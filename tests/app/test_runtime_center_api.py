@@ -254,29 +254,71 @@ def test_task_review_exposes_host_twin_and_prefers_it_for_runtime_guidance() -> 
         evidence=[],
         execution_feedback={
             "host_twin": {
-                "seat_owner": {
-                    "owner_ref": "human-operator:alice",
-                    "label": "Alice",
+                "ownership": {
+                    "seat_owner_agent_id": "ops-agent",
+                    "handoff_owner_ref": "human-operator:alice",
+                    "workspace_scope": "project:copaw",
                 },
-                "writable_surfaces": [
-                    {
+                "surface_mutability": {
+                    "desktop_app": {
                         "surface_ref": "window:excel:orders",
-                        "label": "Orders workbook",
+                        "mutability": "blocked",
+                        "safe_to_mutate": False,
+                        "blocker_family": "modal-uac-login",
+                    },
+                },
+                "blocked_surfaces": [
+                    {
+                        "surface_kind": "desktop_app",
+                        "surface_ref": "window:excel:orders",
+                        "reason": "captcha-required",
+                        "event_family": "modal-uac-login",
                     },
                 ],
-                "legal_recovery_path": {
-                    "mode": "resume-runtime",
-                    "summary": "resume-runtime via Orders workbook checkpoint",
-                },
                 "trusted_anchors": [
                     {
+                        "surface_ref": "window:excel:orders",
                         "anchor_ref": "excel://Orders!A1",
                         "label": "Orders workbook row 1",
                     },
                 ],
+                "legal_recovery": {
+                    "path": "handoff",
+                    "checkpoint_ref": "checkpoint:captcha:orders",
+                    "resume_kind": "resume-runtime",
+                    "verification_channel": "runtime-center-self-check",
+                    "return_condition": "captcha-cleared",
+                },
                 "active_blocker_families": [
                     "modal-uac-login",
                 ],
+                "app_family_twins": {
+                    "office_document": {
+                        "active": True,
+                        "family_kind": "office_document",
+                        "surface_ref": "window:excel:orders",
+                        "contract_status": "verified-writer",
+                        "family_scope_ref": "app:excel",
+                        "writer_lock_scope": "workbook:orders",
+                    },
+                },
+                "coordination": {
+                    "seat_owner_ref": "ops-agent",
+                    "workspace_owner_ref": "ops-agent",
+                    "writer_owner_ref": "ops-agent",
+                    "candidate_seat_refs": ["env:session:session:web:main"],
+                    "selected_seat_ref": "env:session:session:web:main",
+                    "seat_selection_policy": "sticky-active-seat",
+                    "contention_forecast": {
+                        "severity": "blocked",
+                        "reason": "captcha-required",
+                    },
+                    "legal_owner_transition": {
+                        "allowed": False,
+                        "reason": "human handoff is still active",
+                    },
+                    "recommended_scheduler_action": "handoff",
+                },
             },
             "host_contract": {
                 "status": "blocked",
@@ -298,14 +340,38 @@ def test_task_review_exposes_host_twin_and_prefers_it_for_runtime_guidance() -> 
     )
 
     assert (
-        payload["execution_runtime"]["host_twin"]["seat_owner"]["owner_ref"]
+        payload["execution_runtime"]["host_twin"]["ownership"]["handoff_owner_ref"]
         == "human-operator:alice"
+    )
+    assert (
+        payload["execution_runtime"]["host_twin"]["app_family_twins"]["office_document"][
+            "writer_lock_scope"
+        ]
+        == "workbook:orders"
+    )
+    assert (
+        payload["execution_runtime"]["host_twin"]["coordination"][
+            "recommended_scheduler_action"
+        ]
+        == "handoff"
     )
     assert payload["continuity"]["handoff"]["owner_ref"] == "human-operator:alice"
     assert payload["continuity"]["handoff"]["resume_kind"] == "resume-runtime"
+    assert payload["continuity"]["handoff"]["return_condition"] == "captcha-cleared"
+    assert payload["continuity"]["verification"]["channel"] == "runtime-center-self-check"
     assert payload["continuity"]["verification"]["latest_anchor"] == "excel://Orders!A1"
+    assert any("Coordination: handoff" in line for line in payload["summary_lines"])
+    assert any("sticky-active-seat" in line for line in payload["summary_lines"])
+    assert any(
+        "Follow host coordination action: handoff" in action
+        for action in payload["next_actions"]
+    )
     assert any("modal-uac-login" in line for line in payload["summary_lines"])
     assert any("Orders workbook" in action for action in payload["next_actions"])
+    assert any(
+        "Host coordination contention is blocked" in risk
+        for risk in payload["risks"]
+    )
     assert any("modal-uac-login" in risk for risk in payload["risks"])
 
 

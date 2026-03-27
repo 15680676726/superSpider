@@ -28,7 +28,19 @@ class _WorkflowServicePreviewMixin:
         template = self._workflow_template_repository.get_template(run.template_id)
         if template is None:
             raise KeyError(f"Workflow template '{run.template_id}' not found")
-        preview = WorkflowTemplatePreview.model_validate(run.preview_payload or {})
+        stored_preview = WorkflowTemplatePreview.model_validate(run.preview_payload or {})
+        preview_request = self._build_run_preview_request(
+            run=run,
+            preview=stored_preview,
+        )
+        preview = self._refresh_run_preview(
+            template=template,
+            preview=stored_preview,
+            request=preview_request,
+        )
+        host_snapshot = self._resolve_host_snapshot_from_request(preview_request) or dict(
+            dict(run.metadata or {}).get("host_snapshot") or {},
+        )
         goals: list[dict[str, Any]] = []
         tasks: list[dict[str, Any]] = []
         decisions: list[dict[str, Any]] = []
@@ -76,6 +88,7 @@ class _WorkflowServicePreviewMixin:
             tasks=tasks,
             decisions=decisions,
             evidence=evidence,
+            host_snapshot=host_snapshot,
         )
         return WorkflowRunDetail(
             run=run.model_dump(mode="json"),
@@ -271,6 +284,7 @@ class _WorkflowServicePreviewMixin:
         tasks: list[dict[str, Any]],
         decisions: list[dict[str, Any]],
         evidence: list[dict[str, Any]],
+        host_snapshot: dict[str, Any],
     ) -> WorkflowRunDiagnosis:
         blocking_codes = [item.code for item in preview.launch_blockers]
         goal_statuses = self._count_statuses(goals)
@@ -312,6 +326,7 @@ class _WorkflowServicePreviewMixin:
             evidence_count=len(evidence),
             goal_statuses=goal_statuses,
             schedule_statuses=schedule_statuses,
+            host_snapshot=dict(host_snapshot or {}),
             routes={
                 "run": f"/api/workflow-runs/{run.run_id}",
                 "template": f"/api/workflow-templates/{run.template_id}",
@@ -372,6 +387,52 @@ class _WorkflowServicePreviewMixin:
                     return dict(detail)
         return None
 
+    def _extract_host_snapshot(
+        self,
+        detail: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(detail, dict):
+            return {}
+        host_twin = self._mapping(detail.get("host_twin"))
+        return dict(host_twin) if host_twin else {}
+
+    def _resolve_host_snapshot_from_request(
+        self,
+        payload: WorkflowPreviewRequest | None,
+    ) -> dict[str, Any]:
+        if payload is None:
+            return {}
+        return self._extract_host_snapshot(self._resolve_host_twin_detail(payload))
+
+    def _build_run_preview_request(
+        self,
+        *,
+        run: WorkflowRunRecord,
+        preview: WorkflowTemplatePreview,
+    ) -> WorkflowPreviewRequest:
+        metadata = dict(run.metadata or {})
+        return WorkflowPreviewRequest(
+            owner_scope=preview.owner_scope or run.owner_scope,
+            industry_instance_id=preview.industry_instance_id or run.industry_instance_id,
+            owner_agent_id=run.owner_agent_id,
+            environment_id=_string(metadata.get("environment_id")),
+            session_mount_id=_string(metadata.get("session_mount_id")),
+            preset_id=_string(metadata.get("preset_id")),
+            parameters=dict(run.parameter_payload or preview.parameters or {}),
+        )
+
+    def _refresh_run_preview(
+        self,
+        *,
+        template: WorkflowTemplateRecord,
+        preview: WorkflowTemplatePreview,
+        request: WorkflowPreviewRequest,
+    ) -> WorkflowTemplatePreview:
+        try:
+            return self._build_preview(template, request)
+        except Exception:
+            return preview
+
     def _infer_host_twin_surface_kind(
         self,
         required_capability_ids: list[str],
@@ -403,6 +464,14 @@ class _WorkflowServicePreviewMixin:
             if isinstance(explicit_mutating, bool)
             else surface_kind == "desktop"
         )
+        app_family = self._first_string(preflight.get("app_family"))
+        if app_family is None:
+            if surface_kind == "browser":
+                app_family = "browser_backoffice"
+            elif mutating:
+                app_family = "office_document"
+            else:
+                app_family = "desktop_specialized"
         return {
             "surface_kind": surface_kind,
             "mutating": mutating,
@@ -410,7 +479,21 @@ class _WorkflowServicePreviewMixin:
             "title": step.title,
             "agent_id": step.owner_agent_id,
             "capability_ids": list(step.required_capability_ids or []),
+            "app_family": app_family,
         }
+
+    def _host_requirement_for_step(
+        self,
+        preview: WorkflowTemplatePreview,
+        step_id: str,
+    ) -> dict[str, Any]:
+        requirements = [dict(item) for item in list(preview.host_requirements or [])]
+        if not requirements:
+            return {}
+        for requirement in requirements:
+            if _string(requirement.get("step_id")) == step_id:
+                return requirement
+        return requirements[0]
 
     def _surface_active_projection(
         self,
@@ -467,6 +550,17 @@ class _WorkflowServicePreviewMixin:
         detail = self._resolve_host_twin_detail(payload)
         if detail is None:
             return []
+        host_twin = self._mapping(detail.get("host_twin"))
+        host_twin_continuity = self._mapping(host_twin.get("continuity"))
+        host_twin_legal_recovery = self._mapping(host_twin.get("legal_recovery"))
+        host_twin_scheduler = self._mapping(host_twin.get("scheduler_inputs"))
+        host_twin_execution_ready = self._mapping(host_twin.get("execution_mutation_ready"))
+        host_twin_coordination = self._mapping(host_twin.get("coordination"))
+        host_twin_blocked_surfaces = [
+            self._mapping(item)
+            for item in list(host_twin.get("blocked_surfaces") or [])
+            if isinstance(item, dict)
+        ]
         host_companion = self._mapping(detail.get("host_companion_session"))
         host_contract = self._mapping(detail.get("host_contract"))
         recovery = self._mapping(detail.get("recovery"))
@@ -475,9 +569,11 @@ class _WorkflowServicePreviewMixin:
         workspace_surfaces = self._mapping(workspace_graph.get("surfaces"))
         host_blocker = self._mapping(workspace_surfaces.get("host_blocker"))
         active_alert_families = _unique_strings(
+            host_twin.get("active_blocker_families"),
             host_event_summary.get("active_alert_families"),
         )
         continuity_status = self._first_string(
+            host_twin_continuity.get("status"),
             host_companion.get("continuity_status"),
             recovery.get("status"),
         )
@@ -507,7 +603,20 @@ class _WorkflowServicePreviewMixin:
                 surface_kind=surface_kind,
                 workspace_surfaces=workspace_surfaces,
             )
+            blocked_surface = next(
+                (
+                    item
+                    for item in host_twin_blocked_surfaces
+                    if self._first_string(item.get("surface_kind")) in {
+                        surface_kind,
+                        "desktop_app" if surface_kind == "desktop" else surface_kind,
+                    }
+                ),
+                {},
+            )
             current_gap = self._first_string(
+                self._mapping(host_twin_coordination.get("contention_forecast")).get("reason"),
+                blocked_surface.get("reason"),
                 active_surface.get("current_gap_or_blocker"),
                 host_contract.get("current_gap_or_blocker"),
                 host_companion.get("current_gap_or_blocker"),
@@ -533,18 +642,23 @@ class _WorkflowServicePreviewMixin:
 
             if mutating_step_ids:
                 access_mode = self._first_string(host_contract.get("access_mode"))
-                active_ref = self._first_string(
-                    active_surface.get("window_ref"),
-                    active_surface.get("tab_id"),
-                )
-                writer_lock_scope = self._first_string(
-                    active_surface.get("writer_lock_scope"),
-                )
-                writable_surface_available = access_mode == "writer" and active_ref is not None
-                if surface_kind == "desktop":
-                    writable_surface_available = (
-                        writable_surface_available and writer_lock_scope is not None
+                execution_key = "desktop_app" if surface_kind == "desktop" else "browser"
+                writable_surface_available = host_twin_execution_ready.get(execution_key)
+                if not isinstance(writable_surface_available, bool):
+                    active_ref = self._first_string(
+                        active_surface.get("window_ref"),
+                        active_surface.get("tab_id"),
                     )
+                    writer_lock_scope = self._first_string(
+                        active_surface.get("writer_lock_scope"),
+                    )
+                    writable_surface_available = (
+                        access_mode == "writer" and active_ref is not None
+                    )
+                    if surface_kind == "desktop":
+                        writable_surface_available = (
+                            writable_surface_available and writer_lock_scope is not None
+                        )
                 if not writable_surface_available:
                     blockers.append(
                         WorkflowTemplateLaunchBlocker(
@@ -560,9 +674,21 @@ class _WorkflowServicePreviewMixin:
                         ),
                     )
 
-                if handoff_state in self._HOST_TWIN_HANDOFF_ONLY_STATES or (
-                    recovery_status == "same-host-other-process"
-                    and not bool(recovery.get("recoverable"))
+                legal_recovery_path = self._first_string(
+                    host_twin_legal_recovery.get("path"),
+                    host_twin_legal_recovery.get("resume_kind"),
+                )
+                requires_human_return = bool(
+                    host_twin_continuity.get("requires_human_return"),
+                )
+                if (
+                    handoff_state in self._HOST_TWIN_HANDOFF_ONLY_STATES
+                    or requires_human_return
+                    or legal_recovery_path == "handoff"
+                    or (
+                        recovery_status == "same-host-other-process"
+                        and not bool(recovery.get("recoverable"))
+                    )
                 ):
                     blockers.append(
                         WorkflowTemplateLaunchBlocker(
@@ -583,6 +709,11 @@ class _WorkflowServicePreviewMixin:
                 host_blocker_response = self._first_string(
                     host_blocker.get("recommended_runtime_response"),
                 )
+                scheduler_blocker_family = self._first_string(
+                    host_twin_scheduler.get("active_blocker_family"),
+                )
+                if scheduler_blocker_family is not None:
+                    blocking_families.add(scheduler_blocker_family)
                 if (
                     host_blocker_family is not None
                     and host_blocker_response in self._HOST_TWIN_BLOCKING_RESPONSES
@@ -601,6 +732,31 @@ class _WorkflowServicePreviewMixin:
                             capability_ids=capability_ids,
                             step_ids=mutating_step_ids,
                         ),
+                    )
+                contention_forecast = self._mapping(
+                    host_twin_coordination.get("contention_forecast"),
+                )
+                contention_severity = self._first_string(
+                    contention_forecast.get("severity"),
+                )
+                recommended_scheduler_action = self._first_string(
+                    host_twin_coordination.get("recommended_scheduler_action"),
+                    host_twin_scheduler.get("recommended_scheduler_action"),
+                )
+                if contention_severity == "blocked" or (
+                    recommended_scheduler_action in self._HOST_TWIN_BLOCKING_RESPONSES
+                ):
+                    blockers.append(
+                        WorkflowTemplateLaunchBlocker(
+                            code="host-twin-contention-forecast-blocked",
+                            message=(
+                                f"{surface_kind.capitalize()} host coordination forecasts a blocked writer path: "
+                                f"{self._first_string(contention_forecast.get('reason'), current_gap) or 'handoff required.'}"
+                            ),
+                            agent_id=agent_id,
+                            capability_ids=capability_ids,
+                            step_ids=mutating_step_ids,
+                        )
                     )
         return blockers
 
@@ -951,6 +1107,7 @@ class _WorkflowServicePreviewMixin:
             assignment_gap_capability_ids=sorted(assignment_gap_capability_ids),
             capability_budget_by_agent=budget_by_agent,
             budget_status_by_agent=budget_status_by_agent,
+            host_requirements=host_twin_requirements,
             launch_blockers=launch_blockers,
             can_launch=not launch_blockers,
             materialized_objects={

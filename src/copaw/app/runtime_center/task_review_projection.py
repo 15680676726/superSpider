@@ -89,11 +89,18 @@ def host_twin_seat_owner_ref(host_twin: dict[str, object] | None) -> str | None:
     if host_twin is None:
         return None
     seat_owner = dict_from_value(host_twin.get("seat_owner"))
+    ownership = dict_from_value(host_twin.get("ownership"))
+    coordination = dict_from_value(host_twin.get("coordination"))
     return first_non_empty(
         host_twin.get("seat_owner_ref"),
+        ownership.get("handoff_owner_ref") if ownership is not None else None,
+        ownership.get("seat_owner_ref") if ownership is not None else None,
+        ownership.get("owner_ref") if ownership is not None else None,
         seat_owner.get("owner_ref") if seat_owner is not None else None,
         seat_owner.get("seat_owner_ref") if seat_owner is not None else None,
         seat_owner.get("actor_ref") if seat_owner is not None else None,
+        coordination.get("handoff_owner_ref") if coordination is not None else None,
+        coordination.get("seat_owner_ref") if coordination is not None else None,
     )
 
 
@@ -102,11 +109,32 @@ def host_twin_writable_surface_label(host_twin: dict[str, object] | None) -> str
         return None
     surfaces = dict_list_from_value(host_twin.get("writable_surfaces"))
     first_surface = surfaces[0] if surfaces else None
+    blocked_surfaces = dict_list_from_value(host_twin.get("blocked_surfaces"))
+    first_blocked_surface = blocked_surfaces[0] if blocked_surfaces else None
+    trusted_anchors = dict_list_from_value(host_twin.get("trusted_anchors"))
+    first_anchor = trusted_anchors[0] if trusted_anchors else None
+    app_family_twins = dict_from_value(host_twin.get("app_family_twins")) or {}
+    active_family = next(
+        (
+            value
+            for value in app_family_twins.values()
+            if isinstance(value, dict) and value.get("active") is True
+        ),
+        None,
+    )
     return first_non_empty(
         host_twin.get("writable_surface_summary"),
         first_surface.get("label") if first_surface is not None else None,
         first_surface.get("summary") if first_surface is not None else None,
         first_surface.get("surface_ref") if first_surface is not None else None,
+        first_anchor.get("label") if first_anchor is not None else None,
+        active_family.get("label") if active_family is not None else None,
+        active_family.get("writer_lock_scope") if active_family is not None else None,
+        active_family.get("family_scope_ref") if active_family is not None else None,
+        active_family.get("surface_ref") if active_family is not None else None,
+        first_blocked_surface.get("label") if first_blocked_surface is not None else None,
+        first_blocked_surface.get("surface_ref") if first_blocked_surface is not None else None,
+        first_anchor.get("anchor_ref") if first_anchor is not None else None,
     )
 
 
@@ -114,8 +142,12 @@ def host_twin_legal_recovery_mode(host_twin: dict[str, object] | None) -> str | 
     if host_twin is None:
         return None
     recovery_path = dict_from_value(host_twin.get("legal_recovery_path"))
+    legal_recovery = dict_from_value(host_twin.get("legal_recovery"))
     return first_non_empty(
         host_twin.get("legal_recovery_mode"),
+        legal_recovery.get("resume_kind") if legal_recovery is not None else None,
+        legal_recovery.get("mode") if legal_recovery is not None else None,
+        legal_recovery.get("path") if legal_recovery is not None else None,
         recovery_path.get("mode") if recovery_path is not None else None,
         recovery_path.get("resume_kind") if recovery_path is not None else None,
         recovery_path.get("path") if recovery_path is not None else None,
@@ -126,10 +158,19 @@ def host_twin_legal_recovery_summary(host_twin: dict[str, object] | None) -> str
     if host_twin is None:
         return None
     recovery_path = dict_from_value(host_twin.get("legal_recovery_path"))
+    legal_recovery = dict_from_value(host_twin.get("legal_recovery"))
     return first_non_empty(
         host_twin.get("legal_recovery_summary"),
+        legal_recovery.get("summary") if legal_recovery is not None else None,
+        legal_recovery.get("label") if legal_recovery is not None else None,
+        legal_recovery.get("resume_kind") if legal_recovery is not None else None,
+        legal_recovery.get("mode") if legal_recovery is not None else None,
+        legal_recovery.get("checkpoint_ref") if legal_recovery is not None else None,
+        legal_recovery.get("path") if legal_recovery is not None else None,
         recovery_path.get("summary") if recovery_path is not None else None,
         recovery_path.get("label") if recovery_path is not None else None,
+        recovery_path.get("resume_kind") if recovery_path is not None else None,
+        recovery_path.get("mode") if recovery_path is not None else None,
         recovery_path.get("checkpoint_ref") if recovery_path is not None else None,
     )
 
@@ -157,6 +198,25 @@ def host_twin_active_blocker_family(host_twin: dict[str, object] | None) -> str 
     )
     if blocker_families:
         return blocker_families[0]
+    blocked_surfaces = dict_list_from_value(host_twin.get("blocked_surfaces"))
+    if blocked_surfaces:
+        first_blocked_surface = blocked_surfaces[0]
+        blocker = first_non_empty(
+            first_blocked_surface.get("event_family"),
+            first_blocked_surface.get("reason"),
+        )
+        if blocker:
+            return blocker
+    surface_mutability = dict_from_value(host_twin.get("surface_mutability")) or {}
+    for value in surface_mutability.values():
+        if not isinstance(value, dict):
+            continue
+        blocker = first_non_empty(
+            value.get("blocker_family"),
+            value.get("mutability"),
+        )
+        if blocker:
+            return blocker
     return first_non_empty(
         host_twin.get("blocker_family"),
         host_twin.get("blocker_summary"),
@@ -745,6 +805,42 @@ def build_task_review_payload(
     host_twin_anchor = host_twin_trusted_anchor(host_twin)
     host_twin_writable_surface = host_twin_writable_surface_label(host_twin)
     host_twin_seat_owner = host_twin_seat_owner_ref(host_twin)
+    host_twin_coordination = (
+        dict_from_value(host_twin.get("coordination"))
+        if host_twin is not None
+        else None
+    )
+    coordination_contention = (
+        dict_from_value(host_twin_coordination.get("contention_forecast"))
+        if host_twin_coordination is not None
+        else None
+    )
+    coordination_scheduler_action = first_non_empty(
+        host_twin_coordination.get("recommended_scheduler_action")
+        if host_twin_coordination is not None
+        else None,
+    )
+    coordination_selected_seat_ref = first_non_empty(
+        host_twin_coordination.get("selected_seat_ref")
+        if host_twin_coordination is not None
+        else None,
+    )
+    coordination_seat_policy = first_non_empty(
+        host_twin_coordination.get("seat_selection_policy")
+        if host_twin_coordination is not None
+        else None,
+    )
+    coordination_severity = first_non_empty(
+        coordination_contention.get("severity")
+        if coordination_contention is not None
+        else None,
+    )
+    coordination_reason = first_non_empty(
+        host_twin_blocker_family,
+        coordination_contention.get("reason")
+        if coordination_contention is not None
+        else None,
+    )
     host_status = (
         first_non_empty(host_contract.get("status"), host_contract.get("state"))
         if host_contract is not None
@@ -857,13 +953,29 @@ def build_task_review_payload(
     )
     handoff_checkpoint_ref = first_non_empty(
         handoff_checkpoint.get("checkpoint_ref") if handoff_checkpoint is not None else None,
+        host_twin.get("checkpoint_ref") if host_twin is not None else None,
+        (
+            dict_from_value(host_twin.get("legal_recovery")).get("checkpoint_ref")
+            if host_twin is not None and dict_from_value(host_twin.get("legal_recovery")) is not None
+            else None
+        ),
     )
     handoff_return_condition = first_non_empty(
         handoff_checkpoint.get("return_condition") if handoff_checkpoint is not None else None,
+        (
+            dict_from_value(host_twin.get("legal_recovery")).get("return_condition")
+            if host_twin is not None and dict_from_value(host_twin.get("legal_recovery")) is not None
+            else None
+        ),
         host_contract.get("return_condition") if host_contract is not None else None,
     )
     verification_channel = first_non_empty(
         handoff_checkpoint.get("verification_channel") if handoff_checkpoint is not None else None,
+        (
+            dict_from_value(host_twin.get("legal_recovery")).get("verification_channel")
+            if host_twin is not None and dict_from_value(host_twin.get("legal_recovery")) is not None
+            else None
+        ),
         host_contract.get("verification_channel") if host_contract is not None else None,
         recovery.get("verification_channel") if recovery is not None else None,
     )
@@ -961,6 +1073,26 @@ def build_task_review_payload(
         f"当前状态：{status}",
         f"执行阶段：{phase}",
     ]
+    if coordination_scheduler_action or coordination_severity:
+        coordination_label = first_non_empty(
+            coordination_scheduler_action,
+            coordination_severity,
+        )
+        coordination_details = [
+            value
+            for value in (
+                coordination_seat_policy,
+                coordination_selected_seat_ref,
+                coordination_reason,
+            )
+            if value
+        ]
+        if coordination_details:
+            summary_lines.append(
+                f"Coordination: {coordination_label} ({', '.join(coordination_details)})"
+            )
+        else:
+            summary_lines.append(f"Coordination: {coordination_label}")
     if handoff_state:
         if handoff_reason:
             summary_lines.append(f"Handoff: {handoff_state} ({handoff_reason})")
@@ -1007,6 +1139,25 @@ def build_task_review_payload(
         summary_lines.append(f"最新证据：{latest_evidence_summary}")
 
     next_actions: list[str] = []
+    if coordination_scheduler_action and coordination_scheduler_action != "proceed":
+        coordination_targets = [
+            value
+            for value in (
+                coordination_seat_policy,
+                coordination_selected_seat_ref,
+                coordination_reason,
+            )
+            if value
+        ]
+        if coordination_targets:
+            next_actions.append(
+                "Follow host coordination action: "
+                f"{coordination_scheduler_action} ({', '.join(coordination_targets)})"
+            )
+        else:
+            next_actions.append(
+                f"Follow host coordination action: {coordination_scheduler_action}"
+            )
     if host_twin_writable_surface or host_twin_recovery_summary:
         recovery_target = (
             host_twin_recovery_summary
@@ -1061,6 +1212,14 @@ def build_task_review_payload(
     )
     if runtime_risk_level and runtime_risk_level != "auto":
         risks.append(f"当前任务风险级别为 {runtime_risk_level}，后续动作仍需按治理边界执行。")
+    if coordination_severity and coordination_severity != "clear":
+        coordination_label = first_non_empty(
+            coordination_reason,
+            coordination_scheduler_action,
+        ) or "coordination blockers remain active"
+        risks.append(
+            f"Host coordination contention is {coordination_severity}: {coordination_label}."
+        )
     if host_blocker_reason:
         risks.append(f"Host blocker detected: {host_blocker_reason}.")
     elif host_blocked and host_status:

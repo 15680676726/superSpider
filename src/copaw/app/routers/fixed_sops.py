@@ -122,6 +122,8 @@ async def run_fixed_sop_binding(
         return await service.run_binding(binding_id, payload)
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc).strip("'")) from exc
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
 
 
 @router.get("/runs/{run_id}", response_model=FixedSopRunDetail)

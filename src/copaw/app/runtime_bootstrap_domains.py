@@ -260,6 +260,7 @@ def build_runtime_domain_services(
         agent_report_repository=repositories.agent_report_repository,
         evidence_ledger=evidence_ledger,
         routine_service=None,
+        environment_service=environment_service,
     )
     routine_service = RoutineService(
         routine_repository=repositories.routine_repository,

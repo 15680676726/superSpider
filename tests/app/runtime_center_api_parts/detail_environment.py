@@ -246,6 +246,19 @@ def test_runtime_center_environment_read_endpoints() -> None:
     assert detail_response.json()["host_contract"]["lease_class"] == "seat-runtime"
     assert detail_response.json()["host_contract"]["handoff_state"] == "agent-attached"
     assert detail_response.json()["seat_runtime"]["host_mode"] == "local-managed"
+    assert detail_response.json()["seat_runtime"]["status"] == "active"
+    assert detail_response.json()["seat_runtime"]["occupancy_state"] == "occupied"
+    assert detail_response.json()["seat_runtime"]["candidate_seat_refs"] == [
+        "env:session:session:web:main",
+    ]
+    assert (
+        detail_response.json()["seat_runtime"]["selected_seat_ref"]
+        == "env:session:session:web:main"
+    )
+    assert (
+        detail_response.json()["seat_runtime"]["seat_selection_policy"]
+        == "sticky-active-seat"
+    )
     assert (
         detail_response.json()["host_companion_session"]["session_mount_id"]
         == "session:web:main"
@@ -538,6 +551,55 @@ def test_runtime_center_environment_read_endpoints() -> None:
         "desktop_app": False,
         "file_docs": False,
     }
+    assert detail_response.json()["host_twin"]["app_family_twins"] == {
+        "browser_backoffice": {
+            "active": True,
+            "family_kind": "browser_backoffice",
+            "surface_ref": "browser:web:main",
+            "contract_status": "verified-writer",
+            "family_scope_ref": "site:jd:seller-center",
+        },
+        "messaging_workspace": {
+            "active": False,
+            "family_kind": "messaging_workspace",
+            "surface_ref": None,
+            "contract_status": "inactive",
+            "family_scope_ref": None,
+        },
+        "office_document": {
+            "active": True,
+            "family_kind": "office_document",
+            "surface_ref": "window:excel:main",
+            "contract_status": "verified-writer",
+            "family_scope_ref": "app:excel",
+            "writer_lock_scope": "workbook:weekly-report",
+        },
+        "desktop_specialized": {
+            "active": False,
+            "family_kind": "desktop_specialized",
+            "surface_ref": None,
+            "contract_status": "inactive",
+            "family_scope_ref": None,
+        },
+    }
+    assert detail_response.json()["host_twin"]["coordination"] == {
+        "seat_owner_ref": "ops-agent",
+        "workspace_owner_ref": "ops-agent",
+        "writer_owner_ref": "ops-agent",
+        "candidate_seat_refs": ["env:session:session:web:main"],
+        "selected_seat_ref": "env:session:session:web:main",
+        "seat_selection_policy": "sticky-active-seat",
+        "contention_forecast": {
+            "severity": "blocked",
+            "reason": "captcha-required",
+        },
+        "legal_owner_transition": {
+            "allowed": False,
+            "reason": "human handoff is still active",
+        },
+        "recommended_scheduler_action": "handoff",
+        "expected_release_at": None,
+    }
     assert "derived runtime projection" in detail_response.json()["host_twin"]["projection_note"]
     assert "not a second truth source" in detail_response.json()["host_twin"]["projection_note"]
     assert (
@@ -652,6 +714,15 @@ def test_runtime_center_environment_read_endpoints() -> None:
         == "verified-writer"
     )
     assert session_detail.json()["seat_runtime"]["active_session_mount_id"] == "session:web:main"
+    assert session_detail.json()["seat_runtime"]["status"] == "active"
+    assert session_detail.json()["seat_runtime"]["occupancy_state"] == "occupied"
+    assert session_detail.json()["seat_runtime"]["candidate_seat_refs"] == [
+        "env:session:session:web:main",
+    ]
+    assert (
+        session_detail.json()["seat_runtime"]["selected_seat_ref"]
+        == "env:session:session:web:main"
+    )
     assert session_detail.json()["workspace_graph"]["workspace_id"] == "workspace:copaw:main"
     assert session_detail.json()["workspace_graph"]["projection_kind"] == (
         "workspace_graph_projection"
@@ -799,6 +870,39 @@ def test_runtime_center_environment_read_endpoints() -> None:
         "browser": False,
         "desktop_app": False,
         "file_docs": False,
+    }
+    assert session_detail.json()["host_twin"]["app_family_twins"]["browser_backoffice"] == {
+        "active": True,
+        "family_kind": "browser_backoffice",
+        "surface_ref": "browser:web:main",
+        "contract_status": "verified-writer",
+        "family_scope_ref": "site:jd:seller-center",
+    }
+    assert session_detail.json()["host_twin"]["app_family_twins"]["office_document"] == {
+        "active": True,
+        "family_kind": "office_document",
+        "surface_ref": "window:excel:main",
+        "contract_status": "verified-writer",
+        "family_scope_ref": "app:excel",
+        "writer_lock_scope": "workbook:weekly-report",
+    }
+    assert session_detail.json()["host_twin"]["coordination"] == {
+        "seat_owner_ref": "ops-agent",
+        "workspace_owner_ref": "ops-agent",
+        "writer_owner_ref": "ops-agent",
+        "candidate_seat_refs": ["env:session:session:web:main"],
+        "selected_seat_ref": "env:session:session:web:main",
+        "seat_selection_policy": "sticky-active-seat",
+        "contention_forecast": {
+            "severity": "blocked",
+            "reason": "captcha-required",
+        },
+        "legal_owner_transition": {
+            "allowed": False,
+            "reason": "human handoff is still active",
+        },
+        "recommended_scheduler_action": "handoff",
+        "expected_release_at": None,
     }
     assert "derived runtime projection" in session_detail.json()["host_twin"]["projection_note"]
     assert "not a second truth source" in session_detail.json()["host_twin"]["projection_note"]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import uuid
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -18,7 +19,92 @@ from copaw.state.repositories import (
 )
 
 
-def _build_app(tmp_path) -> FastAPI:
+class _FakeEnvironmentService:
+    def __init__(self, detail: dict[str, object]) -> None:
+        self._detail = detail
+
+    def get_session_detail(
+        self,
+        session_mount_id: str,
+        *,
+        limit: int = 20,
+    ) -> dict[str, object] | None:
+        if session_mount_id != "session-desktop-1":
+            return None
+        return dict(self._detail)
+
+    def get_environment_detail(
+        self,
+        env_id: str,
+        *,
+        limit: int = 20,
+    ) -> dict[str, object] | None:
+        if env_id != "env-desktop-1":
+            return None
+        return dict(self._detail)
+
+
+def _host_detail(*, recommended_scheduler_action: str) -> dict[str, object]:
+    return {
+        "environment_id": "env-desktop-1",
+        "session_mount_id": "session-desktop-1",
+        "host_twin": {
+            "continuity": {
+                "status": "attached",
+                "valid": recommended_scheduler_action == "continue",
+                "continuity_source": "live-handle",
+                "requires_human_return": recommended_scheduler_action == "handoff",
+            },
+            "execution_mutation_ready": {
+                "desktop_app": recommended_scheduler_action == "continue",
+                "browser": False,
+                "file_docs": False,
+            },
+            "coordination": {
+                "seat_owner_ref": "ops-agent",
+                "workspace_owner_ref": "ops-agent",
+                "writer_owner_ref": (
+                    "ops-agent" if recommended_scheduler_action == "continue" else None
+                ),
+                "contention_forecast": {
+                    "severity": (
+                        "clear" if recommended_scheduler_action == "continue" else "blocked"
+                    ),
+                    "reason": (
+                        "desktop writer path is clear"
+                        if recommended_scheduler_action == "continue"
+                        else "human handoff is still active"
+                    ),
+                },
+                "recommended_scheduler_action": recommended_scheduler_action,
+            },
+        },
+    }
+
+
+def _create_host_binding(client: TestClient) -> str:
+    response = client.post(
+        "/fixed-sops/bindings",
+        json={
+            "template_id": "fixed-sop-http-routine-bridge",
+            "binding_name": f"Host Aware SOP {uuid.uuid4()}",
+            "status": "active",
+            "metadata": {
+                "environment_id": "env-desktop-1",
+                "session_mount_id": "session-desktop-1",
+                "host_requirement": {
+                    "surface_kind": "desktop",
+                    "app_family": "office_document",
+                    "mutating": True,
+                },
+            },
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["binding"]["binding_id"]
+
+
+def _build_app(tmp_path, *, environment_service=None) -> FastAPI:
     app = FastAPI()
     app.include_router(fixed_sops_router)
 
@@ -42,6 +128,7 @@ def _build_app(tmp_path) -> FastAPI:
         workflow_run_repository=workflow_run_repository,
         agent_report_repository=agent_report_repository,
         evidence_ledger=evidence_ledger,
+        environment_service=environment_service,
     )
     return app
 
@@ -67,3 +154,71 @@ def test_old_sop_adapters_route_is_gone(tmp_path) -> None:
 
 def test_legacy_sop_adapters_router_module_is_removed() -> None:
     assert importlib.util.find_spec("copaw.app.routers.sop_adapters") is None
+
+
+def test_fixed_sop_doctor_and_run_api_surface_host_preflight_blockers(tmp_path) -> None:
+    client = TestClient(
+        _build_app(
+            tmp_path,
+            environment_service=_FakeEnvironmentService(
+                _host_detail(recommended_scheduler_action="handoff"),
+            ),
+        )
+    )
+    binding_id = _create_host_binding(client)
+
+    doctor = client.post(f"/fixed-sops/bindings/{binding_id}/doctor")
+
+    assert doctor.status_code == 200
+    doctor_payload = doctor.json()
+    assert doctor_payload["status"] == "blocked"
+    assert doctor_payload["environment_id"] == "env-desktop-1"
+    assert doctor_payload["session_mount_id"] == "session-desktop-1"
+    assert doctor_payload["host_requirement"]["app_family"] == "office_document"
+    assert doctor_payload["host_preflight"]["coordination"][
+        "recommended_scheduler_action"
+    ] == "handoff"
+
+    run = client.post(
+        f"/fixed-sops/bindings/{binding_id}/run",
+        json={
+            "environment_id": "env-desktop-1",
+            "session_mount_id": "session-desktop-1",
+        },
+    )
+
+    assert run.status_code == 400
+    assert "host preflight" in run.json()["detail"]
+
+
+def test_fixed_sop_run_detail_exposes_host_preflight_snapshot(tmp_path) -> None:
+    client = TestClient(
+        _build_app(
+            tmp_path,
+            environment_service=_FakeEnvironmentService(
+                _host_detail(recommended_scheduler_action="continue"),
+            ),
+        )
+    )
+    binding_id = _create_host_binding(client)
+
+    run = client.post(
+        f"/fixed-sops/bindings/{binding_id}/run",
+        json={
+            "environment_id": "env-desktop-1",
+            "session_mount_id": "session-desktop-1",
+        },
+    )
+
+    assert run.status_code == 200
+    workflow_run_id = run.json()["workflow_run_id"]
+    detail = client.get(f"/fixed-sops/runs/{workflow_run_id}")
+
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    assert detail_payload["environment_id"] == "env-desktop-1"
+    assert detail_payload["session_mount_id"] == "session-desktop-1"
+    assert detail_payload["host_requirement"]["app_family"] == "office_document"
+    assert detail_payload["host_preflight"]["coordination"][
+        "recommended_scheduler_action"
+    ] == "continue"

@@ -895,6 +895,8 @@ def test_system_run_fixed_sop_executes_through_fixed_sop_service() -> None:
             "binding_id": "sop-binding-1",
             "owner_scope": "industry-v1-test",
             "workflow_run_id": "workflow-run-1",
+            "environment_id": "env-desktop-1",
+            "session_mount_id": "session-desktop-1",
             "input_payload": {"window": "today"},
         },
     )
@@ -905,6 +907,8 @@ def test_system_run_fixed_sop_executes_through_fixed_sop_service() -> None:
     binding_id, trigger_payload = fixed_sop_service.calls[0]
     assert binding_id == "sop-binding-1"
     assert trigger_payload.owner_agent_id == "ops-agent"
+    assert trigger_payload.environment_id == "env-desktop-1"
+    assert trigger_payload.session_mount_id == "session-desktop-1"
     assert trigger_payload.input_payload == {"window": "today"}
 
     evidence = evidence_ledger.list_by_task(payload["task_id"])

@@ -147,18 +147,17 @@ class _WorkflowServiceRunMixin:
         template = self._workflow_template_repository.get_template(template_id)
         if template is None:
             raise KeyError(f"Workflow template '{template_id}' not found")
-        preview = self._build_preview(
-            template,
-            WorkflowPreviewRequest(
-                owner_scope=payload.owner_scope,
-                industry_instance_id=payload.industry_instance_id,
-                owner_agent_id=payload.owner_agent_id,
-                environment_id=payload.environment_id,
-                session_mount_id=payload.session_mount_id,
-                preset_id=payload.preset_id,
-                parameters=dict(payload.parameters or {}),
-            ),
+        preview_request = WorkflowPreviewRequest(
+            owner_scope=payload.owner_scope,
+            industry_instance_id=payload.industry_instance_id,
+            owner_agent_id=payload.owner_agent_id,
+            environment_id=payload.environment_id,
+            session_mount_id=payload.session_mount_id,
+            preset_id=payload.preset_id,
+            parameters=dict(payload.parameters or {}),
         )
+        preview = self._build_preview(template, preview_request)
+        host_snapshot = self._resolve_host_snapshot_from_request(preview_request)
         if not preview.can_launch:
             raise ValueError(self._summarize_launch_blockers(preview.launch_blockers))
         step_execution_seed = [
@@ -194,6 +193,9 @@ class _WorkflowServiceRunMixin:
             metadata={
                 "launch_mode": "execute" if payload.execute else "plan-only",
                 "preset_id": _string(payload.preset_id),
+                "environment_id": _string(payload.environment_id),
+                "session_mount_id": _string(payload.session_mount_id),
+                "host_snapshot": dict(host_snapshot or {}),
                 "step_execution_seed": step_execution_seed,
             },
         )
@@ -255,6 +257,13 @@ class _WorkflowServiceRunMixin:
                     linked_schedule_ids = list(step_seed.get("linked_schedule_ids") or [])
                     linked_schedule_ids.append(schedule_id)
                     step_seed["linked_schedule_ids"] = linked_schedule_ids
+                schedule_meta = self._build_schedule_host_meta(
+                    run=run,
+                    template=template,
+                    preview=preview,
+                    step=step,
+                    host_snapshot=host_snapshot,
+                )
                 await self._persist_schedule_spec(
                     {
                         "id": schedule_id,
@@ -287,6 +296,7 @@ class _WorkflowServiceRunMixin:
                                 "owner_agent_id": step.owner_agent_id,
                                 "workflow_run_id": run.run_id,
                                 "workflow_template_id": template.template_id,
+                                **dict(schedule_meta),
                             },
                         },
                         "runtime": {
@@ -294,11 +304,7 @@ class _WorkflowServiceRunMixin:
                             "timeout_seconds": 120,
                             "misfire_grace_seconds": 60,
                         },
-                        "meta": {
-                            "workflow_run_id": run.run_id,
-                            "workflow_template_id": template.template_id,
-                            "workflow_step_id": step.step_id,
-                        },
+                        "meta": dict(schedule_meta),
                     }
                 )
                 if self._schedule_repository is not None:
@@ -315,10 +321,7 @@ class _WorkflowServiceRunMixin:
                                 target_channel=str(step_payload.get("dispatch_channel") or "console"),
                                 source_ref=f"workflow-template:{template.template_id}",
                                 spec_payload={
-                                    "meta": {
-                                        "workflow_run_id": run.run_id,
-                                        "workflow_template_id": template.template_id,
-                                    }
+                                    "meta": dict(schedule_meta),
                                 },
                             ),
                         )
@@ -473,6 +476,13 @@ class _WorkflowServiceRunMixin:
                         schedule_ids.append(schedule_id)
                     if isinstance(step_seed, dict):
                         step_seed["linked_schedule_ids"] = [schedule_id]
+                    schedule_meta = self._build_schedule_host_meta(
+                        run=run,
+                        template=template,
+                        preview=detail.preview,
+                        step=step,
+                        host_snapshot=detail.diagnosis.host_snapshot,
+                    )
                     await self._persist_schedule_spec(
                         {
                             "id": schedule_id,
@@ -506,6 +516,7 @@ class _WorkflowServiceRunMixin:
                                     "workflow_run_id": run.run_id,
                                     "workflow_template_id": template.template_id,
                                     "resume_actor": actor,
+                                    **dict(schedule_meta),
                                 },
                             },
                             "runtime": {
@@ -513,11 +524,7 @@ class _WorkflowServiceRunMixin:
                                 "timeout_seconds": 120,
                                 "misfire_grace_seconds": 60,
                             },
-                            "meta": {
-                                "workflow_run_id": run.run_id,
-                                "workflow_template_id": template.template_id,
-                                "workflow_step_id": step.step_id,
-                            },
+                            "meta": dict(schedule_meta),
                         }
                     )
                     if self._schedule_repository is not None:
@@ -536,10 +543,7 @@ class _WorkflowServiceRunMixin:
                                     ),
                                     source_ref=f"workflow-template:{template.template_id}",
                                     spec_payload={
-                                        "meta": {
-                                            "workflow_run_id": run.run_id,
-                                            "workflow_template_id": template.template_id,
-                                        }
+                                        "meta": dict(schedule_meta),
                                     },
                                 )
                             )
@@ -564,6 +568,58 @@ class _WorkflowServiceRunMixin:
         )
         self._workflow_run_repository.upsert_run(persisted)
         return self.get_run_detail(run_id)
+
+    def _build_schedule_host_meta(
+        self,
+        *,
+        run: WorkflowRunRecord,
+        template: WorkflowTemplateRecord,
+        preview: WorkflowTemplatePreview,
+        step: WorkflowTemplateStepPreview,
+        host_snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        metadata = dict(run.metadata or {})
+        scheduler_inputs = (
+            dict(host_snapshot.get("scheduler_inputs"))
+            if isinstance(host_snapshot.get("scheduler_inputs"), dict)
+            else {}
+        )
+        environment_ref = (
+            _string(metadata.get("environment_ref"))
+            or _string(scheduler_inputs.get("environment_ref"))
+            or _string(host_snapshot.get("environment_ref"))
+            or _string(metadata.get("environment_id"))
+            or _string(scheduler_inputs.get("environment_id"))
+            or _string(host_snapshot.get("environment_id"))
+        )
+        environment_id = (
+            _string(metadata.get("environment_id"))
+            or _string(scheduler_inputs.get("environment_id"))
+            or _string(host_snapshot.get("environment_id"))
+            or environment_ref
+        )
+        session_mount_id = (
+            _string(metadata.get("session_mount_id"))
+            or _string(scheduler_inputs.get("session_mount_id"))
+            or _string(host_snapshot.get("session_mount_id"))
+        )
+        schedule_meta = {
+            "workflow_run_id": run.run_id,
+            "workflow_template_id": template.template_id,
+            "workflow_step_id": step.step_id,
+        }
+        if environment_ref is not None:
+            schedule_meta["environment_ref"] = environment_ref
+        if environment_id is not None:
+            schedule_meta["environment_id"] = environment_id
+        if session_mount_id is not None:
+            schedule_meta["session_mount_id"] = session_mount_id
+        host_requirement = self._host_requirement_for_step(preview, step.step_id)
+        if host_requirement:
+            schedule_meta["host_requirement"] = host_requirement
+        if host_snapshot:
+            schedule_meta["host_snapshot"] = dict(host_snapshot)
+        return schedule_meta
 
     def get_run_step_detail(
         self,

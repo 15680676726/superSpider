@@ -92,6 +92,7 @@ class WorkflowTemplatePreview(BaseModel):
     assignment_gap_capability_ids: list[str] = Field(default_factory=list)
     capability_budget_by_agent: dict[str, int] = Field(default_factory=dict)
     budget_status_by_agent: list[WorkflowTemplateAgentBudgetStatus] = Field(default_factory=list)
+    host_requirements: list[dict[str, Any]] = Field(default_factory=list)
     launch_blockers: list[WorkflowTemplateLaunchBlocker] = Field(default_factory=list)
     can_launch: bool = True
     materialized_objects: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
@@ -163,6 +164,7 @@ class WorkflowRunDiagnosis(BaseModel):
     evidence_count: int = 0
     goal_statuses: dict[str, int] = Field(default_factory=dict)
     schedule_statuses: dict[str, int] = Field(default_factory=dict)
+    host_snapshot: dict[str, Any] = Field(default_factory=dict)
     routes: dict[str, str] = Field(default_factory=dict)
 
 

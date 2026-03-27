@@ -525,6 +525,8 @@ def _host_twin_contract_view(detail):
     twin = _mapping(detail.get("host_twin"))
     seat = _mapping(twin.get("seat"))
     ownership = _mapping(twin.get("ownership"))
+    app_family_twins = _mapping(twin.get("app_family_twins"))
+    coordination = _mapping(twin.get("coordination"))
     continuity = _mapping(twin.get("continuity"))
     legal_recovery_path = _mapping(
         twin.get("legal_recovery_path") or twin.get("legal_recovery"),
@@ -615,6 +617,30 @@ def _host_twin_contract_view(detail):
                 recovery_inputs.get("pending_recovery_families"),
             ),
         ),
+        "app_family_keys": sorted(app_family_twins.keys()),
+        "active_app_families": sorted(
+            family
+            for family, payload in app_family_twins.items()
+            if _mapping(payload).get("active") is True
+        ),
+        "browser_backoffice_contract_status": _mapping(
+            app_family_twins.get("browser_backoffice"),
+        ).get("contract_status"),
+        "office_document_writer_lock_scope": _mapping(
+            app_family_twins.get("office_document"),
+        ).get("writer_lock_scope"),
+        "coordination_selected_seat_ref": _first_string(
+            coordination.get("selected_seat_ref"),
+        ),
+        "coordination_seat_policy": _first_string(
+            coordination.get("seat_selection_policy"),
+        ),
+        "coordination_scheduler_action": _first_string(
+            coordination.get("recommended_scheduler_action"),
+        ),
+        "coordination_contention_severity": _mapping(
+            coordination.get("contention_forecast"),
+        ).get("severity"),
     }
 
 
@@ -1267,6 +1293,11 @@ def test_environment_detail_exposes_host_runtime_baseline_projections(tmp_path):
     assert detail["host_contract"]["current_gap_or_blocker"] == "captcha pending"
     assert detail["seat_runtime"]["projection_kind"] == "seat_runtime_projection"
     assert detail["seat_runtime"]["is_projection"] is True
+    assert detail["seat_runtime"]["status"] == "active"
+    assert detail["seat_runtime"]["occupancy_state"] == "occupied"
+    assert detail["seat_runtime"]["candidate_seat_refs"] == [lease.environment_id]
+    assert detail["seat_runtime"]["selected_seat_ref"] == lease.environment_id
+    assert detail["seat_runtime"]["seat_selection_policy"] == "sticky-active-seat"
     assert detail["host_companion_session"]["session_mount_id"] == lease.id
     assert detail["workspace_graph"]["projection_kind"] == "workspace_graph_projection"
     assert detail["workspace_graph"]["is_projection"] is True
@@ -2110,6 +2141,22 @@ def test_environment_and_session_detail_expose_execution_grade_host_twin_project
             "modal-uac-login",
             "process-exit-restart",
         ],
+        "app_family_keys": [
+            "browser_backoffice",
+            "desktop_specialized",
+            "messaging_workspace",
+            "office_document",
+        ],
+        "active_app_families": [
+            "browser_backoffice",
+            "office_document",
+        ],
+        "browser_backoffice_contract_status": "verified-writer",
+        "office_document_writer_lock_scope": "workbook:weekly-report",
+        "coordination_selected_seat_ref": lease.environment_id,
+        "coordination_seat_policy": "sticky-active-seat",
+        "coordination_scheduler_action": "handoff",
+        "coordination_contention_severity": "blocked",
     }
     assert _host_twin_contract_view(environment_detail) == expected_host_twin
     assert _host_twin_contract_view(session_detail) == expected_host_twin

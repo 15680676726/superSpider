@@ -79,6 +79,10 @@ class FixedSopDoctorReport(BaseModel):
     status: Literal["ready", "degraded", "blocked"] = "blocked"
     summary: str = ""
     checks: list[FixedSopDoctorCheck] = Field(default_factory=list)
+    environment_id: str | None = None
+    session_mount_id: str | None = None
+    host_requirement: dict[str, Any] = Field(default_factory=dict)
+    host_preflight: dict[str, Any] = Field(default_factory=dict)
     routes: dict[str, str] = Field(default_factory=dict)
 
 
@@ -89,6 +93,8 @@ class FixedSopRunRequest(BaseModel):
     workflow_run_id: str | None = None
     owner_agent_id: str | None = None
     owner_scope: str | None = None
+    environment_id: str | None = None
+    session_mount_id: str | None = None
     dry_run: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -110,3 +116,7 @@ class FixedSopRunDetail(BaseModel):
     run: WorkflowRunRecord
     binding: FixedSopBindingRecord | None = None
     template: FixedSopTemplateRecord | None = None
+    environment_id: str | None = None
+    session_mount_id: str | None = None
+    host_requirement: dict[str, Any] = Field(default_factory=dict)
+    host_preflight: dict[str, Any] = Field(default_factory=dict)

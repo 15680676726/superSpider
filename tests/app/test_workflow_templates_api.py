@@ -362,6 +362,8 @@ def _launch_workflow_via_service(
     parameters: dict[str, object],
     owner_agent_id: str | None = None,
     preset_id: str | None = None,
+    environment_id: str | None = None,
+    session_mount_id: str | None = None,
     execute: bool = False,
 ):
     return asyncio.run(
@@ -371,6 +373,8 @@ def _launch_workflow_via_service(
                 industry_instance_id=industry_instance_id,
                 owner_agent_id=owner_agent_id,
                 preset_id=preset_id,
+                environment_id=environment_id,
+                session_mount_id=session_mount_id,
                 parameters=parameters,
                 activate=True,
                 execute=execute,
@@ -474,49 +478,194 @@ def _desktop_host_preflight_detail(
     current_gap_or_blocker: str | None = None,
     active_window_ref: str | None = "window:desktop-outreach",
     writer_lock_scope: str | None = "window:desktop-outreach",
+    coordination_severity: str = "clear",
+    coordination_reason: str | None = None,
+    recommended_scheduler_action: str = "continue",
 ) -> dict[str, object]:
     gap = current_gap_or_blocker or handoff_reason
+    mutation_ready = (
+        continuity_status in {"attached", "restorable", "same-host-other-process"}
+        and access_mode == "writer"
+        and active_window_ref is not None
+        and writer_lock_scope is not None
+    )
     return {
         "environment_id": environment_id,
         "session_mount_id": session_mount_id,
-        "host_companion_session": {
-            "continuity_status": continuity_status,
-            "continuity_source": continuity_source,
-            "current_gap_or_blocker": gap,
-        },
-        "host_contract": {
-            "surface_kind": "desktop",
+        "host_twin": {
+            "projection_kind": "host_twin_projection",
+            "is_projection": True,
+            "is_truth_store": False,
             "environment_id": environment_id,
             "session_mount_id": session_mount_id,
-            "lease_class": lease_class,
-            "access_mode": access_mode,
-            "handoff_state": handoff_state,
-            "handoff_reason": handoff_reason,
-            "resume_kind": "resume-runtime" if continuity_status == "attached" else "fresh",
-            "current_gap_or_blocker": gap,
-        },
-        "recovery": {
-            "status": recovery_status,
-            "recoverable": recovery_recoverable,
-            "note": recovery_note,
-            "resume_kind": "resume-runtime" if recovery_status == "attached" else "fresh",
-        },
-        "host_event_summary": {
-            "active_alert_families": list(active_alert_families or []),
-        },
-        "workspace_graph": {
-            "surfaces": {
-                "desktop": {
-                    "active_window": {
-                        "window_ref": active_window_ref,
-                        "writer_lock_scope": writer_lock_scope,
-                        "current_gap_or_blocker": gap,
-                    },
+            "continuity": {
+                "status": continuity_status,
+                "valid": continuity_status in {"attached", "restorable"},
+                "continuity_source": continuity_source,
+                "resume_kind": (
+                    "resume-runtime" if continuity_status == "attached" else "fresh"
+                ),
+                "requires_human_return": handoff_state in {"active", "manual-only-terminal"},
+            },
+            "legal_recovery": {
+                "path": "handoff" if handoff_state else "resume",
+                "resume_kind": (
+                    "resume-runtime" if recovery_status == "attached" else "fresh"
+                ),
+                "checkpoint_ref": "checkpoint:desktop-host" if handoff_state else None,
+                "return_condition": "human-return" if handoff_state else None,
+                "verification_channel": "runtime-center-self-check",
+            },
+            "active_blocker_families": list(active_alert_families or []),
+            "latest_blocking_event": {
+                "event_family": host_blocker_family,
+                "recommended_runtime_response": host_blocker_response,
+                "surface_refs": [active_window_ref] if active_window_ref else [],
+            },
+            "execution_mutation_ready": {
+                "desktop_app": mutation_ready,
+                "browser": False,
+                "file_docs": False,
+            },
+            "app_family_twins": {
+                "office_document": {
+                    "active": active_window_ref is not None,
+                    "family_kind": "office_document",
+                    "surface_ref": active_window_ref,
+                    "contract_status": (
+                        "verified-writer" if mutation_ready else "blocked"
+                    ),
+                    "family_scope_ref": "app:excel" if active_window_ref else None,
+                    "writer_lock_scope": writer_lock_scope,
                 },
-                "host_blocker": {
-                    "event_family": host_blocker_family,
-                    "recommended_runtime_response": host_blocker_response,
+                "desktop_specialized": {
+                    "active": active_window_ref is not None,
+                    "family_kind": "desktop_specialized",
+                    "surface_ref": active_window_ref,
+                    "contract_status": (
+                        "verified-writer" if mutation_ready else "blocked"
+                    ),
+                    "family_scope_ref": "app:desktop",
                 },
+            },
+            "coordination": {
+                "seat_owner_ref": "ops-agent",
+                "workspace_owner_ref": "ops-agent",
+                "writer_owner_ref": "ops-agent" if mutation_ready else None,
+                "candidate_seat_refs": [environment_id],
+                "selected_seat_ref": environment_id,
+                "seat_selection_policy": "sticky-active-seat",
+                "contention_forecast": {
+                    "severity": coordination_severity,
+                    "reason": coordination_reason or gap or "host coordination is clear",
+                },
+                "legal_owner_transition": {
+                    "allowed": handoff_state is None,
+                    "reason": (
+                        "human handoff is still active"
+                        if handoff_state
+                        else "no ownership transfer required"
+                    ),
+                },
+                "recommended_scheduler_action": recommended_scheduler_action,
+                "expected_release_at": None,
+            },
+            "scheduler_inputs": {
+                "active_blocker_family": host_blocker_family,
+                "requires_human_return": handoff_state in {"active", "manual-only-terminal"},
+                "recommended_scheduler_action": recommended_scheduler_action,
+            },
+            "recovery_inputs": {
+                "pending_recovery_families": (
+                    [host_blocker_family]
+                    if host_blocker_family is not None
+                    else []
+                ),
+            },
+        },
+    }
+
+
+def _browser_host_preflight_detail(
+    *,
+    environment_id: str = "env-browser-host",
+    session_mount_id: str = "session-browser-host",
+    continuity_status: str = "attached",
+    continuity_source: str = "live-handle",
+    active_blocker_families: list[str] | None = None,
+    coordination_severity: str = "clear",
+    recommended_scheduler_action: str = "continue",
+) -> dict[str, object]:
+    return {
+        "environment_id": environment_id,
+        "session_mount_id": session_mount_id,
+        "host_twin": {
+            "projection_kind": "host_twin_projection",
+            "is_projection": True,
+            "is_truth_store": False,
+            "environment_id": environment_id,
+            "session_mount_id": session_mount_id,
+            "continuity": {
+                "status": continuity_status,
+                "valid": continuity_status in {"attached", "restorable"},
+                "continuity_source": continuity_source,
+                "resume_kind": (
+                    "resume-runtime" if continuity_status == "attached" else "fresh"
+                ),
+                "requires_human_return": False,
+            },
+            "legal_recovery": {
+                "path": "resume",
+                "resume_kind": "resume-runtime",
+                "checkpoint_ref": None,
+                "return_condition": None,
+                "verification_channel": "runtime-center-self-check",
+            },
+            "active_blocker_families": list(active_blocker_families or []),
+            "latest_blocking_event": {
+                "event_family": None,
+                "recommended_runtime_response": None,
+                "surface_refs": ["browser:web:main"],
+            },
+            "execution_mutation_ready": {
+                "browser": True,
+                "desktop_app": False,
+                "file_docs": False,
+            },
+            "app_family_twins": {
+                "browser_backoffice": {
+                    "active": True,
+                    "family_kind": "browser_backoffice",
+                    "surface_ref": "browser:web:main",
+                    "contract_status": "verified-writer",
+                    "family_scope_ref": "site:jd:seller-center",
+                },
+            },
+            "coordination": {
+                "seat_owner_ref": "ops-agent",
+                "workspace_owner_ref": "ops-agent",
+                "writer_owner_ref": "ops-agent",
+                "candidate_seat_refs": [environment_id],
+                "selected_seat_ref": environment_id,
+                "seat_selection_policy": "sticky-active-seat",
+                "contention_forecast": {
+                    "severity": coordination_severity,
+                    "reason": "browser coordination is clear",
+                },
+                "legal_owner_transition": {
+                    "allowed": True,
+                    "reason": "no ownership transfer required",
+                },
+                "recommended_scheduler_action": recommended_scheduler_action,
+                "expected_release_at": None,
+            },
+            "scheduler_inputs": {
+                "active_blocker_family": None,
+                "requires_human_return": False,
+                "recommended_scheduler_action": recommended_scheduler_action,
+            },
+            "recovery_inputs": {
+                "pending_recovery_families": [],
             },
         },
     }
@@ -667,13 +816,19 @@ def test_workflow_template_launch_route_is_retired(tmp_path) -> None:
 
 
 def test_workflow_template_service_launch_materializes_run(tmp_path) -> None:
-    client = TestClient(_build_workflow_app(tmp_path))
+    detail = _browser_host_preflight_detail()
+    environment_service = FakeWorkflowEnvironmentService(
+        session_details={str(detail["session_mount_id"]): detail},
+    )
+    client = TestClient(_build_workflow_app(tmp_path, environment_service=environment_service))
     instance_id = _bootstrap_industry(client)
 
     launched = _launch_workflow_via_service(
         client,
         template_id="industry-weekly-research-synthesis",
         industry_instance_id=instance_id,
+        environment_id=str(detail["environment_id"]),
+        session_mount_id=str(detail["session_mount_id"]),
         parameters={
             "focus_area": "channel conversion",
             "weekly_review_cron": "0 12 * * 2",
@@ -694,12 +849,54 @@ def test_workflow_template_service_launch_materializes_run(tmp_path) -> None:
     assert detail_payload["routes"]["run"] == f"/api/workflow-runs/{run_id}"
     assert "resume" not in (detail_payload.get("routes") or {})
     assert detail_payload["diagnosis"]["status"] == "planned"
+    assert detail_payload["diagnosis"]["host_snapshot"]["coordination"][
+        "recommended_scheduler_action"
+    ] == "continue"
     assert len(detail_payload["step_execution"]) == 3
     assert any(
         item["step_id"] == "weekly-research-goal"
         and item["status"] in {"planned", "running", "completed"}
         for item in detail_payload["step_execution"]
     )
+    schedule_payload = detail_payload["schedules"][0]["spec_payload"]
+    assert schedule_payload["meta"]["environment_id"] == detail["environment_id"]
+    assert schedule_payload["meta"]["session_mount_id"] == detail["session_mount_id"]
+    assert schedule_payload["meta"]["host_requirement"]["app_family"] == "browser_backoffice"
+    assert schedule_payload["meta"]["host_snapshot"]["coordination"][
+        "recommended_scheduler_action"
+    ] == "continue"
+
+
+def test_workflow_schedule_meta_uses_canonical_host_refs_when_launch_only_has_session_mount(
+    tmp_path,
+) -> None:
+    detail = _browser_host_preflight_detail(
+        environment_id="env:session:session:web:main",
+        session_mount_id="session:web:main",
+    )
+    environment_service = FakeWorkflowEnvironmentService(
+        session_details={str(detail["session_mount_id"]): detail},
+    )
+    client = TestClient(_build_workflow_app(tmp_path, environment_service=environment_service))
+    instance_id = _bootstrap_industry(client)
+
+    launched = _launch_workflow_via_service(
+        client,
+        template_id="industry-weekly-research-synthesis",
+        industry_instance_id=instance_id,
+        session_mount_id=str(detail["session_mount_id"]),
+        parameters={
+            "focus_area": "channel conversion",
+            "weekly_review_cron": "0 12 * * 2",
+            "timezone": "UTC",
+        },
+    )
+
+    schedule_payload = launched.schedules[0]["spec_payload"]
+    assert schedule_payload["meta"]["environment_ref"] == detail["environment_id"]
+    assert schedule_payload["meta"]["environment_id"] == detail["environment_id"]
+    assert schedule_payload["meta"]["session_mount_id"] == detail["session_mount_id"]
+    assert schedule_payload["meta"]["host_snapshot"]["environment_id"] == detail["environment_id"]
 
 def test_workflow_run_step_detail_stays_read_only_and_service_resume_rehydrates_missing_links(
     tmp_path,
@@ -811,6 +1008,157 @@ def test_workflow_run_step_detail_stays_read_only_and_service_resume_rehydrates_
     assert resumed_step_detail_payload["routes"]["step"] == (
         f"/api/workflow-runs/{run_id}/steps/{goal_step['step_id']}"
     )
+
+
+def test_workflow_preview_declares_host_requirements_and_phase6_coordination_blocker(
+    tmp_path,
+) -> None:
+    detail = _desktop_host_preflight_detail(
+        coordination_severity="blocked",
+        coordination_reason="office writer ownership is contested",
+        recommended_scheduler_action="handoff",
+        active_alert_families=[],
+        host_blocker_family=None,
+        host_blocker_response=None,
+    )
+    environment_service = FakeWorkflowEnvironmentService(
+        session_details={str(detail["session_mount_id"]): detail},
+    )
+    client = TestClient(
+        _build_workflow_app(tmp_path, environment_service=environment_service),
+    )
+    instance_id = _bootstrap_industry(client)
+    solution_lead_agent_id = _industry_role_agent_id(client, instance_id, "solution-lead")
+    _grant_capability_to_agent(
+        client,
+        agent_id=solution_lead_agent_id,
+        capability_ids=["mcp:desktop_windows"],
+    )
+    repository = client.app.state.workflow_template_repository
+    repository.upsert_template(
+        WorkflowTemplateRecord(
+            template_id="phase6-office-document-smoke",
+            title="Phase 6 Office Document Smoke",
+            summary="Use office document host facts for a mutating desktop step.",
+            category="desktop-ops",
+            status="active",
+            version="v1",
+            owner_role_id="solution-lead",
+            suggested_role_ids=["solution-lead"],
+            dependency_capability_ids=["system:dispatch_query", "mcp:desktop_windows"],
+            step_specs=[
+                {
+                    "id": "office-document-leaf",
+                    "kind": "goal",
+                    "execution_mode": "leaf",
+                    "owner_role_id": "solution-lead",
+                    "title": "Update the weekly workbook",
+                    "summary": "Mutate the active office document.",
+                    "required_capability_ids": [
+                        "system:dispatch_query",
+                        "mcp:desktop_windows",
+                    ],
+                    "environment_preflight": {
+                        "surface_kind": "desktop",
+                        "mutating": True,
+                        "app_family": "office_document",
+                    },
+                },
+            ],
+        ),
+    )
+
+    preview = client.post(
+        "/workflow-templates/phase6-office-document-smoke/preview",
+        json={
+            "industry_instance_id": instance_id,
+            "environment_id": detail["environment_id"],
+            "session_mount_id": detail["session_mount_id"],
+        },
+    )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert payload["host_requirements"][0]["step_id"] == "office-document-leaf"
+    assert payload["host_requirements"][0]["app_family"] == "office_document"
+    assert payload["host_requirements"][0]["surface_kind"] == "desktop"
+    assert any(
+        item["code"] == "host-twin-contention-forecast-blocked"
+        for item in payload["launch_blockers"]
+    )
+
+
+def test_workflow_run_diagnosis_keeps_host_snapshot_and_resume_rechecks_live_host_truth(
+    tmp_path,
+) -> None:
+    initial_detail = _desktop_host_preflight_detail(
+        coordination_severity="clear",
+        recommended_scheduler_action="continue",
+        active_alert_families=[],
+        host_blocker_family=None,
+        host_blocker_response=None,
+    )
+    environment_service = FakeWorkflowEnvironmentService(
+        session_details={str(initial_detail["session_mount_id"]): initial_detail},
+    )
+    client = TestClient(
+        _build_workflow_app(tmp_path, environment_service=environment_service),
+    )
+    instance_id = _bootstrap_industry(client)
+    solution_lead_agent_id = _industry_role_agent_id(client, instance_id, "solution-lead")
+    _grant_capability_to_agent(
+        client,
+        agent_id=solution_lead_agent_id,
+        capability_ids=["mcp:desktop_windows"],
+    )
+
+    launched = _launch_workflow_via_service(
+        client,
+        template_id="desktop-outreach-smoke",
+        industry_instance_id=instance_id,
+        environment_id=str(initial_detail["environment_id"]),
+        session_mount_id=str(initial_detail["session_mount_id"]),
+        parameters={
+            "target_application": "Excel",
+            "recipient_name": "Target contact",
+            "message_text": "Prepare the weekly follow-up draft.",
+        },
+    )
+    run_id = launched.run["run_id"]
+    assert launched.diagnosis.host_snapshot["coordination"]["recommended_scheduler_action"] == (
+        "continue"
+    )
+
+    environment_service._session_details[str(initial_detail["session_mount_id"])] = (
+        _desktop_host_preflight_detail(
+            environment_id=str(initial_detail["environment_id"]),
+            session_mount_id=str(initial_detail["session_mount_id"]),
+            coordination_severity="blocked",
+            coordination_reason="office writer ownership is contested",
+            recommended_scheduler_action="handoff",
+            active_alert_families=[],
+            host_blocker_family=None,
+            host_blocker_response=None,
+        )
+    )
+
+    with pytest.raises(ValueError):
+        asyncio.run(
+            client.app.state.workflow_template_service.resume_run(
+                run_id,
+                actor="copaw-operator",
+            ),
+        )
+
+    run_detail = client.get(f"/workflow-runs/{run_id}")
+    assert run_detail.status_code == 200
+    detail_payload = run_detail.json()
+    assert detail_payload["diagnosis"]["host_snapshot"]["coordination"][
+        "recommended_scheduler_action"
+    ] == "handoff"
+    assert "host-twin-contention-forecast-blocked" in detail_payload["diagnosis"][
+        "blocking_codes"
+    ]
 
 def test_workflow_preview_uses_candidate_role_strategy_when_primary_role_is_missing(
     tmp_path,

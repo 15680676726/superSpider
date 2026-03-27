@@ -224,6 +224,13 @@
 - `2026-03-27` Phase 4/5 宽回归已验证通过：`python -m pytest tests/agents/test_browser_tool_evidence.py tests/routines/test_routine_service.py tests/environments/test_environment_registry.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py tests/app/test_runtime_center_api.py tests/app/test_capability_market_phase2_api.py tests/app/test_workflow_templates_api.py -q` -> `126 passed`。
 - 当前下一边界已进入成熟态深化，而不是补当前阶段缺口：后续重点不再是“让 host twin 出现”，而是继续朝 `Phase 6 Full Host Digital Twin` 推进更广的 app-family twins、更深的 multi-seat/multi-agent coordination、以及更强的 live-host simulation / planning 消费。
 - `2026-03-27` 补充：`Phase 6 Full Host Digital Twin` 的正式实施计划已落到 `docs/superpowers/plans/2026-03-27-phase6-full-host-digital-twin.md`。当前推荐执行顺序已锁定为：先补 `host_twin.app_family_twins + coordination` 派生投影，再补 Runtime Center/task-review 读面，再补 workflow preview/run/resume 与 fixed-SOP doctor/run 对同一 host truth 的消费；该计划明确保持 `Workspace Graph` 为 projection、`Host Event Bus` 为 runtime mechanism、`host twin` 为 derived projection，不新增第二真相源。
+- `2026-03-27` 补充：`Phase 6 Full Host Digital Twin` 已在代码侧真实落地并完成聚焦验收。当前正式新增/收口包括：
+  - `host_twin` 已正式补齐 `app_family_twins` 与 `coordination` 派生投影，`seat_runtime` 也已带上 `status / occupancy_state / candidate_seat_refs / selected_seat_ref / seat_selection_policy / expected_release_at`。
+  - `Runtime Center / task review` 不再只透传 `coordination` 原始字段，而会显式把 `recommended_scheduler_action / contention_forecast / seat_selection_policy` 进入 summary、next action 与 risk 读面。
+  - workflow preview / launch / run detail / resume / cron 已统一消费 canonical host truth：`host_requirements`、`host_snapshot`、schedule `environment_ref / environment_id / session_mount_id / host_requirement` 与 cron dispatch host meta 已全部落到正式链路，不再回退成仅靠 `session:{channel}:{session_id}` 猜环境。
+  - fixed SOP doctor / run / run detail 已统一消费 canonical host preflight，正式暴露并落证 `environment_id / session_mount_id / host_requirement / host_preflight`；非法 writable path 会被 doctor 阻断，并在 run 入口返回显式错误，而不是盲跑。
+  - `tests/app/test_cron_executor.py` 已补入 Phase 6 验收面，用于锁住 cron 对 stored host refs / scheduler inputs 的消费契约。
+- `2026-03-27` 补充：当前仓库在 worktree 模式下做 Phase 6 验收时，必须显式把 `PYTHONPATH` 指到 `D:\\word\\copaw\\.worktrees\\codex-phase6-host-twin\\src`；否则 `pytest` 会从主仓 `D:\\word\\copaw\\src` 导入，存在假完成/假失败风险。当前已用该导入路径复核 `copaw.__file__` 与 `FixedSopRunRequest` 字段面，确认验收到的是本 worktree 代码。
 
 
 ### 3.4 当前 single-industry autonomy 基线
@@ -481,6 +488,15 @@
 - `2026-03-27`
   - `python -m pytest tests/agents/test_browser_tool_evidence.py tests/routines/test_routine_service.py tests/environments/test_environment_registry.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py tests/app/test_runtime_center_api.py tests/app/test_capability_market_phase2_api.py -q`
   - 结果：`106 passed`
+- `2026-03-27`
+  - `$env:PYTHONPATH='D:\\word\\copaw\\.worktrees\\codex-phase6-host-twin\\src'; @' import copaw; from copaw.sop_kernel.models import FixedSopRunRequest; print(copaw.__file__); print(sorted(FixedSopRunRequest.model_fields.keys())) '@ | python -`
+  - 结果：`copaw` 已确认从 `D:\word\copaw\.worktrees\codex-phase6-host-twin\src\copaw\__init__.py` 导入；`FixedSopRunRequest` 已包含 `environment_id / session_mount_id`
+- `2026-03-27`
+  - `$env:PYTHONPATH='D:\\word\\copaw\\.worktrees\\codex-phase6-host-twin\\src'; python -m pytest tests/environments/test_environment_registry.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py tests/app/test_runtime_center_api.py tests/app/test_workflow_templates_api.py tests/app/test_cron_executor.py tests/fixed_sops/test_service.py tests/app/test_fixed_sop_kernel_api.py tests/app/test_capabilities_execution.py tests/app/test_runtime_bootstrap_split.py -q`
+  - 结果：`135 passed`
+- `2026-03-27`
+  - `$env:PYTHONPATH='D:\\word\\copaw\\.worktrees\\codex-phase6-host-twin\\src'; python -m pytest tests/agents/test_browser_tool_evidence.py tests/routines/test_routine_service.py tests/environments/test_environment_registry.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py tests/app/test_runtime_center_api.py tests/app/test_capability_market_phase2_api.py tests/app/test_workflow_templates_api.py tests/app/test_cron_executor.py tests/fixed_sops/test_service.py tests/app/test_fixed_sop_kernel_api.py tests/app/test_capabilities_execution.py tests/app/test_runtime_bootstrap_split.py -q`
+  - 结果：`166 passed`
 - `2026-03-27`
   - `python -m pytest tests/routines/test_routine_service.py tests/agents/test_browser_tool_evidence.py -q`
   - 结果：`25 passed`

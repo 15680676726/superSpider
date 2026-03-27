@@ -1270,10 +1270,18 @@ class EnvironmentHealthService:
         ) or self._string_list(mount_metadata.get("active_surface_mix"))
         if not active_surface_mix and mount is not None:
             active_surface_mix = [str(mount.kind)]
+        seat_ref = getattr(mount, "id", None) if mount is not None else None
+        lease_status = self._first_string(host_contract.get("lease_status"))
+        status = "inactive"
+        if lease_status in {"leased", "idle"} or session is not None:
+            status = "active"
+        occupancy_state = "available"
+        if session is not None or self._first_string(host_contract.get("lease_owner")) is not None:
+            occupancy_state = "occupied"
         return {
             "projection_kind": "seat_runtime_projection",
             "is_projection": True,
-            "seat_ref": getattr(mount, "id", None) if mount is not None else None,
+            "seat_ref": seat_ref,
             "environment_ref": getattr(mount, "ref", None) if mount is not None else None,
             "workspace_scope": self._first_string(
                 session_metadata.get("workspace_scope"),
@@ -1289,6 +1297,24 @@ class EnvironmentHealthService:
             "active_session_mount_id": session.id if session is not None else None,
             "host_companion_status": host_companion_session.get("continuity_status"),
             "active_surface_mix": active_surface_mix,
+            "status": status,
+            "occupancy_state": occupancy_state,
+            "candidate_seat_refs": [seat_ref] if seat_ref is not None else [],
+            "selected_seat_ref": seat_ref,
+            "seat_selection_policy": (
+                "sticky-active-seat"
+                if session is not None
+                else "current-seat-only"
+            ),
+            "expected_release_at": (
+                session.lease_expires_at.isoformat()
+                if session is not None and session.lease_expires_at is not None
+                else (
+                    mount.lease_expires_at.isoformat()
+                    if mount is not None and getattr(mount, "lease_expires_at", None) is not None
+                    else None
+                )
+            ),
             "live_handle_ref": (
                 self._first_string(self._mapping(live_handle).get("ref"))
                 if live_handle is not None
@@ -1752,6 +1778,18 @@ class EnvironmentHealthService:
             host_event_summary=host_event_summary,
             surface_mutability=surface_mutability,
         )
+        app_family_twins = self._build_host_twin_app_family_twins(
+            browser_site_contract=browser_site_contract,
+            desktop_app_contract=desktop_app_contract,
+            surface_mutability=surface_mutability,
+        )
+        coordination = self._build_host_twin_coordination(
+            workspace_graph=workspace_graph,
+            ownership=ownership,
+            seat_runtime=seat_runtime,
+            host_contract=host_contract,
+            latest_blocking_event=latest_blocking_event,
+        )
         execution_mutation_ready = {
             "browser": bool(
                 self._mapping(surface_mutability.get("browser")).get("safe_to_mutate"),
@@ -1842,6 +1880,8 @@ class EnvironmentHealthService:
             "active_blocker_families": active_blocker_families,
             "latest_blocking_event": latest_blocking_event,
             "execution_mutation_ready": execution_mutation_ready,
+            "app_family_twins": app_family_twins,
+            "coordination": coordination,
             "scheduler_inputs": {
                 "active_blocker_family": active_blocker_family,
                 "active_recovery_family": active_recovery_family,
@@ -2872,6 +2912,180 @@ class EnvironmentHealthService:
             }:
                 return dict(event)
         return None
+
+    def _build_host_twin_app_family_twins(
+        self,
+        *,
+        browser_site_contract: dict[str, object],
+        desktop_app_contract: dict[str, object],
+        surface_mutability: dict[str, dict[str, object]],
+    ) -> dict[str, dict[str, object]]:
+        browser_surface_ref = self._first_string(
+            self._mapping(surface_mutability.get("browser")).get("surface_ref"),
+        )
+        desktop_surface_ref = self._first_string(
+            self._mapping(surface_mutability.get("desktop_app")).get("surface_ref"),
+        )
+        active_site = self._first_string(browser_site_contract.get("active_site"))
+        browser_contract_status = self._first_string(
+            browser_site_contract.get("site_contract_status"),
+        )
+        app_identity = self._first_string(desktop_app_contract.get("app_identity"))
+        desktop_contract_status = self._first_string(
+            desktop_app_contract.get("app_contract_status"),
+        )
+        writer_lock_scope = self._first_string(
+            desktop_app_contract.get("writer_lock_scope"),
+        )
+        messaging_markers = ("wechat", "slack", "telegram", "whatsapp", "qq")
+        messaging_active = bool(
+            active_site is not None
+            and any(marker in active_site.lower() for marker in messaging_markers)
+        )
+        office_active = bool(
+            writer_lock_scope is not None
+            or (app_identity or "").lower() in {"excel", "word", "powerpoint", "wps"}
+        )
+        desktop_specialized_active = bool(app_identity is not None and not office_active)
+        return {
+            "browser_backoffice": {
+                "active": active_site is not None and not messaging_active,
+                "family_kind": "browser_backoffice",
+                "surface_ref": (
+                    browser_surface_ref
+                    if active_site is not None and not messaging_active
+                    else None
+                ),
+                "contract_status": (
+                    browser_contract_status
+                    if active_site is not None and not messaging_active
+                    else "inactive"
+                ),
+                "family_scope_ref": (
+                    f"site:{active_site}"
+                    if active_site is not None and not messaging_active
+                    else None
+                ),
+            },
+            "messaging_workspace": {
+                "active": messaging_active,
+                "family_kind": "messaging_workspace",
+                "surface_ref": browser_surface_ref if messaging_active else None,
+                "contract_status": browser_contract_status if messaging_active else "inactive",
+                "family_scope_ref": (
+                    f"site:{active_site}"
+                    if messaging_active and active_site is not None
+                    else None
+                ),
+            },
+            "office_document": {
+                "active": office_active,
+                "family_kind": "office_document",
+                "surface_ref": desktop_surface_ref if office_active else None,
+                "contract_status": (
+                    desktop_contract_status if office_active else "inactive"
+                ),
+                "family_scope_ref": (
+                    f"app:{app_identity}"
+                    if office_active and app_identity is not None
+                    else None
+                ),
+                "writer_lock_scope": writer_lock_scope if office_active else None,
+            },
+            "desktop_specialized": {
+                "active": desktop_specialized_active,
+                "family_kind": "desktop_specialized",
+                "surface_ref": desktop_surface_ref if desktop_specialized_active else None,
+                "contract_status": (
+                    desktop_contract_status
+                    if desktop_specialized_active
+                    else "inactive"
+                ),
+                "family_scope_ref": (
+                    f"app:{app_identity}"
+                    if desktop_specialized_active and app_identity is not None
+                    else None
+                ),
+            },
+        }
+
+    def _build_host_twin_coordination(
+        self,
+        *,
+        workspace_graph: dict[str, object],
+        ownership: dict[str, object],
+        seat_runtime: dict[str, object],
+        host_contract: dict[str, object],
+        latest_blocking_event: dict[str, object],
+    ) -> dict[str, object]:
+        workspace_ownership = self._mapping(workspace_graph.get("ownership"))
+        locks = list(workspace_graph.get("locks") or [])
+        writer_owner_ref = None
+        for lock in locks:
+            if not isinstance(lock, dict):
+                continue
+            writer_lock = self._mapping(lock.get("writer_lock"))
+            writer_owner_ref = self._first_string(
+                writer_lock.get("owner_agent_id"),
+                lock.get("owner_agent_id"),
+            )
+            if writer_owner_ref is not None:
+                break
+        seat_owner_ref = self._first_string(
+            ownership.get("seat_owner_agent_id"),
+            seat_runtime.get("lease_owner"),
+            host_contract.get("lease_owner"),
+        )
+        workspace_owner_ref = self._first_string(
+            workspace_ownership.get("owner_agent_id"),
+            workspace_graph.get("owner_agent_id"),
+            seat_owner_ref,
+        )
+        writer_owner_ref = self._first_string(writer_owner_ref, workspace_owner_ref)
+        candidate_seat_refs = self._string_list(seat_runtime.get("candidate_seat_refs"))
+        selected_seat_ref = self._first_string(
+            seat_runtime.get("selected_seat_ref"),
+            seat_runtime.get("seat_ref"),
+        )
+        blocking_family = self._first_string(latest_blocking_event.get("event_family"))
+        blocking_reason = self._first_string(
+            host_contract.get("handoff_reason"),
+            host_contract.get("current_gap_or_blocker"),
+            latest_blocking_event.get("event_name"),
+            workspace_graph.get("active_lock_summary"),
+        )
+        severity = "clear"
+        if blocking_family is not None or self._first_string(host_contract.get("handoff_owner_ref")) is not None:
+            severity = "blocked"
+        legal_owner_transition = {
+            "allowed": severity != "blocked",
+            "reason": (
+                "human handoff is still active"
+                if self._first_string(host_contract.get("handoff_owner_ref")) is not None
+                else (blocking_reason or "coordination-ready")
+            ),
+        }
+        recommended_scheduler_action = "proceed"
+        if severity == "blocked":
+            recommended_scheduler_action = "handoff"
+        return {
+            "seat_owner_ref": seat_owner_ref,
+            "workspace_owner_ref": workspace_owner_ref,
+            "writer_owner_ref": writer_owner_ref,
+            "candidate_seat_refs": candidate_seat_refs
+            or ([selected_seat_ref] if selected_seat_ref is not None else []),
+            "selected_seat_ref": selected_seat_ref,
+            "seat_selection_policy": self._first_string(
+                seat_runtime.get("seat_selection_policy"),
+            ),
+            "contention_forecast": {
+                "severity": severity,
+                "reason": blocking_reason,
+            },
+            "legal_owner_transition": legal_owner_transition,
+            "recommended_scheduler_action": recommended_scheduler_action,
+            "expected_release_at": seat_runtime.get("expected_release_at"),
+        }
 
     def _build_host_twin_ownership(
         self,

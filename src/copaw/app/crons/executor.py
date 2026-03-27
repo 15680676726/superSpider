@@ -146,14 +146,14 @@ class CronExecutor:
             if risk_level in {"auto", "guarded", "confirm"}
             else "guarded"
         )
+        environment_ref = self._resolve_environment_ref(
+            job=job,
+            target_session_id=target_session_id,
+        )
         task = KernelTask(
             title=f"Cron capability: {job.name}",
             capability_ref=capability_ref,
-            environment_ref=(
-                f"session:{job.dispatch.channel}:{target_session_id}"
-                if target_session_id
-                else None
-            ),
+            environment_ref=environment_ref,
             owner_agent_id="copaw-cron",
             risk_level=normalized_risk,
             payload={
@@ -163,8 +163,12 @@ class CronExecutor:
                     "channel": job.dispatch.channel,
                     "user_id": target_user_id,
                     "session_id": target_session_id,
-                    "meta": dispatch_meta,
+                    "meta": {
+                        **dispatch_meta,
+                        **self._host_meta(job),
+                    },
                 },
+                "environment_ref": environment_ref,
             },
         )
         admitted = self._kernel_dispatcher.submit(task)
@@ -192,10 +196,14 @@ class CronExecutor:
 
         if self._kernel_dispatcher is None:
             raise RuntimeError("Kernel dispatcher is not configured for cron")
+        environment_ref = self._resolve_environment_ref(
+            job=job,
+            target_session_id=target_session_id,
+        )
         task = KernelTask(
             title=f"Cron send_text: {job.name}",
             capability_ref="system:send_channel_text",
-            environment_ref=f"session:{job.dispatch.channel}:{target_session_id}",
+            environment_ref=environment_ref,
             owner_agent_id="copaw-cron",
             risk_level="guarded",
             payload={
@@ -203,8 +211,12 @@ class CronExecutor:
                 "user_id": target_user_id,
                 "session_id": target_session_id,
                 "text": job.text.strip() if job.text else "",
-                "meta": dispatch_meta,
+                "meta": {
+                    **dispatch_meta,
+                    **self._host_meta(job),
+                },
                 "job_id": job.id,
+                "environment_ref": environment_ref,
             },
         )
         admitted = self._kernel_dispatcher.submit(task)
@@ -228,12 +240,16 @@ class CronExecutor:
 
         if self._kernel_dispatcher is None:
             raise RuntimeError("Kernel dispatcher is not configured for cron")
+        environment_ref = self._resolve_environment_ref(
+            job=job,
+            target_session_id=target_session_id,
+        )
         task = KernelTask(
             title=f"Cron dispatch agent: {job.name}",
             capability_ref=infer_turn_capability_and_risk(
                 _request_text(request_payload),
             )[0],
-            environment_ref=f"session:{job.dispatch.channel}:{target_session_id}",
+            environment_ref=environment_ref,
             owner_agent_id="copaw-cron",
             risk_level=infer_turn_capability_and_risk(_request_text(request_payload))[1],
             payload={
@@ -241,9 +257,13 @@ class CronExecutor:
                 "channel": job.dispatch.channel,
                 "user_id": target_user_id,
                 "session_id": target_session_id,
-                "meta": dispatch_meta,
+                "meta": {
+                    **dispatch_meta,
+                    **self._host_meta(job),
+                },
                 "mode": job.dispatch.mode,
                 "job_id": job.id,
+                "environment_ref": environment_ref,
             },
         )
         task.payload["task_id"] = task.id
@@ -257,6 +277,58 @@ class CronExecutor:
         )
         if not result.success:
             raise RuntimeError(result.error or result.summary or "cron agent dispatch failed")
+
+    def _resolve_environment_ref(
+        self,
+        *,
+        job: CronJobSpec,
+        target_session_id: str,
+    ) -> str | None:
+        host_meta = self._host_meta(job)
+        return _string_value(host_meta.get("environment_ref")) or (
+            f"session:{job.dispatch.channel}:{target_session_id}"
+            if target_session_id
+            else None
+        )
+
+    def _host_meta(self, job: CronJobSpec) -> Dict[str, Any]:
+        meta = dict(job.meta or {})
+        host_snapshot = (
+            dict(meta.get("host_snapshot"))
+            if isinstance(meta.get("host_snapshot"), dict)
+            else {}
+        )
+        scheduler_inputs = (
+            dict(host_snapshot.get("scheduler_inputs"))
+            if isinstance(host_snapshot.get("scheduler_inputs"), dict)
+            else {}
+        )
+        environment_ref = (
+            _string_value(meta.get("environment_ref"))
+            or _string_value(scheduler_inputs.get("environment_ref"))
+            or _string_value(host_snapshot.get("environment_ref"))
+            or _string_value(meta.get("environment_id"))
+            or _string_value(scheduler_inputs.get("environment_id"))
+            or _string_value(host_snapshot.get("environment_id"))
+        )
+        host_meta: Dict[str, Any] = {}
+        if environment_ref is not None:
+            host_meta["environment_ref"] = environment_ref
+        session_mount_id = (
+            _string_value(meta.get("session_mount_id"))
+            or _string_value(scheduler_inputs.get("session_mount_id"))
+            or _string_value(host_snapshot.get("session_mount_id"))
+        )
+        if session_mount_id is not None:
+            host_meta["session_mount_id"] = session_mount_id
+        host_requirement = meta.get("host_requirement")
+        if isinstance(host_requirement, dict):
+            host_meta["host_requirement"] = dict(host_requirement)
+        if host_snapshot:
+            host_meta["host_snapshot"] = host_snapshot
+        if scheduler_inputs:
+            host_meta["scheduler_inputs"] = scheduler_inputs
+        return host_meta
 
 
 def _request_text(request_payload: Dict[str, Any]) -> str | None:

@@ -146,6 +146,8 @@ class SystemRoutineCapabilityFacade:
             workflow_run_id=_string_value(resolved_payload.get("workflow_run_id")),
             owner_agent_id=_string_value(resolved_payload.get("owner_agent_id")),
             owner_scope=_string_value(resolved_payload.get("owner_scope")),
+            environment_id=_string_value(resolved_payload.get("environment_id")),
+            session_mount_id=_string_value(resolved_payload.get("session_mount_id")),
             dry_run=_bool_value(resolved_payload.get("dry_run")),
             metadata=dict(metadata),
         )

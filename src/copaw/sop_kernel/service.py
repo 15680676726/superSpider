@@ -37,6 +37,7 @@ class FixedSopService:
         agent_report_repository: SqliteAgentReportRepository,
         evidence_ledger: EvidenceLedger,
         routine_service: object | None = None,
+        environment_service: object | None = None,
     ) -> None:
         self._template_repository = template_repository
         self._binding_repository = binding_repository
@@ -44,10 +45,14 @@ class FixedSopService:
         self._agent_report_repository = agent_report_repository
         self._evidence_ledger = evidence_ledger
         self._routine_service = routine_service
+        self._environment_service = environment_service
         self._seed_builtin_templates()
 
     def set_routine_service(self, routine_service: object | None) -> None:
         self._routine_service = routine_service
+
+    def set_environment_service(self, environment_service: object | None) -> None:
+        self._environment_service = environment_service
 
     def validate_node_graph(self, node_graph: list[dict[str, Any]]) -> None:
         allowed = {kind.value for kind in FixedSopNodeKind}
@@ -264,6 +269,12 @@ class FixedSopService:
 
     def run_doctor(self, binding_id: str) -> FixedSopDoctorReport:
         detail = self.get_binding(binding_id)
+        host_context = self._resolve_binding_host_context(detail)
+        host_preflight = self._resolve_host_preflight(
+            environment_id=host_context["environment_id"],
+            session_mount_id=host_context["session_mount_id"],
+        )
+        host_requirement = host_context["host_requirement"]
         checks = [
             FixedSopDoctorCheck(
                 key="template",
@@ -278,13 +289,31 @@ class FixedSopService:
                 message=f"Binding status is '{detail.binding.status}'.",
             ),
         ]
+        host_check = self._evaluate_host_preflight(
+            host_preflight=host_preflight,
+            host_requirement=host_requirement,
+        )
+        if host_check is not None:
+            checks.append(host_check)
         status = "ready" if detail.binding.status == "active" else "degraded"
+        if host_check is not None and host_check.status == "fail":
+            status = "blocked"
         return FixedSopDoctorReport(
             binding_id=detail.binding.binding_id,
             template_id=detail.template.template_id,
             status=status,
-            summary="Fixed SOP binding is ready." if status == "ready" else "Binding can run but is not marked active.",
+            summary=(
+                "Fixed SOP binding is blocked by host preflight."
+                if status == "blocked"
+                else "Fixed SOP binding is ready."
+                if status == "ready"
+                else "Binding can run but is not marked active."
+            ),
             checks=checks,
+            environment_id=host_context["environment_id"],
+            session_mount_id=host_context["session_mount_id"],
+            host_requirement=dict(host_requirement or {}),
+            host_preflight=host_preflight,
             routes={
                 "binding": f"/api/fixed-sops/bindings/{detail.binding.binding_id}",
                 "run": f"/api/fixed-sops/bindings/{detail.binding.binding_id}/run",
@@ -297,6 +326,19 @@ class FixedSopService:
         payload: FixedSopRunRequest,
     ) -> FixedSopRunResponse:
         detail = self.get_binding(binding_id)
+        host_context = self._resolve_binding_host_context(detail, payload)
+        host_preflight = self._resolve_host_preflight(
+            environment_id=host_context["environment_id"],
+            session_mount_id=host_context["session_mount_id"],
+        )
+        host_check = self._evaluate_host_preflight(
+            host_preflight=host_preflight,
+            host_requirement=host_context["host_requirement"],
+        )
+        if host_check is not None and host_check.status == "fail":
+            raise ValueError(
+                host_check.message or "host preflight blocked fixed SOP execution",
+            )
         workflow_run_id = payload.workflow_run_id or f"fixed-sop-run:{binding_id}"
         existing = self._workflow_run_repository.get_run(workflow_run_id)
         if existing is None:
@@ -314,6 +356,10 @@ class FixedSopService:
                     "fixed_sop_binding_id": binding_id,
                     "trigger_mode": detail.binding.trigger_mode,
                     "dry_run": payload.dry_run,
+                    "environment_id": host_context["environment_id"],
+                    "session_mount_id": host_context["session_mount_id"],
+                    "host_requirement": dict(host_context["host_requirement"] or {}),
+                    "host_preflight": dict(host_preflight or {}),
                 },
             )
         else:
@@ -321,6 +367,13 @@ class FixedSopService:
                 update={
                     "status": "completed" if not payload.dry_run else "planned",
                     "parameter_payload": dict(payload.input_payload or {}),
+                    "metadata": {
+                        **dict(existing.metadata or {}),
+                        "environment_id": host_context["environment_id"],
+                        "session_mount_id": host_context["session_mount_id"],
+                        "host_requirement": dict(host_context["host_requirement"] or {}),
+                        "host_preflight": dict(host_preflight or {}),
+                    },
                 }
             )
         self._workflow_run_repository.upsert_run(run)
@@ -331,7 +384,7 @@ class FixedSopService:
             evidence = self._evidence_ledger.append(
                 EvidenceRecord(
                     actor_ref="fixed-sop-kernel",
-                    environment_ref=None,
+                    environment_ref=host_context["environment_id"],
                     capability_ref="system:run_fixed_sop",
                     task_id=run.run_id,
                     risk_level=detail.binding.risk_baseline,
@@ -341,6 +394,10 @@ class FixedSopService:
                     metadata={
                         "fixed_sop_binding_id": binding_id,
                         "fixed_sop_template_id": detail.template.template_id,
+                        "environment_id": host_context["environment_id"],
+                        "session_mount_id": host_context["session_mount_id"],
+                        "host_requirement": dict(host_context["host_requirement"] or {}),
+                        "host_preflight": dict(host_preflight or {}),
                     },
                 )
             )
@@ -364,7 +421,104 @@ class FixedSopService:
         binding_id = str(run.metadata.get("fixed_sop_binding_id") or "").strip()
         binding = self._binding_repository.get_binding(binding_id) if binding_id else None
         template = self.get_template(run.template_id)
-        return FixedSopRunDetail(run=run, binding=binding, template=template)
+        return FixedSopRunDetail(
+            run=run,
+            binding=binding,
+            template=template,
+            environment_id=str(run.metadata.get("environment_id") or "").strip() or None,
+            session_mount_id=str(run.metadata.get("session_mount_id") or "").strip() or None,
+            host_requirement=dict(run.metadata.get("host_requirement") or {}),
+            host_preflight=dict(run.metadata.get("host_preflight") or {}),
+        )
+
+    def _resolve_binding_host_context(
+        self,
+        detail: FixedSopBindingDetail,
+        payload: FixedSopRunRequest | None = None,
+    ) -> dict[str, Any]:
+        binding_metadata = dict(detail.binding.metadata or {})
+        payload_metadata = dict(payload.metadata or {}) if payload is not None else {}
+        host_requirement = payload_metadata.get("host_requirement")
+        if not isinstance(host_requirement, dict):
+            host_requirement = binding_metadata.get("host_requirement")
+        return {
+            "environment_id": (
+                payload.environment_id
+                if payload is not None and payload.environment_id
+                else binding_metadata.get("environment_id")
+            ),
+            "session_mount_id": (
+                payload.session_mount_id
+                if payload is not None and payload.session_mount_id
+                else binding_metadata.get("session_mount_id")
+            ),
+            "host_requirement": dict(host_requirement or {}),
+        }
+
+    def _resolve_host_preflight(
+        self,
+        *,
+        environment_id: str | None,
+        session_mount_id: str | None,
+    ) -> dict[str, Any]:
+        service = self._environment_service
+        if service is None:
+            return {}
+        if session_mount_id:
+            getter = getattr(service, "get_session_detail", None)
+            if callable(getter):
+                detail = getter(session_mount_id, limit=20)
+                if isinstance(detail, dict):
+                    return dict(detail.get("host_twin") or {})
+        if environment_id:
+            getter = getattr(service, "get_environment_detail", None)
+            if callable(getter):
+                detail = getter(environment_id, limit=20)
+                if isinstance(detail, dict):
+                    return dict(detail.get("host_twin") or {})
+        return {}
+
+    def _evaluate_host_preflight(
+        self,
+        *,
+        host_preflight: dict[str, Any],
+        host_requirement: dict[str, Any],
+    ) -> FixedSopDoctorCheck | None:
+        if not bool(host_requirement.get("mutating")):
+            return None
+        continuity = dict(host_preflight.get("continuity") or {})
+        execution_mutation_ready = dict(host_preflight.get("execution_mutation_ready") or {})
+        coordination = dict(host_preflight.get("coordination") or {})
+        surface_kind = str(host_requirement.get("surface_kind") or "").strip() or "desktop"
+        surface_key = "desktop_app" if surface_kind == "desktop" else "browser"
+        continuity_valid = bool(
+            continuity.get("valid")
+            or str(continuity.get("status") or "").strip() in {"attached", "restorable"}
+        )
+        writable = bool(execution_mutation_ready.get(surface_key))
+        recommended_action = str(
+            coordination.get("recommended_scheduler_action") or "",
+        ).strip()
+        reason = (
+            str(dict(coordination.get("contention_forecast") or {}).get("reason") or "").strip()
+            or "host preflight could not confirm a legal writable path"
+        )
+        blocked = (
+            not host_preflight
+            or not continuity_valid
+            or not writable
+            or recommended_action in {"handoff", "recover", "retry"}
+        )
+        return FixedSopDoctorCheck(
+            key="host-preflight",
+            label="Host Preflight",
+            status="fail" if blocked else "pass",
+            message=(
+                f"host preflight blocked fixed SOP execution: {reason}"
+                if blocked
+                else "Host preflight confirms a legal writable path."
+            ),
+        )
 
     def _seed_builtin_templates(self) -> None:
         for template in builtin_fixed_sop_templates():

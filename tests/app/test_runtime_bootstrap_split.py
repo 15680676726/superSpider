@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+from copaw.app import runtime_bootstrap_domains as runtime_bootstrap_domains_module
 from copaw.app import runtime_service_graph as runtime_service_graph_module
 from copaw.app.runtime_service_graph import build_runtime_bootstrap
 from copaw.app.runtime_events import RuntimeEventBus
@@ -234,3 +235,234 @@ def test_environment_service_rebinds_cooperative_facade_after_late_bootstrap_inj
     )
     event_names = [event.event_name for event in runtime_event_bus.list_events(limit=10)]
     assert "cooperative_adapter.browser_companion_updated" in event_names
+
+
+def test_domain_builder_wires_environment_service_into_fixed_sop_service(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _EnvironmentService(SimpleNamespace):
+        def set_kernel_dispatcher(self, value) -> None:
+            captured["environment_kernel_dispatcher"] = value
+
+    class _ProviderManager(SimpleNamespace):
+        @property
+        def get_active_chat_model(self):
+            return lambda *args, **kwargs: None
+
+    environment_service = _EnvironmentService()
+    provider_manager = _ProviderManager()
+
+    class _RepoBag(SimpleNamespace):
+        def __getattr__(self, name: str):
+            value = object()
+            setattr(self, name, value)
+            return value
+
+    class _CapabilityService:
+        def __init__(self) -> None:
+            self.discovery = SimpleNamespace(set_fixed_sop_service=lambda service: None)
+
+        def set_goal_service(self, value) -> None:
+            captured["goal_service"] = value
+
+        def set_agent_profile_service(self, value) -> None:
+            captured["agent_profile_service"] = value
+
+        def set_industry_service(self, value) -> None:
+            captured["industry_service"] = value
+
+        def set_routine_service(self, value) -> None:
+            captured["routine_service"] = value
+
+        def set_fixed_sop_service(self, value) -> None:
+            captured["fixed_sop_service"] = value
+
+        def set_delegation_service(self, value) -> None:
+            captured["delegation_service"] = value
+
+        def set_actor_mailbox_service(self, value) -> None:
+            captured["actor_mailbox_service"] = value
+
+        def set_actor_supervisor(self, value) -> None:
+            captured["actor_supervisor"] = value
+
+        def get_discovery_service(self):
+            return self.discovery
+
+    class _StateQueryService:
+        def set_goal_service(self, value) -> None:
+            captured["state_query_goal_service"] = value
+
+        def set_learning_service(self, value) -> None:
+            captured["state_query_learning_service"] = value
+
+        def set_agent_profile_service(self, value) -> None:
+            captured["state_query_agent_profile_service"] = value
+
+    class _AgentProfileService(SimpleNamespace):
+        def backfill_industry_baseline_capabilities(self) -> None:
+            captured["baseline_backfill"] = True
+
+    class _GoalService(SimpleNamespace):
+        def set_agent_profile_service(self, value) -> None:
+            captured["goal_agent_profile_service"] = value
+
+    class _DerivedMemoryIndexService(SimpleNamespace):
+        def set_reporting_service(self, value) -> None:
+            captured["derived_reporting_service"] = value
+
+        def set_learning_service(self, value) -> None:
+            captured["derived_learning_service"] = value
+
+    class _MemoryReflectionService(SimpleNamespace):
+        def set_learning_service(self, value) -> None:
+            captured["reflection_learning_service"] = value
+
+    class _IndustryService(SimpleNamespace):
+        def set_prediction_service(self, value) -> None:
+            captured["prediction_service"] = value
+
+    class _LearningService(SimpleNamespace):
+        def configure_bindings(self, value) -> None:
+            captured["learning_bindings"] = value
+
+    class _FixedSopService(SimpleNamespace):
+        def __init__(self, **kwargs) -> None:
+            super().__init__()
+            captured["fixed_sop_init_kwargs"] = kwargs
+
+        def set_routine_service(self, value) -> None:
+            captured["fixed_sop_routine_service"] = value
+
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "GoalService",
+        lambda **kwargs: _GoalService(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "AgentProfileService",
+        lambda **kwargs: _AgentProfileService(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "StateReportingService",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "OperatingLaneService",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "BacklogService",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "OperatingCycleService",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "AssignmentService",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "AgentReportService",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "MediaService",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "IndustryDraftGenerator",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "build_industry_service_runtime_bindings",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "IndustryService",
+        lambda **kwargs: _IndustryService(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "WorkflowTemplateService",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "FixedSopService",
+        _FixedSopService,
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "RoutineService",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "PredictionService",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "TaskDelegationService",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "KernelQueryExecutionService",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "MainBrainChatService",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "MainBrainOrchestrator",
+        lambda **kwargs: SimpleNamespace(),
+    )
+
+    runtime_bootstrap_domains_module.build_runtime_domain_services(
+        session_backend=object(),
+        memory_manager=object(),
+        mcp_manager=object(),
+        state_store=SQLiteStateStore(":memory:"),
+        repositories=_RepoBag(),
+        evidence_ledger=object(),
+        environment_service=environment_service,
+        runtime_event_bus=object(),
+        provider_manager=provider_manager,
+        state_query_service=_StateQueryService(),
+        strategy_memory_service=object(),
+        knowledge_service=object(),
+        derived_memory_index_service=_DerivedMemoryIndexService(),
+        memory_reflection_service=_MemoryReflectionService(),
+        memory_recall_service=object(),
+        memory_retain_service=object(),
+        agent_experience_service=None,
+        work_context_service=object(),
+        learning_service=_LearningService(),
+        capability_service=_CapabilityService(),
+        kernel_dispatcher=object(),
+        kernel_tool_bridge=object(),
+        actor_mailbox_service=object(),
+        actor_supervisor=object(),
+    )
+
+    assert captured["fixed_sop_init_kwargs"]["environment_service"] is environment_service
+    assert captured["environment_kernel_dispatcher"] is not None

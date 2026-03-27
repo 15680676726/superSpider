@@ -1371,6 +1371,12 @@ class FakeEnvironmentService:
             "active_session_mount_id": "session:web:main",
             "host_companion_status": "restorable",
             "active_surface_mix": ["browser", "desktop-app"],
+            "status": "active",
+            "occupancy_state": "occupied",
+            "candidate_seat_refs": ["env:session:session:web:main"],
+            "selected_seat_ref": "env:session:session:web:main",
+            "seat_selection_policy": "sticky-active-seat",
+            "expected_release_at": None,
             "live_handle_ref": "live:env:session:session:web:main:1234",
         }
         self._workspace_graph = {
@@ -1642,6 +1648,55 @@ class FakeEnvironmentService:
                 "browser": False,
                 "desktop_app": False,
                 "file_docs": False,
+            },
+            "app_family_twins": {
+                "browser_backoffice": {
+                    "active": True,
+                    "family_kind": "browser_backoffice",
+                    "surface_ref": "browser:web:main",
+                    "contract_status": "verified-writer",
+                    "family_scope_ref": "site:jd:seller-center",
+                },
+                "messaging_workspace": {
+                    "active": False,
+                    "family_kind": "messaging_workspace",
+                    "surface_ref": None,
+                    "contract_status": "inactive",
+                    "family_scope_ref": None,
+                },
+                "office_document": {
+                    "active": True,
+                    "family_kind": "office_document",
+                    "surface_ref": "window:excel:main",
+                    "contract_status": "verified-writer",
+                    "family_scope_ref": "app:excel",
+                    "writer_lock_scope": "workbook:weekly-report",
+                },
+                "desktop_specialized": {
+                    "active": False,
+                    "family_kind": "desktop_specialized",
+                    "surface_ref": None,
+                    "contract_status": "inactive",
+                    "family_scope_ref": None,
+                },
+            },
+            "coordination": {
+                "seat_owner_ref": "ops-agent",
+                "workspace_owner_ref": "ops-agent",
+                "writer_owner_ref": "ops-agent",
+                "candidate_seat_refs": ["env:session:session:web:main"],
+                "selected_seat_ref": "env:session:session:web:main",
+                "seat_selection_policy": "sticky-active-seat",
+                "contention_forecast": {
+                    "severity": "blocked",
+                    "reason": "captcha-required",
+                },
+                "legal_owner_transition": {
+                    "allowed": False,
+                    "reason": "human handoff is still active",
+                },
+                "recommended_scheduler_action": "handoff",
+                "expected_release_at": None,
             },
             "projection_note": (
                 "Execution-grade host twin is a derived runtime projection over "
