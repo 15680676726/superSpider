@@ -1,0 +1,13 @@
+# Generated artifacts and dependency trees must stay out of normal repo analysis.
+# Do not read/search these paths unless the user explicitly asks for the built output.
+
+console/dist/
+website/dist/
+dist/
+build/
+node_modules/
+.vite/
+coverage/
+__pycache__/
+*.min.js
+*.map

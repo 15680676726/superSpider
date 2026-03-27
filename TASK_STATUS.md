@@ -1,0 +1,547 @@
+﻿# TASK_STATUS.md
+
+本文件是 `CoPaw` 仓库的实时施工状态板。
+
+它不替代总方案，也不替代专项执行计划；它的用途只有一个：
+让下一位接手的 agent / 开发者在几分钟内知道“现在做到哪、主链是什么、下一步先干什么”。
+
+---
+
+## 1. 阅读顺序
+
+1. `AGENTS.md`
+2. `COPAW_CARRIER_UPGRADE_MASTERPLAN.md`
+3. 本文档 `TASK_STATUS.md`
+4. `docs/superpowers/specs/2026-03-27-intent-native-universal-carrier-and-symbiotic-host-runtime.md`（如任务涉及上位 carrier 目标 / symbiotic host runtime / seat runtime / workspace / host event）
+5. `implementation_plan.md`
+6. `V6_ROUTINE_MUSCLE_MEMORY_PLAN.md`
+7. `V7_MAIN_BRAIN_AUTONOMY_PLAN.md`
+8. `MAIN_BRAIN_CHAT_ORCHESTRATION_SPLIT_PLAN.md`
+9. `CHAT_RUNTIME_ALIGNMENT_PLAN.md`
+10. `docs/superpowers/specs/2026-03-25-copaw-runtime-first-computer-control-alignment.md`（如任务涉及 runtime-first / computer-control / orchestrator / environment plane 视角）
+11. `docs/superpowers/specs/2026-03-26-agent-body-grid-computer-runtime.md`（如任务涉及 execution agent computer bodies / browser-desktop-document runtime / contention / recovery）
+12. `docs/superpowers/specs/2026-03-26-native-fixed-sop-kernel-and-n8n-retirement.md`（如任务涉及 fixed SOP / automation / `n8n` 退役 / runtime automation IA）
+13. `docs/superpowers/plans/2026-03-26-native-fixed-sop-kernel-and-n8n-retirement.md`（如任务涉及 fixed SOP kernel 施工顺序）
+14. 与当前任务直接相关的源码和测试
+
+---
+
+## 1.1 `2026-03-25` 硬切维护窗口说明
+
+- 当前仓库已进入一次性 `hard-cut autonomy rebuild` 维护窗口，允许短期停机与阶段性功能不完整。
+- 本窗口的最高约束不再是兼容历史数据，而是切掉旧主链、旧真相源与无边界兼容逻辑。
+- 当前唯一目标链以
+  `StrategyMemory -> OperatingLane -> BacklogItem -> OperatingCycle -> Assignment -> AgentReport -> synthesis/replan`
+  为准。
+- `docs/superpowers/specs/2026-03-25-copaw-runtime-first-computer-control-alignment.md` 只作为 runtime-first 补充视角，不替代上述正式主链。
+- `docs/superpowers/specs/2026-03-26-agent-body-grid-computer-runtime.md` 只作为 execution-side computer runtime 补充视角；它规定“执行 agent 持有 computer body”，但不替代正式主链与正式 state object vocabulary。
+- 旧 `goal/task/schedule` 规划主线不再视为未来兼容目标；如无硬依赖，允许直接删除而不是迁移。
+- 已新增运行时清库脚本：
+  - `scripts/reset_autonomy_runtime.py`
+  - 当前批准可直接清理的残留 runtime artifacts：
+    - `state/phase1.sqlite3`
+    - `evidence/phase1.sqlite3`
+    - `learning/phase1.sqlite3`
+    - `memory/qmd`
+- 本窗口内如本文与以下文档冲突，以硬切文档为准：
+  - `docs/superpowers/specs/2026-03-25-copaw-full-architecture-map-and-hard-cut-redesign.md`
+  - `docs/superpowers/plans/2026-03-25-copaw-hard-cut-autonomy-rebuild.md`
+- `docs/superpowers/plans/2026-03-23-seat-gap-closure.md` 现只保留为 seat-gap/staffing 子计划历史切片；其核心规则仍有效，但如与硬切文档冲突，必须以后者为准。
+
+---
+
+## 2. 当前总判断
+
+- 截至 `2026-03-25`，仓库正式从“V7 软收口 / 增量硬化”切换到“一次性硬切重建”阶段；`2026-03-24` 的收口描述现在只代表旧基线，不再代表目标终态。
+- 截至 `2026-03-24`，`Phase A`、`Phase B`、`V1`、`V2`、`V3`、`V4`、`V5` 已完成并形成代码基线。
+- post-`V5` 的 `V6 routine / muscle memory` 主体已经落地；`n8n SOP Adapter / Workflow Hub` 现仅代表旧基线，`2026-03-26` 起已转入退役迁移，目标由系统内建 `Native Fixed SOP Kernel` 接替。
+- 当前正式主线已经进入 post-`V6` 的 `V7 main brain autonomy` 阶段。
+- `2026-03-27` 补充：正式目标框架已升级为 `Intent-Native Universal Carrier`。execution-side 不再只按“更强 computer control”理解，而是以 `Symbiotic Host Runtime` 作为正式执行框架：Windows 宿主、浏览器、文档、应用都是 carrier 的本地执行环境。
+- `2026-03-27` 补充：这次 `Symbiotic Host Runtime V1` 的状态回写，表示 execution-side 的正式方向、对象映射与当前阶段边界已经收敛，不表示相关文档、后续 phase 能力或 `Full Host Digital Twin` 成熟态已经一次性全部落地。
+- 这轮最重要的工程方向，不再是继续堆新模块，而是把“主脑长期自治 + 单行业闭环 + 执行位回流 + staffing 可见化 + 主脑综合闭环”硬切成唯一运行事实，并删除旧 `goal/task/schedule` 主脑规划路径。
+
+一句话概括当前项目状态：
+
+> `CoPaw` 现在不是继续做增量修补，而是在维护窗口内被硬切为“主脑只规划/派工/监督/综合，执行位只负责动作，能力/环境/证据成为统一底座”的本地自治执行载体。
+
+---
+
+## 3. 当前代码基线
+
+### 3.1 已完成的大阶段
+
+- `Phase A` 已完成：载体硬化收口、运行主链收拢、旧入口退役与基础状态统一已完成。
+- `Phase B` 已完成：行业初始化 MVP、行业对象、团队初始化与运行时接线已完成。
+- `V1` 已完成：行业团队正式化。
+- `V2` 已完成：长期自治运营基础、知识/报告/节奏/环境宿主深化。
+- `V3` 已完成：能力市场、治理中心、恢复与规模化收口。
+- `V4` 已完成：预测对象、recommendation、governed prediction-to-execution 闭环。
+- `V5` 已完成：执行 surface 升级与主链收口。
+- `V6` 已完成主体落地：`routine / replay / diagnosis / fallback` 已形成正式产品边界；`n8n SOP Adapter / Workflow Hub` 不再是目标产品边界，后续进入删除与内核替换。
+
+### 3.2 当前聊天与执行主链
+
+- 聊天页正式写入口是 `POST /api/runtime-center/chat/run`。
+- `POST /api/runtime-center/chat/orchestrate` 已物理删除；显式执行编排不再保留第二条 HTTP 前门。
+- `MainBrainChatService` 已作为主脑纯聊天前台存在，不再后台触发正式 `writeback/kickoff`。
+- `MainBrainOrchestrator` 已作为正式主脑执行入口接到 `KernelTurnExecutor` 后面，durable operator turn 统一落到编排链。
+- `2026-03-25` 补充：`MainBrainOrchestrator` 现已先产出 `execution intent / execution mode / environment binding / recovery mode`，再把 request runtime context 提交给 `KernelQueryExecutionService`；query runtime 也开始优先复用 orchestrator 挂载的 intake contract，而不是再次独立判定。
+- `2026-03-25` 补充：`build_runtime_bootstrap(...)` 现已正式拆成 `repositories / observability / query / execution / domains` 多模块装配，`runtime_service_graph.py` 保留公共入口，但不再内联 domain service 组装。
+- `2026-03-24` 补充：`MainBrainChatService` 现已恢复“流式优先”的输出方式。主脑纯聊天链会优先消费流式模型响应，并以同一条消息逐段更新；拿不到有效文本时，才退回非流式兜底，不再默认整段完成后一次性吐出。
+- `KernelTurnExecutor` 负责 `interaction_mode=auto / chat / orchestrate` 裁决与转发。
+- `KernelQueryExecutionService / QueryExecutionRuntime` 继续承载重执行编排链。
+- `2026-03-24` 补充：`execution-core` 与行业执行位的本地 `file/shell` 能力已重新放开，不再被 `direct-tool` 规则一刀切封死；直接阻断现在应只保留给真实高风险外部动作。
+- `2026-03-24` 补充：运行时状态口径已细化为
+  `assigned / queued / claimed / executing / blocked`，
+  其中“已分配但未认领邮箱”的执行位不再被前端误显示为正在干活。
+- `2026-03-24` 补充：`browser/desktop` 的高风险确认规则已收成“默认底线”：绝大多数动作默认放行；当前只把 `transfer / remit / wire / withdraw / 转账 / 汇款 / 打款 / 提现 / 出金` 这类资金转移动作升格到确认门，且用户明确批准后应继续执行，不是永久阻断。
+- 当前产品口径已经固定为：
+  - 人类默认先和主脑说话
+  - 主脑决定本轮是继续聊天还是进入执行编排
+  - 高风险动作仍回到正式治理链
+
+### 3.3 当前 V7 主脑自治基线
+
+- `OperatingLane / BacklogItem / OperatingCycle / Assignment / AgentReport` 已经作为正式对象进入主链。
+- 行业实例 detail 读面已能返回：
+  - `lanes`
+  - `backlog`
+  - `current_cycle`
+  - `cycles`
+  - `assignments`
+  - `agent_reports`
+  - `strategy_memory`
+  - `execution_core_identity`
+- 主脑正式写链现已收口为
+  `chat writeback -> backlog -> cycle -> assignment -> task -> report -> strategy sync / replan`。
+- 前端 shared control-chain 的显式监督链保持为
+  `writeback -> backlog -> cycle -> assignment -> report -> replan`；
+  `task` 仍是真实执行叶子，但不再作为共享 UI 控制链节点单独展示。
+- `2026-03-24` 补充：运行时硬化链已补齐，`ContextVar` 跨上下文错误与控制台编码异常已修复到正式执行链，不再只停留在离线补丁。
+- `2026-03-24` 补充：chat writeback 已停止 eager goal fan-out；goal 现在只物化当前可执行 step，未来步骤继续留在正式 backlog / cycle / planning state 中。
+- `2026-03-24` 补充：`Assignment` 已重新收紧为执行信封；当没有真实执行位承接时，只保留主脑监督 owner，不再把 `execution-core` 默认伪装成叶子执行者。
+- `2026-03-24` 补充：写回路由已改成 `surface -> capability -> environment` 优先，app 名关键词只做 fallback；同时补了英文词边界匹配，避免 `formal -> form` 这类伪 browser 命中。
+- `2026-03-24` 补充：`/industry` 与实例 detail 的主脑监督链已显式展示 `writeback -> backlog -> cycle -> assignment -> report -> replan`，不再只返回一句“已分配”。
+- `2026-03-25` 补充：`/system/self-check` 已新增正式 runtime health 读面，显式暴露 `core_runtime_ready / memory_vector_ready / memory_embedding_config / browser_surface_ready / desktop_surface_ready`；`EMBEDDING_MODEL_NAME` 缺失导致的向量检索降级不再只写日志，而会以前台 `warn` 检查项呈现具体原因。
+- `2026-03-25` 补充：前端 shared `control chain` presenter 已落地，`/industry`、`Runtime Center`、`AgentWorkbench` 统一消费同一条 `writeback -> backlog -> cycle -> assignment -> report -> replan` 呈现链，不再各自维护排序和标签逻辑。
+- `2026-03-25` 补充：`Runtime Center` 路由已继续按域拆出 `overview / memory / knowledge / reports / industry` 模块，`runtime_center_routes_core.py` 不再继续承载这些域；同时已删除 retired `TaskDelegationRequest` 与死掉的 delegation shared helper。
+- `2026-03-25` 补充：`state/models.py` 已收成兼容 re-export 面，`goals_tasks / agents_runtime / governance / workflows / prediction / reporting / industry / core` 分层模块已经落位，旧导入链继续可用但真正定义不再堆在单文件里。
+- `2026-03-25` 补充：`EnvironmentService` 已降为稳定 façade；环境包已拆出 `session_service / lease_service / replay_service / artifact_service / health_service`，session/resource/actor lease、runtime recovery、environment detail 与 replay/artifact 读面不再继续堆在单个 1400+ 行服务里。
+- `2026-03-25` 补充：`ProviderManager` 已降为 compat façade；`providers` 包已拆出 `provider_registry / provider_storage / provider_resolution_service / provider_chat_model_factory / provider_fallback_service`，runtime/query/industry 等可注入调用点优先改走显式实例，残余 `get_instance()` 已收口到 bootstrapping、router/CLI、`memory_manager` 兼容链与 façade 静态入口。
+- `2026-03-25` 补充：`POST /api/runtime-center/tasks/{task_id}/delegate` 已从 runtime-center router 物理删除；人类前台不再保留 direct delegate API，assignment/delegation 只留在内核与 system capability 内部。
+- `2026-03-25` 补充：`dispatch_active_goals` 与旧 goal-dispatch 文案已从前台 capability / insights surface 删除；残留 `GoalRecord` 与 goal service 只作为执行层 phase/leaf object 保留，不再代表主脑规划真相。
+- `2026-03-25` 补充：execution-core 的正式能力基线、runtime query system tools、prompt capability projection、Runtime Center actor capability surface 与 automation loop 已全部摘掉 `dispatch_active_goals`；该能力现在只允许停留在 `/goals` 与 goal service 这类执行层 leaf 兼容边界，主脑/Runtime Center 不再把它当成正式派工入口。
+- `2026-03-25` 补充：execution-core 的正式能力基线、runtime query tool registry、prompt capability card 与 Runtime Center capability assignment surface 也已同步摘掉 `dispatch_goal`；该能力仅保留给 goal service / workflow / prediction 等执行层内部叶子边界，不再作为主脑或 execution-core 的正式可见能力。
+- `2026-03-26` 补充：`Runtime Center` 的行业 kickoff 提示、overview meta 与 execution focus 卡片已停止把 `goal / active goal` 当作 operator 主口径；当前正式摘要统一改成 `backlog / cycle / assignment / report`，详情卡文案也改成 `Current Focus / No active focus`。
+- `2026-03-26` 补充：`/industry` summary/detail/runtime main-chain、agent detail stats、industry team update result、state reporting snapshot 已继续摘掉 `goal_count / active_goal_count` 这类 operator/runtime 兼容统计；行业实例列表也不再按“是否有 goal”决定可见性，而是按真实 team/runtime surface 判定。当前仓库里保留的 `goal_count` 只剩 `/goals` 叶子 dispatch 内部结果，不再属于主脑或运行中心主口径。
+- `2026-03-26` 补充：`LearningService` 已切成正式 façade，公开入口保留在 `src/copaw/learning/service.py`，内部运行逻辑下沉到 `runtime_core + proposal_service + patch_service + growth_service + acquisition_service`；runtime bootstrap 已开始通过 `LearningRuntimeBindings.configure_bindings(...)` 一次性接线，不再继续在 live 装配层堆 learning setter。
+- `2026-03-26` 补充：`RuntimeCenterQueryService` 已切成 thin façade，overview 主装配改为 `service.py -> overview_cards.py -> overview_helpers.py`；`/runtime-center/overview` 已正式退休 `goals / schedules` 卡片，只保留 runtime-first operator 读面。
+- `2026-03-26` 补充：computer-control 的下一正式方向已锁定为 `Agent Body Grid`。浏览器、桌面应用、文件/文档操作不再被视为主脑直接调用的零散工具，而是 execution agent 持有的 `computer body` surfaces；后续实现必须围绕 `observe -> interpret -> act -> verify -> recover` 循环、body lease / resource contention、以及真实任务验收集推进。
+- `2026-03-26` 补充：`Agent Body Grid` 必须与现有 `workflow / routine / SOP` 一起升级，而不是替代它们。正式边界应收成 `Assignment -> Role Workflow -> Body Scheduler -> Body Lease -> Routine/Operator -> Evidence/Report`：workflow 继续负责角色连贯执行逻辑，body scheduler 只负责机器资源/会话/写锁调度；workflow preview/launch 后续也必须把 body/session/resource 可用性纳入 launch blocker，而不再只检查 capability / assignment gap。
+- `2026-03-27` 补充：`Agent Body Grid` 下的 browser runtime contract 已收紧为 3 类正式 mode：`managed-isolated / attach-existing-session / remote-provider`。`attach-existing-session` 不再被视为临时调试技巧，而是正式浏览器会话模式；但首次接管真实用户浏览器、以及该模式下的能力边界，必须继续显式纳入治理与恢复语义。
+- `2026-03-27` 补充：browser readiness 不应再只看单一 `browser_surface_ready`。后续实现、Runtime Center 与 acceptance 必须按 mode 显式暴露 `multi_tab / uploads / downloads / pdf_export / storage_access / locale_timezone_override / resume_kind` 等 capability contract；已登录后台续作、跨 tab、上传下载、恢复重连要进入正式验收，不再只测表单提交。
+- `2026-03-27` 补充：browser writer work 不能继续按“通用网页动作”理解。对已知后台/站点，execution-side 后续必须在 browser mode 之外再解析 `site contract`：至少说明认证/写入/下载/提交/人工登录边界、验证锚点与风险契约。没有 site contract 时，默认只能走 read-only、launch blocker 或 governed handoff。
+- `2026-03-27` 补充：human login / CAPTCHA / MFA / drift rescue 也已被收口为正式 browser continuity contract。人接管浏览器不等于主脑亲自执行；它只是 execution body 的 handoff 状态。后续实现必须显式记录 handoff owner/reason/checkpoint/return condition，并在 agent 续跑前重新 observe/verify，而不是根据聊天文本盲续。
+- `2026-03-27` 补充：desktop/app runtime 后续也不再只按“鼠标键盘能不能点”理解。当前仓库应按 Windows-first 口径补 `desktop host + app contract`：至少显式区分 `host_mode / lease_class / access_mode / session_scope / account_scope_ref / handoff_state / resume_kind / verification_channel` 等共享 host 字段，以及 `app_identity / window_scope / app_contract_status / writer_lock_scope / active_window_ref` 等 Windows app 字段。
+- `2026-03-27` 补充：Windows 桌面应用的 writer work 后续必须解析 `app contract`，并优先走 `accessibility/window/process` 控制通道；未知模态框、登录、UAC/系统提示、焦点丢失与窗口争用都要进入正式 handoff / contention / recovery 语义，不允许继续只靠 Win32 API 返回值或宿主日志判断“操作成功”。
+- `2026-03-27` 补充：execution-side browser/desktop contract 已回写到总方案、API 迁移图、数据模型与执行计划。当前正式口径应统一理解为：`EnvironmentMount / SessionMount` 承载 live surface，shared `Surface Host Contract` 统一 `host_mode / lease_class / access_mode / handoff / resume / verification`，browser 追加 `Site Contract`，Windows desktop 追加 `Desktop App Contract`；主脑继续只负责派工/监督，不直接成为 surface driver。
+- `2026-03-27` 补充：当前上位正式目标已继续上抬为 `Intent-Native Universal Carrier`，execution-side 正式框架改为 `Symbiotic Host Runtime`。`Agent Body Grid` 现在应被理解为 execution substrate，而不是单独的传统 computer-control 产品面。
+- `2026-03-27` 补充：execution-side 当前下一正式阶段已收敛为 `Windows Seat Runtime Baseline`，而不是一次性交付 `Full Host Digital Twin`。当前应优先把 `Seat Runtime / Host Companion Session` 做成正式运行边界，把 `Workspace Graph` 收敛为正式 projection，把 `Host Event Bus` 收敛为正式运行机制。
+- `2026-03-26` 补充：`n8n / Workflow Hub` 已从目标架构退役。后续必须删除 `/sop-adapters`、前端 `社区工作流（n8n）`、社区模板同步与 callback 相关代码，并以系统内建 `Native Fixed SOP Kernel` 取代；该内核只覆盖 webhook、schedule、API 串联、低判断条件路由，真实 UI 动作仍通过 CoPaw 的 body runtime / routine 主链完成。
+- `2026-03-27` 补充：`src/copaw/sop_adapters/*`、旧 `/sop-adapters` router、state `SopAdapter*` record/repository/export 与 fresh schema `sop_adapter_*` 表已物理删除；仓库内正式 SOP 自动化面现只保留 native `fixed-sops` 路线。
+- `2026-03-27` 补充：console 侧旧 `workflow-hub` / `Capability Market -> 工作流` 假入口与 `console/src/api/modules/sopAdapters.ts` 也已删除；`WorkflowTemplates` 独立页现已退役为 `Runtime Center -> 自动化` 的历史残留，不再把已退役的 n8n hub 当正式前台入口。
+- `2026-03-27` 补充：capability-market 安装模板返回的 `workflow_resume.return_path` 已改指向 `Runtime Center -> Automation`，不再回跳到已退休的 `/workflow-templates/*` 前台路由。
+- `2026-03-27` 补充：prediction / Insights 的 operator 文案也已同步收口，不再建议把周期性工作沉淀为“工作流模板”；当前正式口径统一改为 `Runtime Center -> Automation` 下的固定 SOP / 运行计划。
+- `2026-03-26` 补充：固定 SOP 的正式替代方案以 `docs/superpowers/specs/2026-03-26-native-fixed-sop-kernel-and-n8n-retirement.md` 及对应 implementation plan 为准，不再沿用 `n8n` 相关产品口径。
+- `2026-03-26` 补充：`src/copaw/app/routers/learning.py` 已改成依赖注入式 façade 解析，不再在每个 endpoint 内重复手动解析 app-state learning service。
+- `2026-03-26` 补充：capability/runtime 尾巴已继续硬切收口。旧 `/skills`、`/mcp` 与 `legacy_capability_aliases.py` 已物理删除；router 写操作现统一落到 `app/routers/governed_mutations.py`；runtime decision/patch 链接现统一落到 `utils/runtime_action_links.py`；chat / AgentWorkbench / RuntimeCapabilitySurfaceCard / RuntimeExecutionStrip 的风险与状态标签颜色已统一改走 `console/src/runtime/tagSemantics.ts`，不再各自维护分叉语义。
+- `2026-03-26` 补充：`Chat` 页已正式按 chat-first 收口，只保留 `消息流 + 输入框 + 最小状态条 + 必要附件能力 + 最小治理审批入口`；`capability drawer`、重 runtime sidebar、`V7ControlThreadPanel` 与 actor detail 驱动的聊天页附属面已从主页面摘除，不再把 `Chat` 做成第二个运行中心。`AgentWorkbench` 的 `ActorRuntimePanel` 已独立落到 `console/src/pages/AgentWorkbench/sections/runtimePanels.tsx`，`pageSections.tsx` 回退为兼容导出面。
+- `2026-03-26` 补充：Industry 主链已继续朝“单一状态入口”硬化。`build_industry_service_runtime_bindings(...)` 不再基于 `state_store` 临时补造 repo/service，运行时绑定只接受显式注入协作者；`reconcile_instance_status_for_goal()` 也已改成按 `goal_id` 定向读取实例，不再每次 goal 变化都全表扫行业实例。
+- `2026-03-26` 补充：query runtime 的前门意图判定与 durable writeback 策略已统一改走共享 `query_execution_intent_policy.py`，不再在 `shared/runtime/writeback` 三处各自复制“目标委托 / 假设性提问 / 是否写回”的启发式；`LearningRuntimeCore` 公开 patch/growth/trial 入口也已继续瘦身为 thin delegate，proposal/patch/growth/acquisition 责任边界开始稳定落位。
+- `2026-03-26` 补充：前端 page-god 收口继续推进。`Chat` 输入区已移除对第三方聊天框的 DOM 手术式解锁；`/industry` 与 `CapabilityMarket` 的页面级加载、刷新、选择与动作编排已分别下沉到 `useIndustryPageState` / `useCapabilityMarketState`，页面组件本身不再继续兼当 application service。
+- `2026-03-26` 补充：`Chat` 运行时 transport 也已开始从页面状态 hook 中下沉。`useChatRuntimeState` 不再内联模型可用性检查、runtime request 组装、附件合并与流式 response 健康/结束判定；上述逻辑已抽到 `console/src/pages/Chat/runtimeTransport.ts`，并新增前端测试锁住 canonical request body 与 streamed completion 行为。
+- `2026-03-26` 补充：`RuntimeCenter` 的治理/恢复/application orchestration 也已开始从页面层下沉。governance status、capability optimization、recovery/self-check、batch decision/patch actions 与 emergency stop/resume 相关状态机已抽到 `console/src/pages/RuntimeCenter/useRuntimeCenterAdminState.ts`；`RuntimeCenter/index.tsx` 继续回退为 tab 路由与视图组合壳，并新增 hook 测试锁住 governance tab 加载与 batch approve 刷新语义。
+- `2026-03-26` 补充：`Chat` 绑定恢复状态机也已从 `useChatRuntimeState` 抽离。默认 execution-core 自动绑定、失败控制线程重绑、缺 owner reset-chat 等恢复判定现统一收口到 `console/src/pages/Chat/chatBindingRecovery.ts`，页面状态 hook 不再散着维护 3 段 rebind/reset `useEffect`。
+- `2026-03-26` 补充：`RuntimeCenter` 详情抽屉与行业专属 detail section 已正式从 `viewHelpers.tsx` 拆出。共享 detail primitive 已落到 `console/src/pages/RuntimeCenter/runtimeDetailPrimitives.ts`，行业 focus/main-chain/review section 已落到 `console/src/pages/RuntimeCenter/runtimeIndustrySections.tsx`，detail drawer/record renderer 已落到 `console/src/pages/RuntimeCenter/runtimeDetailDrawer.tsx`；`viewHelpers.tsx` 现只保留 entry/card helper 与兼容导出壳，不再继续承载 detail-drawer god block。
+- `2026-03-26` 补充：主脑 environment/recovery 语义已继续收紧。`MainBrainEnvironmentCoordinator` 现已显式区分 `environment_lease_token / continuity_source / resume_ready`，`MainBrainRecoveryCoordinator` 也不再把“本轮刚 admission 出来的 current kernel task id”误判成恢复依据；当前正式恢复口径已拆成 `resume-environment / rebind-environment / attach-environment / resume-runtime / resume-task / fresh`，只有带连续性证明（如 lease token / explicit continuity token）的 live body 才会被标记为真正可续现场。
+- `2026-03-26` 补充：主脑 environment recovery 已进一步从“请求自证”切到“持久态实证”。`MainBrainOrchestrator` 现已显式注入 `EnvironmentService`，恢复判断会回查真实 `SessionMount` 的 `lease_status / lease_token / live_handle_ref`，不再信任 request 携带的 `environment_lease_token`；同时 request 上重复平铺的 `_copaw_main_brain_*` 兼容字段已删除，主脑正式运行上下文统一收口到 `_copaw_main_brain_runtime_context`（`_copaw_main_brain_intake_contract` 与 `_copaw_kernel_task_id` 继续保留给现有真实消费者）。
+- `2026-03-25` 补充：`POST /goals/{goal_id}/dispatch`、`POST /goals/automation/dispatch-active`、`POST /runtime-center/goals/{goal_id}/dispatch` 已全部物理删除；旧 goal-dispatch HTTP 入口不再保留 `410` 兼容壳。
+- `2026-03-25` 补充：`POST /capabilities/{id}/execute`、`POST /routines/{routine_id}/replay`、`POST /predictions/{case_id}/recommendations/{recommendation_id}/execute`、`POST /workflow-templates/{template_id}/launch`、`POST /workflow-runs/{run_id}/resume`、`POST /runtime-center/replays/{replay_id}/execute`、`POST /runtime-center/chat/orchestrate` 已全部物理删除；direct-execution retired shell 已从 router 层清空。
+- `2026-03-25` 补充：execution-core 默认身份文案、行业 detail fallback 身份与 Runtime Center 战略样例数据已统一改成“主脑不亲自执行叶子动作；缺岗位时补位 / 改派 / 提案”，不再残留“没有合适执行位时主脑亲自执行”的旧口径。
+- `2026-03-25` 补充：surface routing 的 hard-hint 逻辑已进一步收紧；未知应用在仅凭 mount/env 推断时优先落到 `desktop/browser` 交互面，不再因为挂了通用 `write_file` 就额外伪命中 `file` 面，app 名关键词继续只做兜底而不是主判据。
+- `2026-03-25` 补充：runtime chat media 前门已补齐正式写回；行业 control thread 上的新附件与既有 `media_analysis_ids` 现在都会在进入 turn executor 前完成 `analysis -> prompt context -> backlog/strategy writeback`，不再只停留在“回答时参考附件”的半闭环。
+- `2026-03-25` 补充：`run_operating_cycle()` 已切掉 `goal` 物化中转；backlog 现在直接生成 `Assignment` 并编译成 assignment-backed `TaskRecord`，`AgentReport` 也优先按 `assignment_id` 回收，不再走旧 goal-phase 假链。
+- `2026-03-25` 补充：`main_chain.routine` 在没有 live task 时，会回锚到最新 `AgentReport` 对应的 assignment/task 元数据；已完成的固定 SOP / routine 执行不会再在主链上丢失执行面信息。
+
+### 3.3.1 `Symbiotic Host Runtime V1` 当前落地边界
+
+- 这次回写的含义，是把 execution-side 的正式口径、对象映射与当前阶段施工边界写成统一状态事实；它不是在声明所有配套文档、后续 phase 能力或成熟态宿主投影已经全部交付。
+- 当前已完成到“正式口径 + 正式映射 + Phase 1 基线边界锁定”这一层：`Intent-Native Universal Carrier` / `Symbiotic Host Runtime` / `Windows Seat Runtime Baseline` 已成为状态板、总方案、数据模型与 API 迁移图一致的正式主线。
+- 当前已有基线主要仍落在统一底座：`SRK` 已拥有 admit/risk/decision/evidence 闭环，`EnvironmentMount / SessionMount` 已持久化 `lease_status / lease_owner / lease_token / lease_acquired_at / lease_expires_at / live_handle_ref` 并具备 `acquire / heartbeat / release / reap` 生命周期；这次版本是在该基线上，把 `Seat Runtime / Host Companion Session`、shared `Surface Host Contract`、browser `Site Contract`、Windows `Desktop App Contract` 明确收口为 execution-side 当前正式施工面。
+- `Workspace Graph V2` 在这次版本中的正式推进程度，只到 `Windows Seat Runtime Baseline` 所需的最小正式 projection：它已被正式收敛为 `TaskRuntime + EnvironmentMount + SessionMount + Artifact/Evidence` 的派生投影，并进入当前阶段正式范围；它还不是 Phase 3 那种跨 browser / app / file-doc / clipboard / downloads / artifacts / locks / handoffs 的完整工作区视图。
+- `Host Event Bus V1` 在这次版本中的正式推进程度，只到 `Windows Seat Runtime Baseline` 所需的最小正式 mechanism：它已被正式收敛为基于 `EvidenceRecord + ObservationCache + environment/runtime detail` 的运行机制与恢复入口，并进入当前阶段正式范围；它还不是 Phase 4 那种完整的 active-window / modal / UAC / login rescue / download-completion 宿主事件总线。
+- `2026-03-27` 补充：`Phase 1 final acceptance closeout` 已在代码侧关账。当前正式结果包括：
+  - `Runtime Center / task-review` 已对 acceptance closeout evidence 做正规 normalization，不再强依赖顶层 `step_id / step_title / verification_status`；`verification / step / checkpoint / closeout` payload 现在可稳定投影到 `continuity`、`evidence_status` 与最近 replayable evidence 读面。
+  - `routine replay` 已新增正式 `verification_summary` 聚合，并进入 `RoutineDiagnosis`；browser/desktop replay 不再只看动作是否执行，而会汇总 `chain_status / verified_steps / observed_steps / evidence_anchors`。
+  - live browser smoke 已扩展到本地 HTML acceptance chain 的完整收口，当前可在真实浏览器会话上跑通 `open / multi-tab / authenticated continuation / save-and-reopen / upload / download-initiation / screenshot`，并留下 replayable evidence anchors。
+  - browser acceptance closeout 已补齐关键底层语义修正：`wait_for_function` 文本参数关键字传递、`tabs.switch -> select` 兼容、logical page handle rebind、重复 page handle 去重、`click.wait` 的 post-click settle、download listener 的 `suggested_filename` property 兼容、HTTP root URL canonicalization（如 `https://example.com` 与 `https://example.com/`）。
+  - Windows desktop/document closeout 已收紧为正式失败/验证语义：ambiguous window selector 不再假成功，focused-window / modal interruption / post-write reread / save-reopen evidence 已进入正式 contract 与 replay verification。
+  - environment/runtime visibility closeout 已补齐 `host_contract / browser_site_contract / desktop_app_contract / workspace_graph / host_event_summary` 的 Phase 1 acceptance projection，不新增第二真相源。
+  - 当前一轮完整 Phase 1 验收组合已验证通过：`139 passed, 1 skipped`。唯一 skip 是 live desktop smoke 对“可解析前台 Windows 窗口”的宿主前提检查；它代表当前座席条件未满足，不再视为代码欠账。
+- 仍属于后续阶段的内容包括：更完整的 shared host/site/app contract 实装、`Seat Runtime / Host Companion Session` 的恢复与交接策略、`Cooperative Adapters`、完整 `Workspace Graph`、完整 `Host Event Bus`，以及 `Execution-Grade Host Twin -> Full Host Digital Twin` 的成熟态投影。
+
+### 3.3.2 `Phase 2 Cooperative Adapters` 当前真实进度
+
+- cooperative runtime slice 已有独立环境测试基线：`tests/environments/test_cooperative_browser_companion.py`、`tests/environments/test_cooperative_document_bridge.py`、`tests/environments/test_cooperative_watchers.py`、`tests/environments/test_cooperative_windows_apps.py` 已落仓。
+- Phase 2 主链已正式接通：`EnvironmentService` 现已暴露 cooperative facade，并通过现有 `EnvironmentMount / SessionMount` metadata、`RuntimeEventBus` 与 `cooperative_adapter_availability` projection 统一承载 browser companion、document bridge、host watchers、Windows app adapters，不新增第二真相源。
+- capability graph / install-template / product API 侧已进入可验收状态：`CapabilityRegistry` 已收进 cooperative system capabilities，`capability_market` router 已把 `environment_service` 正式透传到 install-template surface，`install_templates.py` 已补齐 `browser-companion`、`document-office-bridge`、`host-watchers`、`windows-app-adapters` 四类模板的 builder、doctor、example-run 与 install 路径。
+- `2026-03-27` focused acceptance 已验证通过：`python -m pytest tests/environments/test_cooperative_browser_companion.py tests/environments/test_cooperative_document_bridge.py tests/environments/test_cooperative_watchers.py tests/environments/test_cooperative_windows_apps.py tests/environments/test_environment_registry.py tests/app/test_capability_market_api.py tests/app/test_capability_market_phase2_api.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py -q` -> `79 passed`。
+- Phase 2 期间暴露的独立 routine replay 回归现已实修完成：`RoutineService` 的 browser URL verification 已与 browser tool 契约对齐，优先消费工具返回的导航锚点而不是无条件追加 `evaluate window.location.href`；成功路径测试中的 browser screenshot mock 也已补成真实落文件语义，不再用不完整响应伪装成功。
+- `2026-03-27` 宽回归复跑已验证通过：`python -m pytest tests/agents/test_browser_tool_evidence.py tests/routines/test_routine_service.py tests/environments/test_environment_registry.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py tests/app/test_runtime_center_api.py tests/app/test_capability_market_phase2_api.py -q` -> `106 passed`。
+- 下一步边界应转入 Phase 3/4：继续深化 `Workspace Graph`、`Host Event Bus` 家族与更完整的 runtime center 可见化；当前不再保留已知的 Phase 2 独立 routine replay 回归阻塞。
+
+### 3.3.3 `Phase 3 Workspace Graph` 当前真实进度
+
+- `Workspace Graph` 的正式实现已从“只给 refs 和 count”推进到结构化工作区投影：`EnvironmentHealthService.build_workspace_graph_projection(...)` 现在在不新增第二真相源的前提下，继续基于既有 `EnvironmentMount / SessionMount / Artifact / Evidence / host_event_summary / live handle` 派生 `locks`、`surfaces`、`ownership`、`collision_facts`、`collision_summary` 与 richer `download_status / surface_contracts / handoff_checkpoint`。
+- 当前 `locks` 已显式给出 writer-lock 的 `resource_ref / summary / surface_ref / account_scope_ref / status / scope / owner_agent_id / lease_class / access_mode / handoff`，不再只剩一句 `active_lock_summary`；但这些字段仍全部来自既有 session/environment/contract/runtime facts，而不是新建锁对象库。
+- 当前 `surfaces` 已把 browser / desktop / file-docs / clipboard / downloads / host-blocker 收成同一工作区视图：浏览器会显式暴露 `context_refs + active_tab`，桌面会显式暴露 `window_refs + active_window`，file/doc、clipboard、downloads 也都有 active ref 与 workspace scope；这样 execution-side 已能在一个投影里回答“现在开着什么、写着什么、卡在哪、下载落哪、下一步谁该接”。
+- 当前工作区 ownership/collision 读面也已正式化：`owner_agent_id / account_scope_ref / workspace_scope / handoff_owner_ref / ownership_summary / collision_facts / collision_summary` 已进入 runtime/environment detail 投影，用于表达共享账号、writer 冲突、handoff 人工返回与 active surface owner，而不是把这些冲突事实继续埋在私有 metadata 或宿主日志里。
+- Runtime Center API/read-model 契约现已和真实工作区投影对齐：`tests/app/runtime_center_api_parts/shared.py` 的 fake environment payload 已同步成与真实 `health_service` 同形的 workspace graph；`detail_environment`、`runtime_projection_contracts`、`runtime_query_services` 也已锁住 richer `locks / surfaces / ownership / collision` 读面，不再保留“真实实现一套、stub 一套”的分叉。
+- `2026-03-27` focused Phase 3 acceptance 已验证通过：`python -m pytest tests/environments/test_environment_registry.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py -q` -> `40 passed`。
+- `2026-03-27` Phase 3 合并后宽回归已验证通过：`python -m pytest tests/agents/test_browser_tool_evidence.py tests/routines/test_routine_service.py tests/environments/test_environment_registry.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py tests/app/test_runtime_center_api.py tests/app/test_capability_market_phase2_api.py -q` -> `106 passed`。
+- 下一步边界继续转入 Phase 4/5：`Host Event Bus` 家族还需要从当前 summary/alert/pending-recovery 机制继续深化到更完整的 event-driven runtime loop，前台 Runtime Center 也还需要把 workspace/seat/handoff/recovery 的可见化继续做厚；但当前 `Workspace Graph` 已不再停留在“最小 V2 refs-only projection”阶段。
+
+### 3.3.4 `Phase 4 Host Event Bus` + `Phase 5 Execution-Grade Host Twin` 当前真实进度
+
+- `Host Event Bus` 已从“只有 summary/alert/pending-recovery 的读面”推进到正式 runtime mechanism 输入：`EnvironmentHealthService.build_host_events_projection(...)` 现在除 `family_counts / latest_event_by_family / active_alert_families` 外，还会显式派生 `blocking_event_families / recovery_event_families / latest_blocking_event / latest_recovery_event / latest_handoff_event / human_handoff_active / scheduler_inputs`，并保持 `is_truth_store=False`，不新增第二事件库。
+- 人接管/人返回不再只是宿主日志或聊天暗示：`host.human-takeover`、`host.human-return-ready` 已进入同一 host-event 机制，正式归一为 `human-handoff-return` 家族，并可在 `pending_recovery_events[*].legal_recovery_path` 上给出 `decision / resume_kind / checkpoint_ref / verification_channel / return_condition`，从而把 `handoff / recover / retry` 变成正式 runtime 输入。
+- `Execution-Grade Host Twin` 已正式落地到 environment/session detail：`host_twin` 明确标注 `projection_kind=host_twin_projection`、`is_projection=True`、`is_truth_store=False`，并派生 `ownership / seat / surface_mutability / blocked_surfaces / continuity / trusted_anchors / legal_recovery_path / active_blocker_families / latest_blocking_event / execution_mutation_ready / scheduler_inputs / recovery_inputs`，不新建第二真相源。
+- `host_twin` 当前已能回答 Phase 5 要求的 5 个关键问题：谁持有 seat、哪些 surface 现在可写、continuity 是否仍有效、哪些 anchor 可信、当前合法恢复路径是什么；并且会把这些答案回投到 `Runtime Center / task review / workflow preview`，不再让每个消费面自己猜 host 状态。
+- Runtime Center 读面已对齐真实 host twin 契约：`runtime_center_routes_ops.py` 已把 `host_twin` 纳入 formal runtime surface keys；`tests/app/runtime_center_api_parts/shared.py` 的 fake environment payload 也已补齐同形 `host_twin`，避免“真实 payload 一套、stub 一套”的再次分叉。
+- `RuntimeCenterStateQueryService` 与 task-review projection 已正式接 `host_twin`：environment feedback 会带回 `host_twin`，`build_task_review_payload(...)` 也会显式回传 `execution_runtime.host_twin`，并优先使用 twin 的 blocker/recovery/anchor/writable-surface 事实生成 continuity、风险和 next-step 提示。
+- workflow preview 现在已经把 host twin 作为真实 preflight consumer，而不是只看 capability/assignment 缺口：`WorkflowTemplateService` 会读取 environment detail 的 `host_twin`，对 mutating desktop/browser work 正式发出 `host-twin-continuity-invalid / host-twin-writable-surface-unavailable / host-twin-recovery-handoff-only / host-twin-active-host-blockers` 这类 launch blocker；runtime bootstrap 也已把 `environment_service` 接入 workflow service，避免只在测试 app 生效。
+- `2026-03-27` Phase 4/5 focused acceptance 已验证通过：`python -m pytest tests/environments/test_environment_registry.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py tests/app/test_runtime_center_api.py tests/app/test_workflow_templates_api.py -q` -> `95 passed`。
+- `2026-03-27` Phase 4/5 宽回归已验证通过：`python -m pytest tests/agents/test_browser_tool_evidence.py tests/routines/test_routine_service.py tests/environments/test_environment_registry.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py tests/app/test_runtime_center_api.py tests/app/test_capability_market_phase2_api.py tests/app/test_workflow_templates_api.py -q` -> `126 passed`。
+- 当前下一边界已进入成熟态深化，而不是补当前阶段缺口：后续重点不再是“让 host twin 出现”，而是继续朝 `Phase 6 Full Host Digital Twin` 推进更广的 app-family twins、更深的 multi-seat/multi-agent coordination、以及更强的 live-host simulation / planning 消费。
+- `2026-03-27` 补充：`Phase 6 Full Host Digital Twin` 的正式实施计划已落到 `docs/superpowers/plans/2026-03-27-phase6-full-host-digital-twin.md`。当前推荐执行顺序已锁定为：先补 `host_twin.app_family_twins + coordination` 派生投影，再补 Runtime Center/task-review 读面，再补 workflow preview/run/resume 与 fixed-SOP doctor/run 对同一 host truth 的消费；该计划明确保持 `Workspace Graph` 为 projection、`Host Event Bus` 为 runtime mechanism、`host twin` 为 derived projection，不新增第二真相源。
+
+
+### 3.4 当前 single-industry autonomy 基线
+
+- `IndustryService.apply_execution_chat_writeback()` 已不再只是文本写回。
+- seat gap 现已按正式 `seat_gap_policy` 走三岔路：
+  - 现有岗位承接
+  - 低风险临时位自动补位
+  - 高风险或长期岗位走治理提案
+- `IndustryInstanceDetail` 已有 canonical `staffing` 读面，包含：
+  - `active_gap`
+  - `pending_proposals`
+  - `temporary_seats`
+  - `researcher`
+- `MainBrainChatService`、`Runtime Center`、`/industry`、`AgentWorkbench` 已开始消费这块共享 staffing 读面。
+
+### 3.5 当前主脑综合闭环基线
+
+- `AgentReportRecord` 已扩展 richer report 字段：
+  - `findings`
+  - `uncertainties`
+  - `recommendation`
+  - `needs_followup`
+  - `followup_reason`
+- 主脑侧已存在 explicit report synthesis 读面，可看到：
+  - `latest_findings`
+  - `conflicts`
+  - `holes`
+  - `needs_replan`
+  - `control_core_contract`
+- `/industry`、`Runtime Center`、`AgentWorkbench` 已能看到综合状态、冲突/缺口与 replan 标记。
+
+### 3.6 当前 capability / discovery / acquisition 基线
+
+- `CapabilityDiscoveryService` 已进入正式链路。
+- capability discovery 已打通：
+  - discovery
+  - acquisition proposal
+  - install / upgrade
+  - binding
+  - onboarding validate
+- 官方 `MCP Registry` 已接入共享 discovery/acquisition 主链。
+- `LearningService` 的 `mcp:*` onboarding validate 已升级为真实活体握手与安全零参数工具试运行，不再只是“配置存在性检查”。
+
+### 3.7 当前已退役或不应恢复的旧形态
+
+- `/runtime-center/chat/intake` 已退役。
+- `task-chat:*` / `actor-chat:*` 前台聊天心智已退役。
+- `query_confirmation_policy` 已删除。
+- 人类直连底层执行入口继续退役中：
+  - capability direct execute
+  - replay direct execute
+  - prediction recommendation direct execute
+- 默认产品链路必须保持：
+  `人类 -> 主脑 -> agent 执行`
+
+---
+
+## 4. 当前重点
+
+截至 `2026-03-25`，最值得继续推进的不是新功能扩张，而是以下 5 条硬切施工线。
+
+### 4.0 零号优先级：hard-cut autonomy rebuild
+
+目标：
+
+- 把当前混合主链直接切成唯一自治主链
+- 停止把 `GoalRecord / active goal / schedule` 当成主脑规划真相
+- 让 `MainBrainChatService` 彻底退出 durable runtime mutation
+- 让旧数据通过 reset 明确退出，而不是继续背历史包袱
+
+当前状态：
+
+- 硬切 spec 与 implementation plan 已落地
+- 用户已明确接受停机窗口、旧数据直接删除、旧前后端入口一起下线
+- `scripts/reset_autonomy_runtime.py` 与 `tests/app/test_runtime_reset.py` 已落地并通过首轮验证
+- Task 7/8 已完成：runtime health、shared control-chain presenter、Runtime Center / Industry / AgentWorkbench 新读面全部上线
+- Task 9 已完成产品面删旧：runtime-center direct delegate route 已物理删除，console 侧旧 goal-dispatch 文案已下线
+- `2026-03-25` 补充：Task 10/11 已完成收口，formal operating-cycle 已完全切成 `assignment -> task -> report`，历史 retirement 回归已更新到 live contract，不再拿 `waiting-confirm` / `goal` 节点当当前主链。
+
+### 4.1 第一优先级：single-industry autonomy closure
+
+目标：
+
+- 主脑收到 operator 指令后，优先把工作路由给现有执行位
+- 没有合适执行位时，低风险任务自动补临时位
+- 高风险或长期岗位需求进入治理提案
+- researcher 作为长期观察位持续回流
+- 上述状态必须同时在 prompt、state、API、UI 四层一致可见
+
+当前状态：
+- 已有正式 staffing 读面
+- 已有 seat gap policy
+- 已有 UI surface
+- `2026-03-24` 补充：surface-first 路由、seat gap 回填、supervisor-only backlog/schedule 元数据、监督链可见化与对应回归已完成一轮正式收口。
+- `2026-03-26` 补充：更大回归面已再次通过，`tests/app/industry_api_parts/bootstrap_lifecycle.py`、`tests/app/industry_api_parts/runtime_updates.py`、`tests/app/industry_api_parts/retirement_chain.py`、`tests/state/test_main_brain_hard_cut.py` 与 `console/src/runtime/staffingGapPresentation.test.ts` 均通过；`single-industry autonomy closure` 的 seat-gap、temporary seat、staffing read surface 与 UI helper 现阶段已形成稳定代码基线。
+- `2026-03-26` 补充：learning/runtime-center P1-P3 硬切已完成一轮正式验证，已通过
+  `tests/app/test_learning_api.py`、
+  `tests/app/test_runtime_center_api.py`、
+  `tests/app/runtime_center_api_parts/overview_governance.py`、
+  `tests/app/test_runtime_center_actor_api.py`、
+  `tests/app/industry_api_parts/bootstrap_lifecycle.py`、
+  `tests/app/industry_api_parts/runtime_updates.py`、
+  `tests/app/industry_api_parts/retirement_chain.py`、
+  `tests/state/test_reporting_service.py`、
+  `tests/kernel/test_agent_profile_service.py`、
+  `tests/app/test_capabilities_execution.py`、
+  `tests/app/test_industry_service_wiring.py`。
+- `2026-03-26` 补充：第二轮 deep-cut 已落地到 live 代码路径：
+  `LearningPatchService` 与 `LearningAcquisitionService` 已切到
+  `patch_runtime.py` / `acquisition_runtime.py`，
+  `RuntimeCenterOverviewBuilder` 已降为分组编排壳并由
+  `overview_groups.py` 承接 operations/control/learning 三组卡片；
+  新增验证 `tests/kernel/test_learning_runtime_domains.py` 与
+  `tests/app/test_runtime_center_overview_group_builders.py` 已通过。
+- 仍需继续补更大范围的真实世界覆盖与长期自治策略回归，但 `execution-core` 默认兜底成叶子执行位的已知回退已被压住。
+
+
+### 4.2 第一优先级并行：主脑 cognitive closure
+
+目标：
+
+- 主脑不是只会派工，还要会收结果、看冲突、补缺口、决定是否 replan
+- 子执行位必须输出主脑可消费的正式报告，不是只有 status/summary
+- 综合状态必须进入正式读面与测试
+当前状态：
+
+- report schema 已增强
+- synthesis 读面已出现
+- UI 可见化已补出第一轮
+- `2026-03-24` 补充：主脑监督链节点已进入正式 detail/UI 读面，writeback/backlog/cycle/assignment/report/replan 的可见链路与回归测试已补齐。
+- `2026-03-26` 补充：`tests/kernel/test_main_brain_chat_service.py`、`tests/kernel/test_turn_executor.py`、`tests/kernel/test_query_execution_runtime.py`、`tests/app/test_runtime_center_api.py`、`tests/app/test_runtime_conversations_api.py`、`tests/app/test_agent_runtime_ingress.py`、`tests/app/runtime_center_api_parts/overview_governance.py`、`tests/app/test_system_api.py` 与 `console/src/runtime/controlChainPresentation.test.ts` 已通过更大回归，`report_synthesis`、`main_brain_intake`、control-chain presenter 与 runtime/system 读面当前已形成可验证基线。
+- 仍需继续加强“主脑唯一认知中心”的更大范围工程事实
+
+### 4.3 第二优先级：主脑聊天链瘦身与性能硬化
+
+目标：
+
+- 纯聊天态保持轻量、低负载、少工具
+- 需要执行时再进入编排态
+- 聊天前台仍保持思考流 / 工具流可见，但不把执行噪声长期混进控制线程
+- 首字延迟、一次性整段返回、过重 prompt/持久化负担要持续收敛
+
+当前状态：
+
+- `MainBrainChatService` 已存在
+- `/chat` 默认已收口为主脑 auto 裁决
+- prompt 已做过一轮瘦身
+- `2026-03-26` 补充：runtime surface decomposition 已完成一轮正式收口：
+  `state_query.py` 的 task-review / route contract 已切到
+  `task_review_projection.py` 与 `utils/runtime_routes.py`；
+  `query_execution_shared.py` 的 chat-writeback / confirmation seam
+  已切到 `query_execution_writeback.py` / `query_execution_confirmation.py`；
+  `AgentWorkbench/pageSections.tsx` 已稳定消费
+  `sections/taskPanels.tsx` / `sections/detailPanels.tsx`；
+  `Chat` 已补 `useRuntimeBinding.ts` 统一 runtime binding 入口。
+  已通过
+  `tests/app/test_runtime_projection_contracts.py`、
+  `tests/kernel/test_query_execution_shared_split.py`、
+  `tests/app/test_runtime_center_api.py`、
+  `tests/kernel/test_main_brain_chat_service.py`、
+  `tests/kernel/test_turn_executor.py`、
+  `console/src/pages/AgentWorkbench/pageSections.test.ts`、
+  `console/src/pages/Chat/useRuntimeBinding.test.ts`、
+  `console/src/runtime/controlChainPresentation.test.ts`、
+  `console/src/runtime/staffingGapPresentation.test.ts`
+  与 `console tsc --noEmit` 验证。
+- 高阶遗留已明显下降，但 `Chat/index.tsx` 仍是当前最大的前端重文件；后续如继续压缩，应优先再拆 sidebar / media shell，而不是回头堆平行 surface。
+- 仍需持续做性能和交互回归
+
+### 4.4 第三优先级：媒体与记忆闭环继续接线
+
+目标：
+
+- `Memory VNext`
+- `MediaAnalysisRecord`
+- `chat media -> analysis -> answer/writeback/strategy`
+
+当前状态：
+
+- 规划文档已齐
+- 后端基础承接能力已有一部分
+- 但完整的聊天附件闭环还没完全收干净
+
+---
+
+## 5. 当前最重要的风险
+
+1. 不要重新引入平行聊天前门、平行任务线程前台或旧 compat shell。
+2. 不要为了“看起来更聪明”继续堆 role / capability / router，先补主脑闭环。
+3. 不要让 `execution-core` 再次退化成默认叶子执行者。
+4. 不要让 capability / MCP / install-template 的复杂度继续吞掉主脑清晰度。
+5. 不要在中文 Markdown 上继续做补丁式乱码修复；如文件已坏，优先整份重写。
+
+---
+
+## 6. 下一步推荐施工顺序
+
+1. 扩大 hard-cut 回归面，优先跑更大批量的 state / industry / runtime 聚合测试与 live smoke。
+2. 继续压缩残留 `GoalRecord / goal service` 叶子兼容边界，避免旧语义重新回流到主脑规划面。
+3. 深化 single-industry 真实世界覆盖，补长期自治、岗位补位与监督回流的长跑回归。
+4. 完成媒体/记忆闭环剩余接线，把 `analysis -> writeback -> strategy -> execution` 做成稳定产品主链。
+5. 拆分过重的行业层与前端运行中心页面，降低后续维护认知密度。
+
+---
+
+- `2026-03-24`
+  - `python -m pytest tests/kernel/test_main_brain_chat_service.py tests/kernel/test_turn_executor.py tests/app/test_agent_runtime_ingress.py tests/app/runtime_center_api_parts/overview_governance.py -q`
+  - 结果：`66 passed`
+- `2026-03-24`
+  - `python -m pytest tests/industry/test_seat_gap_policy.py tests/app/industry_api_parts/runtime_updates.py tests/kernel/test_main_brain_chat_service.py tests/app/test_runtime_conversations_api.py -q`
+  - 结果：`42 passed`
+- `2026-03-24`
+  - `npm --prefix console exec vitest run src/runtime/staffingGapPresentation.test.ts`
+  - 结果：`2 passed`
+- `2026-03-24`
+  - `npm --prefix console run build`
+  - 结果：通过
+- `2026-03-24`
+  - `python -m pytest tests/app/industry_api_parts/runtime_updates.py tests/industry/test_seat_gap_policy.py tests/kernel/test_main_brain_chat_service.py tests/kernel/test_turn_executor.py -q`
+  - 结果：`67 passed`
+- `2026-03-25`
+  - `python -m pytest tests/app/industry_api_parts/retirement_chain.py -q`
+  - 结果：`12 passed`
+- `2026-03-25`
+  - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py -q`
+  - 结果：`20 passed`
+- `2026-03-25`
+  - `python -m pytest tests/app/industry_api_parts/runtime_updates.py -q`
+  - 结果：`23 passed`
+- `2026-03-26`
+  - `python -m pytest tests/app/industry_api_parts/runtime_updates.py -q`
+  - 结果：`23 passed`
+- `2026-03-26`
+  - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py -q`
+  - 结果：`20 passed`
+- `2026-03-26`
+  - `python -m pytest tests/app/industry_api_parts/retirement_chain.py tests/state/test_main_brain_hard_cut.py -q`
+  - 结果：`14 passed`
+- `2026-03-26`
+  - `python -m pytest tests/kernel/test_main_brain_chat_service.py tests/kernel/test_turn_executor.py tests/kernel/test_query_execution_runtime.py -q`
+  - 结果：`44 passed`
+- `2026-03-26`
+  - `python -m pytest tests/app/test_runtime_center_api.py tests/app/test_runtime_conversations_api.py tests/app/test_agent_runtime_ingress.py tests/app/runtime_center_api_parts/overview_governance.py tests/app/test_system_api.py -q`
+  - 结果：`75 passed`
+- `2026-03-26`
+  - `npm --prefix console exec vitest run src/runtime/controlChainPresentation.test.ts src/runtime/staffingGapPresentation.test.ts`
+  - 结果：`4 passed`
+- `2026-03-25`
+  - `python -m pytest tests/state/test_main_brain_hard_cut.py -q`
+  - 结果：`2 passed`
+- `2026-03-27`
+  - `python -m pytest tests/environments/test_cooperative_browser_companion.py tests/environments/test_cooperative_document_bridge.py tests/environments/test_cooperative_watchers.py tests/environments/test_cooperative_windows_apps.py tests/environments/test_environment_registry.py tests/app/test_capability_market_api.py tests/app/test_capability_market_phase2_api.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py -q`
+  - 结果：`79 passed`
+- `2026-03-27`
+  - `python -m pytest tests/agents/test_browser_tool_evidence.py tests/routines/test_routine_service.py tests/environments/test_environment_registry.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py tests/app/test_runtime_center_api.py tests/app/test_capability_market_phase2_api.py -q`
+  - 结果：`106 passed`
+- `2026-03-27`
+  - `python -m pytest tests/routines/test_routine_service.py tests/agents/test_browser_tool_evidence.py -q`
+  - 结果：`25 passed`
+- `2026-03-25`
+  - `npx vitest run src/runtime/controlChainPresentation.test.ts`
+  - 结果：`2 passed`
+- `2026-03-24`
+  - `python -m pytest tests/kernel/test_query_execution_runtime.py tests/app/test_runtime_center_task_delegation_api.py tests/app/test_console_channel.py tests/app/test_goals_api.py -q`
+  - 结果：`23 passed`
+
+历史验收请直接看：
+- `2026-03-24`
+  - `npm --prefix console run build`
+  - 结果：通过
+
+历史验收请直接看：
+
+- `V1_RELEASE_ACCEPTANCE.md`
+- `V2_RELEASE_ACCEPTANCE.md`
+- `V3_RELEASE_ACCEPTANCE.md`
+- `V6_RELEASE_ACCEPTANCE.md`
+
+---
+
+## 8. 当前推荐关注源码
+
+如果任务涉及主脑 / 聊天 / 编排 / 闭环，优先看：
+
+- `src/copaw/kernel/turn_executor.py`
+- `src/copaw/kernel/main_brain_chat_service.py`
+- `src/copaw/kernel/query_execution_runtime.py`
+- `src/copaw/kernel/query_execution_prompt.py`
+- `src/copaw/kernel/delegation_service.py`
+- `src/copaw/kernel/query_execution_tools.py`
+
+如果任务涉及行业自治 / staffing / report / synthesis，优先看：
+
+- `src/copaw/industry/service.py`
+- `src/copaw/industry/service_lifecycle.py`
+- `src/copaw/industry/service_strategy.py`
+- `src/copaw/industry/service_runtime_views.py`
+- `src/copaw/industry/seat_gap_policy.py`
+- `src/copaw/industry/report_synthesis.py`
+
+如果任务涉及聊天页与前端结果面，优先看：
+
+- `console/src/pages/Chat/*`
+- `console/src/pages/Industry/*`
+- `console/src/pages/RuntimeCenter/*`
+- `console/src/pages/AgentWorkbench/*`
+- `console/src/runtime/staffingGapPresentation.ts`
+
+---
+
+## 9. 给下一位 agent 的一句话提醒
+
+先确认你现在做的是哪条收口线：
+
+- single-industry autonomy
+- main-brain cognitive closure
+- main-brain chat performance / split-chain hardening
+- media / memory 闭环
+
+如果答不出来，就不要下手改代码。

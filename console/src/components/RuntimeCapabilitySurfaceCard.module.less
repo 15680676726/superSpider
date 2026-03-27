@@ -1,0 +1,148 @@
+.surface {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hero {
+  padding: 16px 18px;
+  border: var(--baize-border);
+  border-radius: 20px;
+  background: var(--baize-surface-color);
+}
+
+.eyebrow {
+  display: inline-block;
+  margin-bottom: 10px;
+  color: var(--baize-primary-glow);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.heroTags {
+  display: flex;
+  row-gap: 8px;
+  margin-bottom: 10px;
+}
+
+.heroSummary {
+  margin-bottom: 0;
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.metricCard,
+.panel {
+  padding: 14px;
+  border: var(--baize-border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.02);
+  box-shadow: none;
+}
+
+.metricLabel {
+  color: var(--baize-text-muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.metricValue {
+  margin-top: 8px;
+  color: var(--baize-text-main);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionTitle {
+  color: var(--baize-text-muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.panelTitle {
+  color: var(--baize-text-main);
+  font-size: 14px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.capabilityTag {
+  margin-inline-end: 0;
+  word-break: break-all;
+}
+
+.emptyText {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.decisionItem {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.decisionMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--baize-text-muted);
+  font-size: 12px;
+}
+
+.decisionReason {
+  margin-bottom: 0;
+  color: var(--baize-text-secondary);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.panel :global(.baize-list-item) {
+  padding-inline: 0;
+}
+
+@media (max-width: 768px) {
+  .hero,
+  .metricCard,
+  .panel {
+    padding: 14px;
+  }
+
+  .metricValue {
+    font-size: 24px;
+  }
+}

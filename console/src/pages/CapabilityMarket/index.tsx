@@ -1,0 +1,245 @@
+import { useCallback } from "react";
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Empty,
+  Form,
+  Input,
+  List,
+  Pagination,
+  Space,
+  Spin,
+  Switch,
+  Tabs,
+  Tag,
+  Typography,
+  message,
+} from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
+import { Sparkles } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import api, { type CuratedSkillCatalogEntry } from "../../api";
+import {
+  localizeRemoteSkillText,
+  presentRecommendationInstallKind,
+  presentRecommendationManifestStatus,
+  presentRecommendationRiskLevel,
+  presentRecommendationSourceLabel,
+  presentRemoteSkillName,
+  presentRemoteSkillSummary,
+  presentRemoteVersion,
+} from "../../utils/remoteSkillPresentation";
+import styles from "./index.module.less";
+import {
+  buildCuratedInstallKey,
+  CURATED_CATEGORY_DEFINITIONS,
+  CURATED_PAGE_SIZE,
+  MARKET_TAB_KEY_SET,
+  parseTemplateConfigValue,
+  templateStatusColor,
+  type TemplateConfigField,
+} from "./presentation";
+import { useCapabilityMarketState } from "./useCapabilityMarketState";
+
+const { Paragraph, Text } = Typography;
+const { TextArea, Password } = Input;
+
+export default function CapabilityMarketPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [templateForm] = Form.useForm<Record<string, unknown>>();
+  const [mcpForm] = Form.useForm<Record<string, any>>();
+  const {
+    activeTab,
+    categoryCounts,
+    curatedCategory,
+    curatedError,
+    curatedLoading,
+    curatedPage,
+    curatedQuery,
+    curatedRangeText,
+    curatedReviewAcknowledgements,
+    filteredCuratedItems,
+    handleRefreshAll,
+    installingCuratedId,
+    loadCurated,
+    mcpCatalog,
+    mcpCatalogLoading,
+    mcpQuery,
+    requestedTemplateId,
+    selectedTemplate,
+    setCuratedCategory,
+    setCuratedPage,
+    setCuratedQuery,
+    setCuratedReviewAcknowledgements,
+    setInstallingCuratedId,
+    setMcpQuery,
+    setTemplateActionKey,
+    setTemplateInstallSummary,
+    templateActionKey,
+    templateInstallSummary,
+    templates,
+    templatesLoading,
+    updateSearchParams,
+  } = useCapabilityMarketState({ templateForm, mcpForm, searchParams, setSearchParams });
+
+  const handleTabChange = useCallback(
+    (nextTab: string) => {
+      updateSearchParams({
+        tab: MARKET_TAB_KEY_SET.has(nextTab) ? nextTab : "curated",
+        template: nextTab === "install-templates" ? requestedTemplateId : null,
+      });
+    },
+    [requestedTemplateId, updateSearchParams],
+  );
+
+  const handleCuratedSearch = useCallback(async () => {
+    setCuratedPage(1);
+    await loadCurated(curatedQuery.trim());
+  }, [curatedQuery, loadCurated, setCuratedPage]);
+
+  const installCuratedSkill = useCallback(
+    async (item: CuratedSkillCatalogEntry) => {
+      const installKey = buildCuratedInstallKey(item);
+      if (item.review_required && !curatedReviewAcknowledgements[installKey]) {
+        message.warning("璇峰厛纭瀹℃牳鎻愮ず");
+        return;
+      }
+      setInstallingCuratedId(installKey);
+      try {
+        await api.installCapabilityMarketCuratedCatalogEntry({
+          source_id: item.source_id,
+          candidate_id: item.candidate_id,
+          review_acknowledged: Boolean(curatedReviewAcknowledgements[installKey]),
+          enable: true,
+        });
+        message.success("瀹夎鎴愬姛");
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : String(error));
+      } finally {
+        setInstallingCuratedId(null);
+      }
+    },
+    [curatedReviewAcknowledgements, setInstallingCuratedId],
+  );
+
+  const buildTemplateConfigPayload = useCallback(async () => {
+    if (!selectedTemplate?.config_schema?.fields?.length) {
+      return {};
+    }
+    await templateForm.validateFields();
+    const rawValues = templateForm.getFieldsValue(true);
+    return Object.fromEntries(
+      selectedTemplate.config_schema.fields.map((field) => [field.key, parseTemplateConfigValue(field, rawValues[field.key])]),
+    );
+  }, [selectedTemplate, templateForm]);
+
+  const handleInstallTemplate = useCallback(async () => {
+    if (!requestedTemplateId) return;
+    setTemplateActionKey(`install:${requestedTemplateId}`);
+    try {
+      const config = await buildTemplateConfigPayload();
+      const result = await api.installCapabilityMarketInstallTemplate(requestedTemplateId, { config, enabled: true });
+      setTemplateInstallSummary(result.summary || "瀹夎鎴愬姛");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTemplateActionKey(null);
+    }
+  }, [buildTemplateConfigPayload, requestedTemplateId, setTemplateActionKey, setTemplateInstallSummary]);
+
+  const renderTemplateConfigField = useCallback((field: TemplateConfigField) => {
+    const fieldType = String(field.field_type || "string").trim().toLowerCase();
+    if (fieldType === "boolean") return <Form.Item key={field.key} name={field.key} label={field.label || field.key} valuePropName="checked"><Switch /></Form.Item>;
+    if (fieldType === "string[]") return <Form.Item key={field.key} name={field.key} label={field.label || field.key}><TextArea rows={3} /></Form.Item>;
+    return <Form.Item key={field.key} name={field.key} label={field.label || field.key}>{field.secret ? <Password /> : <Input />}</Form.Item>;
+  }, []);
+
+  return (
+    <div className={styles.page}>
+      <Space style={{ marginBottom: 12 }}>
+        <Button icon={<ReloadOutlined />} onClick={() => void handleRefreshAll()}>鍒锋柊</Button>
+      </Space>
+      {curatedError ? <Alert type="error" showIcon message={curatedError} /> : null}
+      <Tabs
+        activeKey={activeTab}
+        onChange={handleTabChange}
+        items={[
+          {
+            key: "curated",
+            label: "绮鹃€変腑蹇?",
+            children: (
+              <div className={styles.hubStack}>
+                <div className={styles.searchBar}>
+                  <Input value={curatedQuery} prefix={<Sparkles size={16} />} onChange={(e) => setCuratedQuery(e.currentTarget.value)} onPressEnter={() => void handleCuratedSearch()} />
+                  <Button onClick={() => void handleCuratedSearch()}>鎼滅储</Button>
+                  <Button icon={<ReloadOutlined />} onClick={() => void loadCurated(curatedQuery.trim())}>鍒锋柊</Button>
+                </div>
+                <Space wrap>{CURATED_CATEGORY_DEFINITIONS.map((d) => <Button key={d.key} type={curatedCategory === d.key ? "primary" : "default"} onClick={() => setCuratedCategory(d.key)}>{d.label} ({categoryCounts[d.key] || 0})</Button>)}</Space>
+                <Tag>{curatedRangeText}</Tag>
+                {curatedLoading ? <Spin /> : filteredCuratedItems.length ? (
+                  <>
+                    <div className={styles.hubGrid}>
+                      {filteredCuratedItems.slice((curatedPage - 1) * CURATED_PAGE_SIZE, curatedPage * CURATED_PAGE_SIZE).map(({ item }) => {
+                        const installKey = buildCuratedInstallKey(item);
+                        return (
+                          <Card key={installKey} className={styles.hubCard}>
+                            <Paragraph strong>{presentRemoteSkillName({ slug: item.candidate_id, title: item.title, description: item.description })}</Paragraph>
+                            <Paragraph>{presentRemoteSkillSummary({ slug: item.candidate_id, title: item.title, description: item.description })}</Paragraph>
+                            <Space wrap>
+                              <Tag>{presentRecommendationSourceLabel(item.source_label)}</Tag>
+                              <Tag>{presentRecommendationManifestStatus(item.manifest_status)}</Tag>
+                              <Tag>{presentRecommendationRiskLevel("guarded")}</Tag>
+                              <Tag>{presentRemoteVersion(item.version)}</Tag>
+                            </Space>
+                            {item.review_summary ? <Paragraph type="secondary">{localizeRemoteSkillText(item.review_summary)}</Paragraph> : null}
+                            {item.review_required ? <Checkbox checked={Boolean(curatedReviewAcknowledgements[installKey])} onChange={(e) => setCuratedReviewAcknowledgements((current) => ({ ...current, [installKey]: e.target.checked }))}>鎴戝凡闃呰</Checkbox> : null}
+                            <Button loading={installingCuratedId === installKey} onClick={() => void installCuratedSkill(item)}>瀹夎</Button>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                    <Pagination current={curatedPage} pageSize={CURATED_PAGE_SIZE} total={filteredCuratedItems.length} onChange={(p) => setCuratedPage(p)} />
+                  </>
+                ) : <Empty />}
+              </div>
+            ),
+          },
+          {
+            key: "install-templates",
+            label: "瀹夎妯℃澘",
+            children: (
+              <div className={styles.templateGrid}>
+                <Card title="妯℃澘" className={styles.templateList} loading={templatesLoading}>
+                  <List dataSource={templates} renderItem={(item) => <List.Item onClick={() => updateSearchParams({ template: item.id, tab: "install-templates" })}><Space><Text>{item.name}</Text><Tag color={templateStatusColor(item)}>{item.ready ? "ready" : item.installed ? "installed" : "new"}</Tag><Tag>{presentRecommendationInstallKind(item.install_kind)}</Tag></Space></List.Item>} />
+                </Card>
+                <Card className={styles.templateDetail}>
+                  {selectedTemplate ? (
+                    <Space direction="vertical" style={{ width: "100%" }}>
+                      {templateInstallSummary ? <Alert type="success" message={templateInstallSummary} /> : null}
+                      <Form form={templateForm} layout="vertical">{selectedTemplate.config_schema?.fields?.map(renderTemplateConfigField)}</Form>
+                      <Button type="primary" loading={templateActionKey === `install:${selectedTemplate.id}`} onClick={() => void handleInstallTemplate()}>瀹夎</Button>
+                    </Space>
+                  ) : <Empty />}
+                </Card>
+              </div>
+            ),
+          },
+          { key: "installed", label: "宸插畨瑁?", children: <Card><List dataSource={[]} renderItem={() => null} /></Card> },
+          { key: "skills", label: "Skills", children: <Card><List dataSource={[]} renderItem={() => null} /></Card> },
+          {
+            key: "mcp",
+            label: "MCP",
+            children: (
+              <Card>
+                <Input value={mcpQuery} onChange={(e) => setMcpQuery(e.currentTarget.value)} onPressEnter={() => void loadCurated(mcpQuery)} />
+                {mcpCatalogLoading ? <Spin /> : <Tag>{mcpCatalog?.items?.length || 0}</Tag>}
+              </Card>
+            ),
+          },
+        ]}
+      />
+    </div>
+  );
+}

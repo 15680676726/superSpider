@@ -1,0 +1,142 @@
+.capabilitiesPage {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.headerInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--baize-text-main);
+}
+
+.description {
+  margin: 0;
+  font-size: 13px;
+  color: var(--baize-text-muted);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.filterLabel {
+  font-size: 12px;
+  color: var(--baize-text-muted);
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.summaryCard {
+  border-radius: 14px;
+}
+
+.summaryTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.capabilityCard {
+  border-radius: var(--baize-card-radius-sm);
+  border: 1px solid var(--baize-border-color);
+  box-shadow: var(--baize-shadow-sm);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+
+  &:hover {
+    border-color: var(--baize-border-strong);
+    transform: translateY(-2px);
+  }
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--baize-text-main);
+}
+
+.cardSubtitle {
+  font-size: 12px;
+  color: var(--baize-text-muted);
+}
+
+.cardSummary {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--baize-text-secondary);
+  line-height: 1.5;
+}
+
+.metaBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.metaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.metaLabel {
+  font-size: 12px;
+  color: var(--baize-text-muted);
+  margin-right: 4px;
+}
+
+.metaEmpty {
+  font-size: 12px;
+  color: var(--baize-text-dim);
+}
+
+.emptyState {
+  padding: 24px 0;
+}
+
+@media (max-width: 768px) {
+  .capabilitiesPage {
+    padding: 16px;
+  }
+}

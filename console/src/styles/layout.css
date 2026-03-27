@@ -1,0 +1,837 @@
+/* Noble Blue & Gold — 皇家蓝 × 香槟金 贵族设计系统 */
+
+/* ---- Responsive breakpoints ---- */
+@media (max-width: 768px) {
+  :root {
+    --baize-card-radius: 16px;
+    --baize-element-radius: 10px;
+    --baize-blur: blur(20px);
+  }
+  .baize-layout-header {
+    padding: 0 16px !important;
+    height: 56px !important;
+  }
+  .baize-hero {
+    padding: 20px 16px !important;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .baize-hero-title {
+    font-size: 22px !important;
+  }
+  .baize-hero-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 480px) {
+  :root {
+    --baize-card-radius: 12px;
+    --baize-element-radius: 8px;
+  }
+  .baize-menu-item {
+    margin: 4px 8px !important;
+    height: 44px !important;
+    line-height: 44px !important;
+  }
+}
+
+:root {
+  /* ── 背景色 ── 午夜深蓝 */
+  --baize-bg-color: #03070F;
+  --baize-surface-color: rgba(5, 12, 35, 0.50);
+  --baize-surface-strong: rgba(10, 22, 60, 0.80);
+  --baize-surface-subtle: rgba(5, 12, 35, 0.28);
+
+  /* ── 内发光（金边基底） ── */
+  --baize-surface-glow: inset 0 1px 1px rgba(201, 168, 76, 0.12), inset 0 0 0 1px rgba(201, 168, 76, 0.06);
+
+  /* ── 金色光晕 ── */
+  --baize-accent-glow: 0 0 40px rgba(201, 168, 76, 0.20);
+  --baize-accent-glow-strong: 0 0 60px rgba(201, 168, 76, 0.35);
+
+  /* ── 阴影 ── */
+  --baize-shadow-dark: 0 15px 35px rgba(0, 0, 0, 0.70);
+  --baize-shadow-deep: 0 50px 100px rgba(0, 0, 0, 0.85);
+  --baize-shadow: 0 8px 32px rgba(0, 0, 0, 0.55), var(--baize-shadow-dark);
+  --baize-shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.40);
+
+  /* ── 圆角 ── */
+  --baize-card-radius: 28px;
+  --baize-card-radius-sm: 16px;
+  --baize-element-radius: 16px;
+
+  /* ── 主色调 ── 皇家蓝 */
+  --baize-primary-color: #1B4FD8;
+  --baize-primary-glow: #4B7BF5;
+  --baize-primary-deep: #0F2E8A;
+
+  /* ── 强调色 ── 香槟金 */
+  --baize-gold: #C9A84C;
+  --baize-gold-light: #E8C870;
+  --baize-gold-pale: #F5DFA0;
+  --baize-gold-dim: rgba(201, 168, 76, 0.35);
+
+  /* ── 辅助色 ── */
+  --baize-accent-2: #2563EB;
+  --baize-accent-3: #1E3A8A;
+
+  /* ── 模糊 ── */
+  --baize-blur: blur(40px);
+  --baize-blur-sm: blur(16px);
+
+  /* ── 边框（金边） ── */
+  --baize-border: 1px solid rgba(201, 168, 76, 0.18);
+  --baize-border-color: rgba(201, 168, 76, 0.15);
+  --baize-border-strong: rgba(201, 168, 76, 0.35);
+  --baize-border-gold: rgba(201, 168, 76, 0.50);
+
+  /* ── 文字 ── */
+  --baize-text-main: #EEF2FF;
+  --baize-text-secondary: #A8B8D8;
+  --baize-text-muted: #6B7E9F;
+  --baize-text-dim: #3D5070;
+  --baize-text-gold: #C9A84C;
+
+  /* ── 语义状态色 ── */
+  --baize-success: #34d399;
+  --baize-success-bg: rgba(52, 211, 153, 0.10);
+  --baize-warning: #E8C870;
+  --baize-warning-bg: rgba(232, 200, 112, 0.12);
+  --baize-error: #f87171;
+  --baize-error-bg: rgba(248, 113, 113, 0.10);
+  --baize-info: #4B7BF5;
+  --baize-info-bg: rgba(75, 123, 245, 0.12);
+
+  /* ── 选中 / 激活态 ── */
+  --baize-selected-border: rgba(201, 168, 76, 0.55);
+  --baize-selected-bg: rgba(27, 79, 216, 0.15);
+  --baize-hover-bg: rgba(201, 168, 76, 0.05);
+
+  /* ── 间距 ── */
+  --baize-gap-xs: 8px;
+  --baize-gap-sm: 12px;
+  --baize-gap-md: 16px;
+  --baize-gap-lg: 24px;
+  --baize-gap-xl: 32px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  background-color: var(--baize-bg-color);
+  color: var(--baize-text-main);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* ════════════════════════════════════════════
+   Base Layout — 深蓝底色 + 金色星云渐变
+   ════════════════════════════════════════════ */
+.baize-layout {
+  min-height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+  position: relative;
+  background: var(--baize-bg-color) !important;
+}
+
+/* 背景光晕 — 皇家蓝 + 金色星芒 */
+.baize-layout::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(ellipse at 20% 20%, rgba(27, 79, 216, 0.30) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 80%, rgba(201, 168, 76, 0.18) 0%, transparent 45%),
+    radial-gradient(ellipse at 60% 10%, rgba(37, 99, 235, 0.20) 0%, transparent 40%),
+    radial-gradient(ellipse at 10% 80%, rgba(201, 168, 76, 0.10) 0%, transparent 35%),
+    linear-gradient(180deg, #03070F 0%, #060E25 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 颗粒纹理 */
+.baize-layout::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.025;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  z-index: 1;
+}
+
+/* 侧边栏 — 金边右侧 */
+.baize-layout-sider {
+  background: rgba(3, 7, 15, 0.45) !important;
+  backdrop-filter: var(--baize-blur) !important;
+  -webkit-backdrop-filter: var(--baize-blur) !important;
+  border-right: var(--baize-border) !important;
+  z-index: 10;
+}
+
+/* 顶栏 — 金边底部 */
+.baize-layout-header {
+  background: rgba(3, 7, 15, 0.45) !important;
+  backdrop-filter: var(--baize-blur) !important;
+  -webkit-backdrop-filter: var(--baize-blur) !important;
+  border-bottom: var(--baize-border) !important;
+  padding: 0 28px !important;
+  height: 80px !important;
+  display: flex !important;
+  align-items: center !important;
+  z-index: 10;
+}
+
+.baize-layout-content {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100vh !important;
+  overflow: hidden;
+  background: transparent !important;
+  padding: 0 !important;
+  z-index: 5;
+}
+
+/* ════════════════════════════════════════════
+   Premium Card — 蓝底 + 金边内发光
+   ════════════════════════════════════════════ */
+.baize-card {
+  background: var(--baize-surface-color) !important;
+  border: var(--baize-border) !important;
+  border-radius: var(--baize-card-radius) !important;
+  backdrop-filter: var(--baize-blur) !important;
+  -webkit-backdrop-filter: var(--baize-blur) !important;
+  box-shadow: var(--baize-surface-glow), var(--baize-shadow) !important;
+  transition: all 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 金色光泽扫光 */
+.baize-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(201, 168, 76, 0.06) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.baize-card-hoverable:hover {
+  background: var(--baize-surface-strong) !important;
+  transform: translateY(-8px) scale(1.01);
+  box-shadow: var(--baize-surface-glow), var(--baize-shadow-deep), var(--baize-accent-glow) !important;
+  border-color: rgba(201, 168, 76, 0.45) !important;
+}
+
+/* ════════════════════════════════════════════
+   Buttons — 蓝色主按钮 / 金色强调
+   ════════════════════════════════════════════ */
+.baize-btn {
+  border-radius: var(--baize-element-radius) !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 主按钮：蓝色渐变 */
+.baize-btn-primary {
+  background: linear-gradient(135deg, #1B4FD8 0%, #2563EB 100%) !important;
+  color: white !important;
+  border: 1px solid rgba(201, 168, 76, 0.25) !important;
+  box-shadow: 0 8px 20px rgba(27, 79, 216, 0.45), inset 0 1px 0 rgba(201, 168, 76, 0.15) !important;
+}
+
+.baize-btn-primary:hover {
+  background: linear-gradient(135deg, #2563EB 0%, #3B82F6 100%) !important;
+  box-shadow: 0 14px 32px rgba(27, 79, 216, 0.60), inset 0 1px 0 rgba(201, 168, 76, 0.25), var(--baize-accent-glow) !important;
+  transform: translateY(-3px) scale(1.02);
+  border-color: rgba(201, 168, 76, 0.45) !important;
+}
+
+/* 辅助按钮：半透明蓝底 + 金边 */
+.baize-btn-default {
+  background: rgba(5, 12, 35, 0.60) !important;
+  color: var(--baize-text-main) !important;
+  border: 1px solid rgba(201, 168, 76, 0.22) !important;
+}
+
+.baize-btn-default:hover {
+  background: rgba(27, 79, 216, 0.15) !important;
+  border-color: var(--baize-gold-dim) !important;
+  color: var(--baize-gold-light) !important;
+}
+
+/* ════════════════════════════════════════════
+   Inputs — 深蓝底 + 金色焦点边框
+   ════════════════════════════════════════════ */
+.baize-input,
+.baize-select-selector,
+.baize-input-number,
+.baize-picker {
+  border-radius: var(--baize-element-radius) !important;
+  background: rgba(5, 12, 35, 0.75) !important;
+  border: 1px solid rgba(201, 168, 76, 0.18) !important;
+  color: white !important;
+  backdrop-filter: blur(16px) !important;
+  padding: 10px 18px !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.baize-input:focus,
+.baize-select-selector:focus {
+  background: rgba(5, 12, 35, 0.90) !important;
+  border-color: var(--baize-gold) !important;
+  box-shadow: 0 0 0 3px rgba(201, 168, 76, 0.20) !important;
+}
+
+/* ════════════════════════════════════════════
+   Menu — 透明底 + 金色选中态
+   ════════════════════════════════════════════ */
+.baize-menu {
+  background: transparent !important;
+  border: none !important;
+}
+
+.baize-menu-item {
+  color: var(--baize-text-muted) !important;
+  margin: 8px 14px !important;
+  border-radius: 14px !important;
+  height: 52px !important;
+  line-height: 52px !important;
+  transition: all 0.3s ease !important;
+}
+
+.baize-menu-item:hover {
+  background: rgba(201, 168, 76, 0.07) !important;
+  color: var(--baize-gold-light) !important;
+}
+
+/* 选中：左侧金边 + 蓝色底 */
+.baize-menu-item-selected {
+  background: rgba(27, 79, 216, 0.20) !important;
+  color: var(--baize-gold-light) !important;
+  font-weight: 800 !important;
+  box-shadow: inset 0 0 15px rgba(27, 79, 216, 0.25), inset 3px 0 0 var(--baize-gold) !important;
+}
+
+/* ════════════════════════════════════════════
+   Typography
+   ════════════════════════════════════════════ */
+.baize-typography {
+  color: var(--baize-text-main) !important;
+}
+
+.baize-typography-secondary {
+  color: var(--baize-text-muted) !important;
+}
+
+/* ════════════════════════════════════════════
+   Table — 金色表头 + 蓝底行悬浮
+   ════════════════════════════════════════════ */
+.baize-table {
+  background: transparent !important;
+}
+
+.baize-table thead th {
+  background: rgba(5, 12, 35, 0.70) !important;
+  color: var(--baize-text-gold) !important;
+  font-weight: 800 !important;
+  border-bottom: 1px solid rgba(201, 168, 76, 0.25) !important;
+  padding: 20px !important;
+}
+
+.baize-table tbody td {
+  background: transparent !important;
+  color: #CDD8F0 !important;
+  border-bottom: 1px solid rgba(201, 168, 76, 0.08) !important;
+  padding: 18px !important;
+}
+
+.baize-table tbody tr:hover td {
+  background: rgba(201, 168, 76, 0.04) !important;
+}
+
+/* ════════════════════════════════════════════
+   Custom Scrollbar — 金色细条
+   ════════════════════════════════════════════ */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(201, 168, 76, 0.30);
+  border-radius: 20px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(201, 168, 76, 0.55);
+}
+
+/* ════════════════════════════════════════════
+   Logo — 金色 + 蓝色渐变文字
+   ════════════════════════════════════════════ */
+.baize-logo {
+  font-weight: 900;
+  font-size: 28px;
+  letter-spacing: -0.04em;
+  background: linear-gradient(135deg, #C9A84C 0%, #E8C870 40%, #4B7BF5 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 12px rgba(201, 168, 76, 0.45));
+}
+
+/* ════════════════════════════════════════════
+   Tag — 蓝底 + 金边
+   ════════════════════════════════════════════ */
+.baize-tag {
+  border-radius: 10px !important;
+  font-weight: 700 !important;
+  padding: 4px 10px !important;
+  background: rgba(27, 79, 216, 0.20) !important;
+  border: 1px solid rgba(201, 168, 76, 0.25) !important;
+  color: var(--baize-gold-light) !important;
+}
+
+/* ════════════════════════════════════════════
+   Chat Input — 深蓝底 + 金边
+   ════════════════════════════════════════════ */
+[class*="sender-"],
+[class*="chat-input-wrapper"] {
+  background: rgba(5, 12, 35, 0.80) !important;
+  backdrop-filter: var(--baize-blur) !important;
+  border: var(--baize-border) !important;
+  border-radius: 24px !important;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.55), var(--baize-accent-glow) !important;
+  padding: 16px !important;
+}
+
+/* ════════════════════════════════════════════
+   Card Head
+   ════════════════════════════════════════════ */
+.baize-card-head {
+  border-bottom: 1px solid rgba(201, 168, 76, 0.12) !important;
+  background: rgba(201, 168, 76, 0.03) !important;
+}
+
+.baize-card-head-title {
+  color: white !important;
+  font-weight: 800 !important;
+}
+
+/* ════════════════════════════════════════════
+   Animations
+   ════════════════════════════════════════════ */
+@keyframes flowing-light {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* 金色呼吸光晕 */
+@keyframes breathing-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(201, 168, 76, 0.15), var(--baize-surface-glow); }
+  50% { box-shadow: 0 0 45px rgba(201, 168, 76, 0.40), var(--baize-surface-glow); }
+}
+
+@keyframes shift-light {
+  from { transform: translateX(-100%) skewX(-15deg); }
+  to { transform: translateX(200%) skewX(-15deg); }
+}
+
+/* 金边流光 */
+.baize-flowing-border {
+  position: relative;
+  overflow: hidden;
+}
+
+.baize-flowing-border::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(201, 168, 76, 0.06),
+    rgba(201, 168, 76, 0.18),
+    rgba(201, 168, 76, 0.06),
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: flowing-light 8s linear infinite;
+  pointer-events: none;
+}
+
+.baize-breathing {
+  animation: breathing-glow 4s ease-in-out infinite;
+}
+
+/* ════════════════════════════════════════════
+   3D Depth Classes
+   ════════════════════════════════════════════ */
+.baize-depth-container {
+  perspective: 1200px;
+}
+
+.baize-depth-card {
+  transform-style: preserve-3d;
+  transition: transform 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.baize-depth-card.baize-card-hoverable:hover {
+  transform: rotateX(2deg) rotateY(-2deg) translateZ(10px);
+}
+
+/* ════════════════════════════════════════════
+   Chat Bubble — 金色流光边框
+   ════════════════════════════════════════════ */
+.baize-chat-bubble-glow {
+  position: relative;
+}
+
+.baize-chat-bubble-glow::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  background: linear-gradient(90deg, #1B4FD8, #C9A84C, #E8C870, #1B4FD8);
+  background-size: 300% 100%;
+  animation: flowing-light 4s linear infinite;
+  border-radius: inherit;
+  z-index: -1;
+  opacity: 0.4;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+}
+
+/* ════════════════════════════════════════════
+   Page Hero Header — 金色左侧光晕
+   ════════════════════════════════════════════ */
+.baize-hero {
+  padding: 32px 40px !important;
+  background:
+    linear-gradient(135deg, rgba(201, 168, 76, 0.08) 0%, rgba(27, 79, 216, 0.10) 60%, transparent 100%),
+    rgba(5, 12, 35, 0.45) !important;
+  border-bottom: 1px solid rgba(201, 168, 76, 0.12);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 32px;
+}
+
+.baize-hero-eyebrow {
+  color: var(--baize-gold);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  opacity: 0.9;
+}
+
+.baize-hero-title {
+  color: white !important;
+  font-size: 32px !important;
+  font-weight: 900 !important;
+  letter-spacing: -0.02em;
+  margin: 0 !important;
+  line-height: 1.2 !important;
+}
+
+.baize-hero-description {
+  color: var(--baize-text-muted);
+  font-size: 14px;
+  margin-top: 8px !important;
+  max-width: 600px;
+}
+
+.baize-hero-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* ════════════════════════════════════════════
+   Page Header Card
+   ════════════════════════════════════════════ */
+.baize-page-header {
+  margin-bottom: 24px !important;
+  background: var(--baize-surface-color) !important;
+  border: 1px solid rgba(201, 168, 76, 0.15) !important;
+}
+
+.baize-page-header .ant-card-body {
+  padding: 16px 24px !important;
+}
+
+.baize-page-header-content {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.baize-page-header-title {
+  margin: 0 !important;
+  font-size: 1.25rem !important;
+  font-weight: 600 !important;
+  color: var(--baize-text-main) !important;
+}
+
+.baize-page-header-description {
+  margin-top: 4px !important;
+  margin-bottom: 0 !important;
+  font-size: 0.875rem !important;
+  color: var(--baize-text-secondary) !important;
+}
+
+.baize-page-header-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* ════════════════════════════════════════════
+   Alert
+   ════════════════════════════════════════════ */
+.baize-alert {
+  background: rgba(5, 12, 35, 0.65) !important;
+  border: 1px solid rgba(201, 168, 76, 0.15) !important;
+  border-radius: 12px !important;
+  backdrop-filter: var(--baize-blur) !important;
+}
+
+.baize-alert-info {
+  border-left: 4px solid var(--baize-gold) !important;
+}
+
+.baize-alert-message {
+  color: white !important;
+  font-weight: 700 !important;
+}
+
+.baize-alert-description {
+  color: var(--baize-text-muted) !important;
+  font-size: 13px !important;
+}
+
+/* ════════════════════════════════════════════
+   Page Entrance Animation
+   ════════════════════════════════════════════ */
+@keyframes baize-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes baize-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.page-container {
+  animation: baize-fade-in-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ════════════════════════════════════════════
+   Item Card
+   ════════════════════════════════════════════ */
+.baize-item-card {
+  padding: 16px;
+  border: 1px solid var(--baize-border-color);
+  border-radius: var(--baize-card-radius-sm);
+  background: var(--baize-surface-subtle);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+}
+
+.baize-item-card:hover {
+  background: var(--baize-hover-bg);
+  border-color: var(--baize-border-strong);
+  transform: translateX(4px);
+}
+
+.baize-item-card.active {
+  border-color: var(--baize-selected-border);
+  background: var(--baize-selected-bg);
+}
+
+/* ════════════════════════════════════════════
+   Metric Card
+   ════════════════════════════════════════════ */
+.baize-metric-card {
+  background: rgba(10, 22, 60, 0.45) !important;
+  border: 1px solid var(--baize-border-color) !important;
+  border-radius: var(--baize-card-radius-sm) !important;
+  backdrop-filter: var(--baize-blur-sm) !important;
+  -webkit-backdrop-filter: var(--baize-blur-sm) !important;
+  padding: 20px !important;
+  transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+
+.baize-metric-card:hover {
+  transform: translateY(-4px);
+  box-shadow: inset 0 0 20px rgba(201, 168, 76, 0.06), var(--baize-shadow-sm), var(--baize-accent-glow) !important;
+  border-color: var(--baize-border-strong) !important;
+}
+
+/* ════════════════════════════════════════════
+   Status Dot
+   ════════════════════════════════════════════ */
+.baize-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.baize-status-dot.success { background: var(--baize-success); box-shadow: 0 0 8px var(--baize-success); }
+.baize-status-dot.warning { background: var(--baize-warning); box-shadow: 0 0 8px var(--baize-warning); }
+.baize-status-dot.error   { background: var(--baize-error);   box-shadow: 0 0 8px var(--baize-error); }
+.baize-status-dot.muted   { background: var(--baize-text-dim); }
+
+/* ════════════════════════════════════════════
+   Tabs — 金色激活指示条
+   ════════════════════════════════════════════ */
+.baize-tabs .baize-tabs-tab {
+  color: var(--baize-text-muted) !important;
+  transition: color 0.2s;
+}
+
+.baize-tabs .baize-tabs-tab-active {
+  color: var(--baize-gold-light) !important;
+  font-weight: 700 !important;
+}
+
+.baize-tabs .baize-tabs-ink-bar {
+  background: linear-gradient(90deg, var(--baize-gold), var(--baize-gold-light)) !important;
+  height: 3px !important;
+  border-radius: 3px !important;
+}
+
+/* ════════════════════════════════════════════
+   Divider
+   ════════════════════════════════════════════ */
+.baize-divider {
+  border-color: var(--baize-border-color) !important;
+}
+
+/* ════════════════════════════════════════════
+   Modal / Drawer
+   ════════════════════════════════════════════ */
+.baize-modal-content,
+.baize-drawer-content {
+  background-color: var(--baize-bg-color) !important;
+  color: var(--baize-text-main) !important;
+}
+
+.baize-modal-header,
+.baize-drawer-header {
+  background: transparent !important;
+  border-bottom: 1px solid var(--baize-border-color) !important;
+}
+
+.baize-modal-title,
+.baize-drawer-title {
+  color: var(--baize-text-main) !important;
+  font-weight: 700 !important;
+}
+
+.baize-modal-close,
+.baize-drawer-close {
+  color: var(--baize-text-muted) !important;
+}
+
+/* ════════════════════════════════════════════
+   Descriptions
+   ════════════════════════════════════════════ */
+.baize-descriptions-bordered .baize-descriptions-item-label {
+  background: rgba(5, 12, 35, 0.45) !important;
+  color: var(--baize-text-gold) !important;
+  border-color: var(--baize-border-color) !important;
+}
+
+.baize-descriptions-bordered .baize-descriptions-item-content {
+  color: var(--baize-text-secondary) !important;
+  border-color: var(--baize-border-color) !important;
+}
+
+/* ════════════════════════════════════════════
+   Popconfirm / Tooltip
+   ════════════════════════════════════════════ */
+.baize-popconfirm-inner,
+.baize-tooltip-inner {
+  background: rgba(5, 12, 35, 0.96) !important;
+  color: var(--baize-text-main) !important;
+  backdrop-filter: var(--baize-blur-sm) !important;
+  border: 1px solid var(--baize-border-color) !important;
+}
+
+/* ════════════════════════════════════════════
+   Select Dropdown
+   ════════════════════════════════════════════ */
+.baize-select-dropdown {
+  background: rgba(5, 12, 35, 0.96) !important;
+  backdrop-filter: var(--baize-blur-sm) !important;
+  border: 1px solid var(--baize-border-color) !important;
+}
+
+.baize-select-item {
+  color: var(--baize-text-secondary) !important;
+}
+
+.baize-select-item-option-active {
+  background: var(--baize-hover-bg) !important;
+}
+
+.baize-select-item-option-selected {
+  background: var(--baize-selected-bg) !important;
+  color: var(--baize-gold-light) !important;
+  font-weight: 600 !important;
+}
+
+/* ════════════════════════════════════════════
+   Empty / Spin / Form
+   ════════════════════════════════════════════ */
+.baize-empty-description {
+  color: var(--baize-text-dim) !important;
+}
+
+.baize-spin-dot-item {
+  background: var(--baize-gold) !important;
+}
+
+.baize-form-item-label > label {
+  color: var(--baize-text-secondary) !important;
+}

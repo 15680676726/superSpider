@@ -1,0 +1,371 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from fastapi.testclient import TestClient
+
+from copaw.app.runtime_center.task_review_projection import build_task_review_payload
+from copaw.evidence import EvidenceRecord, ReplayPointer
+from copaw.utils.runtime_routes import task_route
+
+from .runtime_center_api_parts.overview_governance import *  # noqa: F401,F403
+from .runtime_center_api_parts.detail_environment import *  # noqa: F401,F403
+from .runtime_center_api_parts.shared import build_runtime_center_app
+
+
+def test_task_review_projects_acceptance_closeout_visibility() -> None:
+    now = datetime(2026, 3, 27, 10, 0, tzinfo=timezone.utc)
+    payload = build_task_review_payload(
+        task=type(
+            "Task",
+            (),
+            {
+                "id": "task-acceptance-1",
+                "title": "Close seller portal verification loop",
+                "summary": "Verify the resumed seller session and capture replayable proof.",
+                "owner_agent_id": "ops-agent",
+                "status": "running",
+                "acceptance_criteria": '{"kind":"kernel-task-meta-v1"}',
+                "updated_at": now,
+            },
+        )(),
+        runtime=type(
+            "Runtime",
+            (),
+            {
+                "current_phase": "executing",
+                "last_result_summary": "Waiting for CAPTCHA clearance before resuming writer flow.",
+                "last_error_summary": None,
+                "updated_at": now,
+                "risk_level": "guarded",
+            },
+        )(),
+        decisions=[],
+        evidence=[
+            EvidenceRecord(
+                id="evidence-step-1",
+                task_id="task-acceptance-1",
+                actor_ref="ops-agent",
+                risk_level="guarded",
+                action_summary="Captured pre-handoff checkpoint",
+                result_summary="Seller portal state saved before human CAPTCHA takeover",
+                created_at=now,
+                metadata={
+                    "step_id": "checkpoint-1",
+                    "step_title": "Checkpoint before handoff",
+                    "verification_status": "blocked",
+                    "verification_reason": "captcha-required",
+                },
+                replay_pointers=(
+                    ReplayPointer(
+                        id="replay-step-1",
+                        replay_type="browser-session",
+                        storage_uri="file:///tmp/replay-step-1.json",
+                        summary="Replay the seller portal checkpoint",
+                        created_at=now,
+                    ),
+                ),
+            ),
+            EvidenceRecord(
+                id="evidence-step-2",
+                task_id="task-acceptance-1",
+                actor_ref="ops-agent",
+                risk_level="auto",
+                action_summary="Verified DOM anchor after resume",
+                result_summary="Header anchor confirmed after the session resumed",
+                created_at=now.replace(minute=5),
+                metadata={
+                    "step_id": "verify-1",
+                    "step_title": "Verify resumed page anchor",
+                    "verification_status": "passed",
+                },
+            ),
+        ],
+        execution_feedback={
+            "workspace_graph": {
+                "workspace_id": "workspace:copaw:main",
+                "handoff_checkpoint": {
+                    "state": "agent-attached",
+                    "reason": "captcha-required",
+                    "owner_ref": "human-operator:alice",
+                    "resume_kind": "host-companion-session",
+                    "verification_channel": "runtime-center-self-check",
+                    "checkpoint_ref": "checkpoint:captcha:jd-seller",
+                    "return_condition": "captcha-cleared",
+                },
+            },
+            "host_contract": {
+                "host_mode": "attach-existing-session",
+                "handoff_state": "agent-attached",
+                "verification_channel": "runtime-center-self-check",
+            },
+            "recovery": {
+                "status": "pending",
+                "mode": "resume-runtime",
+            },
+            "browser_site_contract": {
+                "browser_mode": "attach-existing-session",
+                "site_contract_status": "governed-handoff",
+                "last_verified_dom_anchor": "#seller-header",
+            },
+        },
+        child_results=[],
+        owner_agent={"name": "Ops Agent"},
+        task_route=task_route("task-acceptance-1"),
+    )
+
+    assert payload["continuity"]["handoff"]["state"] == "agent-attached"
+    assert payload["continuity"]["handoff"]["checkpoint_ref"] == "checkpoint:captcha:jd-seller"
+    assert payload["continuity"]["handoff"]["return_condition"] == "captcha-cleared"
+    assert payload["continuity"]["verification"]["channel"] == "runtime-center-self-check"
+    assert payload["continuity"]["verification"]["status"] == "blocked"
+    assert payload["continuity"]["verification"]["latest_anchor"] == "#seller-header"
+    assert payload["evidence_status"]["total_count"] == 2
+    assert payload["evidence_status"]["replayable_count"] == 1
+    assert payload["evidence_status"]["verified_count"] == 1
+    assert payload["evidence_status"]["task_evidence_route"] == (
+        "/api/runtime-center/evidence?task_id=task-acceptance-1"
+    )
+    assert payload["evidence_status"]["recent_steps"][0]["evidence_id"] == "evidence-step-2"
+    assert payload["evidence_status"]["recent_steps"][1]["replay_count"] == 1
+    assert payload["evidence_status"]["recent_steps"][1]["replay_route"] == (
+        "/api/runtime-center/replays/replay-step-1"
+    )
+    assert any("Handoff" in line for line in payload["summary_lines"])
+    assert any("Verification" in line for line in payload["summary_lines"])
+
+
+def test_task_review_normalizes_closeout_fallback_from_verification_payload() -> None:
+    now = datetime(2026, 3, 27, 11, 0, tzinfo=timezone.utc)
+    payload = build_task_review_payload(
+        task=type(
+            "Task",
+            (),
+            {
+                "id": "task-acceptance-2",
+                "title": "Review resumed seller portal acceptance closeout",
+                "summary": "Confirm the resumed seller portal is safe to continue.",
+                "owner_agent_id": "ops-agent",
+                "status": "completed",
+                "acceptance_criteria": '{"kind":"kernel-task-meta-v1"}',
+                "updated_at": now,
+            },
+        )(),
+        runtime=type(
+            "Runtime",
+            (),
+            {
+                "current_phase": "completed",
+                "last_result_summary": "Acceptance closeout recorded after resume.",
+                "last_error_summary": None,
+                "updated_at": now,
+                "risk_level": "auto",
+            },
+        )(),
+        decisions=[],
+        evidence=[
+            EvidenceRecord(
+                id="evidence-closeout-1",
+                task_id="task-acceptance-2",
+                actor_ref="ops-agent",
+                risk_level="auto",
+                action_summary="Review resumed seller portal acceptance closeout",
+                result_summary="Replayable acceptance proof saved for operator review",
+                created_at=now,
+                metadata={
+                    "checkpoint": {
+                        "id": "closeout-1",
+                        "title": "Review resumed seller portal acceptance closeout",
+                    },
+                    "verification": {
+                        "verified": True,
+                        "summary": "Seller portal anchor confirmed after resume",
+                    },
+                },
+                replay_pointers=(
+                    ReplayPointer(
+                        id="replay-closeout-1",
+                        replay_type="browser-session",
+                        storage_uri="file:///tmp/replay-closeout-1.json",
+                        summary="Replay the acceptance closeout proof",
+                        created_at=now,
+                    ),
+                ),
+            ),
+        ],
+        execution_feedback={},
+        child_results=[],
+        owner_agent={"name": "Ops Agent"},
+        task_route=task_route("task-acceptance-2"),
+    )
+
+    assert payload["continuity"]["verification"]["status"] == "passed"
+    assert payload["continuity"]["verification"]["reason"] == (
+        "Seller portal anchor confirmed after resume"
+    )
+    assert payload["evidence_status"]["verified_count"] == 1
+    assert payload["evidence_status"]["latest_replayable_evidence_id"] == "evidence-closeout-1"
+    assert payload["evidence_status"]["latest_replayable_evidence_route"] == (
+        "/api/runtime-center/evidence/evidence-closeout-1"
+    )
+    assert payload["evidence_status"]["latest_replayable_replay_route"] == (
+        "/api/runtime-center/replays/replay-closeout-1"
+    )
+    assert payload["evidence_status"]["recent_steps"][0]["step_id"] == "closeout-1"
+    assert payload["evidence_status"]["recent_steps"][0]["step_title"] == (
+        "Review resumed seller portal acceptance closeout"
+    )
+    assert payload["evidence_status"]["recent_steps"][0]["verification_status"] == "passed"
+    assert payload["evidence_status"]["recent_steps"][0]["verification_reason"] == (
+        "Seller portal anchor confirmed after resume"
+    )
+    assert any("Verification: passed" in line for line in payload["summary_lines"])
+
+
+def test_task_review_exposes_host_twin_and_prefers_it_for_runtime_guidance() -> None:
+    now = datetime(2026, 3, 27, 11, 30, tzinfo=timezone.utc)
+    payload = build_task_review_payload(
+        task=type(
+            "Task",
+            (),
+            {
+                "id": "task-host-twin-api-1",
+                "title": "Resume workbook writer from host twin",
+                "summary": "Recover the Orders workbook writing session.",
+                "owner_agent_id": "ops-agent",
+                "status": "running",
+                "acceptance_criteria": '{"kind":"kernel-task-meta-v1"}',
+                "updated_at": now,
+            },
+        )(),
+        runtime=type(
+            "Runtime",
+            (),
+            {
+                "current_phase": "executing",
+                "last_result_summary": "Workbook writer is paused for guarded recovery.",
+                "last_error_summary": None,
+                "updated_at": now,
+                "risk_level": "guarded",
+            },
+        )(),
+        decisions=[],
+        evidence=[],
+        execution_feedback={
+            "host_twin": {
+                "seat_owner": {
+                    "owner_ref": "human-operator:alice",
+                    "label": "Alice",
+                },
+                "writable_surfaces": [
+                    {
+                        "surface_ref": "window:excel:orders",
+                        "label": "Orders workbook",
+                    },
+                ],
+                "legal_recovery_path": {
+                    "mode": "resume-runtime",
+                    "summary": "resume-runtime via Orders workbook checkpoint",
+                },
+                "trusted_anchors": [
+                    {
+                        "anchor_ref": "excel://Orders!A1",
+                        "label": "Orders workbook row 1",
+                    },
+                ],
+                "active_blocker_families": [
+                    "modal-uac-login",
+                ],
+            },
+            "host_contract": {
+                "status": "blocked",
+                "blocked_reason": "legacy-host-blocker",
+                "handoff_state": "handoff-required",
+                "handoff_owner_ref": "agent:legacy-owner",
+            },
+            "recovery": {
+                "status": "pending",
+                "mode": "attach-environment",
+            },
+            "browser_site_contract": {
+                "verification_anchor": "#legacy-anchor",
+            },
+        },
+        child_results=[],
+        owner_agent={"name": "Ops Agent"},
+        task_route=task_route("task-host-twin-api-1"),
+    )
+
+    assert (
+        payload["execution_runtime"]["host_twin"]["seat_owner"]["owner_ref"]
+        == "human-operator:alice"
+    )
+    assert payload["continuity"]["handoff"]["owner_ref"] == "human-operator:alice"
+    assert payload["continuity"]["handoff"]["resume_kind"] == "resume-runtime"
+    assert payload["continuity"]["verification"]["latest_anchor"] == "excel://Orders!A1"
+    assert any("modal-uac-login" in line for line in payload["summary_lines"])
+    assert any("Orders workbook" in action for action in payload["next_actions"])
+    assert any("modal-uac-login" in risk for risk in payload["risks"])
+
+
+def test_runtime_center_evidence_endpoint_filters_by_task_id() -> None:
+    class FakeEvidenceQueryService:
+        def list_recent_records(self, limit: int = 20):
+            raise AssertionError("task_id filter should bypass list_recent_records")
+
+        def list_by_capability_ref(self, capability_ref: str, *, limit: int = 20):
+            raise AssertionError("task_id filter should bypass capability filtering")
+
+        def list_by_task(self, task_id: str, *, limit: int | None = None):
+            assert task_id == "task-1"
+            assert limit == 7
+            return [
+                type(
+                    "EvidenceRecord",
+                    (),
+                    {
+                        "id": "evidence-1",
+                        "task_id": "task-1",
+                        "actor_ref": "ops-agent",
+                        "environment_ref": "session:web:main",
+                        "capability_ref": "system:dispatch_query",
+                        "risk_level": "guarded",
+                        "action_summary": "Captured runtime checkpoint",
+                        "result_summary": "Checkpoint stored with replay pointer",
+                        "created_at": now,
+                        "status": "recorded",
+                        "input_digest": None,
+                        "output_digest": None,
+                        "metadata": {},
+                        "artifacts": (),
+                        "replay_pointers": (),
+                    },
+                )(),
+            ]
+
+        def serialize_record(self, record):
+            return {
+                "id": record.id,
+                "task_id": record.task_id,
+                "result_summary": record.result_summary,
+            }
+
+    now = datetime(2026, 3, 27, 10, 0, tzinfo=timezone.utc)
+    app = build_runtime_center_app()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+
+    client = TestClient(app)
+    response = client.get(
+        "/runtime-center/evidence",
+        params={"task_id": " task-1 ", "capability_ref": "ignored", "limit": 7},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": "evidence-1",
+            "task_id": "task-1",
+            "result_summary": "Checkpoint stored with replay pointer",
+        },
+    ]

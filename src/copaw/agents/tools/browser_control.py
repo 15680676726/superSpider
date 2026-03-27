@@ -1,0 +1,503 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+from . import browser_control_actions_core as browser_control_actions_core_module
+from .browser_control_shared import *  # noqa: F401,F403
+from .browser_control_actions_core import *  # noqa: F401,F403
+from .browser_control_actions_extended import *  # noqa: F401,F403
+
+
+_ORIGINAL_ATTACH_PAGE_LISTENERS = browser_control_actions_core_module._attach_page_listeners
+
+
+def _attach_page_listeners_with_downloads(page, page_id: str, session_id: str) -> None:
+    _ORIGINAL_ATTACH_PAGE_LISTENERS(page, page_id, session_id)
+    _attach_download_listener(page, page_id, session_id)
+
+
+if browser_control_actions_core_module._attach_page_listeners is not _attach_page_listeners_with_downloads:
+    browser_control_actions_core_module._attach_page_listeners = _attach_page_listeners_with_downloads
+
+
+async def browser_use(  # pylint: disable=R0911,R0912
+    action: str,
+    url: str = "",
+    page_id: str = "default",
+    session_id: str = "",
+    selector: str = "",
+    text: str = "",
+    code: str = "",
+    path: str = "",
+    wait: int = 0,
+    full_page: bool = False,
+    width: int = 0,
+    height: int = 0,
+    level: str = "info",
+    filename: str = "",
+    accept: bool = True,
+    prompt_text: str = "",
+    ref: str = "",
+    element: str = "",
+    paths_json: str = "",
+    fields_json: str = "",
+    key: str = "",
+    submit: bool = False,
+    slowly: bool = False,
+    include_static: bool = False,
+    screenshot_type: str = "png",
+    snapshot_filename: str = "",
+    double_click: bool = False,
+    button: str = "left",
+    modifiers_json: str = "",
+    start_ref: str = "",
+    end_ref: str = "",
+    start_selector: str = "",
+    end_selector: str = "",
+    start_element: str = "",
+    end_element: str = "",
+    values_json: str = "",
+    tab_action: str = "",
+    index: int = -1,
+    wait_time: float = 0,
+    text_gone: str = "",
+    frame_selector: str = "",
+    headed: bool = True,
+    profile_id: str = "",
+    entry_url: str = "",
+    persist_login_state: bool = False,
+    storage_state_path: str = "",
+) -> ToolResponse:
+    """Control browser (Playwright). Default opens a visible browser window.
+    Set headed=False with action=start to force background headless mode. Flow:
+    start, open(url),
+    snapshot to get refs, then click/type etc. with ref or selector. Use
+    page_id for multiple tabs.
+
+    Args:
+        action (str):
+            Required. Action type. Values: start, stop, open, navigate,
+            navigate_back, snapshot, screenshot, click, type, eval, evaluate,
+            resize, console_messages, network_requests, handle_dialog,
+            file_upload, fill_form, install, press_key, run_code, drag, hover,
+            select_option, tabs, wait_for, pdf, close.
+        url (str):
+            URL to open. Required for action=open or navigate.
+        page_id (str):
+            Page/tab identifier, default "default". Use different page_id for
+            multiple tabs.
+        selector (str):
+            CSS selector to locate element for click/type/hover etc. Prefer
+            ref when available.
+        text (str):
+            Text to type. Required for action=type.
+        code (str):
+            JavaScript code. Required for action=eval, evaluate, or run_code.
+        path (str):
+            File path for screenshot save or PDF export.
+        wait (int):
+            Milliseconds to wait after click. Used with action=click.
+        full_page (bool):
+            Whether to capture full page. Used with action=screenshot.
+        width (int):
+            Viewport width in pixels. Used with action=resize.
+        height (int):
+            Viewport height in pixels. Used with action=resize.
+        level (str):
+            Console log level filter, e.g. "info" or "error". Used with
+            action=console_messages.
+        filename (str):
+            Filename for saving logs or screenshot. Used with
+            console_messages, network_requests, screenshot.
+        accept (bool):
+            Whether to accept dialog (true) or dismiss (false). Used with
+            action=handle_dialog.
+        prompt_text (str):
+            Input for prompt dialog. Used with action=handle_dialog when
+            dialog is prompt.
+        ref (str):
+            Element ref from snapshot output; use for stable targeting. Prefer
+            ref for click/type/hover/screenshot/evaluate/select_option.
+        element (str):
+            Element description for evaluate etc. Prefer ref when available.
+        paths_json (str):
+            JSON array string of file paths. Used with action=file_upload.
+        fields_json (str):
+            JSON object string of form field name to value. Used with
+            action=fill_form.
+        key (str):
+            Key name, e.g. "Enter", "Control+a". Required for
+            action=press_key.
+        submit (bool):
+            Whether to submit (press Enter) after typing. Used with
+            action=type.
+        slowly (bool):
+            Whether to type character by character. Used with action=type.
+        include_static (bool):
+            Whether to include static resource requests. Used with
+            action=network_requests.
+        screenshot_type (str):
+            Screenshot format, "png" or "jpeg". Used with action=screenshot.
+        snapshot_filename (str):
+            File path to save snapshot output. Used with action=snapshot.
+        double_click (bool):
+            Whether to double-click. Used with action=click.
+        button (str):
+            Mouse button: "left", "right", or "middle". Used with
+            action=click.
+        modifiers_json (str):
+            JSON array of modifier keys, e.g. ["Shift","Control"]. Used with
+            action=click.
+        start_ref (str):
+            Drag start element ref. Used with action=drag.
+        end_ref (str):
+            Drag end element ref. Used with action=drag.
+        start_selector (str):
+            Drag start CSS selector. Used with action=drag.
+        end_selector (str):
+            Drag end CSS selector. Used with action=drag.
+        start_element (str):
+            Drag start element description. Used with action=drag.
+        end_element (str):
+            Drag end element description. Used with action=drag.
+        values_json (str):
+            JSON of option value(s) for select. Used with
+            action=select_option.
+        tab_action (str):
+            Tab action: list, new, close, or select. Required for
+            action=tabs.
+        index (int):
+            Tab index for tabs select, zero-based. Used with action=tabs.
+        wait_time (float):
+            Seconds to wait. Used with action=wait_for.
+        text_gone (str):
+            Wait until this text disappears from page. Used with
+            action=wait_for.
+        frame_selector (str):
+            iframe selector, e.g. "iframe#main". Set when operating inside
+            that iframe in snapshot/click/type etc.
+        headed (bool):
+            When True with action=start, launch a visible browser window
+            (non-headless). User can see the real browser. Default True.
+    """
+    action = (action or "").strip().lower()
+    if not action:
+        return _tool_response(
+            json.dumps(
+                {"ok": False, "error": "action required"},
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+
+    raw_session_id = str(session_id or "").strip()
+    resolved_session_id = _normalize_session_id(raw_session_id)
+    page_id = (page_id or "default").strip() or "default"
+    current = _current_page_id(resolved_session_id)
+    pages = _session_bucket("pages", resolved_session_id)
+    if page_id == "default" and current and current in pages:
+        page_id = current
+    if action != "stop":
+        _state["current_session_id"] = resolved_session_id
+
+    should_emit_evidence = action in _BROWSER_EVIDENCE_ACTIONS
+    started_at = _utc_now() if should_emit_evidence else None
+
+    async def _with_evidence(response: ToolResponse) -> ToolResponse:
+        if not should_emit_evidence or started_at is None:
+            return response
+        await _emit_browser_action_evidence(
+            action=action,
+            page_id=page_id,
+            response=response,
+            started_at=started_at,
+            url=(
+                url.strip()
+                if url and action in {"open", "navigate"}
+                else _invoke_browser_helper(
+                    _current_page_url,
+                    page_id,
+                    resolved_session_id,
+                )
+            ),
+            metadata={
+                "session_id": resolved_session_id,
+                "ref": ref or None,
+                "selector": selector or None,
+                "path": (path or filename) or None,
+                "fields_count": (
+                    len(_parse_json_param(fields_json, []))
+                    if action == "fill_form"
+                    else None
+                ),
+                "upload_paths": (
+                    _parse_json_param(paths_json, [])
+                    if action == "file_upload"
+                    else None
+                ),
+                "tab_action": tab_action if action == "tabs" else None,
+                "tab_index": index if action == "tabs" else None,
+                "full_page": full_page if action in {"screenshot", "take_screenshot"} else None,
+                "button": button if action == "click" else None,
+            },
+        )
+        return response
+
+    try:
+        if action == "start":
+            return await _invoke_browser_handler(
+                _action_start,
+                headed=headed,
+                session_id=resolved_session_id,
+                profile_id=profile_id,
+                entry_url=entry_url,
+                persist_login_state=persist_login_state,
+                storage_state_path=storage_state_path,
+            )
+        if action == "stop":
+            return await _invoke_browser_handler(
+                _action_stop,
+                session_id=resolved_session_id if raw_session_id else None,
+            )
+        if action == "open":
+            return await _with_evidence(
+                await _invoke_browser_handler(
+                    _action_open,
+                    url,
+                    page_id,
+                    resolved_session_id,
+                )
+            )
+        if action == "navigate":
+            return await _with_evidence(
+                await _invoke_browser_handler(
+                    _action_navigate,
+                    url,
+                    page_id,
+                    resolved_session_id,
+                )
+            )
+        if action == "navigate_back":
+            return await _invoke_browser_handler(
+                _action_navigate_back,
+                page_id,
+                resolved_session_id,
+            )
+        if action in ("screenshot", "take_screenshot"):
+            return await _with_evidence(
+                await _invoke_browser_handler(
+                    _action_screenshot,
+                    page_id,
+                    path or filename,
+                    full_page,
+                    screenshot_type,
+                    ref,
+                    element,
+                    frame_selector,
+                    resolved_session_id,
+                ),
+            )
+        if action == "snapshot":
+            return await _invoke_browser_handler(
+                _action_snapshot,
+                page_id,
+                snapshot_filename or filename,
+                frame_selector,
+                resolved_session_id,
+            )
+        if action == "click":
+            return await _with_evidence(
+                await _invoke_browser_handler(
+                    _action_click,
+                    page_id,
+                    selector,
+                    ref,
+                    element,
+                    wait,
+                    double_click,
+                    button,
+                    modifiers_json,
+                    frame_selector,
+                    resolved_session_id,
+                ),
+            )
+        if action == "type":
+            return await _invoke_browser_handler(
+                _action_type,
+                page_id,
+                selector,
+                ref,
+                element,
+                text,
+                submit,
+                slowly,
+                frame_selector,
+                resolved_session_id,
+            )
+        if action == "eval":
+            return await _invoke_browser_handler(
+                _action_eval,
+                page_id,
+                code,
+                resolved_session_id,
+            )
+        if action == "evaluate":
+            return await _invoke_browser_handler(
+                _action_evaluate,
+                page_id,
+                code,
+                ref,
+                element,
+                frame_selector,
+                resolved_session_id,
+            )
+        if action == "resize":
+            return await _invoke_browser_handler(
+                _action_resize,
+                page_id,
+                width,
+                height,
+                resolved_session_id,
+            )
+        if action == "console_messages":
+            return await _invoke_browser_handler(
+                _action_console_messages,
+                page_id,
+                level,
+                filename or path,
+                resolved_session_id,
+            )
+        if action == "handle_dialog":
+            return await _invoke_browser_handler(
+                _action_handle_dialog,
+                page_id,
+                accept,
+                prompt_text,
+                resolved_session_id,
+            )
+        if action == "file_upload":
+            return await _with_evidence(
+                await _invoke_browser_handler(
+                    _action_file_upload,
+                    page_id,
+                    paths_json,
+                    resolved_session_id,
+                )
+            )
+        if action == "fill_form":
+            return await _with_evidence(
+                await _invoke_browser_handler(
+                    _action_fill_form,
+                    page_id,
+                    fields_json,
+                    resolved_session_id,
+                )
+            )
+        if action == "install":
+            return await _invoke_browser_handler(_action_install)
+        if action == "press_key":
+            return await _invoke_browser_handler(
+                _action_press_key,
+                page_id,
+                key,
+                resolved_session_id,
+            )
+        if action == "network_requests":
+            return await _invoke_browser_handler(
+                _action_network_requests,
+                page_id,
+                include_static,
+                filename or path,
+                resolved_session_id,
+            )
+        if action == "run_code":
+            return await _invoke_browser_handler(
+                _action_run_code,
+                page_id,
+                code,
+                resolved_session_id,
+            )
+        if action == "drag":
+            return await _invoke_browser_handler(
+                _action_drag,
+                page_id,
+                start_ref,
+                end_ref,
+                start_selector,
+                end_selector,
+                start_element,
+                end_element,
+                frame_selector,
+                resolved_session_id,
+            )
+        if action == "hover":
+            return await _invoke_browser_handler(
+                _action_hover,
+                page_id,
+                ref,
+                element,
+                selector,
+                frame_selector,
+                resolved_session_id,
+            )
+        if action == "select_option":
+            return await _invoke_browser_handler(
+                _action_select_option,
+                page_id,
+                ref,
+                element,
+                values_json,
+                frame_selector,
+                resolved_session_id,
+            )
+        if action == "tabs":
+            return await _with_evidence(
+                await _invoke_browser_handler(
+                    _action_tabs,
+                    page_id,
+                    tab_action,
+                    index,
+                    resolved_session_id,
+                )
+            )
+        if action == "wait_for":
+            return await _invoke_browser_handler(
+                _action_wait_for,
+                page_id,
+                wait_time,
+                text,
+                text_gone,
+                resolved_session_id,
+            )
+        if action == "pdf":
+            return await _with_evidence(
+                await _invoke_browser_handler(
+                    _action_pdf,
+                    page_id,
+                    path,
+                    resolved_session_id,
+                )
+            )
+        if action == "close":
+            return await _invoke_browser_handler(
+                _action_close,
+                page_id,
+                resolved_session_id,
+            )
+        return _tool_response(
+            json.dumps(
+                {"ok": False, "error": f"Unknown action: {action}"},
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+    except Exception as e:
+        logger.error("Browser tool error: %s", e, exc_info=True)
+        return _tool_response(
+            json.dumps(
+                {"ok": False, "error": str(e)},
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+
+

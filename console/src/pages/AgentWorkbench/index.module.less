@@ -1,0 +1,77 @@
+﻿.agentSwitcherGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+.agentSwitcherCard {
+  height: 100%;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.agentSwitcherCard:hover {
+  transform: translateY(-2px);
+}
+
+.agentSwitcherCardSelected {
+  border-color: rgba(27, 79, 216, 0.68) !important;
+  box-shadow:
+    var(--baize-surface-glow),
+    0 0 0 1px rgba(27, 79, 216, 0.2),
+    var(--baize-shadow) !important;
+}
+
+.agentSwitcherCard :global(.ant-card-body) {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 104px;
+}
+
+.agentSwitcherHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agentSwitcherIcon {
+  color: var(--baize-text-secondary);
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.agentSwitcherName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--baize-text-main);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+@media (min-width: 640px) {
+  .agentSwitcherGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 900px) {
+  .agentSwitcherGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1120px) {
+  .agentSwitcherGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1360px) {
+  .agentSwitcherGrid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
