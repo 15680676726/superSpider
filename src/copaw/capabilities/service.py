@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from ..config import load_config, save_config
 from ..evidence import EvidenceLedger, EvidenceRecord
 from .capability_discovery import CapabilityDiscoveryService
-from .catalog import CapabilityCatalogFacade
+from .catalog import CapabilityCatalogFacade, summarize_capability_mounts
 from .execution import CapabilityExecutionFacade
 from .models import CapabilityMount, CapabilitySummary
 from .registry import CapabilityRegistry
@@ -52,6 +52,7 @@ class CapabilityService:
         industry_service: object | None = None,
         skill_service: CapabilitySkillService | None = None,
         state_store: "SQLiteStateStore | None" = None,
+        environment_service: object | None = None,
     ) -> None:
         self._registry = registry or CapabilityRegistry()
         self._evidence_ledger = evidence_ledger
@@ -72,6 +73,7 @@ class CapabilityService:
         self._industry_service = industry_service
         self._skill_service = skill_service or default_skill_service
         self._state_store = state_store
+        self._environment_service = environment_service
 
         self._catalog = CapabilityCatalogFacade(
             registry=self._registry,
@@ -108,6 +110,7 @@ class CapabilityService:
             actor_mailbox_service=self._actor_mailbox_service,
             actor_supervisor=self._actor_supervisor,
             capability_discovery_service=self._discovery_service,
+            environment_service=self._environment_service,
         )
         self._execution = CapabilityExecutionFacade(
             get_capability_fn=self.get_capability,
@@ -139,6 +142,15 @@ class CapabilityService:
     ) -> list[CapabilityMount]:
         return self._catalog.list_public_capabilities(kind=kind, enabled_only=enabled_only)
 
+    def list_public_capability_inventory(
+        self,
+        *,
+        kind: str | None = None,
+        enabled_only: bool = False,
+    ) -> tuple[list[CapabilityMount], CapabilitySummary]:
+        mounts = self.list_public_capabilities(kind=kind, enabled_only=enabled_only)
+        return mounts, summarize_capability_mounts(mounts)
+
     def get_capability(self, capability_id: str) -> CapabilityMount | None:
         return self._catalog.get_capability(capability_id)
 
@@ -149,7 +161,8 @@ class CapabilityService:
         return self._catalog.summarize()
 
     def summarize_public(self) -> CapabilitySummary:
-        return self._catalog.summarize_public()
+        _mounts, summary = self.list_public_capability_inventory()
+        return summary
 
     def get_discovery_service(self) -> CapabilityDiscoveryService:
         return self._discovery_service
@@ -239,6 +252,10 @@ class CapabilityService:
     def set_actor_supervisor(self, actor_supervisor: object | None) -> None:
         self._actor_supervisor = actor_supervisor
         self._system_handler.set_actor_supervisor(actor_supervisor)
+
+    def set_environment_service(self, environment_service: object | None) -> None:
+        self._environment_service = environment_service
+        self._system_handler.set_environment_service(environment_service)
 
     def list_accessible_capabilities(
         self,

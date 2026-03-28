@@ -52,6 +52,7 @@ import {
 } from "./runtimeDiagnostics";
 import sessionApi from "./sessionApi";
 import { ChatComposerAdapter } from "./ChatComposerAdapter";
+import { ChatHumanAssistPanel } from "./ChatHumanAssistPanel";
 import { ChatRuntimeSidebar } from "./ChatRuntimeSidebar";
 import { useChatMedia } from "./useChatMedia";
 import { useChatRuntimeState } from "./useChatRuntimeState";
@@ -552,6 +553,10 @@ export default function ChatPage() {
             runtimeHealthNotice={runtimeHealthNotice}
             approvalButtonLabel={approvalButtonLabel}
             onOpenGovernanceApprovals={openGovernanceApprovals}
+          />
+          <ChatHumanAssistPanel
+            activeChatThreadId={activeChatThreadId}
+            threadMeta={threadMeta}
           />
 
           {/* 错误提示 */}

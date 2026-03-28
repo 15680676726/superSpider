@@ -128,6 +128,53 @@ class FakeCapabilityService(CapabilityService):
         ]
 
 
+class DriftingCapabilityService(FakeCapabilityService):
+    """Simulate a registry that changes between independent reads."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._public_read_count = 0
+
+    def list_public_capabilities(
+        self,
+        *,
+        kind: str | None = None,
+        enabled_only: bool = False,
+    ):
+        self._public_read_count += 1
+        mounts = super().list_capabilities(kind=kind, enabled_only=enabled_only)
+        public_mounts = [mount for mount in mounts if mount.source_kind != "system"]
+        if self._public_read_count >= 2:
+            public_mounts.append(
+                CapabilityMount(
+                    id="mcp:filesystem-drifted",
+                    name="Filesystem Drifted",
+                    summary="A late-arriving capability should not desync the overview snapshot.",
+                    kind="remote-mcp",
+                    source_kind="mcp",
+                    risk_level="guarded",
+                ),
+            )
+        return public_mounts
+
+    def summarize_public(self) -> CapabilitySummary:
+        mounts = self.list_public_capabilities()
+        by_kind: dict[str, int] = {}
+        by_source: dict[str, int] = {}
+        enabled = 0
+        for mount in mounts:
+            by_kind[mount.kind] = by_kind.get(mount.kind, 0) + 1
+            by_source[mount.source_kind] = by_source.get(mount.source_kind, 0) + 1
+            if mount.enabled:
+                enabled += 1
+        return CapabilitySummary(
+            total=len(mounts),
+            enabled=enabled,
+            by_kind=by_kind,
+            by_source=by_source,
+        )
+
+
 class FakeMcpRegistryCatalog:
     def __init__(self) -> None:
         self.catalog_version = "1.0.0"
@@ -363,6 +410,25 @@ def test_capability_market_overview_aggregates_existing_sources() -> None:
         payload["routes"]["install_templates"]
         == "/api/capability-market/install-templates"
     )
+
+
+def test_capability_market_overview_uses_one_public_snapshot_for_summary() -> None:
+    app = FastAPI()
+    app.include_router(capability_market_router)
+    app.state.capability_service = DriftingCapabilityService()
+    app.state.mcp_registry_catalog = FakeMcpRegistryCatalog()
+    client = TestClient(app)
+
+    response = client.get("/capability-market/overview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["total"] == len(payload["installed"])
+    assert payload["summary"]["by_kind"] == {"skill-bundle": 1}
+    assert payload["summary"]["by_source"] == {
+        "skill": 1,
+    }
+    assert [item["id"] for item in payload["installed"]] == ["skill:research"]
     assert (
         payload["routes"]["curated_catalog"]
         == "/api/capability-market/curated-catalog"

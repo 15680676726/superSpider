@@ -684,6 +684,233 @@
   cursor: not-allowed;
 }
 
+.humanAssistStrip {
+  margin: 8px 12px 0;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(201, 168, 76, 0.16);
+  background:
+    linear-gradient(135deg, rgba(201, 168, 76, 0.1), rgba(27, 79, 216, 0.07)),
+    rgba(4, 10, 28, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.humanAssistStripIdle {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(4, 10, 28, 0.62);
+}
+
+.humanAssistStripActive {
+  box-shadow:
+    0 0 0 1px rgba(201, 168, 76, 0.04) inset,
+    0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.humanAssistStripMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.humanAssistStripBadge {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(201, 168, 76, 0.14);
+  border: 1px solid rgba(201, 168, 76, 0.24);
+  color: #d6b460;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.humanAssistStripBody {
+  min-width: 0;
+  flex: 1;
+}
+
+.humanAssistStripTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.humanAssistStripTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--baize-text-main);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.humanAssistStripSummary {
+  color: var(--baize-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.humanAssistStripActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.humanAssistModalLayout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 18px;
+  min-height: 460px;
+}
+
+.humanAssistTaskList,
+.humanAssistDetailPane {
+  min-height: 0;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(3, 7, 20, 0.48);
+  padding: 14px;
+}
+
+.humanAssistSectionTitle {
+  margin-bottom: 12px;
+  color: var(--baize-text-main);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.humanAssistTaskListInner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 560px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.humanAssistTaskCard {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    background 0.18s ease;
+}
+
+.humanAssistTaskCard:hover {
+  border-color: rgba(201, 168, 76, 0.28);
+  background: rgba(201, 168, 76, 0.06);
+  transform: translateY(-1px);
+}
+
+.humanAssistTaskCardActive {
+  border-color: rgba(201, 168, 76, 0.42);
+  background: rgba(201, 168, 76, 0.08);
+  box-shadow: 0 0 0 1px rgba(201, 168, 76, 0.08) inset;
+}
+
+.humanAssistTaskCardTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.humanAssistTaskCardTitle {
+  color: var(--baize-text-main);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.humanAssistTaskCardSummary {
+  color: var(--baize-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.humanAssistTaskCardMeta {
+  margin-top: 8px;
+  color: var(--baize-text-muted);
+  font-size: 11px;
+}
+
+.humanAssistDetailBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.humanAssistDetailHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.humanAssistDetailTitle {
+  color: var(--baize-text-main);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.humanAssistDetailSubtitle {
+  margin-top: 6px;
+  color: var(--baize-text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.humanAssistDetailGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.humanAssistDetailBlock {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.humanAssistDetailLabel {
+  margin-bottom: 8px;
+  color: var(--baize-text-muted);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.humanAssistDetailValue {
+  color: var(--baize-text-main);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.humanAssistMuted {
+  color: var(--baize-text-muted);
+  font-size: 12px;
+}
+
 /* ================================================================
    旧类名兼容（保留空壳避免 module 报错）
    ================================================================ */
@@ -748,6 +975,25 @@
    响应式
    ================================================================ */
 @media (max-width: 768px) {
+  .humanAssistStrip {
+    margin: 6px 6px 0;
+    padding: 12px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .humanAssistStripActions {
+    justify-content: flex-end;
+  }
+
+  .humanAssistModalLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .humanAssistDetailGrid {
+    grid-template-columns: 1fr;
+  }
+
   .topBar {
     padding: 0 12px;
     gap: 8px;

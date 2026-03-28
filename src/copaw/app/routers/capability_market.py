@@ -804,9 +804,9 @@ def _template_to_install_template_response(
 @router.get("/overview", response_model=dict[str, object])
 async def get_capability_market_overview(request: Request) -> dict[str, object]:
     service = _get_capability_service(request)
-    capabilities = service.list_public_capabilities()
+    capabilities, summary = service.list_public_capability_inventory()
     return {
-        "summary": service.summarize_public().model_dump(mode="json"),
+        "summary": summary.model_dump(mode="json"),
         "installed": [mount.model_dump(mode="json") for mount in capabilities],
         "skills": service.list_skill_specs(),
         "available_skills": service.list_available_skill_specs(),

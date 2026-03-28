@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from copaw.app.crons.heartbeat import run_heartbeat_once
 from copaw.app.runtime_lifecycle import (
     RuntimeRestartCoordinator,
+    _should_run_host_recovery,
     _should_run_operating_cycle,
     _should_run_learning_strategy,
     automation_interval_seconds,
@@ -48,6 +49,7 @@ async def test_start_automation_tasks_creates_named_tasks() -> None:
     )
 
     assert {task.get_name() for task in tasks} == {
+        "copaw-automation-host-recovery",
         "copaw-automation-operating-cycle",
         "copaw-automation-learning-strategy",
     }
@@ -199,6 +201,20 @@ def test_should_run_operating_cycle_uses_service_preflight() -> None:
 
     assert allowed is False
     assert reason == "open-backlog-drained"
+
+
+def test_should_run_host_recovery_uses_service_preflight() -> None:
+    allowed, reason = _should_run_host_recovery(
+        SimpleNamespace(
+            should_run_host_recovery=lambda **_kwargs: (
+                False,
+                "no-actionable-host-events",
+            ),
+        ),
+    )
+
+    assert allowed is False
+    assert reason == "no-actionable-host-events"
 
 
 @pytest.mark.asyncio

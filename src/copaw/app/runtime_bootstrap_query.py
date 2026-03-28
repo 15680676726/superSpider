@@ -49,6 +49,7 @@ def build_runtime_query_services(
     repositories: RuntimeRepositories,
     evidence_ledger: EvidenceLedger,
     runtime_event_bus: RuntimeEventBus,
+    human_assist_task_service: object | None = None,
     environment_service: EnvironmentService | None = None,
 ) -> RuntimeQueryServices:
     qmd_backend = QmdRecallBackend(config=QmdBackendConfig.from_env())
@@ -64,6 +65,7 @@ def build_runtime_query_services(
         work_context_repository=repositories.work_context_repository,
         decision_request_repository=repositories.decision_request_repository,
         evidence_ledger=evidence_ledger,
+        human_assist_task_service=human_assist_task_service,
         runtime_event_bus=runtime_event_bus,
         environment_service=environment_service,
     )

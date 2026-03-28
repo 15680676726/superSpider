@@ -85,6 +85,7 @@
 - `Goal`
 - `Agent`
 - `Task`
+- `HumanAssistTask`
 - `TaskRuntime`
 - `RuntimeFrame`
 - `CapabilityMount`
@@ -127,6 +128,7 @@
 - `Goal`
 - `Agent`
 - `Task`
+- `HumanAssistTask`
 - `TaskRuntime`
 - `RuntimeFrame`
 - `EnvironmentMount`
@@ -166,10 +168,13 @@
 - `BacklogItem 1 -> 0..N OperatingCycle`
 - `OperatingCycle 1 -> N Assignment`
 - `Assignment 1 -> N Task`
+- `Assignment 1 -> 0..N HumanAssistTask`
 - `Assignment 1 -> N AgentReport`
 - `WorkContext 1 -> N Task`
 - `Goal 1 -> N Task`
 - `Agent 1 -> N Task`
+- `Task 1 -> 0..N HumanAssistTask`
+- `HumanAssistTask 1 -> N EvidenceRecord`
 - `Task 1 -> 1 TaskRuntime`
 - `Task 1 -> N EvidenceRecord`
 - `Task 1 -> N DecisionRequest`
@@ -351,6 +356,76 @@
 - `completed`
 - `failed`
 - `cancelled`
+
+---
+
+## 5.3a `HumanAssistTask`
+
+### 定义
+
+`HumanAssistTask` 表示系统执行链上一个“必须由宿主补一段”的正式协作任务。它只用于
+`blocked-by-proof / human-owned checkpoint`，不是泛提醒，也不是第二聊天线程。
+
+### 稳定核心字段
+
+- `id`
+- `industry_instance_id`
+- `assignment_id`
+- `chat_thread_id`
+- `title`
+- `summary`
+- `task_type`
+- `required_action`
+- `status`
+- `submission_mode`
+- `acceptance_mode`
+- `acceptance_spec`
+- `resume_checkpoint_ref`
+- `issued_at`
+- `updated_at`
+
+### 建议字段
+
+- `reason_code`
+- `reason_summary`
+- `block_evidence_refs`
+- `submission_evidence_refs`
+- `verification_evidence_refs`
+- `reward_preview`
+- `reward_result`
+- `submitted_at`
+- `verified_at`
+- `closed_at`
+- `expires_at`
+
+### 待验证字段
+
+- `issuer_agent_id`
+- `owner_scope`
+- `host_hint`
+- `verification_window_seconds`
+
+### 状态建议
+
+- `created`
+- `issued`
+- `in_progress`
+- `submitted`
+- `verifying`
+- `accepted`
+- `resume_queued`
+- `closed`
+- `rejected`
+- `expired`
+- `cancelled`
+- `handoff_blocked`
+
+### 验收补充
+
+- 没有 `acceptance_spec` 不允许发布
+- 用户说“我完成了”只表示进入验证，不表示直接通过
+- 验收优先读取 `EvidenceRecord / EnvironmentMount / SessionMount / Runtime projection`
+- 奖励只在通过验收后正式写回
 
 ---
 
@@ -1926,6 +2001,7 @@ Persistence/query landing:
 - `OperatingCycleRecord`
 - `AssignmentRecord`
 - `AgentReportRecord`
+- `HumanAssistTaskRecord`
 
 ### 13.5 前端同步要求
 

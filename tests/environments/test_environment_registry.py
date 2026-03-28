@@ -1474,7 +1474,10 @@ def test_environment_and_session_detail_expose_execution_contract_projections(tm
 
     assert environment_detail is not None
     assert session_detail is not None
-    assert environment_detail["browser_site_contract"]["browser_mode"] == "tab-attached"
+    assert (
+        environment_detail["browser_site_contract"]["browser_mode"]
+        == "attach-existing-session"
+    )
     assert (
         environment_detail["browser_site_contract"]["active_tab_ref"]
         == "page:jd:seller-center:home"

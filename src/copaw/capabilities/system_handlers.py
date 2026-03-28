@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import inspect
 from typing import Any, Callable
 
 from .skill_service import CapabilitySkillService
@@ -69,6 +70,7 @@ class SystemCapabilityHandler:
         actor_mailbox_service: object | None = None,
         actor_supervisor: object | None = None,
         capability_discovery_service: object | None = None,
+        environment_service: object | None = None,
     ) -> None:
         self._dispatch = SystemDispatchFacade(
             channel_manager=channel_manager,
@@ -110,6 +112,7 @@ class SystemCapabilityHandler:
         self._learning = SystemLearningCapabilityFacade(
             learning_service=learning_service,
         )
+        self._environment_service = environment_service
 
     def set_channel_manager(self, channel_manager: object | None) -> None:
         self._dispatch.set_channel_manager(channel_manager)
@@ -153,6 +156,9 @@ class SystemCapabilityHandler:
         capability_discovery_service: object | None,
     ) -> None:
         self._discovery.set_capability_discovery_service(capability_discovery_service)
+
+    def set_environment_service(self, environment_service: object | None) -> None:
+        self._environment_service = environment_service
 
     def set_actor_mailbox_service(self, actor_mailbox_service: object | None) -> None:
         self._actor.set_actor_mailbox_service(actor_mailbox_service)
@@ -203,6 +209,9 @@ class SystemCapabilityHandler:
         if capability_id == "system:run_operating_cycle":
             return await self._team.handle_run_operating_cycle(resolved_payload)
 
+        if capability_id == "system:run_host_recovery":
+            return await self._execute_host_recovery(resolved_payload)
+
         if capability_id in {"system:dispatch_goal", "system:dispatch_active_goals"}:
             return await self._team.handle_goal_dispatch(capability_id, resolved_payload)
 
@@ -219,6 +228,53 @@ class SystemCapabilityHandler:
             return self._execute_config_capability(capability_id, resolved_payload)
 
         return self._learning.execute(capability_id, resolved_payload)
+
+    async def _execute_host_recovery(
+        self,
+        resolved_payload: dict[str, object],
+    ) -> dict[str, object]:
+        if self._environment_service is None:
+            return {"success": False, "error": "Environment service is not available"}
+        runner = getattr(self._environment_service, "run_host_recovery_cycle", None)
+        if not callable(runner):
+            return {
+                "success": False,
+                "error": "Environment service cannot run host recovery",
+            }
+        result = runner(
+            limit=(
+                int(resolved_payload["limit"])
+                if isinstance(resolved_payload.get("limit"), int)
+                else None
+            ),
+            allow_cross_process_recovery=bool(
+                resolved_payload.get("allow_cross_process_recovery", False),
+            ),
+            actor=(
+                str(resolved_payload.get("actor")).strip()
+                if isinstance(resolved_payload.get("actor"), str)
+                and str(resolved_payload.get("actor")).strip()
+                else "system:automation"
+            ),
+            source=(
+                str(resolved_payload.get("source")).strip()
+                if isinstance(resolved_payload.get("source"), str)
+                and str(resolved_payload.get("source")).strip()
+                else None
+            ),
+        )
+        if inspect.isawaitable(result):
+            result = await result
+        host_recovery = result if isinstance(result, dict) else {}
+        executed = int(host_recovery.get("executed") or 0)
+        return {
+            "success": True,
+            "summary": f"Host recovery processed {executed} actionable event(s).",
+            "host_recovery": host_recovery,
+            "evidence_metadata": {
+                "host_recovery": host_recovery,
+            },
+        }
 
     def _execute_skill_capability(
         self,

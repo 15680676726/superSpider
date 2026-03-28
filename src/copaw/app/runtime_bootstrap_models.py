@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from ..routines import RoutineService
     from ..sop_kernel import FixedSopService
     from ..state import SQLiteStateStore
+    from ..state.human_assist_task_service import HumanAssistTaskService
     from ..state.main_brain_service import (
         AgentReportService,
         AssignmentService,
@@ -67,6 +68,7 @@ if TYPE_CHECKING:
         SqliteGoalOverrideRepository,
         SqliteGoalRepository,
         SqliteGovernanceControlRepository,
+        SqliteHumanAssistTaskRepository,
         SqliteIndustryInstanceRepository,
         SqliteKnowledgeChunkRepository,
         SqliteMediaAnalysisRepository,
@@ -115,6 +117,7 @@ class RuntimeRepositories:
     bootstrap_schedule_repository: SqliteScheduleRepository
     schedule_repository: SqliteScheduleRepository
     goal_repository: SqliteGoalRepository
+    human_assist_task_repository: SqliteHumanAssistTaskRepository
     work_context_repository: SqliteWorkContextRepository
     decision_request_repository: SqliteDecisionRequestRepository
     governance_control_repository: SqliteGovernanceControlRepository
@@ -169,6 +172,7 @@ class RuntimeBootstrap:
     provider_manager: ProviderManager
     state_query_service: RuntimeCenterStateQueryService
     evidence_query_service: RuntimeCenterEvidenceQueryService
+    human_assist_task_service: HumanAssistTaskService
     strategy_memory_service: StateStrategyMemoryService
     work_context_service: WorkContextService
     knowledge_service: StateKnowledgeService

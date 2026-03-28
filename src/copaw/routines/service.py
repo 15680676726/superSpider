@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -51,6 +53,17 @@ RETIRED_SOP_ENGINE_KIND = "n8n-sop"
 RETIRED_SOP_MIGRATION_MESSAGE = (
     "Legacy routine engine 'n8n-sop' has been retired; migrate this flow to /api/fixed-sops bindings instead."
 )
+_DESKTOP_DOCUMENT_FAMILY_BY_SUFFIX = {
+    ".csv": "spreadsheets",
+    ".doc": "documents",
+    ".docx": "documents",
+    ".ppt": "presentations",
+    ".pptx": "presentations",
+    ".tsv": "spreadsheets",
+    ".xls": "spreadsheets",
+    ".xlsm": "spreadsheets",
+    ".xlsx": "spreadsheets",
+}
 
 
 def _utc_now() -> datetime:
@@ -1143,18 +1156,27 @@ class RoutineService:
         host = WindowsDesktopHost()
         evidence_ids: list[str] = []
         verification_chain: list[dict[str, Any]] = []
+        execution_path_chain: list[dict[str, Any]] = []
         lock_leases: list[Any] = []
         try:
             lock_leases = self._acquire_desktop_locks(routine=routine, run=run)
             output_lines: list[str] = []
             for index, contract in enumerate(list(routine.action_contract or []), start=1):
                 action = str(contract.get("action") or "").strip()
-                result = self._execute_desktop_action(host=host, action=action, contract=contract)
+                result = await self._execute_desktop_action_with_environment_path(
+                    host=host,
+                    action=action,
+                    contract=contract,
+                    routine=routine,
+                    run=run,
+                    session_mount_id=session_lease.id,
+                )
                 verification = self._verify_desktop_step(
                     action=action,
                     contract=contract,
                     result=result,
                 )
+                execution_path = self._mapping(result.get("execution_path"))
                 result_summary = str(
                     result.get("message")
                     or result.get("summary")
@@ -1184,6 +1206,13 @@ class RoutineService:
                 )
                 if persisted.id is not None:
                     evidence_ids.append(persisted.id)
+                execution_path_chain.append(
+                    {
+                        "step": index,
+                        "action": action,
+                        **execution_path,
+                    },
+                )
                 verification_chain.append(
                     {
                         "step": index,
@@ -1227,6 +1256,7 @@ class RoutineService:
                 "deterministic_result": "desktop-replay-complete",
                 "metadata": {
                     "lock_scope": self._derive_desktop_lock_scope(routine),
+                    "execution_paths": execution_path_chain,
                     "verification_summary": self._build_verification_summary(
                         routine=routine,
                         verification_chain=verification_chain,
@@ -2089,6 +2119,300 @@ class RoutineService:
                 encoding=_string(contract.get("encoding")) or "utf-8",
             )
         raise _RoutineFailure("executor-unavailable", f"Desktop routine action '{action}' is not supported")
+
+    async def _execute_desktop_action_with_environment_path(
+        self,
+        *,
+        host: WindowsDesktopHost,
+        action: str,
+        contract: dict[str, Any],
+        routine: ExecutionRoutineRecord,
+        run: RoutineRunRecord,
+        session_mount_id: str,
+    ) -> dict[str, Any]:
+        is_document_action = action in {"write_document_file", "edit_document_file"}
+        document_family = self._desktop_document_family(contract) if is_document_action else None
+        host_executor = lambda **_kwargs: self._execute_desktop_action(  # noqa: E731
+            host=host,
+            action=action,
+            contract=contract,
+        )
+        if is_document_action:
+            executor = getattr(self._environment_service, "execute_document_action", None)
+            if callable(executor):
+                return await self._execute_environment_desktop_action(
+                    executor=executor,
+                    action=action,
+                    contract=contract,
+                    routine=routine,
+                    run=run,
+                    session_mount_id=session_mount_id,
+                    host_executor=host_executor,
+                    document_family=document_family,
+                )
+        else:
+            executor = getattr(self._environment_service, "execute_windows_app_action", None)
+            if callable(executor):
+                return await self._execute_environment_desktop_action(
+                    executor=executor,
+                    action=action,
+                    contract=contract,
+                    routine=routine,
+                    run=run,
+                    session_mount_id=session_mount_id,
+                    host_executor=host_executor,
+                    document_family=None,
+                )
+        execution_path = self._desktop_execution_path_ui_fallback(
+            self._resolve_desktop_execution_path(
+                action=action,
+                contract=contract,
+                session_mount_id=session_mount_id,
+            ),
+            reason="EnvironmentService executable surface control is not available.",
+        )
+        result = self._execute_desktop_action(host=host, action=action, contract=contract)
+        return self._desktop_result_with_execution_path(
+            result=result,
+            execution_path=execution_path,
+        )
+
+    async def _execute_environment_desktop_action(
+        self,
+        *,
+        executor: object,
+        action: str,
+        contract: dict[str, Any],
+        routine: ExecutionRoutineRecord,
+        run: RoutineRunRecord,
+        session_mount_id: str,
+        host_executor: object,
+        document_family: str | None,
+    ) -> dict[str, Any]:
+        try:
+            executor_kwargs = {
+                "session_mount_id": session_mount_id,
+                "action": action,
+                "contract": dict(contract),
+                "host_executor": host_executor,
+            }
+            if document_family is not None:
+                executor_kwargs["document_family"] = document_family
+            result = executor(**executor_kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:
+            failing_execution_path = self._resolve_desktop_execution_path(
+                action=action,
+                contract=contract,
+                session_mount_id=session_mount_id,
+            )
+            summary = _string(exc) or exc.__class__.__name__
+            failure_class = (
+                self._classify_desktop_exception(exc)
+                if isinstance(exc, DesktopAutomationError)
+                else "execution-error"
+            )
+            failure_metadata: dict[str, Any] = {
+                "execution_path": failing_execution_path,
+            }
+            if isinstance(exc, DesktopAutomationError):
+                failure_metadata["verification_summary"] = self._build_verification_summary(
+                    routine=routine,
+                    verification_chain=[],
+                    status="failed",
+                    failure_class=failure_class,
+                )
+            raise _RoutineFailure(
+                failure_class,
+                summary,
+                metadata=failure_metadata,
+            ) from exc
+        if not isinstance(result, dict):
+            result = {"value": result}
+        execution_path = self._mapping(result.get("execution_path"))
+        if execution_path:
+            return result
+        return self._desktop_result_with_execution_path(
+            result=result,
+            execution_path=self._resolve_desktop_execution_path(
+                action=action,
+                contract=contract,
+                session_mount_id=session_mount_id,
+            ),
+        )
+
+    def _resolve_desktop_execution_path(
+        self,
+        *,
+        action: str,
+        contract: dict[str, Any],
+        session_mount_id: str,
+    ) -> dict[str, Any]:
+        is_document_action = action in {"write_document_file", "edit_document_file"}
+        document_family = self._desktop_document_family(contract) if is_document_action else None
+        document_snapshot = (
+            self._desktop_document_bridge_snapshot(
+                session_mount_id=session_mount_id,
+                document_family=document_family,
+            )
+            if is_document_action
+            else {}
+        )
+        app_snapshot = self._desktop_windows_app_snapshot(session_mount_id=session_mount_id)
+        document_bridge = self._mapping(document_snapshot.get("document_bridge"))
+        app_adapters = self._mapping(app_snapshot.get("windows_app_adapters"))
+        preferred_execution_path = self._first_string(
+            document_snapshot.get("preferred_execution_path"),
+            app_snapshot.get("preferred_execution_path"),
+            "cooperative-native-first",
+        )
+        ui_fallback_mode = self._first_string(
+            document_snapshot.get("ui_fallback_mode"),
+            app_snapshot.get("ui_fallback_mode"),
+            "ui-fallback-last",
+        )
+        current_gap_or_blocker = self._first_string(
+            document_snapshot.get("adapter_gap_or_blocker"),
+            app_snapshot.get("adapter_gap_or_blocker"),
+        )
+        resolution = self._environment_service.resolve_execution_path(
+            surface_kind="document" if is_document_action else "desktop-app",
+            cooperative_available=bool(document_bridge.get("available")),
+            cooperative_refs=[document_bridge.get("bridge_ref")],
+            cooperative_blocker=current_gap_or_blocker,
+            semantic_available=bool(app_adapters.get("available"))
+            and self._first_string(app_adapters.get("control_channel")) is not None,
+            semantic_channel=self._first_string(
+                app_adapters.get("control_channel"),
+                "semantic-operator",
+            ) or "semantic-operator",
+            semantic_ref=self._first_string(
+                app_adapters.get("control_channel"),
+            ),
+            ui_available=True,
+            ui_ref=f"session:desktop:{session_mount_id}",
+            preferred_execution_path=preferred_execution_path or "cooperative-native-first",
+            ui_fallback_mode=ui_fallback_mode or "ui-fallback-last",
+        )
+        execution_path = self._desktop_execution_path_metadata(resolution)
+        if document_family is not None:
+            execution_path["document_family"] = document_family
+        return execution_path
+
+    def _desktop_document_bridge_snapshot(
+        self,
+        *,
+        session_mount_id: str,
+        document_family: str | None,
+    ) -> dict[str, Any]:
+        getter = getattr(self._environment_service, "document_bridge_snapshot", None)
+        if not callable(getter):
+            return {}
+        try:
+            snapshot = getter(
+                session_mount_id=session_mount_id,
+                document_family=document_family,
+            )
+        except Exception:
+            return {}
+        return snapshot if isinstance(snapshot, dict) else {}
+
+    def _desktop_windows_app_snapshot(
+        self,
+        *,
+        session_mount_id: str,
+    ) -> dict[str, Any]:
+        getter = getattr(self._environment_service, "windows_app_adapter_snapshot", None)
+        if not callable(getter):
+            return {}
+        try:
+            snapshot = getter(session_mount_id=session_mount_id)
+        except Exception:
+            return {}
+        return snapshot if isinstance(snapshot, dict) else {}
+
+    def _desktop_result_with_execution_path(
+        self,
+        *,
+        result: dict[str, Any],
+        execution_path: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload = dict(result)
+        payload["execution_path"] = dict(execution_path)
+        return payload
+
+    def _desktop_execution_path_metadata(self, resolution: object) -> dict[str, Any]:
+        if resolution is None:
+            return {}
+        payload = {
+            "surface_kind": getattr(resolution, "surface_kind", None),
+            "preferred_execution_path": getattr(resolution, "preferred_execution_path", None),
+            "ui_fallback_mode": getattr(resolution, "ui_fallback_mode", None),
+            "selected_path": getattr(resolution, "selected_path", None),
+            "selected_channel": getattr(resolution, "selected_channel", None),
+            "selected_ref": getattr(resolution, "selected_ref", None),
+            "blocked": bool(getattr(resolution, "blocked", False)),
+            "fallback_applied": bool(getattr(resolution, "fallback_applied", False)),
+            "current_gap_or_blocker": getattr(resolution, "current_gap_or_blocker", None),
+            "attempted_paths": list(getattr(resolution, "attempted_paths", ()) or ()),
+            "resolution_reason": getattr(resolution, "resolution_reason", None),
+        }
+        return payload
+
+    def _desktop_execution_path_ui_fallback(
+        self,
+        execution_path: dict[str, Any],
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        updated = dict(execution_path)
+        initial_selected_path = self._first_string(updated.get("selected_path"))
+        if initial_selected_path is not None:
+            updated["initial_selected_path"] = initial_selected_path
+        updated["selected_path"] = "ui-fallback"
+        updated["selected_channel"] = "ui-fallback"
+        updated["selected_ref"] = updated.get("selected_ref") or "ui-fallback"
+        updated["fallback_applied"] = True
+        updated["blocked"] = False
+        prior_reason = self._first_string(updated.get("resolution_reason"))
+        updated["resolution_reason"] = (
+            f"{prior_reason} {reason}".strip() if prior_reason else reason
+        )
+        return updated
+
+    def _desktop_document_family(self, contract: dict[str, Any]) -> str | None:
+        explicit = self._first_string(
+            contract.get("document_family"),
+            contract.get("family"),
+        )
+        if explicit is not None:
+            normalized = explicit.lower()
+            if normalized.endswith("s"):
+                return normalized
+            if normalized == "document":
+                return "documents"
+            if normalized == "presentation":
+                return "presentations"
+            if normalized == "spreadsheet":
+                return "spreadsheets"
+            return normalized
+        path = _string(contract.get("path"))
+        if path is None:
+            return None
+        return _DESKTOP_DOCUMENT_FAMILY_BY_SUFFIX.get(Path(path).suffix.lower())
+
+    @staticmethod
+    def _mapping(value: object) -> dict[str, Any]:
+        return dict(value) if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _first_string(*values: object) -> str | None:
+        for value in values:
+            normalized = _string(value)
+            if normalized is not None:
+                return normalized
+        return None
 
     def _window_selector_from_payload(self, payload: Any) -> WindowSelector | None:
         if not isinstance(payload, dict):

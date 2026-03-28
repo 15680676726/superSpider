@@ -55,12 +55,14 @@ interface CreateRuntimeTransportArgs {
   setRuntimeWaitState: (state: RuntimeWaitState | null) => void;
   setShowModelPrompt: (show: boolean) => void;
   dispatchGovernanceDirty?: () => void;
+  dispatchHumanAssistDirty?: () => void;
 }
 
 interface ParseRuntimeResponseChunkArgs {
   setRuntimeHealthNotice: (notice: RuntimeHealthNotice | null) => void;
   setRuntimeWaitState: (state: RuntimeWaitState | null) => void;
   dispatchGovernanceDirty?: () => void;
+  dispatchHumanAssistDirty?: () => void;
 }
 
 const ACTIVE_MODELS_CACHE_TTL_MS = 30_000;
@@ -256,6 +258,7 @@ export function parseRuntimeResponseChunk(
     setRuntimeHealthNotice,
     setRuntimeWaitState,
     dispatchGovernanceDirty,
+    dispatchHumanAssistDirty,
   }: ParseRuntimeResponseChunkArgs,
 ): unknown {
   const parsed = localizeRuntimeChunk(JSON.parse(rawChunk));
@@ -281,6 +284,7 @@ export function parseRuntimeResponseChunk(
     if (["completed", "failed", "canceled"].includes(status)) {
       setRuntimeWaitState(null);
       dispatchGovernanceDirty?.();
+      dispatchHumanAssistDirty?.();
     }
   }
   return parsed;
@@ -299,6 +303,7 @@ export function createRuntimeTransport({
   setRuntimeWaitState,
   setShowModelPrompt,
   dispatchGovernanceDirty,
+  dispatchHumanAssistDirty,
 }: CreateRuntimeTransportArgs): {
   fetch: (data: RuntimeWebUiFetchData) => Promise<Response>;
   responseParser: (rawChunk: string) => unknown;
@@ -426,6 +431,7 @@ export function createRuntimeTransport({
       setRuntimeHealthNotice,
       setRuntimeWaitState,
       dispatchGovernanceDirty,
+      dispatchHumanAssistDirty,
     });
 
   return {

@@ -19,13 +19,16 @@ from copaw.app.runtime_center import (
 from copaw.evidence import EvidenceLedger, EvidenceRecord
 from copaw.state import (
     DecisionRequestRecord,
+    HumanAssistTaskRecord,
     SQLiteStateStore,
     TaskRecord,
     TaskRuntimeRecord,
     WorkContextRecord,
 )
+from copaw.state.human_assist_task_service import HumanAssistTaskService
 from copaw.state.repositories import (
     SqliteDecisionRequestRepository,
+    SqliteHumanAssistTaskRepository,
     SqliteScheduleRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
@@ -44,6 +47,37 @@ def _make_job(job_id: str) -> CronJobSpec:
         dispatch=DispatchSpec(
             target=DispatchTarget(user_id="founder", session_id=f"cron:{job_id}"),
         ),
+    )
+
+
+def _make_human_assist_task(*, task_id: str = "task-1") -> HumanAssistTaskRecord:
+    timestamp = datetime(2026, 3, 28, 9, 0, tzinfo=timezone.utc)
+    return HumanAssistTaskRecord(
+        id=f"human-assist:{task_id}",
+        industry_instance_id="industry-1",
+        assignment_id="assignment-1",
+        task_id=task_id,
+        chat_thread_id="industry-chat:industry-1:execution-core",
+        title="Upload receipt proof",
+        summary="Host proof is required before the task can resume.",
+        task_type="evidence-submit",
+        reason_code="blocked-by-proof",
+        reason_summary="The runtime cannot verify the payment receipt alone.",
+        required_action="Upload the receipt in chat and say the task is finished.",
+        submission_mode="chat-message",
+        acceptance_mode="evidence_verified",
+        acceptance_spec={
+            "version": "v1",
+            "hard_anchors": ["receipt"],
+            "result_anchors": ["uploaded"],
+            "negative_anchors": ["missing"],
+            "failure_hint": "Provide receipt proof before acceptance.",
+        },
+        reward_preview={"sync_points": 2, "familiarity_exp": 1},
+        resume_checkpoint_ref="checkpoint:receipt-upload",
+        status="created",
+        created_at=timestamp,
+        updated_at=timestamp,
     )
 
 
@@ -379,7 +413,7 @@ def test_runtime_query_services_read_state_backed_surfaces(tmp_path) -> None:
                     },
                 },
                 "browser_site_contract": {
-                    "browser_mode": "tab-attached",
+                    "browser_mode": "attach-existing-session",
                     "active_site": "jd:seller-center",
                     "authenticated_continuation": True,
                     "download_verification": True,
@@ -740,3 +774,50 @@ def test_runtime_query_services_read_state_backed_surfaces(tmp_path) -> None:
         task_thread_failed_a.id,
         task_thread_failed_b.id,
     }
+
+
+def test_runtime_query_services_expose_human_assist_task_surfaces(tmp_path) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
+    human_assist_repository = SqliteHumanAssistTaskRepository(state_store)
+    human_assist_service = HumanAssistTaskService(
+        repository=human_assist_repository,
+        evidence_ledger=evidence_ledger,
+    )
+    issued = human_assist_service.issue_task(_make_human_assist_task())
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=SqliteTaskRepository(state_store),
+        task_runtime_repository=SqliteTaskRuntimeRepository(state_store),
+        schedule_repository=SqliteScheduleRepository(state_store),
+        decision_request_repository=SqliteDecisionRequestRepository(state_store),
+        evidence_ledger=evidence_ledger,
+        human_assist_task_service=human_assist_service,
+    )
+
+    current = state_query.get_current_human_assist_task(
+        chat_thread_id="industry-chat:industry-1:execution-core",
+    )
+    assert current is not None
+    assert current["id"] == issued.id
+    assert current["status"] == "issued"
+    assert current["route"] == f"/api/runtime-center/human-assist-tasks/{issued.id}"
+    assert (
+        current["tasks_route"]
+        == "/api/runtime-center/human-assist-tasks?chat_thread_id=industry-chat%3Aindustry-1%3Aexecution-core"
+    )
+
+    items = state_query.list_human_assist_tasks(
+        chat_thread_id="industry-chat:industry-1:execution-core",
+        limit=10,
+    )
+    assert len(items) == 1
+    assert items[0]["id"] == issued.id
+    assert items[0]["acceptance_mode"] == "evidence_verified"
+
+    detail = state_query.get_human_assist_task_detail(issued.id)
+    assert detail is not None
+    assert detail["task"]["id"] == issued.id
+    assert detail["task"]["acceptance_spec"]["hard_anchors"] == ["receipt"]
+    assert detail["task"]["reward_preview"]["sync_points"] == 2
+    assert detail["routes"]["self"] == f"/api/runtime-center/human-assist-tasks/{issued.id}"

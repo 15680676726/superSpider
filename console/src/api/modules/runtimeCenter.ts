@@ -148,6 +148,50 @@ export interface RuntimeTaskReviewPayload {
   route: string;
 }
 
+export interface RuntimeHumanAssistTaskSummary {
+  id: string;
+  industry_instance_id?: string | null;
+  assignment_id?: string | null;
+  task_id?: string | null;
+  chat_thread_id: string;
+  title: string;
+  summary?: string | null;
+  task_type?: string | null;
+  reason_code?: string | null;
+  reason_summary?: string | null;
+  required_action?: string | null;
+  submission_mode?: string | null;
+  acceptance_mode?: string | null;
+  acceptance_spec?: Record<string, unknown>;
+  resume_checkpoint_ref?: string | null;
+  status: string;
+  reward_preview?: Record<string, unknown>;
+  reward_result?: Record<string, unknown>;
+  block_evidence_refs?: string[];
+  submission_evidence_refs?: string[];
+  verification_evidence_refs?: string[];
+  submission_text?: string | null;
+  submission_payload?: Record<string, unknown>;
+  verification_payload?: Record<string, unknown>;
+  issued_at?: string | null;
+  submitted_at?: string | null;
+  verified_at?: string | null;
+  closed_at?: string | null;
+  expires_at?: string | null;
+  route: string;
+  tasks_route?: string | null;
+  current_route?: string | null;
+}
+
+export interface RuntimeHumanAssistTaskDetail {
+  task: RuntimeHumanAssistTaskSummary;
+  routes: {
+    self: string;
+    list: string;
+    current: string;
+  };
+}
+
 export const runtimeCenterApi = {
   getRuntimeTaskDetail: (taskId: string) =>
     request<RuntimeTaskDetail>(
@@ -157,6 +201,49 @@ export const runtimeCenterApi = {
   getRuntimeTaskReview: (taskId: string) =>
     request<RuntimeTaskReviewPayload>(
       `/runtime-center/tasks/${encodeURIComponent(taskId)}/review`,
+    ),
+
+  listRuntimeHumanAssistTasks: (params?: {
+    chat_thread_id?: string;
+    industry_instance_id?: string;
+    assignment_id?: string;
+    task_id?: string;
+    status?: string;
+    limit?: number;
+  }) => {
+    const search = new URLSearchParams();
+    if (params?.chat_thread_id) {
+      search.set("chat_thread_id", params.chat_thread_id);
+    }
+    if (params?.industry_instance_id) {
+      search.set("industry_instance_id", params.industry_instance_id);
+    }
+    if (params?.assignment_id) {
+      search.set("assignment_id", params.assignment_id);
+    }
+    if (params?.task_id) {
+      search.set("task_id", params.task_id);
+    }
+    if (params?.status) {
+      search.set("status", params.status);
+    }
+    if (typeof params?.limit === "number") {
+      search.set("limit", String(params.limit));
+    }
+    const suffix = search.toString();
+    return request<RuntimeHumanAssistTaskSummary[]>(
+      `/runtime-center/human-assist-tasks${suffix ? `?${suffix}` : ""}`,
+    );
+  },
+
+  getCurrentRuntimeHumanAssistTask: (chatThreadId: string) =>
+    request<RuntimeHumanAssistTaskSummary>(
+      `/runtime-center/human-assist-tasks/current?chat_thread_id=${encodeURIComponent(chatThreadId)}`,
+    ),
+
+  getRuntimeHumanAssistTaskDetail: (taskId: string) =>
+    request<RuntimeHumanAssistTaskDetail>(
+      `/runtime-center/human-assist-tasks/${encodeURIComponent(taskId)}`,
     ),
 
   getRuntimeHeartbeat: () =>

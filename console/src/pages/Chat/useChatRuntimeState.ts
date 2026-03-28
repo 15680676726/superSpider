@@ -82,6 +82,7 @@ type UseChatRuntimeStateResult = {
 declare global {
   interface WindowEventMap {
     "copaw:governance-status-dirty": CustomEvent<void>;
+    "copaw:human-assist-dirty": CustomEvent<void>;
   }
 }
 
@@ -140,6 +141,8 @@ export function useChatRuntimeState({
       setShowModelPrompt,
       dispatchGovernanceDirty: () =>
         window.dispatchEvent(new CustomEvent("copaw:governance-status-dirty")),
+      dispatchHumanAssistDirty: () =>
+        window.dispatchEvent(new CustomEvent("copaw:human-assist-dirty")),
     });
 
     return {

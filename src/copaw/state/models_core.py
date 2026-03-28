@@ -17,6 +17,25 @@ TaskStatus = Literal[
     "failed",
     "cancelled",
 ]
+HumanAssistTaskStatus = Literal[
+    "created",
+    "issued",
+    "in_progress",
+    "submitted",
+    "verifying",
+    "accepted",
+    "resume_queued",
+    "closed",
+    "rejected",
+    "expired",
+    "cancelled",
+    "handoff_blocked",
+]
+HumanAssistTaskAcceptanceMode = Literal[
+    "anchor_verified",
+    "evidence_verified",
+    "state_change_verified",
+]
 TaskRuntimeStatus = Literal[
     "cold",
     "hydrating",
@@ -153,6 +172,8 @@ __all__ = [
     "BacklogItemStatus",
     "DecisionRequestStatus",
     "GoalStatus",
+    "HumanAssistTaskAcceptanceMode",
+    "HumanAssistTaskStatus",
     "OperatingCycleKind",
     "OperatingCycleStatus",
     "OperatingLaneStatus",

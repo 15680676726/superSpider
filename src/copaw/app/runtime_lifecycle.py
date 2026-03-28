@@ -183,10 +183,15 @@ def start_automation_tasks(
     *,
     kernel_dispatcher: KernelDispatcher,
     capability_service: CapabilityService,
+    environment_service: Any | None = None,
     industry_service: Any | None = None,
     learning_service: Any | None = None,
     logger: logging.Logger,
 ) -> list[asyncio.Task[None]]:
+    host_recovery_interval = automation_interval_seconds(
+        "COPAW_HOST_RECOVERY_INTERVAL_SECONDS",
+        120,
+    )
     operating_cycle_interval = automation_interval_seconds(
         "COPAW_OPERATING_CYCLE_INTERVAL_SECONDS",
         180,
@@ -196,6 +201,29 @@ def start_automation_tasks(
         900,
     )
     return [
+        asyncio.create_task(
+            _automation_loop(
+                task_name="host-recovery",
+                interval_seconds=host_recovery_interval,
+                capability_ref="system:run_host_recovery",
+                owner_agent_id="copaw-main-brain",
+                payload_factory=lambda: {
+                    "actor": "system:automation",
+                    "source": "automation:host_recovery",
+                    "limit": 25,
+                    "allow_cross_process_recovery": True,
+                },
+                should_run=(
+                    (lambda: _should_run_host_recovery(environment_service))
+                    if environment_service is not None
+                    else None
+                ),
+                kernel_dispatcher=kernel_dispatcher,
+                capability_service=capability_service,
+                logger=logger,
+            ),
+            name="copaw-automation-host-recovery",
+        ),
         asyncio.create_task(
             _automation_loop(
                 task_name="operating-cycle",
@@ -292,6 +320,20 @@ def _should_run_learning_strategy(learning_service: Any | None) -> tuple[bool, s
     except Exception:
         logger.exception("Automation preflight 'learning-strategy' failed")
         return (True, "learning-preflight-error")
+    return _resolve_automation_gate(lambda: result)
+
+
+def _should_run_host_recovery(environment_service: Any | None) -> tuple[bool, str]:
+    if environment_service is None:
+        return (True, "environment-service-unavailable")
+    checker = getattr(environment_service, "should_run_host_recovery", None)
+    if not callable(checker):
+        return (True, "environment-service-without-preflight")
+    try:
+        result = checker(limit=25, allow_cross_process_recovery=True)
+    except Exception:
+        logger.exception("Automation preflight 'host-recovery' failed")
+        return (True, "host-recovery-preflight-error")
     return _resolve_automation_gate(lambda: result)
 
 

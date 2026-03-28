@@ -1750,7 +1750,7 @@ class FakeEnvironmentService:
             "is_projection": True,
             "environment_id": "env:session:session:web:main",
             "session_mount_id": "session:web:main",
-            "browser_mode": "tab-attached",
+            "browser_mode": "attach-existing-session",
             "login_state": "authenticated",
             "tab_scope": "single-tab",
             "profile_ref": "profile:copaw:main",

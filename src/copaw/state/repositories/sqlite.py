@@ -9,6 +9,9 @@ from .sqlite_tasks import (
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
 )
+from .sqlite_human_assist_tasks import (
+    SqliteHumanAssistTaskRepository,
+)
 from .sqlite_work_context import (
     SqliteWorkContextRepository,
 )

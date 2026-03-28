@@ -8,7 +8,11 @@ from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.app.runtime_threads import RuntimeThreadHistory, RuntimeThreadSpec
 from copaw.kernel.models import KernelTask
 from copaw.kernel.persistence import encode_kernel_task_metadata
-from copaw.state import AgentThreadBindingRecord, WorkContextRecord
+from copaw.state import (
+    AgentThreadBindingRecord,
+    HumanAssistTaskRecord,
+    WorkContextRecord,
+)
 
 
 class _FakeHistoryReader:
@@ -310,10 +314,38 @@ class _FakeWorkContextRepository:
         return None
 
 
+class _FakeHumanAssistTaskService:
+    def get_current_task(self, *, chat_thread_id: str):
+        if chat_thread_id != "industry-chat:industry-v1-acme:execution-core":
+            return None
+        return HumanAssistTaskRecord(
+            id="human-assist:task-1",
+            industry_instance_id="industry-v1-acme",
+            assignment_id="assignment-1",
+            task_id="task-1",
+            chat_thread_id=chat_thread_id,
+            title="Upload receipt proof",
+            summary="Host proof is required before resume.",
+            task_type="evidence-submit",
+            reason_code="blocked-by-proof",
+            reason_summary="Payment receipt still needs host confirmation.",
+            required_action="Upload the receipt in chat and say it is finished.",
+            submission_mode="chat-message",
+            acceptance_mode="evidence_verified",
+            acceptance_spec={
+                "version": "v1",
+                "hard_anchors": ["receipt"],
+                "result_anchors": ["uploaded"],
+            },
+            status="issued",
+        )
+
+
 def _build_app(
     *,
     history_reader: _FakeHistoryReader | None = None,
     industry_service: _FakeIndustryService | None = None,
+    human_assist_task_service: object | None = None,
     thread_binding_repository: object | None = None,
     task_repository: object | None = None,
     work_context_repository: object | None = None,
@@ -330,6 +362,7 @@ def _build_app(
     app.state.task_repository = task_repository or _FakeTaskRepository()
     app.state.task_runtime_repository = _FakeTaskRuntimeRepository()
     app.state.work_context_repository = work_context_repository or _FakeWorkContextRepository()
+    app.state.human_assist_task_service = human_assist_task_service
     return app, history_reader
 
 
@@ -356,6 +389,26 @@ def test_runtime_conversation_detail_resolves_industry_thread() -> None:
     assert payload["messages"][0]["content"][0]["text"] == "history:copaw-agent-runner"
     assert history_reader.calls[0].session_id == "industry-chat:industry-v1-acme:execution-core"
     assert history_reader.calls[0].user_id == "copaw-agent-runner"
+
+
+def test_runtime_conversation_detail_exposes_current_human_assist_task_meta() -> None:
+    app, _history_reader = _build_app(
+        human_assist_task_service=_FakeHumanAssistTaskService(),
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/runtime-center/conversations/industry-chat:industry-v1-acme:execution-core",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"]["human_assist_task"]["id"] == "human-assist:task-1"
+    assert payload["meta"]["human_assist_task"]["status"] == "issued"
+    assert (
+        payload["meta"]["human_assist_tasks_route"]
+        == "/api/runtime-center/human-assist-tasks?chat_thread_id=industry-chat%3Aindustry-v1-acme%3Aexecution-core"
+    )
 
 
 def test_runtime_conversation_detail_injects_waiting_confirm_kickoff_prompt() -> None:

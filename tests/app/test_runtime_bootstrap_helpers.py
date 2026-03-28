@@ -74,6 +74,7 @@ def _build_bootstrap() -> RuntimeBootstrap:
         bootstrap_schedule_repository=object(),
         schedule_repository=object(),
         goal_repository=object(),
+        human_assist_task_repository=object(),
         work_context_repository=object(),
         decision_request_repository=object(),
         governance_control_repository=object(),
@@ -126,6 +127,7 @@ def _build_bootstrap() -> RuntimeBootstrap:
         provider_manager=object(),
         state_query_service=object(),
         evidence_query_service=object(),
+        human_assist_task_service=object(),
         strategy_memory_service=object(),
         work_context_service=object(),
         knowledge_service=object(),
@@ -190,12 +192,17 @@ def test_attach_runtime_state_binds_bootstrap_and_manager_stack() -> None:
 
     assert app.state.runtime_host is runtime_host
     assert app.state.turn_executor is bootstrap.turn_executor
+    assert app.state.human_assist_task_service is bootstrap.human_assist_task_service
     assert app.state.main_brain_chat_service is bootstrap.main_brain_chat_service
     assert app.state.capability_service is bootstrap.capability_service
     assert app.state.runtime_health_service is bootstrap.runtime_health_service
     assert app.state.channel_manager is manager_stack.channel_manager
     assert app.state.job_repository is manager_stack.job_repository
     assert app.state.schedule_repository is bootstrap.repositories.schedule_repository
+    assert (
+        app.state.human_assist_task_repository
+        is bootstrap.repositories.human_assist_task_repository
+    )
     assert app.state.work_context_repository is bootstrap.repositories.work_context_repository
     assert app.state.session_mount_repository is bootstrap.repositories.session_mount_repository
     assert (
@@ -254,6 +261,10 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
 
     assert bindings["runtime_host"] is runtime_host
     assert bindings["schedule_repository"] is bootstrap.repositories.schedule_repository
+    assert (
+        bindings["human_assist_task_repository"]
+        is bootstrap.repositories.human_assist_task_repository
+    )
     assert bindings["work_context_repository"] is bootstrap.repositories.work_context_repository
     assert (
         bindings["fixed_sop_template_repository"]
@@ -264,6 +275,7 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
         is bootstrap.repositories.fixed_sop_binding_repository
     )
     assert bindings["fixed_sop_service"] is bootstrap.fixed_sop_service
+    assert bindings["human_assist_task_service"] is bootstrap.human_assist_task_service
     assert (
         bindings["media_analysis_repository"]
         is bootstrap.repositories.media_analysis_repository

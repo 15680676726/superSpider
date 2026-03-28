@@ -59,6 +59,10 @@ class EnvironmentHealthService:
         "Host events are runtime-mechanism signals for observe/recover loops, "
         "not truth-store records."
     )
+    _CANONICAL_BROWSER_MODE_BY_LEGACY = {
+        "tab-attached": "attach-existing-session",
+        "tab_attached": "attach-existing-session",
+    }
 
     def __init__(self, service: EnvironmentService) -> None:
         self._service = service
@@ -678,12 +682,14 @@ class EnvironmentHealthService:
             "is_projection": True,
             "environment_id": getattr(mount, "id", None) if mount is not None else None,
             "session_mount_id": session.id if session is not None else None,
-            "browser_mode": self._first_string(
-                session_metadata.get("browser_mode"),
-                mount_metadata.get("browser_mode"),
-                runtime_descriptor.get("browser_mode"),
-                live_descriptor.get("browser_mode"),
-                host_contract.get("host_mode"),
+            "browser_mode": self._canonical_browser_mode(
+                self._first_string(
+                    session_metadata.get("browser_mode"),
+                    mount_metadata.get("browser_mode"),
+                    runtime_descriptor.get("browser_mode"),
+                    live_descriptor.get("browser_mode"),
+                    host_contract.get("host_mode"),
+                ),
             ),
             "tab_scope": tab_scope,
             "login_state": login_state,
@@ -831,6 +837,19 @@ class EnvironmentHealthService:
                 "the shared host contract, not a second browser truth store."
             ),
         }
+
+    def _canonical_browser_mode(self, mode: object) -> str | None:
+        normalized = self._first_string(mode)
+        if normalized is None:
+            return None
+        lowered = normalized.strip().lower()
+        if lowered in {
+            "managed-isolated",
+            "attach-existing-session",
+            "remote-provider",
+        }:
+            return lowered
+        return self._CANONICAL_BROWSER_MODE_BY_LEGACY.get(lowered, normalized)
 
     def build_desktop_app_contract_projection(
         self,

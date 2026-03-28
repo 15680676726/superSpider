@@ -124,6 +124,7 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
 
     with sqlite3.connect(path) as conn:
         assert "work_contexts" in _table_names(conn)
+        assert "human_assist_tasks" in _table_names(conn)
         assert "sop_adapter_templates" not in _table_names(conn)
         assert "sop_adapter_bindings" not in _table_names(conn)
         assert {
@@ -164,4 +165,13 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
             "primary_thread_id",
             "parent_work_context_id",
         }.issubset(_column_names(conn, "work_contexts"))
+        assert {
+            "chat_thread_id",
+            "acceptance_mode",
+            "acceptance_spec_json",
+            "reward_preview_json",
+            "reward_result_json",
+            "submission_payload_json",
+            "verification_payload_json",
+        }.issubset(_column_names(conn, "human_assist_tasks"))
         assert conn.execute("PRAGMA user_version").fetchone()[0] == STATE_SCHEMA_VERSION

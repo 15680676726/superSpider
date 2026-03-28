@@ -25,6 +25,7 @@ from .models import (
     GovernanceControlRecord,
     GoalRecord,
     GoalOverrideRecord,
+    HumanAssistTaskRecord,
     IndustryInstanceRecord,
     MediaAnalysisRecord,
     MetricRecord,
@@ -55,6 +56,10 @@ from .models_memory import (
 )
 from .models_work_context import WorkContextRecord
 from .work_context_service import WorkContextService
+from .human_assist_task_service import (
+    HumanAssistTaskService,
+    HumanAssistVerificationResult,
+)
 from .main_brain_service import (
     AgentReportService,
     AssignmentService,
@@ -85,6 +90,9 @@ __all__ = [
     "GovernanceControlRecord",
     "GoalRecord",
     "GoalOverrideRecord",
+    "HumanAssistTaskRecord",
+    "HumanAssistTaskService",
+    "HumanAssistVerificationResult",
     "IndustryInstanceRecord",
     "MediaAnalysisRecord",
     "KnowledgeChunkRecord",

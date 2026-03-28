@@ -95,6 +95,11 @@
   `assigned / queued / claimed / executing / blocked`，
   其中“已分配但未认领邮箱”的执行位不再被前端误显示为正在干活。
 - `2026-03-24` 补充：`browser/desktop` 的高风险确认规则已收成“默认底线”：绝大多数动作默认放行；当前只把 `transfer / remit / wire / withdraw / 转账 / 汇款 / 打款 / 提现 / 出金` 这类资金转移动作升格到确认门，且用户明确批准后应继续执行，不是永久阻断。
+- `2026-03-28` 已补上 chat-first `HumanAssistTask / 共生协作任务` 正式主链基线：
+  - 状态层已有正式 `HumanAssistTaskRecord / repository / service`
+  - Runtime Center 已提供 `current / list / detail` 读面
+  - `POST /api/runtime-center/chat/run` 已可在当前控制线程拦截宿主提交，自动走 `submit -> verify -> accepted|need_more_evidence -> resume_queued`
+  - 聊天页已补任务条、任务记录弹层与详情读面，宿主可直接在聊天窗口提交并查看历史
 - 当前产品口径已经固定为：
   - 人类默认先和主脑说话
   - 主脑决定本轮是继续聊天还是进入执行编排
@@ -429,11 +434,12 @@
 
 ## 6. 下一步推荐施工顺序
 
-1. 扩大 hard-cut 回归面，优先跑更大批量的 state / industry / runtime 聚合测试与 live smoke。
+1. 扩大 `HumanAssistTask / 共生协作任务` 回归面，补更多 state / runtime / chat / frontend smoke，确认真实宿主提交链稳定。
 2. 继续压缩残留 `GoalRecord / goal service` 叶子兼容边界，避免旧语义重新回流到主脑规划面。
 3. 深化 single-industry 真实世界覆盖，补长期自治、岗位补位与监督回流的长跑回归。
 4. 完成媒体/记忆闭环剩余接线，把 `analysis -> writeback -> strategy -> execution` 做成稳定产品主链。
 5. 拆分过重的行业层与前端运行中心页面，降低后续维护认知密度。
+6. 继续扩大 hard-cut 回归面，优先跑更大批量的 industry / runtime 聚合测试与 live smoke。
 
 ---
 

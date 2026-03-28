@@ -214,7 +214,7 @@ def test_build_task_review_payload_projects_execution_runtime_visibility_from_fe
                 "status": "degraded",
             },
             "browser_site_contract": {
-                "browser_mode": "tab-attached",
+                "browser_mode": "attach-existing-session",
                 "active_site": "jd:seller-center",
                 "authenticated_continuation": True,
                 "download_verification": True,

@@ -16,6 +16,7 @@ from copaw.state import (
     ExecutionRoutineRecord,
     GoalRecord,
     GoalOverrideRecord,
+    HumanAssistTaskRecord,
     IndustryInstanceRecord,
     KnowledgeChunkRecord,
     MediaAnalysisRecord,
@@ -47,6 +48,7 @@ from copaw.state.repositories import (
     SqliteExecutionRoutineRepository,
     SqliteGoalRepository,
     SqliteGoalOverrideRepository,
+    SqliteHumanAssistTaskRepository,
     SqliteIndustryInstanceRepository,
     SqliteKnowledgeChunkRepository,
     SqliteMediaAnalysisRepository,
@@ -209,6 +211,76 @@ def test_sqlite_repositories_crud_round_trip(tmp_path) -> None:
     assert decision_repo.list_decision_requests(task_id=task.id) == []
     assert goal_repo.delete_goal(goal.id) is True
     assert goal_repo.get_goal(goal.id) is None
+
+
+def test_sqlite_human_assist_task_repository_round_trip(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteHumanAssistTaskRepository(store)
+
+    issued_at = datetime(2026, 3, 28, 10, 0, tzinfo=timezone.utc)
+    record = HumanAssistTaskRecord(
+        id="human-assist-1",
+        industry_instance_id="industry-1",
+        assignment_id="assignment-1",
+        task_id="task-1",
+        chat_thread_id="industry-chat:industry-1:execution-core",
+        title="上传回执截图",
+        summary="系统缺少宿主侧完成证明。",
+        task_type="evidence-submit",
+        reason_code="blocked-by-proof",
+        reason_summary="需要宿主补充付款回执。",
+        required_action="请在聊天里上传回执截图并回复已完成。",
+        submission_mode="chat-message",
+        acceptance_mode="evidence_verified",
+        acceptance_spec={
+            "version": "v1",
+            "hard_anchors": ["receipt"],
+            "result_anchors": ["uploaded"],
+            "pass_rule": "all-required",
+        },
+        resume_checkpoint_ref="checkpoint:receipt-upload",
+        status="issued",
+        reward_preview={"协作值": 2, "同调经验": 1},
+        block_evidence_refs=["evidence-block-1"],
+        issued_at=issued_at,
+        created_at=issued_at,
+        updated_at=issued_at,
+    )
+
+    repository.upsert_task(record)
+
+    stored = repository.get_task(record.id)
+    assert stored is not None
+    assert stored.chat_thread_id == "industry-chat:industry-1:execution-core"
+    assert stored.acceptance_spec["result_anchors"] == ["uploaded"]
+    assert stored.reward_preview["协作值"] == 2
+
+    updated = stored.model_copy(
+        update={
+            "status": "submitted",
+            "submission_text": "我已经上传回执了",
+            "submission_evidence_refs": ["media-analysis-1"],
+            "submission_payload": {
+                "media_analysis_ids": ["media-analysis-1"],
+                "anchors": ["receipt", "uploaded"],
+            },
+            "updated_at": issued_at + timedelta(minutes=3),
+        },
+    )
+    repository.upsert_task(updated)
+
+    listed = repository.list_tasks(
+        chat_thread_id="industry-chat:industry-1:execution-core",
+        status="submitted",
+    )
+    assert [item.id for item in listed] == [record.id]
+    assert listed[0].submission_payload["anchors"] == ["receipt", "uploaded"]
+
+    by_assignment = repository.list_tasks(assignment_id="assignment-1")
+    assert [item.id for item in by_assignment] == [record.id]
+
+    assert repository.delete_task(record.id) is True
+    assert repository.get_task(record.id) is None
 
 
 def test_sqlite_work_context_repository_round_trip(tmp_path) -> None:

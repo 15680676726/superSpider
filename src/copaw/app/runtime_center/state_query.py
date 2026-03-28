@@ -17,6 +17,9 @@ from ...utils.runtime_routes import (
     agent_route,
     decision_route,
     goal_route,
+    human_assist_task_current_route,
+    human_assist_task_list_route,
+    human_assist_task_route,
     schedule_route,
     task_route,
     work_context_route,
@@ -68,6 +71,7 @@ class RuntimeCenterStateQueryService:
         evidence_ledger: EvidenceLedger | None = None,
         learning_service: object | None = None,
         agent_profile_service: object | None = None,
+        human_assist_task_service: object | None = None,
         kernel_dispatcher: object | None = None,
         runtime_event_bus: object | None = None,
         environment_service: object | None = None,
@@ -83,6 +87,7 @@ class RuntimeCenterStateQueryService:
         self._evidence_ledger = evidence_ledger
         self._learning_service = learning_service
         self._agent_profile_service = agent_profile_service
+        self._human_assist_task_service = human_assist_task_service
         self._kernel_dispatcher = kernel_dispatcher
         self._runtime_event_bus = runtime_event_bus
         self._environment_service = environment_service
@@ -286,6 +291,65 @@ class RuntimeCenterStateQueryService:
             "route": task_route(task_id),
         }
 
+    def list_human_assist_tasks(
+        self,
+        *,
+        chat_thread_id: str | None = None,
+        industry_instance_id: str | None = None,
+        assignment_id: str | None = None,
+        task_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = 20,
+    ) -> list[dict[str, object]]:
+        service = self._human_assist_task_service
+        list_tasks = getattr(service, "list_tasks", None)
+        if not callable(list_tasks):
+            return []
+        tasks = list_tasks(
+            chat_thread_id=chat_thread_id,
+            industry_instance_id=industry_instance_id,
+            assignment_id=assignment_id,
+            task_id=task_id,
+            status=status,
+            limit=limit,
+        )
+        return [self._serialize_human_assist_task(task) for task in tasks]
+
+    def get_current_human_assist_task(
+        self,
+        *,
+        chat_thread_id: str,
+    ) -> dict[str, object] | None:
+        service = self._human_assist_task_service
+        getter = getattr(service, "get_current_task", None)
+        if not callable(getter):
+            return None
+        task = getter(chat_thread_id=chat_thread_id)
+        if task is None:
+            return None
+        return self._serialize_human_assist_task(task)
+
+    def get_human_assist_task_detail(self, task_id: str) -> dict[str, object] | None:
+        service = self._human_assist_task_service
+        getter = getattr(service, "get_task", None)
+        if not callable(getter):
+            return None
+        task = getter(task_id)
+        if task is None:
+            return None
+        return {
+            "task": self._serialize_human_assist_task(task),
+            "routes": {
+                "self": human_assist_task_route(task.id),
+                "list": human_assist_task_list_route(
+                    chat_thread_id=task.chat_thread_id,
+                ),
+                "current": human_assist_task_current_route(
+                    chat_thread_id=task.chat_thread_id,
+                ),
+            },
+        }
+
     def _serialize_work_context(
         self,
         work_context_id: str | None,
@@ -305,6 +369,23 @@ class RuntimeCenterStateQueryService:
             "status": record.status,
             "context_key": record.context_key,
         }
+
+    def _serialize_human_assist_task(self, task: object) -> dict[str, object]:
+        model_dump = getattr(task, "model_dump", None)
+        payload = model_dump(mode="json") if callable(model_dump) else {}
+        if not isinstance(payload, dict):
+            payload = {}
+        task_id = str(payload.get("id") or "").strip()
+        chat_thread_id = str(payload.get("chat_thread_id") or "").strip() or None
+        if task_id:
+            payload["route"] = human_assist_task_route(task_id)
+        payload["tasks_route"] = human_assist_task_list_route(
+            chat_thread_id=chat_thread_id,
+        )
+        payload["current_route"] = human_assist_task_current_route(
+            chat_thread_id=chat_thread_id,
+        )
+        return payload
 
     def get_task_review(self, task_id: str) -> dict[str, object] | None:
         detail = self.get_task_detail(task_id)
@@ -706,6 +787,9 @@ class RuntimeCenterStateQueryService:
 
     def set_agent_profile_service(self, agent_profile_service: object | None) -> None:
         self._agent_profile_service = agent_profile_service
+
+    def set_human_assist_task_service(self, human_assist_task_service: object | None) -> None:
+        self._human_assist_task_service = human_assist_task_service
 
     def list_decision_requests(self, limit: int | None = 5) -> list[dict[str, object]]:
         decisions = self._decision_request_repository.list_decision_requests(limit=limit)

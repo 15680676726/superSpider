@@ -99,6 +99,7 @@ def build_runtime_execution_stack(
         override_repository=repositories.capability_override_repository,
         agent_profile_override_repository=repositories.agent_profile_override_repository,
         state_store=state_store,
+        environment_service=environment_service,
     )
     kernel_dispatcher = kernel_dispatcher_cls(
         task_store=kernel_task_store,

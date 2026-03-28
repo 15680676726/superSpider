@@ -21,6 +21,7 @@ from ..models import (
     FixedSopTemplateRecord,
     GovernanceControlRecord,
     GoalRecord,
+    HumanAssistTaskRecord,
     IndustryInstanceRecord,
     MediaAnalysisRecord,
     OperatingCycleRecord,
@@ -294,6 +295,35 @@ class BaseTaskRepository(ABC):
 
     @abstractmethod
     def upsert_task(self, task: TaskRecord) -> TaskRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_task(self, task_id: str) -> bool:
+        raise NotImplementedError
+
+
+class BaseHumanAssistTaskRepository(ABC):
+    """Abstract repository for formal host-side assist tasks."""
+
+    @abstractmethod
+    def get_task(self, task_id: str) -> Optional[HumanAssistTaskRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_tasks(
+        self,
+        *,
+        chat_thread_id: str | None = None,
+        industry_instance_id: str | None = None,
+        assignment_id: str | None = None,
+        task_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[HumanAssistTaskRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_task(self, task: HumanAssistTaskRecord) -> HumanAssistTaskRecord:
         raise NotImplementedError
 
     @abstractmethod

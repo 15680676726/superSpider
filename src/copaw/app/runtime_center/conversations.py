@@ -14,6 +14,11 @@ from ...industry.identity import (
     is_execution_core_role_id,
     normalize_industry_role_id,
 )
+from ...utils.runtime_routes import (
+    human_assist_task_current_route,
+    human_assist_task_list_route,
+    human_assist_task_route,
+)
 from ..channels.schema import DEFAULT_CHANNEL
 from ..runtime_threads import (
     RuntimeThreadHistory,
@@ -44,12 +49,14 @@ class RuntimeConversationFacade:
         industry_service: object | None = None,
         agent_profile_service: object | None = None,
         agent_thread_binding_repository: object | None = None,
+        human_assist_task_service: object | None = None,
         work_context_repository: object | None = None,
     ) -> None:
         self._history_reader = history_reader
         self._industry_service = industry_service
         self._agent_profile_service = agent_profile_service
         self._agent_thread_binding_repository = agent_thread_binding_repository
+        self._human_assist_task_service = human_assist_task_service
         self._work_context_repository = work_context_repository
 
     async def get_conversation(self, conversation_id: str) -> RuntimeConversationPayload:
@@ -65,9 +72,45 @@ class RuntimeConversationFacade:
             session_id=thread_spec.session_id,
             user_id=thread_spec.user_id,
             channel=thread_spec.channel,
-            meta=_compact_mapping(thread_spec.meta),
+            meta=self._build_conversation_meta(thread_spec),
             messages=history.messages,
         )
+
+    def _build_conversation_meta(self, thread_spec: RuntimeThreadSpec) -> dict[str, object]:
+        meta = _compact_mapping(thread_spec.meta)
+        human_assist_task = self._get_current_human_assist_task(thread_spec.id)
+        if human_assist_task is not None:
+            meta["human_assist_task"] = human_assist_task
+            meta["human_assist_tasks_route"] = human_assist_task.get(
+                "tasks_route",
+            ) or human_assist_task_list_route(chat_thread_id=thread_spec.id)
+        return meta
+
+    def _get_current_human_assist_task(
+        self,
+        chat_thread_id: str,
+    ) -> dict[str, object] | None:
+        service = self._human_assist_task_service
+        getter = getattr(service, "get_current_task", None)
+        if not callable(getter):
+            return None
+        task = getter(chat_thread_id=chat_thread_id)
+        if task is None:
+            return None
+        model_dump = getattr(task, "model_dump", None)
+        payload = model_dump(mode="json") if callable(model_dump) else {}
+        if not isinstance(payload, dict):
+            return None
+        task_id = str(payload.get("id") or "").strip()
+        if task_id:
+            payload["route"] = human_assist_task_route(task_id)
+        payload["tasks_route"] = human_assist_task_list_route(
+            chat_thread_id=chat_thread_id,
+        )
+        payload["current_route"] = human_assist_task_current_route(
+            chat_thread_id=chat_thread_id,
+        )
+        return payload
 
     def _build_empty_thread_bootstrap_messages(
         self,

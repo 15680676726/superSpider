@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 20
+STATE_SCHEMA_VERSION = 21
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS goals (
@@ -92,6 +92,49 @@ CREATE INDEX IF NOT EXISTS idx_tasks_work_context_id ON tasks(work_context_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_task_type ON tasks(task_type);
 CREATE INDEX IF NOT EXISTS idx_tasks_updated_at ON tasks(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS human_assist_tasks (
+    id TEXT PRIMARY KEY,
+    industry_instance_id TEXT,
+    assignment_id TEXT,
+    task_id TEXT,
+    chat_thread_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    task_type TEXT NOT NULL,
+    reason_code TEXT,
+    reason_summary TEXT NOT NULL DEFAULT '',
+    required_action TEXT NOT NULL DEFAULT '',
+    submission_mode TEXT NOT NULL DEFAULT 'chat-message',
+    acceptance_mode TEXT NOT NULL DEFAULT 'anchor_verified',
+    acceptance_spec_json TEXT NOT NULL DEFAULT '{}',
+    resume_checkpoint_ref TEXT,
+    status TEXT NOT NULL DEFAULT 'created',
+    reward_preview_json TEXT NOT NULL DEFAULT '{}',
+    reward_result_json TEXT NOT NULL DEFAULT '{}',
+    block_evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    submission_evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    verification_evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    submission_text TEXT,
+    submission_payload_json TEXT NOT NULL DEFAULT '{}',
+    verification_payload_json TEXT NOT NULL DEFAULT '{}',
+    issued_at TEXT,
+    submitted_at TEXT,
+    verified_at TEXT,
+    closed_at TEXT,
+    expires_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_human_assist_tasks_thread_updated
+    ON human_assist_tasks(chat_thread_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_human_assist_tasks_status
+    ON human_assist_tasks(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_human_assist_tasks_assignment
+    ON human_assist_tasks(assignment_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_human_assist_tasks_task
+    ON human_assist_tasks(task_id, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS task_runtimes (
     task_id TEXT PRIMARY KEY,

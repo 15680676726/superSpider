@@ -346,6 +346,11 @@ def _get_runtime_conversation_facade(request: Request) -> RuntimeConversationFac
             "agent_thread_binding_repository",
             None,
         ),
+        human_assist_task_service=getattr(
+            request.app.state,
+            "human_assist_task_service",
+            None,
+        ),
         work_context_repository=getattr(request.app.state, "work_context_repository", None),
     )
 
@@ -383,6 +388,13 @@ def _get_turn_executor(request: Request):
     if turn_executor is None:
         raise HTTPException(503, detail="Kernel turn executor is not available")
     return turn_executor
+
+
+def _get_human_assist_task_service(request: Request):
+    service = getattr(request.app.state, "human_assist_task_service", None)
+    if service is None:
+        raise HTTPException(503, detail="Human assist task service is not available")
+    return service
 
 
 def _encode_sse_event(event: object) -> str:

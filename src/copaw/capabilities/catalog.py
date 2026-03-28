@@ -81,6 +81,15 @@ class CapabilityCatalogFacade:
             if _is_public_mount(mount)
         ]
 
+    def list_public_capability_inventory(
+        self,
+        *,
+        kind: str | None = None,
+        enabled_only: bool = False,
+    ) -> tuple[list[CapabilityMount], CapabilitySummary]:
+        mounts = self.list_public_capabilities(kind=kind, enabled_only=enabled_only)
+        return mounts, summarize_capability_mounts(mounts)
+
     def get_capability(self, capability_id: str) -> CapabilityMount | None:
         for mount in self.list_capabilities():
             if mount.id == capability_id:
@@ -94,28 +103,11 @@ class CapabilityCatalogFacade:
         return mount
 
     def summarize(self) -> CapabilitySummary:
-        mounts = self.list_capabilities()
-        by_kind = Counter(mount.kind for mount in mounts)
-        by_source = Counter(mount.source_kind for mount in mounts)
-        enabled = sum(1 for mount in mounts if mount.enabled)
-        return CapabilitySummary(
-            total=len(mounts),
-            enabled=enabled,
-            by_kind=dict(sorted(by_kind.items())),
-            by_source=dict(sorted(by_source.items())),
-        )
+        return summarize_capability_mounts(self.list_capabilities())
 
     def summarize_public(self) -> CapabilitySummary:
-        mounts = self.list_public_capabilities()
-        by_kind = Counter(mount.kind for mount in mounts)
-        by_source = Counter(mount.source_kind for mount in mounts)
-        enabled = sum(1 for mount in mounts if mount.enabled)
-        return CapabilitySummary(
-            total=len(mounts),
-            enabled=enabled,
-            by_kind=dict(sorted(by_kind.items())),
-            by_source=dict(sorted(by_source.items())),
-        )
+        _mounts, summary = self.list_public_capability_inventory()
+        return summary
 
     def list_accessible_capabilities(
         self,
@@ -437,5 +429,24 @@ def _mask_secret(value: str) -> str:
     return f"{prefix}{'*' * masked_len}{suffix}"
 
 
+def summarize_capability_mounts(
+    mounts: list[CapabilityMount],
+) -> CapabilitySummary:
+    by_kind = Counter(mount.kind for mount in mounts)
+    by_source = Counter(mount.source_kind for mount in mounts)
+    enabled = sum(1 for mount in mounts if mount.enabled)
+    return CapabilitySummary(
+        total=len(mounts),
+        enabled=enabled,
+        by_kind=dict(sorted(by_kind.items())),
+        by_source=dict(sorted(by_source.items())),
+    )
+
+
 def _is_public_mount(mount: CapabilityMount) -> bool:
-    return str(mount.metadata.get("visibility") or "public").strip().lower() != "internal"
+    visibility = str(mount.metadata.get("visibility") or "").strip().lower()
+    if visibility == "internal":
+        return False
+    if visibility == "public":
+        return True
+    return mount.source_kind != "system"

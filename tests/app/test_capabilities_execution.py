@@ -919,6 +919,63 @@ def test_system_run_fixed_sop_executes_through_fixed_sop_service() -> None:
     assert evidence[0].metadata["fixed_sop_evidence_id"] == "fixed-sop-evidence-1"
 
 
+def test_system_run_host_recovery_executes_through_environment_service() -> None:
+    app = FastAPI()
+    app.include_router(capabilities_router)
+
+    class FakeEnvironmentService:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def run_host_recovery_cycle(self, **kwargs) -> dict[str, object]:
+            self.calls.append(dict(kwargs))
+            return {
+                "executed": 2,
+                "decisions": {
+                    "recover": 1,
+                    "re-observe": 1,
+                },
+                "results": [
+                    {"session_mount_id": "session-1", "decision": "recover"},
+                    {"session_mount_id": "session-2", "decision": "re-observe"},
+                ],
+            }
+
+    evidence_ledger = EvidenceLedger()
+    environment_service = FakeEnvironmentService()
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+        environment_service=environment_service,
+    )
+    app.state.capability_service = capability_service
+    app.state.kernel_dispatcher = KernelDispatcher(capability_service=capability_service)
+
+    payload = _execute_capability_direct(
+        capability_service,
+        app.state.kernel_dispatcher,
+        capability_id="system:run_host_recovery",
+        owner_agent_id="copaw-main-brain",
+        payload={
+            "actor": "system:automation",
+            "source": "automation:host_recovery",
+            "limit": 10,
+            "allow_cross_process_recovery": True,
+        },
+    )
+
+    assert payload["success"] is True
+    assert payload["phase"] == "completed"
+    assert payload["summary"] == "Host recovery processed 2 actionable event(s)."
+    assert len(environment_service.calls) == 1
+    assert environment_service.calls[0]["limit"] == 10
+    assert environment_service.calls[0]["allow_cross_process_recovery"] is True
+
+    evidence = evidence_ledger.list_by_task(payload["task_id"])
+    assert len(evidence) == 1
+    assert evidence[0].capability_ref == "system:run_host_recovery"
+    assert evidence[0].metadata["host_recovery"]["executed"] == 2
+
+
 def test_routines_replay_route_is_retired() -> None:
     app = FastAPI()
     app.include_router(routines_router)

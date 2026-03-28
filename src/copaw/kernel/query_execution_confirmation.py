@@ -40,6 +40,14 @@ def _string_list(values: Any) -> list[str]:
     return normalized
 
 
+def _normalize_main_brain_runtime_context(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    from .main_brain_intake import normalize_main_brain_runtime_context
+
+    return normalize_main_brain_runtime_context(value)
+
+
 def runtime_task_route(task_id: str) -> str:
     return task_route(task_id)
 
@@ -106,6 +114,12 @@ def query_confirmation_request_context(request: Any) -> dict[str, object]:
                 goal_kind=(industry_role_id if industry_role_id == EXECUTION_CORE_ROLE_ID else None),
                 source="goal",
             )
+    main_brain_runtime = _normalize_main_brain_runtime_context(
+        getattr(request, "_copaw_main_brain_runtime_context", None)
+        or getattr(request, "main_brain_runtime", None),
+    )
+    if main_brain_runtime:
+        payload["main_brain_runtime"] = main_brain_runtime
     return payload
 
 
@@ -141,6 +155,9 @@ def build_query_resume_request(
     owner_agent_id: str,
 ) -> Any:
     payload = dict(request_context)
+    main_brain_runtime = _normalize_main_brain_runtime_context(
+        payload.get("main_brain_runtime"),
+    )
     session_id = _first_non_empty(payload.get("session_id")) or f"resume:{owner_agent_id}"
     user_id = _first_non_empty(payload.get("user_id"), owner_agent_id) or owner_agent_id
     channel = _first_non_empty(payload.get("channel"), DEFAULT_CHANNEL) or DEFAULT_CHANNEL
@@ -165,6 +182,9 @@ def build_query_resume_request(
         value = payload.get(field)
         if value not in (None, ""):
             setattr(request, field, value)
+    if main_brain_runtime is not None:
+        setattr(request, "main_brain_runtime", main_brain_runtime)
+        setattr(request, "_copaw_main_brain_runtime_context", main_brain_runtime)
     return request
 
 

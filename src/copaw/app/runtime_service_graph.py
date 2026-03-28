@@ -40,6 +40,7 @@ from ..providers.provider_manager import ProviderManager
 from ..routines import RoutineService
 from ..sop_kernel import FixedSopService
 from ..state import SQLiteStateStore
+from ..state.human_assist_task_service import HumanAssistTaskService
 from ..state.main_brain_service import (
     AgentReportService,
     AssignmentService,
@@ -175,6 +176,7 @@ def _build_query_services(
     repositories: RuntimeRepositories,
     evidence_ledger: EvidenceLedger,
     runtime_event_bus: RuntimeEventBus,
+    human_assist_task_service: HumanAssistTaskService | None,
     environment_service: EnvironmentService,
 ) -> tuple[
     RuntimeCenterStateQueryService,
@@ -191,6 +193,7 @@ def _build_query_services(
         repositories=repositories,
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
+        human_assist_task_service=human_assist_task_service,
         environment_service=environment_service,
     )
 
@@ -308,6 +311,11 @@ def build_runtime_bootstrap(
         state_store=state_store,
         repositories=repositories,
     )
+    human_assist_task_service = HumanAssistTaskService(
+        repository=repositories.human_assist_task_repository,
+        evidence_ledger=evidence_ledger,
+        runtime_event_bus=runtime_event_bus,
+    )
 
     provider_manager = _resolve_provider_manager()
     (
@@ -324,6 +332,7 @@ def build_runtime_bootstrap(
         repositories=repositories,
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
+        human_assist_task_service=human_assist_task_service,
         environment_service=environment_service,
     )
     work_context_service = WorkContextService(
@@ -438,6 +447,7 @@ def build_runtime_bootstrap(
         provider_manager=provider_manager,
         state_query_service=state_query_service,
         evidence_query_service=evidence_query_service,
+        human_assist_task_service=human_assist_task_service,
         strategy_memory_service=strategy_memory_service,
         work_context_service=work_context_service,
         knowledge_service=knowledge_service,

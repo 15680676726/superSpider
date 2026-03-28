@@ -111,6 +111,8 @@
     以及 host-event-to-recovery 入口
 - `DecisionService`
   - 待确认请求、审批结果、治理记录
+- `HumanAssistTaskService`
+  - 负责 human-only checkpoint 的发布、提交、验收、恢复排队
 - `PatchService`
   - proposal、patch、apply、revert
 - `ConfigService`
@@ -408,6 +410,9 @@
 - `2026-03-21` 起 execution-core 聊天前门的结构化输出已删除 `query_confirmation_policy_change` 分支；“默认执行 / 恢复确认”不再是持久治理能力，风险动作统一回到 kernel 既有 `auto / guarded / confirm` 链，浏览器/桌面等高风险外部动作默认继续显式确认
 - `2026-03-19` 起 `/chat` 已新增显式 media panel，先经 `/api/media/*` 产出 `MediaAnalysisRecord`，再把 `media_analysis_ids` 顶层透传到 `chat/intake|run`；聊天主链消费的是分析结果而不是页面本地附件真相
 - `2026-03-19` 起已新增 `CHAT_RUNTIME_ALIGNMENT_PLAN.md` 作为下一轮迁移约束：当前 `chat/intake + ChatFrontdoorDecision + task-thread-first` 仅视为过渡方案，不得继续扩张；正式目标是删除 `/runtime-center/chat/intake`，让 `/chat` 默认直通 `chat/run`，并把宿主观察、task/create、durable writeback、风险确认收口到 tool/runtime/governance 显式边界
+- `2026-03-28` 补充：对“系统不能做 / 不该做 / 暂缺宿主证明”的步骤，正式目标是在主脑控制线程内物化 `HumanAssistTask`，由 `HumanAssistTaskService + ConversationFacade + RuntimeCenterQueryService` 提供当前任务条、历史列表、聊天提交与自动验收；它不是 `task-chat:*` 的回潮，也不是新的公开聊天入口
+- `2026-03-28` 补充：`/runtime-center/chat/run` 后续需要先判定当前线程是否存在活动 `HumanAssistTask`。当宿主发送“已完成 / 已上传 / 已处理”类回执时，应先进入 `submitted -> verifying -> accepted|rejected|need_more_evidence` 正式链，再决定是否把执行恢复排队回内核
+- `2026-03-28` 补充：`HumanAssistTask` 只允许承接 `checkpoint / ui-assist / evidence-submit` 等 human-only step；没有验收契约的提醒文案不得作为正式任务发布
 - 前端 `/chat` 侧栏已改为真实行业角色 / agent 列表，`/sessions` 页面与 `New Chat` shell 已删除
   - 旧 `/chats` HTTP router 与 `copaw chats` CLI 已删除，不再保留公开兼容入口
   - `chats.json` 主链 bootstrap/read fallback 已删除，legacy delete-gate surfaces 已移除；query turn 也不再额外写入 `chat:*` metadata task；如工作目录仍出现同名文件，也只应视为历史 artifact，不参与 runtime

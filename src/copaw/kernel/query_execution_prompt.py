@@ -123,6 +123,9 @@ class _QueryExecutionPromptMixin:
         resume_checkpoint = _mapping_value(
             (execution_context or {}).get("resume_checkpoint"),
         )
+        main_brain_runtime = _mapping_value(
+            (execution_context or {}).get("main_brain_runtime"),
+        )
         capabilities = mounted_capabilities or (
             getattr(profile, "capabilities", None) if profile is not None else None
         ) or []
@@ -244,6 +247,11 @@ class _QueryExecutionPromptMixin:
                 lines.append(
                     f"- Resume checkpoint: {resume_checkpoint.get('id')} / {checkpoint_summary}",
                 )
+        main_brain_runtime_lines = self._build_main_brain_runtime_lines(
+            main_brain_runtime=main_brain_runtime,
+        )
+        if main_brain_runtime_lines:
+            lines.extend(["", "# Main Brain Runtime", *main_brain_runtime_lines])
         industry_brief_lines = self._build_industry_brief_lines(
             industry_instance_id=industry_instance_id,
         )
@@ -362,6 +370,67 @@ class _QueryExecutionPromptMixin:
             ],
         )
         return "\n".join(lines)
+
+    def _build_main_brain_runtime_lines(
+        self,
+        *,
+        main_brain_runtime: dict[str, Any],
+    ) -> list[str]:
+        if not main_brain_runtime:
+            return []
+        intent = _mapping_value(main_brain_runtime.get("intent"))
+        environment = _mapping_value(main_brain_runtime.get("environment"))
+        recovery = _mapping_value(main_brain_runtime.get("recovery"))
+        lines: list[str] = []
+        source_kind = _first_non_empty(intent.get("source_kind"))
+        intent_kind = _first_non_empty(intent.get("kind"))
+        intent_mode = _first_non_empty(intent.get("mode"))
+        route = None
+        if source_kind and intent_kind and intent_mode:
+            route = f"{source_kind} -> {intent_kind} ({intent_mode})"
+        elif source_kind and intent_kind:
+            route = f"{source_kind} -> {intent_kind}"
+        elif intent_kind and intent_mode:
+            route = f"{intent_kind} ({intent_mode})"
+        else:
+            route = _first_non_empty(source_kind, intent_kind, intent_mode)
+        if route:
+            lines.append(f"- Execution route: {route}")
+        if environment.get("ref"):
+            lines.append(f"- Environment binding: {environment.get('ref')}")
+        if environment.get("session_id"):
+            lines.append(f"- Environment session: {environment.get('session_id')}")
+        continuity_source = _first_non_empty(environment.get("continuity_source"))
+        continuity_token = _first_non_empty(environment.get("continuity_token"))
+        if continuity_source and continuity_token:
+            lines.append(
+                f"- Continuity proof: {continuity_source} / {continuity_token}",
+            )
+        elif continuity_source:
+            lines.append(f"- Continuity proof: {continuity_source}")
+        elif continuity_token:
+            lines.append(f"- Continuity proof: {continuity_token}")
+        if "resume_ready" in environment:
+            lines.append(
+                "- Environment resume-ready: "
+                + ("yes" if bool(environment.get("resume_ready")) else "no"),
+            )
+        recovery_mode = _first_non_empty(recovery.get("mode"))
+        recovery_reason = _first_non_empty(recovery.get("reason"))
+        recovery_contract = None
+        if recovery_mode and recovery_reason:
+            recovery_contract = f"{recovery_mode} / {recovery_reason}"
+        else:
+            recovery_contract = _first_non_empty(recovery_mode, recovery_reason)
+        if recovery_contract:
+            lines.append(f"- Recovery contract: {recovery_contract}")
+        if recovery.get("checkpoint_id"):
+            lines.append(f"- Recovery checkpoint: {recovery.get('checkpoint_id')}")
+        if recovery.get("mailbox_id"):
+            lines.append(f"- Recovery mailbox: {recovery.get('mailbox_id')}")
+        if recovery.get("kernel_task_id"):
+            lines.append(f"- Recovery kernel task: {recovery.get('kernel_task_id')}")
+        return lines
 
     def _resolve_execution_core_identity_payload(
         self,

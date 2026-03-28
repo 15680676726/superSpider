@@ -15,6 +15,7 @@ from .cooperative import (
     resolve_preferred_execution_path,
 )
 from .health_service import EnvironmentHealthService
+from .host_event_recovery_service import HostEventRecoveryService
 from .lease_service import EnvironmentLeaseService
 from .models import EnvironmentMount, EnvironmentSummary, SessionMount
 from .observations import ActionReplayStore, ArtifactStore, ObservationCache
@@ -22,6 +23,7 @@ from .registry import EnvironmentRegistry
 from .replay_service import EnvironmentReplayService
 from .repository import SessionMountRepository
 from .session_service import EnvironmentSessionService
+from .surface_control_service import SurfaceControlService
 
 
 class EnvironmentService:
@@ -52,6 +54,10 @@ class EnvironmentService:
         self._replay_service = EnvironmentReplayService(self)
         self._artifact_service = EnvironmentArtifactService(self)
         self._health_service = EnvironmentHealthService(self)
+        self._host_event_recovery_service = HostEventRecoveryService(
+            environment_service=self,
+        )
+        self._surface_control_service = SurfaceControlService(self)
         self._rebind_cooperative_runtimes()
 
     def set_session_repository(
@@ -81,6 +87,10 @@ class EnvironmentService:
 
     def set_runtime_event_bus(self, runtime_event_bus) -> None:
         self._runtime_event_bus = runtime_event_bus
+        self._host_event_recovery_service = HostEventRecoveryService(
+            environment_service=self,
+            runtime_event_bus=runtime_event_bus,
+        )
         self._rebind_cooperative_runtimes()
 
     def set_agent_lease_repository(self, agent_lease_repository) -> None:
@@ -102,6 +112,36 @@ class EnvironmentService:
         executor: object | None,
     ) -> None:
         self._replay_service.register_replay_executor(replay_type, executor)
+
+    def register_document_bridge_executor(
+        self,
+        bridge_ref: str,
+        executor: object | None,
+    ) -> None:
+        self._surface_control_service.register_document_bridge_executor(
+            bridge_ref,
+            executor,
+        )
+
+    def register_windows_app_executor(
+        self,
+        app_identity: str,
+        executor: object | None,
+    ) -> None:
+        self._surface_control_service.register_windows_app_executor(
+            app_identity,
+            executor,
+        )
+
+    def register_semantic_surface_executor(
+        self,
+        control_channel: str,
+        executor: object | None,
+    ) -> None:
+        self._surface_control_service.register_semantic_surface_executor(
+            control_channel,
+            executor,
+        )
 
     def list_environments(
         self,
@@ -472,6 +512,33 @@ class EnvironmentService:
             limit=limit,
         )
 
+    def should_run_host_recovery(
+        self,
+        *,
+        limit: int = 20,
+        allow_cross_process_recovery: bool = False,
+    ) -> tuple[bool, str]:
+        _ = allow_cross_process_recovery
+        plan = self._host_event_recovery_service.plan_recovery(limit=limit)
+        planned = int(plan.get("planned") or 0)
+        if planned > 0:
+            return (True, "actionable-host-events")
+        skipped = int(plan.get("skipped") or 0)
+        if skipped > 0:
+            return (False, "host-events-already-handled")
+        return (False, "no-actionable-host-events")
+
+    def run_host_recovery_cycle(
+        self,
+        *,
+        limit: int = 20,
+        allow_cross_process_recovery: bool = False,
+    ) -> dict[str, Any]:
+        _ = allow_cross_process_recovery
+        return self._host_event_recovery_service.run_recovery_cycle(
+            limit=limit,
+        )
+
     def register_browser_companion(self, **kwargs) -> dict[str, Any]:
         runtime = self._require_browser_companion_runtime()
         return runtime.register_companion(**kwargs)
@@ -678,6 +745,42 @@ class EnvironmentService:
         **kwargs,
     ) -> ExecutionPathResolution:
         return resolve_preferred_execution_path(**kwargs)
+
+    async def execute_document_action(
+        self,
+        *,
+        session_mount_id: str,
+        action: str,
+        contract: dict[str, Any],
+        host_executor: object | None = None,
+        document_family: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        return await self._surface_control_service.execute_document_action(
+            session_mount_id=session_mount_id,
+            action=action,
+            contract=contract,
+            host_executor=host_executor,
+            document_family=document_family,
+            limit=limit,
+        )
+
+    async def execute_windows_app_action(
+        self,
+        *,
+        session_mount_id: str,
+        action: str,
+        contract: dict[str, Any],
+        host_executor: object | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        return await self._surface_control_service.execute_windows_app_action(
+            session_mount_id=session_mount_id,
+            action=action,
+            contract=contract,
+            host_executor=host_executor,
+            limit=limit,
+        )
 
     def _cooperative_projection_for_session(
         self,

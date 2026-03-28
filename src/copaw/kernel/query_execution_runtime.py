@@ -7,6 +7,7 @@ from ..evidence import EvidenceRecord
 from ..providers import ProviderManager
 from .main_brain_intake import (
     build_industry_chat_action_kwargs,
+    normalize_main_brain_runtime_context,
     resolve_execution_core_industry_instance_id,
     resolve_request_main_brain_intake_contract,
     resolve_request_main_brain_intake_contract_sync,
@@ -275,6 +276,7 @@ class _QueryExecutionRuntimeMixin:
                 working_dir=str(WORKING_DIR),
             )
             execution_context = self._resolve_execution_task_context(
+                request=request,
                 agent_id=owner_agent_id,
                 kernel_task_id=kernel_task_id,
                 conversation_thread_id=session_id,
@@ -881,6 +883,38 @@ class _QueryExecutionRuntimeMixin:
             payload,
         )
 
+    def _merge_main_brain_runtime_contexts(
+        self,
+        *values: Any,
+    ) -> dict[str, Any] | None:
+        merged: dict[str, Any] = {}
+        for value in values:
+            normalized = normalize_main_brain_runtime_context(value)
+            if not normalized:
+                continue
+            for section in ("intent", "environment", "recovery"):
+                payload = _mapping_value(normalized.get(section))
+                if not payload:
+                    continue
+                existing = _mapping_value(merged.get(section))
+                merged[section] = {
+                    **existing,
+                    **payload,
+                }
+        return merged or None
+
+    def _resolve_request_main_brain_runtime_context(
+        self,
+        *,
+        request: Any | None,
+    ) -> dict[str, Any] | None:
+        if request is None:
+            return None
+        return self._merge_main_brain_runtime_contexts(
+            getattr(request, "_copaw_main_brain_runtime_context", None),
+            getattr(request, "main_brain_runtime", None),
+        )
+
     def _mark_actor_query_started(
         self,
         *,
@@ -911,6 +945,29 @@ class _QueryExecutionRuntimeMixin:
         checkpoint_id = getattr(checkpoint, "id", None) if checkpoint is not None else None
         if runtime is None or runtime_repository is None:
             return
+        main_brain_runtime = self._merge_main_brain_runtime_contexts(
+            dict(runtime.metadata or {}).get("main_brain_runtime"),
+            (execution_context or {}).get("main_brain_runtime"),
+        )
+        metadata = {
+            **dict(runtime.metadata or {}),
+            "last_query_channel": channel,
+            "last_query_session_id": session_id,
+            "last_query_user_id": user_id,
+            "last_query_thread_id": conversation_thread_id,
+            "last_resume_cursor": _first_non_empty(
+                _mapping_value(
+                    (execution_context or {}).get("resume_point"),
+                ).get("cursor"),
+            ),
+            "last_task_segment_id": _first_non_empty(
+                _mapping_value(
+                    (execution_context or {}).get("task_segment"),
+                ).get("segment_id"),
+            ),
+        }
+        if main_brain_runtime is not None:
+            metadata["main_brain_runtime"] = main_brain_runtime
         runtime_repository.upsert_runtime(
             runtime.model_copy(
                 update={
@@ -920,23 +977,7 @@ class _QueryExecutionRuntimeMixin:
                     "last_heartbeat_at": now,
                     "last_error_summary": None,
                     "last_checkpoint_id": checkpoint_id or runtime.last_checkpoint_id,
-                    "metadata": {
-                        **dict(runtime.metadata),
-                        "last_query_channel": channel,
-                        "last_query_session_id": session_id,
-                        "last_query_user_id": user_id,
-                        "last_query_thread_id": conversation_thread_id,
-                        "last_resume_cursor": _first_non_empty(
-                            _mapping_value(
-                                (execution_context or {}).get("resume_point"),
-                            ).get("cursor"),
-                        ),
-                        "last_task_segment_id": _first_non_empty(
-                            _mapping_value(
-                                (execution_context or {}).get("task_segment"),
-                            ).get("segment_id"),
-                        ),
-                    },
+                    "metadata": metadata,
                 },
             ),
         )
@@ -983,6 +1024,27 @@ class _QueryExecutionRuntimeMixin:
         if runtime is None or runtime_repository is None:
             return
         blocking_error = resolved_error if should_block_runtime_error(resolved_error) else None
+        main_brain_runtime = self._merge_main_brain_runtime_contexts(
+            dict(runtime.metadata or {}).get("main_brain_runtime"),
+            (execution_context or {}).get("main_brain_runtime"),
+        )
+        metadata = {
+            **dict(runtime.metadata or {}),
+            "last_query_channel": channel,
+            "last_query_session_id": session_id,
+            "last_query_user_id": user_id,
+            "last_query_thread_id": conversation_thread_id,
+            "last_stream_step_count": stream_step_count,
+            "last_query_outcome": (
+                "failed"
+                if blocking_error
+                else "cancelled"
+                if resolved_error
+                else "completed"
+            ),
+        }
+        if main_brain_runtime is not None:
+            metadata["main_brain_runtime"] = main_brain_runtime
         runtime_repository.upsert_runtime(
             runtime.model_copy(
                 update={
@@ -999,21 +1061,7 @@ class _QueryExecutionRuntimeMixin:
                     "last_result_summary": runtime.last_result_summary if resolved_error else final_summary,
                     "last_error_summary": resolved_error,
                     "last_checkpoint_id": checkpoint_id or runtime.last_checkpoint_id,
-                    "metadata": {
-                        **dict(runtime.metadata),
-                        "last_query_channel": channel,
-                        "last_query_session_id": session_id,
-                        "last_query_user_id": user_id,
-                        "last_query_thread_id": conversation_thread_id,
-                        "last_stream_step_count": stream_step_count,
-                        "last_query_outcome": (
-                            "failed"
-                            if blocking_error
-                            else "cancelled"
-                            if resolved_error
-                            else "completed"
-                        ),
-                    },
+                    "metadata": metadata,
                 },
             ),
         )
@@ -1066,7 +1114,7 @@ class _QueryExecutionRuntimeMixin:
         runtime = self._agent_runtime_repository.get_runtime(owner_agent_id)
         if runtime is None:
             return
-        metadata = dict(runtime.metadata)
+        metadata = dict(runtime.metadata or {})
         metadata["last_query_usage"] = usage_payload
         metadata["last_query_usage_at"] = recorded_at.isoformat()
         if model_context:
@@ -1191,11 +1239,22 @@ class _QueryExecutionRuntimeMixin:
     def _resolve_execution_task_context(
         self,
         *,
+        request: Any | None = None,
         agent_id: str,
         kernel_task_id: str | None,
         conversation_thread_id: str | None,
     ) -> dict[str, Any]:
         context: dict[str, Any] = {}
+        runtime_repository = self._agent_runtime_repository
+
+        def _merge_main_brain_runtime(value: Any) -> None:
+            merged = self._merge_main_brain_runtime_contexts(
+                context.get("main_brain_runtime"),
+                value,
+            )
+            if merged is not None:
+                context["main_brain_runtime"] = merged
+
         if kernel_task_id and self._kernel_dispatcher is not None:
             task = self._kernel_dispatcher.lifecycle.get_task(kernel_task_id)
             if task is not None:
@@ -1207,6 +1266,19 @@ class _QueryExecutionRuntimeMixin:
                     context["actor_owner_id"] = task.actor_owner_id
                 if isinstance(getattr(task, "work_context_id", None), str) and task.work_context_id:
                     context["work_context_id"] = task.work_context_id
+                payload = task.payload if isinstance(task.payload, dict) else {}
+                _merge_main_brain_runtime(payload.get("main_brain_runtime"))
+                task_request_context = _mapping_value(payload.get("request_context"))
+                if task_request_context:
+                    _merge_main_brain_runtime(task_request_context.get("main_brain_runtime"))
+                task_request = _mapping_value(payload.get("request"))
+                if task_request:
+                    _merge_main_brain_runtime(task_request.get("main_brain_runtime"))
+        runtime = runtime_repository.get_runtime(agent_id) if runtime_repository is not None else None
+        if runtime is not None:
+            runtime_metadata = _mapping_value(getattr(runtime, "metadata", None))
+            if runtime_metadata:
+                _merge_main_brain_runtime(runtime_metadata.get("main_brain_runtime"))
         if self._actor_mailbox_service is not None:
             list_checkpoints = getattr(self._actor_mailbox_service, "list_checkpoints", None)
             if callable(list_checkpoints):
@@ -1225,9 +1297,13 @@ class _QueryExecutionRuntimeMixin:
                         embedded_resume = _mapping_value(checkpoint_resume.get("resume_point"))
                         if embedded_resume and "resume_point" not in context:
                             context["resume_point"] = embedded_resume
+                        _merge_main_brain_runtime(checkpoint_resume.get("main_brain_runtime"))
                     checkpoint_snapshot = _mapping_value(latest_checkpoint.snapshot_payload)
                     if checkpoint_snapshot:
                         context["resume_snapshot"] = checkpoint_snapshot
+        _merge_main_brain_runtime(
+            self._resolve_request_main_brain_runtime_context(request=request),
+        )
         return context
 
     def _record_query_checkpoint(
@@ -1260,6 +1336,9 @@ class _QueryExecutionRuntimeMixin:
         mailbox_id = getattr(runtime, "current_mailbox_id", None) if runtime is not None else None
         task_segment = _mapping_value((execution_context or {}).get("task_segment"))
         resume_point = _mapping_value((execution_context or {}).get("resume_point"))
+        main_brain_runtime = self._merge_main_brain_runtime_contexts(
+            (execution_context or {}).get("main_brain_runtime"),
+        )
         checkpoint_payload = {
             "session_id": session_id,
             "user_id": user_id,
@@ -1277,6 +1356,8 @@ class _QueryExecutionRuntimeMixin:
                 ),
             },
         }
+        if main_brain_runtime is not None:
+            checkpoint_payload["main_brain_runtime"] = main_brain_runtime
         return create_checkpoint(
             agent_id=agent_id,
             mailbox_id=mailbox_id,

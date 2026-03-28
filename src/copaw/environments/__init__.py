@@ -12,6 +12,7 @@ from .cooperative import (
     resolve_preferred_execution_path,
 )
 from .health_service import EnvironmentHealthService
+from .host_event_recovery_service import HostEventRecoveryService
 from .lease_service import EnvironmentLeaseService
 from .models import (
     ArtifactEntry,
@@ -28,6 +29,7 @@ from .replay_service import EnvironmentReplayService
 from .repository import EnvironmentRepository, SessionMountRepository
 from .service import EnvironmentService
 from .session_service import EnvironmentSessionService
+from .surface_control_service import SurfaceControlService
 
 __all__ = [
     "ActionReplayStore",
@@ -49,6 +51,7 @@ __all__ = [
     "EnvironmentService",
     "EnvironmentSummary",
     "ExecutionPathResolution",
+    "HostEventRecoveryService",
     "HostWatcherRuntime",
     "ObservationCache",
     "ObservationRecord",
@@ -56,5 +59,6 @@ __all__ = [
     "resolve_preferred_execution_path",
     "SessionMount",
     "SessionMountRepository",
+    "SurfaceControlService",
     "WindowsAppAdapterRuntime",
 ]

@@ -20,6 +20,8 @@ from .models_core import (
     AssignmentStatus,
     BacklogItemStatus,
     GoalStatus,
+    HumanAssistTaskAcceptanceMode,
+    HumanAssistTaskStatus,
     OperatingCycleKind,
     OperatingCycleStatus,
     OperatingLaneStatus,
@@ -67,6 +69,73 @@ class TaskRecord(UpdatedRecord):
     lane_id: str | None = None
     cycle_id: str | None = None
     report_back_mode: str = "summary"
+
+
+def _normalize_mapping(value: object) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        payload = model_dump(mode="json")
+        if isinstance(payload, dict):
+            return dict(payload)
+    return {}
+
+
+class HumanAssistTaskRecord(UpdatedRecord):
+    """Formal host-side task for blocked-by-proof or human-owned checkpoints."""
+
+    id: str = Field(default_factory=_new_record_id, min_length=1)
+    industry_instance_id: str | None = None
+    assignment_id: str | None = None
+    task_id: str | None = None
+    chat_thread_id: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1)
+    summary: str = ""
+    task_type: str = Field(..., min_length=1)
+    reason_code: str | None = None
+    reason_summary: str = ""
+    required_action: str = ""
+    submission_mode: str = "chat-message"
+    acceptance_mode: HumanAssistTaskAcceptanceMode = "anchor_verified"
+    acceptance_spec: dict[str, Any] = Field(default_factory=dict)
+    resume_checkpoint_ref: str | None = None
+    status: HumanAssistTaskStatus = "created"
+    reward_preview: dict[str, Any] = Field(default_factory=dict)
+    reward_result: dict[str, Any] = Field(default_factory=dict)
+    block_evidence_refs: list[str] = Field(default_factory=list)
+    submission_evidence_refs: list[str] = Field(default_factory=list)
+    verification_evidence_refs: list[str] = Field(default_factory=list)
+    submission_text: str | None = None
+    submission_payload: dict[str, Any] = Field(default_factory=dict)
+    verification_payload: dict[str, Any] = Field(default_factory=dict)
+    issued_at: datetime | None = None
+    submitted_at: datetime | None = None
+    verified_at: datetime | None = None
+    closed_at: datetime | None = None
+    expires_at: datetime | None = None
+
+    @field_validator(
+        "block_evidence_refs",
+        "submission_evidence_refs",
+        "verification_evidence_refs",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_evidence_refs(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+    @field_validator(
+        "acceptance_spec",
+        "reward_preview",
+        "reward_result",
+        "submission_payload",
+        "verification_payload",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_mapping_fields(cls, value: object) -> dict[str, Any]:
+        return _normalize_mapping(value)
 
 
 class TaskRuntimeRecord(StateRecord):
@@ -271,6 +340,7 @@ __all__ = [
     "AssignmentRecord",
     "BacklogItemRecord",
     "GoalRecord",
+    "HumanAssistTaskRecord",
     "OperatingCycleRecord",
     "OperatingLaneRecord",
     "RuntimeFrameRecord",

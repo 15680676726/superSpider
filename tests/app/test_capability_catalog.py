@@ -15,6 +15,20 @@ class _FakeRegistry(CapabilityRegistry):
         return list(self._mounts)
 
 
+class _DriftingRegistry(CapabilityRegistry):
+    def __init__(self, mounts: list[CapabilityMount], drift_mount: CapabilityMount) -> None:
+        self._mounts = mounts
+        self._drift_mount = drift_mount
+        self.read_count = 0
+
+    def list_capabilities(self) -> list[CapabilityMount]:
+        self.read_count += 1
+        mounts = list(self._mounts)
+        if self.read_count >= 2:
+            mounts.append(self._drift_mount)
+        return mounts
+
+
 class _Override:
     def __init__(
         self,
@@ -149,3 +163,73 @@ def test_capability_catalog_access_prefers_explicit_allowlist() -> None:
     )
 
     assert [mount.id for mount in mounts] == ["tool:allowed"]
+
+
+def test_capability_catalog_public_inventory_uses_one_snapshot() -> None:
+    drift_mount = CapabilityMount(
+        id="mcp:drifted",
+        name="drifted",
+        summary="Drifted",
+        kind="remote-mcp",
+        source_kind="mcp",
+        risk_level="guarded",
+        enabled=True,
+    )
+    registry = _DriftingRegistry(
+        [
+            CapabilityMount(
+                id="skill:research",
+                name="research",
+                summary="Research",
+                kind="skill-bundle",
+                source_kind="skill",
+                risk_level="auto",
+                enabled=True,
+            ),
+            CapabilityMount(
+                id="system:hidden",
+                name="hidden",
+                summary="Hidden",
+                kind="system-op",
+                source_kind="system",
+                risk_level="auto",
+                enabled=True,
+                metadata={"visibility": "internal"},
+            ),
+            CapabilityMount(
+                id="system:browser_companion_runtime",
+                name="browser_companion_runtime",
+                summary="Browser companion runtime",
+                kind="system-op",
+                source_kind="system",
+                risk_level="guarded",
+                enabled=True,
+            ),
+        ],
+        drift_mount=drift_mount,
+    )
+    skill_service = SimpleNamespace(
+        list_all_skills=lambda: [],
+        list_available_skill_names=lambda: [],
+        list_available_skills=lambda: [],
+        enable_skill=lambda _name: None,
+        disable_skill=lambda _name: None,
+        delete_skill=lambda _name: True,
+    )
+    facade = CapabilityCatalogFacade(
+        registry=registry,
+        load_config_fn=lambda: SimpleNamespace(mcp=SimpleNamespace(clients={})),
+        save_config_fn=lambda _config: None,
+        skill_service=skill_service,
+        override_repository=None,
+        agent_profile_service=None,
+        agent_profile_override_repository=None,
+    )
+
+    mounts, summary = facade.list_public_capability_inventory()
+
+    assert registry.read_count == 1
+    assert [mount.id for mount in mounts] == ["skill:research"]
+    assert summary.total == 1
+    assert summary.enabled == 1
+    assert summary.by_source == {"skill": 1}

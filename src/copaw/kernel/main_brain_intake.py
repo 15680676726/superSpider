@@ -49,6 +49,138 @@ def read_attached_main_brain_intake_contract(
     return intake_contract
 
 
+def read_attached_main_brain_runtime_context(
+    *,
+    request: Any,
+) -> dict[str, Any] | None:
+    return normalize_main_brain_runtime_context(
+        getattr(request, "_copaw_main_brain_runtime_context", None),
+    )
+
+
+def normalize_main_brain_runtime_context(
+    value: Any,
+) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    if any(isinstance(value.get(key), dict) for key in ("intent", "environment", "recovery")):
+        intent_payload = value.get("intent")
+        environment_payload = value.get("environment")
+        recovery_payload = value.get("recovery")
+        normalized = _compact_mapping(
+            {
+                "intent": {
+                    "source_kind": _first_non_empty(
+                        intent_payload.get("source_kind")
+                        if isinstance(intent_payload, dict)
+                        else None,
+                    ),
+                    "kind": _first_non_empty(
+                        intent_payload.get("kind")
+                        if isinstance(intent_payload, dict)
+                        else None,
+                    ),
+                    "mode": _first_non_empty(
+                        intent_payload.get("mode")
+                        if isinstance(intent_payload, dict)
+                        else None,
+                    ),
+                },
+                "environment": {
+                    "ref": _first_non_empty(
+                        environment_payload.get("ref")
+                        if isinstance(environment_payload, dict)
+                        else None,
+                    ),
+                    "binding_kind": _first_non_empty(
+                        environment_payload.get("binding_kind")
+                        if isinstance(environment_payload, dict)
+                        else None,
+                    ),
+                    "kind": _first_non_empty(
+                        environment_payload.get("kind")
+                        if isinstance(environment_payload, dict)
+                        else None,
+                    ),
+                    "session_id": _first_non_empty(
+                        environment_payload.get("session_id")
+                        if isinstance(environment_payload, dict)
+                        else None,
+                    ),
+                    "continuity_token": _first_non_empty(
+                        environment_payload.get("continuity_token")
+                        if isinstance(environment_payload, dict)
+                        else None,
+                    ),
+                    "continuity_source": _first_non_empty(
+                        environment_payload.get("continuity_source")
+                        if isinstance(environment_payload, dict)
+                        else None,
+                    ),
+                    "resume_ready": bool(
+                        environment_payload.get("resume_ready")
+                        if isinstance(environment_payload, dict)
+                        else False
+                    ),
+                },
+                "recovery": {
+                    "mode": _first_non_empty(
+                        recovery_payload.get("mode")
+                        if isinstance(recovery_payload, dict)
+                        else None,
+                    ),
+                    "reason": _first_non_empty(
+                        recovery_payload.get("reason")
+                        if isinstance(recovery_payload, dict)
+                        else None,
+                    ),
+                    "checkpoint_id": _first_non_empty(
+                        recovery_payload.get("checkpoint_id")
+                        if isinstance(recovery_payload, dict)
+                        else None,
+                    ),
+                    "mailbox_id": _first_non_empty(
+                        recovery_payload.get("mailbox_id")
+                        if isinstance(recovery_payload, dict)
+                        else None,
+                    ),
+                    "kernel_task_id": _first_non_empty(
+                        recovery_payload.get("kernel_task_id")
+                        if isinstance(recovery_payload, dict)
+                        else None,
+                    ),
+                },
+            },
+        )
+        return normalized or None
+    normalized = _compact_mapping(
+        {
+            "intent": {
+                "source_kind": _first_non_empty(value.get("source_intent_kind")),
+                "kind": _first_non_empty(value.get("execution_intent")),
+                "mode": _first_non_empty(value.get("execution_mode")),
+            },
+            "environment": {
+                "ref": _first_non_empty(value.get("environment_ref")),
+                "binding_kind": _first_non_empty(value.get("environment_binding_kind")),
+                "kind": _first_non_empty(value.get("environment_kind")),
+                "session_id": _first_non_empty(value.get("environment_session_id")),
+                "continuity_token": _first_non_empty(value.get("environment_continuity_token")),
+                "continuity_source": _first_non_empty(value.get("environment_continuity_source")),
+                "resume_ready": bool(value.get("environment_resume_ready", False)),
+            },
+            "recovery": {
+                "mode": _first_non_empty(value.get("recovery_mode")),
+                "reason": _first_non_empty(value.get("recovery_reason")),
+                "checkpoint_id": _first_non_empty(value.get("resume_checkpoint_id")),
+                "mailbox_id": _first_non_empty(value.get("resume_mailbox_id")),
+                "kernel_task_id": _first_non_empty(value.get("resume_kernel_task_id")),
+            },
+        },
+    )
+    return normalized or None
+
+
 def extract_main_brain_intake_text(msgs: list[Any]) -> str | None:
     latest_user_text = get_last_user_text(msgs)
     if latest_user_text:
@@ -218,12 +350,30 @@ def build_industry_chat_action_kwargs(
     }
 
 
+def _compact_mapping(value: dict[str, Any]) -> dict[str, Any]:
+    compacted: dict[str, Any] = {}
+    for key, item in value.items():
+        if isinstance(item, dict):
+            nested = _compact_mapping(item)
+            if nested:
+                compacted[key] = nested
+            continue
+        if isinstance(item, bool):
+            compacted[key] = item
+            continue
+        if item not in (None, ""):
+            compacted[key] = item
+    return compacted
+
+
 __all__ = [
     "MainBrainIntakeContract",
     "build_industry_chat_action_kwargs",
     "extract_main_brain_intake_text",
     "materialize_main_brain_intake_contract",
     "read_attached_main_brain_intake_contract",
+    "read_attached_main_brain_runtime_context",
+    "normalize_main_brain_runtime_context",
     "resolve_execution_core_industry_instance_id",
     "resolve_main_brain_intake_contract",
     "resolve_main_brain_intake_contract_sync",

@@ -126,6 +126,7 @@ async def lifespan(
     automation_tasks = start_automation_tasks(
         kernel_dispatcher=bootstrap.kernel_dispatcher,
         capability_service=bootstrap.capability_service,
+        environment_service=bootstrap.environment_service,
         industry_service=bootstrap.industry_service,
         learning_service=bootstrap.learning_service,
         logger=logger,

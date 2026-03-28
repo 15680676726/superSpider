@@ -263,7 +263,10 @@ def test_runtime_center_environment_read_endpoints() -> None:
         detail_response.json()["host_companion_session"]["session_mount_id"]
         == "session:web:main"
     )
-    assert detail_response.json()["browser_site_contract"]["browser_mode"] == "tab-attached"
+    assert (
+        detail_response.json()["browser_site_contract"]["browser_mode"]
+        == "attach-existing-session"
+    )
     assert (
         detail_response.json()["browser_site_contract"]["site_contract_status"]
         == "verified-writer"
