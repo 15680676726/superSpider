@@ -9,7 +9,9 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from copaw.app.runtime_center import RuntimeCenterStateQueryService
+from copaw.capabilities import CapabilityService
 from copaw.evidence import EvidenceLedger
+from copaw.kernel import KernelDispatcher, KernelTaskStore
 from copaw.state import HumanAssistTaskRecord, SQLiteStateStore
 from copaw.state.human_assist_task_service import HumanAssistTaskService
 from copaw.state.repositories import (
@@ -20,7 +22,13 @@ from copaw.state.repositories import (
     SqliteTaskRuntimeRepository,
 )
 
-from .runtime_center_api_parts.shared import FakeTurnExecutor, build_runtime_center_app
+from .runtime_center_api_parts.shared import (
+    FakeCronManager,
+    FakeScheduleStateQueryService,
+    FakeTurnExecutor,
+    build_runtime_center_app,
+    make_job,
+)
 
 
 class _FakeQueryExecutionService:
@@ -167,6 +175,31 @@ def _build_human_assist_app(tmp_path, *, query_execution_service: object | None 
     app.state.turn_executor = turn_executor
     app.state.query_execution_service = query_execution_service
     return app, service, turn_executor, query_execution_service
+
+
+def _wire_governed_schedule_runtime(app, manager: FakeCronManager, tmp_path) -> None:
+    state_store = SQLiteStateStore(tmp_path / "schedule-governance.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    evidence_ledger = EvidenceLedger(tmp_path / "schedule-governance.evidence.sqlite3")
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+    )
+    capability_service.set_cron_manager(manager)
+    kernel_dispatcher = KernelDispatcher(
+        task_store=KernelTaskStore(
+            task_repository=task_repository,
+            task_runtime_repository=task_runtime_repository,
+            decision_request_repository=decision_request_repository,
+            evidence_ledger=evidence_ledger,
+        ),
+        capability_service=capability_service,
+    )
+    app.state.capability_service = capability_service
+    app.state.kernel_dispatcher = kernel_dispatcher
+    app.state.decision_request_repository = decision_request_repository
+    app.state.evidence_ledger = evidence_ledger
 
 
 def test_runtime_center_human_assist_task_endpoints(tmp_path) -> None:
@@ -601,3 +634,106 @@ def test_runtime_center_chat_run_accepts_media_only_human_assist_submission(
     assert query_execution_service.calls == [issued.id]
     assert service.get_task(issued.id).status == "closed"
     assert '"outcome":"accepted"' in response.text
+
+
+def test_runtime_center_chat_run_preserves_shared_work_context_across_schedule_resume_and_human_assist(
+    tmp_path,
+) -> None:
+    shared_work_context_id = "ctx-shared-reentry"
+    recommended_scheduler_action = "resume"
+    schedule = make_job("sched-shared")
+    schedule = schedule.model_copy(
+        update={
+            "meta": {
+                "work_context_id": shared_work_context_id,
+                "recommended_scheduler_action": recommended_scheduler_action,
+            },
+        },
+    )
+    manager = FakeCronManager([schedule])
+
+    app, service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
+    )
+    app.state.cron_manager = manager
+    base_state_query_service = app.state.state_query_service
+    schedule_state_query_service = FakeScheduleStateQueryService(manager)
+
+    class _HybridStateQueryService:
+        async def list_schedules(self, limit: int | None = 5):
+            return await schedule_state_query_service.list_schedules(limit=limit)
+
+        async def get_schedule_detail(self, schedule_id: str):
+            return await schedule_state_query_service.get_schedule_detail(schedule_id)
+
+        def __getattr__(self, name: str):
+            return getattr(base_state_query_service, name)
+
+    app.state.state_query_service = _HybridStateQueryService()
+    _wire_governed_schedule_runtime(app, manager, tmp_path)
+
+    issued = service.issue_task(_make_human_assist_task(task_id="task-shared-work-context"))
+    client = TestClient(app)
+
+    pause_response = client.post("/runtime-center/schedules/sched-shared/pause")
+    assert pause_response.status_code == 200
+    assert pause_response.json()["paused"] is True
+
+    resume_response = client.post("/runtime-center/schedules/sched-shared/resume")
+    assert resume_response.status_code == 200
+    assert resume_response.json()["resumed"] is True
+
+    schedule_detail = client.get("/runtime-center/schedules/sched-shared")
+    assert schedule_detail.status_code == 200
+    assert schedule_detail.json()["spec"]["meta"]["work_context_id"] == shared_work_context_id
+    assert (
+        schedule_detail.json()["spec"]["meta"]["recommended_scheduler_action"]
+        == recommended_scheduler_action
+    )
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-human-assist-shared-work-context",
+            "session_id": issued.chat_thread_id,
+            "thread_id": issued.chat_thread_id,
+            "user_id": "host-user",
+            "channel": "console",
+            "requested_actions": ["submit_human_assist"],
+            "work_context_id": shared_work_context_id,
+            "main_brain_runtime": {
+                "work_context_id": shared_work_context_id,
+                "recommended_scheduler_action": recommended_scheduler_action,
+            },
+            "media_analysis_ids": ["analysis-receipt-shared"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Receipt uploaded.",
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(turn_executor.stream_calls) == 0
+    assert query_execution_service.calls == [issued.id]
+    assert service.get_task(issued.id).status == "closed"
+    assert '"outcome":"accepted"' in response.text
+
+    task_detail = client.get(f"/runtime-center/human-assist-tasks/{issued.id}")
+    assert task_detail.status_code == 200
+    submission_payload = task_detail.json()["task"]["submission_payload"]
+    assert submission_payload["main_brain_runtime"]["work_context_id"] == shared_work_context_id
+    assert (
+        submission_payload["main_brain_runtime"]["recommended_scheduler_action"]
+        == recommended_scheduler_action
+    )
+    assert submission_payload["media_analysis_ids"] == ["analysis-receipt-shared"]

@@ -732,6 +732,42 @@ class _IndustryRuntimeViewsMixin:
             if replan_needed
             else "No explicit replan request is pending."
         )
+        followup_backlog_items = [
+            item
+            for item in live_backlog_items
+            if self._backlog_item_is_report_followup(item)
+        ]
+        followup_pressure_surfaces = _unique_strings(
+            *[
+                _mapping(item.get("metadata")).get("seat_requested_surfaces")
+                for item in followup_backlog_items
+            ],
+            *[
+                _mapping(item.get("metadata")).get("chat_writeback_requested_surfaces")
+                for item in followup_backlog_items
+            ],
+        )
+        followup_pressure_surfaces = [
+            surface
+            for surface in followup_pressure_surfaces
+            if surface in {"browser", "desktop", "document", "file"}
+        ]
+        pending_followup_confirmations = [
+            item
+            for item in followup_backlog_items
+            if _string(_mapping(item.get("metadata")).get("decision_request_id")) is not None
+            and _string(_mapping(item.get("metadata")).get("proposal_status"))
+            in {"waiting-confirm", "reviewing", "submitted", "verifying", "need_more_evidence"}
+        ]
+        recommended_replan_action = None
+        if pending_followup_confirmations:
+            recommended_replan_action = "close-staffing-or-human-handoff-before-dispatch"
+        elif followup_pressure_surfaces:
+            recommended_replan_action = (
+                f"dispatch-governed-followup-on-{followup_pressure_surfaces[0]}-surface"
+            )
+        elif replan_needed:
+            recommended_replan_action = "review-reports-and-materialize-next-followup-cycle"
         nodes = [
             IndustryMainChainNode(
                 node_id="carrier",
@@ -1018,6 +1054,10 @@ class _IndustryRuntimeViewsMixin:
                     "needs_replan": replan_needed,
                     "replan_reason_count": len(synthesis_replan_reasons),
                     "replan_reasons": synthesis_replan_reasons,
+                    "followup_pressure_count": len(followup_backlog_items),
+                    "pending_followup_confirmation_count": len(pending_followup_confirmations),
+                    "followup_pressure_surfaces": followup_pressure_surfaces,
+                    "recommended_action": recommended_replan_action,
                 },
             ),
             IndustryMainChainNode(

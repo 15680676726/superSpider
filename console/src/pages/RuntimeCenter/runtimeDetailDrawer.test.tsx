@@ -135,18 +135,35 @@ describe("runtimeDetailDrawer", () => {
                 needs_replan: false,
               },
             },
+            assignments: [
+              {
+                assignment_id: "assignment-1",
+                title: "Handle backlog",
+                summary: "Operator-focused assignment card",
+                status: "active",
+                owner_agent_id: "ops-agent",
+                lane_id: "lane-growth",
+                cycle_id: "cycle-1",
+                evidence_ids: [],
+                metadata: {},
+                route: "/api/runtime-center/industry/industry-1?assignment_id=assignment-1",
+              } as any,
+            ],
             agent_reports: [
               {
                 report_id: "report-1",
+                report_kind: "status",
                 headline: "交付风险提醒",
                 status: "recorded",
                 findings: [],
                 uncertainties: [],
                 needs_followup: true,
+                processed: false,
                 evidence_ids: [],
                 decision_ids: [],
                 metadata: {},
-              },
+                route: "/api/runtime-center/industry/industry-1?report_id=report-1",
+              } as any,
             ],
             focus_selection: {
               selection_kind: "assignment",
@@ -187,6 +204,10 @@ describe("runtimeDetailDrawer", () => {
     expect(screen.getByText("Focused Assignment")).toBeTruthy();
     expect(screen.getByText("增长获客")).toBeTruthy();
     expect(screen.getByText("本周增长与交付协调")).toBeTruthy();
+    expect(screen.getAllByText("Open Assignment").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Open Report").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Unconsumed").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Needs follow-up").length).toBeGreaterThan(0);
     expect(screen.queryByText("Execution")).toBeNull();
     expect(screen.queryByText("Main Chain")).toBeNull();
   });

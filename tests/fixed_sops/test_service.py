@@ -290,6 +290,13 @@ def test_fixed_sop_service_records_host_snapshot_in_run_and_evidence(tmp_path) -
     detail = service.get_run(response.workflow_run_id or "")
     assert detail.host_preflight["coordination"]["recommended_scheduler_action"] == "continue"
     assert detail.host_preflight["host_twin_summary"]["host_companion_status"] == "restorable"
+    assert detail.host_preflight["host_twin_summary"]["active_app_family_keys"]
+    assert detail.host_preflight["host_twin_summary"]["seat_owner_ref"] == "ops-agent"
+    assert detail.host_preflight["host_twin_summary"]["blocked_surface_count"] == 0
+    assert detail.host_preflight["host_twin_summary"]["legal_recovery_mode"] == "resume"
+    assert detail.host_preflight["host_twin_summary"][
+        "recommended_scheduler_action"
+    ] == "continue"
     assert detail.environment_id == "env-desktop-1"
     assert detail.session_mount_id == "session-desktop-1"
     assert detail.host_requirement["app_family"] == "office_document"
@@ -305,6 +312,21 @@ def test_fixed_sop_service_records_host_snapshot_in_run_and_evidence(tmp_path) -
     assert evidence[0].metadata["host_preflight"]["host_twin_summary"][
         "host_companion_status"
     ] == "restorable"
+    assert evidence[0].metadata["host_preflight"]["host_twin_summary"][
+        "active_app_family_keys"
+    ]
+    assert evidence[0].metadata["host_preflight"]["host_twin_summary"][
+        "seat_owner_ref"
+    ] == "ops-agent"
+    assert evidence[0].metadata["host_preflight"]["host_twin_summary"][
+        "blocked_surface_count"
+    ] == 0
+    assert evidence[0].metadata["host_preflight"]["host_twin_summary"][
+        "legal_recovery_mode"
+    ] == "resume"
+    assert evidence[0].metadata["host_preflight"]["host_twin_summary"][
+        "recommended_scheduler_action"
+    ] == "continue"
 
 
 def test_fixed_sop_service_blocks_mutating_run_when_host_recovery_requires_human_return(
@@ -355,3 +377,62 @@ def test_fixed_sop_service_blocks_mutating_run_when_host_recovery_requires_human
                 ),
             )
         )
+
+
+def test_fixed_sop_service_ignores_stale_handoff_metadata_when_canonical_summary_is_proceed(
+    tmp_path,
+) -> None:
+    detail = _host_detail(
+        recommended_scheduler_action="proceed",
+        requires_human_return=True,
+        legal_recovery_path="handoff",
+        legal_recovery_reason="stale handoff metadata should not block canonical proceed",
+    )
+    detail["host_twin"]["host_twin_summary"] = {
+        "active_app_family_keys": ["office_document"],
+        "seat_owner_ref": "ops-agent",
+        "blocked_surface_count": 0,
+        "legal_recovery_mode": "resume-environment",
+        "recommended_scheduler_action": "proceed",
+    }
+    service = _build_service(
+        tmp_path,
+        environment_service=_FakeEnvironmentService(detail),
+    )
+    binding = service.create_binding(
+        FixedSopBindingCreateRequest(
+            template_id="fixed-sop-http-routine-bridge",
+            binding_name="Host Canonical Proceed SOP",
+            status="active",
+            metadata={
+                "environment_id": "env-desktop-1",
+                "session_mount_id": "session-desktop-1",
+                "host_requirement": {
+                    "surface_kind": "desktop",
+                    "app_family": "office_document",
+                    "mutating": True,
+                },
+            },
+        )
+    )
+
+    doctor = service.run_doctor(binding.binding.binding_id)
+
+    assert doctor.status == "ready"
+    host_check = next(item for item in doctor.checks if item.key == "host-preflight")
+    assert host_check.status == "pass"
+    assert doctor.host_preflight["host_twin_summary"]["recommended_scheduler_action"] == "proceed"
+    assert doctor.host_preflight["host_twin_summary"]["legal_recovery_mode"] == (
+        "resume-environment"
+    )
+
+    response = asyncio.run(
+        service.run_binding(
+            binding.binding.binding_id,
+            FixedSopRunRequest(
+                environment_id="env-desktop-1",
+                session_mount_id="session-desktop-1",
+            ),
+        )
+    )
+    assert response.status == "success"

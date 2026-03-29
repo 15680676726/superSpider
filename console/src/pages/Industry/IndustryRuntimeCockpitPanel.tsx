@@ -13,10 +13,10 @@ import { useCallback } from "react";
 
 import type {
   IndustryInstanceDetail,
+  IndustryReportSnapshot,
   IndustryRuntimeAgentReport,
   IndustryRuntimeAssignment,
   IndustryRuntimeBacklogItem,
-  IndustryRuntimeSchedule,
 } from "../../api/modules/industry";
 import type { MediaAnalysisSummary } from "../../api/modules/media";
 import { buildStaffingPresentation } from "../../runtime/staffingGapPresentation";
@@ -33,6 +33,97 @@ import {
 } from "./pageHelpers";
 
 const { Paragraph, Text } = Typography;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function stringValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function summarizeHostTwin(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const coordination = isRecord(value.coordination) ? value.coordination : value;
+  return (
+    stringValue(coordination.recommended_scheduler_action) ||
+    stringValue(coordination.selected_seat_ref) ||
+    stringValue(coordination.seat_selection_policy) ||
+    stringValue(coordination.active_app_family_count) ||
+    stringValue(coordination.contention_severity) ||
+    stringValue(coordination.blocked_surface_count) ||
+    null
+  );
+}
+
+function resolveEvidenceLabel(record: Record<string, unknown>): string {
+  return (
+    stringValue(record.summary) ||
+    stringValue(record.title) ||
+    stringValue(record.headline) ||
+    stringValue(record.evidence_id) ||
+    stringValue(record.id) ||
+    "Evidence record"
+  );
+}
+
+function resolveExecutionEnvironmentVisibility(detail: IndustryInstanceDetail): {
+  environment: string | null;
+  hostTwinSummary: string | null;
+  constraints: string[];
+} {
+  const anyDetail = detail as unknown as Record<string, unknown>;
+  const identity = (detail.execution_core_identity || null) as unknown as Record<string, unknown> | null;
+
+  const directEnv =
+    anyDetail.execution_environment ||
+    anyDetail.executionEnvironment ||
+    anyDetail.environment ||
+    null;
+  const envRecord = isRecord(directEnv) ? directEnv : null;
+
+  const hostTwin =
+    (envRecord && isRecord(envRecord.host_twin) ? envRecord.host_twin : null) ||
+    (envRecord && isRecord(envRecord.hostTwin) ? envRecord.hostTwin : null) ||
+    (identity && isRecord(identity.host_twin) ? identity.host_twin : null) ||
+    (identity && isRecord(identity.hostTwin) ? identity.hostTwin : null) ||
+    (isRecord(anyDetail.host_twin) ? anyDetail.host_twin : null) ||
+    (isRecord(anyDetail.hostTwin) ? anyDetail.hostTwin : null) ||
+    null;
+
+  const constraintsFromIdentity = Array.isArray(detail.execution_core_identity?.environment_constraints)
+    ? detail.execution_core_identity!.environment_constraints.filter(
+        (item): item is string => typeof item === "string" && item.trim(),
+      )
+    : [];
+  const constraintsFromEnv =
+    envRecord && Array.isArray(envRecord.environment_constraints)
+      ? envRecord.environment_constraints.filter(
+          (item): item is string => typeof item === "string" && item.trim(),
+        )
+      : [];
+
+  return {
+    environment:
+      stringValue(envRecord?.environment_summary) ||
+      stringValue(envRecord?.environment) ||
+      stringValue(identity?.environment_summary) ||
+      stringValue(identity?.environment) ||
+      null,
+    hostTwinSummary:
+      stringValue(envRecord?.host_twin_summary) ||
+      stringValue(identity?.host_twin_summary) ||
+      summarizeHostTwin(hostTwin) ||
+      null,
+    constraints: Array.from(new Set([...constraintsFromIdentity, ...constraintsFromEnv])),
+  };
+}
 
 function isFocusedAssignment(
   assignment: IndustryRuntimeAssignment,
@@ -103,6 +194,12 @@ export default function IndustryRuntimeCockpitPanel({
   const staffingPresentation = buildStaffingPresentation(detail.staffing);
   const mediaAnalyses = detail.media_analyses || [];
   const lanes = detail.lanes || [];
+  const focusedAssignment =
+    detail.assignments.find((assignment) => isFocusedAssignment(assignment, focusSelection)) || null;
+  const focusedBacklog =
+    detail.backlog.find((backlogItem) => isFocusedBacklog(backlogItem, focusSelection)) || null;
+  const followupReports = detail.agent_reports.filter((report) => report.needs_followup);
+  const environmentVisibility = resolveExecutionEnvironmentVisibility(detail);
   const runtimeSignalCounts = {
     assignment: detail.assignments.length,
     report: detail.agent_reports.length,
@@ -110,6 +207,20 @@ export default function IndustryRuntimeCockpitPanel({
     decision: detail.decisions.length,
     patch: detail.patches.length,
   };
+
+  const runtimeFocusSummary =
+    focusSelection?.summary ||
+    focusSelection?.title ||
+    (focusedAssignment
+      ? `Assignment: ${focusedAssignment.title || focusedAssignment.assignment_id}`
+      : null) ||
+    (focusedBacklog ? `Backlog: ${focusedBacklog.title || focusedBacklog.backlog_item_id}` : null) ||
+    (followupReports[0]
+      ? `Follow-up: ${followupReports[0].headline || followupReports[0].report_id}`
+      : null) ||
+    detail.execution?.current_focus ||
+    detail.main_chain?.current_focus ||
+    "No focused subview yet.";
 
   const renderMediaAnalysisList = useCallback(
     (
@@ -188,6 +299,53 @@ export default function IndustryRuntimeCockpitPanel({
       );
     },
     [],
+  );
+
+  const renderReportSnapshot = useCallback(
+    (snapshot: IndustryReportSnapshot, title: string) => {
+      return (
+        <Card key={`snapshot:${title}`} size="small" title={title}>
+          <Space direction="vertical" size={10} style={{ width: "100%" }}>
+            <Space wrap>
+              <Tag>{snapshot.window}</Tag>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {formatTimestamp(snapshot.since, locale)} - {formatTimestamp(snapshot.until, locale)}
+              </Text>
+            </Space>
+            <Descriptions
+              size="small"
+              column={2}
+              items={[
+                { key: "evidence", label: "Evidence", children: String(snapshot.evidence_count) },
+                { key: "decision", label: "Decision", children: String(snapshot.decision_count) },
+                { key: "proposal", label: "Proposal", children: String(snapshot.proposal_count) },
+                { key: "patch", label: "Patch", children: String(snapshot.patch_count) },
+                { key: "applied", label: "Applied", children: String(snapshot.applied_patch_count) },
+                { key: "growth", label: "Growth", children: String(snapshot.growth_count) },
+                { key: "highlights", label: "Highlights", children: presentList(snapshot.highlights) },
+              ]}
+            />
+            {snapshot.recent_evidence.length ? (
+              <Card size="small" title={`Recent Evidence (${snapshot.recent_evidence.length})`}>
+                <Space direction="vertical" size={6} style={{ width: "100%" }}>
+                  {snapshot.recent_evidence.slice(0, 5).map((record, index) => {
+                    const rec = isRecord(record) ? record : {};
+                    return (
+                      <Text key={`recent:${title}:${index}`} type="secondary">
+                        {resolveEvidenceLabel(rec)}
+                      </Text>
+                    );
+                  })}
+                </Space>
+              </Card>
+            ) : (
+              <Empty description="No recent evidence captured yet." style={{ margin: "4px 0" }} />
+            )}
+          </Space>
+        </Card>
+      );
+    },
+    [locale],
   );
 
   return (
@@ -270,11 +428,7 @@ export default function IndustryRuntimeCockpitPanel({
               {
                 key: "runtime-focus",
                 label: "Runtime Focus",
-                children:
-                  detail.execution?.current_focus ||
-                  focusSelection?.summary ||
-                  focusSelection?.title ||
-                  "No focused subview yet.",
+                children: runtimeFocusSummary,
               },
             ]}
           />
@@ -308,6 +462,150 @@ export default function IndustryRuntimeCockpitPanel({
 
       <Card className="baize-card" size="small" title="Runtime Focus">
         <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          {focusedAssignment || focusedBacklog || followupReports.length ? (
+            <Card size="small" title="Focus Surfaces" style={runtimeSurfaceCardStyle(true)}>
+              <Space direction="vertical" size={10} style={{ width: "100%" }}>
+                {followupReports.length ? (
+                  <Card
+                    size="small"
+                    title={`Follow-up (${followupReports.length})`}
+                    style={{
+                      borderRadius: 12,
+                      border: "1px solid rgba(250,173,20,0.55)",
+                      background: "rgba(250,173,20,0.10)",
+                    }}
+                    extra={
+                      <Button
+                        size="small"
+                        type="primary"
+                        onClick={() => onOpenAgentReportChat(followupReports[0])}
+                      >
+                        Open follow-up chat
+                      </Button>
+                    }
+                  >
+                    <Space direction="vertical" size={6} style={{ width: "100%" }}>
+                      <Space wrap>
+                        <Text strong style={{ color: "var(--baize-text-main)" }}>
+                          {followupReports[0].headline || followupReports[0].report_id}
+                        </Text>
+                        <Tag color="orange">Follow-up</Tag>
+                        {followupReports[0].followup_reason ? (
+                          <Tag>{followupReports[0].followup_reason}</Tag>
+                        ) : null}
+                        {resolveReportWorkContextId(followupReports[0]) ? (
+                          <Tag color="blue">{resolveReportWorkContextId(followupReports[0])}</Tag>
+                        ) : null}
+                      </Space>
+                      <Text type="secondary">
+                        {followupReports[0].summary ||
+                          followupReports[0].recommendation ||
+                          followupReports[0].findings[0] ||
+                          "Follow-up report recorded."}
+                      </Text>
+                      <Space wrap>
+                        {followupReports[0].assignment_id ? (
+                          <Button
+                            size="small"
+                            onClick={() => onSelectAssignmentFocus(followupReports[0].assignment_id!)}
+                          >
+                            Focus linked assignment
+                          </Button>
+                        ) : null}
+                        <Tag>{`Evidence ${followupReports[0].evidence_ids.length}`}</Tag>
+                      </Space>
+                    </Space>
+                  </Card>
+                ) : null}
+
+                {focusedBacklog ? (
+                  <Card
+                    size="small"
+                    title="Focused Backlog"
+                    style={runtimeSurfaceCardStyle(true)}
+                    extra={
+                      <Button
+                        size="small"
+                        type="primary"
+                        onClick={() => onSelectBacklogFocus(focusedBacklog.backlog_item_id)}
+                      >
+                        Focus backlog
+                      </Button>
+                    }
+                  >
+                    <Space direction="vertical" size={6} style={{ width: "100%" }}>
+                      <Space wrap>
+                        <Text strong style={{ color: "var(--baize-text-main)" }}>
+                          {focusedBacklog.title || focusedBacklog.backlog_item_id}
+                        </Text>
+                        <Tag color={pageRuntimeStatusColor(focusedBacklog.status)}>
+                          {presentIndustryRuntimeStatus(focusedBacklog.status)}
+                        </Tag>
+                        <Tag>{`P${focusedBacklog.priority}`}</Tag>
+                        <Tag>{focusedBacklog.source_kind}</Tag>
+                      </Space>
+                      <Text type="secondary">
+                        {focusedBacklog.summary ||
+                          focusedBacklog.source_ref ||
+                          "No backlog summary captured yet."}
+                      </Text>
+                      <Space wrap>
+                        <Tag>{`Evidence ${focusedBacklog.evidence_ids.length}`}</Tag>
+                        {focusedBacklog.updated_at ? (
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {formatTimestamp(focusedBacklog.updated_at, locale)}
+                          </Text>
+                        ) : null}
+                      </Space>
+                    </Space>
+                  </Card>
+                ) : null}
+
+                {focusedAssignment ? (
+                  <Card
+                    size="small"
+                    title="Focused Assignment"
+                    style={runtimeSurfaceCardStyle(true)}
+                    extra={
+                      <Button
+                        size="small"
+                        type="primary"
+                        onClick={() => onSelectAssignmentFocus(focusedAssignment.assignment_id)}
+                      >
+                        Focus assignment
+                      </Button>
+                    }
+                  >
+                    <Space direction="vertical" size={6} style={{ width: "100%" }}>
+                      <Space wrap>
+                        <Text strong style={{ color: "var(--baize-text-main)" }}>
+                          {focusedAssignment.title || focusedAssignment.assignment_id}
+                        </Text>
+                        <Tag color={pageRuntimeStatusColor(focusedAssignment.status)}>
+                          {presentIndustryRuntimeStatus(focusedAssignment.status)}
+                        </Tag>
+                        {focusedAssignment.report_back_mode ? (
+                          <Tag>{focusedAssignment.report_back_mode}</Tag>
+                        ) : null}
+                      </Space>
+                      <Text type="secondary">
+                        {focusedAssignment.summary || "No assignment summary captured yet."}
+                      </Text>
+                      <Space wrap>
+                        <Tag>{`Evidence ${focusedAssignment.evidence_ids.length}`}</Tag>
+                        {focusedAssignment.updated_at ? (
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {formatTimestamp(focusedAssignment.updated_at, locale)}
+                          </Text>
+                        ) : null}
+                      </Space>
+                    </Space>
+                  </Card>
+                ) : null}
+              </Space>
+            </Card>
+          ) : null}
+
           {detail.execution ? (
             <div>
               <Space wrap style={{ marginBottom: 8 }}>
@@ -402,6 +700,47 @@ export default function IndustryRuntimeCockpitPanel({
         </Space>
       </Card>
 
+      {environmentVisibility.environment ||
+      environmentVisibility.hostTwinSummary ||
+      environmentVisibility.constraints.length ? (
+        <Card className="baize-card" size="small" title="Execution Environment">
+          <Space direction="vertical" size={10} style={{ width: "100%" }}>
+            <Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
+              Environment and host-twin hints are surfaced when the runtime payload already provides them.
+            </Paragraph>
+            <Descriptions
+              size="small"
+              column={2}
+              items={[
+                {
+                  key: "environment",
+                  label: "Environment",
+                  children: environmentVisibility.environment || "-",
+                },
+                {
+                  key: "host-twin",
+                  label: "Host Twin",
+                  children: environmentVisibility.hostTwinSummary || "-",
+                },
+                {
+                  key: "constraints",
+                  label: "Constraints",
+                  children: environmentVisibility.constraints.length ? (
+                    <Space wrap>
+                      {environmentVisibility.constraints.slice(0, 8).map((constraint) => (
+                        <Tag key={constraint}>{constraint}</Tag>
+                      ))}
+                    </Space>
+                  ) : (
+                    "-"
+                  ),
+                },
+              ]}
+            />
+          </Space>
+        </Card>
+      ) : null}
+
       {detail.execution_core_identity || detail.strategy_memory ? (
         <Card className="baize-card" size="small" title="Strategy">
           <Space direction="vertical" size={12} style={{ width: "100%" }}>
@@ -476,6 +815,18 @@ export default function IndustryRuntimeCockpitPanel({
           adoptedTag: "已接入身份",
           showWriteback: true,
         })}
+      </Card>
+
+      <Card className="baize-card" size="small" title="Report Snapshot">
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
+            Evidence-driven snapshots for quick review without opening the full evidence stream.
+          </Paragraph>
+          <Space direction="vertical" size={12} style={{ width: "100%" }}>
+            {renderReportSnapshot(detail.reports.daily, "Daily")}
+            {renderReportSnapshot(detail.reports.weekly, "Weekly")}
+          </Space>
+        </Space>
       </Card>
 
       <IndustryPlanningSurface detail={detail} locale={locale} />

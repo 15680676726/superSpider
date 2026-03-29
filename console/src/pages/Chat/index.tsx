@@ -67,9 +67,191 @@ declare const window: CustomWindow;
 
 type OptionsConfig = DefaultConfig;
 
+type RuntimeModelsSnapshot = {
+  resolved_llm?: { provider_id: string; model: string } | null;
+  active_llm?: { provider_id: string; model: string } | null;
+  fallback_enabled?: boolean;
+  fallback_chain?: unknown[];
+  resolution_reason?: string | null;
+} | null;
+
+function resolveRuntimeModelPresentation(
+  activeModels: RuntimeModelsSnapshot,
+): {
+  runtimeModelLabel: string;
+  runtimeFallbackLabel: string | null;
+  runtimeModelHint: string;
+} {
+  const resolvedRuntimeModel =
+    activeModels?.resolved_llm || activeModels?.active_llm || null;
+  const runtimeModelLabel = resolvedRuntimeModel
+    ? `${resolvedRuntimeModel.provider_id}/${resolvedRuntimeModel.model}`
+    : "模型未配置";
+  const runtimeFallbackLabel =
+    activeModels?.fallback_enabled === false
+      ? null
+      : activeModels?.fallback_chain?.length
+      ? `备用 ${activeModels.fallback_chain.length}`
+      : null;
+  const runtimeModelHint =
+    activeModels?.resolution_reason?.trim() ||
+    (runtimeFallbackLabel ? "已启用备用模型" : "当前对话模型");
+  return {
+    runtimeModelLabel,
+    runtimeFallbackLabel,
+    runtimeModelHint,
+  };
+}
+
+function resolveRuntimeWaitPresentation(
+  runtimeWaitState: RuntimeWaitState | null,
+  runtimeWaitClock: number,
+): { runtimeWaitDescription: string | null; runtimeWaitSeconds: number } {
+  if (!runtimeWaitState) {
+    return {
+      runtimeWaitDescription: null,
+      runtimeWaitSeconds: 0,
+    };
+  }
+  return {
+    runtimeWaitDescription: formatRuntimeWaitDescription(runtimeWaitState),
+    runtimeWaitSeconds: Math.max(
+      0,
+      Math.floor((runtimeWaitClock - runtimeWaitState.startedAt) / 1000),
+    ),
+  };
+}
+
+function resolveChatUiKey({
+  requestedThreadId,
+  activeIndustryId,
+  activeIndustryRoleId,
+  activeAgentId,
+}: {
+  requestedThreadId: string | null;
+  activeIndustryId: string | null;
+  activeIndustryRoleId: string | null;
+  activeAgentId: string | null;
+}): string {
+  if (requestedThreadId) return requestedThreadId;
+  if (activeIndustryId && activeIndustryRoleId) {
+    return `industry:${activeIndustryId}:${activeIndustryRoleId}`;
+  }
+  if (activeAgentId) return `agent:${activeAgentId}`;
+  return "chat-runtime";
+}
+
+function resolveChatUiVisibility({
+  requestedThreadId,
+  activeWindowThreadId,
+  requestedThreadLooksBound,
+  threadBootstrapError,
+  hasBoundAgentContext,
+  effectiveThreadPending,
+}: {
+  requestedThreadId: string | null;
+  activeWindowThreadId: string | null;
+  requestedThreadLooksBound: boolean;
+  threadBootstrapError: string | null;
+  hasBoundAgentContext: boolean;
+  effectiveThreadPending: boolean;
+}): { hasDirectBoundThreadContext: boolean; shouldRenderChatUi: boolean } {
+  const hasDirectBoundThreadContext =
+    requestedThreadLooksBound && !threadBootstrapError;
+  return {
+    hasDirectBoundThreadContext,
+    shouldRenderChatUi:
+      Boolean(requestedThreadId || activeWindowThreadId) &&
+      (hasBoundAgentContext || hasDirectBoundThreadContext) &&
+      !effectiveThreadPending,
+  };
+}
+
 // ============================================================
 // 媒体附件面板
 // ============================================================
+type ChatWritebackTarget = "strategy" | "lane" | "backlog" | "immediate-goal";
+
+function normalizeWritebackTarget(raw: string): ChatWritebackTarget | null {
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "strategy") return "strategy";
+  if (normalized === "lane") return "lane";
+  if (normalized === "backlog" || normalized === "backlog-item") return "backlog";
+  if (
+    normalized === "immediate-goal" ||
+    normalized === "immediate_goal" ||
+    normalized === "immediate goal" ||
+    normalized === "goal"
+  ) {
+    return "immediate-goal";
+  }
+  return null;
+}
+
+function normalizeWritebackTargetList(value: unknown): ChatWritebackTarget[] {
+  if (!Array.isArray(value)) return [];
+  const out: ChatWritebackTarget[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const t = normalizeWritebackTarget(item);
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+function normalizeWritebackTargetsFromThreadMeta(
+  threadMeta: Record<string, unknown>,
+): ChatWritebackTarget[] {
+  const fromTargets = normalizeWritebackTargetList(threadMeta.chat_writeback_targets);
+  const fromClasses = normalizeWritebackTargetList(threadMeta.chat_writeback_classes);
+  const fromSingle =
+    typeof threadMeta.chat_writeback_target === "string"
+      ? normalizeWritebackTarget(threadMeta.chat_writeback_target)
+      : null;
+
+  const merged: ChatWritebackTarget[] = [];
+  for (const t of [...fromTargets, ...fromClasses, ...(fromSingle ? [fromSingle] : [])]) {
+    if (!merged.includes(t)) merged.push(t);
+  }
+  if (merged.length > 0 && !merged.includes("strategy")) {
+    merged.unshift("strategy");
+  }
+  return merged;
+}
+
+function inferWritebackTargetsFromFocus({
+  sessionKind,
+  focusKind,
+}: {
+  sessionKind: string;
+  focusKind: string;
+}): ChatWritebackTarget[] {
+  const normalizedKind = focusKind.trim().toLowerCase();
+  const mapped =
+    normalizedKind === "lane"
+      ? "lane"
+      : normalizedKind === "backlog" || normalizedKind === "backlog-item"
+        ? "backlog"
+        : normalizedKind === "goal"
+          ? "immediate-goal"
+          : normalizedKind === "strategy"
+            ? "strategy"
+            : null;
+  if (mapped) {
+    return mapped === "strategy" ? ["strategy"] : ["strategy", mapped];
+  }
+  return sessionKind === "industry-control-thread" ? ["strategy"] : [];
+}
+
+function presentSessionKindLabel(sessionKind: string): string {
+  const normalized = sessionKind.trim().toLowerCase();
+  if (normalized === "industry-control-thread") return "control-thread";
+  if (normalized === "industry-agent-chat") return "execution-thread";
+  if (normalized === "agent-chat") return "agent-thread";
+  return sessionKind;
+}
+
 function MediaPanel({
   mediaError,
   clearMediaError,
@@ -408,20 +590,88 @@ export default function ChatPage() {
 
   const {
     bindingLabel,
+    currentGoal,
     executionCoreSuggestions,
     hasBoundAgentContext,
     hasSuggestedTeams,
     options,
     openSuggestedIndustryChat,
+    sessionKind,
   } = runtimeState;
+
+  const focusKind =
+    typeof threadMeta.current_focus_kind === "string" ? threadMeta.current_focus_kind : "";
+  const focusId =
+    typeof threadMeta.current_focus_id === "string" ? threadMeta.current_focus_id : "";
+  const focusLabel = currentGoal?.trim() ? `Focus: ${currentGoal.trim()}` : null;
+  const focusHintParts = [
+    focusKind.trim() ? `kind=${focusKind.trim()}` : "",
+    focusId.trim() ? `id=${focusId.trim()}` : "",
+  ].filter(Boolean);
+  const focusHint = focusHintParts.length > 0 ? focusHintParts.join(" | ") : null;
+
+  const threadKindLabel = sessionKind?.trim()
+    ? `Thread: ${presentSessionKindLabel(sessionKind.trim())}`
+    : null;
+  const threadBindingKind =
+    typeof threadMeta.thread_binding_kind === "string"
+      ? threadMeta.thread_binding_kind
+      : "";
+  const ownerScope =
+    typeof threadMeta.owner_scope === "string" ? threadMeta.owner_scope : "";
+  const threadKindHintParts = [
+    sessionKind?.trim() ? `session_kind=${sessionKind.trim()}` : "",
+    threadBindingKind.trim() ? `thread_binding_kind=${threadBindingKind.trim()}` : "",
+    ownerScope.trim() ? `owner_scope=${ownerScope.trim()}` : "",
+  ].filter(Boolean);
+  const threadKindHint =
+    threadKindHintParts.length > 0 ? threadKindHintParts.join(" | ") : null;
+
+  const metaWritebackTargets = normalizeWritebackTargetsFromThreadMeta(threadMeta);
+  const inferredWritebackTargets =
+    metaWritebackTargets.length > 0
+      ? metaWritebackTargets
+      : inferWritebackTargetsFromFocus({
+          sessionKind: sessionKind || "",
+          focusKind,
+        });
+  const writebackLabel =
+    inferredWritebackTargets.length > 0
+      ? `Writeback: ${inferredWritebackTargets.join("/")}`
+      : null;
+  const writebackRoleName =
+    typeof threadMeta.chat_writeback_target_role_name === "string"
+      ? threadMeta.chat_writeback_target_role_name
+      : "";
+  const writebackMatchSignalsCount = Array.isArray(
+    threadMeta.chat_writeback_target_match_signals,
+  )
+    ? threadMeta.chat_writeback_target_match_signals.length
+    : 0;
+  const writebackHintParts = [
+    metaWritebackTargets.length > 0
+      ? `targets=${metaWritebackTargets.join(",")}`
+      : inferredWritebackTargets.length > 0
+        ? `inferred=${inferredWritebackTargets.join(",")}`
+        : "",
+    writebackRoleName.trim() ? `role=${writebackRoleName.trim()}` : "",
+    writebackMatchSignalsCount > 0
+      ? `match_signals=${writebackMatchSignalsCount}`
+      : "",
+  ].filter(Boolean);
+  const writebackHint =
+    writebackHintParts.length > 0 ? writebackHintParts.join(" | ") : null;
 
   const effectiveThreadPending = threadBootstrapPending || autoBindingPending;
   const activeWindowThreadId = normalizeThreadId(window.currentThreadId);
-  const hasDirectBoundThreadContext = requestedThreadLooksBound && !threadBootstrapError;
-  const shouldRenderChatUi =
-    Boolean(requestedThreadId || activeWindowThreadId) &&
-    (hasBoundAgentContext || hasDirectBoundThreadContext) &&
-    !effectiveThreadPending;
+  const { shouldRenderChatUi } = resolveChatUiVisibility({
+    requestedThreadId,
+    activeWindowThreadId,
+    requestedThreadLooksBound,
+    threadBootstrapError,
+    hasBoundAgentContext,
+    effectiveThreadPending,
+  });
 
   const chatNoticeVariant = resolveChatNoticeVariant({
     threadBootstrapPending,
@@ -430,30 +680,24 @@ export default function ChatPage() {
     shouldRenderChatUi,
   });
 
-  const runtimeWaitDescription = runtimeWaitState ? formatRuntimeWaitDescription(runtimeWaitState) : null;
-  const runtimeWaitSeconds = runtimeWaitState
-    ? Math.max(0, Math.floor((runtimeWaitClock - runtimeWaitState.startedAt) / 1000))
-    : 0;
-
-  const resolvedRuntimeModel = activeModels?.resolved_llm || activeModels?.active_llm || null;
-  const runtimeModelLabel = resolvedRuntimeModel
-    ? `${resolvedRuntimeModel.provider_id}/${resolvedRuntimeModel.model}`
-    : "模型未配置";
-  const runtimeFallbackLabel =
-    activeModels?.fallback_enabled === false ? null
-      : activeModels?.fallback_chain?.length ? `备用 ${activeModels.fallback_chain.length}` : null;
-  const runtimeModelHint =
-    activeModels?.resolution_reason?.trim() || (runtimeFallbackLabel ? "已启用备用模型" : "当前对话模型");
+  const { runtimeWaitDescription, runtimeWaitSeconds } =
+    resolveRuntimeWaitPresentation(runtimeWaitState, runtimeWaitClock);
+  const { runtimeModelLabel, runtimeFallbackLabel, runtimeModelHint } =
+    resolveRuntimeModelPresentation(activeModels);
 
   const pendingApprovalCount = countPendingChatApprovals(governanceStatus);
   const approvalButtonLabel = pendingApprovalCount > 0 ? `审批(${pendingApprovalCount})` : "审批";
 
-  const chatUiKey = useMemo(() => {
-    if (requestedThreadId) return requestedThreadId;
-    if (activeIndustryId && activeIndustryRoleId) return `industry:${activeIndustryId}:${activeIndustryRoleId}`;
-    if (activeAgentId) return `agent:${activeAgentId}`;
-    return "chat-runtime";
-  }, [activeAgentId, activeIndustryId, activeIndustryRoleId, requestedThreadId]);
+  const chatUiKey = useMemo(
+    () =>
+      resolveChatUiKey({
+        requestedThreadId,
+        activeIndustryId,
+        activeIndustryRoleId,
+        activeAgentId,
+      }),
+    [activeAgentId, activeIndustryId, activeIndustryRoleId, requestedThreadId],
+  );
 
   // ============================================================
   return (
@@ -485,6 +729,12 @@ export default function ChatPage() {
           {/* 顶部状态条 */}
           <ChatRuntimeSidebar
             bindingLabel={bindingLabel}
+            threadKindLabel={threadKindLabel}
+            threadKindHint={threadKindHint}
+            focusLabel={focusLabel}
+            focusHint={focusHint}
+            writebackLabel={writebackLabel}
+            writebackHint={writebackHint}
             runtimeModelLabel={runtimeModelLabel}
             runtimeModelHint={runtimeModelHint}
             runtimeFallbackLabel={runtimeFallbackLabel}

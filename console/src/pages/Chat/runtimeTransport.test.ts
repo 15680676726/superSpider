@@ -7,8 +7,11 @@ import { providerApi } from "../../api/modules/provider";
 import {
   buildRuntimeChatRequest,
   createRuntimeTransport,
+  normalizeRuntimeStringList,
   parseRuntimeResponseChunk,
   queueHumanAssistSubmissionForNextMessage,
+  resolveRuntimeSessionContext,
+  resolveRuntimeThreadContext,
   resetRuntimeTransportForTests,
 } from "./runtimeTransport";
 
@@ -154,6 +157,58 @@ describe("runtimeTransport", () => {
     expect(request.industry_role_name).toBe("执行中枢");
     expect(request.interaction_mode).toBe("auto");
     expect(request.stream).toBe(true);
+  });
+
+  it("normalizes runtime string arrays by trimming empties and deduping while keeping order", () => {
+    expect(
+      normalizeRuntimeStringList([
+        " submit_human_assist ",
+        "",
+        null,
+        "submit_human_assist",
+        "create_report",
+        "  ",
+        "create_report",
+      ]),
+    ).toEqual(["submit_human_assist", "create_report"]);
+  });
+
+  it("resolves runtime session context from window/thread/session canonical precedence", () => {
+    const context = resolveRuntimeSessionContext({
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-2:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      threadMeta: {
+        control_thread_id: "industry-chat:industry-2:execution-core",
+      },
+      session: {
+        session_id: "session-thread",
+        user_id: "session-user",
+        channel: "session-channel",
+      },
+    });
+
+    expect(context.currentThreadId).toBe("industry-chat:industry-2:execution-core");
+    expect(context.sessionId).toBe("industry-chat:industry-2:execution-core");
+    expect(context.userId).toBe("window-user");
+    expect(context.channel).toBe("console");
+  });
+
+  it("resolves runtime thread context fields with control-thread fallback context key", () => {
+    const context = resolveRuntimeThreadContext({
+      threadMeta: {},
+      bizParams: {},
+      sessionId: "industry-chat:industry-3:execution-core",
+    });
+
+    expect(context.controlThreadId).toBe("industry-chat:industry-3:execution-core");
+    expect(context.workContextId).toBeNull();
+    expect(context.contextKey).toBe(
+      "control-thread:industry-chat:industry-3:execution-core",
+    );
   });
 
   it("sends queued human assist submissions through the real runtime transport and marks dirty on completion", async () => {

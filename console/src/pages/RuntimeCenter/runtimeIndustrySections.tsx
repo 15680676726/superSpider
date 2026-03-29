@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Space, Tag, Typography } from "antd";
+import { Alert, Button, Card, Empty, Space, Tag, Typography } from "antd";
 
 import type {
   IndustryInstanceDetail,
@@ -253,6 +253,271 @@ export function buildRuntimeIndustryCockpitSignals(
       "Patch detail",
     ),
   ];
+}
+
+function focusedSelectionId(
+  focusSelection: Record<string, unknown> | null | undefined,
+  kind: string,
+  idKey: string,
+): string | null {
+  if (!focusSelection) {
+    return null;
+  }
+  const selectionKind = typeof focusSelection.selection_kind === "string" ? focusSelection.selection_kind : null;
+  if (selectionKind !== kind) {
+    return null;
+  }
+  const value = focusSelection[idKey];
+  return typeof value === "string" && value ? value : null;
+}
+
+function renderAssignmentSummaryTags(assignments: Record<string, unknown>[]) {
+  const activeCount = assignments.filter(
+    (assignment) => typeof assignment.status === "string" && assignment.status === "active",
+  ).length;
+  const readyCount = assignments.filter(
+    (assignment) => typeof assignment.status === "string" && assignment.status === "ready",
+  ).length;
+  const completedCount = assignments.filter(
+    (assignment) => typeof assignment.status === "string" && assignment.status === "completed",
+  ).length;
+  const evidenceCounts = assignments.map((assignment) =>
+    Array.isArray(assignment.evidence_ids) ? assignment.evidence_ids.length : 0,
+  );
+  const maxEvidence = evidenceCounts.length > 0 ? Math.max(...evidenceCounts) : 0;
+
+  return (
+    <Space wrap size={[6, 6]} style={{ marginTop: 8 }}>
+      {activeCount > 0 ? <Tag color="blue">{`Active ${activeCount}`}</Tag> : null}
+      {readyCount > 0 ? <Tag>{`Ready ${readyCount}`}</Tag> : null}
+      {completedCount > 0 ? <Tag color="success">{`Completed ${completedCount}`}</Tag> : null}
+      {maxEvidence > 0 ? <Tag>{`Max evidence ${maxEvidence}`}</Tag> : null}
+    </Space>
+  );
+}
+
+export function renderOperatorAssignmentsSection(
+  sectionKey: string,
+  sectionValue: unknown,
+  openRoute: (route: string, title: string) => void,
+  focusSelection?: Record<string, unknown> | null,
+) {
+  if (!Array.isArray(sectionValue)) {
+    return null;
+  }
+  const assignments = sectionValue.filter(isRecord);
+  const focusedAssignmentId = focusedSelectionId(focusSelection, "assignment", "assignment_id");
+
+  return (
+    <section key={sectionKey} className={styles.detailSection}>
+      <div className={styles.detailSectionTitle}>
+        {translateRuntimeSectionLabel(sectionKey)} <Tag>{sectionValue.length}</Tag>
+      </div>
+
+      {assignments.length > 0 ? renderAssignmentSummaryTags(assignments) : null}
+
+      {sectionValue.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="鏆傛棤鍐呭" />
+      ) : (
+        <div className={styles.detailArray}>
+          {sectionValue.map((item, index) => {
+            if (!isRecord(item)) {
+              return (
+                <pre key={`${sectionKey}:${index}`} className={styles.detailPre}>
+                  {formatPrimitiveValue(item)}
+                </pre>
+              );
+            }
+
+            const assignmentId =
+              typeof item.assignment_id === "string" && item.assignment_id ? item.assignment_id : null;
+            const title =
+              (typeof item.title === "string" && item.title) ||
+              (typeof item.summary === "string" && item.summary) ||
+              assignmentId ||
+              `Assignment ${index + 1}`;
+            const summary = typeof item.summary === "string" ? item.summary : null;
+            const status = typeof item.status === "string" && item.status ? item.status : "unknown";
+            const route = typeof item.route === "string" && item.route ? item.route : null;
+            const focused =
+              item.selected === true || (assignmentId && assignmentId === focusedAssignmentId);
+            const ownerAgentId =
+              typeof item.owner_agent_id === "string" && item.owner_agent_id
+                ? item.owner_agent_id
+                : null;
+            const laneId =
+              typeof item.lane_id === "string" && item.lane_id ? item.lane_id : null;
+            const cycleId =
+              typeof item.cycle_id === "string" && item.cycle_id ? item.cycle_id : null;
+            const evidenceCount = Array.isArray(item.evidence_ids) ? item.evidence_ids.length : 0;
+            const lastReportId =
+              typeof item.last_report_id === "string" && item.last_report_id
+                ? item.last_report_id
+                : null;
+
+            return (
+              <Card
+                key={assignmentId || `${sectionKey}:${index}`}
+                size="small"
+                style={
+                  focused
+                    ? {
+                        border: "1px solid rgba(22, 119, 255, 0.35)",
+                        boxShadow: "0 0 0 1px rgba(22, 119, 255, 0.08)",
+                      }
+                    : undefined
+                }
+              >
+                <Space wrap size={[6, 6]} style={{ marginBottom: summary ? 6 : 0 }}>
+                  <Text strong>{title}</Text>
+                  <Tag color={runtimeStatusColor(status)}>{translateRuntimeStatus(status)}</Tag>
+                  {focused ? <Tag color="blue">Focused</Tag> : null}
+                  {evidenceCount > 0 ? <Tag>{`Evidence ${evidenceCount}`}</Tag> : null}
+                </Space>
+                {summary ? <Text type="secondary">{summary}</Text> : null}
+                <Space wrap size={[8, 6]} className={styles.selectionMeta}>
+                  {ownerAgentId ? <span>{`Owner ${ownerAgentId}`}</span> : null}
+                  {laneId ? <span>{`Lane ${laneId}`}</span> : null}
+                  {cycleId ? <span>{`Cycle ${cycleId}`}</span> : null}
+                  {lastReportId ? <span>{`Last report ${lastReportId}`}</span> : null}
+                </Space>
+                {route ? (
+                  <div className={styles.routeActions}>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        openRoute(route, title);
+                      }}
+                    >
+                      Open Assignment
+                    </Button>
+                  </div>
+                ) : null}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function renderOperatorAgentReportsSection(
+  sectionKey: string,
+  sectionValue: unknown,
+  openRoute: (route: string, title: string) => void,
+  focusSelection?: Record<string, unknown> | null,
+) {
+  if (!Array.isArray(sectionValue)) {
+    return null;
+  }
+
+  const reports = sectionValue.filter(isRecord);
+  const focusedReportId = focusedSelectionId(focusSelection, "agent_report", "report_id");
+  const unconsumedCount = reports.filter((report) => report.processed !== true).length;
+  const followupCount = reports.filter((report) => report.needs_followup === true).length;
+
+  return (
+    <section key={sectionKey} className={styles.detailSection}>
+      <div className={styles.detailSectionTitle}>
+        {translateRuntimeSectionLabel(sectionKey)} <Tag>{sectionValue.length}</Tag>
+      </div>
+
+      {reports.length > 0 ? (
+        <Space wrap size={[6, 6]} style={{ marginTop: 8 }}>
+          {unconsumedCount > 0 ? <Tag color="warning">{`Unconsumed ${unconsumedCount}`}</Tag> : <Tag color="success">All consumed</Tag>}
+          {followupCount > 0 ? <Tag color="warning">{`Follow-ups ${followupCount}`}</Tag> : null}
+        </Space>
+      ) : null}
+
+      {sectionValue.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="鏆傛棤鍐呭" />
+      ) : (
+        <div className={styles.detailArray}>
+          {sectionValue.map((item, index) => {
+            if (!isRecord(item)) {
+              return (
+                <pre key={`${sectionKey}:${index}`} className={styles.detailPre}>
+                  {formatPrimitiveValue(item)}
+                </pre>
+              );
+            }
+
+            const reportId =
+              typeof item.report_id === "string" && item.report_id ? item.report_id : null;
+            const headline =
+              (typeof item.headline === "string" && item.headline) ||
+              (typeof item.summary === "string" && item.summary) ||
+              reportId ||
+              `Report ${index + 1}`;
+            const summary = typeof item.summary === "string" ? item.summary : null;
+            const status = typeof item.status === "string" && item.status ? item.status : "unknown";
+            const processed = item.processed === true;
+            const needsFollowup = item.needs_followup === true;
+            const route = typeof item.route === "string" && item.route ? item.route : null;
+            const focused =
+              item.selected === true || (reportId && reportId === focusedReportId);
+            const reportKind =
+              typeof item.report_kind === "string" && item.report_kind ? item.report_kind : null;
+            const riskLevel =
+              typeof item.risk_level === "string" && item.risk_level ? item.risk_level : null;
+            const ownerAgentId =
+              typeof item.owner_agent_id === "string" && item.owner_agent_id
+                ? item.owner_agent_id
+                : null;
+            const laneId = typeof item.lane_id === "string" && item.lane_id ? item.lane_id : null;
+            const assignmentId =
+              typeof item.assignment_id === "string" && item.assignment_id ? item.assignment_id : null;
+            const evidenceCount = Array.isArray(item.evidence_ids) ? item.evidence_ids.length : 0;
+
+            return (
+              <Card
+                key={reportId || `${sectionKey}:${index}`}
+                size="small"
+                style={
+                  focused
+                    ? {
+                        border: "1px solid rgba(22, 119, 255, 0.35)",
+                        boxShadow: "0 0 0 1px rgba(22, 119, 255, 0.08)",
+                      }
+                    : undefined
+                }
+              >
+                <Space wrap size={[6, 6]} style={{ marginBottom: summary ? 6 : 0 }}>
+                  <Text strong>{headline}</Text>
+                  <Tag color={runtimeStatusColor(status)}>{translateRuntimeStatus(status)}</Tag>
+                  {focused ? <Tag color="blue">Focused</Tag> : null}
+                  {processed ? <Tag color="success">Consumed</Tag> : <Tag color="warning">Unconsumed</Tag>}
+                  {needsFollowup ? <Tag color="warning">Needs follow-up</Tag> : null}
+                  {evidenceCount > 0 ? <Tag>{`Evidence ${evidenceCount}`}</Tag> : null}
+                  {riskLevel ? <Tag color={runtimeRiskColor(riskLevel)}>{riskLevel}</Tag> : null}
+                  {reportKind ? <Tag>{reportKind}</Tag> : null}
+                </Space>
+                {summary ? <Text type="secondary">{summary}</Text> : null}
+                <Space wrap size={[8, 6]} className={styles.selectionMeta}>
+                  {ownerAgentId ? <span>{`Owner ${ownerAgentId}`}</span> : null}
+                  {laneId ? <span>{`Lane ${laneId}`}</span> : null}
+                  {assignmentId ? <span>{`Assignment ${assignmentId}`}</span> : null}
+                </Space>
+                {route ? (
+                  <div className={styles.routeActions}>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        openRoute(route, headline);
+                      }}
+                    >
+                      Open Report
+                    </Button>
+                  </div>
+                ) : null}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 }
 
 export function renderIndustryExecutionFocusSection(

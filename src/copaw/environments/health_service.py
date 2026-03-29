@@ -1805,10 +1805,16 @@ class EnvironmentHealthService:
             for surface_kind, details in surface_mutability.items()
             if details.get("mutability") == "blocked"
         ]
+        recovered_runtime_ready = self._host_twin_recovered_runtime_ready(
+            host_contract=host_contract,
+            recovery=recovery,
+            host_event_summary=host_event_summary,
+        )
         continuity = self._build_host_twin_continuity(
             host_contract=host_contract,
             recovery=recovery,
             host_companion_session=host_companion_session,
+            recovered_runtime_ready=recovered_runtime_ready,
         )
         trusted_anchors = self._build_host_twin_trusted_anchors(
             workspace_graph=workspace_graph,
@@ -1832,17 +1838,13 @@ class EnvironmentHealthService:
             desktop_app_contract=desktop_app_contract,
             surface_mutability=surface_mutability,
         )
-        recovered_runtime_ready = self._host_twin_recovered_runtime_ready(
-            host_contract=host_contract,
-            recovery=recovery,
-            host_event_summary=host_event_summary,
-        )
         coordination = self._build_host_twin_coordination(
             workspace_graph=workspace_graph,
             ownership=ownership,
             seat_runtime=seat_runtime,
             host_contract=host_contract,
             latest_blocking_event=latest_blocking_event,
+            recovered_runtime_ready=recovered_runtime_ready,
         )
         execution_mutation_ready = {
             "browser": bool(
@@ -3263,6 +3265,7 @@ class EnvironmentHealthService:
         seat_runtime: dict[str, object],
         host_contract: dict[str, object],
         latest_blocking_event: dict[str, object],
+        recovered_runtime_ready: bool,
     ) -> dict[str, object]:
         workspace_ownership = self._mapping(workspace_graph.get("ownership"))
         locks = list(workspace_graph.get("locks") or [])
@@ -3294,20 +3297,27 @@ class EnvironmentHealthService:
             seat_runtime.get("seat_ref"),
         )
         blocking_family = self._first_string(latest_blocking_event.get("event_family"))
+        active_handoff_owner_ref = None
+        if not recovered_runtime_ready:
+            active_handoff_owner_ref = self._first_string(
+                host_contract.get("handoff_owner_ref"),
+            )
         blocking_reason = self._first_string(
-            host_contract.get("handoff_reason"),
-            host_contract.get("current_gap_or_blocker"),
+            None if recovered_runtime_ready else host_contract.get("handoff_reason"),
+            None
+            if recovered_runtime_ready
+            else host_contract.get("current_gap_or_blocker"),
             latest_blocking_event.get("event_name"),
             workspace_graph.get("active_lock_summary"),
         )
         severity = "clear"
-        if blocking_family is not None or self._first_string(host_contract.get("handoff_owner_ref")) is not None:
+        if blocking_family is not None or active_handoff_owner_ref is not None:
             severity = "blocked"
         legal_owner_transition = {
             "allowed": severity != "blocked",
             "reason": (
                 "human handoff is still active"
-                if self._first_string(host_contract.get("handoff_owner_ref")) is not None
+                if active_handoff_owner_ref is not None
                 else (blocking_reason or "coordination-ready")
             ),
         }
@@ -3424,6 +3434,8 @@ class EnvironmentHealthService:
                 host_contract.get("current_gap_or_blocker"),
             ),
         )
+        if recovered_runtime_ready:
+            requires_handoff = False
         def _entry(surface_ref: str | None, writer_ready: bool) -> dict[str, object]:
             if surface_ref is None:
                 return {
@@ -3489,6 +3501,7 @@ class EnvironmentHealthService:
         host_contract: dict[str, object],
         recovery: dict[str, object],
         host_companion_session: dict[str, object],
+        recovered_runtime_ready: bool,
     ) -> dict[str, object]:
         continuity_status = self._first_string(
             host_companion_session.get("continuity_status"),
@@ -3509,6 +3522,8 @@ class EnvironmentHealthService:
                 host_contract.get("current_gap_or_blocker"),
             ),
         )
+        if recovered_runtime_ready:
+            requires_human_return = False
         status = "blocked"
         if valid and requires_human_return:
             status = "guarded"
@@ -3682,13 +3697,6 @@ class EnvironmentHealthService:
         recovery: dict[str, object],
         host_event_summary: dict[str, object],
     ) -> bool:
-        if self._first_string(
-            host_contract.get("handoff_state"),
-            host_contract.get("handoff_owner_ref"),
-            host_contract.get("handoff_reason"),
-            host_contract.get("current_gap_or_blocker"),
-        ):
-            return False
         recovery_status = self._first_string(
             recovery.get("status"),
             recovery.get("state"),

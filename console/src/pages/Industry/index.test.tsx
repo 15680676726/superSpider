@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import IndustryPage from "./index";
@@ -259,6 +259,14 @@ describe("IndustryPage", () => {
     useIndustryPageStateMock.mockReturnValue(
       createPageState({
         detail: {
+          execution: {
+            status: "active",
+            current_focus: "generic-focus",
+            current_owner: "Spider Mesh 主脑",
+            current_risk: "guarded",
+            evidence_count: 0,
+            updated_at: "2026-03-27T09:30:00Z",
+          },
           focus_selection: {
             selection_kind: "assignment",
             assignment_id: "assignment-1",
@@ -446,7 +454,11 @@ describe("IndustryPage", () => {
 
     render(<IndustryPage />);
 
-    expect(screen.getByText("Focused Assignment")).toBeTruthy();
+    expect(screen.getAllByText("Focused Assignment").length).toBeGreaterThan(0);
+    const cockpitCard = screen.getByText("Runtime Cockpit").closest(".ant-card");
+    expect(cockpitCard).toBeTruthy();
+    expect(within(cockpitCard!).getByText("Focused runtime assignment")).toBeTruthy();
+    expect(within(cockpitCard!).queryByText("generic-focus")).toBeNull();
     expect(screen.getByText("Staffing Closure")).toBeTruthy();
     expect(screen.getByText("工作泳道")).toBeTruthy();
     expect(screen.getByText("增长获客")).toBeTruthy();
@@ -457,18 +469,24 @@ describe("IndustryPage", () => {
     expect(screen.getByText("Approve closer staffing")).toBeTruthy();
     expect(screen.getByText("synthesize-before-reassign")).toBeTruthy();
     expect(screen.getAllByText("Selected").length).toBeGreaterThan(0);
-    expect(screen.getByText("ctx-report-1")).toBeTruthy();
+    expect(screen.getAllByText("ctx-report-1").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Show full surface" }));
     expect(handleClearRuntimeFocus).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Focus backlog" }));
+    const backlogCard = screen.getByText("Backlog").closest(".ant-card");
+    expect(backlogCard).toBeTruthy();
+    fireEvent.click(within(backlogCard!).getByRole("button", { name: "Focus backlog" }));
     expect(handleSelectBacklogFocus).toHaveBeenCalledWith("backlog-2");
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Focus assignment" })[1]);
+    const assignmentsCard = screen.getByText("Assignments").closest(".ant-card");
+    expect(assignmentsCard).toBeTruthy();
+    fireEvent.click(within(assignmentsCard!).getByRole("button", { name: "Focus assignment" }));
     expect(handleSelectAssignmentFocus).toHaveBeenCalledWith("assignment-2");
 
-    fireEvent.click(screen.getByRole("button", { name: "Open report chat" }));
+    const reportsCard = screen.getByText("Agent Reports").closest(".ant-card");
+    expect(reportsCard).toBeTruthy();
+    fireEvent.click(within(reportsCard!).getByRole("button", { name: "Open report chat" }));
     expect(handleOpenAgentReportChat).toHaveBeenCalledWith(
       expect.objectContaining({
         report_id: "report-1",
@@ -505,6 +523,44 @@ describe("IndustryPage", () => {
             north_star: "One runtime truth across carrier, strategy, lane, and cycle.",
             current_focuses: ["assignment", "report", "decision", "patch"],
             priority_order: ["lane", "cycle", "assignment", "report"],
+          },
+          execution_environment: {
+            environment_summary: "desktop-windows",
+            host_twin_summary: "Seat policy sticky",
+            environment_constraints: ["desktop", "browser-session"],
+            host_twin: {
+              coordination: {
+                selected_seat_ref: "seat-1",
+              },
+            },
+          },
+          reports: {
+            daily: {
+              window: "daily",
+              since: "2026-03-27T00:00:00Z",
+              until: "2026-03-27T23:59:59Z",
+              evidence_count: 1,
+              proposal_count: 0,
+              patch_count: 0,
+              applied_patch_count: 0,
+              growth_count: 0,
+              decision_count: 1,
+              recent_evidence: [{ summary: "Evidence snapshot entry" }],
+              highlights: ["Daily highlight"],
+            },
+            weekly: {
+              window: "weekly",
+              since: "2026-03-21T00:00:00Z",
+              until: "2026-03-27T23:59:59Z",
+              evidence_count: 0,
+              proposal_count: 0,
+              patch_count: 0,
+              applied_patch_count: 0,
+              growth_count: 0,
+              decision_count: 0,
+              recent_evidence: [],
+              highlights: [],
+            },
           },
           current_cycle: {
             cycle_id: "cycle-1",
@@ -581,5 +637,10 @@ describe("IndustryPage", () => {
     expect(screen.getAllByText("Evidence").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Decision").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Patch").length).toBeGreaterThan(0);
+    expect(screen.getByText("Execution Environment")).toBeTruthy();
+    expect(screen.getByText("Seat policy sticky")).toBeTruthy();
+    expect(screen.getByText("desktop")).toBeTruthy();
+    expect(screen.getByText("Report Snapshot")).toBeTruthy();
+    expect(screen.getByText("Evidence snapshot entry")).toBeTruthy();
   });
 });

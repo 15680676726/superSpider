@@ -16,6 +16,8 @@ import styles from "./index.module.less";
 export function ChatRuntimeSidebar({
   approvalButtonLabel,
   bindingLabel,
+  focusHint,
+  focusLabel,
   onOpenGovernanceApprovals,
   runtimeFallbackLabel,
   runtimeHealthNotice,
@@ -24,9 +26,15 @@ export function ChatRuntimeSidebar({
   runtimeWaitDescription,
   runtimeWaitSeconds,
   runtimeWaitState,
+  threadKindHint,
+  threadKindLabel,
+  writebackHint,
+  writebackLabel,
 }: {
   approvalButtonLabel: string;
   bindingLabel: string | null;
+  focusHint?: string | null;
+  focusLabel?: string | null;
   onOpenGovernanceApprovals: () => void;
   runtimeFallbackLabel: string | null;
   runtimeHealthNotice: RuntimeHealthNotice | null;
@@ -35,7 +43,25 @@ export function ChatRuntimeSidebar({
   runtimeWaitDescription: string | null;
   runtimeWaitSeconds: number;
   runtimeWaitState: RuntimeWaitState | null;
+  threadKindHint?: string | null;
+  threadKindLabel?: string | null;
+  writebackHint?: string | null;
+  writebackLabel?: string | null;
 }) {
+  const renderMetaChip = (
+    label: string | null | undefined,
+    hint?: string | null,
+  ) => {
+    if (!label) return null;
+    return (
+      <div className={styles.topBarChip}>
+        <span className={styles.topBarChipDot} />
+        <span className={styles.topBarChipText} title={hint || label}>
+          {label}
+        </span>
+      </div>
+    );
+  };
   const hasPendingApprovals = approvalButtonLabel !== "审批";
 
   return (
@@ -46,14 +72,10 @@ export function ChatRuntimeSidebar({
           <AppstoreOutlined className={styles.topBarLogoIcon} />
           <span className={styles.topBarLogoText}>主脑对话</span>
         </div>
-        {bindingLabel ? (
-          <div className={styles.topBarChip}>
-            <span className={styles.topBarChipDot} />
-            <span className={styles.topBarChipText} title={bindingLabel}>
-              {bindingLabel}
-            </span>
-          </div>
-        ) : null}
+        {renderMetaChip(bindingLabel, bindingLabel)}
+        {renderMetaChip(threadKindLabel, threadKindHint)}
+        {renderMetaChip(focusLabel, focusHint)}
+        {renderMetaChip(writebackLabel, writebackHint)}
       </div>
 
       {/* 中间：运行状态 */}

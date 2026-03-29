@@ -79,7 +79,7 @@
 - `MainBrainChatService` 只保留聊天、澄清、状态说明与建议输出
 - `Goal / Task / Schedule` 可以保留为执行层对象，但不再作为主脑规划主语义
 - `delegate` 旧入口、chat 后台 writeback、app-name first 路由都应视为待删除兼容债
-- 本系统尚未正式上线，允许通过 reset 脚本直接清理旧 runtime data，而不是迁移
+- 本系统处于 `2026-03-25` hard-cut 维护窗口，允许通过 reset 脚本直接清理旧 runtime data（以删旧为准，不做历史迁移）
 - `2026-03-25` 完成补充：
   - `POST /runtime-center/tasks/{task_id}/delegate` 已从 runtime-center router 物理删除
   - 前台 capability / insights surface 不再公开 `dispatch_active_goals` / `dispatch_goal` 作为产品心智
@@ -98,7 +98,10 @@
   - `RuntimeCenterStateQueryService` / task-review projection / overview governance` 也已开始消费 `host_twin_summary` 这类派生摘要，首屏读面优先显示 `seat_owner_ref / recommended_scheduler_action / active_app_family_keys / blocked_surface_count / legal_recovery_mode`，而不是继续靠 raw `host_twin` JSON 自行拼摘要
   - execution-side canonical host truth 现在也已补上“当前事实优先于历史 blocker 文案”的收口：stale blocker / stale handoff history 只会在当前 host/session 事实已 clean 且 latest handoff event 明确进入 `return-ready / return-complete` 时才会被抑制，不再因为残留 recovery metadata 就把 live blocker 吞掉
   - workflow resume / cron 与 fixed-SOP doctor/run 现在都会继续从 live `host_twin` 刷新执行面：workflow run detail / schedule meta 会回填 `host_snapshot / environment_ref / environment_id / session_mount_id / host_requirement`，fixed SOP 会正式阻断 `requires_human_return`、`legal_recovery.path=handoff` 与显式要求 `handoff/recover/retry` 的 blocker event，不再让 handoff-only 路径误判为可执行
+  - workflow preview / fixed-SOP doctor 现在也会优先消费 top-level 或 nested `host_twin_summary`：当 canonical summary 已明确给出 `recommended_scheduler_action=proceed|continue`、`blocked_surface_count=0` 与非 handoff 的 `legal_recovery_mode` 时，消费面不再被 raw/stale handoff metadata 反向卡住
   - single-industry runtime focus 也已把 report follow-up truth 纳入同一条主链：当 backlog 来自 `source_report_id` 或 `synthesis_kind=followup-needed` 时，默认 focused runtime 会优先呈现该 follow-up backlog，并保留 supervisor/staffing/writeback metadata，而不是被无关 active assignment 抢走执行焦点
+  - report follow-up backlog 现在还会继续保留 `control_thread_id / session_id / environment_ref / chat_writeback_channel / requested_surfaces`；即使后续只剩 session/control-thread 线索，governance、human-assist 与 runtime resume 也能把同一条 browser/desktop/document follow-up execution chain 接回正式主链
+  - `HumanAssistTaskService` / runtime schedule resume 也已继续共享 `work_context_id + recommended_scheduler_action` 这条 continuity contract；pause/resume/reentry 不再各自猜当前执行身份
   - `GET /goals/{goal_id}/detail` 已进一步收口为只读 leaf detail；detail 读取不再隐式触发 `reconcile_goal_status()`，状态推进必须显式走 reconcile/write 链，不允许“看详情顺手改状态”
   - CLI `goals dispatch` 已从命令面物理删除，不再保留 retired shell；CLI 仅保留 `goals list/compile`
   - `GoalRecord` 仍可作为执行层 phase/leaf object 存在，但 operator 主入口必须优先经过 `strategy / lane / backlog / cycle / assignment / report`
@@ -764,6 +767,14 @@
 
 ## 6. API 迁移优先级
 
+补充（截至 `2026-03-29` 的 phase-next 牵引项，影响 API contract 的演进顺序，但不意味着终态已交付）：
+
+- `Full Host Digital Twin` 扩面（基线为 `Execution-Grade Host Twin`；后续仍会继续补 multi-seat/multi-agent coordination 与更长时间的 live smoke）
+- single-industry 真实世界扩面（更长周期、更高并发、更真实的 supervisor/handoff/staffing 组合）
+- 主脑 cockpit 扩面（把 `strategy / lanes / backlog / cycles / assignments / agent reports` 从读面继续推进到更完整的治理写链与可见化）
+- 回归与 live smoke 扩面（优先扩 `industry/runtime/human-assist/host recovery` 聚合回归与真实宿主链）
+- 重模块拆分（router/service/query presenter/console pages 继续下沉拆分，降低后续维护成本）
+
 ### 第一优先级（Phase 1 收口）
 
 - `jobs/chats/sessions` 旧真相源清退（已完成，残留文件需人工清理）
@@ -858,11 +869,13 @@
 
 ---
 
-## 5. Post-`V6` planned：主脑长期自治 surface
+## 10. Post-`V6` 主脑 cockpit（现状 + phase-next）
 
 下一正式阶段的迁移目标不是在 `industry` 旁边再造第二套执行器，而是在现有 `IndustryService + Runtime Center` 基线之上把主脑自治对象与 API 硬切成唯一正式主链。
 
-planned canonical surfaces：
+现状（截至 `2026-03-29`）：`Runtime Center / /industry / kickoff prompt` 已把 `strategy / lanes / current cycle / assignments / agent reports` 提升为正式 planning 读面基线，但“更完整的 cockpit 写链、治理动作、回归与 live smoke 扩面”仍属于 phase-next。
+
+phase-next 候选独立 surfaces（如后续需要把 cockpit 从 `industry detail` 投影进一步拆成专用 endpoint，再锁定最终路径命名）：
 
 - `/api/runtime-center/main-brain/{carrier_id}`
   - 聚合 `carrier / identity / strategy / current cycle / current focuses / next review`
@@ -892,7 +905,7 @@ planned canonical surfaces：
 
 ---
 
-## WorkContext 迁移补充
+## 11. WorkContext 迁移补充
 
 ### 目标
 

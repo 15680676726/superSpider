@@ -1329,6 +1329,102 @@ def test_processed_report_keeps_completed_career_role_in_team(tmp_path) -> None:
     assert any(agent.role_id == support_role.role_id for agent in detail.team.agents)
 
 
+def test_agent_report_writeback_honors_control_thread_override_in_report_metadata(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+    asyncio.run(take_all())
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    execution_core_agent_id = preview_payload["draft"]["team"]["agents"][0]["agent_id"]
+    support_role = _build_support_role(execution_core_agent_id)
+    facade = _build_team_capability_facade(app)
+
+    created = asyncio.run(
+        facade.handle_update_industry_team(
+            {
+                "instance_id": instance_id,
+                "operation": "add-role",
+                "role": support_role.model_dump(mode="json"),
+            },
+        ),
+    )
+    assert created["success"] is True
+
+    assignment = AssignmentRecord(
+        industry_instance_id=instance_id,
+        owner_agent_id=support_role.agent_id,
+        owner_role_id=support_role.role_id,
+        title="Support follow-up writeback",
+        summary="Write back to the preserved control thread, not the canonical one.",
+        status="completed",
+    )
+    app.state.assignment_repository.upsert_assignment(assignment)
+
+    control_thread_id = f"industry-chat:{instance_id}:support-followup"
+    report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        assignment_id=assignment.id,
+        owner_agent_id=support_role.agent_id,
+        owner_role_id=support_role.role_id,
+        headline="Support follow-up completed",
+        summary="Writeback should land in the support-followup control thread.",
+        status="recorded",
+        result="completed",
+        processed=False,
+        metadata={
+            "control_thread_id": control_thread_id,
+            "session_id": control_thread_id,
+            "environment_ref": f"session:console:industry:{instance_id}",
+        },
+    )
+    app.state.agent_report_repository.upsert_report(report)
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+
+    processed = app.state.industry_service._process_pending_agent_reports(
+        record=record,
+        cycle_id=None,
+    )
+    assert len(processed) == 1
+    assert processed[0].processed is True
+
+    session_snapshot = app.state.session_backend.load_session_snapshot(
+        session_id=control_thread_id,
+        user_id="copaw-agent-runner",
+    )
+    assert session_snapshot is not None
+    message_buffer = session_snapshot["agent"]["memory"]
+    if isinstance(message_buffer, dict):
+        message_buffer = message_buffer.get("content") or []
+    report_message = next(
+        message
+        for message in message_buffer
+        if message["id"] == f"agent-report:{report.id}"
+    )
+    assert report_message["metadata"]["message_kind"] == "agent-report-writeback"
+
+
 def test_agent_report_processing_preserves_cognitive_fields(tmp_path) -> None:
     app = _build_industry_app(tmp_path)
     client = TestClient(app)
@@ -1948,6 +2044,126 @@ def test_failed_assignment_report_completes_original_backlog_after_followup_is_r
     assert focused_backlog_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
     assert focused_backlog_payload["execution"]["current_focus"] == followup_backlog["title"]
     assert focused_backlog_payload["main_chain"]["current_focus"] == followup_backlog["title"]
+
+
+def test_failed_report_followup_carries_control_thread_and_surface_pressure_without_backlog_assignment(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    execution_core_agent_id = preview_payload["draft"]["team"]["agents"][0]["agent_id"]
+    support_role = _build_support_role(execution_core_agent_id)
+    facade = _build_team_capability_facade(app)
+
+    created = asyncio.run(
+        facade.handle_update_industry_team(
+            {
+                "instance_id": instance_id,
+                "operation": "add-role",
+                "role": support_role.model_dump(mode="json"),
+            },
+        ),
+    )
+    assert created["success"] is True
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    cycle_id = record.current_cycle_id
+    assert cycle_id is not None
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+    environment_ref = f"session:console:industry:{instance_id}"
+    assignment = AssignmentRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        owner_agent_id=support_role.agent_id,
+        owner_role_id=support_role.role_id,
+        title="Browser follow-up handoff",
+        summary="Recover the governed browser workflow after handoff returns.",
+        status="failed",
+        metadata={
+            "chat_writeback_requested_surfaces": ["browser", "desktop", "document"],
+            "seat_requested_surfaces": ["browser", "desktop", "document"],
+            "control_thread_id": control_thread_id,
+            "session_id": control_thread_id,
+            "environment_ref": environment_ref,
+            "report_back_mode": "summary",
+        },
+    )
+    app.state.assignment_repository.upsert_assignment(assignment)
+    report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=assignment.id,
+        owner_agent_id=support_role.agent_id,
+        owner_role_id=support_role.role_id,
+        headline="Browser follow-up handoff failed",
+        summary="Browser and desktop actions are still blocked until human return completes.",
+        status="recorded",
+        result="failed",
+        findings=["Handoff checkpoint was not returned yet."],
+        work_context_id="work-context:test-failed-followup",
+        metadata={
+            "chat_writeback_requested_surfaces": ["browser", "desktop", "document"],
+            "control_thread_id": control_thread_id,
+            "session_id": control_thread_id,
+            "environment_ref": environment_ref,
+            "recommended_scheduler_action": "handoff",
+        },
+        processed=False,
+    )
+    app.state.agent_report_repository.upsert_report(report)
+
+    processed = app.state.industry_service._process_pending_agent_reports(
+        record=record,
+        cycle_id=cycle_id,
+    )
+    assert [item.id for item in processed] == [report.id]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    followup_backlog = next(
+        item
+        for item in detail.backlog
+        if item["metadata"].get("source_report_id") == report.id
+    )
+    assert "browser" in followup_backlog["metadata"]["seat_requested_surfaces"]
+    assert "desktop" in followup_backlog["metadata"]["seat_requested_surfaces"]
+    assert "document" in followup_backlog["metadata"]["seat_requested_surfaces"]
+    assert followup_backlog["metadata"]["control_thread_id"] == control_thread_id
+    assert followup_backlog["metadata"]["session_id"] == control_thread_id
+    assert followup_backlog["metadata"]["environment_ref"] == environment_ref
+    assert followup_backlog["metadata"]["work_context_id"] == report.work_context_id
+    assert followup_backlog["metadata"]["recommended_scheduler_action"] == "handoff"
+
+    runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    replan_node = next(
+        node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
+    )
+    assert "browser" in replan_node["metrics"]["followup_pressure_surfaces"]
+    assert "desktop" in replan_node["metrics"]["followup_pressure_surfaces"]
+    assert "document" in replan_node["metrics"]["followup_pressure_surfaces"]
+    assert replan_node["metrics"]["recommended_action"] is not None
 
 
 def test_completed_temporary_role_auto_retires_after_report_processing(tmp_path) -> None:

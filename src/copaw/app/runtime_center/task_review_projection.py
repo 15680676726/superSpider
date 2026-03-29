@@ -141,16 +141,55 @@ def host_twin_writable_surface_label(host_twin: dict[str, object] | None) -> str
 def host_twin_legal_recovery_mode(host_twin: dict[str, object] | None) -> str | None:
     if host_twin is None:
         return None
+    embedded_summary = dict_from_value(host_twin.get("host_twin_summary"))
     recovery_path = dict_from_value(host_twin.get("legal_recovery_path"))
     legal_recovery = dict_from_value(host_twin.get("legal_recovery"))
     return first_non_empty(
+        embedded_summary.get("legal_recovery_mode")
+        if embedded_summary is not None
+        else None,
         host_twin.get("legal_recovery_mode"),
-        legal_recovery.get("resume_kind") if legal_recovery is not None else None,
         legal_recovery.get("mode") if legal_recovery is not None else None,
         legal_recovery.get("path") if legal_recovery is not None else None,
+        legal_recovery.get("resume_kind") if legal_recovery is not None else None,
         recovery_path.get("mode") if recovery_path is not None else None,
-        recovery_path.get("resume_kind") if recovery_path is not None else None,
         recovery_path.get("path") if recovery_path is not None else None,
+        recovery_path.get("resume_kind") if recovery_path is not None else None,
+    )
+
+
+def host_twin_resume_kind(host_twin: dict[str, object] | None) -> str | None:
+    if host_twin is None:
+        return None
+    recovery_path = dict_from_value(host_twin.get("legal_recovery_path"))
+    legal_recovery = dict_from_value(host_twin.get("legal_recovery"))
+    return first_non_empty(
+        host_twin.get("resume_kind"),
+        legal_recovery.get("resume_kind") if legal_recovery is not None else None,
+        recovery_path.get("resume_kind") if recovery_path is not None else None,
+    )
+
+
+def host_twin_summary_ready(
+    host_twin_summary: dict[str, object] | None,
+) -> bool:
+    if host_twin_summary is None:
+        return False
+    recommended_action = first_non_empty(
+        host_twin_summary.get("recommended_scheduler_action"),
+    )
+    legal_recovery_mode = first_non_empty(
+        host_twin_summary.get("legal_recovery_mode"),
+    )
+    try:
+        blocked_surface_count = int(host_twin_summary.get("blocked_surface_count") or 0)
+    except (TypeError, ValueError):
+        blocked_surface_count = 0
+    return bool(
+        recommended_action
+        and recommended_action not in {"recover", "handoff", "retry"}
+        and legal_recovery_mode != "handoff"
+        and blocked_surface_count == 0
     )
 
 
@@ -230,6 +269,7 @@ def build_host_twin_summary(
 ) -> dict[str, object] | None:
     if host_twin is None:
         return None
+    embedded_summary = dict_from_value(host_twin.get("host_twin_summary")) or {}
     ownership = dict_from_value(host_twin.get("ownership")) or {}
     coordination = dict_from_value(host_twin.get("coordination")) or {}
     app_family_twins = dict_from_value(host_twin.get("app_family_twins")) or {}
@@ -245,11 +285,15 @@ def build_host_twin_summary(
     )
     app_family_readiness = dict_from_value(host_twin.get("app_family_readiness")) or {}
     blocked_surfaces = dict_list_from_value(host_twin.get("blocked_surfaces"))
-    active_app_family_keys = sorted(
-        family_key
-        for family_key, value in app_family_twins.items()
-        if isinstance(value, dict) and value.get("active") is True
+    active_app_family_keys = string_list_from_values(
+        embedded_summary.get("active_app_family_keys"),
     )
+    if not active_app_family_keys:
+        active_app_family_keys = sorted(
+            family_key
+            for family_key, value in app_family_twins.items()
+            if isinstance(value, dict) and value.get("active") is True
+        )
     ready_app_family_keys = string_list_from_values(
         app_family_readiness.get("ready_family_keys"),
     )
@@ -292,7 +336,9 @@ def build_host_twin_summary(
         multi_seat_coordination.get("seat_selection_policy"),
         coordination.get("seat_selection_policy"),
     )
-    seat_count_value = multi_seat_coordination.get("seat_count")
+    seat_count_value = embedded_summary.get("seat_count")
+    if not isinstance(seat_count_value, int):
+        seat_count_value = multi_seat_coordination.get("seat_count")
     if not isinstance(seat_count_value, int):
         seat_count_value = len(candidate_seat_refs) or (1 if selected_seat_ref else 0)
     host_companion_status = first_non_empty(
@@ -341,6 +387,7 @@ def build_host_twin_summary(
     }
     return {
         "seat_owner_ref": first_non_empty(
+            embedded_summary.get("seat_owner_ref"),
             coordination.get("seat_owner_ref"),
             ownership.get("seat_owner_ref"),
             ownership.get("seat_owner_agent_id"),
@@ -376,6 +423,7 @@ def build_host_twin_summary(
         "selected_seat_ref": selected_seat_ref,
         "seat_selection_policy": seat_selection_policy,
         "recommended_scheduler_action": first_non_empty(
+            embedded_summary.get("recommended_scheduler_action"),
             coordination.get("recommended_scheduler_action"),
             multi_seat_coordination.get("recommended_scheduler_action"),
         ),
@@ -428,14 +476,21 @@ def build_host_twin_summary(
         },
         "active_app_family_keys": active_app_family_keys[:4],
         "active_app_family_count": len(active_app_family_keys),
-        "blocked_surface_refs": [
-            first_non_empty(
-                surface.get("surface_ref"),
-                surface.get("surface_kind"),
-            )
-            for surface in blocked_surfaces[:4]
-        ],
-        "blocked_surface_count": len(blocked_surfaces),
+        "blocked_surface_refs": string_list_from_values(
+            embedded_summary.get("blocked_surface_refs"),
+            [
+                first_non_empty(
+                    surface.get("surface_ref"),
+                    surface.get("surface_kind"),
+                )
+                for surface in blocked_surfaces[:4]
+            ],
+        )[:4],
+        "blocked_surface_count": (
+            embedded_summary.get("blocked_surface_count")
+            if isinstance(embedded_summary.get("blocked_surface_count"), int)
+            else len(blocked_surfaces)
+        ),
         "active_blocker_families": string_list_from_values(
             host_twin.get("active_blocker_families"),
             host_twin.get("active_blocker_family"),
@@ -1037,6 +1092,7 @@ def build_task_review_payload(
         host_companion_session=host_companion_session,
     )
     host_twin_blocker_family = host_twin_active_blocker_family(host_twin)
+    host_twin_resume = host_twin_resume_kind(host_twin)
     host_twin_recovery_mode = host_twin_legal_recovery_mode(host_twin)
     host_twin_recovery_summary = host_twin_legal_recovery_summary(host_twin)
     host_twin_anchor = host_twin_trusted_anchor(host_twin)
@@ -1052,46 +1108,65 @@ def build_task_review_payload(
         if host_twin_coordination is not None
         else None
     )
-    coordination_scheduler_action = first_non_empty(
-        host_twin_coordination.get("recommended_scheduler_action")
-        if host_twin_coordination is not None
+    canonical_host_ready = host_twin_summary_ready(host_twin_summary_payload)
+    host_twin_summary_recovery_mode = first_non_empty(
+        host_twin_summary_payload.get("legal_recovery_mode")
+        if host_twin_summary_payload is not None
         else None,
+        host_twin_recovery_mode,
+    )
+    coordination_scheduler_action = first_non_empty(
         host_twin_summary_payload.get("recommended_scheduler_action")
         if host_twin_summary_payload is not None
         else None,
-    )
-    coordination_selected_seat_ref = first_non_empty(
-        host_twin_coordination.get("selected_seat_ref")
+        host_twin_coordination.get("recommended_scheduler_action")
         if host_twin_coordination is not None
         else None,
+    )
+    coordination_selected_seat_ref = first_non_empty(
         host_twin_summary_payload.get("selected_seat_ref")
         if host_twin_summary_payload is not None
         else None,
-    )
-    coordination_seat_policy = first_non_empty(
-        host_twin_coordination.get("seat_selection_policy")
+        host_twin_coordination.get("selected_seat_ref")
         if host_twin_coordination is not None
         else None,
+    )
+    coordination_seat_policy = first_non_empty(
         host_twin_summary_payload.get("seat_selection_policy")
         if host_twin_summary_payload is not None
         else None,
+        host_twin_coordination.get("seat_selection_policy")
+        if host_twin_coordination is not None
+        else None,
     )
     coordination_severity = first_non_empty(
-        coordination_contention.get("severity")
-        if coordination_contention is not None
-        else None,
         host_twin_summary_payload.get("contention_severity")
         if host_twin_summary_payload is not None
         else None,
-    )
-    coordination_reason = first_non_empty(
-        host_twin_blocker_family,
-        coordination_contention.get("reason")
+        coordination_contention.get("severity")
         if coordination_contention is not None
         else None,
-        host_twin_summary_payload.get("contention_reason")
-        if host_twin_summary_payload is not None
-        else None,
+    )
+    coordination_reason = (
+        first_non_empty(
+            host_twin_summary_payload.get("contention_reason")
+            if host_twin_summary_payload is not None
+            else None,
+            host_twin_blocker_family,
+            coordination_contention.get("reason")
+            if coordination_contention is not None
+            else None,
+        )
+        if canonical_host_ready
+        else first_non_empty(
+            host_twin_blocker_family,
+            coordination_contention.get("reason")
+            if coordination_contention is not None
+            else None,
+            host_twin_summary_payload.get("contention_reason")
+            if host_twin_summary_payload is not None
+            else None,
+        )
     )
     host_status = (
         first_non_empty(host_contract.get("status"), host_contract.get("state"))
@@ -1163,6 +1238,10 @@ def build_task_review_payload(
             status_key = recovery_status.strip().lower() if recovery_status is not None else ""
             if status_key not in recovery_terminal_markers:
                 recovery_active = True
+    if canonical_host_ready:
+        recovery_active = False
+        recovery_status = None
+        recovery_mode = first_non_empty(host_twin_summary_recovery_mode, host_twin_resume)
     latest_host_event = (
         dict_from_value(host_event_summary.get("latest_event"))
         if host_event_summary is not None
@@ -1199,6 +1278,9 @@ def build_task_review_payload(
         host_blocker_reason,
     )
     handoff_owner_ref = first_non_empty(
+        host_twin_summary_payload.get("handoff_owner_ref")
+        if host_twin_summary_payload is not None
+        else None,
         host_twin_seat_owner,
         handoff_checkpoint.get("owner_ref") if handoff_checkpoint is not None else None,
         host_contract.get("handoff_owner_ref") if host_contract is not None else None,
@@ -1231,6 +1313,14 @@ def build_task_review_payload(
         host_contract.get("verification_channel") if host_contract is not None else None,
         recovery.get("verification_channel") if recovery is not None else None,
     )
+    if canonical_host_ready:
+        handoff_state = None
+        handoff_reason = None
+        handoff_owner_ref = None
+        host_blocker_reason = None
+        host_blocked = False
+        if not coordination_severity:
+            coordination_severity = "clear"
     latest_evidence_closeout = (
         _normalized_evidence_closeout(latest_evidence)
         if latest_evidence is not None
@@ -1275,7 +1365,7 @@ def build_task_review_payload(
             "return_condition": handoff_return_condition,
             "resume_kind": first_non_empty(
                 handoff_checkpoint.get("resume_kind") if handoff_checkpoint is not None else None,
-                host_twin_recovery_mode,
+                host_twin_resume,
                 recovery_mode,
             ),
         },

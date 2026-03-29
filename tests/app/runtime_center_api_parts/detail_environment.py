@@ -1081,6 +1081,67 @@ def test_runtime_center_environment_detail_surfaces_host_twin_summary() -> None:
     ]
 
 
+def test_runtime_center_environment_detail_prefers_canonical_host_twin_summary_after_reentry() -> None:
+    class _ReentryEnvironmentService:
+        def __init__(self) -> None:
+            self._reentered = False
+
+        def mark_reentered(self) -> None:
+            self._reentered = True
+
+        def get_environment_detail(self, env_id: str, *args, **kwargs):
+            _ = args, kwargs
+            if env_id != "env:session:session:web:main":
+                return None
+            return {
+                "ref": "session:web:main",
+                "host_companion_session": {
+                    "session_mount_id": "session:web:main",
+                    "environment_id": "env:session:session:web:main",
+                    "continuity_status": "attached" if self._reentered else "restorable",
+                    "continuity_source": "live-handle",
+                },
+                "host_twin_summary": {
+                    "host_companion_status": "attached" if self._reentered else "restorable",
+                    "host_companion_source": "live-handle",
+                    "seat_count": 2,
+                    "recommended_scheduler_action": "proceed" if self._reentered else "handoff",
+                    "ready_app_family_keys": [
+                        "browser_backoffice",
+                        "office_document",
+                    ],
+                    "blocked_app_family_keys": [] if self._reentered else ["desktop_specialized"],
+                },
+                "metadata": {
+                    "stale_checkpoint_state": "agent-attached",
+                    "stale_recommended_scheduler_action": "handoff",
+                },
+            }
+
+        def get_session_detail(self, session_mount_id: str, *args, **kwargs):
+            _ = args, kwargs
+            return self.get_environment_detail(session_mount_id)
+
+    service = _ReentryEnvironmentService()
+    app = build_runtime_center_app()
+    app.state.environment_service = service
+
+    client = TestClient(app)
+    before = client.get("/runtime-center/environments/env:session:session:web:main")
+    assert before.status_code == 200
+    assert before.json()["host_twin_summary"]["recommended_scheduler_action"] == "handoff"
+    assert before.json()["host_twin_summary"]["blocked_app_family_keys"] == ["desktop_specialized"]
+
+    service.mark_reentered()
+    after = client.get("/runtime-center/environments/env:session:session:web:main")
+    assert after.status_code == 200
+    payload = after.json()
+    assert payload["metadata"]["stale_recommended_scheduler_action"] == "handoff"
+    assert payload["host_twin_summary"]["host_companion_status"] == "attached"
+    assert payload["host_twin_summary"]["recommended_scheduler_action"] == "proceed"
+    assert payload["host_twin_summary"]["blocked_app_family_keys"] == []
+
+
 def test_runtime_center_environment_action_endpoints() -> None:
     app = build_runtime_center_app()
     app.state.environment_service = FakeEnvironmentService()

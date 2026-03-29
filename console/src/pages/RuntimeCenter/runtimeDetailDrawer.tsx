@@ -34,6 +34,8 @@ import {
 import {
   renderIndustryExecutionFocusSection,
   renderIndustryMainChainSection,
+  renderOperatorAgentReportsSection,
+  renderOperatorAssignmentsSection,
   renderTaskReviewSection,
 } from "./runtimeIndustrySections";
 import { renderHostTwinSection } from "./runtimeEnvironmentSections";
@@ -208,6 +210,30 @@ export function renderDetailSection(
 
   if (sectionKey === "host_twin" && isRecord(sectionValue)) {
     return renderHostTwinSection(sectionKey, sectionValue);
+  }
+
+  if (sectionKey === "assignments") {
+    const rendered = renderOperatorAssignmentsSection(
+      sectionKey,
+      sectionValue,
+      openRoute,
+      focusSelection,
+    );
+    if (rendered) {
+      return rendered;
+    }
+  }
+
+  if (sectionKey === "agent_reports") {
+    const rendered = renderOperatorAgentReportsSection(
+      sectionKey,
+      sectionValue,
+      openRoute,
+      focusSelection,
+    );
+    if (rendered) {
+      return rendered;
+    }
   }
 
   if (Array.isArray(sectionValue)) {

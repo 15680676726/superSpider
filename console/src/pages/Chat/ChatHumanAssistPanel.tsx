@@ -51,32 +51,24 @@ function normalizeTaskSummary(value: unknown): RuntimeHumanAssistTaskSummary | n
   } as RuntimeHumanAssistTaskSummary;
 }
 
-function statusLabel(status: string | null | undefined): string {
+export function resolveHumanAssistStatusPresentation(
+  status: string | null | undefined,
+): { label: string; color: string } {
   const normalized = String(status || "").trim().toLowerCase();
-  if (normalized === "issued") return "待提交";
-  if (normalized === "submitted") return "已提交";
-  if (normalized === "verifying") return "验证中";
-  if (normalized === "accepted") return "已通过";
-  if (normalized === "need_more_evidence") return "待补证";
-  if (normalized === "resume_queued") return "已验收";
-  if (normalized === "handoff_blocked") return "\u6062\u590d\u53d7\u963b";
-  if (normalized === "rejected") return "未通过";
-  if (normalized === "closed") return "已关闭";
-  if (normalized === "expired") return "已过期";
-  if (normalized === "cancelled") return "已取消";
-  return status || "未知";
-}
-
-function statusColor(status: string | null | undefined): string {
-  const normalized = String(status || "").trim().toLowerCase();
-  if (normalized === "accepted" || normalized === "resume_queued") return "success";
-  if (normalized === "need_more_evidence" || normalized === "handoff_blocked") return "warning";
-  if (normalized === "rejected") return "warning";
-  if (normalized === "verifying") return "processing";
-  if (normalized === "submitted") return "gold";
-  if (normalized === "issued") return "blue";
-  if (normalized === "closed" || normalized === "cancelled") return "default";
-  return "default";
+  if (normalized === "issued") return { label: "待提交", color: "blue" };
+  if (normalized === "submitted") return { label: "已提交", color: "gold" };
+  if (normalized === "verifying") return { label: "验证中", color: "processing" };
+  if (normalized === "accepted") return { label: "已通过", color: "success" };
+  if (normalized === "need_more_evidence") return { label: "待补证", color: "warning" };
+  if (normalized === "resume_queued") return { label: "已验收", color: "success" };
+  if (normalized === "handoff_blocked") {
+    return { label: "\u6062\u590d\u53d7\u963b", color: "warning" };
+  }
+  if (normalized === "rejected") return { label: "未通过", color: "warning" };
+  if (normalized === "closed") return { label: "已关闭", color: "default" };
+  if (normalized === "expired") return { label: "已过期", color: "default" };
+  if (normalized === "cancelled") return { label: "已取消", color: "default" };
+  return { label: status || "未知", color: "default" };
 }
 
 function formatDateTime(value: string | null | undefined): string | null {
@@ -262,6 +254,9 @@ export function ChatHumanAssistPanel({
   const rewardResult = entryList(selectedTaskDetail?.task.reward_result);
   const hasTaskStrip = Boolean(activeChatThreadId);
   const currentTaskTitle = currentTask ? currentTask.title : "当前无待协作任务";
+  const currentTaskStatusPresentation = resolveHumanAssistStatusPresentation(
+    currentTask?.status,
+  );
   const currentTaskSummary = currentTask
     ? firstNonEmptyString(
         currentTask.required_action,
@@ -277,6 +272,9 @@ export function ChatHumanAssistPanel({
     : null;
   const detailAction = selectedTaskDetail
     ? firstNonEmptyString(selectedTaskDetail.task.required_action) || "无"
+    : null;
+  const detailStatusPresentation = selectedTaskDetail
+    ? resolveHumanAssistStatusPresentation(selectedTaskDetail.task.status)
     : null;
   const armHumanAssistSubmission = useCallback(() => {
     if (!activeChatThreadId || !currentTask) {
@@ -303,8 +301,8 @@ export function ChatHumanAssistPanel({
               <span className={styles.humanAssistStripTitle} title={currentTaskTitle}>
                 {currentTaskTitle}
               </span>
-              <Tag bordered={false} color={statusColor(currentTask?.status)}>
-                {currentTask ? statusLabel(currentTask.status) : "空闲"}
+              <Tag bordered={false} color={currentTaskStatusPresentation.color}>
+                {currentTask ? currentTaskStatusPresentation.label : "空闲"}
               </Tag>
             </div>
             <div className={styles.humanAssistStripSummary} title={currentTaskSummary}>
@@ -362,6 +360,9 @@ export function ChatHumanAssistPanel({
               <div className={styles.humanAssistTaskListInner}>
                 {tasks.map((item) => {
                   const selected = item.id === selectedTaskId;
+                  const statusPresentation = resolveHumanAssistStatusPresentation(
+                    item.status,
+                  );
                   const itemSummary =
                     firstNonEmptyString(
                       item.required_action,
@@ -387,8 +388,8 @@ export function ChatHumanAssistPanel({
                         >
                           {item.title}
                         </span>
-                        <Tag bordered={false} color={statusColor(item.status)}>
-                          {statusLabel(item.status)}
+                        <Tag bordered={false} color={statusPresentation.color}>
+                          {statusPresentation.label}
                         </Tag>
                       </div>
                       <div
@@ -430,8 +431,8 @@ export function ChatHumanAssistPanel({
                       {detailSummary}
                     </div>
                   </div>
-                  <Tag bordered={false} color={statusColor(selectedTaskDetail.task.status)}>
-                    {statusLabel(selectedTaskDetail.task.status)}
+                  <Tag bordered={false} color={detailStatusPresentation?.color || "default"}>
+                    {detailStatusPresentation?.label || "未知"}
                   </Tag>
                 </div>
 

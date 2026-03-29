@@ -458,6 +458,16 @@ class _IndustryLifecycleMixin:
             if original_backlog_item is not None
             else {}
         )
+        assignment_metadata = (
+            dict(assignment.metadata or {})
+            if assignment is not None
+            else {}
+        )
+        report_metadata = (
+            dict(report.metadata or {})
+            if report is not None
+            else {}
+        )
         supervisor_owner_agent_id = _string(
             original_metadata.get("supervisor_owner_agent_id"),
         )
@@ -479,6 +489,7 @@ class _IndustryLifecycleMixin:
             "chat_writeback_target_role_name",
             "chat_writeback_target_match_signals",
             "chat_writeback_requested_surfaces",
+            "chat_writeback_channel",
             "chat_writeback_gap_kind",
             "seat_resolution_kind",
             "seat_resolution_reason",
@@ -488,9 +499,37 @@ class _IndustryLifecycleMixin:
             "seat_target_agent_id",
             "decision_request_id",
             "proposal_status",
+            "recommended_scheduler_action",
+            "control_thread_id",
+            "session_id",
+            "environment_ref",
+            "work_context_id",
         ):
-            if key in original_metadata and original_metadata[key] is not None:
-                carried[key] = original_metadata[key]
+            value = (
+                original_metadata.get(key)
+                if key in original_metadata
+                else assignment_metadata.get(key)
+                if key in assignment_metadata
+                else report_metadata.get(key)
+                if key in report_metadata
+                else None
+            )
+            if value is not None:
+                carried[key] = value
+        requested_surfaces = _unique_strings(
+            carried.get("seat_requested_surfaces"),
+            carried.get("chat_writeback_requested_surfaces"),
+            assignment_metadata.get("seat_requested_surfaces"),
+            assignment_metadata.get("chat_writeback_requested_surfaces"),
+            report_metadata.get("seat_requested_surfaces"),
+            report_metadata.get("chat_writeback_requested_surfaces"),
+        )
+        if requested_surfaces:
+            carried["seat_requested_surfaces"] = list(requested_surfaces)
+            carried.setdefault(
+                "chat_writeback_requested_surfaces",
+                list(requested_surfaces),
+            )
         if supervisor_owner_agent_id is not None:
             carried["owner_agent_id"] = supervisor_owner_agent_id
         if supervisor_industry_role_id is not None:
@@ -501,6 +540,8 @@ class _IndustryLifecycleMixin:
             carried["role_name"] = supervisor_role_name
             carried.setdefault("role_summary", supervisor_role_name)
         carried.setdefault("task_mode", "report-followup")
+        if report is not None and _string(getattr(report, "work_context_id", None)) is not None:
+            carried.setdefault("work_context_id", report.work_context_id)
         if report is not None:
             if _string(report.owner_agent_id) is not None:
                 carried.setdefault("source_owner_agent_id", report.owner_agent_id)
@@ -513,6 +554,20 @@ class _IndustryLifecycleMixin:
                 carried.setdefault("source_industry_role_id", assignment.owner_role_id)
         if original_backlog_item is not None and original_backlog_item.source_ref is not None:
             carried.setdefault("upstream_backlog_source_ref", original_backlog_item.source_ref)
+        control_thread_id = _string(carried.get("control_thread_id")) or _string(
+            carried.get("session_id"),
+        )
+        if control_thread_id is not None:
+            carried["control_thread_id"] = control_thread_id
+            carried["session_id"] = control_thread_id
+        if _string(carried.get("environment_ref")) is None:
+            instance_id = (
+                _string(getattr(report, "industry_instance_id", None))
+                or _string(getattr(assignment, "industry_instance_id", None))
+            )
+            if instance_id is not None:
+                channel = _string(carried.get("chat_writeback_channel")) or "console"
+                carried["environment_ref"] = f"session:{channel}:industry:{instance_id}"
         return carried
     def _persist_cycle_report_synthesis(
         self,
@@ -1840,6 +1895,14 @@ class _IndustryLifecycleMixin:
         seat_resolution_kind = seat_resolution.kind
         seat_resolution_reason = _string(seat_resolution.reason) or ""
         requested_surfaces = list(seat_resolution.requested_surfaces or requested_surfaces)
+        control_thread_id = self._chat_writeback_control_thread_id(
+            instance_id=record.instance_id,
+            session_id=session_id,
+        )
+        chat_writeback_channel = _string(channel) or "console"
+        chat_writeback_environment_ref = (
+            f"session:{chat_writeback_channel}:industry:{record.instance_id}"
+        )
         decision_request_id: str | None = None
         proposal_status: str | None = None
         target_role = matched_role
@@ -2097,6 +2160,10 @@ class _IndustryLifecycleMixin:
                         "chat_writeback_target_role_name": target_role_name,
                         "chat_writeback_target_match_signals": list(target_match_signals),
                         "chat_writeback_requested_surfaces": list(requested_surfaces),
+                        "chat_writeback_channel": chat_writeback_channel,
+                        "control_thread_id": control_thread_id,
+                        "session_id": control_thread_id,
+                        "environment_ref": chat_writeback_environment_ref,
                         "seat_resolution_kind": seat_resolution_kind,
                         "seat_resolution_reason": seat_resolution_reason or None,
                         "seat_requested_surfaces": list(requested_surfaces),
@@ -3383,7 +3450,20 @@ class _IndustryLifecycleMixin:
         saver = getattr(session_backend, "save_session_snapshot", None)
         if not callable(loader) or not callable(saver):
             return
-        session_id = f"industry-chat:{record.instance_id}:{EXECUTION_CORE_ROLE_ID}"
+        original_backlog_item = None
+        if assignment is not None and self._backlog_service is not None:
+            if assignment.backlog_item_id is not None:
+                original_backlog_item = self._backlog_service.get_item(assignment.backlog_item_id)
+        continuity = self._build_report_followup_metadata(
+            report=report,
+            assignment=assignment,
+            original_backlog_item=original_backlog_item,
+        )
+        session_id = (
+            _string(continuity.get("control_thread_id"))
+            or _string(continuity.get("session_id"))
+            or f"industry-chat:{record.instance_id}:{EXECUTION_CORE_ROLE_ID}"
+        )
         payload = loader(
             session_id=session_id,
             user_id=EXECUTION_CORE_AGENT_ID,
@@ -3436,6 +3516,12 @@ class _IndustryLifecycleMixin:
                         "synthetic": True,
                         "message_kind": "agent-report-writeback",
                         "industry_instance_id": record.instance_id,
+                        "control_thread_id": _string(continuity.get("control_thread_id")),
+                        "session_id": _string(continuity.get("session_id")),
+                        "environment_ref": _string(continuity.get("environment_ref")),
+                        "recommended_scheduler_action": _string(
+                            continuity.get("recommended_scheduler_action"),
+                        ),
                         "report_id": report.id,
                         "assignment_id": report.assignment_id,
                         "task_id": report.task_id,
@@ -3537,7 +3623,13 @@ class _IndustryLifecycleMixin:
         )
         control_thread_id = self._chat_writeback_control_thread_id(
             instance_id=record.instance_id,
-            session_id=None,
+            session_id=(
+                _string(metadata.get("control_thread_id"))
+                or _string(metadata.get("session_id"))
+            ),
+        )
+        environment_ref = _string(metadata.get("environment_ref")) or (
+            f"session:{_string(metadata.get('chat_writeback_channel')) or 'console'}:industry:{record.instance_id}"
         )
         compiler_context: dict[str, object] = {
             "goal_title": item.title,
@@ -3637,6 +3729,7 @@ class _IndustryLifecycleMixin:
             "trigger_source": trigger_source,
             "trigger_actor": trigger_actor or actor or EXECUTION_CORE_AGENT_ID,
             "trigger_reason": trigger_reason,
+            "environment_ref": environment_ref,
             "session_id": control_thread_id,
             "control_thread_id": control_thread_id,
         }

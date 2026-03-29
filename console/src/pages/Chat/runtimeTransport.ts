@@ -34,6 +34,19 @@ export interface RuntimeWebUiFetchData {
   signal?: AbortSignal;
 }
 
+export interface RuntimeSessionContext {
+  currentThreadId: string | null;
+  sessionId: string;
+  userId: string;
+  channel: string;
+}
+
+export interface RuntimeThreadContext {
+  controlThreadId: string | null;
+  workContextId: string | null;
+  contextKey: string | null;
+}
+
 interface BuildRuntimeChatRequestArgs {
   data: RuntimeWebUiFetchData;
   runtimeWindow: RuntimeWindowContext;
@@ -119,6 +132,73 @@ export function firstNonEmptyString(...values: unknown[]): string | null {
   return null;
 }
 
+export function normalizeRuntimeStringList(values: unknown[]): string[] {
+  const normalized = values
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+  return Array.from(new Set(normalized));
+}
+
+export function resolveRuntimeSessionContext({
+  runtimeWindow,
+  requestedThreadId,
+  threadMeta,
+  session,
+}: {
+  runtimeWindow: RuntimeWindowContext;
+  requestedThreadId: string | null;
+  threadMeta: Record<string, unknown>;
+  session: RuntimeWebUiMessage["session"];
+}): RuntimeSessionContext {
+  const currentThreadId =
+    normalizeThreadId(runtimeWindow.currentThreadId) ||
+    requestedThreadId ||
+    (typeof threadMeta.control_thread_id === "string" &&
+    threadMeta.control_thread_id.trim()
+      ? threadMeta.control_thread_id.trim()
+      : null);
+  return {
+    currentThreadId,
+    sessionId: currentThreadId || requestedThreadId || session?.session_id || "",
+    userId: runtimeWindow.currentUserId || session?.user_id || "default",
+    channel: runtimeWindow.currentChannel || session?.channel || "console",
+  };
+}
+
+export function resolveRuntimeThreadContext({
+  threadMeta,
+  bizParams,
+  sessionId,
+}: {
+  threadMeta: Record<string, unknown>;
+  bizParams: Record<string, unknown>;
+  sessionId: string;
+}): RuntimeThreadContext {
+  const controlThreadId = firstNonEmptyString(
+    threadMeta.control_thread_id,
+    typeof bizParams.control_thread_id === "string"
+      ? bizParams.control_thread_id
+      : null,
+    sessionId.startsWith("industry-chat:") ? sessionId : null,
+  );
+  const workContextId = firstNonEmptyString(
+    threadMeta.work_context_id,
+    typeof bizParams.work_context_id === "string"
+      ? bizParams.work_context_id
+      : null,
+  );
+  const contextKey = firstNonEmptyString(
+    threadMeta.context_key,
+    typeof bizParams.context_key === "string" ? bizParams.context_key : null,
+    controlThreadId ? `control-thread:${controlThreadId}` : null,
+  );
+  return {
+    controlThreadId,
+    workContextId,
+    contextKey,
+  };
+}
+
 function beginRuntimeWait(
   activeModels: ActiveModelsInfo,
   setRuntimeHealthNotice: (notice: RuntimeHealthNotice | null) => void,
@@ -168,62 +248,45 @@ export function buildRuntimeChatRequest({
   const { input, biz_params } = data;
   const lastMessage = input[input.length - 1];
   const session = lastMessage?.session || {};
-  const currentThreadId =
-    normalizeThreadId(runtimeWindow.currentThreadId) ||
-    requestedThreadId ||
-    (typeof threadMeta.control_thread_id === "string" &&
-    threadMeta.control_thread_id.trim()
-      ? threadMeta.control_thread_id.trim()
-      : null);
-
-  const session_id = currentThreadId || requestedThreadId || session?.session_id || "";
-  const user_id = runtimeWindow.currentUserId || session?.user_id || "default";
-  const channel = runtimeWindow.currentChannel || session?.channel || "console";
-  const controlThreadId = firstNonEmptyString(
-    threadMeta.control_thread_id,
-    typeof biz_params?.control_thread_id === "string"
-      ? biz_params.control_thread_id
-      : null,
-    session_id.startsWith("industry-chat:") ? session_id : null,
-  );
-  const workContextId = firstNonEmptyString(
-    threadMeta.work_context_id,
-    typeof biz_params?.work_context_id === "string"
-      ? biz_params.work_context_id
-      : null,
-  );
-  const contextKey = firstNonEmptyString(
-    threadMeta.context_key,
-    typeof biz_params?.context_key === "string"
-      ? biz_params.context_key
-      : null,
-    controlThreadId ? `control-thread:${controlThreadId}` : null,
-  );
-  const requestedActions = Array.from(
-    new Set(
-      [
-        ...(Array.isArray(biz_params?.requested_actions)
-          ? (biz_params.requested_actions as unknown[])
-          : []),
-        ...consumeQueuedHumanAssistSubmission(session_id),
-      ]
-        .map((item) => String(item || "").trim())
-        .filter((item) => item.length > 0),
-    ),
-  );
+  const sessionContext = resolveRuntimeSessionContext({
+    runtimeWindow,
+    requestedThreadId,
+    threadMeta,
+    session,
+  });
+  const threadContext = resolveRuntimeThreadContext({
+    threadMeta,
+    bizParams:
+      biz_params && typeof biz_params === "object"
+        ? (biz_params as Record<string, unknown>)
+        : {},
+    sessionId: sessionContext.sessionId,
+  });
+  const requestedActions = normalizeRuntimeStringList([
+    ...(Array.isArray(biz_params?.requested_actions)
+      ? (biz_params.requested_actions as unknown[])
+      : []),
+    ...consumeQueuedHumanAssistSubmission(sessionContext.sessionId),
+  ]);
   const mediaInputs = normalizeRuntimeMediaSources([
     ...(Array.isArray(biz_params?.media_inputs)
       ? (biz_params.media_inputs as unknown[])
       : []),
     ...pendingMediaSources,
   ]);
+  const mediaAnalysisIds = normalizeRuntimeStringList([
+    ...(Array.isArray(biz_params?.media_analysis_ids)
+      ? (biz_params.media_analysis_ids as unknown[])
+      : []),
+    ...selectedMediaAnalysisIds,
+  ]);
 
   return {
     input: input.slice(-1),
-    session_id,
-    thread_id: currentThreadId || undefined,
-    user_id,
-    channel,
+    session_id: sessionContext.sessionId,
+    thread_id: sessionContext.currentThreadId || undefined,
+    user_id: sessionContext.userId,
+    channel: sessionContext.channel,
     stream: true,
     ...biz_params,
     interaction_mode: "auto",
@@ -236,22 +299,11 @@ export function buildRuntimeChatRequest({
     session_kind: threadMeta.session_kind || biz_params?.session_kind,
     agent_id: threadMeta.agent_id || biz_params?.agent_id,
     agent_name: threadMeta.agent_name || biz_params?.agent_name,
-    control_thread_id: controlThreadId || undefined,
-    work_context_id: workContextId || undefined,
-    context_key: contextKey || undefined,
+    control_thread_id: threadContext.controlThreadId || undefined,
+    work_context_id: threadContext.workContextId || undefined,
+    context_key: threadContext.contextKey || undefined,
     requested_actions: requestedActions.length > 0 ? requestedActions : undefined,
-    media_analysis_ids: Array.from(
-      new Set(
-        [
-          ...(Array.isArray(biz_params?.media_analysis_ids)
-            ? (biz_params.media_analysis_ids as unknown[])
-            : []),
-          ...selectedMediaAnalysisIds,
-        ]
-          .map((item) => String(item || "").trim())
-          .filter((item) => item.length > 0),
-      ),
-    ),
+    media_analysis_ids: mediaAnalysisIds,
     media_inputs: mediaInputs,
   };
 }

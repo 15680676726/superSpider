@@ -105,6 +105,64 @@ def _staffing_confirmation_required(entry: object | None) -> bool:
     return _first_non_empty(payload.get("decision_request_id")) is not None
 
 
+def _resolve_chat_thread_id(payload: dict[str, object]) -> str | None:
+    return _first_non_empty(
+        payload.get("chat_thread_id"),
+        payload.get("control_thread_id"),
+        payload.get("session_id"),
+    )
+
+
+def _resolve_industry_instance_id_from_thread_id(thread_id: str | None) -> str | None:
+    normalized = _first_non_empty(thread_id)
+    if normalized is None:
+        return None
+    if not normalized.startswith("industry-chat:"):
+        return None
+    parts = normalized.split(":")
+    if len(parts) < 3:
+        return None
+    return _first_non_empty(parts[1])
+
+
+def _resolve_candidate_environment_refs(
+    *,
+    payload: dict[str, object],
+    task_environment_ref: object | None,
+) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def _append(value: object | None) -> None:
+        text = _first_non_empty(value)
+        if text is None:
+            return
+        lowered = text.lower()
+        if lowered in seen:
+            return
+        seen.add(lowered)
+        candidates.append(text)
+
+    _append(task_environment_ref)
+    _append(payload.get("environment_ref"))
+    session_id = _first_non_empty(
+        payload.get("session_id"),
+        payload.get("control_thread_id"),
+    )
+    if session_id is not None:
+        _append(session_id if session_id.startswith("session:") else None)
+        _append(f"session:console:{session_id}")
+    instance_id = _first_non_empty(
+        payload.get("industry_instance_id"),
+        _resolve_industry_instance_id_from_thread_id(
+            _resolve_chat_thread_id(payload),
+        ),
+    )
+    if instance_id is not None:
+        _append(f"session:console:industry:{instance_id}")
+    return candidates
+
+
 def _batch_action_label(action: str) -> str:
     mapping = {
         "approve": "批准",
@@ -286,21 +344,32 @@ class GovernanceService:
         if service is None:
             return None
         payload = _mapping_value(getattr(task, "payload", None))
-        session_ref = _first_non_empty(
-            getattr(task, "environment_ref", None),
-            payload.get("environment_ref"),
+        candidate_session_refs = _resolve_candidate_environment_refs(
+            payload=payload,
+            task_environment_ref=getattr(task, "environment_ref", None),
         )
-        if session_ref is None:
+        if not candidate_session_refs:
             return None
         getter = getattr(service, "get_session_detail", None)
         if not callable(getter):
             return None
-        try:
-            detail = getter(session_ref, limit=20)
-        except TypeError:
-            detail = getter(session_ref)
-        except Exception:
-            logger.exception("Failed to inspect environment handoff governance")
+        session_ref: str | None = None
+        detail = None
+        for candidate in candidate_session_refs:
+            try:
+                detail = getter(candidate, limit=20)
+                session_ref = candidate
+                break
+            except TypeError:
+                try:
+                    detail = getter(candidate)
+                    session_ref = candidate
+                    break
+                except Exception:
+                    continue
+            except Exception:
+                continue
+        if detail is None or session_ref is None:
             return None
         detail_payload = _mapping_value(detail)
         host_twin = _mapping_value(detail_payload.get("host_twin"))
@@ -333,7 +402,7 @@ class GovernanceService:
         if not callable(ensure_task):
             return
         payload = _mapping_value(getattr(task, "payload", None))
-        chat_thread_id = _first_non_empty(payload.get("chat_thread_id"))
+        chat_thread_id = _resolve_chat_thread_id(payload)
         if chat_thread_id is None:
             return
         legal_recovery = _mapping_value(host_twin.get("legal_recovery"))
@@ -386,7 +455,7 @@ class GovernanceService:
         if service is None:
             return None
         payload = _mapping_value(getattr(task, "payload", None))
-        chat_thread_id = _first_non_empty(payload.get("chat_thread_id"))
+        chat_thread_id = _resolve_chat_thread_id(payload)
         if chat_thread_id is None:
             return None
         list_tasks = getattr(service, "list_tasks", None)

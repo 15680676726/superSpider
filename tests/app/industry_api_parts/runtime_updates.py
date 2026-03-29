@@ -1417,6 +1417,7 @@ def test_staffed_assignment_failure_keeps_supervisor_chain_and_replan_truth(
     assert followup_backlog["metadata"]["synthesis_kind"] == "failed-report"
     assert followup_backlog["metadata"]["supervisor_owner_agent_id"] == "copaw-agent-runner"
     assert followup_backlog["metadata"]["supervisor_industry_role_id"] == "execution-core"
+    assert "browser" in followup_backlog["metadata"]["seat_requested_surfaces"]
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
     replan_node = next(
@@ -1427,6 +1428,9 @@ def test_staffed_assignment_failure_keeps_supervisor_chain_and_replan_truth(
     assert "Browser publish handoff failed requires main-brain follow-up." in (
         replan_node["metrics"]["replan_reasons"]
     )
+    assert "browser" in replan_node["metrics"]["followup_pressure_surfaces"]
+    assert replan_node["metrics"]["followup_pressure_count"] >= 1
+    assert replan_node["metrics"]["recommended_action"] is not None
 
 
 def test_governance_blocks_dispatch_when_pending_staffing_proposal_is_not_top_active_gap(
@@ -1718,6 +1722,20 @@ def test_report_followup_backlog_wins_next_cycle_over_unrelated_open_backlog_whe
     assert status.human_assist["open_count"] == 1
     assert status.staffing["pending_confirmation_count"] >= 1
 
+    fallback_reason = governance.admission_block_reason(
+        KernelTask(
+            title="Dispatch governed browser work via control thread fallback",
+            capability_ref="system:dispatch_command",
+            payload={
+                "industry_instance_id": instance_id,
+                "session_id": f"industry-chat:{instance_id}:execution-core",
+                "control_thread_id": f"industry-chat:{instance_id}:execution-core",
+            },
+        ),
+    )
+    assert fallback_reason is not None
+    assert "Runtime handoff is active" in fallback_reason
+
     second_cycle = asyncio.run(
         app.state.industry_service.run_operating_cycle(
             instance_id=instance_id,
@@ -1738,6 +1756,11 @@ def test_report_followup_backlog_wins_next_cycle_over_unrelated_open_backlog_whe
     assert runtime_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
     assert runtime_payload["execution"]["current_focus"] == followup_backlog["title"]
     assert runtime_payload["main_chain"]["current_focus"] == followup_backlog["title"]
+    replan_node = next(
+        node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
+    )
+    assert "browser" in replan_node["metrics"]["followup_pressure_surfaces"]
+    assert replan_node["metrics"]["recommended_action"] is not None
 
 
 def test_industry_chat_writeback_updates_priority_without_duplicate_history(tmp_path) -> None:

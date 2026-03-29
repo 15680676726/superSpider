@@ -99,6 +99,8 @@ function createRuntimeCenterState() {
               title: "Cycle 12",
               summary: "Weekly cadence",
               status: "active",
+              next_cycle_due_at: "2026-03-31T23:59:59Z",
+              focus_count: 9,
               route: "/api/runtime-center/industry/industry-1?cycle_id=cycle-12",
             },
             assignments: {
@@ -106,8 +108,9 @@ function createRuntimeCenterState() {
               summary: "3 active assignments",
             },
             agent_reports: {
-              count: 2,
-              summary: "2 agent reports",
+              count: 8,
+              unconsumed_count: 5,
+              summary: "8 agent reports",
             },
             evidence: {
               count: 5,
@@ -221,6 +224,12 @@ describe("RuntimeCenterPage", () => {
     expect(screen.getAllByText("Strategy").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Current Cycle").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Agent Reports").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Cycle Deadline").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Focus Count").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Unconsumed Reports").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("2026-03-31 23:59Z").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("9").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("5").length).toBeGreaterThan(0);
     expect(screen.getAllByText("North star: weekly alignment").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Cycle 12").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Workspace bound").length).toBeGreaterThan(0);

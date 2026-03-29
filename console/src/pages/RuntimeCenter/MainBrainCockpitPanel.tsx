@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Skeleton, Space, Tag } from "antd";
+import { Alert, Button, Card, Descriptions, Skeleton, Space, Tag } from "antd";
 import {
   Activity,
   Bot,
@@ -16,11 +16,13 @@ import {
   MAIN_BRAIN_COCKPIT_TEXT,
   RUNTIME_CENTER_TEXT,
   formatCnTimestamp,
+  formatRuntimeFieldLabel,
   formatRuntimeSourceList,
   formatRuntimeStatus,
   formatRuntimeSurfaceNote,
 } from "./text";
 import type { RuntimeCenterOverviewPayload } from "./useRuntimeCenter";
+import { isRecord } from "./runtimeDetailPrimitives";
 import {
   buildRuntimeEnvironmentCockpitSignals,
 } from "./runtimeEnvironmentSections";
@@ -98,6 +100,131 @@ function renderSignalCard(
   );
 }
 
+function overviewCardMeta(
+  payload: RuntimeCenterOverviewPayload | null,
+  cardKey: string,
+): Record<string, unknown> {
+  const card = payload?.cards?.find((entry) => entry.key === cardKey);
+  return isRecord(card?.meta) ? card!.meta : {};
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+    if (isRecord(value)) {
+      const nested = firstString(
+        value.title,
+        value.name,
+        value.label,
+        value.summary,
+        value.value,
+        value.status,
+        value.count,
+        value.total,
+      );
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+  return null;
+}
+
+function extractTimestamp(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (isRecord(value)) {
+    return firstString(
+      value.next_cycle_due_at,
+      value.deadline_at,
+      value.deadline,
+      value.due_at,
+      value.until,
+      value.ends_at,
+      value.end_at,
+      value.updated_at,
+      value.created_at,
+    );
+  }
+  return null;
+}
+
+function formatUtcMinute(value: string | null): string {
+  if (!value) {
+    return RUNTIME_CENTER_TEXT.emptyValue;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  // Stable formatting for operator top bar (avoid locale + timezone drift in tests).
+  return `${parsed.toISOString().slice(0, 16).replace("T", " ")}Z`;
+}
+
+function extractFocusCount(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  const numeric =
+    (typeof value.focus_count === "number" ? value.focus_count : null) ??
+    (typeof value.current_focus_count === "number" ? value.current_focus_count : null) ??
+    (typeof value.focuses_count === "number" ? value.focuses_count : null);
+  if (typeof numeric === "number" && Number.isFinite(numeric)) {
+    return numeric;
+  }
+  for (const key of ["current_focuses", "focus_lane_ids", "focuses"] as const) {
+    const list = value[key];
+    if (Array.isArray(list)) {
+      return list.length;
+    }
+  }
+  return null;
+}
+
+function deriveUnconsumedReportCount(payload: RuntimeCenterOverviewPayload | null): number | null {
+  const mainBrainMeta = overviewCardMeta(payload, "main-brain");
+  const reportsSignal = isRecord(mainBrainMeta.agent_reports) ? mainBrainMeta.agent_reports : null;
+  if (reportsSignal) {
+    for (const key of ["unconsumed_count", "unconsumed_reports", "pending_count"] as const) {
+      const value = reportsSignal[key];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+      }
+    }
+  }
+
+  const reportCards = (payload?.cards ?? []).filter((card) =>
+    ["agent_reports", "agent-reports", "reports"].includes(card.key),
+  );
+  if (reportCards.length === 0) {
+    return null;
+  }
+  const entries = reportCards.flatMap((card) => card.entries ?? []);
+  const unconsumed = entries.filter((entry) => {
+    const meta = isRecord(entry.meta) ? entry.meta : {};
+    if (meta.processed === false) {
+      return true;
+    }
+    if (meta.report_consumed === false || meta.consumed === false) {
+      return true;
+    }
+    if (meta.unconsumed === true) {
+      return true;
+    }
+    return false;
+  });
+  return unconsumed.length;
+}
+
 export default function MainBrainCockpitPanel({
   data,
   loading,
@@ -110,6 +237,23 @@ export default function MainBrainCockpitPanel({
   const industrySignals = buildRuntimeIndustryCockpitSignals(data);
   const surface = data?.surface;
   const signalCards = [...environmentSignals, ...industrySignals];
+
+  const carrierSignal = environmentSignals.find((signal) => signal.key === "carrier") ?? null;
+  const strategySignal = industrySignals.find((signal) => signal.key === "strategy") ?? null;
+  const mainBrainMeta = overviewCardMeta(data, "main-brain");
+  const industryMeta = overviewCardMeta(data, "industry");
+  const cycleSignal =
+    (isRecord(mainBrainMeta.current_cycle) ? mainBrainMeta.current_cycle : null) ??
+    (isRecord(industryMeta.current_cycle) ? industryMeta.current_cycle : null);
+  const cycleDeadline = formatUtcMinute(extractTimestamp(cycleSignal));
+  const focusCountValue = extractFocusCount(cycleSignal);
+  const focusCount =
+    focusCountValue === null ? RUNTIME_CENTER_TEXT.emptyValue : String(focusCountValue);
+  const unconsumedReportsValue = deriveUnconsumedReportCount(data);
+  const unconsumedReports =
+    unconsumedReportsValue === null
+      ? RUNTIME_CENTER_TEXT.emptyValue
+      : String(unconsumedReportsValue);
 
   if (loading && !data) {
     return (
@@ -168,6 +312,40 @@ export default function MainBrainCockpitPanel({
           <Tag>{RUNTIME_CENTER_TEXT.generatedAt(formatCnTimestamp(data.generated_at))}</Tag>
         ) : null}
       </Space>
+
+      <Descriptions
+        size="small"
+        bordered
+        column={{ xs: 1, sm: 2, md: 3 }}
+        style={{ marginBottom: 16 }}
+        items={[
+          {
+            key: "carrier",
+            label: carrierSignal?.label ?? formatRuntimeFieldLabel("carrier"),
+            children: carrierSignal?.value ?? RUNTIME_CENTER_TEXT.emptyValue,
+          },
+          {
+            key: "strategy",
+            label: strategySignal?.label ?? formatRuntimeFieldLabel("strategy"),
+            children: strategySignal?.value ?? RUNTIME_CENTER_TEXT.emptyValue,
+          },
+          {
+            key: "cycle_deadline",
+            label: formatRuntimeFieldLabel("cycle_deadline"),
+            children: cycleDeadline,
+          },
+          {
+            key: "focus_count",
+            label: formatRuntimeFieldLabel("focus_count"),
+            children: focusCount,
+          },
+          {
+            key: "unconsumed_reports",
+            label: formatRuntimeFieldLabel("unconsumed_reports"),
+            children: unconsumedReports,
+          },
+        ]}
+      />
 
       <section className={styles.metrics}>
         {signalCards.map((signal) => renderSignalCard(signal, onOpenRoute))}

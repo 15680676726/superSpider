@@ -586,6 +586,48 @@ async def _maybe_intercept_human_assist_chat_turn(
     )
 
 
+async def _runtime_center_list_query(
+    *,
+    request: Request,
+    response: Response,
+    query_methods: tuple[str, ...],
+    not_available_detail: str,
+    **query_kwargs: object,
+) -> list[dict[str, object]]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    state_query = _get_state_query_service(request)
+    items = await _call_runtime_query_method(
+        state_query,
+        *query_methods,
+        not_available_detail=not_available_detail,
+        **query_kwargs,
+    )
+    return items if isinstance(items, list) else []
+
+
+async def _runtime_center_detail_query(
+    *,
+    request: Request,
+    response: Response,
+    query_methods: tuple[str, ...],
+    not_available_detail: str,
+    not_found_detail: str,
+    payload_key: str,
+    **query_kwargs: object,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    state_query = _get_state_query_service(request)
+    detail = await _call_runtime_query_method(
+        state_query,
+        *query_methods,
+        not_available_detail=not_available_detail,
+        **query_kwargs,
+    )
+    if detail is None:
+        raise HTTPException(404, detail=not_found_detail)
+    return detail if isinstance(detail, dict) else {payload_key: detail}
+
+
 @router.get("/governance/status", response_model=dict[str, object])
 async def get_governance_status(
     request: Request,
@@ -835,11 +877,10 @@ async def list_human_assist_tasks(
     status: str | None = None,
     limit: int = 20,
 ) -> list[dict[str, object]]:
-    apply_runtime_center_surface_headers(response, surface="runtime-center")
-    state_query = _get_state_query_service(request)
-    items = await _call_runtime_query_method(
-        state_query,
-        "list_human_assist_tasks",
+    return await _runtime_center_list_query(
+        request=request,
+        response=response,
+        query_methods=("list_human_assist_tasks",),
         not_available_detail="Human assist task queries are not available",
         chat_thread_id=chat_thread_id,
         industry_instance_id=industry_instance_id,
@@ -848,7 +889,6 @@ async def list_human_assist_tasks(
         status=status,
         limit=limit,
     )
-    return items if isinstance(items, list) else []
 
 
 @router.get("/human-assist-tasks/current", response_model=dict[str, object])
@@ -857,20 +897,17 @@ async def get_current_human_assist_task(
     response: Response,
     chat_thread_id: str,
 ) -> dict[str, object]:
-    apply_runtime_center_surface_headers(response, surface="runtime-center")
-    state_query = _get_state_query_service(request)
-    item = await _call_runtime_query_method(
-        state_query,
-        "get_current_human_assist_task",
+    return await _runtime_center_detail_query(
+        request=request,
+        response=response,
+        query_methods=("get_current_human_assist_task",),
         not_available_detail="Human assist current-task queries are not available",
+        not_found_detail=(
+            f"Current human assist task for '{chat_thread_id}' was not found"
+        ),
+        payload_key="task",
         chat_thread_id=chat_thread_id,
     )
-    if item is None:
-        raise HTTPException(
-            404,
-            detail=f"Current human assist task for '{chat_thread_id}' was not found",
-        )
-    return item if isinstance(item, dict) else {"task": item}
 
 
 @router.get("/human-assist-tasks/{task_id}", response_model=dict[str, object])
@@ -879,17 +916,15 @@ async def get_human_assist_task_detail(
     request: Request,
     response: Response,
 ) -> dict[str, object]:
-    apply_runtime_center_surface_headers(response, surface="runtime-center")
-    state_query = _get_state_query_service(request)
-    detail = await _call_runtime_query_method(
-        state_query,
-        "get_human_assist_task_detail",
+    return await _runtime_center_detail_query(
+        request=request,
+        response=response,
+        query_methods=("get_human_assist_task_detail",),
         not_available_detail="Human assist task detail queries are not available",
+        not_found_detail=f"Human assist task '{task_id}' not found",
+        payload_key="task",
         task_id=task_id,
     )
-    if detail is None:
-        raise HTTPException(404, detail=f"Human assist task '{task_id}' not found")
-    return detail if isinstance(detail, dict) else {"task": detail}
 
 
 @router.get("/tasks", response_model=list[dict[str, object]])
@@ -898,17 +933,13 @@ async def list_tasks(
     response: Response,
     limit: int = 20,
 ) -> list[dict[str, object]]:
-    apply_runtime_center_surface_headers(response, surface="runtime-center")
-    state_query = _get_state_query_service(request)
-    tasks = await _call_runtime_query_method(
-        state_query,
-        "list_tasks",
-        "get_tasks",
-        "list_runtime_tasks",
+    return await _runtime_center_list_query(
+        request=request,
+        response=response,
+        query_methods=("list_tasks", "get_tasks", "list_runtime_tasks"),
         not_available_detail="Task queries are not available",
         limit=limit,
     )
-    return tasks if isinstance(tasks, list) else []
 
 
 @router.get("/tasks/{task_id}", response_model=dict[str, object])
@@ -917,18 +948,15 @@ async def get_task_detail(
     request: Request,
     response: Response,
 ) -> dict[str, object]:
-    apply_runtime_center_surface_headers(response, surface="runtime-center")
-    state_query = _get_state_query_service(request)
-    detail = await _call_runtime_query_method(
-        state_query,
-        "get_task_detail",
-        "get_task",
+    return await _runtime_center_detail_query(
+        request=request,
+        response=response,
+        query_methods=("get_task_detail", "get_task"),
         not_available_detail="Task detail queries are not available",
+        not_found_detail=f"Task '{task_id}' not found",
+        payload_key="task",
         task_id=task_id,
     )
-    if detail is None:
-        raise HTTPException(404, detail=f"Task '{task_id}' not found")
-    return detail if isinstance(detail, dict) else {"task": detail}
 
 
 @router.get("/tasks/{task_id}/review", response_model=dict[str, object])
@@ -937,17 +965,15 @@ async def get_task_review(
     request: Request,
     response: Response,
 ) -> dict[str, object]:
-    apply_runtime_center_surface_headers(response, surface="runtime-center")
-    state_query = _get_state_query_service(request)
-    detail = await _call_runtime_query_method(
-        state_query,
-        "get_task_review",
+    return await _runtime_center_detail_query(
+        request=request,
+        response=response,
+        query_methods=("get_task_review",),
         not_available_detail="Task review queries are not available",
+        not_found_detail=f"Task '{task_id}' not found",
+        payload_key="review",
         task_id=task_id,
     )
-    if detail is None:
-        raise HTTPException(404, detail=f"Task '{task_id}' not found")
-    return detail if isinstance(detail, dict) else {"review": detail}
 
 
 @router.get("/work-contexts", response_model=list[dict[str, object]])
@@ -956,15 +982,13 @@ async def list_work_contexts(
     response: Response,
     limit: int = 20,
 ) -> list[dict[str, object]]:
-    apply_runtime_center_surface_headers(response, surface="runtime-center")
-    state_query = _get_state_query_service(request)
-    items = await _call_runtime_query_method(
-        state_query,
-        "list_work_contexts",
+    return await _runtime_center_list_query(
+        request=request,
+        response=response,
+        query_methods=("list_work_contexts",),
         not_available_detail="Work context queries are not available",
         limit=limit,
     )
-    return items if isinstance(items, list) else []
 
 
 @router.get("/work-contexts/{context_id}", response_model=dict[str, object])
@@ -973,14 +997,12 @@ async def get_work_context_detail(
     request: Request,
     response: Response,
 ) -> dict[str, object]:
-    apply_runtime_center_surface_headers(response, surface="runtime-center")
-    state_query = _get_state_query_service(request)
-    detail = await _call_runtime_query_method(
-        state_query,
-        "get_work_context_detail",
+    return await _runtime_center_detail_query(
+        request=request,
+        response=response,
+        query_methods=("get_work_context_detail",),
         not_available_detail="Work context detail queries are not available",
+        not_found_detail=f"Work context '{context_id}' not found",
+        payload_key="work_context",
         context_id=context_id,
     )
-    if detail is None:
-        raise HTTPException(404, detail=f"Work context '{context_id}' not found")
-    return detail if isinstance(detail, dict) else {"work_context": detail}

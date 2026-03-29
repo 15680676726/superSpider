@@ -287,6 +287,13 @@ def test_fixed_sop_run_detail_exposes_host_preflight_snapshot(tmp_path) -> None:
         "recommended_scheduler_action"
     ] == "continue"
     assert detail_payload["host_preflight"]["host_twin_summary"]["host_companion_status"] == "restorable"
+    assert detail_payload["host_preflight"]["host_twin_summary"]["active_app_family_keys"]
+    assert detail_payload["host_preflight"]["host_twin_summary"]["seat_owner_ref"] == "ops-agent"
+    assert detail_payload["host_preflight"]["host_twin_summary"]["blocked_surface_count"] == 0
+    assert detail_payload["host_preflight"]["host_twin_summary"]["legal_recovery_mode"] == "resume"
+    assert detail_payload["host_preflight"]["host_twin_summary"][
+        "recommended_scheduler_action"
+    ] == "continue"
 
 
 def test_fixed_sop_doctor_and_run_api_block_handoff_only_recovery_state(tmp_path) -> None:
@@ -328,3 +335,50 @@ def test_fixed_sop_doctor_and_run_api_block_handoff_only_recovery_state(tmp_path
 
     assert run.status_code == 400
     assert "host preflight" in run.json()["detail"]
+
+
+def test_fixed_sop_api_ignores_stale_handoff_metadata_when_canonical_summary_is_proceed(
+    tmp_path,
+) -> None:
+    detail = _host_detail(
+        recommended_scheduler_action="proceed",
+        requires_human_return=True,
+        legal_recovery_path="handoff",
+        legal_recovery_reason="stale handoff metadata should not block canonical proceed",
+    )
+    detail["host_twin"]["host_twin_summary"] = {
+        "active_app_family_keys": ["office_document"],
+        "seat_owner_ref": "ops-agent",
+        "blocked_surface_count": 0,
+        "legal_recovery_mode": "resume-environment",
+        "recommended_scheduler_action": "proceed",
+    }
+    client = TestClient(
+        _build_app(
+            tmp_path,
+            environment_service=_FakeEnvironmentService(detail),
+        )
+    )
+    binding_id = _create_host_binding(client)
+
+    doctor = client.post(f"/fixed-sops/bindings/{binding_id}/doctor")
+
+    assert doctor.status_code == 200
+    doctor_payload = doctor.json()
+    assert doctor_payload["status"] == "ready"
+    assert doctor_payload["host_preflight"]["host_twin_summary"][
+        "recommended_scheduler_action"
+    ] == "proceed"
+    assert doctor_payload["host_preflight"]["host_twin_summary"][
+        "legal_recovery_mode"
+    ] == "resume-environment"
+
+    run = client.post(
+        f"/fixed-sops/bindings/{binding_id}/run",
+        json={
+            "environment_id": "env-desktop-1",
+            "session_mount_id": "session-desktop-1",
+        },
+    )
+
+    assert run.status_code == 200

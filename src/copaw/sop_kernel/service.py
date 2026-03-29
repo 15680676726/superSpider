@@ -515,6 +515,7 @@ class FixedSopService:
         execution_mutation_ready = dict(host_preflight.get("execution_mutation_ready") or {})
         coordination = dict(host_preflight.get("coordination") or {})
         scheduler_inputs = dict(host_preflight.get("scheduler_inputs") or {})
+        host_twin_summary = dict(host_preflight.get("host_twin_summary") or {})
         surface_kind = str(host_requirement.get("surface_kind") or "").strip() or "desktop"
         surface_key = "desktop_app" if surface_kind == "desktop" else "browser"
         continuity_valid = bool(
@@ -523,7 +524,9 @@ class FixedSopService:
         )
         writable = bool(execution_mutation_ready.get(surface_key))
         recommended_action = str(
-            coordination.get("recommended_scheduler_action") or "",
+            host_twin_summary.get("recommended_scheduler_action")
+            or coordination.get("recommended_scheduler_action")
+            or "",
         ).strip()
         recommended_runtime_response = str(
             latest_blocking_event.get("recommended_runtime_response") or "",
@@ -538,6 +541,20 @@ class FixedSopService:
             continuity.get("requires_human_return")
             or scheduler_inputs.get("requires_human_return")
         )
+        summary_recovery_mode = str(
+            host_twin_summary.get("legal_recovery_mode") or "",
+        ).strip()
+        if (
+            bool(host_twin_summary)
+            and bool(recommended_action)
+            and recommended_action not in self._HOST_PRELIGHT_BLOCKING_RESPONSES
+            and summary_recovery_mode != "handoff"
+            and int(host_twin_summary.get("blocked_surface_count") or 0) == 0
+        ):
+            requires_human_return = False
+            writable = True
+            if summary_recovery_mode:
+                legal_recovery_path = summary_recovery_mode
         coordination_reason = str(
             dict(coordination.get("contention_forecast") or {}).get("reason") or "",
         ).strip()

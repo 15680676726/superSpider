@@ -2384,3 +2384,120 @@ def test_host_twin_recovery_handoff_long_run_prefers_current_host_truth_over_sta
     assert (
         detail["host_twin"]["coordination"]["contention_forecast"]["severity"] == "clear"
     )
+
+
+def test_host_twin_summary_treats_return_ready_as_non_blocking_even_if_stale_handoff_metadata_still_exists(
+    tmp_path,
+):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+    event_bus = RuntimeEventBus(max_events=50)
+    service.set_runtime_event_bus(event_bus)
+
+    lease = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-phase6-return-ready-stale-metadata",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={
+            "browser": "tab:web:jd:seller-center:main",
+            "page_id": "page:jd:seller-center:home",
+            "active_window_ref": "window:excel:orders",
+            "window_scope": "window:excel:orders",
+            "process_id": 4242,
+        },
+        metadata={
+            "host_mode": "local-managed",
+            "lease_class": "exclusive-writer",
+            "access_mode": "desktop-app",
+            "session_scope": "desktop-user-session",
+            "handoff_state": "agent-attached",
+            "handoff_reason": "captcha-required",
+            "handoff_owner_ref": "human-operator:alice",
+            "resume_kind": "resume-environment",
+            "verification_channel": "runtime-center-self-check",
+            "workspace_id": "workspace-main",
+            "workspace_scope": "task:task-1",
+            "account_scope_ref": "windows:user:alice",
+            "browser_mode": "tab-attached",
+            "login_state": "authenticated",
+            "tab_scope": "single-tab",
+            "active_tab_ref": "page:jd:seller-center:home",
+            "site_contract_ref": "site-contract:jd:seller-center:writer",
+            "site_contract_status": "verified-writer",
+            "download_policy": "workspace-bucket",
+            "downloads": True,
+            "last_verified_url": "https://seller.jd.com/home",
+            "last_verified_dom_anchor": "#shop-header",
+            "app_identity": "excel",
+            "active_process_ref": "process:4242",
+            "app_contract_ref": "app-contract:excel:writer",
+            "app_contract_status": "verified-writer",
+            "control_channel": "accessibility-tree",
+            "writer_lock_scope": "workbook:orders",
+            "window_anchor_summary": "Excel > Orders.xlsx > Sheet1!A1",
+            "handoff_checkpoint_ref": "checkpoint:captcha",
+            "handoff_return_condition": "captcha-cleared",
+            "pending_handoff_summary": "operator finishing captcha",
+        },
+    )
+    base_payload = {
+        "session_mount_id": lease.id,
+        "environment_id": lease.environment_id,
+        "checkpoint_ref": "checkpoint:captcha",
+        "verification_channel": "runtime-center-self-check",
+        "return_condition": "captcha-cleared",
+        "handoff_owner_ref": "human-operator:alice",
+    }
+    event_bus.publish(
+        topic="desktop",
+        action="uac-prompt",
+        payload={
+            **base_payload,
+            "prompt_kind": "uac",
+            "window_title": "User Account Control",
+        },
+    )
+    event_bus.publish(
+        topic="process",
+        action="process-restarted",
+        payload={
+            **base_payload,
+            "process_ref": "process:4242",
+        },
+    )
+    event_bus.publish(
+        topic="host",
+        action="human-return-ready",
+        payload={
+            **base_payload,
+            "summary": "operator returned seat after captcha",
+        },
+    )
+
+    detail = service.get_environment_detail(lease.environment_id, limit=10)
+
+    assert detail is not None
+    summary = _mapping(detail.get("host_twin_summary"))
+    assert detail["host_event_summary"]["latest_handoff_event"]["event_name"] == (
+        "host.human-return-ready"
+    )
+    assert detail["host_twin"]["coordination"]["recommended_scheduler_action"] == "proceed"
+    assert detail["host_twin"]["coordination"]["contention_forecast"]["severity"] == "clear"
+    assert detail["host_twin"]["blocked_surfaces"] == []
+    assert detail["host_twin"]["continuity"]["requires_human_return"] is False
+    assert detail["host_twin"]["scheduler_inputs"]["active_blocker_family"] is None
+    assert detail["host_twin"]["scheduler_inputs"]["active_recovery_family"] is None
+    assert summary["recommended_scheduler_action"] == "proceed"
+    assert summary["blocked_surface_count"] == 0
+    assert summary["legal_recovery_mode"] == "resume-environment"

@@ -375,6 +375,104 @@ def test_task_review_exposes_host_twin_and_prefers_it_for_runtime_guidance() -> 
     assert any("modal-uac-login" in risk for risk in payload["risks"])
 
 
+def test_task_review_prefers_canonical_host_twin_summary_after_reentry() -> None:
+    now = datetime(2026, 3, 29, 12, 30, tzinfo=timezone.utc)
+    payload = build_task_review_payload(
+        task=type(
+            "Task",
+            (),
+            {
+                "id": "task-host-twin-api-reentry-1",
+                "title": "Resume clean reentry",
+                "summary": "Use canonical host summary instead of stale handoff metadata.",
+                "owner_agent_id": "ops-agent",
+                "status": "running",
+                "acceptance_criteria": '{"kind":"kernel-task-meta-v1"}',
+                "updated_at": now,
+            },
+        )(),
+        runtime=type(
+            "Runtime",
+            (),
+            {
+                "current_phase": "executing",
+                "last_result_summary": "Clean reentry confirmed by host summary.",
+                "last_error_summary": None,
+                "updated_at": now,
+                "risk_level": "guarded",
+            },
+        )(),
+        decisions=[],
+        evidence=[],
+        execution_feedback={
+            "host_twin_summary": {
+                "recommended_scheduler_action": "proceed",
+                "blocked_surface_count": 0,
+                "legal_recovery_mode": "resume-environment",
+                "contention_severity": "clear",
+                "contention_reason": "clean reentry confirmed",
+                "host_companion_status": "attached",
+                "host_companion_source": "live-handle",
+            },
+            "host_twin": {
+                "ownership": {
+                    "handoff_owner_ref": "human-operator:alice",
+                },
+                "blocked_surfaces": [
+                    {
+                        "surface_kind": "desktop_app",
+                        "surface_ref": "window:excel:orders",
+                        "reason": "stale-captcha",
+                        "event_family": "modal-uac-login",
+                    },
+                ],
+                "legal_recovery": {
+                    "path": "handoff",
+                    "checkpoint_ref": "checkpoint:captcha:orders",
+                    "resume_kind": "resume-environment",
+                    "verification_channel": "runtime-center-self-check",
+                },
+                "coordination": {
+                    "recommended_scheduler_action": "handoff",
+                    "contention_forecast": {
+                        "severity": "blocked",
+                        "reason": "stale-captcha",
+                    },
+                },
+            },
+            "host_contract": {
+                "status": "blocked",
+                "blocked_reason": "legacy-host-blocker",
+                "handoff_state": "handoff-required",
+                "handoff_reason": "legacy-handoff",
+            },
+            "recovery": {
+                "status": "pending",
+                "mode": "attach-environment",
+            },
+        },
+        child_results=[],
+        owner_agent={"name": "Ops Agent"},
+        task_route=task_route("task-host-twin-api-reentry-1"),
+    )
+
+    assert (
+        payload["execution_runtime"]["host_twin_summary"]["recommended_scheduler_action"]
+        == "proceed"
+    )
+    assert payload["continuity"]["handoff"]["state"] is None
+    assert payload["continuity"]["handoff"]["reason"] is None
+    assert payload["continuity"]["handoff"]["resume_kind"] == "resume-environment"
+    assert any("Host twin coordination: proceed" in line for line in payload["summary_lines"])
+    assert not any("Handoff:" in line for line in payload["summary_lines"])
+    assert not any(
+        "Follow host coordination action: handoff" in action
+        for action in payload["next_actions"]
+    )
+    assert not any("Handoff is active" in risk for risk in payload["risks"])
+    assert not any("Host blocker detected" in risk for risk in payload["risks"])
+
+
 def test_runtime_center_evidence_endpoint_filters_by_task_id() -> None:
     class FakeEvidenceQueryService:
         def list_recent_records(self, limit: int = 20):

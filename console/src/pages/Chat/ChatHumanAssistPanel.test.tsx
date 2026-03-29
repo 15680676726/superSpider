@@ -19,7 +19,10 @@ vi.mock("../../api", async () => {
 });
 
 import api from "../../api";
-import { ChatHumanAssistPanel } from "./ChatHumanAssistPanel";
+import {
+  ChatHumanAssistPanel,
+  resolveHumanAssistStatusPresentation,
+} from "./ChatHumanAssistPanel";
 import * as runtimeTransport from "./runtimeTransport";
 
 const mockedGetCurrentRuntimeHumanAssistTask = vi.mocked(
@@ -79,6 +82,25 @@ describe("ChatHumanAssistPanel", () => {
     mockedListRuntimeHumanAssistTasks.mockReset();
     mockedGetRuntimeHumanAssistTaskDetail.mockReset();
     vi.restoreAllMocks();
+  });
+
+  it("maps human assist statuses to canonical readable label and color", () => {
+    expect(resolveHumanAssistStatusPresentation("issued")).toEqual({
+      label: "待提交",
+      color: "blue",
+    });
+    expect(resolveHumanAssistStatusPresentation("need_more_evidence")).toEqual({
+      label: "待补证",
+      color: "warning",
+    });
+    expect(resolveHumanAssistStatusPresentation("handoff_blocked")).toEqual({
+      label: "\u6062\u590d\u53d7\u963b",
+      color: "warning",
+    });
+    expect(resolveHumanAssistStatusPresentation("accepted")).toEqual({
+      label: "已通过",
+      color: "success",
+    });
   });
 
   it("renders the current task strip from thread meta and refreshes current state", async () => {

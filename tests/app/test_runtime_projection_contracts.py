@@ -704,3 +704,97 @@ def test_build_task_review_payload_prefers_host_twin_visibility_when_present() -
         for risk in payload["risks"]
     )
     assert any("modal-uac-login" in risk for risk in payload["risks"])
+
+
+def test_build_task_review_payload_prefers_canonical_host_twin_summary_for_reentry() -> None:
+    now = datetime(2026, 3, 29, 12, 0, tzinfo=timezone.utc)
+    task = SimpleNamespace(
+        id="task-host-twin-reentry-1",
+        title="Resume reentered writer session",
+        summary="Prefer canonical host summary after clean reentry.",
+        owner_agent_id="ops-agent",
+        status="running",
+        acceptance_criteria='{"kind":"kernel-task-meta-v1"}',
+        updated_at=now,
+    )
+    runtime = SimpleNamespace(
+        current_phase="executing",
+        last_result_summary="Canonical host summary says the writer can continue.",
+        last_error_summary=None,
+        updated_at=now,
+        risk_level="guarded",
+    )
+
+    payload = build_task_review_payload(
+        task=task,
+        runtime=runtime,
+        decisions=[],
+        evidence=[],
+        execution_feedback={
+            "host_twin_summary": {
+                "recommended_scheduler_action": "proceed",
+                "blocked_surface_count": 0,
+                "legal_recovery_mode": "resume-environment",
+                "contention_severity": "clear",
+                "contention_reason": "clean reentry confirmed",
+                "host_companion_status": "attached",
+                "host_companion_source": "live-handle",
+            },
+            "host_twin": {
+                "ownership": {
+                    "handoff_owner_ref": "human-operator:alice",
+                },
+                "blocked_surfaces": [
+                    {
+                        "surface_kind": "desktop_app",
+                        "surface_ref": "window:excel:orders",
+                        "reason": "stale-captcha",
+                        "event_family": "modal-uac-login",
+                    },
+                ],
+                "legal_recovery": {
+                    "path": "handoff",
+                    "checkpoint_ref": "checkpoint:captcha:orders",
+                    "resume_kind": "resume-environment",
+                    "verification_channel": "runtime-center-self-check",
+                },
+                "coordination": {
+                    "recommended_scheduler_action": "handoff",
+                    "contention_forecast": {
+                        "severity": "blocked",
+                        "reason": "stale-captcha",
+                    },
+                },
+            },
+            "host_contract": {
+                "status": "blocked",
+                "blocked_reason": "legacy-host-blocker",
+                "handoff_state": "handoff-required",
+                "handoff_reason": "legacy-handoff",
+            },
+            "recovery": {
+                "status": "pending",
+                "mode": "attach-environment",
+            },
+        },
+        child_results=[],
+        owner_agent={"name": "Ops Agent"},
+        task_route=task_route("task-host-twin-reentry-1"),
+    )
+
+    assert (
+        payload["execution_runtime"]["host_twin_summary"]["recommended_scheduler_action"]
+        == "proceed"
+    )
+    assert payload["continuity"]["handoff"]["state"] is None
+    assert payload["continuity"]["handoff"]["reason"] is None
+    assert payload["continuity"]["handoff"]["resume_kind"] == "resume-environment"
+    assert any("Host twin coordination: proceed" in line for line in payload["summary_lines"])
+    assert not any("Handoff:" in line for line in payload["summary_lines"])
+    assert not any("Host blocker:" in line for line in payload["summary_lines"])
+    assert not any(
+        "Follow host coordination action: handoff" in action
+        for action in payload["next_actions"]
+    )
+    assert not any("Handoff is active" in risk for risk in payload["risks"])
+    assert not any("Host blocker detected" in risk for risk in payload["risks"])

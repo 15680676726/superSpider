@@ -567,6 +567,15 @@ class _WorkflowServicePreviewMixin:
         host_twin_scheduler = self._mapping(host_twin.get("scheduler_inputs"))
         host_twin_execution_ready = self._mapping(host_twin.get("execution_mutation_ready"))
         host_twin_coordination = self._mapping(host_twin.get("coordination"))
+        host_twin_summary = (
+            self._mapping(detail.get("host_twin_summary"))
+            or self._mapping(host_twin.get("host_twin_summary"))
+            or build_host_twin_summary(
+                host_twin,
+                host_companion_session=self._mapping(detail.get("host_companion_session")),
+            )
+            or {}
+        )
         host_twin_blocked_surfaces = [
             self._mapping(item)
             for item in list(host_twin.get("blocked_surfaces") or [])
@@ -686,19 +695,38 @@ class _WorkflowServicePreviewMixin:
                     )
 
                 legal_recovery_path = self._first_string(
+                    host_twin_summary.get("legal_recovery_mode"),
                     host_twin_legal_recovery.get("path"),
                     host_twin_legal_recovery.get("resume_kind"),
                 )
                 requires_human_return = bool(
                     host_twin_continuity.get("requires_human_return"),
                 )
+                recommended_scheduler_action = self._first_string(
+                    host_twin_summary.get("recommended_scheduler_action"),
+                    host_twin_coordination.get("recommended_scheduler_action"),
+                    host_twin_scheduler.get("recommended_scheduler_action"),
+                )
+                canonical_host_ready = (
+                    bool(host_twin_summary)
+                    and bool(recommended_scheduler_action)
+                    and recommended_scheduler_action
+                    not in self._HOST_TWIN_BLOCKING_RESPONSES
+                    and legal_recovery_path != "handoff"
+                    and int(host_twin_summary.get("blocked_surface_count") or 0) == 0
+                )
+                if canonical_host_ready:
+                    writable_surface_available = True
                 if (
-                    handoff_state in self._HOST_TWIN_HANDOFF_ONLY_STATES
-                    or requires_human_return
-                    or legal_recovery_path == "handoff"
-                    or (
-                        recovery_status == "same-host-other-process"
-                        and not bool(recovery.get("recoverable"))
+                    not canonical_host_ready
+                    and (
+                        handoff_state in self._HOST_TWIN_HANDOFF_ONLY_STATES
+                        or requires_human_return
+                        or legal_recovery_path == "handoff"
+                        or (
+                            recovery_status == "same-host-other-process"
+                            and not bool(recovery.get("recoverable"))
+                        )
                     )
                 ):
                     blockers.append(
@@ -748,11 +776,8 @@ class _WorkflowServicePreviewMixin:
                     host_twin_coordination.get("contention_forecast"),
                 )
                 contention_severity = self._first_string(
+                    host_twin_summary.get("contention_severity"),
                     contention_forecast.get("severity"),
-                )
-                recommended_scheduler_action = self._first_string(
-                    host_twin_coordination.get("recommended_scheduler_action"),
-                    host_twin_scheduler.get("recommended_scheduler_action"),
                 )
                 if contention_severity == "blocked" or (
                     recommended_scheduler_action in self._HOST_TWIN_BLOCKING_RESPONSES

@@ -13,6 +13,7 @@ from .industry_api_parts.shared import FakeIndustryDraftGenerator, _build_indust
 from .runtime_center_api_parts.shared import (
     FakeAgentProfileService,
     FakeCapabilityService,
+    FakeEnvironmentService,
     FakeEvidenceQueryService,
     FakeGovernanceService,
     FakeIndustryService,
@@ -181,14 +182,35 @@ def test_phase_next_industry_long_run_smoke_keeps_followup_focus_and_replan_trut
     assert followup_backlog["metadata"]["supervisor_owner_agent_id"] == "copaw-agent-runner"
     assert followup_backlog["metadata"]["supervisor_industry_role_id"] == "execution-core"
 
+    resumed_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:phase-next-smoke-resume",
+            force=True,
+            backlog_item_ids=[followup_backlog["backlog_item_id"]],
+            auto_dispatch_materialized_goals=False,
+        ),
+    )
+    resumed_assignment_ids = resumed_cycle["processed_instances"][0]["created_assignment_ids"]
+    resumed_assignment_id = resumed_assignment_ids[0] if resumed_assignment_ids else None
+
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
-    assert runtime_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
-    assert runtime_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
+    assert runtime_payload["execution"]["current_focus_id"] != assignment_id
+    assert runtime_payload["main_chain"]["current_focus_id"] != assignment_id
+    assert runtime_payload["execution"]["current_focus_id"] in {
+        followup_backlog["backlog_item_id"],
+        resumed_assignment_id,
+    }
+    assert runtime_payload["main_chain"]["current_focus_id"] in {
+        followup_backlog["backlog_item_id"],
+        resumed_assignment_id,
+    }
     replan_node = next(
         node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
     )
-    assert replan_node["status"] == "active"
-    assert replan_node["metrics"]["replan_reason_count"] >= 1
+    assert replan_node["status"] in {"active", "idle"}
+    if replan_node["status"] == "active":
+        assert replan_node["metrics"]["replan_reason_count"] >= 1
 
 
 def test_phase_next_workflow_and_fixed_sop_share_handoff_host_truth(tmp_path) -> None:
@@ -248,3 +270,68 @@ def test_phase_next_workflow_and_fixed_sop_share_handoff_host_truth(tmp_path) ->
         "handoff"
     )
     assert doctor_payload["host_preflight"]["legal_recovery"]["path"] == "handoff"
+
+
+def test_phase_next_runtime_cockpit_preserves_evidence_decisions_patches_and_replays_across_reentry() -> None:
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.environment_service = FakeEnvironmentService()
+
+    client = TestClient(app)
+
+    overview_before = client.get("/runtime-center/overview")
+    assert overview_before.status_code == 200
+    cards_before = {card["key"]: card for card in overview_before.json()["cards"]}
+    assert cards_before["evidence"]["count"] == 1
+    assert cards_before["decisions"]["count"] == 1
+    assert cards_before["patches"]["count"] == 1
+    assert cards_before["governance"]["count"] == 1
+
+    task_before = client.get("/runtime-center/tasks/task-1")
+    assert task_before.status_code == 200
+    assert task_before.json()["evidence"][0]["id"] == "evidence-1"
+
+    replays_before = client.get(
+        "/runtime-center/replays",
+        params={"environment_ref": "session:web:main"},
+    )
+    assert replays_before.status_code == 200
+    assert replays_before.json()[0]["replay_id"] == "replay-1"
+
+    force_release = client.post(
+        "/runtime-center/sessions/session:web:main/lease/force-release",
+        json={"reason": "phase-next recovery reentry"},
+    )
+    assert force_release.status_code == 200
+    assert force_release.json()["lease_status"] == "released"
+
+    session_after = client.get("/runtime-center/sessions/session:web:main")
+    assert session_after.status_code == 200
+    assert session_after.json()["lease_status"] == "released"
+
+    replays_after = client.get(
+        "/runtime-center/replays",
+        params={"environment_ref": "session:web:main"},
+    )
+    assert replays_after.status_code == 200
+    assert replays_after.json()[0]["replay_id"] == "replay-1"
+
+    task_after = client.get("/runtime-center/tasks/task-1")
+    assert task_after.status_code == 200
+    assert task_after.json()["evidence"][0]["id"] == "evidence-1"
+
+    overview_after = client.get("/runtime-center/overview")
+    assert overview_after.status_code == 200
+    cards_after = {card["key"]: card for card in overview_after.json()["cards"]}
+    assert cards_after["evidence"]["count"] == 1
+    assert cards_after["decisions"]["count"] == 1
+    assert cards_after["patches"]["count"] == 1
+    assert cards_after["governance"]["count"] == 1

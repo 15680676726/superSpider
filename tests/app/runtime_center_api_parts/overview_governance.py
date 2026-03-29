@@ -321,6 +321,11 @@ def test_runtime_center_overview_governance_uses_canonical_host_twin_summary_for
                 "anchor_ref": "excel://Orders!A1",
             },
         ],
+        "metadata": {
+            "stale_checkpoint_state": "agent-attached",
+            "stale_recommended_scheduler_action": "handoff",
+            "stale_blocking_event_family": "modal-uac-login",
+        },
     }
     governance_service.status["handoff"] = {
         "active": False,
@@ -364,6 +369,10 @@ def test_runtime_center_overview_governance_uses_canonical_host_twin_summary_for
         "browser_backoffice",
         "office_document",
     ]
+    assert (
+        governance["meta"]["host_twin_summary"].get("stale_recommended_scheduler_action")
+        is None
+    )
     assert governance["summary"] == (
         "Host twin ready on env:desktop:seat-a via sticky-active-seat; "
         "active app families: browser_backoffice, office_document."

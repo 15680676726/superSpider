@@ -1139,6 +1139,100 @@ def test_workflow_preview_declares_host_requirements_and_phase6_coordination_blo
     )
 
 
+def test_workflow_preview_prefers_canonical_host_twin_summary_over_stale_handoff_metadata(
+    tmp_path,
+) -> None:
+    detail = _desktop_host_preflight_detail(
+        recommended_scheduler_action="proceed",
+        continuity_status="attached",
+        continuity_source="live-handle",
+        handoff_state=None,
+        handoff_reason=None,
+        active_alert_families=[],
+        host_blocker_family=None,
+        host_blocker_response=None,
+    )
+    detail["host_contract"] = {
+        "handoff_state": "active",
+        "handoff_reason": "stale-handoff-metadata",
+        "current_gap_or_blocker": "stale-gap",
+    }
+    detail["recovery"] = {
+        "status": "attached",
+        "recoverable": True,
+        "note": "runtime already return-ready",
+    }
+    detail["host_twin"]["host_twin_summary"] = {
+        "active_app_family_keys": ["office_document", "desktop_specialized"],
+        "seat_owner_ref": "ops-agent",
+        "blocked_surface_count": 0,
+        "legal_recovery_mode": "resume-environment",
+        "recommended_scheduler_action": "proceed",
+    }
+    environment_service = FakeWorkflowEnvironmentService(
+        session_details={str(detail["session_mount_id"]): detail},
+    )
+    client = TestClient(
+        _build_workflow_app(tmp_path, environment_service=environment_service),
+    )
+    instance_id = _bootstrap_industry(client)
+    solution_lead_agent_id = _industry_role_agent_id(client, instance_id, "solution-lead")
+    _grant_capability_to_agent(
+        client,
+        agent_id=solution_lead_agent_id,
+        capability_ids=["mcp:desktop_windows"],
+    )
+    repository = client.app.state.workflow_template_repository
+    repository.upsert_template(
+        WorkflowTemplateRecord(
+            template_id="phase-next-office-document-canonical",
+            title="Phase Next Office Document Canonical",
+            summary="Mutating desktop step should trust canonical host summary.",
+            category="desktop-ops",
+            status="active",
+            version="v1",
+            owner_role_id="solution-lead",
+            suggested_role_ids=["solution-lead"],
+            dependency_capability_ids=["system:dispatch_query", "mcp:desktop_windows"],
+            step_specs=[
+                {
+                    "id": "office-document-leaf",
+                    "kind": "goal",
+                    "execution_mode": "leaf",
+                    "owner_role_id": "solution-lead",
+                    "title": "Update workbook",
+                    "summary": "Mutate office workbook with canonical host twin readiness.",
+                    "required_capability_ids": [
+                        "system:dispatch_query",
+                        "mcp:desktop_windows",
+                    ],
+                    "environment_preflight": {
+                        "surface_kind": "desktop",
+                        "mutating": True,
+                        "app_family": "office_document",
+                    },
+                },
+            ],
+        ),
+    )
+
+    preview = client.post(
+        "/workflow-templates/phase-next-office-document-canonical/preview",
+        json={
+            "industry_instance_id": instance_id,
+            "environment_id": detail["environment_id"],
+            "session_mount_id": detail["session_mount_id"],
+        },
+    )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert payload["can_launch"] is True
+    blocker_codes = {item["code"] for item in payload["launch_blockers"]}
+    assert "host-twin-recovery-handoff-only" not in blocker_codes
+    assert "host-twin-contention-forecast-blocked" not in blocker_codes
+
+
 def test_workflow_run_diagnosis_keeps_host_snapshot_and_resume_rechecks_live_host_truth(
     tmp_path,
 ) -> None:
@@ -1184,6 +1278,13 @@ def test_workflow_run_diagnosis_keeps_host_snapshot_and_resume_rechecks_live_hos
     ] == "attached"
     assert launched.diagnosis.host_snapshot["host_twin_summary"]["host_companion_status"] == "attached"
     assert launched.diagnosis.host_snapshot["host_twin_summary"]["seat_count"] == 1
+    assert launched.diagnosis.host_snapshot["host_twin_summary"]["active_app_family_keys"]
+    assert launched.diagnosis.host_snapshot["host_twin_summary"]["seat_owner_ref"] == "ops-agent"
+    assert launched.diagnosis.host_snapshot["host_twin_summary"]["blocked_surface_count"] == 0
+    assert launched.diagnosis.host_snapshot["host_twin_summary"]["legal_recovery_mode"] == "resume"
+    assert launched.diagnosis.host_snapshot["host_twin_summary"][
+        "recommended_scheduler_action"
+    ] == "continue"
 
     environment_service._session_details[str(initial_detail["session_mount_id"])] = (
         _desktop_host_preflight_detail(
@@ -1215,6 +1316,21 @@ def test_workflow_run_diagnosis_keeps_host_snapshot_and_resume_rechecks_live_hos
     assert detail_payload["diagnosis"]["host_snapshot"]["host_twin_summary"][
         "host_companion_status"
     ] == "attached"
+    assert detail_payload["diagnosis"]["host_snapshot"]["host_twin_summary"][
+        "active_app_family_keys"
+    ]
+    assert detail_payload["diagnosis"]["host_snapshot"]["host_twin_summary"][
+        "seat_owner_ref"
+    ] == "ops-agent"
+    assert detail_payload["diagnosis"]["host_snapshot"]["host_twin_summary"][
+        "blocked_surface_count"
+    ] == 0
+    assert detail_payload["diagnosis"]["host_snapshot"]["host_twin_summary"][
+        "legal_recovery_mode"
+    ] == "resume"
+    assert detail_payload["diagnosis"]["host_snapshot"]["host_twin_summary"][
+        "recommended_scheduler_action"
+    ] == "handoff"
     assert "host-twin-contention-forecast-blocked" in detail_payload["diagnosis"][
         "blocking_codes"
     ]
@@ -1297,6 +1413,21 @@ def test_workflow_resume_refreshes_schedule_host_meta_from_live_host_twin(
     assert schedule_payload.spec_payload["meta"]["host_snapshot"]["host_twin_summary"][
         "host_companion_source"
     ] == "rebound-live-handle"
+    assert schedule_payload.spec_payload["meta"]["host_snapshot"]["host_twin_summary"][
+        "active_app_family_keys"
+    ]
+    assert schedule_payload.spec_payload["meta"]["host_snapshot"]["host_twin_summary"][
+        "seat_owner_ref"
+    ] == "ops-agent"
+    assert schedule_payload.spec_payload["meta"]["host_snapshot"]["host_twin_summary"][
+        "blocked_surface_count"
+    ] == 0
+    assert schedule_payload.spec_payload["meta"]["host_snapshot"]["host_twin_summary"][
+        "legal_recovery_mode"
+    ] == "resume"
+    assert schedule_payload.spec_payload["meta"]["host_snapshot"]["host_twin_summary"][
+        "recommended_scheduler_action"
+    ] == "continue"
     assert schedule_payload.spec_payload["meta"]["host_snapshot"]["coordination"][
         "contention_forecast"
     ]["reason"] == "browser writer path was rebound after recovery"
