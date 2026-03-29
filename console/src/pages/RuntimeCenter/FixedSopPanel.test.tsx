@@ -82,7 +82,7 @@ const BINDING = {
 };
 
 describe("FixedSopPanel", () => {
-  it("loads fixed SOP templates and bindings, then runs a binding from Runtime Center", async () => {
+  it("keeps one-click run and shows host summary in latest run column", async () => {
     mockedApi.listFixedSopTemplates.mockResolvedValue({
       items: [
         {
@@ -129,6 +129,17 @@ describe("FixedSopPanel", () => {
       },
       binding: BINDING,
       template: TEMPLATE,
+      environment_id: "env-desktop-1",
+      session_mount_id: "session-desktop-1",
+      host_requirement: {
+        surface_kind: "desktop",
+        app_family: "office_document",
+      },
+      host_preflight: {
+        coordination: {
+          recommended_scheduler_action: "continue",
+        },
+      },
     });
     mockedApi.runFixedSopBinding.mockResolvedValue({
       binding_id: BINDING.binding_id,
@@ -161,6 +172,10 @@ describe("FixedSopPanel", () => {
     expect(screen.getByText("Retail Follow-up")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(screen.getByText("Environment: env-desktop-1")).toBeTruthy();
+    expect(screen.getByText("Session: session-desktop-1")).toBeTruthy();
+    expect(screen.getByText("Requirement: office_document")).toBeTruthy();
+    expect(screen.getByText("Host snapshot: continue")).toBeTruthy();
 
     await waitFor(() => {
       expect(mockedApi.runFixedSopBinding).toHaveBeenCalledWith(
@@ -172,5 +187,111 @@ describe("FixedSopPanel", () => {
       );
     });
     expect(onRuntimeChanged).toHaveBeenCalled();
+  });
+
+  it("renders doctor report modal with host blocker context", async () => {
+    mockedApi.listFixedSopTemplates.mockResolvedValue({
+      items: [
+        {
+          template: TEMPLATE,
+          binding_count: 1,
+          routes: {
+            detail: `/api/fixed-sops/templates/${TEMPLATE.template_id}`,
+          },
+        },
+      ],
+      total: 1,
+    });
+    mockedApi.listFixedSopBindings.mockResolvedValue([
+      {
+        binding: BINDING,
+        template: TEMPLATE,
+        routes: {
+          detail: `/api/fixed-sops/bindings/${BINDING.binding_id}`,
+          run: `/api/fixed-sops/bindings/${BINDING.binding_id}/run`,
+        },
+      },
+    ]);
+    mockedApi.listIndustryInstances.mockResolvedValue([]);
+    mockedApi.getFixedSopRun.mockResolvedValue({
+      run: {
+        run_id: "workflow-run-1",
+        template_id: TEMPLATE.template_id,
+        title: "Retail Follow-up",
+        summary: "Run completed",
+        status: "completed",
+        owner_scope: "retail-demo",
+        owner_agent_id: "agent-sales",
+        industry_instance_id: "industry-demo",
+        parameter_payload: {},
+        preview_payload: {},
+        goal_ids: [],
+        schedule_ids: [],
+        task_ids: [],
+        decision_ids: [],
+        evidence_ids: ["evidence-1"],
+        metadata: {},
+        created_at: "2026-03-26T09:00:00Z",
+        updated_at: "2026-03-26T09:01:00Z",
+      },
+      binding: BINDING,
+      template: TEMPLATE,
+      host_requirement: {},
+      host_preflight: {},
+    });
+    mockedApi.runFixedSopDoctor.mockResolvedValue({
+      binding_id: BINDING.binding_id,
+      template_id: TEMPLATE.template_id,
+      status: "blocked",
+      summary: "Host preflight blocked by active human handoff",
+      checks: [
+        {
+          key: "host-preflight",
+          label: "Host preflight",
+          status: "fail",
+          message: "Writer path blocked by human handoff",
+        },
+      ],
+      environment_id: "env-desktop-1",
+      session_mount_id: "session-desktop-1",
+      host_requirement: {
+        surface_kind: "desktop",
+        app_family: "office_document",
+      },
+      host_preflight: {
+        continuity: {
+          status: "attached",
+        },
+        coordination: {
+          recommended_scheduler_action: "handoff",
+          contention_forecast: {
+            reason: "human handoff is still active",
+          },
+        },
+      },
+      routes: {},
+    });
+
+    render(
+      <FixedSopPanel
+        focusScope="retail-demo"
+        openDetail={vi.fn().mockResolvedValue(undefined)}
+        onRuntimeChanged={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await screen.findByText("Retail Follow-up");
+    fireEvent.click(screen.getByRole("button", { name: "Doctor" }));
+
+    const doctorDialog = await screen.findByRole("dialog", { name: "Doctor report" });
+    expect(doctorDialog).toBeTruthy();
+    expect(screen.getByText("Host preflight blocked by active human handoff")).toBeTruthy();
+    expect(screen.getByText("Environment: env-desktop-1")).toBeTruthy();
+    expect(screen.getByText("Session: session-desktop-1")).toBeTruthy();
+    expect(screen.getByText("Scheduler action: handoff")).toBeTruthy();
+    expect(
+      screen.getAllByText("Blocker: human handoff is still active").length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("Writer path blocked by human handoff")).toBeTruthy();
   });
 });

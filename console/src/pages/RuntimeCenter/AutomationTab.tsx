@@ -29,6 +29,7 @@ import type {
   RuntimeHeartbeatDetail,
   RuntimeScheduleConfig,
   RuntimeScheduleDetail,
+  RuntimeScheduleHostBindingMeta,
   RuntimeScheduleSummary,
 } from "../../api/types";
 import styles from "./index.module.less";
@@ -135,6 +136,61 @@ function normalizeSchedule(item: RuntimeScheduleSummary): RuntimeScheduleSummary
     title: item.title || item.name || item.id,
     actions: item.actions ?? {},
   };
+}
+
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const next = value.trim();
+  return next || null;
+}
+
+function readScheduleHostMeta(
+  schedule?: RuntimeScheduleSummary | null,
+): RuntimeScheduleHostBindingMeta | null {
+  if (schedule?.host_meta && typeof schedule.host_meta === "object") {
+    return schedule.host_meta;
+  }
+  return null;
+}
+
+function getScheduleHostWarnings(hostMeta?: RuntimeScheduleHostBindingMeta | null): string[] {
+  if (!hostMeta) {
+    return [];
+  }
+
+  const warnings = new Set<string>();
+  const environmentRef = nonEmptyString(hostMeta.environment_ref);
+  const sessionMountId = nonEmptyString(hostMeta.session_mount_id);
+  const snapshotEnvironmentRef = nonEmptyString(hostMeta.host_snapshot?.environment_ref);
+  const snapshotSessionMountId = nonEmptyString(hostMeta.host_snapshot?.session_mount_id);
+  const schedulerEnvironmentRef = nonEmptyString(
+    hostMeta.scheduler_inputs?.environment_ref ??
+      hostMeta.host_snapshot?.scheduler_inputs?.environment_ref,
+  );
+  const schedulerSessionMountId = nonEmptyString(
+    hostMeta.scheduler_inputs?.session_mount_id ??
+      hostMeta.host_snapshot?.scheduler_inputs?.session_mount_id,
+  );
+
+  if (
+    environmentRef &&
+    ((snapshotEnvironmentRef && snapshotEnvironmentRef !== environmentRef) ||
+      (schedulerEnvironmentRef && schedulerEnvironmentRef !== environmentRef))
+  ) {
+    warnings.add("environment_ref mismatch");
+  }
+
+  if (
+    sessionMountId &&
+    ((snapshotSessionMountId && snapshotSessionMountId !== sessionMountId) ||
+      (schedulerSessionMountId && schedulerSessionMountId !== sessionMountId))
+  ) {
+    warnings.add("session_mount_id mismatch");
+  }
+
+  return [...warnings];
 }
 
 function parseCron(cron: string): {
@@ -699,6 +755,49 @@ export default function AutomationTab({
             </Text>
           </div>
         ),
+      },
+      {
+        title: "Host Binding",
+        key: "hostBinding",
+        width: 320,
+        render: (_, record) => {
+          const hostMeta = readScheduleHostMeta(record);
+          if (!hostMeta) {
+            return <Text type="secondary">No host binding</Text>;
+          }
+
+          const warnings = getScheduleHostWarnings(hostMeta);
+          const environmentRef = nonEmptyString(hostMeta.environment_ref);
+          const environmentId = nonEmptyString(
+            hostMeta.environment_id ?? hostMeta.host_snapshot?.environment_id,
+          );
+          const sessionMountId = nonEmptyString(hostMeta.session_mount_id);
+          const appFamily = nonEmptyString(hostMeta.host_requirement?.app_family);
+          const schedulerAction = nonEmptyString(
+            hostMeta.host_snapshot?.coordination?.recommended_scheduler_action,
+          );
+
+          return (
+            <div className={styles.automationCell}>
+              <Text>{environmentRef || environmentId || "-"}</Text>
+              <Text type="secondary">{sessionMountId || "-"}</Text>
+              {appFamily ? <Text type="secondary">{appFamily}</Text> : null}
+              {schedulerAction ? (
+                <Text type="secondary">{`Host coordination: ${schedulerAction}`}</Text>
+              ) : null}
+              {warnings.length > 0 ? (
+                <div className={styles.automationCell}>
+                  <Tag color="gold">Host binding warning</Tag>
+                  {warnings.map((warning) => (
+                    <Text key={warning} type="warning">
+                      {warning}
+                    </Text>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        },
       },
       {
         title: "所属角色",

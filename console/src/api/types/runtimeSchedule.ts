@@ -1,3 +1,53 @@
+export interface RuntimeScheduleSchedulerInputs {
+  environment_ref?: string | null;
+  environment_id?: string | null;
+  session_mount_id?: string | null;
+  [key: string]: unknown;
+}
+
+export interface RuntimeScheduleHostRequirement {
+  app_family?: string | null;
+  capability_ref?: string | null;
+  surface_kind?: string | null;
+  mutating?: boolean | null;
+  [key: string]: unknown;
+}
+
+export interface RuntimeScheduleHostSnapshot {
+  environment_ref?: string | null;
+  environment_id?: string | null;
+  session_mount_id?: string | null;
+  scheduler_inputs?: RuntimeScheduleSchedulerInputs | null;
+  host_preflight?: {
+    status?: string | null;
+    warnings?: string[] | null;
+    [key: string]: unknown;
+  } | null;
+  execution_mutation_ready?: Record<string, boolean | null> | null;
+  writable_surface_kinds?: string[] | null;
+  coordination?: {
+    recommended_scheduler_action?: string | null;
+    contention_forecast?: {
+      severity?: string | null;
+      reason?: string | null;
+      [key: string]: unknown;
+    } | null;
+    [key: string]: unknown;
+  } | null;
+  app_family_twins?: Record<string, unknown> | null;
+  [key: string]: unknown;
+}
+
+export interface RuntimeScheduleHostBindingMeta {
+  environment_ref?: string | null;
+  environment_id?: string | null;
+  session_mount_id?: string | null;
+  host_requirement?: RuntimeScheduleHostRequirement | null;
+  host_snapshot?: RuntimeScheduleHostSnapshot | null;
+  scheduler_inputs?: RuntimeScheduleSchedulerInputs | null;
+  [key: string]: unknown;
+}
+
 export interface RuntimeScheduleConfig {
   id: string;
   name: string;
@@ -46,6 +96,7 @@ export interface RuntimeScheduleSummary {
   last_run_at?: string | null;
   next_run_at?: string | null;
   last_error?: string | null;
+  host_meta?: RuntimeScheduleHostBindingMeta | null;
   route?: string | null;
   actions?: Record<string, string>;
 }

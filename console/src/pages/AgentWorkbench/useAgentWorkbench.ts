@@ -182,6 +182,12 @@ export interface EnvironmentItem {
   metadata?: Record<string, unknown>;
   live_handle?: Record<string, unknown> | null;
   recovery?: Record<string, unknown> | null;
+  host_contract?: HostContractProjection | null;
+  seat_runtime?: SeatRuntimeProjection | null;
+  workspace_graph?: WorkspaceGraphProjection | null;
+  host_twin?: HostTwinProjection | null;
+  host_companion_session?: HostCompanionSessionProjection | null;
+  host_event_summary?: HostEventSummary | null;
   observations?: EnvironmentObservationItem[];
   replays?: EnvironmentReplayItem[];
   artifacts?: EnvironmentArtifactItem[];
@@ -193,6 +199,149 @@ export interface EnvironmentRuntimeStats {
   observation_count?: number;
   replay_count?: number;
   artifact_count?: number;
+}
+
+export interface HostContractProjection {
+  projection_kind?: string;
+  is_projection?: boolean;
+  surface_kind?: string | null;
+  environment_id?: string | null;
+  session_mount_id?: string | null;
+  host_mode?: string | null;
+  lease_class?: string | null;
+  access_mode?: string | null;
+  session_scope?: string | null;
+  account_scope_ref?: string | null;
+  handoff_state?: string | null;
+  handoff_reason?: string | null;
+  handoff_owner_ref?: string | null;
+  resume_kind?: string | null;
+  verification_channel?: string | null;
+}
+
+export interface SeatRuntimeProjection {
+  projection_kind?: string;
+  is_projection?: boolean;
+  seat_ref?: string | null;
+  environment_ref?: string | null;
+  workspace_scope?: string | null;
+  session_scope?: string | null;
+  host_mode?: string | null;
+  lease_status?: string | null;
+  lease_owner?: string | null;
+  host_id?: string | null;
+  process_id?: number | null;
+  session_count?: number | null;
+  active_session_mount_id?: string | null;
+  host_companion_status?: string | null;
+  active_surface_mix?: string[];
+  status?: string | null;
+  occupancy_state?: string | null;
+  candidate_seat_refs?: string[];
+  selected_seat_ref?: string | null;
+  seat_selection_policy?: string | null;
+  expected_release_at?: string | null;
+  live_handle_ref?: string | null;
+}
+
+export interface WorkspaceGraphWriterLock {
+  owner_agent_id?: string | null;
+  status?: string | null;
+  scope?: string | null;
+}
+
+export interface WorkspaceGraphLock {
+  resource_ref?: string | null;
+  writer_lock?: WorkspaceGraphWriterLock | null;
+}
+
+export interface WorkspaceGraphHandoffCheckpoint {
+  state?: string | null;
+  owner_ref?: string | null;
+  checkpoint_ref?: string | null;
+}
+
+export interface WorkspaceGraphProjection {
+  projection_kind?: string;
+  is_projection?: boolean;
+  workspace_id?: string | null;
+  seat_ref?: string | null;
+  session_mount_id?: string | null;
+  workspace_scope?: string | null;
+  owner_agent_id?: string | null;
+  account_scope_ref?: string | null;
+  active_lock_summary?: string | null;
+  collision_summary?: string | null;
+  locks?: WorkspaceGraphLock[];
+  handoff_checkpoint?: WorkspaceGraphHandoffCheckpoint | null;
+}
+
+export interface HostTwinOwnershipProjection {
+  seat_owner_agent_id?: string | null;
+  handoff_owner_ref?: string | null;
+  account_scope_ref?: string | null;
+  workspace_scope?: string | null;
+  ownership_source?: string | null;
+  active_owner_kind?: string | null;
+}
+
+export interface HostTwinAppFamilyProjection {
+  active?: boolean;
+  family_kind?: string | null;
+  surface_ref?: string | null;
+  contract_status?: string | null;
+  family_scope_ref?: string | null;
+  writer_lock_scope?: string | null;
+}
+
+export interface HostTwinContentionForecast {
+  severity?: string | null;
+  reason?: string | null;
+}
+
+export interface HostTwinLegalOwnerTransition {
+  allowed?: boolean | null;
+  reason?: string | null;
+}
+
+export interface HostTwinCoordinationProjection {
+  seat_owner_ref?: string | null;
+  workspace_owner_ref?: string | null;
+  writer_owner_ref?: string | null;
+  candidate_seat_refs?: string[];
+  selected_seat_ref?: string | null;
+  seat_selection_policy?: string | null;
+  contention_forecast?: HostTwinContentionForecast | null;
+  legal_owner_transition?: HostTwinLegalOwnerTransition | null;
+  recommended_scheduler_action?: string | null;
+  expected_release_at?: string | null;
+}
+
+export interface HostTwinProjection {
+  projection_kind?: string;
+  is_projection?: boolean;
+  is_truth_store?: boolean;
+  seat_ref?: string | null;
+  environment_id?: string | null;
+  session_mount_id?: string | null;
+  projection_note?: string | null;
+  ownership?: HostTwinOwnershipProjection | null;
+  app_family_twins?: Record<string, HostTwinAppFamilyProjection>;
+  coordination?: HostTwinCoordinationProjection | null;
+}
+
+export interface HostCompanionSessionProjection {
+  projection_kind?: string;
+  is_projection?: boolean;
+  session_mount_id?: string | null;
+  status?: string | null;
+  resume_kind?: string | null;
+}
+
+export interface HostEventSummary {
+  event_name?: string | null;
+  severity?: string | null;
+  recommended_runtime_response?: string | null;
 }
 
 export interface EnvironmentObservationItem {

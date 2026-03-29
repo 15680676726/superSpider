@@ -1,6 +1,27 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+
+import React from "react";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildGoalTaskGroups } from "./sections/taskPanels";
+import { ProfileCard } from "./pageSections";
+
+if (!window.matchMedia) {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
 
 describe("pageSections decomposition", () => {
   it("groups parent tasks, standalone tasks, and orphan children via the extracted task panel module", () => {
@@ -28,5 +49,46 @@ describe("pageSections decomposition", () => {
     expect(grouped.groups[0].children.map((item) => item.task.id)).toEqual(["task-child"]);
     expect(grouped.standalone.map((item) => item.task.id)).toEqual(["task-standalone"]);
     expect(grouped.orphanChildren.map((item) => item.task.id)).toEqual(["task-orphan"]);
+  });
+
+  it("renders current focus text from current_focus without relying on current_goal", () => {
+    render(
+      React.createElement(ProfileCard, {
+        agent: {
+          agent_id: "agent-1",
+          name: "Operator",
+          role_name: "Ops",
+          role_summary: "ops role",
+          agent_class: "business",
+          employment_mode: "career",
+          activation_mode: "persistent",
+          suspendable: true,
+          reports_to: null,
+          mission: "Keep runtime healthy",
+          status: "active",
+          risk_level: "auto",
+          current_focus_kind: "goal",
+          current_focus_id: "goal-focus",
+          current_focus: "Focused Goal Summary",
+          current_goal_id: "goal-legacy",
+          current_goal: "Legacy Goal Summary",
+          current_task_id: null,
+          industry_instance_id: null,
+          industry_role_id: null,
+          environment_summary: "",
+          environment_constraints: [],
+          evidence_expectations: [],
+          today_output_summary: "",
+          latest_evidence_summary: "",
+          capabilities: [],
+          updated_at: null,
+        },
+        linkedGoal: null,
+        onOpenChat: vi.fn(),
+      }),
+    );
+
+    expect(screen.getByText("Focused Goal Summary")).toBeTruthy();
+    expect(screen.queryByText("Legacy Goal Summary")).toBeNull();
   });
 });

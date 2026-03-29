@@ -94,6 +94,10 @@ export interface FixedSopDoctorReport {
   status: "ready" | "degraded" | "blocked";
   summary: string;
   checks: FixedSopDoctorCheck[];
+  environment_id?: string | null;
+  session_mount_id?: string | null;
+  host_requirement: Record<string, unknown>;
+  host_preflight: Record<string, unknown>;
   routes: Record<string, string>;
 }
 
@@ -102,6 +106,8 @@ export interface FixedSopRunRequest {
   workflow_run_id?: string;
   owner_agent_id?: string;
   owner_scope?: string;
+  environment_id?: string;
+  session_mount_id?: string;
   dry_run?: boolean;
   metadata?: Record<string, unknown>;
 }
@@ -140,6 +146,10 @@ export interface FixedSopRunDetail {
   run: WorkflowRunRecord;
   binding?: FixedSopBindingRecord | null;
   template?: FixedSopTemplateRecord | null;
+  environment_id?: string | null;
+  session_mount_id?: string | null;
+  host_requirement: Record<string, unknown>;
+  host_preflight: Record<string, unknown>;
 }
 
 export const fixedSopsApi = {

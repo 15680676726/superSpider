@@ -18,7 +18,10 @@ import {
   runtimeCenterText,
 } from "../copy";
 import { localizeWorkbenchText } from "../localize";
-import type { AgentDetail } from "../useAgentWorkbench";
+import type {
+  AgentDetail,
+  EnvironmentItem,
+} from "../useAgentWorkbench";
 import {
   presentDesiredStateLabel,
   presentRuntimeStatusLabel,
@@ -29,6 +32,23 @@ import {
 } from "./shared";
 
 const { Text } = Typography;
+
+function pickRuntimeEnvironment(detail: AgentDetail): EnvironmentItem | null {
+  const runtimeEnvironmentId = detail.runtime?.current_environment_id || null;
+  if (
+    runtimeEnvironmentId &&
+    detail.workspace.current_environment?.id === runtimeEnvironmentId
+  ) {
+    return detail.workspace.current_environment;
+  }
+  if (runtimeEnvironmentId) {
+    const matched = detail.environments.find((item) => item.id === runtimeEnvironmentId);
+    if (matched) {
+      return matched;
+    }
+  }
+  return detail.workspace.current_environment || detail.environments[0] || null;
+}
 
 export function ActorRuntimePanel({
   detail,
@@ -50,6 +70,47 @@ export function ActorRuntimePanel({
   }
   const runtime = detail.runtime;
   const agentId = detail.agent.agent_id;
+  const runtimeEnvironment = pickRuntimeEnvironment(detail);
+  const hostContract = runtimeEnvironment?.host_contract ?? null;
+  const seatRuntime = runtimeEnvironment?.seat_runtime ?? null;
+  const coordination = runtimeEnvironment?.host_twin?.coordination ?? null;
+  const hostOwnership = runtimeEnvironment?.host_twin?.ownership ?? null;
+  const officeDocumentTwin =
+    runtimeEnvironment?.host_twin?.app_family_twins?.office_document ?? null;
+  const writerLockScope =
+    officeDocumentTwin?.writer_lock_scope ||
+    runtimeEnvironment?.workspace_graph?.active_lock_summary ||
+    runtimeEnvironment?.workspace_graph?.locks?.[0]?.writer_lock?.scope ||
+    null;
+  const handoffState =
+    hostContract?.handoff_state ||
+    runtimeEnvironment?.workspace_graph?.handoff_checkpoint?.state ||
+    null;
+  const handoffOwner =
+    hostContract?.handoff_owner_ref ||
+    hostOwnership?.handoff_owner_ref ||
+    runtimeEnvironment?.workspace_graph?.handoff_checkpoint?.owner_ref ||
+    null;
+  const seatOwner =
+    coordination?.seat_owner_ref ||
+    hostOwnership?.seat_owner_agent_id ||
+    seatRuntime?.lease_owner ||
+    null;
+  const workspaceOwner =
+    coordination?.workspace_owner_ref ||
+    runtimeEnvironment?.workspace_graph?.owner_agent_id ||
+    null;
+  const writerOwner =
+    coordination?.writer_owner_ref ||
+    runtimeEnvironment?.workspace_graph?.locks?.[0]?.writer_lock?.owner_agent_id ||
+    null;
+  const contentionSeverity = coordination?.contention_forecast?.severity || null;
+  const contentionReason = coordination?.contention_forecast?.reason || null;
+  const selectedSeatRef =
+    coordination?.selected_seat_ref || seatRuntime?.selected_seat_ref || null;
+  const seatSelectionPolicy =
+    coordination?.seat_selection_policy || seatRuntime?.seat_selection_policy || null;
+  const schedulerAction = coordination?.recommended_scheduler_action || null;
   const currentTaskId = runtime?.current_task_id || detail.agent.current_task_id || null;
   const pauseKey = `actor:pause:${agentId}`;
   const resumeKey = `actor:resume:${agentId}`;
@@ -130,6 +191,50 @@ export function ActorRuntimePanel({
           <Tag>{agentWorkbenchText.checkpointTag(runtime.last_checkpoint_id)}</Tag>
         ) : null}
       </Space>
+
+      {runtimeEnvironment &&
+      (seatOwner ||
+        handoffState ||
+        handoffOwner ||
+        writerOwner ||
+        contentionSeverity ||
+        schedulerAction ||
+        writerLockScope) ? (
+        <Card
+          className="baize-card"
+          size="small"
+          title="Host coordination"
+          style={{ marginBottom: 32 }}
+        >
+          <Space wrap style={{ marginBottom: 16 }}>
+            {selectedSeatRef ? <Tag>{`Seat ${selectedSeatRef}`}</Tag> : null}
+            {seatSelectionPolicy ? <Tag>{seatSelectionPolicy}</Tag> : null}
+            {handoffState ? <Tag color="orange">{handoffState}</Tag> : null}
+            {contentionSeverity ? (
+              <Tag color={contentionSeverity === "blocked" ? "red" : "gold"}>
+                {`Contention ${contentionSeverity}`}
+              </Tag>
+            ) : null}
+            {schedulerAction ? <Tag color="blue">{`Action ${schedulerAction}`}</Tag> : null}
+          </Space>
+          <Space direction="vertical" size={4}>
+            {seatOwner ? <Text>{`Seat owner: ${seatOwner}`}</Text> : null}
+            {workspaceOwner ? <Text>{`Workspace owner: ${workspaceOwner}`}</Text> : null}
+            {writerOwner ? <Text>{`Writer owner: ${writerOwner}`}</Text> : null}
+            {handoffState ? <Text>{`Handoff: ${handoffState}`}</Text> : null}
+            {handoffOwner ? <Text>{`Handoff owner: ${handoffOwner}`}</Text> : null}
+            {contentionSeverity ? (
+              <Text>
+                {`Contention: ${contentionSeverity}${
+                  contentionReason ? ` (${contentionReason})` : ""
+                }`}
+              </Text>
+            ) : null}
+            {schedulerAction ? <Text>{`Scheduler action: ${schedulerAction}`}</Text> : null}
+            {writerLockScope ? <Text>{`Writer lock: ${writerLockScope}`}</Text> : null}
+          </Space>
+        </Card>
+      ) : null}
 
       {detail.thread_bindings.length > 0 ? (
         <div style={{ marginBottom: 32 }}>

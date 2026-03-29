@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Col,
+  Descriptions,
   Empty,
   Form,
   Input,
@@ -21,6 +22,7 @@ import api from "../../api";
 import type {
   FixedSopBindingCreatePayload,
   FixedSopBindingDetail,
+  FixedSopDoctorReport,
   FixedSopRunDetail,
   FixedSopTemplateSummary,
 } from "../../api/modules/fixedSops";
@@ -62,6 +64,140 @@ function formatTimestamp(value?: string | null): string {
   return date.toLocaleString();
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function textValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function booleanValue(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function summarizeHostRequirement(requirement: unknown): string {
+  const requirementRecord = asRecord(requirement);
+  if (!requirementRecord) {
+    return "-";
+  }
+  return (
+    textValue(requirementRecord.app_family) ||
+    textValue(requirementRecord.surface_kind) ||
+    "-"
+  );
+}
+
+function summarizeHostRequirementDetails(requirement: unknown): string[] {
+  const requirementRecord = asRecord(requirement);
+  if (!requirementRecord) {
+    return [];
+  }
+  return [
+    textValue(requirementRecord.surface_kind),
+    booleanValue(requirementRecord.mutating) ? "mutating" : null,
+  ].filter((item): item is string => Boolean(item));
+}
+
+function getHostCoordination(preflight: unknown): Record<string, unknown> {
+  const preflightRecord = asRecord(preflight);
+  return asRecord(preflightRecord?.coordination) || {};
+}
+
+function getHostSchedulerAction(preflight: unknown): string {
+  return textValue(getHostCoordination(preflight).recommended_scheduler_action) || "-";
+}
+
+function getHostBlockerReason(preflight: unknown): string | null {
+  const coordination = getHostCoordination(preflight);
+  const contentionForecast = asRecord(coordination.contention_forecast);
+  return textValue(contentionForecast?.reason) || textValue(coordination.reason) || null;
+}
+
+function getHostContinuityStatus(preflight: unknown): string | null {
+  const preflightRecord = asRecord(preflight);
+  return textValue(asRecord(preflightRecord?.continuity)?.status);
+}
+
+function getBindingMetadata(detail?: FixedSopBindingDetail | null): Record<string, unknown> {
+  return asRecord(detail?.binding.metadata) || {};
+}
+
+function getBindingEnvironmentId(
+  detail: FixedSopBindingDetail,
+  runDetail?: FixedSopRunDetail,
+): string | undefined {
+  return (
+    textValue(runDetail?.environment_id) ||
+    textValue(getBindingMetadata(detail).environment_id) ||
+    undefined
+  );
+}
+
+function getBindingSessionMountId(
+  detail: FixedSopBindingDetail,
+  runDetail?: FixedSopRunDetail,
+): string | undefined {
+  return (
+    textValue(runDetail?.session_mount_id) ||
+    textValue(getBindingMetadata(detail).session_mount_id) ||
+    undefined
+  );
+}
+
+function getBindingHostRequirement(
+  detail: FixedSopBindingDetail,
+  runDetail?: FixedSopRunDetail,
+): Record<string, unknown> {
+  return (
+    asRecord(runDetail?.host_requirement) ||
+    asRecord(getBindingMetadata(detail).host_requirement) ||
+    {}
+  );
+}
+
+function renderHostSummaryLines(
+  environmentId?: string,
+  sessionMountId?: string,
+  hostRequirement?: Record<string, unknown>,
+  hostPreflight?: Record<string, unknown>,
+): JSX.Element[] {
+  const items: JSX.Element[] = [];
+  if (environmentId) {
+    items.push(
+      <Text key="environment" type="secondary">
+        Environment: {environmentId}
+      </Text>,
+    );
+  }
+  if (sessionMountId) {
+    items.push(
+      <Text key="session" type="secondary">
+        Session: {sessionMountId}
+      </Text>,
+    );
+  }
+  if (hostRequirement && Object.keys(hostRequirement).length > 0) {
+    items.push(
+      <Text key="requirement" type="secondary">
+        Requirement: {summarizeHostRequirement(hostRequirement)}
+      </Text>,
+    );
+  }
+  const schedulerAction = getHostSchedulerAction(hostPreflight);
+  if (schedulerAction !== "-") {
+    items.push(
+      <Text key="snapshot" type="secondary">
+        Host snapshot: {schedulerAction}
+      </Text>,
+    );
+  }
+  return items;
+}
+
 function describeBindingContext(
   detail: FixedSopBindingDetail,
   instances: Map<string, IndustryInstanceSummary>,
@@ -93,6 +229,10 @@ export default function FixedSopPanel({
   const [error, setError] = useState<string | null>(null);
   const [actionKey, setActionKey] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [doctorReports, setDoctorReports] = useState<Record<string, FixedSopDoctorReport>>(
+    {},
+  );
+  const [doctorBindingId, setDoctorBindingId] = useState<string | null>(null);
   const [createForm] = Form.useForm<CreateBindingValues>();
 
   const watchedIndustryInstanceId = Form.useWatch("industry_instance_id", createForm);
@@ -125,6 +265,14 @@ export default function FixedSopPanel({
       })),
     [selectedInstance],
   );
+  const doctorTarget = useMemo(
+    () =>
+      doctorBindingId
+        ? bindings.find((item) => item.binding.binding_id === doctorBindingId) || null
+        : null,
+    [bindings, doctorBindingId],
+  );
+  const doctorReport = doctorBindingId ? doctorReports[doctorBindingId] : undefined;
 
   useEffect(() => {
     if (selectedInstance?.owner_scope) {
@@ -171,6 +319,16 @@ export default function FixedSopPanel({
       setBindings(nextBindings);
       setInstances(nextInstances);
       setRunDetails(nextRunDetails);
+      setDoctorReports((current) => {
+        const next: Record<string, FixedSopDoctorReport> = {};
+        nextBindings.forEach((item) => {
+          const report = current[item.binding.binding_id];
+          if (report) {
+            next[item.binding.binding_id] = report;
+          }
+        });
+        return next;
+      });
       setError(null);
     } catch (loadError) {
       setError(
@@ -266,7 +424,11 @@ export default function FixedSopPanel({
     setActionKey(`doctor:${detail.binding.binding_id}`);
     try {
       const report = await api.runFixedSopDoctor(detail.binding.binding_id);
-      message.success(localizeRuntimeText(report.summary || "Doctor completed"));
+      setDoctorReports((current) => ({
+        ...current,
+        [detail.binding.binding_id]: report,
+      }));
+      setDoctorBindingId(detail.binding.binding_id);
       await onRuntimeChanged?.();
     } catch (doctorError) {
       message.error(
@@ -320,6 +482,15 @@ export default function FixedSopPanel({
       render: (_, detail) => {
         const runId = detail.binding.last_run_id || undefined;
         const run = runId ? runDetails[runId] : undefined;
+        const environmentId = getBindingEnvironmentId(detail, run);
+        const sessionMountId = getBindingSessionMountId(detail, run);
+        const hostRequirement = getBindingHostRequirement(detail, run);
+        const hostSummaryLines = renderHostSummaryLines(
+          environmentId,
+          sessionMountId,
+          hostRequirement,
+          asRecord(run?.host_preflight) || undefined,
+        );
         return (
           <Space direction="vertical" size={2}>
             <Text>{runId || "-"}</Text>
@@ -329,11 +500,15 @@ export default function FixedSopPanel({
                   {formatRuntimeStatus(run.run.status)}
                 </Tag>
                 <Text type="secondary">Evidence: {run.run.evidence_ids.length}</Text>
+                {hostSummaryLines}
               </>
             ) : (
-              <Text type="secondary">
-                Verified: {formatTimestamp(detail.binding.last_verified_at)}
-              </Text>
+              <>
+                <Text type="secondary">
+                  Verified: {formatTimestamp(detail.binding.last_verified_at)}
+                </Text>
+                {hostSummaryLines}
+              </>
             )}
           </Space>
         );
@@ -510,6 +685,113 @@ export default function FixedSopPanel({
           </Col>
         </Row>
       </Card>
+
+      <Modal
+        destroyOnHidden
+        open={doctorBindingId !== null}
+        title="Doctor report"
+        footer={[
+          <Button key="close" onClick={() => setDoctorBindingId(null)}>
+            Close
+          </Button>,
+        ]}
+        onCancel={() => setDoctorBindingId(null)}
+      >
+        {doctorTarget && doctorReport ? (
+          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            <Alert
+              showIcon
+              type={doctorReport.status === "blocked" ? "error" : "info"}
+              message={doctorReport.summary || "Doctor completed"}
+              description={
+                getHostBlockerReason(doctorReport.host_preflight) ? (
+                  <span>Blocker: {getHostBlockerReason(doctorReport.host_preflight)}</span>
+                ) : undefined
+              }
+            />
+            <Space direction="vertical" size={4} style={{ width: "100%" }}>
+              {renderHostSummaryLines(
+                textValue(doctorReport.environment_id) || undefined,
+                textValue(doctorReport.session_mount_id) || undefined,
+                asRecord(doctorReport.host_requirement) || undefined,
+                asRecord(doctorReport.host_preflight) || undefined,
+              )}
+              {getHostSchedulerAction(doctorReport.host_preflight) !== "-" ? (
+                <Text type="secondary">
+                  Scheduler action: {getHostSchedulerAction(doctorReport.host_preflight)}
+                </Text>
+              ) : null}
+              {getHostBlockerReason(doctorReport.host_preflight) ? (
+                <Text type="secondary">
+                  Blocker: {getHostBlockerReason(doctorReport.host_preflight)}
+                </Text>
+              ) : null}
+            </Space>
+            <Descriptions
+              bordered
+              size="small"
+              column={1}
+              items={[
+                {
+                  key: "binding",
+                  label: "Binding",
+                  children: doctorTarget.binding.binding_name,
+                },
+                {
+                  key: "environment",
+                  label: "Environment",
+                  children: doctorReport.environment_id || "-",
+                },
+                {
+                  key: "session",
+                  label: "Session",
+                  children: doctorReport.session_mount_id || "-",
+                },
+                {
+                  key: "requirement",
+                  label: "Requirement",
+                  children: summarizeHostRequirement(doctorReport.host_requirement),
+                },
+                {
+                  key: "scheduler-action",
+                  label: "Scheduler action",
+                  children: getHostSchedulerAction(doctorReport.host_preflight),
+                },
+                {
+                  key: "continuity",
+                  label: "Continuity",
+                  children: getHostContinuityStatus(doctorReport.host_preflight) || "-",
+                },
+              ]}
+            />
+            {summarizeHostRequirementDetails(doctorReport.host_requirement).length > 0 ? (
+              <Text type="secondary">
+                Requirement details:{" "}
+                {summarizeHostRequirementDetails(doctorReport.host_requirement).join(" / ")}
+              </Text>
+            ) : null}
+            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+              {doctorReport.checks.map((check) => (
+                <Alert
+                  key={check.key}
+                  showIcon
+                  type={
+                    check.status === "fail"
+                      ? "error"
+                      : check.status === "warn"
+                        ? "warning"
+                        : "info"
+                  }
+                  message={check.label}
+                  description={check.message}
+                />
+              ))}
+            </Space>
+          </Space>
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No doctor report" />
+        )}
+      </Modal>
 
       <Modal
         destroyOnHidden
