@@ -21,7 +21,7 @@ async def list_agents(
         industry_instance_id=industry_instance_id,
     )
     return [
-        _model_dump_or_dict(agent) or {"agent_id": getattr(agent, "agent_id", None)}
+        _public_agent_payload(agent) or {"agent_id": getattr(agent, "agent_id", None)}
         for agent in agents
     ]
 
@@ -39,10 +39,12 @@ async def get_agent(
     if callable(detail_getter):
         detail = detail_getter(agent_id)
         if detail is not None:
-            return detail
+            public_detail = _public_agent_detail_payload(detail)
+            if public_detail is not None:
+                return public_detail
     agent = service.get_agent(agent_id)
     if agent is not None:
-        return _model_dump_or_dict(agent) or {"agent_id": agent_id}
+        return _public_agent_payload(agent) or {"agent_id": agent_id}
     raise HTTPException(404, detail=f"Agent '{agent_id}' not found")
 
 
@@ -867,7 +869,7 @@ async def get_patch_detail(
             patch_risk_level,
         ),
         "routes": {
-            "goal": f"/api/runtime-center/goals/{patch.goal_id}" if patch.goal_id else None,
+            "goal": f"/api/goals/{patch.goal_id}/detail" if patch.goal_id else None,
             "task": f"/api/runtime-center/tasks/{patch.task_id}" if patch.task_id else None,
             "agent": f"/api/runtime-center/agents/{patch.agent_id}" if patch.agent_id else None,
         },
@@ -885,9 +887,30 @@ async def approve_runtime_center_patch(
     service = _get_learning_service(request)
     actor = payload.actor if payload is not None else "system"
     try:
-        patch = service.approve_patch(patch_id, approved_by=actor)
+        service.get_patch(patch_id)
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
+    result = await _dispatch_runtime_mutation(
+        request,
+        capability_ref="system:approve_patch",
+        title=f"Approve patch '{patch_id}'",
+        payload={
+            "actor": actor,
+            "owner_agent_id": "copaw-operator",
+            "patch_id": patch_id,
+        },
+    )
+    if not result.get("success"):
+        if result.get("phase") == "waiting-confirm":
+            patch = service.get_patch(patch_id)
+            return {
+                "approved": False,
+                "result": result,
+                "decision": _get_decision_payload(request, result.get("decision_request_id")),
+                "patch": patch.model_dump(mode="json"),
+            }
+        raise HTTPException(400, detail=result.get("error") or "Patch approval failed")
+    patch = service.get_patch(patch_id)
     return patch.model_dump(mode="json")
 
 
@@ -902,9 +925,30 @@ async def reject_runtime_center_patch(
     service = _get_learning_service(request)
     actor = payload.actor if payload is not None else "system"
     try:
-        patch = service.reject_patch(patch_id, rejected_by=actor)
+        service.get_patch(patch_id)
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
+    result = await _dispatch_runtime_mutation(
+        request,
+        capability_ref="system:reject_patch",
+        title=f"Reject patch '{patch_id}'",
+        payload={
+            "actor": actor,
+            "owner_agent_id": "copaw-operator",
+            "patch_id": patch_id,
+        },
+    )
+    if not result.get("success"):
+        if result.get("phase") == "waiting-confirm":
+            patch = service.get_patch(patch_id)
+            return {
+                "rejected": False,
+                "result": result,
+                "decision": _get_decision_payload(request, result.get("decision_request_id")),
+                "patch": patch.model_dump(mode="json"),
+            }
+        raise HTTPException(400, detail=result.get("error") or "Patch rejection failed")
+    patch = service.get_patch(patch_id)
     return patch.model_dump(mode="json")
 
 
@@ -919,11 +963,34 @@ async def apply_runtime_center_patch(
     service = _get_learning_service(request)
     actor = payload.actor if payload is not None else "system"
     try:
-        patch = service.apply_patch(patch_id, applied_by=actor)
+        patch = service.get_patch(patch_id)
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
-    except (RuntimeError, ValueError) as exc:
-        raise HTTPException(400, detail=str(exc)) from exc
+    patch_payload = _model_dump_or_dict(patch) or {}
+    if str(patch_payload.get("status") or "") != "approved":
+        raise HTTPException(400, detail="Only approved patches can be applied")
+    result = await _dispatch_runtime_mutation(
+        request,
+        capability_ref="system:apply_patch",
+        title=f"Apply patch '{patch_id}'",
+        payload={
+            "actor": actor,
+            "owner_agent_id": "copaw-operator",
+            "patch_id": patch_id,
+            "applied_by": actor,
+            "disable_main_brain_auto_adjudicate": True,
+        },
+    )
+    if not result.get("success"):
+        if result.get("phase") == "waiting-confirm":
+            return {
+                "applied": False,
+                "result": result,
+                "decision": _get_decision_payload(request, result.get("decision_request_id")),
+                "patch": patch_payload,
+            }
+        raise HTTPException(400, detail=result.get("error") or "Patch apply failed")
+    patch = service.get_patch(patch_id)
     return patch.model_dump(mode="json")
 
 
@@ -938,11 +1005,31 @@ async def rollback_runtime_center_patch(
     service = _get_learning_service(request)
     actor = payload.actor if payload is not None else "system"
     try:
-        patch = service.rollback_patch(patch_id, rolled_back_by=actor)
+        patch = service.get_patch(patch_id)
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(400, detail=str(exc)) from exc
+    result = await _dispatch_runtime_mutation(
+        request,
+        capability_ref="system:rollback_patch",
+        title=f"Rollback patch '{patch_id}'",
+        payload={
+            "actor": actor,
+            "owner_agent_id": "copaw-operator",
+            "patch_id": patch_id,
+            "rolled_back_by": actor,
+            "disable_main_brain_auto_adjudicate": True,
+        },
+    )
+    if not result.get("success"):
+        if result.get("phase") == "waiting-confirm":
+            return {
+                "rolled_back": False,
+                "result": result,
+                "decision": _get_decision_payload(request, result.get("decision_request_id")),
+                "patch": patch.model_dump(mode="json"),
+            }
+        raise HTTPException(400, detail=result.get("error") or "Patch rollback failed")
+    patch = service.get_patch(patch_id)
     return patch.model_dump(mode="json")
 
 
@@ -1002,7 +1089,7 @@ async def get_growth_detail(
                 else None
             ),
             "goal": (
-                f"/api/runtime-center/goals/{goal_id}"
+                f"/api/goals/{goal_id}/detail"
                 if goal_id is not None
                 else None
             ),

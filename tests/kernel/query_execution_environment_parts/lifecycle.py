@@ -422,7 +422,7 @@ def test_query_execution_service_uses_agent_profile_and_capability_graph(
     assert "Industry role id: execution-core" in agent.kwargs["prompt_appendix"]
     assert "Owner scope: industry-v1-ops-scope" in agent.kwargs["prompt_appendix"]
     assert "Session kind: industry-agent-chat" in agent.kwargs["prompt_appendix"]
-    assert "Current goal: Launch runtime center (goal-1)" in agent.kwargs["prompt_appendix"]
+    assert "Current focus: Launch runtime center (goal-1)" in agent.kwargs["prompt_appendix"]
     assert "# Industry Brief" in agent.kwargs["prompt_appendix"]
     assert "# Team Roster" in agent.kwargs["prompt_appendix"]
     assert "# Delegation Policy" in agent.kwargs["prompt_appendix"]
@@ -444,7 +444,7 @@ def test_query_execution_service_uses_agent_profile_and_capability_graph(
     assert "Delegation-first policy is active for this turn" in agent.kwargs["prompt_appendix"]
     assert "ops-researcher" in agent.kwargs["prompt_appendix"]
     assert "allowed_capabilities=" in agent.kwargs["prompt_appendix"]
-    assert "current_goal=Launch runtime center" in agent.kwargs["prompt_appendix"]
+    assert "current_focus=Launch runtime center" in agent.kwargs["prompt_appendix"]
     assert "Target customers: COO leaders, RevOps teams" in agent.kwargs["prompt_appendix"]
     assert "Constraints: No shell access" in agent.kwargs["prompt_appendix"]
     assert "# Retrieved Knowledge" in agent.kwargs["prompt_appendix"]
@@ -592,7 +592,7 @@ def test_query_execution_service_injects_execution_core_industry_identity(
     assert "Role: 白泽执行中枢" in prompt_appendix
     assert "Role summary: Operate as the execution brain for this ops team." in prompt_appendix
     assert "Mission: Turn the ops brief into the next coordinated move." in prompt_appendix
-    assert "Current goal: Launch runtime center (goal-1)" in prompt_appendix
+    assert "Current focus: Launch runtime center (goal-1)" in prompt_appendix
     assert "# Execution Core Identity" in prompt_appendix
     assert "# Team Operating Model" in prompt_appendix
     assert "Identity label: Ops Industry Team / 白泽执行中枢" in prompt_appendix
@@ -775,10 +775,11 @@ def test_query_execution_service_applies_chat_writeback_before_prompt_build(
         industry_service=industry_service,
         strategy_memory_service=strategy_memory_service,
     )
+    text = "改成先做现场验证再做规模复制"
 
     async def _run():
         async for _msg, _last in service.execute_stream(
-            msgs=[SimpleNamespace(get_text_content=lambda: "改成先做现场验证再做规模复制")],
+            msgs=[SimpleNamespace(get_text_content=lambda: text)],
             request=SimpleNamespace(
                 session_id="industry-chat:industry-v1-ops:execution-core",
                 user_id="default",
@@ -787,6 +788,9 @@ def test_query_execution_service_applies_chat_writeback_before_prompt_build(
                 industry_role_id="execution-core",
                 task_mode="team-orchestration",
                 session_kind="industry-agent-chat",
+                _copaw_main_brain_intake_contract=_make_attached_main_brain_intake_contract(
+                    text=text,
+                ),
             ),
             kernel_task_id="chat-writeback",
         ):
@@ -871,11 +875,6 @@ def test_query_execution_service_applies_model_approved_writeback_when_rules_mis
         "_resolve_chat_writeback_model_decision",
         _model_approved_writeback_async,
     )
-    monkeypatch.setattr(
-        main_brain_intake_module,
-        "_resolve_chat_writeback_model_decision_sync",
-        _model_approved_writeback_sync,
-    )
 
     service = KernelQueryExecutionService(
         session_backend=_FakeSessionBackend(),
@@ -884,12 +883,13 @@ def test_query_execution_service_applies_model_approved_writeback_when_rules_mis
         industry_service=industry_service,
         strategy_memory_service=strategy_memory_service,
     )
+    text = "persist this instruction as the team baseline default"
 
     async def _run():
         async for _msg, _last in service.execute_stream(
             msgs=[
                 SimpleNamespace(
-                    get_text_content=lambda: "persist this instruction as the team baseline default",
+                    get_text_content=lambda: text,
                 ),
             ],
             request=SimpleNamespace(
@@ -900,6 +900,10 @@ def test_query_execution_service_applies_model_approved_writeback_when_rules_mis
                 industry_role_id="execution-core",
                 task_mode="team-orchestration",
                 session_kind="industry-agent-chat",
+                _copaw_main_brain_intake_contract=_make_attached_main_brain_intake_contract(
+                    text=text,
+                    decision=_model_approved_writeback_sync(text=text),
+                ),
             ),
             kernel_task_id="chat-model-writeback",
         ):
@@ -949,14 +953,13 @@ def test_query_execution_service_runs_writeback_before_kickoff_when_both_apply(
         industry_service=industry_service,
         strategy_memory_service=strategy_memory_service,
     )
+    text = "confirm and continue, must include a specialist follow-up loop and review it weekly"
 
     async def _run():
         async for _msg, _last in service.execute_stream(
             msgs=[
                 SimpleNamespace(
-                    get_text_content=lambda: (
-                        "confirm and continue, must include a specialist follow-up loop and review it weekly"
-                    ),
+                    get_text_content=lambda: text,
                 ),
             ],
             request=SimpleNamespace(
@@ -967,6 +970,9 @@ def test_query_execution_service_runs_writeback_before_kickoff_when_both_apply(
                 industry_role_id="execution-core",
                 task_mode="team-orchestration",
                 session_kind="industry-agent-chat",
+                _copaw_main_brain_intake_contract=_make_attached_main_brain_intake_contract(
+                    text=text,
+                ),
             ),
             kernel_task_id="chat-writeback-kickoff",
         ):
@@ -1030,14 +1036,13 @@ def test_query_execution_service_does_not_kickoff_on_writeback_only_chat(
         industry_service=industry_service,
         strategy_memory_service=strategy_memory_service,
     )
+    text = "must include a specialist follow-up loop and review it weekly"
 
     async def _run():
         async for _msg, _last in service.execute_stream(
             msgs=[
                 SimpleNamespace(
-                    get_text_content=lambda: (
-                        "must include a specialist follow-up loop and review it weekly"
-                    ),
+                    get_text_content=lambda: text,
                 ),
             ],
             request=SimpleNamespace(
@@ -1048,6 +1053,9 @@ def test_query_execution_service_does_not_kickoff_on_writeback_only_chat(
                 industry_role_id="execution-core",
                 task_mode="team-orchestration",
                 session_kind="industry-agent-chat",
+                _copaw_main_brain_intake_contract=_make_attached_main_brain_intake_contract(
+                    text=text,
+                ),
             ),
             kernel_task_id="chat-writeback-only",
         ):
@@ -1410,10 +1418,11 @@ def test_query_execution_service_kicks_off_pending_industry_execution_from_chat(
         agent_profile_service=_FakeAgentProfileService(),
         industry_service=industry_service,
     )
+    text = "开始执行默认计划"
 
     async def _run():
         async for _msg, _last in service.execute_stream(
-            msgs=[SimpleNamespace(get_text_content=lambda: "开始执行默认计划")],
+            msgs=[SimpleNamespace(get_text_content=lambda: text)],
             request=SimpleNamespace(
                 session_id="industry-chat:industry-v1-ops:execution-core",
                 user_id="default",
@@ -1421,6 +1430,9 @@ def test_query_execution_service_kicks_off_pending_industry_execution_from_chat(
                 industry_instance_id="industry-v1-ops",
                 industry_role_id="execution-core",
                 session_kind="industry-agent-chat",
+                _copaw_main_brain_intake_contract=_make_attached_main_brain_intake_contract(
+                    text=text,
+                ),
             ),
             kernel_task_id="chat-kickoff",
         ):

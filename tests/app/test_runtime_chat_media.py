@@ -9,17 +9,29 @@ from agentscope_runtime.engine.schemas.agent_schemas import AgentRequest
 
 from copaw.app.runtime_chat_media import enrich_agent_request_with_media
 from copaw.evidence import EvidenceLedger
+from copaw.memory import (
+    DerivedMemoryIndexService,
+    MemoryRecallService,
+    MemoryReflectionService,
+    MemoryRetainService,
+)
 from copaw.media import MediaAnalysisRequest, MediaService, MediaSourceSpec
 from copaw.state import (
     IndustryInstanceRecord,
     OperatingLaneRecord,
     SQLiteStateStore,
 )
+from copaw.state.knowledge_service import StateKnowledgeService
 from copaw.state.main_brain_service import BacklogService, OperatingLaneService
 from copaw.state.repositories import (
     SqliteBacklogItemRepository,
     SqliteIndustryInstanceRepository,
+    SqliteKnowledgeChunkRepository,
     SqliteMediaAnalysisRepository,
+    SqliteMemoryEntityViewRepository,
+    SqliteMemoryFactIndexRepository,
+    SqliteMemoryOpinionViewRepository,
+    SqliteMemoryReflectionRunRepository,
     SqliteOperatingLaneRepository,
     SqliteStrategyMemoryRepository,
 )
@@ -32,19 +44,53 @@ def _build_media_runtime(tmp_path: Path) -> SimpleNamespace:
     media_repository = SqliteMediaAnalysisRepository(store)
     lane_repository = SqliteOperatingLaneRepository(store)
     backlog_repository = SqliteBacklogItemRepository(store)
+    knowledge_repository = SqliteKnowledgeChunkRepository(store)
+    fact_repository = SqliteMemoryFactIndexRepository(store)
+    entity_repository = SqliteMemoryEntityViewRepository(store)
+    opinion_repository = SqliteMemoryOpinionViewRepository(store)
+    reflection_repository = SqliteMemoryReflectionRunRepository(store)
     strategy_repository = SqliteStrategyMemoryRepository(store)
+    derived_index_service = DerivedMemoryIndexService(
+        fact_index_repository=fact_repository,
+        entity_view_repository=entity_repository,
+        opinion_view_repository=opinion_repository,
+        reflection_run_repository=reflection_repository,
+        knowledge_repository=knowledge_repository,
+        strategy_repository=strategy_repository,
+    )
+    reflection_service = MemoryReflectionService(
+        derived_index_service=derived_index_service,
+        entity_view_repository=entity_repository,
+        opinion_view_repository=opinion_repository,
+        reflection_run_repository=reflection_repository,
+    )
+    knowledge_service = StateKnowledgeService(
+        repository=knowledge_repository,
+        derived_index_service=derived_index_service,
+        reflection_service=reflection_service,
+    )
     strategy_memory_service = StateStrategyMemoryService(
         repository=strategy_repository,
+    )
+    memory_retain_service = MemoryRetainService(
+        knowledge_service=knowledge_service,
+        derived_index_service=derived_index_service,
+        reflection_service=reflection_service,
+    )
+    memory_recall_service = MemoryRecallService(
+        derived_index_service=derived_index_service,
     )
     backlog_service = BacklogService(repository=backlog_repository)
     lane_service = OperatingLaneService(repository=lane_repository)
     media_service = MediaService(
         repository=media_repository,
         evidence_ledger=EvidenceLedger(),
+        knowledge_service=knowledge_service,
         strategy_memory_service=strategy_memory_service,
         backlog_service=backlog_service,
         operating_lane_service=lane_service,
         industry_instance_repository=industry_repository,
+        memory_retain_service=memory_retain_service,
     )
 
     industry_repository.upsert_instance(
@@ -78,11 +124,18 @@ def _build_media_runtime(tmp_path: Path) -> SimpleNamespace:
         media_service=media_service,
         media_repository=media_repository,
         backlog_repository=backlog_repository,
+        knowledge_service=knowledge_service,
+        memory_recall_service=memory_recall_service,
         strategy_memory_service=strategy_memory_service,
     )
 
 
-def _build_industry_request(*, media_inputs: list[dict[str, object]] | None = None, media_analysis_ids: list[str] | None = None) -> AgentRequest:
+def _build_industry_request(
+    *,
+    media_inputs: list[dict[str, object]] | None = None,
+    media_analysis_ids: list[str] | None = None,
+    work_context_id: str = "ctx-media-ops",
+) -> AgentRequest:
     return AgentRequest.model_validate(
         {
             "id": "req-media-runtime",
@@ -93,6 +146,7 @@ def _build_industry_request(*, media_inputs: list[dict[str, object]] | None = No
             "thread_id": "industry-chat:industry-v1-media:execution-core",
             "control_thread_id": "industry-chat:industry-v1-media:execution-core",
             "session_kind": "industry-control-thread",
+            "work_context_id": work_context_id,
             "requested_actions": ["writeback_backlog"],
             "input": [
                 {
@@ -150,6 +204,7 @@ def test_enrich_agent_request_with_media_writes_back_industry_chat_attachments(
     analysis = runtime.media_repository.get_analysis(analysis_ids[0])
     assert analysis is not None
     assert analysis.industry_instance_id == "industry-v1-media"
+    assert analysis.work_context_id == "ctx-media-ops"
     assert analysis.backlog_writeback_status == "written"
     assert analysis.strategy_writeback_status == "written"
 
@@ -168,6 +223,24 @@ def test_enrich_agent_request_with_media_writes_back_industry_chat_attachments(
     )
     assert strategy is not None
     assert analysis.analysis_id in (strategy.metadata or {}).get("media_analysis_ids", [])
+
+    retained_chunks = runtime.knowledge_service.list_chunks(
+        document_id="memory:work_context:ctx-media-ops",
+        limit=None,
+    )
+    assert retained_chunks
+    assert retained_chunks[0].source_ref == f"media-analysis:{analysis.analysis_id}"
+
+    recall = runtime.memory_recall_service.recall(
+        query="关键结论",
+        role="execution-core",
+        work_context_id="ctx-media-ops",
+        include_related_scopes=False,
+    )
+    assert recall.hits
+    assert recall.hits[0].scope_type == "work_context"
+    assert recall.hits[0].scope_id == "ctx-media-ops"
+    assert recall.hits[0].source_ref == f"media-analysis:{analysis.analysis_id}"
 
 
 def test_enrich_agent_request_with_media_adopts_existing_analysis_into_industry_state(
@@ -214,6 +287,7 @@ def test_enrich_agent_request_with_media_adopts_existing_analysis_into_industry_
     analysis = runtime.media_repository.get_analysis(analysis_id)
     assert analysis is not None
     assert analysis.industry_instance_id == "industry-v1-media"
+    assert analysis.work_context_id == "ctx-media-ops"
     assert analysis.backlog_writeback_status == "written"
     assert analysis.strategy_writeback_status == "written"
 
@@ -226,3 +300,21 @@ def test_enrich_agent_request_with_media_adopts_existing_analysis_into_industry_
 
     request_data = updated_request.model_dump(mode="python")
     assert request_data["media_analysis_ids"] == [analysis_id]
+
+    retained_chunks = runtime.knowledge_service.list_chunks(
+        document_id="memory:work_context:ctx-media-ops",
+        limit=None,
+    )
+    assert retained_chunks
+    assert retained_chunks[0].source_ref == f"media-analysis:{analysis_id}"
+
+    recall = runtime.memory_recall_service.recall(
+        query="库存预警",
+        role="execution-core",
+        work_context_id="ctx-media-ops",
+        include_related_scopes=False,
+    )
+    assert recall.hits
+    assert recall.hits[0].scope_type == "work_context"
+    assert recall.hits[0].scope_id == "ctx-media-ops"
+    assert recall.hits[0].source_ref == f"media-analysis:{analysis_id}"

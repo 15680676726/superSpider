@@ -493,6 +493,25 @@ def _model_dump_or_dict(value: object | None) -> dict[str, object] | None:
     return None
 
 
+def _public_agent_payload(value: object | None) -> dict[str, object] | None:
+    payload = _model_dump_or_dict(value)
+    if payload is None:
+        return None
+    payload.pop("current_goal_id", None)
+    payload.pop("current_goal", None)
+    return payload
+
+
+def _public_agent_detail_payload(value: object | None) -> dict[str, object] | None:
+    payload = _model_dump_or_dict(value)
+    if payload is None:
+        return None
+    agent_payload = _public_agent_payload(payload.get("agent"))
+    if agent_payload is not None:
+        payload["agent"] = agent_payload
+    return payload
+
+
 def _runtime_non_empty_str(value: object | None) -> str | None:
     if not isinstance(value, str):
         return None
@@ -738,10 +757,10 @@ async def _assign_agent_capabilities(
     detail_getter = getattr(profile_service, "get_agent_detail", None)
     detail = detail_getter(agent_id) if callable(detail_getter) else None
     if isinstance(detail, dict) and isinstance(detail.get("agent"), dict):
-        agent_payload = detail["agent"]
+        agent_payload = _public_agent_payload(detail["agent"]) or {"agent_id": agent_id}
     else:
         refreshed = profile_service.get_agent(agent_id)
-        agent_payload = _model_dump_or_dict(refreshed) or {"agent_id": agent_id}
+        agent_payload = _public_agent_payload(refreshed) or {"agent_id": agent_id}
     if runtime_repository is not None:
         runtime = runtime_repository.get_runtime(agent_id)
     return {
@@ -811,10 +830,10 @@ async def _submit_governed_capabilities(
     detail_getter = getattr(profile_service, "get_agent_detail", None)
     detail = detail_getter(agent_id) if callable(detail_getter) else None
     if isinstance(detail, dict) and isinstance(detail.get("agent"), dict):
-        agent_payload = detail["agent"]
+        agent_payload = _public_agent_payload(detail["agent"]) or {"agent_id": agent_id}
     else:
         refreshed = profile_service.get_agent(agent_id)
-        agent_payload = _model_dump_or_dict(refreshed) or {"agent_id": agent_id}
+        agent_payload = _public_agent_payload(refreshed) or {"agent_id": agent_id}
     if runtime_repository is not None:
         runtime = runtime_repository.get_runtime(agent_id)
     return {

@@ -39,31 +39,33 @@ export function ChatRuntimeSidebar({
   const hasPendingApprovals = approvalButtonLabel !== "审批";
 
   return (
-    <div className={styles.chatTopBar}>
+    <div className={styles.topBar}>
       {/* 左侧：绑定信息 */}
-      <div className={styles.chatTopBarLeft}>
-        <div className={styles.chatTopBarBrand}>
-          <AppstoreOutlined className={styles.chatTopBarBrandIcon} />
-          <span className={styles.chatTopBarBrandLabel}>主脑对话</span>
+      <div className={styles.topBarLeft}>
+        <div className={styles.topBarLogo}>
+          <AppstoreOutlined className={styles.topBarLogoIcon} />
+          <span className={styles.topBarLogoText}>主脑对话</span>
         </div>
         {bindingLabel ? (
-          <div className={styles.chatTopBarBinding}>
-            <span className={styles.chatTopBarBindingDot} />
-            <span className={styles.chatTopBarBindingText}>{bindingLabel}</span>
+          <div className={styles.topBarChip}>
+            <span className={styles.topBarChipDot} />
+            <span className={styles.topBarChipText} title={bindingLabel}>
+              {bindingLabel}
+            </span>
           </div>
         ) : null}
       </div>
 
       {/* 中间：运行状态 */}
-      <div className={styles.chatTopBarCenter}>
+      <div className={styles.topBarCenter}>
         <Tooltip title={runtimeModelHint}>
-          <div className={styles.chatTopBarModel}>
-            <InfoCircleOutlined className={styles.chatTopBarModelIcon} />
-            <span className={styles.chatTopBarModelLabel}>
+          <div className={styles.topBarModel}>
+            <InfoCircleOutlined />
+            <span className={styles.topBarModelText} title={runtimeModelLabel}>
               {runtimeModelLabel}
             </span>
             {runtimeFallbackLabel ? (
-              <Tag bordered={false} className={styles.chatTopBarFallbackTag}>
+              <Tag bordered={false} className={styles.topBarModelBadge}>
                 {runtimeFallbackLabel}
               </Tag>
             ) : null}
@@ -72,10 +74,10 @@ export function ChatRuntimeSidebar({
       </div>
 
       {/* 右侧：状态 + 审批 */}
-      <div className={styles.chatTopBarRight}>
+      <div className={styles.topBarRight}>
         {runtimeWaitState ? (
           <Tooltip title={runtimeWaitDescription || undefined}>
-            <div className={`${styles.chatTopBarStatus} ${styles.chatTopBarStatusWaiting}`}>
+            <div className={`${styles.topBarStatus} ${styles.topBarStatusBusy}`}>
               <LoadingOutlined spin />
               <span>{`等待响应 ${runtimeWaitSeconds}s`}</span>
             </div>
@@ -83,10 +85,10 @@ export function ChatRuntimeSidebar({
         ) : runtimeHealthNotice ? (
           <Tooltip title={runtimeHealthNotice.description}>
             <div
-              className={`${styles.chatTopBarStatus} ${
+              className={`${styles.topBarStatus} ${
                 runtimeHealthNotice.type === "error"
-                  ? styles.chatTopBarStatusError
-                  : styles.chatTopBarStatusWarning
+                  ? styles.topBarStatusError
+                  : styles.topBarStatusWarn
               }`}
             >
               <WarningOutlined />
@@ -94,7 +96,7 @@ export function ChatRuntimeSidebar({
             </div>
           </Tooltip>
         ) : (
-          <div className={`${styles.chatTopBarStatus} ${styles.chatTopBarStatusIdle}`}>
+          <div className={`${styles.topBarStatus} ${styles.topBarStatusOk}`}>
             <CheckCircleOutlined />
             <span>就绪</span>
           </div>
@@ -103,7 +105,7 @@ export function ChatRuntimeSidebar({
         {hasPendingApprovals ? (
           <Button
             size="small"
-            className={styles.chatTopBarApprovalBtn}
+            className={styles.topBarApprovalBtn}
             onClick={onOpenGovernanceApprovals}
           >
             {approvalButtonLabel}

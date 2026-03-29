@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from copaw.industry.report_synthesis import synthesize_reports
 from copaw.state import AgentReportRecord
@@ -20,6 +21,7 @@ def _report(
     recommendation: str | None = None,
     needs_followup: bool = False,
     followup_reason: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> AgentReportRecord:
     return AgentReportRecord(
         industry_instance_id="industry-1",
@@ -37,6 +39,7 @@ def _report(
         recommendation=recommendation,
         needs_followup=needs_followup,
         followup_reason=followup_reason,
+        metadata=metadata or {},
     )
 
 
@@ -197,3 +200,39 @@ def test_synthesize_reports_exposes_explicit_replan_reasons() -> None:
         "Reports disagree on assignment-shared.",
         "Warehouse issue still blocked requires main-brain follow-up.",
     ]
+
+
+def test_synthesize_reports_collapses_duplicate_followups_for_the_same_claim() -> None:
+    reports = [
+        _report(
+            headline="Warehouse variance review A",
+            owner_agent_id="agent-a",
+            lane_id="lane-ops",
+            findings=["Warehouse variance still lacks a validated cause."],
+            needs_followup=True,
+            followup_reason="Warehouse variance still lacks a validated cause.",
+            metadata={"claim_key": "warehouse-variance"},
+        ),
+        _report(
+            headline="Warehouse variance review B",
+            owner_agent_id="agent-b",
+            lane_id="lane-ops",
+            findings=["Warehouse variance still lacks a validated cause."],
+            needs_followup=True,
+            followup_reason="Warehouse variance still lacks a validated cause.",
+            metadata={"claim_key": "warehouse-variance"},
+        ),
+    ]
+
+    synthesis = synthesize_reports(reports)
+
+    assert len(synthesis["holes"]) == 1
+    assert synthesis["holes"][0]["kind"] == "followup-needed"
+    assert len(synthesis["recommended_actions"]) == 1
+    assert synthesis["recommended_actions"][0]["metadata"]["source_report_ids"] == [
+        reports[0].id,
+    ]
+    assert synthesis["replan_reasons"] == [
+        "Warehouse variance still lacks a validated cause.",
+    ]
+    assert synthesis["needs_replan"] is True

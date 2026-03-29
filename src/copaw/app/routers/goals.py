@@ -9,6 +9,7 @@ from ...goals import GoalService
 from ...state import GoalRecord
 
 router = APIRouter(prefix="/goals", tags=["goals"])
+public_router = APIRouter(prefix="/goals", tags=["goals"])
 
 
 class GoalCreateRequest(BaseModel):
@@ -70,16 +71,8 @@ async def create_goal(
     )
 
 
-@router.get("/{goal_id}", response_model=GoalRecord)
-async def get_goal(request: Request, goal_id: str) -> GoalRecord:
-    service = _get_goal_service(request)
-    goal = service.get_goal(goal_id)
-    if goal is None:
-        raise HTTPException(404, detail=f"Goal '{goal_id}' not found")
-    return goal
-
-
 @router.get("/{goal_id}/detail", response_model=dict[str, object])
+@public_router.get("/{goal_id}/detail", response_model=dict[str, object])
 async def get_goal_detail(request: Request, goal_id: str) -> dict[str, object]:
     service = _get_goal_service(request)
     detail = service.get_goal_detail(goal_id)
@@ -128,4 +121,3 @@ async def compile_goal(
         return service.compile_goal(goal_id, context=payload.context)
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
-

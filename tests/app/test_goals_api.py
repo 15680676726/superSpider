@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -164,6 +165,9 @@ def test_goals_crud_compile_and_dispatch(tmp_path) -> None:
     assert updated.status_code == 200
     assert updated.json()["status"] == "active"
 
+    goal_read = client.get(f"/goals/{goal_id}")
+    assert goal_read.status_code == 405
+
     compiled = client.post(
         f"/goals/{goal_id}/compile",
         json={"context": {"source": "test", "owner_agent_id": "ops-agent"}},
@@ -294,11 +298,10 @@ def test_dispatch_goal_preserves_override_owner_when_request_owner_is_missing(
     )
 
     payload = asyncio.run(
-        app.state.goal_service.dispatch_goal(
+        app.state.goal_service.compile_goal_dispatch(
             goal_id,
             context={},
             owner_agent_id=None,
-            execute=False,
             activate=True,
         )
     )
@@ -329,25 +332,25 @@ def test_dispatch_goal_can_defer_background_execution_until_released(
     )
 
     async def _exercise() -> tuple[dict[str, object], list[str], list[str]]:
-        background_task_ids: list[str] = []
-        payload = await app.state.goal_service.dispatch_goal(
+        payload = await app.state.goal_service.dispatch_goal_deferred_background(
             goal.id,
             context={"owner_agent_id": "ops-agent"},
             owner_agent_id="ops-agent",
-            execute=True,
-            execute_background=True,
             activate=True,
-            schedule_background_execution=False,
-            background_task_ids_sink=background_task_ids,
         )
         await asyncio.sleep(0.35)
+        background_task_ids = [
+            str(item["task_id"])
+            for item in payload["dispatch_results"]
+            if item.get("scheduled_execution") is True and item.get("task_id")
+        ]
         statuses_before_release = [
             app.state.task_repository.get_task(task_id).status
             for task_id in background_task_ids
         ]
-        app.state.goal_service.schedule_background_goal_execution(
+        app.state.goal_service.release_deferred_goal_dispatch(
             goal_id=goal.id,
-            task_ids=background_task_ids,
+            dispatch_results=payload["dispatch_results"],
         )
         statuses_after_release = list(statuses_before_release)
         for _ in range(30):
@@ -366,6 +369,27 @@ def test_dispatch_goal_can_defer_background_execution_until_released(
     assert all(item["scheduled_execution"] is True for item in payload["dispatch_results"])
     assert all(status == "created" for status in statuses_before_release)
     assert all(status == "completed" for status in statuses_after_release)
+
+
+def test_goal_service_uses_explicit_leaf_dispatch_entrypoints(tmp_path) -> None:
+    app = _build_goal_app(tmp_path)
+    compile_signature = inspect.signature(app.state.goal_service.compile_goal_dispatch)
+    execute_signature = inspect.signature(app.state.goal_service.dispatch_goal_execute_now)
+    background_signature = inspect.signature(app.state.goal_service.dispatch_goal_background)
+    deferred_signature = inspect.signature(
+        app.state.goal_service.dispatch_goal_deferred_background,
+    )
+
+    assert hasattr(app.state.goal_service, "dispatch_goal") is False
+    assert "background_task_ids_sink" not in compile_signature.parameters
+    assert "schedule_background_execution" not in compile_signature.parameters
+    assert "execute_background" not in compile_signature.parameters
+    assert "execute" not in compile_signature.parameters
+    assert "activate" in compile_signature.parameters
+    assert "activate" in execute_signature.parameters
+    assert "activate" in background_signature.parameters
+    assert "activate" in deferred_signature.parameters
+    assert hasattr(app.state.goal_service, "schedule_background_goal_execution") is False
 
 
 def test_dispatch_goal_only_materializes_the_current_planned_step(
@@ -391,11 +415,10 @@ def test_dispatch_goal_only_materializes_the_current_planned_step(
     )
 
     async def _exercise() -> dict[str, object]:
-        return await app.state.goal_service.dispatch_goal(
+        return await app.state.goal_service.compile_goal_dispatch(
             goal.id,
             context={"owner_agent_id": "ops-agent"},
             owner_agent_id="ops-agent",
-            execute=False,
             activate=True,
         )
 
@@ -404,6 +427,8 @@ def test_dispatch_goal_only_materializes_the_current_planned_step(
     compiled_tasks = payload["compiled_tasks"]
     assert len(compiled_tasks) == 1
     assert compiled_tasks[0]["title"].startswith("Goal step 1:")
+    assert "compiled_specs" not in payload
+    assert "trigger" not in payload
 
     task_records = app.state.task_repository.list_tasks(goal_id=goal.id)
     assert len(task_records) == 1
@@ -413,7 +438,7 @@ def test_dispatch_goal_only_materializes_the_current_planned_step(
     assert metadata["payload"]["compiler"]["plan_step_total"] == 3
 
 
-def test_dispatch_active_goals_advances_to_the_next_planned_step_after_completion(
+def test_dispatch_goal_advances_to_the_next_planned_step_after_completion(
     tmp_path,
 ) -> None:
     app = _build_goal_app(tmp_path)
@@ -436,11 +461,10 @@ def test_dispatch_active_goals_advances_to_the_next_planned_step_after_completio
     )
 
     async def _dispatch_first_step() -> str:
-        await app.state.goal_service.dispatch_goal(
+        await app.state.goal_service.compile_goal_dispatch(
             goal.id,
             context={"owner_agent_id": "ops-agent"},
             owner_agent_id="ops-agent",
-            execute=False,
             activate=True,
         )
         first_task = app.state.task_repository.list_tasks(goal_id=goal.id)[0]
@@ -466,9 +490,16 @@ def test_dispatch_active_goals_advances_to_the_next_planned_step_after_completio
     assert updated_goal is not None
     assert updated_goal.status == "active"
 
-    payload = asyncio.run(app.state.goal_service.dispatch_active_goals(execute=True))
+    payload = asyncio.run(
+        app.state.goal_service.dispatch_goal_execute_now(
+            goal.id,
+            context={"owner_agent_id": "ops-agent"},
+            owner_agent_id="ops-agent",
+            activate=False,
+        )
+    )
 
-    assert len(payload) == 1
+    assert len(payload["dispatch_results"]) == 1
     task_records = app.state.task_repository.list_tasks(goal_id=goal.id)
     assert len(task_records) == 2
     second_task = max(task_records, key=lambda item: item.updated_at)
@@ -478,46 +509,57 @@ def test_dispatch_active_goals_advances_to_the_next_planned_step_after_completio
     assert metadata["payload"]["compiler"]["plan_step_total"] == 3
 
 
-def test_dispatch_active_goals_skips_goals_with_inflight_tasks(tmp_path) -> None:
+def test_goal_service_no_longer_exposes_dispatch_active_goals(tmp_path) -> None:
+    app = _build_goal_app(tmp_path)
+    assert hasattr(app.state.goal_service, "dispatch_active_goals") is False
+
+
+def test_goal_detail_does_not_reconcile_goal_status(tmp_path) -> None:
     app = _build_goal_app(tmp_path)
     client = TestClient(app)
 
     created = client.post(
         "/goals",
         json={
-            "title": "In-flight goal",
-            "summary": "This active goal already has a running kernel task.",
+            "title": "Keep goal detail read-only",
+            "summary": "Detail reads should not mutate goal status.",
             "status": "active",
-            "priority": 1,
+            "priority": 2,
         },
     )
     assert created.status_code == 200
     goal_id = created.json()["id"]
 
-    app.state.task_repository.upsert_task(
-        TaskRecord(
-            id="goal-inflight-task",
-            goal_id=goal_id,
-            title="Existing in-flight task",
-            summary="Still executing.",
-            task_type="system:dispatch_query",
-            status="running",
-            owner_agent_id="ops-agent",
-        ),
+    completed_task = TaskRecord(
+        id="task-goal-detail-read-only",
+        goal_id=goal_id,
+        title="Completed task",
+        summary="Already finished before the detail read.",
+        task_type="goal-step",
+        status="completed",
+        owner_agent_id="copaw-agent-runner",
+        current_risk_level="guarded",
     )
+    app.state.task_repository.upsert_task(completed_task)
     app.state.task_runtime_repository.upsert_runtime(
         TaskRuntimeRecord(
-            task_id="goal-inflight-task",
-            runtime_status="active",
-            current_phase="executing",
-            last_owner_agent_id="ops-agent",
+            task_id=completed_task.id,
+            runtime_status="terminated",
+            current_phase="completed",
+            risk_level="guarded",
+            last_owner_agent_id="copaw-agent-runner",
         ),
     )
 
-    payload = asyncio.run(app.state.goal_service.dispatch_active_goals(execute=True))
+    detail = client.get(f"/goals/{goal_id}/detail")
+    assert detail.status_code == 200
+    assert detail.json()["goal"]["status"] == "active"
+    assert app.state.goal_service.get_goal(goal_id).status == "active"
 
-    assert payload == []
-    assert len(app.state.task_repository.list_tasks(goal_id=goal_id)) == 1
+    reconciled = app.state.goal_service.reconcile_goal_status(goal_id)
+    assert reconciled is not None
+    assert reconciled.status == "completed"
+    assert app.state.goal_service.get_goal(goal_id).status == "completed"
 
 
 def test_goal_detail_links_tasks_agents_patches_and_growth(tmp_path) -> None:

@@ -113,6 +113,21 @@ def test_resolve_gap_builds_auto_temporary_seat_for_low_risk_local_work() -> Non
     assert "tool:write_file" in resolution.role.allowed_capabilities
 
 
+def test_resolve_gap_normalizes_requested_surfaces_for_local_seat_requests() -> None:
+    resolution = resolve_chat_writeback_seat_gap(
+        message_text="Organize the desktop files into the project folder.",
+        requested_surfaces=["FILE", "desktop", "file", " desktop "],
+        matched_role=None,
+        team=_team(),
+    )
+
+    assert resolution.kind == "temporary-seat-auto"
+    assert resolution.requested_surfaces == ["file", "desktop"]
+    assert resolution.metadata["requested_surfaces"] == ["file", "desktop"]
+    assert resolution.role is not None
+    assert resolution.role.employment_mode == "temporary"
+
+
 def test_resolve_gap_requires_governance_for_long_term_browser_seat() -> None:
     resolution = resolve_chat_writeback_seat_gap(
         message_text="以后长期负责平台投放并直接下单执行",
@@ -126,3 +141,21 @@ def test_resolve_gap_requires_governance_for_long_term_browser_seat() -> None:
     assert resolution.role is not None
     assert resolution.role.employment_mode == "career"
     assert resolution.target_role_id == resolution.role.role_id
+
+
+def test_resolve_gap_requires_governed_temporary_seat_for_browser_leaf_work() -> None:
+    resolution = resolve_chat_writeback_seat_gap(
+        message_text="Please publish the customer notice in the browser and send the receipt.",
+        requested_surfaces=["browser"],
+        matched_role=None,
+        team=_team(),
+    )
+
+    assert resolution.kind == "temporary-seat-proposal"
+    assert resolution.requires_confirmation is True
+    assert resolution.requested_surfaces == ["browser"]
+    assert resolution.metadata["requested_surfaces"] == ["browser"]
+    assert resolution.role is not None
+    assert resolution.role.employment_mode == "temporary"
+    assert resolution.role.activation_mode == "on-demand"
+    assert resolution.role.risk_level == "guarded"

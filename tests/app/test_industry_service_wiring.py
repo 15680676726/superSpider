@@ -49,14 +49,12 @@ class _DispatchGoalService(_DummyGoalService):
     def __init__(self) -> None:
         self.dispatched: list[dict[str, object]] = []
 
-    async def dispatch_goal(
+    async def compile_goal_dispatch(
         self,
         goal_id: str,
         *,
         context,
         owner_agent_id=None,
-        execute=True,
-        execute_background=False,
         activate=True,
     ):
         self.dispatched.append(
@@ -64,8 +62,7 @@ class _DispatchGoalService(_DummyGoalService):
                 "goal_id": goal_id,
                 "context": context,
                 "owner_agent_id": owner_agent_id,
-                "execute": execute,
-                "execute_background": execute_background,
+                "execute": False,
                 "activate": activate,
             },
         )
@@ -73,6 +70,55 @@ class _DispatchGoalService(_DummyGoalService):
             "goal_id": goal_id,
             "context": context,
         }
+
+    async def dispatch_goal_execute_now(
+        self,
+        goal_id: str,
+        *,
+        context,
+        owner_agent_id=None,
+        activate=True,
+    ):
+        self.dispatched.append(
+            {
+                "goal_id": goal_id,
+                "context": context,
+                "owner_agent_id": owner_agent_id,
+                "execute": True,
+                "activate": activate,
+            },
+        )
+        return {
+            "goal_id": goal_id,
+            "context": context,
+        }
+
+    async def dispatch_goal_background(
+        self,
+        goal_id: str,
+        *,
+        context,
+        owner_agent_id=None,
+        activate=True,
+    ):
+        self.dispatched.append(
+            {
+                "goal_id": goal_id,
+                "context": context,
+                "owner_agent_id": owner_agent_id,
+                "execute": True,
+                "background": True,
+                "activate": activate,
+            },
+        )
+        return {
+            "goal_id": goal_id,
+            "context": context,
+            "dispatch_results": [{"task_id": "task-1", "scheduled_execution": True}],
+        }
+
+    def release_deferred_goal_dispatch(self, *, goal_id: str, dispatch_results):
+        self.released = {"goal_id": goal_id, "dispatch_results": list(dispatch_results or [])}
 
 
 @dataclass

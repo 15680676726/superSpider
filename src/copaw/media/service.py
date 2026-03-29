@@ -444,6 +444,7 @@ class MediaService:
                     source=source,
                     industry_instance_id=request.industry_instance_id,
                     thread_id=request.thread_id,
+                    work_context_id=request.work_context_id,
                     entry_point=request.entry_point,
                     purpose=request.purpose,
                     writeback=request.writeback,
@@ -457,6 +458,7 @@ class MediaService:
                         analysis_id=f"media-error:{source.source_id}",
                         industry_instance_id=request.industry_instance_id,
                         thread_id=request.thread_id,
+                        work_context_id=request.work_context_id,
                         entry_point=request.entry_point,
                         purpose=request.purpose,
                         source_kind=source.source_kind,
@@ -541,6 +543,7 @@ class MediaService:
         industry_instance_id: str,
         analysis_ids: Sequence[str],
         thread_id: str | None = None,
+        work_context_id: str | None = None,
     ) -> list[MediaAnalysisSummary]:
         adopted: list[MediaAnalysisSummary] = []
         for analysis_id in analysis_ids:
@@ -551,6 +554,7 @@ class MediaService:
                 update={
                     "industry_instance_id": industry_instance_id,
                     "thread_id": thread_id or record.thread_id,
+                    "work_context_id": work_context_id or record.work_context_id,
                     "updated_at": _utc_now(),
                 }
             )
@@ -568,6 +572,7 @@ class MediaService:
         source: MediaSourceSpec,
         industry_instance_id: str | None,
         thread_id: str | None,
+        work_context_id: str | None,
         entry_point: str,
         purpose: str,
         writeback: bool,
@@ -607,6 +612,7 @@ class MediaService:
                     update={
                         "industry_instance_id": industry_instance_id,
                         "thread_id": thread_id or existing_match.thread_id,
+                        "work_context_id": work_context_id or existing_match.work_context_id,
                         "updated_at": _utc_now(),
                     }
                 )
@@ -664,6 +670,7 @@ class MediaService:
             analysis_id=analysis_id,
             industry_instance_id=industry_instance_id,
             thread_id=thread_id,
+            work_context_id=work_context_id,
             entry_point=entry_point,
             purpose=purpose,
             source_kind=prepared.source_kind,
@@ -1047,6 +1054,7 @@ class MediaService:
             try:
                 retain(
                     industry_instance_id=industry_instance_id,
+                    work_context_id=record.work_context_id,
                     title=record.title or record.analysis_id,
                     content=self.build_prompt_context([record.analysis_id], limit_chars=4000),
                     source_ref=source_ref,
@@ -1355,6 +1363,7 @@ class MediaService:
             analysis_id=record.analysis_id,
             industry_instance_id=record.industry_instance_id,
             thread_id=record.thread_id,
+            work_context_id=record.work_context_id,
             entry_point=record.entry_point,
             purpose=record.purpose,
             source_kind=record.source_kind,

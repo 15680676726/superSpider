@@ -26,14 +26,14 @@ class SystemTeamCapabilityFacade:
     ) -> None:
         self._get_capability = get_capability_fn
         self._resolve_agent_profile = resolve_agent_profile_fn
-        self._goal_service = goal_service
+        _ = goal_service
         self._agent_profile_service = agent_profile_service
         self._agent_profile_override_repository = agent_profile_override_repository
         self._delegation_service = delegation_service
         self._industry_service = industry_service
 
     def set_goal_service(self, goal_service: object | None) -> None:
-        self._goal_service = goal_service
+        _ = goal_service
 
     def set_agent_profile_service(self, agent_profile_service: object | None) -> None:
         self._agent_profile_service = agent_profile_service
@@ -628,52 +628,3 @@ class SystemTeamCapabilityFacade:
             "result": result,
         }
 
-    async def handle_goal_dispatch(
-        self,
-        capability_id: str,
-        resolved_payload: dict[str, object],
-    ) -> dict[str, object]:
-        if self._goal_service is None:
-            return {"success": False, "error": "Goal service is not available"}
-
-        owner_agent_id = (
-            str(resolved_payload.get("owner_agent_id")).strip()
-            if isinstance(resolved_payload.get("owner_agent_id"), str)
-            and str(resolved_payload.get("owner_agent_id")).strip()
-            else None
-        )
-        execute = bool(resolved_payload.get("execute", False))
-        activate = bool(resolved_payload.get("activate", True))
-        context = resolved_payload.get("context") or {}
-
-        if capability_id == "system:dispatch_goal":
-            goal_id = str(resolved_payload.get("goal_id") or "")
-            if not goal_id:
-                return {"success": False, "error": "goal_id is required"}
-            result = await self._goal_service.dispatch_goal(
-                goal_id,
-                context=context if isinstance(context, dict) else {},
-                owner_agent_id=owner_agent_id,
-                execute=execute,
-                activate=activate,
-            )
-            return {
-                "success": True,
-                "summary": f"Dispatched goal '{goal_id}'.",
-                "result": result,
-            }
-
-        limit = resolved_payload.get("limit")
-        if isinstance(limit, int) and limit <= 0:
-            limit = None
-        results = await self._goal_service.dispatch_active_goals(
-            owner_agent_id=owner_agent_id,
-            execute=execute,
-            limit=limit,
-            context=context if isinstance(context, dict) else {},
-        )
-        return {
-            "success": True,
-            "summary": f"Dispatched {len(results)} active goal(s).",
-            "results": results,
-        }

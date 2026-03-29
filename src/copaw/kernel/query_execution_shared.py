@@ -70,7 +70,6 @@ from .query_execution_writeback import (
     _is_explicit_risky_execution_confirmation,
     _normalize_chat_writeback_targets,
     _resolve_chat_writeback_model_decision,
-    _resolve_chat_writeback_model_decision_sync,
     _resolve_team_role_gap_action_request,
     _should_attempt_formal_chat_writeback,
     _should_surface_team_role_gap_notice,
@@ -160,6 +159,7 @@ _REQUESTED_CHAT_ACTIONS = frozenset(
         "show_team_role_gap",
         "approve_team_role_gap",
         "reject_team_role_gap",
+        "submit_human_assist",
         "writeback_strategy",
         "writeback_backlog",
         "writeback_schedule",
@@ -489,6 +489,9 @@ def _normalize_team_role_gap_action(value: Any) -> str | None:
 
 
 def _extract_message_text(msg: Any) -> str | None:
+    if isinstance(msg, str):
+        return msg.strip() or None
+
     get_text_content = getattr(msg, "get_text_content", None)
     if callable(get_text_content):
         try:
@@ -850,7 +853,6 @@ def _prompt_capability_bucket(
     if source_kind == "system":
         if capability_id in {
             "system:dispatch_query",
-            "system:dispatch_goal",
             "system:delegate_task",
         }:
             return "system_dispatch"

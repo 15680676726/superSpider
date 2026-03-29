@@ -531,6 +531,7 @@ class BaseMediaAnalysisRepository(ABC):
         *,
         industry_instance_id: str | None = None,
         thread_id: str | None = None,
+        work_context_id: str | None = None,
         entry_point: str | None = None,
         status: str | None = None,
         limit: int | None = None,

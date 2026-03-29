@@ -81,7 +81,9 @@ export function buildBoundAgentChatBinding(params: {
   agentId: string;
   agentName?: string | null;
   roleName?: string | null;
-  currentGoal?: string | null;
+  currentFocusKind?: string | null;
+  currentFocusId?: string | null;
+  currentFocus?: string | null;
   industryInstanceId?: string | null;
   industryLabel?: string | null;
   industryRoleId?: string | null;
@@ -143,7 +145,9 @@ export function buildBoundAgentChatBinding(params: {
           ? industryRoleId
           : undefined,
       owner_scope: params.ownerScope || preferredBinding?.owner_scope || undefined,
-      current_goal: params.currentGoal || undefined,
+      current_focus_kind: params.currentFocusKind || undefined,
+      current_focus_id: params.currentFocusId || undefined,
+      current_focus: params.currentFocus || undefined,
       thread_binding_kind: preferredBinding?.binding_kind || undefined,
       control_thread_id: controlThreadId,
       work_context_id: preferredBinding?.work_context_id || undefined,
@@ -205,7 +209,9 @@ export function buildAgentChatBinding(
     agentId: agent.agent_id,
     agentName: agent.name,
     roleName: agent.role_name || undefined,
-    currentGoal: agent.current_goal || undefined,
+    currentFocusKind: agent.current_focus_kind || undefined,
+    currentFocusId: agent.current_focus_id || undefined,
+    currentFocus: agent.current_focus || undefined,
     industryInstanceId: agent.industry_instance_id,
     industryRoleId: agent.industry_role_id,
     threadId: resolveIndustryControlThreadId(agent.industry_instance_id),

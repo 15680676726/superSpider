@@ -612,6 +612,9 @@ class AgentProfileService:
                 "mission",
                 "status",
                 "risk_level",
+                "current_focus_kind",
+                "current_focus_id",
+                "current_focus",
                 "current_goal_id",
                 "current_goal",
                 "current_task_id",
@@ -787,7 +790,6 @@ class AgentProfileService:
         if normalized_source_kind == "system":
             if capability_id in {
                 "system:dispatch_query",
-                "system:dispatch_goal",
                 "system:delegate_task",
             }:
                 return "system_dispatch"
@@ -978,6 +980,30 @@ class AgentProfileService:
             activation_mode=activation_mode,
             suspendable=agent_class != "system",
             mission=_coerce_non_empty_str(metadata.get("mission")) or "",
+            current_focus_kind=(
+                _coerce_non_empty_str(metadata.get("current_focus_kind"))
+                or (
+                    "goal"
+                    if (
+                        _coerce_non_empty_str(metadata.get("current_focus_id"))
+                        or _coerce_non_empty_str(metadata.get("current_focus"))
+                        or _coerce_non_empty_str(metadata.get("goal_id"))
+                        or _coerce_non_empty_str(metadata.get("goal_title"))
+                    )
+                    else None
+                )
+            ),
+            current_focus_id=(
+                _coerce_non_empty_str(metadata.get("current_focus_id"))
+                or _coerce_non_empty_str(metadata.get("focus_id"))
+                or _coerce_non_empty_str(metadata.get("goal_id"))
+            ),
+            current_focus=(
+                _coerce_non_empty_str(metadata.get("current_focus"))
+                or _coerce_non_empty_str(metadata.get("focus_title"))
+                or _coerce_non_empty_str(metadata.get("goal_title"))
+                or ""
+            ),
             current_goal_id=_coerce_non_empty_str(metadata.get("goal_id")),
             current_goal=_coerce_non_empty_str(metadata.get("goal_title")) or "",
             industry_instance_id=getattr(runtime, "industry_instance_id", None),
@@ -1091,6 +1117,48 @@ class AgentProfileService:
             else {}
         )
 
+        explicit_focus_kind = (
+            _coerce_non_empty_str(runtime_metadata.get("current_focus_kind"))
+            or _coerce_non_empty_str(runtime_metadata.get("focus_kind"))
+            or _coerce_non_empty_str(mailbox_metadata.get("current_focus_kind"))
+            or _coerce_non_empty_str(mailbox_metadata.get("focus_kind"))
+            or _coerce_non_empty_str(mailbox_payload.get("current_focus_kind"))
+            or _coerce_non_empty_str(mailbox_payload.get("focus_kind"))
+            or _coerce_non_empty_str(checkpoint_resume.get("current_focus_kind"))
+            or _coerce_non_empty_str(checkpoint_resume.get("focus_kind"))
+            or _coerce_non_empty_str(checkpoint_snapshot.get("current_focus_kind"))
+            or _coerce_non_empty_str(checkpoint_snapshot.get("focus_kind"))
+        )
+        explicit_focus_id = (
+            _coerce_non_empty_str(runtime_metadata.get("current_focus_id"))
+            or _coerce_non_empty_str(runtime_metadata.get("focus_id"))
+            or _coerce_non_empty_str(mailbox_metadata.get("current_focus_id"))
+            or _coerce_non_empty_str(mailbox_metadata.get("focus_id"))
+            or _coerce_non_empty_str(mailbox_payload.get("current_focus_id"))
+            or _coerce_non_empty_str(mailbox_payload.get("focus_id"))
+            or _coerce_non_empty_str(checkpoint_resume.get("current_focus_id"))
+            or _coerce_non_empty_str(checkpoint_resume.get("focus_id"))
+            or _coerce_non_empty_str(checkpoint_snapshot.get("current_focus_id"))
+            or _coerce_non_empty_str(checkpoint_snapshot.get("focus_id"))
+        )
+        explicit_focus = (
+            _coerce_non_empty_str(runtime_metadata.get("current_focus"))
+            or _coerce_non_empty_str(runtime_metadata.get("focus_title"))
+            or _coerce_non_empty_str(runtime_metadata.get("focus"))
+            or _coerce_non_empty_str(mailbox_metadata.get("current_focus"))
+            or _coerce_non_empty_str(mailbox_metadata.get("focus_title"))
+            or _coerce_non_empty_str(mailbox_metadata.get("focus"))
+            or _coerce_non_empty_str(mailbox_payload.get("current_focus"))
+            or _coerce_non_empty_str(mailbox_payload.get("focus_title"))
+            or _coerce_non_empty_str(mailbox_payload.get("focus"))
+            or _coerce_non_empty_str(checkpoint_resume.get("current_focus"))
+            or _coerce_non_empty_str(checkpoint_resume.get("focus_title"))
+            or _coerce_non_empty_str(checkpoint_resume.get("focus"))
+            or _coerce_non_empty_str(checkpoint_snapshot.get("current_focus"))
+            or _coerce_non_empty_str(checkpoint_snapshot.get("focus_title"))
+            or _coerce_non_empty_str(checkpoint_snapshot.get("focus"))
+        )
+
         current_goal_id = (
             _coerce_non_empty_str(runtime_metadata.get("goal_id"))
             or _coerce_non_empty_str(mailbox_metadata.get("goal_id"))
@@ -1113,6 +1181,13 @@ class AgentProfileService:
             )
             or profile.current_goal
         )
+        current_focus_kind = explicit_focus_kind or profile.current_focus_kind
+        current_focus_id = explicit_focus_id or current_goal_id or profile.current_focus_id
+        current_focus = explicit_focus or current_goal or profile.current_focus
+        if current_focus_kind is None and not explicit_focus_kind and (
+            current_goal_id or current_goal
+        ):
+            current_focus_kind = "goal"
 
         current_environment_id = (
             _coerce_non_empty_str(getattr(actor_runtime, "current_environment_id", None))
@@ -1180,6 +1255,9 @@ class AgentProfileService:
             updated_candidates.append(task.updated_at)
 
         update: dict[str, Any] = {
+            "current_focus_kind": current_focus_kind,
+            "current_focus_id": current_focus_id,
+            "current_focus": current_focus,
             "current_goal_id": current_goal_id,
             "current_goal": current_goal,
             "updated_at": max(updated_candidates),
@@ -1308,6 +1386,9 @@ class AgentProfileService:
             if teammate_profile is not None:
                 item["name"] = teammate_profile.name
                 item["role_name"] = teammate_profile.role_name
+                item["current_focus_kind"] = teammate_profile.current_focus_kind
+                item["current_focus_id"] = teammate_profile.current_focus_id
+                item["current_focus"] = teammate_profile.current_focus
                 item["current_goal"] = teammate_profile.current_goal
                 item["capabilities"] = list(teammate_profile.capabilities)
             payload.append(item)

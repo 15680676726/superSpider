@@ -657,6 +657,9 @@ CREATE TABLE IF NOT EXISTS agent_profile_overrides (
     mission TEXT,
     status TEXT,
     risk_level TEXT,
+    current_focus_kind TEXT,
+    current_focus_id TEXT,
+    current_focus TEXT,
     current_goal_id TEXT,
     current_goal TEXT,
     current_task_id TEXT,
@@ -871,6 +874,7 @@ CREATE TABLE IF NOT EXISTS media_analyses (
     analysis_id TEXT PRIMARY KEY,
     industry_instance_id TEXT,
     thread_id TEXT,
+    work_context_id TEXT,
     entry_point TEXT NOT NULL,
     purpose TEXT NOT NULL DEFAULT 'reference-only',
     source_kind TEXT NOT NULL,
@@ -908,6 +912,8 @@ CREATE INDEX IF NOT EXISTS idx_media_analyses_instance
     ON media_analyses(industry_instance_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_media_analyses_thread
     ON media_analyses(thread_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_media_analyses_work_context
+    ON media_analyses(work_context_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_media_analyses_entry
     ON media_analyses(entry_point, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_media_analyses_status
@@ -1290,6 +1296,9 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
             ("suspendable", "INTEGER"),
             ("reports_to", "TEXT"),
             ("mission", "TEXT"),
+            ("current_focus_kind", "TEXT"),
+            ("current_focus_id", "TEXT"),
+            ("current_focus", "TEXT"),
             ("current_goal_id", "TEXT"),
             ("industry_instance_id", "TEXT"),
             ("industry_role_id", "TEXT"),
@@ -1325,6 +1334,7 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
     (
         "media_analyses",
         (
+            ("work_context_id", "TEXT"),
             ("purpose", "TEXT NOT NULL DEFAULT 'reference-only'"),
             ("source_hash", "TEXT"),
             ("declared_media_type", "TEXT"),

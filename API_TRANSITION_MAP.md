@@ -84,8 +84,23 @@
   - `POST /runtime-center/tasks/{task_id}/delegate` 已从 runtime-center router 物理删除
   - 前台 capability / insights surface 不再公开 `dispatch_active_goals` / `dispatch_goal` 作为产品心智
   - execution-core 正式 query/runtime/tooling 口径已同步删掉 `dispatch_active_goals`，同时 execution-core baseline / prompt capability projection / actor capability surface 也已同步删掉 `dispatch_goal`
-  - `dispatch_goal` / `dispatch_active_goals` 当前只允许停留在 `/goals`、goal service、workflow run、prediction refresh 这类执行层 leaf/internal 边界
-  - `POST /goals/{goal_id}/dispatch`、`POST /goals/automation/dispatch-active`、`POST /runtime-center/goals/{goal_id}/dispatch` 已从 router 物理删除，不再保留 `410 Gone` 兼容壳
+  - retired `dispatch_goal` 旧公共名已退役；goal service 现只保留显式 leaf dispatch family：`compile_goal_dispatch(...)`、`dispatch_goal_execute_now(...)`、`dispatch_goal_background(...)`、`dispatch_goal_deferred_background(...) + release_deferred_goal_dispatch(...)`
+  - `dispatch_active_goals` 已从 router / system capability / goal service 公开面退役；prediction service 启动时会直接清理残留历史 recommendation，而不是继续改写后展示
+  - 现役 prediction handoff 统一走 `manual:coordinate-main-brain + routes.coordinate`；前后端不再依赖旧 `goal_id / owner_agent_id / execute / activate / context` payload 做 dispatch 语义透传
+  - `/goals` 叶子 compile/dispatch 返回面也已收口，不再额外回显 `compiled_specs` 与顶层 `trigger`；trigger 事实继续进入 override/runtime evidence，而不是在 dispatch payload 里再复制一份
+  - `POST /goals/{goal_id}/dispatch`、`POST /goals/automation/dispatch-active`、`POST /runtime-center/goals/{goal_id}/dispatch` 已从 router 物理删除，不再保留 `410 Gone` 兼容壳；`GET /runtime-center/goals/{goal_id}` 这条 runtime-center goal detail alias 也已从 assembled root-router 退役，Goal detail 正式只保留 `/goals/{goal_id}/detail`
+  - assembled root app 上的公开 `/goals` frontdoor 也已继续收口为 detail-only：`GET/POST /goals`、`GET/PATCH/DELETE /goals/{goal_id}` 与 `POST /goals/{goal_id}/compile` 不再挂到 root-router；如专项 app 仍需完整 `/goals` router，必须显式手工 include
+  - `GET /goals/{goal_id}` 也已从 `goals` 公开 router 退役；public leaf read 只保留 `/goals/{goal_id}/detail`，不再继续暴露旧 `GoalRecord` 裸读面
+  - `GET /runtime-center/industry/{instance_id}` 的正式 Current Focus 读面也已同步从 legacy goal 文本退场；当 live `assignment / backlog` 存在时，`execution.current_focus` 与 `main_chain.current_focus` 优先投影 live focus，节点 route 统一锚定到 `industry detail + assignment_id/backlog_item_id`，并通过 `focus_selection + selected assignment/backlog` 呈现 focused subview，不再回跳旧 goal detail
+  - `Runtime Center / /industry / 行业 kickoff prompt` 现也已把 `strategy / lanes / current cycle / assignments / agent reports` 升成正式 planning surface：`Runtime Center` 的行业 focus section 已新增 `Main-Brain Planning` 卡，`/industry` 已新增 `工作泳道` 正式展示，kickoff prompt 会显式带出 `lane/backlog/cycle/assignment/report` 计数与 lane 摘要
+  - `AgentProfile / AgentProfileOverrideRecord / runtime chat meta` 也已开始从 legacy `current_goal` 收口到 `current_focus_kind / current_focus_id / current_focus`；prompt appendix、Runtime Center conversations、overview agent meta 与主脑 roster 已优先消费 focus 字段，`current_goal / current_goal_id` 暂时只保留 leaf backlink 兼容
+  - execution-side `host_twin` 也已开始作为正式前台 section 消费：`Runtime Center` detail drawer 现在会把 continuity / legal recovery / coordination / app-family twins / blocked surfaces 升成结构化 `Host Twin` section，而不是继续只递归展示 raw projection metadata
+  - `RuntimeCenterStateQueryService` / task-review projection / overview governance` 也已开始消费 `host_twin_summary` 这类派生摘要，首屏读面优先显示 `seat_owner_ref / recommended_scheduler_action / active_app_family_keys / blocked_surface_count / legal_recovery_mode`，而不是继续靠 raw `host_twin` JSON 自行拼摘要
+  - execution-side canonical host truth 现在也已补上“当前事实优先于历史 blocker 文案”的收口：stale blocker / stale handoff history 只会在当前 host/session 事实已 clean 且 latest handoff event 明确进入 `return-ready / return-complete` 时才会被抑制，不再因为残留 recovery metadata 就把 live blocker 吞掉
+  - workflow resume / cron 与 fixed-SOP doctor/run 现在都会继续从 live `host_twin` 刷新执行面：workflow run detail / schedule meta 会回填 `host_snapshot / environment_ref / environment_id / session_mount_id / host_requirement`，fixed SOP 会正式阻断 `requires_human_return`、`legal_recovery.path=handoff` 与显式要求 `handoff/recover/retry` 的 blocker event，不再让 handoff-only 路径误判为可执行
+  - single-industry runtime focus 也已把 report follow-up truth 纳入同一条主链：当 backlog 来自 `source_report_id` 或 `synthesis_kind=followup-needed` 时，默认 focused runtime 会优先呈现该 follow-up backlog，并保留 supervisor/staffing/writeback metadata，而不是被无关 active assignment 抢走执行焦点
+  - `GET /goals/{goal_id}/detail` 已进一步收口为只读 leaf detail；detail 读取不再隐式触发 `reconcile_goal_status()`，状态推进必须显式走 reconcile/write 链，不允许“看详情顺手改状态”
+  - CLI `goals dispatch` 已从命令面物理删除，不再保留 retired shell；CLI 仅保留 `goals list/compile`
   - `GoalRecord` 仍可作为执行层 phase/leaf object 存在，但 operator 主入口必须优先经过 `strategy / lane / backlog / cycle / assignment / report`
 
 ---
@@ -316,9 +331,9 @@
   - `GoalRecord + SqliteGoalRepository + GoalService + /goals` 后端一等对象已经落地
   - `POST /goals/{id}/compile` 继续保留为 leaf compiler/read boundary；`dispatch` / `dispatch-active` 旧入口已物理删除
   - Runtime Center 当前只保留 `/api/runtime-center/goals/{id}/compile`；旧 `/dispatch` 入口已删除，不再给 operator 暴露第二条派工 HTTP 路径
-  - `GET /goals/{id}/detail` 与 `GET /api/runtime-center/goals/{id}` 已提供 Goal detail 聚合读面，统一返回 goal/override/compiled specs/agents/tasks/decisions/evidence/patches/growth；Agent Workbench 已接入该 detail
+  - `GET /goals/{id}/detail` 已成为 Goal detail 的唯一正式 HTTP 读面；`GET /api/runtime-center/goals/{id}` runtime-center alias 已退役，Agent Workbench 与 Runtime Center 统一改走稳定的 leaf detail route
   - compiler 现已把 `compiler/task_seed/evidence_refs` 与 `feedback_summary / feedback_items / feedback_patch_ids / feedback_growth_ids / feedback_evidence_refs / next_plan_hints` 一并持久化到 state-backed `system:dispatch_query` task spec
-  - learning proposal/patch/growth 现已自动补全 compiler seed 的 `goal_id / task_id / agent_id / source_evidence_id / evidence_refs`，且 approved/applied patch 与 recent growth 会反哺下一轮 planning/compile；`AgentProfile.current_goal_id`、Agent Workbench 与 Runtime Center 也都已消费稳定对象 ID 深链路
+  - learning proposal/patch/growth 现已自动补全 compiler seed 的 `goal_id / task_id / agent_id / source_evidence_id / evidence_refs`，且 approved/applied patch 与 recent growth 会反哺下一轮 planning/compile；`AgentProfile.current_focus_id` 已作为新的前台 focus 深链路主口径，`current_goal_id` 仅保留叶子 goal backlink 兼容
 - `2026-03-25` hard-cut 补充：`Goal` 现在应被视为 cycle 下游的 phase/leaf object，而不是主脑长期规划入口；operator 主入口应优先消费 `strategy / lane / backlog / cycle / assignment / report`
 - `2026-03-25` hard-cut 完成补充：旧 goal dispatch 只允许保留在执行层或 system capability 内部；前台不再暴露 direct delegate / goal-dispatch 心智
 
@@ -409,10 +424,14 @@
 - `2026-03-21` 起 runtime conversation facade 只接受 `industry-chat:{instance_id}:{role_id}` 与 `agent-chat:{agent_id}` 两类正式线程 id；`actor-chat:*` 与 `task-chat:*` 已从前台产品与正式解析链退役，请求会直接返回 `400`
 - `2026-03-21` 起 execution-core 聊天前门的结构化输出已删除 `query_confirmation_policy_change` 分支；“默认执行 / 恢复确认”不再是持久治理能力，风险动作统一回到 kernel 既有 `auto / guarded / confirm` 链，浏览器/桌面等高风险外部动作默认继续显式确认
 - `2026-03-19` 起 `/chat` 已新增显式 media panel，先经 `/api/media/*` 产出 `MediaAnalysisRecord`，再把 `media_analysis_ids` 顶层透传到 `chat/intake|run`；聊天主链消费的是分析结果而不是页面本地附件真相
+- `2026-03-29` 补充：prompt recall 现已优先消费 `work_context_id`。当线程/任务已绑定共享工作上下文时，媒体分析与长期记忆的 recall 不再只按 `task_id` 兜底，而会优先命中同一 `work_context` scope，避免共享工作区里的素材/记忆在 follow-up turn 中漏召回
+- `2026-03-29` 补充：runtime chat media 正式写回链也已补成 `work_context` 闭环。media analyze / adopt / retain / recall 现在都会显式透传 `work_context_id`；聊天附件 writeback 会进入 `memory:work_context:*` scope，recall hit 也会优先回显原始 `source_ref`
 - `2026-03-19` 起已新增 `CHAT_RUNTIME_ALIGNMENT_PLAN.md` 作为下一轮迁移约束：当前 `chat/intake + ChatFrontdoorDecision + task-thread-first` 仅视为过渡方案，不得继续扩张；正式目标是删除 `/runtime-center/chat/intake`，让 `/chat` 默认直通 `chat/run`，并把宿主观察、task/create、durable writeback、风险确认收口到 tool/runtime/governance 显式边界
 - `2026-03-28` 补充：对“系统不能做 / 不该做 / 暂缺宿主证明”的步骤，正式目标是在主脑控制线程内物化 `HumanAssistTask`，由 `HumanAssistTaskService + ConversationFacade + RuntimeCenterQueryService` 提供当前任务条、历史列表、聊天提交与自动验收；它不是 `task-chat:*` 的回潮，也不是新的公开聊天入口
 - `2026-03-28` 补充：`/runtime-center/chat/run` 后续需要先判定当前线程是否存在活动 `HumanAssistTask`。当宿主发送“已完成 / 已上传 / 已处理”类回执时，应先进入 `submitted -> verifying -> accepted|rejected|need_more_evidence` 正式链，再决定是否把执行恢复排队回内核
 - `2026-03-28` 补充：`HumanAssistTask` 只允许承接 `checkpoint / ui-assist / evidence-submit` 等 human-only step；没有验收契约的提醒文案不得作为正式任务发布
+- `2026-03-29` 补充：`HumanAssistTask` 当前第一条正式 producer 已接到 runtime governance / host-twin blocker 上。环境 handoff 要求人返回时，治理层会直接物化 `task_type=host-handoff-return` 协作任务，并复用同一条聊天线程承接宿主回执。
+- `2026-03-29` 补充：活动 `HumanAssistTask` 的聊天提交判定已经从“只认显式 `submit_human_assist` / media-only”扩大到“显式动作 + 验收锚点命中 + 完成回执话术”；自然语言回执不再需要额外 legacy chat frontdoor。
 - 前端 `/chat` 侧栏已改为真实行业角色 / agent 列表，`/sessions` 页面与 `New Chat` shell 已删除
   - 旧 `/chats` HTTP router 与 `copaw chats` CLI 已删除，不再保留公开兼容入口
   - `chats.json` 主链 bootstrap/read fallback 已删除，legacy delete-gate surfaces 已移除；query turn 也不再额外写入 `chat:*` metadata task；如工作目录仍出现同名文件，也只应视为历史 artifact，不参与 runtime
@@ -434,6 +453,7 @@
   - cron 文本与 cron-agent 任务均通过 `system:dispatch_query` 进入 kernel-owned query execution path（`KernelTurnExecutor` 包装 + `KernelQueryExecutionService` 实际流执行）
   - channel ingress / cron agent dispatch 现在都会先推断 `dispatch_query` 或 `dispatch_command` 及其 risk，再提交 kernel，避免 `/command` 旁路
   - Runtime Center 已把 schedule 暴露为一等对象：`/api/runtime-center/schedules`、`/api/runtime-center/schedules/{id}`、`/api/runtime-center/schedules/{id}/run|pause|resume` 已落地，且 `CronManager` runtime state 会持续回写 `ScheduleRecord`
+  - `2026-03-29` 补充：schedule 写 frontdoor 现已统一进入 governed mutation；`/api/runtime-center/schedules*` 与 `/cron/jobs*` 的 create/update/delete/run/pause/resume 不再直接调用 `CronManager`，而是统一物化为 `system:create_schedule / update_schedule / delete_schedule / run_schedule / pause_schedule / resume_schedule` kernel task，并通过 `/api/runtime-center/decisions/*` 承接 confirm 链
 - 前端独立 `/cron-jobs` 与 `/heartbeat` 页面及其 redirect 壳均已退役；steady-state operator IA 已收口为 `Runtime Center -> Automation`
 - heartbeat 的 canonical HTTP surface 已迁入 `/api/runtime-center/heartbeat`（detail/update/run），旧 `/api/config/heartbeat` 已删除；前端 `AutomationTab` 只再消费 Runtime Center heartbeat surface
 - `EnvironmentService` 现已补齐 orphaned lease recovery；`/api/runtime-center/environments|sessions|observations|replays|artifacts` 也已具备 detail 路由，环境对象不再只是列表读面
@@ -607,9 +627,11 @@
   - 当前 `/runtime-center/recovery/latest` 与 `/runtime-center/sessions/{id}/lease/force-release` 仍是一等 operator 动作；`/runtime-center/replays/{id}/execute` 已于 `2026-03-25` 从 router 物理删除，不再允许人类前台直接重放执行
   - `V6` 的 routine diagnosis / lock conflict / replay fallback 也应继续落在 Runtime Center detail/drawer 体系里，不允许再造 page-local routine operator 面
   - 当前 `/runtime-center/learning/proposals|patches|growth` 已统一走共享 `LearningService`，不再旁路到底层 engine
+  - `2026-03-29` 补充：single-item patch 写动作现也已统一收口到 Runtime Center governed surface；`/api/runtime-center/learning/patches/{id}/approve|reject|apply|rollback` 全部通过 kernel-governed `system:*patch` mounts 执行，旧 `/api/learning/patches/{id}/approve|reject|apply|rollback` 已物理删除
 - `2026-03-22` 起 `/api/learning/acquisition/proposals|plans|onboarding-runs|run` 已作为 learning 写读面落地，用于承接行业 learning stage 自动产出的 acquisition/install/onboarding 闭环；`CapabilityAcquisitionProposal` 现也已正式接入 approval gate，并开放 approve/reject 写入口；Runtime Center 的行业 detail 也已直接消费这些正式对象，而不是从日志推断
   - 当前 `RuntimeOverviewResponse.bridge` 与 `X-CoPaw-Bridge-*` header 已删除；Runtime Center discovery/header contract 现统一使用 `RuntimeCenterSurfaceInfo` 与 `X-CoPaw-Runtime-*` / `X-CoPaw-Runtime-Surface-*`
   - 当前这些 detail route 已被 Runtime Center 前端统一消费为 drawer drill-down；overview/card/detail 已完成对正式 service 与治理动作验收的收口，不再保留 runtime-center bridge fallback
+  - `2026-03-29` 补充：`GovernanceStatus` 当前已正式纳入 `host_twin / handoff / staffing / human_assist` blocker 摘要；`GovernanceService.admission_block_reason(...)` 除 emergency stop 外，也会在 `system:dispatch_query / system:dispatch_command` 前检查 handoff、人协作阻塞与 staffing confirmation
 
 ---
 
@@ -812,7 +834,7 @@
 - `/capabilities` 已成为统一能力读面，并已承接 `tool / skill / MCP / system` execute；toggle/delete 也已进入 kernel-governed write，confirm-risk admission 会返回 `decision_request_id`
 - `SRK` 当前已经拥有持久化 admit/risk/decision/evidence 闭环，并已接管 channels / cron / heartbeat 的 ingress；`system:dispatch_query` / `system:dispatch_command` 已改为 `CapabilityService -> KernelTurnExecutor -> KernelQueryExecutionService` 的 kernel-owned 执行链，direct `/api/agent/process` 也已直连本地 kernel ingress，`AgentRunner` 宿主壳已在 `V3-B4` 删除
 - `EnvironmentService` 已持久化 `EnvironmentMount / SessionMount` 的 `lease_status / lease_owner / lease_token / lease_acquired_at / lease_expires_at / live_handle_ref`，并具备 `acquire / heartbeat / release / reap` 生命周期；当前下一正式补齐项已明确为 shared `Surface Host Contract`、browser `Site Contract`、Windows `Desktop App Contract`、`Seat Runtime / Host Companion Session / Workspace Graph / Host Event`，以及对应的宿主恢复/交接策略
-- `/goals` 已成为后端一级对象接口，Goal detail 已通过 `/goals/{id}/detail` 与 `/api/runtime-center/goals/{id}` 落地，Agent Workbench 与 Runtime Center 都已接入稳定对象深链路；compiler 也已把 `compiler/task_seed/evidence_refs` 与 learning feedback metadata 持久化到 state-backed tasks
+- `/goals` 已成为后端一级对象接口，Goal detail 正式只通过 `/goals/{id}/detail` 落地；`/api/runtime-center/goals/{id}` alias 已退役，Agent Workbench 与 Runtime Center 都已接入稳定对象深链路；compiler 也已把 `compiler/task_seed/evidence_refs` 与 learning feedback metadata 持久化到 state-backed tasks
 - `/runtime-center/decisions/*` 已成为统一的 DecisionRequest 读写治理面；detail 已纯读，review/approve/reject 为显式动作，且 Runtime Center 已补齐 governance / recovery / automation 正式工作面
 - `/runtime-center/learning/*` 已经成为当前 proposal/patch/growth 读面，且读取已统一走共享 `LearningService`；`capability / profile / role / plan` patch 已可通过持久化 override executor 产生真实副作用，patch/growth detail 也已显式挂上 `goal/task/agent/evidence` 关联，并会反哺下一轮 compile feedback context
 - `/runtime-center` 已不止 overview 卡片，还具备 task/goal/agent/patch/growth/environment detail 路由，以及 patch approve/reject/apply/rollback operator 路由；这些 detail/actions 已被前端或测试真实消费，V3 operator surface 已完成收口，后续缺口转入 V4 prediction / governed recommendation

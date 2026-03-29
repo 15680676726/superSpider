@@ -584,7 +584,7 @@ export default function V7ExecutionSeatPanel({
           <Paragraph>
             <Text strong>职责：</Text>{" "}
             {normalizeSpiderMeshBrand(
-              roleContract?.role_summary || agent.role_summary || agent.current_goal,
+              roleContract?.role_summary || agent.role_summary || agent.current_focus,
             ) || "暂无职责摘要"}
           </Paragraph>
           <Paragraph>

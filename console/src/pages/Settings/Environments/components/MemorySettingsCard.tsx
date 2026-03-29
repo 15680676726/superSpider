@@ -203,6 +203,20 @@ export function MemorySettingsCard({
     : followActiveProvider
       ? "跟随当前提供方"
       : "独立环境配置";
+  const activeProviderDisplayText = activeProviderId
+    ? `${activeProviderName || activeProviderId} / ${activeProviderModel || "-"}`
+    : "暂无激活提供方";
+  const modelInferenceText = serverWillInferDefaultModel
+    ? `服务端将自动推断 ${defaultEmbeddingModel}`
+    : "需显式指定模型或改用自定义提供方";
+
+  const renderStatusTag = (text: string, color?: string) => (
+    <Tag color={color} title={text}>
+      <span className={styles.memoryStatusTagText} title={text}>
+        {text}
+      </span>
+    </Tag>
+  );
 
   return (
     <section className={styles.memoryCard}>
@@ -364,42 +378,51 @@ export function MemorySettingsCard({
         <div className={styles.memoryStatusGrid}>
           <div className={styles.memoryStatusItem}>
             <span className={styles.memoryStatusLabel}>记忆主模式</span>
-            <Tag color={memoryRecallMode === "qmd" ? "processing" : "default"}>
-              {memoryRecallModeLabel}
-            </Tag>
+            {renderStatusTag(
+              memoryRecallModeLabel,
+              memoryRecallMode === "qmd" ? "processing" : "default",
+            )}
           </div>
 
           <div className={styles.memoryStatusItem}>
             <span className={styles.memoryStatusLabel}>QMD 启动预热</span>
-            <Tag color={qmdPrewarmEnabled ? "success" : "default"}>
-              {qmdPrewarmEnabled ? "已启用" : "未启用"}
-            </Tag>
+            {renderStatusTag(
+              qmdPrewarmEnabled ? "已启用" : "未启用",
+              qmdPrewarmEnabled ? "success" : "default",
+            )}
           </div>
 
           <div className={styles.memoryStatusItem}>
             <span className={styles.memoryStatusLabel}>QMD 查询模式</span>
-            <span className={styles.memoryStatusValue}>{qmdQueryMode}</span>
+            <span className={styles.memoryStatusValue} title={qmdQueryMode}>
+              {qmdQueryMode}
+            </span>
           </div>
 
           <div className={styles.memoryStatusItem}>
             <span className={styles.memoryStatusLabel}>
               配置来源
             </span>
-            <Tag>{configSourceLabel}</Tag>
+            {renderStatusTag(configSourceLabel)}
           </div>
 
           <div className={styles.memoryStatusItem}>
             <span className={styles.memoryStatusLabel}>
               实际服务地址
             </span>
-            <span className={styles.memoryStatusValue}>{effectiveBaseUrl}</span>
+            <span className={styles.memoryStatusValue} title={effectiveBaseUrl}>
+              {effectiveBaseUrl}
+            </span>
           </div>
 
           <div className={styles.memoryStatusItem}>
             <span className={styles.memoryStatusLabel}>
               实际模型
             </span>
-            <span className={styles.memoryStatusValue}>
+            <span
+              className={styles.memoryStatusValue}
+              title={effectiveModelName || "未解析"}
+            >
               {effectiveModelName || "未解析"}
             </span>
           </div>
@@ -408,39 +431,38 @@ export function MemorySettingsCard({
             <span className={styles.memoryStatusLabel}>
               检索模式
             </span>
-            <Tag color={retrievalTagColor(retrievalMode)}>
-              {RETRIEVAL_LABELS[retrievalMode]}
-            </Tag>
+            {renderStatusTag(
+              RETRIEVAL_LABELS[retrievalMode],
+              retrievalTagColor(retrievalMode),
+            )}
           </div>
 
           <div className={styles.memoryStatusItem}>
             <span className={styles.memoryStatusLabel}>
               模型推断
             </span>
-            <Tag color={serverWillInferDefaultModel ? "gold" : "default"}>
-              {serverWillInferDefaultModel
-                ? `服务端将自动推断 ${defaultEmbeddingModel}`
-                : "需显式指定模型或改用自定义提供方"}
-            </Tag>
+            {renderStatusTag(
+              modelInferenceText,
+              serverWillInferDefaultModel ? "gold" : "default",
+            )}
           </div>
 
           <div className={styles.memoryStatusItem}>
             <span className={styles.memoryStatusLabel}>
               记忆后端
             </span>
-            <Tag>{backendLabel}</Tag>
+            {renderStatusTag(backendLabel)}
           </div>
 
           <div className={styles.memoryStatusItem}>
             <span className={styles.memoryStatusLabel}>
               当前激活提供方
             </span>
-            <span className={styles.memoryStatusValue}>
-              {activeProviderId
-                ? `${activeProviderName || activeProviderId} / ${
-                    activeProviderModel || "-"
-                  }`
-                : "暂无激活提供方"}
+            <span
+              className={styles.memoryStatusValue}
+              title={activeProviderDisplayText}
+            >
+              {activeProviderDisplayText}
             </span>
           </div>
         </div>

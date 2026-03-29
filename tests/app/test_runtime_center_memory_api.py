@@ -205,3 +205,49 @@ def test_runtime_center_memory_backends_include_qmd_metadata(tmp_path) -> None:
     assert qmd["metadata"]["ready"] is False
     assert "runtime_problem" in qmd["metadata"]
     assert qmd["metadata"]["daemon_state"] == "disabled"
+
+
+def test_runtime_center_memory_recall_accepts_work_context_selector(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    industry_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "Industry note",
+            "content": "browser publish checklist browser publish checklist browser publish checklist",
+            "scope_type": "industry",
+            "scope_id": "industry-1",
+            "role_bindings": ["execution-core"],
+            "tags": ["browser", "industry"],
+        },
+    )
+    assert industry_response.status_code == 200
+
+    remember_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "Control-thread note",
+            "content": "Escalate browser publish only after the governed checklist is complete.",
+            "scope_type": "work_context",
+            "scope_id": "ctx-industry-control",
+            "role_bindings": ["execution-core"],
+            "tags": ["browser", "control-thread"],
+        },
+    )
+    assert remember_response.status_code == 200
+
+    recall_response = client.get(
+        "/runtime-center/memory/recall",
+        params={
+            "query": "browser publish checklist",
+            "work_context_id": "ctx-industry-control",
+            "role": "execution-core",
+            "limit": 5,
+        },
+    )
+    assert recall_response.status_code == 200
+    payload = recall_response.json()
+    assert payload["hits"]
+    assert payload["hits"][0]["scope_type"] == "work_context"
+    assert payload["hits"][0]["scope_id"] == "ctx-industry-control"
+    assert payload["hits"][0]["title"] == "Control-thread note"

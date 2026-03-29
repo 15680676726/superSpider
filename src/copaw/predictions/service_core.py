@@ -47,6 +47,7 @@ class _PredictionServiceCoreMixin:
         self._kernel_dispatcher = kernel_dispatcher
         self._enable_remote_hub_search = enable_remote_hub_search
         self._enable_remote_curated_search = enable_remote_curated_search
+        self._purge_retired_goal_dispatch_recommendations()
 
     def list_cases(
         self,

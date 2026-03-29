@@ -62,6 +62,23 @@ def _resolve_runtime_thread_id(
     )
 
 
+def _resolve_work_context_id(
+    request_payload: AgentRequest,
+    *,
+    extra_payload: dict[str, Any],
+) -> str | None:
+    work_context = extra_payload.get("work_context")
+    return (
+        _string(extra_payload.get("work_context_id"))
+        or (
+            _string(work_context.get("id"))
+            if isinstance(work_context, dict)
+            else None
+        )
+        or _string(getattr(request_payload, "work_context_id", None))
+    )
+
+
 def _should_writeback_runtime_media(
     request_payload: AgentRequest,
     *,
@@ -326,6 +343,10 @@ async def enrich_agent_request_with_media(
         extra_payload=extra_payload,
         thread_id=thread_id,
     )
+    work_context_id = _resolve_work_context_id(
+        request_payload,
+        extra_payload=extra_payload,
+    )
     should_writeback = _should_writeback_runtime_media(
         request_payload,
         extra_payload=extra_payload,
@@ -340,6 +361,7 @@ async def enrich_agent_request_with_media(
                 sources=media_inputs,
                 industry_instance_id=industry_instance_id,
                 thread_id=resolved_thread_id,
+                work_context_id=work_context_id,
                 entry_point=entry_point,
                 purpose=purpose,
                 writeback=should_writeback,
@@ -361,6 +383,7 @@ async def enrich_agent_request_with_media(
                     industry_instance_id=industry_instance_id,
                     analysis_ids=adopt_ids,
                     thread_id=resolved_thread_id,
+                    work_context_id=work_context_id,
                 )
                 analysis_ids = _merge_string_list(
                     analysis_ids,

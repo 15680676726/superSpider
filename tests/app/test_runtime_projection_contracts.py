@@ -21,7 +21,7 @@ from copaw.utils.runtime_routes import (
 
 def test_runtime_routes_share_one_contract() -> None:
     assert task_route("task-1") == "/api/runtime-center/tasks/task-1"
-    assert goal_route("goal-1") == "/api/runtime-center/goals/goal-1"
+    assert goal_route("goal-1") == "/api/goals/goal-1/detail"
     assert agent_route("agent-1") == "/api/runtime-center/agents/agent-1"
     assert decision_route("decision-1") == "/api/runtime-center/decisions/decision-1"
     assert schedule_route("schedule-1") == "/api/runtime-center/schedules/schedule-1"
@@ -516,6 +516,17 @@ def test_build_task_review_payload_prefers_host_twin_visibility_when_present() -
         decisions=[],
         evidence=[],
         execution_feedback={
+            "host_companion_session": {
+                "session_mount_id": "session-host-companion-1",
+                "environment_id": "env-host-companion-1",
+                "continuity_status": "restorable",
+                "continuity_source": "live-handle",
+                "locality": {
+                    "same_host": True,
+                    "same_process": False,
+                    "startup_recovery_required": False,
+                },
+            },
             "host_twin": {
                 "ownership": {
                     "seat_owner_agent_id": "ops-agent",
@@ -583,6 +594,37 @@ def test_build_task_review_payload_prefers_host_twin_visibility_when_present() -
                     },
                     "recommended_scheduler_action": "handoff",
                 },
+                "multi_seat_coordination": {
+                    "seat_count": 2,
+                    "candidate_seat_refs": [
+                        "env:session:session:web:main",
+                        "env:session:session:backup",
+                    ],
+                    "selected_seat_ref": "env:session:session:web:main",
+                    "seat_selection_policy": "sticky-active-seat",
+                    "occupancy_state": "occupied",
+                    "status": "active",
+                    "host_companion_status": "restorable",
+                    "active_surface_mix": ["browser", "desktop-app"],
+                },
+                "app_family_readiness": {
+                    "active_family_keys": ["office_document"],
+                    "active_family_count": 1,
+                    "ready_family_keys": ["office_document"],
+                    "ready_family_count": 1,
+                    "blocked_family_keys": [],
+                    "blocked_family_count": 0,
+                    "family_statuses": {
+                        "office_document": {
+                            "active": True,
+                            "ready": True,
+                            "contract_status": "verified-writer",
+                            "surface_ref": "window:excel:orders",
+                            "family_scope_ref": "app:excel",
+                            "writer_lock_scope": "workbook:orders",
+                        },
+                    },
+                },
             },
             "host_contract": {
                 "status": "blocked",
@@ -620,10 +662,35 @@ def test_build_task_review_payload_prefers_host_twin_visibility_when_present() -
         ]
         == "handoff"
     )
+    assert (
+        payload["execution_runtime"]["host_twin_summary"]["seat_owner_ref"]
+        == "ops-agent"
+    )
+    assert (
+        payload["execution_runtime"]["host_twin_summary"]["active_app_family_count"]
+        == 1
+    )
+    assert payload["execution_runtime"]["host_twin_summary"]["active_app_family_keys"] == [
+        "office_document",
+    ]
+    assert payload["execution_runtime"]["host_twin_summary"]["host_companion_status"] == "restorable"
+    assert payload["execution_runtime"]["host_twin_summary"]["host_companion_source"] == "live-handle"
+    assert payload["execution_runtime"]["host_twin_summary"]["seat_count"] == 2
+    assert payload["execution_runtime"]["host_twin_summary"]["multi_seat_coordination"][
+        "selected_seat_ref"
+    ] == "env:session:session:web:main"
+    assert payload["execution_runtime"]["host_twin_summary"]["app_family_readiness"][
+        "ready_family_keys"
+    ] == ["office_document"]
+    assert (
+        payload["execution_runtime"]["host_twin_summary"]["recommended_scheduler_action"]
+        == "handoff"
+    )
     assert payload["continuity"]["handoff"]["owner_ref"] == "human-operator:alice"
     assert payload["continuity"]["handoff"]["resume_kind"] == "resume-runtime"
     assert payload["continuity"]["verification"]["latest_anchor"] == "excel://Orders!A1"
     assert any("Coordination: handoff" in line for line in payload["summary_lines"])
+    assert any("App families ready: office_document" in line for line in payload["summary_lines"])
     assert any("sticky-active-seat" in line for line in payload["summary_lines"])
     assert any(
         "Follow host coordination action: handoff" in action

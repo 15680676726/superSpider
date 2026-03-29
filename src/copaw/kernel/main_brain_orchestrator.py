@@ -15,6 +15,7 @@ from .main_brain_environment_coordinator import (
 from .main_brain_execution_planner import MainBrainExecutionPlanner
 from .main_brain_intake import (
     MainBrainIntakeContract,
+    read_attached_main_brain_intake_contract,
     resolve_main_brain_intake_contract,
 )
 from .main_brain_recovery_coordinator import MainBrainRecoveryCoordinator
@@ -119,7 +120,10 @@ class MainBrainOrchestrator:
         kernel_task_id: str | None = None,
         transient_input_message_ids: set[str] | None = None,
     ) -> MainBrainExecutionEnvelope:
-        intake_contract = await self._resolve_intake_contract(msgs=msgs)
+        intake_contract = await self._resolve_intake_contract(
+            request=request,
+            msgs=msgs,
+        )
         execution_plan = self._execution_planner.plan(
             request=request,
             intake_contract=intake_contract,
@@ -170,16 +174,26 @@ class MainBrainOrchestrator:
     async def _resolve_intake_contract(
         self,
         *,
+        request: Any,
         msgs: list[Any],
     ) -> MainBrainIntakeContract | None:
+        attached = read_attached_main_brain_intake_contract(request=request)
+        if attached is not None:
+            return attached
         resolver = self._intake_contract_resolver
         if resolver is None:
             return None
         try:
-            return await resolver(msgs=msgs)
+            contract = await resolver(msgs=msgs)
         except Exception:
             logger.debug("Main-brain intake resolution failed during orchestration", exc_info=True)
             return None
+        if contract is not None:
+            try:
+                setattr(request, "_copaw_main_brain_intake_contract", contract)
+            except Exception:
+                logger.debug("Failed to attach main-brain intake contract to request")
+        return contract
 
     async def _execute_envelope_stream(
         self,

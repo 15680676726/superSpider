@@ -13,7 +13,6 @@ from .query_execution_shared import (
     _first_non_empty,
     _message_query_text,
     _resolve_chat_writeback_model_decision,
-    _resolve_chat_writeback_model_decision_sync,
 )
 
 
@@ -278,34 +277,6 @@ async def resolve_request_main_brain_intake_contract(
     return await resolve_main_brain_intake_contract(msgs=msgs)
 
 
-def resolve_main_brain_intake_contract_sync(
-    *,
-    text: str | None = None,
-    msgs: list[Any] | None = None,
-) -> MainBrainIntakeContract | None:
-    message_text = _first_non_empty(text)
-    if message_text is None and msgs is not None:
-        message_text = extract_main_brain_intake_text(msgs)
-    if message_text is None:
-        return None
-    decision = _resolve_chat_writeback_model_decision_sync(text=message_text)
-    return materialize_main_brain_intake_contract(
-        message_text=message_text,
-        decision=decision,
-    )
-
-
-def resolve_request_main_brain_intake_contract_sync(
-    *,
-    request: Any,
-    msgs: list[Any],
-) -> MainBrainIntakeContract | None:
-    attached = read_attached_main_brain_intake_contract(request=request)
-    if attached is not None:
-        return attached
-    return resolve_main_brain_intake_contract_sync(msgs=msgs)
-
-
 def resolve_execution_core_industry_instance_id(
     *,
     request: Any,
@@ -376,7 +347,5 @@ __all__ = [
     "normalize_main_brain_runtime_context",
     "resolve_execution_core_industry_instance_id",
     "resolve_main_brain_intake_contract",
-    "resolve_main_brain_intake_contract_sync",
     "resolve_request_main_brain_intake_contract",
-    "resolve_request_main_brain_intake_contract_sync",
 ]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .service_shared import *  # noqa: F401,F403
+from ..app.runtime_center.task_review_projection import build_host_twin_summary
 
 
 class _WorkflowServicePreviewMixin:
@@ -106,7 +107,7 @@ class _WorkflowServicePreviewMixin:
                 "run": f"/api/workflow-runs/{run.run_id}",
                 "cancel": f"/api/workflow-runs/{run.run_id}/cancel",
                 "goals": [
-                    f"/api/runtime-center/goals/{goal_id}"
+                    f"/api/goals/{goal_id}/detail"
                     for goal_id in run.goal_ids
                 ],
                 "schedules": [
@@ -394,7 +395,17 @@ class _WorkflowServicePreviewMixin:
         if not isinstance(detail, dict):
             return {}
         host_twin = self._mapping(detail.get("host_twin"))
-        return dict(host_twin) if host_twin else {}
+        host_companion_session = self._mapping(detail.get("host_companion_session"))
+        snapshot = dict(host_twin) if host_twin else {}
+        if host_companion_session:
+            snapshot["host_companion_session"] = dict(host_companion_session)
+        summary = self._mapping(detail.get("host_twin_summary")) or build_host_twin_summary(
+            host_twin,
+            host_companion_session=host_companion_session,
+        )
+        if summary:
+            snapshot["host_twin_summary"] = summary
+        return snapshot
 
     def _resolve_host_snapshot_from_request(
         self,

@@ -276,7 +276,6 @@ class _GoalServiceCoreMixin:
         return resolved_context
 
     def get_goal_detail(self, goal_id: str) -> dict[str, object] | None:
-        self.reconcile_goal_status(goal_id, source="detail")
         goal = self.get_goal(goal_id)
         if goal is None:
             return None

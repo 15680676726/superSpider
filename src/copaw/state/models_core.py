@@ -24,6 +24,7 @@ HumanAssistTaskStatus = Literal[
     "submitted",
     "verifying",
     "accepted",
+    "need_more_evidence",
     "resume_queued",
     "closed",
     "rejected",

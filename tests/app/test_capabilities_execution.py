@@ -249,9 +249,9 @@ def test_goal_dispatch_capabilities_are_hidden_from_public_capability_routes() -
     hidden_detail = client.get("/capabilities/system:dispatch_goal")
     assert hidden_detail.status_code == 404
 
-    # Internal leaf execution still needs the mount for workflow/prediction/goals paths.
-    assert capability_service.get_capability("system:dispatch_goal") is not None
-    assert capability_service.get_capability("system:dispatch_active_goals") is not None
+    # Legacy goal dispatch system mounts are fully retired from the capability graph.
+    assert capability_service.get_capability("system:dispatch_goal") is None
+    assert capability_service.get_capability("system:dispatch_active_goals") is None
 
 
 def test_confirm_capability_requires_kernel_confirmation_then_executes() -> None:
@@ -1152,9 +1152,9 @@ def test_execute_task_enforces_role_access_policy() -> None:
     service = CapabilityService(
         registry=StaticCapabilityRegistry(
             CapabilityMount(
-                id="system:dispatch_goal",
-                name="dispatch_goal",
-                summary="Dispatch a goal.",
+                id="system:apply_role",
+                name="apply_role",
+                summary="Apply a role.",
                 kind="system-op",
                 source_kind="system",
                 risk_level="guarded",
@@ -1171,8 +1171,8 @@ def test_execute_task_enforces_role_access_policy() -> None:
         service.execute_task(
             KernelTask(
                 id="task-role-denied",
-                title="Dispatch goal",
-                capability_ref="system:dispatch_goal",
+                title="Apply role",
+                capability_ref="system:apply_role",
                 owner_agent_id="guest-agent",
                 payload={},
             ),
@@ -1182,37 +1182,10 @@ def test_execute_task_enforces_role_access_policy() -> None:
     assert "not authorized" in execution_result["error"]
 
 
-def test_system_dispatch_goal_preserves_goal_owner_when_payload_owner_is_missing(
+def test_system_dispatch_goal_capability_is_retired(
     tmp_path,
 ) -> None:
-    state_store = SQLiteStateStore(tmp_path / "state.db")
-    goal_repository = SqliteGoalRepository(state_store)
-    goal_override_repository = SqliteGoalOverrideRepository(state_store)
-    task_repository = SqliteTaskRepository(state_store)
-    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
-
     capability_service = CapabilityService()
-    dispatcher = KernelDispatcher(capability_service=capability_service)
-    goal_service = GoalService(
-        repository=goal_repository,
-        override_repository=goal_override_repository,
-        dispatcher=dispatcher,
-        task_repository=task_repository,
-        task_runtime_repository=task_runtime_repository,
-    )
-    capability_service.set_goal_service(goal_service)
-
-    goal = goal_service.create_goal(
-        title="Dispatch seeded goal",
-        summary="Preserve the compiler owner through system dispatch.",
-        status="active",
-    )
-    goal_override_repository.upsert_override(
-        GoalOverrideRecord(
-            goal_id=goal.id,
-            compiler_context={"owner_agent_id": "copaw-agent-runner"},
-        ),
-    )
 
     execution_result = asyncio.run(
         capability_service.execute_task(
@@ -1222,7 +1195,7 @@ def test_system_dispatch_goal_preserves_goal_owner_when_payload_owner_is_missing
                 capability_ref="system:dispatch_goal",
                 owner_agent_id="copaw-scheduler",
                 payload={
-                    "goal_id": goal.id,
+                    "goal_id": "goal-1",
                     "execute": False,
                     "context": {"source": "automation:dispatch_active_goals"},
                 },
@@ -1230,8 +1203,32 @@ def test_system_dispatch_goal_preserves_goal_owner_when_payload_owner_is_missing
         ),
     )
 
-    assert execution_result["success"] is True
-    assert task_repository.list_tasks(goal_id=goal.id)[0].owner_agent_id == "copaw-agent-runner"
+    assert execution_result["success"] is False
+    assert "not found" in execution_result["error"]
+
+
+def test_system_dispatch_goal_manual_execution_is_retired(
+    tmp_path,
+) -> None:
+    capability_service = CapabilityService()
+
+    execution_result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                id="task-system-dispatch-goal-manual",
+                title="Dispatch goal",
+                capability_ref="system:dispatch_goal",
+                owner_agent_id="copaw-operator",
+                payload={
+                    "goal_id": "goal-1",
+                    "execute": False,
+                },
+            ),
+        ),
+    )
+
+    assert execution_result["success"] is False
+    assert "not found" in execution_result["error"]
 
 
 def test_system_apply_role_persists_agent_profile_override(tmp_path) -> None:

@@ -371,7 +371,7 @@ export function useCapabilityMarketState({
   );
 
   const mcpCategoryOptions = useMemo(
-    () => (mcpCatalog?.categories?.length ? mcpCatalog.categories : [{ key: "all", label: "鍏ㄩ儴" }]),
+    () => (mcpCatalog?.categories?.length ? mcpCatalog.categories : [{ key: "all", label: "全部" }]),
     [mcpCatalog],
   );
 

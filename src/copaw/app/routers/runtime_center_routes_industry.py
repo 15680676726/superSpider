@@ -20,10 +20,16 @@ async def get_industry_instance_detail(
     instance_id: str,
     request: Request,
     response: Response,
+    assignment_id: str | None = None,
+    backlog_item_id: str | None = None,
 ) -> dict[str, object]:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
     service = _get_industry_service(request)
-    detail = service.get_instance_detail(instance_id)
+    detail = service.get_instance_detail(
+        instance_id,
+        assignment_id=assignment_id,
+        backlog_item_id=backlog_item_id,
+    )
     if detail is None:
         raise HTTPException(404, detail=f"Industry instance '{instance_id}' not found")
     return detail.model_dump(mode="json")

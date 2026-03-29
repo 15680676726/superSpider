@@ -174,4 +174,5 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
             "submission_payload_json",
             "verification_payload_json",
         }.issubset(_column_names(conn, "human_assist_tasks"))
+        assert {"work_context_id"}.issubset(_column_names(conn, "media_analyses"))
         assert conn.execute("PRAGMA user_version").fetchone()[0] == STATE_SCHEMA_VERSION

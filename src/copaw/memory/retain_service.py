@@ -104,15 +104,18 @@ class MemoryRetainService:
         self,
         *,
         industry_instance_id: str,
+        work_context_id: str | None = None,
         title: str,
         content: str,
         source_ref: str,
         role_bindings: list[str] | None = None,
         tags: list[str] | None = None,
     ) -> object | None:
+        scope_type = "work_context" if str(work_context_id or "").strip() else "industry"
+        scope_id = str(work_context_id or industry_instance_id).strip()
         self._upsert_memory_chunk(
             chunk_id=f"retain:chat-writeback:{normalize_scope_id(source_ref)}",
-            document_id=f"memory:industry:{industry_instance_id}",
+            document_id=f"memory:{scope_type}:{scope_id}",
             title=title,
             content=content,
             source_ref=source_ref,
@@ -120,12 +123,18 @@ class MemoryRetainService:
             tags=["retain", "chat-writeback", *(tags or [])],
         )
         self._reflect_scope(
-            scope_type="industry",
-            scope_id=industry_instance_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
             industry_instance_id=industry_instance_id,
             trigger_kind="retain-chat-writeback",
         )
-        return {"industry_instance_id": industry_instance_id, "source_ref": source_ref}
+        return {
+            "industry_instance_id": industry_instance_id,
+            "work_context_id": work_context_id,
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "source_ref": source_ref,
+        }
 
     def retain_report_snapshot(self, report: object) -> object | None:
         self._derived_index_service.upsert_report_snapshot(report)

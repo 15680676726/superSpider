@@ -65,7 +65,11 @@ async def dispatch_governed_mutation(
         title=title,
         capability_ref=capability_ref,
         environment_ref=environment_ref,
-        owner_agent_id=str(payload.get("actor") or "copaw-operator"),
+        owner_agent_id=str(
+            payload.get("owner_agent_id")
+            or payload.get("actor")
+            or "copaw-operator"
+        ),
         risk_level=(
             risk_level_override.strip()
             if isinstance(risk_level_override, str) and risk_level_override.strip()

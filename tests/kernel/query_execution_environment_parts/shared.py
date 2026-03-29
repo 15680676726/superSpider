@@ -276,6 +276,20 @@ async def _fake_chat_writeback_model_decision_async(**kwargs):
     return _fake_chat_writeback_model_decision(**kwargs)
 
 
+def _make_attached_main_brain_intake_contract(
+    *,
+    text: str,
+    decision=None,
+):
+    effective_decision = decision or _fake_chat_writeback_model_decision(text=text)
+    contract = main_brain_intake_module.materialize_main_brain_intake_contract(
+        message_text=text,
+        decision=effective_decision,
+    )
+    assert contract is not None
+    return contract
+
+
 @pytest.fixture(autouse=True)
 def patch_chat_writeback_model_gate(monkeypatch):
     monkeypatch.setattr(
@@ -284,29 +298,14 @@ def patch_chat_writeback_model_gate(monkeypatch):
         _fake_chat_writeback_model_decision_async,
     )
     monkeypatch.setattr(
-        query_execution_shared_module,
-        "_resolve_chat_writeback_model_decision_sync",
-        _fake_chat_writeback_model_decision,
-    )
-    monkeypatch.setattr(
         main_brain_intake_module,
         "_resolve_chat_writeback_model_decision",
         _fake_chat_writeback_model_decision_async,
     )
     monkeypatch.setattr(
-        main_brain_intake_module,
-        "_resolve_chat_writeback_model_decision_sync",
-        _fake_chat_writeback_model_decision,
-    )
-    monkeypatch.setattr(
         query_execution_runtime_module,
         "_resolve_chat_writeback_model_decision",
         _fake_chat_writeback_model_decision_async,
-    )
-    monkeypatch.setattr(
-        query_execution_runtime_module,
-        "_resolve_chat_writeback_model_decision_sync",
-        _fake_chat_writeback_model_decision,
     )
 
 
@@ -394,6 +393,9 @@ class _FakeAgentProfileService:
             mission="Turn the industry brief into an executable operating loop.",
             environment_constraints=["workspace draft/edit allowed", "browser research allowed"],
             evidence_expectations=["operating brief", "next-action recommendation"],
+            current_focus_kind="goal",
+            current_focus_id="goal-1",
+            current_focus="Launch runtime center",
             current_goal_id="goal-1",
             current_goal="Launch runtime center",
             current_task_id="task-1",
@@ -551,18 +553,6 @@ class _FakeCapabilityService:
                 enabled=True,
             ),
             CapabilityMount(
-                id="system:dispatch_active_goals",
-                name="dispatch_active_goals",
-                summary="Dispatch active goals for the owner.",
-                kind="system-op",
-                source_kind="system",
-                risk_level="guarded",
-                environment_requirements=[],
-                evidence_contract=["kernel-task"],
-                role_access_policy=["execution-core"],
-                enabled=True,
-            ),
-            CapabilityMount(
                 id="system:apply_role",
                 name="apply_role",
                 summary="Apply a governed role or capability update.",
@@ -668,6 +658,7 @@ class _FakeIndustryService:
                         "system:apply_role",
                         "tool:browser_use",
                     ],
+                    "current_focus": "Launch runtime center",
                     "current_goal": "Launch runtime center",
                 },
                 {
@@ -679,6 +670,7 @@ class _FakeIndustryService:
                         "system:dispatch_query",
                         "tool:browser_use",
                     ],
+                    "current_focus": "Gather operator research",
                     "current_goal": "Gather operator research",
                 },
             ],

@@ -53,6 +53,20 @@ class _FakeIndustryService:
             "label": "Acme Pets",
             "owner_scope": "pets-ops",
             "goals": [{"goal_id": "goal-1"}],
+            "lanes": [
+                {
+                    "lane_id": "lane-growth",
+                    "title": "增长获客",
+                    "status": "active",
+                    "priority": 3,
+                },
+                {
+                    "lane_id": "lane-fulfillment",
+                    "title": "交付履约",
+                    "status": "queued",
+                    "priority": 2,
+                },
+            ],
             "backlog": [{"backlog_item_id": "backlog-1"}],
             "assignments": [],
             "team": {
@@ -109,6 +123,9 @@ class _FakeAgentProfileService:
                 "agent_id": "copaw-agent-runner",
                 "name": "Execution Core",
                 "role_name": "Execution Core",
+                "current_focus_kind": "goal",
+                "current_focus_id": "goal-execution-core",
+                "current_focus": "Run weekly industry review",
                 "current_goal": "Run weekly industry review",
                 "industry_instance_id": "industry-v1-acme",
                 "industry_role_id": "execution-core",
@@ -118,6 +135,9 @@ class _FakeAgentProfileService:
                 "agent_id": "research-agent",
                 "name": "Research Agent",
                 "role_name": "Research Lead",
+                "current_focus_kind": "goal",
+                "current_focus_id": "goal-research",
+                "current_focus": "Prepare the next evidence digest",
                 "current_goal": "Prepare the next evidence digest",
             }
         return None
@@ -382,7 +402,10 @@ def test_runtime_conversation_detail_resolves_industry_thread() -> None:
     assert payload["name"] == "Acme Pets - Execution Core"
     assert payload["meta"]["session_kind"] == "industry-control-thread"
     assert payload["meta"]["entry_source"] == "industry"
-    assert payload["meta"]["current_goal"] == "Run weekly industry review"
+    assert payload["meta"]["current_focus_kind"] == "goal"
+    assert payload["meta"]["current_focus_id"] == "goal-execution-core"
+    assert payload["meta"]["current_focus"] == "Run weekly industry review"
+    assert "current_goal" not in payload["meta"]
     assert payload["meta"]["context_key"] == "control-thread:industry-chat:industry-v1-acme:execution-core"
     assert payload["meta"]["work_context_id"] == "ctx-acme-execution-core"
     assert payload["meta"]["work_context"]["title"] == "Acme Pets execution core"
@@ -411,6 +434,27 @@ def test_runtime_conversation_detail_exposes_current_human_assist_task_meta() ->
     )
 
 
+def test_runtime_conversation_detail_omits_human_assist_meta_when_current_task_is_resume_queued() -> None:
+    class _ResumeQueuedHumanAssistTaskService:
+        def get_current_task(self, *, chat_thread_id: str):
+            del chat_thread_id
+            return None
+
+    app, _history_reader = _build_app(
+        human_assist_task_service=_ResumeQueuedHumanAssistTaskService(),
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/runtime-center/conversations/industry-chat:industry-v1-acme:execution-core",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "human_assist_task" not in payload["meta"]
+    assert "human_assist_tasks_route" not in payload["meta"]
+
+
 def test_runtime_conversation_detail_injects_waiting_confirm_kickoff_prompt() -> None:
     thread_id = "industry-chat:industry-v1-acme:execution-core"
     app, history_reader = _build_app(
@@ -430,7 +474,8 @@ def test_runtime_conversation_detail_injects_waiting_confirm_kickoff_prompt() ->
     assert text
     assert "Acme Pets" in text
     assert "当前待编排：goal" not in text
-    assert "当前待编排：backlog 1 / cycle 1 / assignment 0 / report 0。" in text
+    assert "当前待编排：lane 2 / backlog 1 / cycle 1 / assignment 0 / report 0。" in text
+    assert "当前 lane：增长获客、交付履约。" in text
     assert history_reader.calls[0].session_id == thread_id
 
 
@@ -451,6 +496,45 @@ def test_runtime_conversation_detail_kickoff_prompt_mentions_staffing_gap_and_re
     assert "decision-seat-1" in text
     assert "Researcher" in text
     assert history_reader.calls[0].session_id == thread_id
+
+
+def test_runtime_conversation_detail_kickoff_prompt_mentions_pending_proposals_and_temporary_seats() -> None:
+    class _RichKickoffIndustryService(_FakeIndustryService):
+        def get_instance_detail(self, instance_id: str):
+            detail = super().get_instance_detail(instance_id)
+            if detail is None:
+                return None
+            staffing = detail["staffing"]
+            staffing["pending_proposals"] = [
+                *list(staffing.get("pending_proposals") or []),
+                {
+                    "kind": "temporary-seat-proposal",
+                    "target_role_name": "Browser QA Seat",
+                    "decision_request_id": "decision-seat-2",
+                },
+            ]
+            staffing["temporary_seats"] = [
+                {
+                    "role_id": "temporary-browser-runner",
+                    "role_name": "Temporary Browser Runner",
+                },
+            ]
+            return detail
+
+    thread_id = "industry-chat:industry-v1-acme:execution-core"
+    app, _history_reader = _build_app(
+        history_reader=_FakeHistoryReader(empty_thread_ids={thread_id}),
+        industry_service=_RichKickoffIndustryService(waiting_confirm=True),
+    )
+    client = TestClient(app)
+
+    response = client.get(f"/runtime-center/conversations/{thread_id}")
+
+    assert response.status_code == 200
+    text = response.json()["messages"][0]["content"][0]["text"]
+    assert "待确认 proposals" in text
+    assert "Browser QA Seat" in text
+    assert "Temporary Browser Runner" in text
 
 
 def test_runtime_conversation_detail_rejects_retired_agent_thread_frontdoor() -> None:

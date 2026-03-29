@@ -148,8 +148,11 @@ export interface AgentProfile {
   resident?: boolean;
   status: string;
   risk_level: string;
-  current_goal_id: string | null;
-  current_goal: string;
+  current_focus_kind?: string | null;
+  current_focus_id?: string | null;
+  current_focus?: string | null;
+  current_goal_id?: string | null;
+  current_goal?: string | null;
   current_task_id: string | null;
   current_mailbox_id?: string | null;
   queue_depth?: number;
@@ -542,6 +545,33 @@ export interface GovernedCapabilityAssignmentResult {
 
 const EXECUTION_CORE_ROLE_ID = "execution-core";
 
+function resolveFocusedGoalId(agent: AgentProfile | null | undefined): string | null {
+  const focusKind = agent?.current_focus_kind?.trim().toLowerCase();
+  const focusId = agent?.current_focus_id?.trim() || null;
+  if (focusKind === "goal" && focusId) {
+    return focusId;
+  }
+  return null;
+}
+
+function resolveRuntimeIndustryFocus(agent: AgentProfile | null | undefined): {
+  assignmentId?: string;
+  backlogItemId?: string;
+} {
+  const focusKind = agent?.current_focus_kind?.trim().toLowerCase();
+  const focusId = agent?.current_focus_id?.trim() || "";
+  if (!focusId) {
+    return {};
+  }
+  if (focusKind === "assignment") {
+    return { assignmentId: focusId };
+  }
+  if (focusKind === "backlog" || focusKind === "backlog-item") {
+    return { backlogItemId: focusId };
+  }
+  return {};
+}
+
 function pickPreferredAgent(agents: AgentProfile[]): AgentProfile | null {
   return (
     agents.find(
@@ -673,7 +703,10 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
   }, []);
 
   const refreshIndustryDetail = useCallback(
-    async (overrideIndustryInstanceId?: string | null) => {
+    async (
+      overrideIndustryInstanceId?: string | null,
+      focusAgent?: AgentProfile | null,
+    ) => {
       const targetIndustryInstanceId =
         overrideIndustryInstanceId?.trim() || selectedIndustryInstanceId;
       if (!targetIndustryInstanceId) {
@@ -685,7 +718,10 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
       setIndustryDetailLoading(true);
       try {
         setIndustryDetailError(null);
-        const detail = await api.getRuntimeIndustryDetail(targetIndustryInstanceId);
+        const detail = await api.getRuntimeIndustryDetail(
+          targetIndustryInstanceId,
+          resolveRuntimeIndustryFocus(focusAgent ?? selectedAgent),
+        );
         setIndustryDetail(detail);
         return detail;
       } catch (error) {
@@ -697,7 +733,7 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
         setIndustryDetailLoading(false);
       }
     },
-    [selectedIndustryInstanceId],
+    [selectedAgent, selectedIndustryInstanceId],
   );
 
   const fetchCapabilityCatalog = useCallback(async () => {
@@ -744,13 +780,14 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
       setIndustryDetailError(null);
       return;
     }
-    void refreshIndustryDetail(selectedIndustryInstanceId);
-  }, [refreshIndustryDetail, selectedIndustryInstanceId]);
+    void refreshIndustryDetail(selectedIndustryInstanceId, selectedAgent);
+  }, [refreshIndustryDetail, selectedAgent, selectedIndustryInstanceId]);
 
   useEffect(() => {
-    if (selectedAgent?.current_goal_id) {
-      if (selectedAgent.current_goal_id !== selectedGoalId) {
-        setSelectedGoalId(selectedAgent.current_goal_id);
+    const focusedGoalId = resolveFocusedGoalId(selectedAgent);
+    if (focusedGoalId) {
+      if (focusedGoalId !== selectedGoalId) {
+        setSelectedGoalId(focusedGoalId);
       }
       return;
     }
@@ -764,7 +801,8 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
   }, [
     agentDetail?.goals,
     agentDetailLoading,
-    selectedAgent?.current_goal_id,
+    selectedAgent?.current_focus_id,
+    selectedAgent?.current_focus_kind,
     selectedGoalId,
   ]);
 
@@ -772,12 +810,13 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
     await Promise.all([
       fetchDashboard(),
       fetchCapabilityCatalog(),
-      refreshIndustryDetail(selectedIndustryInstanceId),
+      refreshIndustryDetail(selectedIndustryInstanceId, selectedAgent),
     ]);
   }, [
     fetchCapabilityCatalog,
     fetchDashboard,
     refreshIndustryDetail,
+    selectedAgent,
     selectedIndustryInstanceId,
   ]);
 
@@ -787,7 +826,7 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
     }
     await Promise.all([
       fetchAgentDetail(selectedAgent.agent_id),
-      refreshIndustryDetail(selectedAgent.industry_instance_id),
+      refreshIndustryDetail(selectedAgent.industry_instance_id, selectedAgent),
     ]);
   }, [
     fetchAgentDetail,
@@ -801,10 +840,20 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
       await Promise.all([
         fetchDashboard(),
         fetchAgentDetail(agentId),
-        refreshIndustryDetail(selectedIndustryInstanceId),
+        refreshIndustryDetail(
+          selectedIndustryInstanceId,
+          agents.find((item) => item.agent_id === agentId) || selectedAgent,
+        ),
       ]);
     },
-    [fetchAgentDetail, fetchDashboard, refreshIndustryDetail, selectedIndustryInstanceId],
+    [
+      agents,
+      fetchAgentDetail,
+      fetchDashboard,
+      refreshIndustryDetail,
+      selectedAgent,
+      selectedIndustryInstanceId,
+    ],
   );
 
   const submitGovernedCapabilityAssignment = useCallback(

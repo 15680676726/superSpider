@@ -76,12 +76,15 @@ def test_human_assist_task_service_accepts_submission_when_verification_passes(t
     )
 
     assert result.outcome == "accepted"
-    assert result.resume_queued is True
-    assert result.task.status == "resume_queued"
+    assert result.resume_queued is False
+    assert result.task.status == "accepted"
     assert result.task.reward_result["协作值"] == 2
     assert result.task.reward_result["granted"] is True
     assert "receipt" in result.matched_hard_anchors
     assert "uploaded" in result.matched_result_anchors
+
+    queued = service.mark_resume_queued(issued.id)
+    assert queued.status == "resume_queued"
 
 
 def test_human_assist_task_service_requests_more_evidence_when_anchors_are_missing(tmp_path) -> None:
@@ -96,7 +99,7 @@ def test_human_assist_task_service_requests_more_evidence_when_anchors_are_missi
 
     assert result.outcome == "need_more_evidence"
     assert result.resume_queued is False
-    assert result.task.status == "rejected"
+    assert result.task.status == "need_more_evidence"
     assert result.missing_hard_anchors == ["receipt"]
     assert result.missing_result_anchors == ["uploaded"]
     assert "补上传回执截图" in result.message
@@ -135,9 +138,99 @@ def test_human_assist_task_service_excludes_resume_queued_from_current_task(tmp_
         submission_text="uploaded receipt proof",
         submission_evidence_refs=["media-analysis-1"],
     )
+    service.mark_resume_queued(issued.id)
 
     current = service.get_current_task(
         chat_thread_id="industry-chat:industry-1:execution-core",
     )
 
     assert current is None
+
+
+def test_human_assist_task_service_closes_task_after_resume_finishes(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    issued = service.issue_task(_make_record())
+
+    service.submit_and_verify(
+        issued.id,
+        submission_text="uploaded receipt proof",
+        submission_evidence_refs=["media-analysis-1"],
+    )
+    service.mark_resume_queued(issued.id)
+
+    closed = service.mark_closed(
+        issued.id,
+        summary="系统已从断点继续。",
+        resume_payload={"resumed": True, "summary": "resume finished"},
+    )
+
+    assert closed.status == "closed"
+    assert closed.closed_at is not None
+    assert closed.verification_payload["resume"]["status"] == "closed"
+    assert closed.verification_payload["resume"]["summary"] == "系统已从断点继续。"
+
+
+def test_human_assist_task_service_marks_handoff_blocked_when_resume_fails(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    issued = service.issue_task(_make_record())
+
+    service.submit_and_verify(
+        issued.id,
+        submission_text="uploaded receipt proof",
+        submission_evidence_refs=["media-analysis-1"],
+    )
+    service.mark_resume_queued(issued.id)
+
+    blocked = service.mark_handoff_blocked(
+        issued.id,
+        reason="系统暂时没接上后续流程。",
+        resume_payload={"resumed": False, "reason": "resume_unavailable"},
+    )
+
+    current = service.get_current_task(
+        chat_thread_id="industry-chat:industry-1:execution-core",
+    )
+
+    assert blocked.status == "handoff_blocked"
+    assert blocked.closed_at is None
+    assert blocked.verification_payload["resume"]["status"] == "handoff_blocked"
+    assert blocked.verification_payload["resume"]["reason"] == "系统暂时没接上后续流程。"
+    assert current is not None
+    assert current.id == issued.id
+def test_human_assist_task_service_rejects_submission_when_negative_anchor_matches(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+    issued = service.issue_task(_make_record())
+
+    result = service.submit_and_verify(
+        issued.id,
+        submission_text="missing receipt proof",
+        submission_evidence_refs=[],
+    )
+
+    assert result.outcome == "rejected"
+    assert result.task.status == "rejected"
+    assert result.matched_negative_anchors == ["missing"]
+
+
+def test_human_assist_task_service_allows_resubmission_after_need_more_evidence(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+    issued = service.issue_task(_make_record())
+
+    first = service.submit_and_verify(
+        issued.id,
+        submission_text="I finished it.",
+        submission_evidence_refs=[],
+    )
+    second = service.submit_and_verify(
+        issued.id,
+        submission_text="uploaded receipt proof",
+        submission_evidence_refs=["media-analysis-1"],
+    )
+
+    assert first.outcome == "need_more_evidence"
+    assert second.outcome == "accepted"
+    assert second.task.status == "accepted"

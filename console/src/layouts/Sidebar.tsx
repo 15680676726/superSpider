@@ -81,10 +81,10 @@ const MENU_PARENT_PATHS: Record<string, string[]> = {
   "agent-config": ["settings-group"],
 };
 
-const UPDATE_MD = `### Update Spider Mesh
+const UPDATE_MD = `### 更新 Spider Mesh
 
-Spider Mesh is distributed as a local/private deployment bundle.
-If you need an update, request the latest package from the maintainer and restart the service after installation.`;
+Spider Mesh 当前以本地 / 私有化部署包的形式分发。
+如需更新，请向维护者获取最新安装包，并在安装完成后重启服务。`;
 
 interface SidebarProps {
   selectedKey: string;
@@ -125,76 +125,76 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
   const menuItems: MenuProps["items"] = [
     {
       key: "chat-group",
-      label: "Chat",
+      label: "对话",
       icon: <MessageSquare size={16} />,
       children: [
         {
           key: "chat",
-          label: "Chat",
+          label: "聊天",
           icon: <MessageSquare size={16} />,
         },
       ],
     },
     {
       key: "runtime-group",
-      label: "Runtime",
+      label: "运行",
       icon: <Radar size={16} />,
       children: [
         {
           key: "runtime-center",
-          label: "Runtime Center",
+          label: "运行中心",
           icon: <Radar size={16} />,
         },
         {
           key: "agents",
-          label: "Agents",
+          label: "智能体",
           icon: <Briefcase size={16} />,
         },
         {
           key: "industry",
-          label: "Industry",
+          label: "行业中枢",
           icon: <Building2 size={16} />,
         },
         {
           key: "build-subgroup",
-          label: "Build",
+          label: "构建",
           icon: <Box size={16} />,
           children: [
             {
               key: "capability-market",
-              label: "Capability Market",
+              label: "能力市场",
               icon: <Waypoints size={16} />,
             },
           ],
         },
         {
           key: "insight-subgroup",
-          label: "Insights",
+          label: "洞察",
           icon: <BarChart3 size={16} />,
           children: [
             {
               key: "knowledge",
-              label: "Knowledge",
+              label: "知识库",
               icon: <BookOpen size={16} />,
             },
             {
               key: "reports",
-              label: "Reports",
+              label: "报告",
               icon: <FileText size={16} />,
             },
             {
               key: "performance",
-              label: "Performance",
+              label: "绩效",
               icon: <Gauge size={16} />,
             },
             {
               key: "calendar",
-              label: "Calendar",
+              label: "日历",
               icon: <CalendarDays size={16} />,
             },
             {
               key: "predictions",
-              label: "Predictions",
+              label: "预测",
               icon: <BarChart3 size={16} />,
             },
           ],
@@ -203,32 +203,32 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
     },
     {
       key: "settings-group",
-      label: "Settings",
+      label: "设置",
       icon: <Settings size={16} />,
       children: [
         {
           key: "system",
-          label: "System",
+          label: "系统",
           icon: <ShieldCheck size={16} />,
         },
         {
           key: "channels",
-          label: "Channels",
+          label: "渠道",
           icon: <Wifi size={16} />,
         },
         {
           key: "models",
-          label: "Models",
+          label: "模型",
           icon: <Cpu size={16} />,
         },
         {
           key: "environments",
-          label: "Environments",
+          label: "环境",
           icon: <Box size={16} />,
         },
         {
           key: "agent-config",
-          label: "Agent Config",
+          label: "智能体配置",
           icon: <Globe size={16} />,
         },
       ],
@@ -296,7 +296,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
                 onClick={handleOpenUpdateModal}
                 className={styles.updateButton}
               >
-                Update
+                更新
               </Button>
             </Badge>
           ) : null}
@@ -320,7 +320,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
         />
       </div>
       <Modal
-        title="Version Update"
+        title="版本更新"
         open={updateModalOpen}
         onCancel={() => setUpdateModalOpen(false)}
         footer={null}

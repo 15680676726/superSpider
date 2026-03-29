@@ -676,6 +676,18 @@ def test_runtime_query_services_read_state_backed_surfaces(tmp_path) -> None:
         == "handoff"
     )
     assert (
+        task_review["review"]["execution_runtime"]["host_twin_summary"][
+            "active_app_family_count"
+        ]
+        == 1
+    )
+    assert (
+        task_review["review"]["execution_runtime"]["host_twin_summary"][
+            "recommended_scheduler_action"
+        ]
+        == "handoff"
+    )
+    assert (
         task_review["review"]["continuity"]["handoff"]["state"]
         == "handoff-required"
     )
@@ -697,6 +709,10 @@ def test_runtime_query_services_read_state_backed_surfaces(tmp_path) -> None:
     )
     assert any(
         "Coordination: handoff" in line
+        for line in task_review["review"]["summary_lines"]
+    )
+    assert any(
+        "Host twin families:" in line
         for line in task_review["review"]["summary_lines"]
     )
     assert any(
@@ -821,3 +837,51 @@ def test_runtime_query_services_expose_human_assist_task_surfaces(tmp_path) -> N
     assert detail["task"]["acceptance_spec"]["hard_anchors"] == ["receipt"]
     assert detail["task"]["reward_preview"]["sync_points"] == 2
     assert detail["routes"]["self"] == f"/api/runtime-center/human-assist-tasks/{issued.id}"
+
+
+def test_runtime_query_services_hide_resume_queued_human_assist_from_current_but_keep_detail(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
+    human_assist_repository = SqliteHumanAssistTaskRepository(state_store)
+    human_assist_service = HumanAssistTaskService(
+        repository=human_assist_repository,
+        evidence_ledger=evidence_ledger,
+    )
+    issued = human_assist_service.issue_task(_make_human_assist_task())
+    human_assist_service.mark_resume_queued(issued.id)
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=SqliteTaskRepository(state_store),
+        task_runtime_repository=SqliteTaskRuntimeRepository(state_store),
+        schedule_repository=SqliteScheduleRepository(state_store),
+        decision_request_repository=SqliteDecisionRequestRepository(state_store),
+        evidence_ledger=evidence_ledger,
+        human_assist_task_service=human_assist_service,
+    )
+
+    current = state_query.get_current_human_assist_task(
+        chat_thread_id="industry-chat:industry-1:execution-core",
+    )
+    assert current is None
+
+    items = state_query.list_human_assist_tasks(
+        chat_thread_id="industry-chat:industry-1:execution-core",
+        limit=10,
+    )
+    assert len(items) == 1
+    assert items[0]["status"] == "resume_queued"
+
+    detail = state_query.get_human_assist_task_detail(issued.id)
+    assert detail is not None
+    assert detail["task"]["status"] == "resume_queued"
+    assert detail["task"]["current_route"].endswith(
+        "chat_thread_id=industry-chat%3Aindustry-1%3Aexecution-core",
+    )
+    assert detail["routes"]["list"].endswith(
+        "chat_thread_id=industry-chat%3Aindustry-1%3Aexecution-core",
+    )
+    assert detail["routes"]["current"].endswith(
+        "chat_thread_id=industry-chat%3Aindustry-1%3Aexecution-core",
+    )

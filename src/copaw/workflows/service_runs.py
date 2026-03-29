@@ -235,20 +235,27 @@ class _WorkflowServiceRunMixin:
                         ),
                     )
                 if payload.activate:
-                    await self._goal_service.dispatch_goal(
-                        goal.id,
-                        context={
-                            "channel": "workflow-template",
-                            "workflow_run_id": run.run_id,
-                            "workflow_template_id": template.template_id,
-                            "workflow_step_id": step.step_id,
-                            "execution_mode": step.execution_mode,
-                        },
-                        owner_agent_id=step.owner_agent_id,
-                        execute=payload.execute,
-                        execute_background=payload.execute,
-                        activate=payload.activate,
-                    )
+                    dispatch_context = {
+                        "channel": "workflow-template",
+                        "workflow_run_id": run.run_id,
+                        "workflow_template_id": template.template_id,
+                        "workflow_step_id": step.step_id,
+                        "execution_mode": step.execution_mode,
+                    }
+                    if payload.execute:
+                        await self._goal_service.dispatch_goal_background(
+                            goal.id,
+                            context=dispatch_context,
+                            owner_agent_id=step.owner_agent_id,
+                            activate=payload.activate,
+                        )
+                    else:
+                        await self._goal_service.compile_goal_dispatch(
+                            goal.id,
+                            context=dispatch_context,
+                            owner_agent_id=step.owner_agent_id,
+                            activate=payload.activate,
+                        )
             elif step.kind == "schedule":
                 schedule_id = str(step_payload.get("id") or f"{run.run_id}:{step.step_id}")
                 schedule_ids.append(schedule_id)
@@ -400,6 +407,8 @@ class _WorkflowServiceRunMixin:
             if execute is not None
             else str(dict(run.metadata or {}).get("launch_mode") or "").strip() == "execute"
         )
+        host_snapshot = dict(detail.diagnosis.host_snapshot or {})
+        metadata = dict(run.metadata or {})
         step_seed_items = list(dict(run.metadata or {}).get("step_execution_seed") or [])
         step_seed_by_id = {
             str(item.get("step_id")): item
@@ -449,21 +458,28 @@ class _WorkflowServiceRunMixin:
                     goal = self._goal_service.get_goal(goal_id)
                     if goal is None or goal.status in {"completed", "archived"}:
                         continue
-                    await self._goal_service.dispatch_goal(
-                        goal_id,
-                        context={
-                            "channel": "workflow-template",
-                            "workflow_run_id": run.run_id,
-                            "workflow_template_id": template.template_id,
-                            "workflow_step_id": step.step_id,
-                            "execution_mode": step.execution_mode,
-                            "resume_actor": actor,
-                        },
-                        owner_agent_id=step.owner_agent_id,
-                        execute=bool(execute_flag),
-                        execute_background=bool(execute_flag),
-                        activate=True,
-                    )
+                    dispatch_context = {
+                        "channel": "workflow-template",
+                        "workflow_run_id": run.run_id,
+                        "workflow_template_id": template.template_id,
+                        "workflow_step_id": step.step_id,
+                        "execution_mode": step.execution_mode,
+                        "resume_actor": actor,
+                    }
+                    if bool(execute_flag):
+                        await self._goal_service.dispatch_goal_background(
+                            goal_id,
+                            context=dispatch_context,
+                            owner_agent_id=step.owner_agent_id,
+                            activate=True,
+                        )
+                    else:
+                        await self._goal_service.compile_goal_dispatch(
+                            goal_id,
+                            context=dispatch_context,
+                            owner_agent_id=step.owner_agent_id,
+                            activate=True,
+                        )
             elif step.kind == "schedule":
                 linked_schedule_ids = (
                     list(step_seed.get("linked_schedule_ids") or [])
@@ -481,52 +497,18 @@ class _WorkflowServiceRunMixin:
                         template=template,
                         preview=detail.preview,
                         step=step,
-                        host_snapshot=detail.diagnosis.host_snapshot,
+                        host_snapshot=host_snapshot,
                     )
-                    await self._persist_schedule_spec(
-                        {
-                            "id": schedule_id,
-                            "name": step.title,
-                            "enabled": True,
-                            "schedule": {
-                                "type": "cron",
-                                "cron": str(step_payload.get("cron") or "0 9 * * *"),
-                                "timezone": str(step_payload.get("timezone") or "UTC"),
-                            },
-                            "task_type": "agent",
-                            "request": {
-                                "input": str(step_payload.get("request_input") or step.summary),
-                                "meta": {
-                                    "workflow_run_id": run.run_id,
-                                    "workflow_template_id": template.template_id,
-                                    "workflow_step_id": step.step_id,
-                                },
-                            },
-                            "dispatch": {
-                                "type": "channel",
-                                "channel": str(step_payload.get("dispatch_channel") or "console"),
-                                "target": {
-                                    "user_id": str(step_payload.get("dispatch_user_id") or "workflow"),
-                                    "session_id": str(step_payload.get("dispatch_session_id") or run.run_id),
-                                },
-                                "mode": str(step_payload.get("dispatch_mode") or "final"),
-                                "meta": {
-                                    "summary": step.summary,
-                                    "owner_agent_id": step.owner_agent_id,
-                                    "workflow_run_id": run.run_id,
-                                    "workflow_template_id": template.template_id,
-                                    "resume_actor": actor,
-                                    **dict(schedule_meta),
-                                },
-                            },
-                            "runtime": {
-                                "max_concurrency": 1,
-                                "timeout_seconds": 120,
-                                "misfire_grace_seconds": 60,
-                            },
-                            "meta": dict(schedule_meta),
-                        }
+                    schedule_spec = self._build_schedule_spec(
+                        run=run,
+                        template=template,
+                        step=step,
+                        step_payload=step_payload,
+                        schedule_id=schedule_id,
+                        schedule_meta=schedule_meta,
+                        dispatch_meta_extra={"resume_actor": actor},
                     )
+                    await self._persist_schedule_spec(schedule_spec)
                     if self._schedule_repository is not None:
                         stored = self._schedule_repository.get_schedule(schedule_id)
                         if stored is None:
@@ -549,25 +531,147 @@ class _WorkflowServiceRunMixin:
                             )
                 else:
                     for schedule_id in linked_schedule_ids:
+                        schedule_meta = self._build_schedule_host_meta(
+                            run=run,
+                            template=template,
+                            preview=detail.preview,
+                            step=step,
+                            host_snapshot=host_snapshot,
+                        )
+                        schedule_spec = self._build_schedule_spec(
+                            run=run,
+                            template=template,
+                            step=step,
+                            step_payload=step_payload,
+                            schedule_id=schedule_id,
+                            schedule_meta=schedule_meta,
+                            dispatch_meta_extra={"resume_actor": actor},
+                        )
+                        await self._persist_schedule_spec(schedule_spec)
+                        if self._schedule_repository is not None:
+                            stored = self._schedule_repository.get_schedule(schedule_id)
+                            if stored is not None:
+                                self._schedule_repository.upsert_schedule(
+                                    stored.model_copy(
+                                        update={
+                                            "title": step.title,
+                                            "cron": str(
+                                                step_payload.get("cron") or stored.cron
+                                            ),
+                                            "timezone": str(
+                                                step_payload.get("timezone") or stored.timezone
+                                            ),
+                                            "status": "scheduled",
+                                            "enabled": True,
+                                            "target_channel": str(
+                                                step_payload.get("dispatch_channel")
+                                                or stored.target_channel
+                                            ),
+                                            "source_ref": (
+                                                stored.source_ref
+                                                or f"workflow-template:{template.template_id}"
+                                            ),
+                                            "spec_payload": {
+                                                **dict(stored.spec_payload or {}),
+                                                "meta": dict(schedule_meta),
+                                            },
+                                            "updated_at": _utc_now(),
+                                        }
+                                    )
+                                )
                         await self._resume_schedule(schedule_id)
 
+        resolved_environment_ref = (
+            _string(metadata.get("environment_ref"))
+            or _string(host_snapshot.get("environment_ref"))
+            or _string(host_snapshot.get("environment_id"))
+            or _string(metadata.get("environment_id"))
+        )
+        resolved_environment_id = (
+            _string(host_snapshot.get("environment_id"))
+            or _string(metadata.get("environment_id"))
+            or resolved_environment_ref
+        )
+        resolved_session_mount_id = (
+            _string(host_snapshot.get("session_mount_id"))
+            or _string(metadata.get("session_mount_id"))
+        )
         persisted = run.model_copy(
             update={
                 "goal_ids": goal_ids,
                 "schedule_ids": schedule_ids,
                 "status": "running" if execute_flag else run.status,
                 "metadata": {
-                    **dict(run.metadata or {}),
+                    **metadata,
                     "step_execution_seed": step_seed_items,
                     "last_resumed_by": actor,
                     "last_resumed_at": _utc_now().isoformat(),
                     "resume_count": int(dict(run.metadata or {}).get("resume_count") or 0) + 1,
+                    "host_snapshot": host_snapshot,
+                    "environment_ref": resolved_environment_ref,
+                    "environment_id": resolved_environment_id,
+                    "session_mount_id": resolved_session_mount_id,
                 },
                 "updated_at": _utc_now(),
             },
         )
         self._workflow_run_repository.upsert_run(persisted)
         return self.get_run_detail(run_id)
+
+    def _build_schedule_spec(
+        self,
+        *,
+        run: WorkflowRunRecord,
+        template: WorkflowTemplateRecord,
+        step: WorkflowTemplateStepPreview,
+        step_payload: dict[str, Any],
+        schedule_id: str,
+        schedule_meta: dict[str, Any],
+        dispatch_meta_extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        dispatch_meta = {
+            "summary": step.summary,
+            "owner_agent_id": step.owner_agent_id,
+            "workflow_run_id": run.run_id,
+            "workflow_template_id": template.template_id,
+            **dict(dispatch_meta_extra or {}),
+            **dict(schedule_meta),
+        }
+        return {
+            "id": schedule_id,
+            "name": step.title,
+            "enabled": True,
+            "schedule": {
+                "type": "cron",
+                "cron": str(step_payload.get("cron") or "0 9 * * *"),
+                "timezone": str(step_payload.get("timezone") or "UTC"),
+            },
+            "task_type": "agent",
+            "request": {
+                "input": str(step_payload.get("request_input") or step.summary),
+                "meta": {
+                    "workflow_run_id": run.run_id,
+                    "workflow_template_id": template.template_id,
+                    "workflow_step_id": step.step_id,
+                },
+            },
+            "dispatch": {
+                "type": "channel",
+                "channel": str(step_payload.get("dispatch_channel") or "console"),
+                "target": {
+                    "user_id": str(step_payload.get("dispatch_user_id") or "workflow"),
+                    "session_id": str(step_payload.get("dispatch_session_id") or run.run_id),
+                },
+                "mode": str(step_payload.get("dispatch_mode") or "final"),
+                "meta": dispatch_meta,
+            },
+            "runtime": {
+                "max_concurrency": 1,
+                "timeout_seconds": 120,
+                "misfire_grace_seconds": 60,
+            },
+            "meta": dict(schedule_meta),
+        }
 
     def _build_schedule_host_meta(
         self,

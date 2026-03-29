@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ..industry.identity import EXECUTION_CORE_AGENT_ID, EXECUTION_CORE_NAME
 
@@ -38,6 +38,9 @@ class AgentProfile(BaseModel):
     resident: bool = Field(default=False)
     status: AgentStatus = Field(default="idle")
     risk_level: str = Field(default="auto")
+    current_focus_kind: str | None = Field(default=None)
+    current_focus_id: str | None = Field(default=None)
+    current_focus: str = Field(default="", description="Current live execution focus")
     current_goal_id: str | None = Field(default=None)
     current_goal: str = Field(default="", description="Current top-level goal")
     current_task_id: str | None = Field(default=None)
@@ -57,6 +60,21 @@ class AgentProfile(BaseModel):
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
     )
+
+    @model_validator(mode="after")
+    def _sync_focus_goal_backlinks(self) -> "AgentProfile":
+        if not self.current_focus_kind and (self.current_goal_id or self.current_goal):
+            self.current_focus_kind = "goal"
+        if not self.current_focus_id and self.current_goal_id:
+            self.current_focus_id = self.current_goal_id
+        if not self.current_focus and self.current_goal:
+            self.current_focus = self.current_goal
+        if self.current_focus_kind == "goal":
+            if not self.current_goal_id and self.current_focus_id:
+                self.current_goal_id = self.current_focus_id
+            if not self.current_goal and self.current_focus:
+                self.current_goal = self.current_focus
+        return self
 
 
 class AgentDailyReport(BaseModel):

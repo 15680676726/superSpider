@@ -196,6 +196,7 @@ class EnvironmentHealthService:
                 "cooperative_adapter_availability": cooperative_adapter_availability,
                 "workspace_graph": workspace_graph,
                 "host_twin": host_twin,
+                "host_twin_summary": host_twin.get("host_twin_summary"),
                 "host_event_summary": host_event_summary,
                 "host_events": host_events,
                 "sessions": [session.model_dump(mode="json") for session in sessions],
@@ -341,6 +342,7 @@ class EnvironmentHealthService:
                 "cooperative_adapter_availability": cooperative_adapter_availability,
                 "workspace_graph": workspace_graph,
                 "host_twin": host_twin,
+                "host_twin_summary": host_twin.get("host_twin_summary"),
                 "host_event_summary": host_event_summary,
                 "host_events": host_events,
                 "environment": (
@@ -395,12 +397,34 @@ class EnvironmentHealthService:
             runtime_descriptor.get("handoff_reason"),
             live_descriptor.get("handoff_reason"),
         )
-        current_gap = self._first_string(
+        explicit_current_gap = self._first_string(
             session_metadata.get("current_gap_or_blocker"),
             mount_metadata.get("current_gap_or_blocker"),
             runtime_descriptor.get("current_gap_or_blocker"),
             live_descriptor.get("current_gap_or_blocker"),
-            self._host_event_gap_or_blocker(blocker_event),
+        )
+        recovered_runtime_ready = self._host_twin_recovered_runtime_ready(
+            host_contract={
+                "handoff_state": explicit_handoff_state,
+                "handoff_owner_ref": self._first_string(
+                    session_metadata.get("handoff_owner_ref"),
+                    mount_metadata.get("handoff_owner_ref"),
+                    runtime_descriptor.get("handoff_owner_ref"),
+                    live_descriptor.get("handoff_owner_ref"),
+                ),
+                "handoff_reason": explicit_handoff_reason,
+                "current_gap_or_blocker": explicit_current_gap,
+            },
+            recovery=recovery,
+            host_event_summary=host_event_summary,
+        )
+        current_gap = self._first_string(
+            explicit_current_gap,
+            (
+                self._host_event_gap_or_blocker(blocker_event)
+                if not recovered_runtime_ready
+                else None
+            ),
         )
         if current_gap is None:
             recovery_note = self._first_string(recovery.get("note"))
@@ -445,13 +469,17 @@ class EnvironmentHealthService:
             ),
             "handoff_state": self._first_string(
                 explicit_handoff_state,
-                self._host_event_handoff_state(blocker_event),
+                (
+                    self._host_event_handoff_state(blocker_event)
+                    if not recovered_runtime_ready
+                    else None
+                ),
             ),
             "handoff_reason": self._first_string(
                 explicit_handoff_reason,
                 (
                     self._host_event_gap_or_blocker(blocker_event)
-                    if explicit_handoff_state is None
+                    if explicit_handoff_state is None and not recovered_runtime_ready
                     else None
                 ),
             ),
@@ -1796,11 +1824,18 @@ class EnvironmentHealthService:
             workspace_graph=workspace_graph,
             host_event_summary=host_event_summary,
             surface_mutability=surface_mutability,
+            host_contract=host_contract,
+            recovery=recovery,
         )
         app_family_twins = self._build_host_twin_app_family_twins(
             browser_site_contract=browser_site_contract,
             desktop_app_contract=desktop_app_contract,
             surface_mutability=surface_mutability,
+        )
+        recovered_runtime_ready = self._host_twin_recovered_runtime_ready(
+            host_contract=host_contract,
+            recovery=recovery,
+            host_event_summary=host_event_summary,
         )
         coordination = self._build_host_twin_coordination(
             workspace_graph=workspace_graph,
@@ -1846,6 +1881,22 @@ class EnvironmentHealthService:
             self._mapping(host_event_summary.get("scheduler_inputs")).get(
                 "active_recovery_family",
             ),
+        )
+        if recovered_runtime_ready:
+            active_recovery_family = None
+        host_twin_summary = self._build_host_twin_summary_projection(
+            ownership=ownership,
+            coordination=coordination,
+            app_family_twins=app_family_twins,
+            host_companion_session=host_companion_session,
+            seat_runtime=seat_runtime,
+            blocked_surfaces=blocked_surfaces,
+            continuity=continuity,
+            legal_recovery=legal_recovery,
+            latest_blocking_event=latest_blocking_event,
+            execution_mutation_ready=execution_mutation_ready,
+            writable_surface_kinds=writable_surface_kinds,
+            trusted_anchors=trusted_anchors,
         )
         return {
             "projection_kind": "host_twin_projection",
@@ -1901,6 +1952,7 @@ class EnvironmentHealthService:
             "execution_mutation_ready": execution_mutation_ready,
             "app_family_twins": app_family_twins,
             "coordination": coordination,
+            "host_twin_summary": host_twin_summary,
             "scheduler_inputs": {
                 "active_blocker_family": active_blocker_family,
                 "active_recovery_family": active_recovery_family,
@@ -1925,6 +1977,181 @@ class EnvironmentHealthService:
                 "seat/workspace/contracts/events/evidence anchors, not a second "
                 "truth source."
             ),
+        }
+
+    def _build_host_twin_summary_projection(
+        self,
+        *,
+        ownership: dict[str, object],
+        coordination: dict[str, object],
+        app_family_twins: dict[str, dict[str, object]],
+        host_companion_session: dict[str, object],
+        seat_runtime: dict[str, object],
+        blocked_surfaces: list[dict[str, object]],
+        continuity: dict[str, object],
+        legal_recovery: dict[str, object],
+        latest_blocking_event: dict[str, object],
+        execution_mutation_ready: dict[str, bool],
+        writable_surface_kinds: list[str],
+        trusted_anchors: list[dict[str, object]],
+    ) -> dict[str, object]:
+        active_app_family_keys = sorted(
+            family_key
+            for family_key, value in app_family_twins.items()
+            if isinstance(value, dict) and value.get("active") is True
+        )
+        ready_app_family_keys = sorted(
+            family_key
+            for family_key, value in app_family_twins.items()
+            if isinstance(value, dict)
+            and value.get("active") is True
+            and self._first_string(value.get("contract_status")) not in {
+                "blocked",
+                "inactive",
+            }
+        )
+        blocked_app_family_keys = sorted(
+            family_key
+            for family_key, value in app_family_twins.items()
+            if isinstance(value, dict)
+            and (
+                value.get("active") is not True
+                or self._first_string(value.get("contract_status")) in {
+                    "blocked",
+                    "inactive",
+                }
+            )
+        )
+        candidate_seat_refs = self._string_list(coordination.get("candidate_seat_refs"))
+        selected_seat_ref = self._first_string(
+            coordination.get("selected_seat_ref"),
+            seat_runtime.get("selected_seat_ref"),
+            seat_runtime.get("seat_ref"),
+        )
+        seat_count = seat_runtime.get("session_count")
+        if not isinstance(seat_count, int):
+            seat_count = len(candidate_seat_refs) or (1 if selected_seat_ref else 0)
+        host_companion_status = self._first_string(
+            host_companion_session.get("continuity_status"),
+        )
+        host_companion_source = self._first_string(
+            host_companion_session.get("continuity_source"),
+        )
+        host_companion_locality = self._mapping(host_companion_session.get("locality"))
+        multi_seat_coordination = {
+            "seat_count": seat_count,
+            "candidate_seat_refs": candidate_seat_refs,
+            "selected_seat_ref": selected_seat_ref,
+            "seat_selection_policy": self._first_string(
+                coordination.get("seat_selection_policy"),
+            ),
+            "occupancy_state": self._first_string(
+                seat_runtime.get("occupancy_state"),
+            ),
+            "status": self._first_string(seat_runtime.get("status")),
+            "host_companion_status": host_companion_status,
+            "active_surface_mix": self._string_list(
+                seat_runtime.get("active_surface_mix"),
+            ),
+        }
+        app_family_statuses = {
+            family_key: {
+                "active": bool(value.get("active")),
+                "ready": family_key in ready_app_family_keys,
+                "contract_status": self._first_string(value.get("contract_status")),
+                "surface_ref": self._first_string(value.get("surface_ref")),
+                "family_scope_ref": self._first_string(value.get("family_scope_ref")),
+                "writer_lock_scope": self._first_string(value.get("writer_lock_scope")),
+            }
+            for family_key, value in app_family_twins.items()
+            if isinstance(value, dict)
+        }
+        trusted_anchor_ref = None
+        if trusted_anchors:
+            first_anchor = trusted_anchors[0]
+            if isinstance(first_anchor, dict):
+                trusted_anchor_ref = self._first_string(
+                    first_anchor.get("anchor_ref"),
+                    first_anchor.get("anchor"),
+                    first_anchor.get("label"),
+                )
+        return {
+            "seat_owner_ref": self._first_string(
+                coordination.get("seat_owner_ref"),
+                ownership.get("seat_owner_ref"),
+                ownership.get("seat_owner_agent_id"),
+            ),
+            "handoff_owner_ref": self._first_string(ownership.get("handoff_owner_ref")),
+            "workspace_owner_ref": self._first_string(
+                coordination.get("workspace_owner_ref"),
+                ownership.get("workspace_owner_ref"),
+            ),
+            "writer_owner_ref": self._first_string(
+                coordination.get("writer_owner_ref"),
+                ownership.get("writer_owner_ref"),
+            ),
+            "selected_seat_ref": selected_seat_ref,
+            "seat_selection_policy": self._first_string(
+                coordination.get("seat_selection_policy"),
+            ),
+            "recommended_scheduler_action": self._first_string(
+                coordination.get("recommended_scheduler_action"),
+            ),
+            "contention_severity": self._first_string(
+                self._mapping(coordination.get("contention_forecast")).get("severity"),
+            ),
+            "contention_reason": self._first_string(
+                self._mapping(coordination.get("contention_forecast")).get("reason"),
+            ),
+            "host_companion_status": host_companion_status,
+            "host_companion_source": host_companion_source,
+            "host_companion_session_mount_id": self._first_string(
+                host_companion_session.get("session_mount_id"),
+            ),
+            "host_companion_environment_id": self._first_string(
+                host_companion_session.get("environment_id"),
+            ),
+            "host_companion_locality": host_companion_locality,
+            "seat_count": seat_count,
+            "candidate_seat_refs": candidate_seat_refs,
+            "multi_seat_coordination": multi_seat_coordination,
+            "ready_app_family_keys": ready_app_family_keys,
+            "ready_app_family_count": len(ready_app_family_keys),
+            "blocked_app_family_keys": blocked_app_family_keys,
+            "blocked_app_family_count": len(blocked_app_family_keys),
+            "app_family_readiness": {
+                "active_family_keys": active_app_family_keys,
+                "active_family_count": len(active_app_family_keys),
+                "ready_family_keys": ready_app_family_keys,
+                "ready_family_count": len(ready_app_family_keys),
+                "blocked_family_keys": blocked_app_family_keys,
+                "blocked_family_count": len(blocked_app_family_keys),
+                "family_statuses": app_family_statuses,
+            },
+            "active_app_family_keys": active_app_family_keys,
+            "active_app_family_count": len(active_app_family_keys),
+            "blocked_surface_refs": [
+                self._first_string(surface.get("surface_ref"), surface.get("surface_kind"))
+                for surface in blocked_surfaces
+                if isinstance(surface, dict)
+            ],
+            "blocked_surface_count": len(blocked_surfaces),
+            "active_blocker_families": self._string_list(
+                latest_blocking_event.get("event_family"),
+            ),
+            "legal_recovery_mode": self._first_string(
+                legal_recovery.get("resume_kind"),
+                legal_recovery.get("mode"),
+                legal_recovery.get("path"),
+            ),
+            "legal_recovery_summary": self._first_string(
+                legal_recovery.get("checkpoint_ref"),
+                legal_recovery.get("path"),
+            ),
+            "writable_surface_label": (
+                ", ".join(writable_surface_kinds) if writable_surface_kinds else None
+            ),
+            "trusted_anchor_ref": trusted_anchor_ref,
         }
 
     def _build_workspace_lock_projection(
@@ -3166,6 +3393,11 @@ class EnvironmentHealthService:
         desktop_surface = self._mapping(surfaces.get("desktop"))
         file_docs_surface = self._mapping(surfaces.get("file_docs"))
         host_blocker = self._mapping(surfaces.get("host_blocker"))
+        recovered_runtime_ready = self._host_twin_recovered_runtime_ready(
+            host_contract=host_contract,
+            recovery=recovery,
+            host_event_summary=host_event_summary,
+        )
         blocking_family = self._first_string(
             host_blocker.get("event_family"),
             self._mapping(self._blocking_host_event(host_event_summary)).get(
@@ -3177,6 +3409,9 @@ class EnvironmentHealthService:
             host_contract.get("current_gap_or_blocker"),
             host_blocker.get("event_name"),
         )
+        if recovered_runtime_ready:
+            blocking_family = None
+            blocking_reason = None
         recovery_path = self._first_string(
             self._mapping(workspace_graph.get("handoff_checkpoint")).get("resume_kind"),
             host_contract.get("resume_kind"),
@@ -3396,7 +3631,20 @@ class EnvironmentHealthService:
         workspace_graph: dict[str, object],
         host_event_summary: dict[str, object],
         surface_mutability: dict[str, dict[str, object]],
+        host_contract: dict[str, object],
+        recovery: dict[str, object],
     ) -> dict[str, object]:
+        if self._host_twin_recovered_runtime_ready(
+            host_contract=host_contract,
+            recovery=recovery,
+            host_event_summary=host_event_summary,
+        ):
+            return {
+                "event_family": None,
+                "event_name": None,
+                "recommended_runtime_response": None,
+                "surface_refs": [],
+            }
         surfaces = self._mapping(workspace_graph.get("surfaces"))
         host_blocker = self._mapping(surfaces.get("host_blocker"))
         blocker_event = self._blocking_host_event(host_event_summary)
@@ -3425,6 +3673,38 @@ class EnvironmentHealthService:
             "event_name": event_name,
             "recommended_runtime_response": recommended_runtime_response,
             "surface_refs": surface_refs,
+        }
+
+    def _host_twin_recovered_runtime_ready(
+        self,
+        *,
+        host_contract: dict[str, object],
+        recovery: dict[str, object],
+        host_event_summary: dict[str, object],
+    ) -> bool:
+        if self._first_string(
+            host_contract.get("handoff_state"),
+            host_contract.get("handoff_owner_ref"),
+            host_contract.get("handoff_reason"),
+            host_contract.get("current_gap_or_blocker"),
+        ):
+            return False
+        recovery_status = self._first_string(
+            recovery.get("status"),
+            recovery.get("state"),
+        )
+        if recovery_status not in {"attached", "completed", "ready", "stable"}:
+            return False
+        latest_handoff_event = self._mapping(host_event_summary.get("latest_handoff_event"))
+        latest_handoff_name = self._first_string(
+            latest_handoff_event.get("event_name"),
+            latest_handoff_event.get("action"),
+        )
+        return latest_handoff_name in {
+            "host.human-return-ready",
+            "human-return-ready",
+            "host.return-complete",
+            "return-complete",
         }
 
     def _host_event_resume_kind(

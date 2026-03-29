@@ -35,6 +35,7 @@ class SqliteMediaAnalysisRepository(BaseMediaAnalysisRepository):
         *,
         industry_instance_id: str | None = None,
         thread_id: str | None = None,
+        work_context_id: str | None = None,
         entry_point: str | None = None,
         status: str | None = None,
         limit: int | None = None,
@@ -47,6 +48,9 @@ class SqliteMediaAnalysisRepository(BaseMediaAnalysisRepository):
         if thread_id is not None:
             clauses.append("thread_id = ?")
             params.append(thread_id)
+        if work_context_id is not None:
+            clauses.append("work_context_id = ?")
+            params.append(work_context_id)
         if entry_point is not None:
             clauses.append("entry_point = ?")
             params.append(entry_point)
@@ -98,6 +102,7 @@ class SqliteMediaAnalysisRepository(BaseMediaAnalysisRepository):
                     analysis_id,
                     industry_instance_id,
                     thread_id,
+                    work_context_id,
                     entry_point,
                     purpose,
                     source_kind,
@@ -133,6 +138,7 @@ class SqliteMediaAnalysisRepository(BaseMediaAnalysisRepository):
                     :analysis_id,
                     :industry_instance_id,
                     :thread_id,
+                    :work_context_id,
                     :entry_point,
                     :purpose,
                     :source_kind,
@@ -168,6 +174,7 @@ class SqliteMediaAnalysisRepository(BaseMediaAnalysisRepository):
                 ON CONFLICT(analysis_id) DO UPDATE SET
                     industry_instance_id = excluded.industry_instance_id,
                     thread_id = excluded.thread_id,
+                    work_context_id = excluded.work_context_id,
                     entry_point = excluded.entry_point,
                     purpose = excluded.purpose,
                     source_kind = excluded.source_kind,

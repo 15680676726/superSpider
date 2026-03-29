@@ -60,6 +60,7 @@ async def start_runtime_manager_stack(
             kernel_dispatcher=kernel_dispatcher,
         )
         await stack.cron_manager.start()
+        capability_service.set_cron_manager(stack.cron_manager)
         governance_service.set_runtime_managers(
             cron_manager=stack.cron_manager,
             channel_manager=stack.channel_manager,

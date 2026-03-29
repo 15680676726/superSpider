@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from copaw.app.routers.learning import router as learning_router
 from copaw.app.routers.runtime_center import router as runtime_center_router
+from copaw.capabilities import CapabilityService
 from copaw.capabilities.install_templates import InstallTemplateExampleRunRecord
 from copaw.config.config import MCPClientConfig
 from copaw.evidence import EvidenceLedger
@@ -18,6 +19,7 @@ from copaw.industry import (
     IndustryRoleBlueprint,
     IndustryTeamBlueprint,
 )
+from copaw.kernel import KernelDispatcher, KernelTaskStore
 from copaw.learning import LearningEngine, LearningService, PatchExecutor
 from copaw.learning.runtime_bindings import LearningRuntimeBindings
 from copaw.state import SQLiteStateStore
@@ -26,6 +28,7 @@ from copaw.state.repositories import (
     SqliteDecisionRequestRepository,
     SqliteGoalOverrideRepository,
     SqliteTaskRepository,
+    SqliteTaskRuntimeRepository,
 )
 
 
@@ -39,6 +42,7 @@ def _build_learning_app(tmp_path) -> FastAPI:
     goal_override_repository = SqliteGoalOverrideRepository(state_store)
     decision_request_repository = SqliteDecisionRequestRepository(state_store)
     task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
     evidence_ledger = EvidenceLedger(tmp_path / "evidence.db")
 
     learning_service = LearningService(
@@ -51,12 +55,29 @@ def _build_learning_app(tmp_path) -> FastAPI:
         task_repository=task_repository,
         evidence_ledger=evidence_ledger,
     )
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+        learning_service=learning_service,
+    )
+    kernel_dispatcher = KernelDispatcher(
+        task_store=KernelTaskStore(
+            task_repository=task_repository,
+            task_runtime_repository=task_runtime_repository,
+            decision_request_repository=decision_request_repository,
+            evidence_ledger=evidence_ledger,
+        ),
+        capability_service=capability_service,
+    )
     app.state.learning_service = learning_service
     app.state.learning_engine = learning_service.engine
+    app.state.capability_service = capability_service
+    app.state.kernel_dispatcher = kernel_dispatcher
     app.state.agent_profile_override_repository = agent_profile_override_repository
     app.state.goal_override_repository = goal_override_repository
     app.state.decision_request_repository = decision_request_repository
     app.state.task_repository = task_repository
+    app.state.task_runtime_repository = task_runtime_repository
+    app.state.evidence_ledger = evidence_ledger
     return app
 
 
@@ -310,24 +331,36 @@ def test_learning_api_patch_lifecycle_and_runtime_center_reads(tmp_path) -> None
     assert created_patch_payload["decision_request"] is not None
 
     apply_before_approve = client.post(
-        f"/learning/patches/{patch_id}/apply",
+        f"/runtime-center/learning/patches/{patch_id}/apply",
         json={"actor": "reviewer"},
     )
     assert apply_before_approve.status_code == 400
 
     approved = client.post(
-        f"/learning/patches/{patch_id}/approve",
+        f"/runtime-center/learning/patches/{patch_id}/approve",
         json={"actor": "reviewer"},
     )
     assert approved.status_code == 200
     assert approved.json()["status"] == "approved"
 
     applied = client.post(
-        f"/learning/patches/{patch_id}/apply",
+        f"/runtime-center/learning/patches/{patch_id}/apply",
         json={"actor": "reviewer"},
     )
     assert applied.status_code == 200
-    assert applied.json()["status"] == "applied"
+    applied_payload = applied.json()
+    assert applied_payload["applied"] is False
+    assert applied_payload["result"]["phase"] == "waiting-confirm"
+    decision_id = applied_payload["result"]["decision_request_id"]
+    assert decision_id
+
+    approved_apply = client.post(
+        f"/runtime-center/decisions/{decision_id}/approve",
+        json={"resolution": "Apply the approved patch.", "execute": True},
+    )
+    assert approved_apply.status_code == 200
+    assert approved_apply.json()["phase"] == "completed"
+    assert approved_apply.json()["decision_request_id"] == decision_id
 
     goal_override = app.state.goal_override_repository.get_override("goal-detail")
     assert goal_override is not None
@@ -342,15 +375,27 @@ def test_learning_api_patch_lifecycle_and_runtime_center_reads(tmp_path) -> None
     assert any(item["source_patch_id"] == patch_id for item in runtime_growth.json())
 
     rolled_back = client.post(
-        f"/learning/patches/{patch_id}/rollback",
+        f"/runtime-center/learning/patches/{patch_id}/rollback",
         json={"actor": "reviewer"},
     )
     assert rolled_back.status_code == 200
-    assert rolled_back.json()["status"] == "rolled_back"
+    rolled_back_payload = rolled_back.json()
+    assert rolled_back_payload["rolled_back"] is False
+    assert rolled_back_payload["result"]["phase"] == "waiting-confirm"
+    rollback_decision_id = rolled_back_payload["result"]["decision_request_id"]
+    assert rollback_decision_id
+
+    approved_rollback = client.post(
+        f"/runtime-center/decisions/{rollback_decision_id}/approve",
+        json={"resolution": "Rollback the applied patch.", "execute": True},
+    )
+    assert approved_rollback.status_code == 200
+    assert approved_rollback.json()["phase"] == "completed"
+    assert approved_rollback.json()["decision_request_id"] == rollback_decision_id
     assert app.state.goal_override_repository.get_override("goal-detail") is None
 
 
-def test_runtime_center_patch_action_routes_share_learning_service(tmp_path) -> None:
+def test_runtime_center_patch_action_routes_enter_governed_mutation_flow(tmp_path) -> None:
     app = _build_learning_app(tmp_path)
     client = TestClient(app)
 
@@ -379,14 +424,65 @@ def test_runtime_center_patch_action_routes_share_learning_service(tmp_path) -> 
         json={"actor": "runtime-reviewer"},
     )
     assert apply_response.status_code == 200
-    assert apply_response.json()["status"] == "applied"
+    apply_payload = apply_response.json()
+    assert apply_payload["applied"] is False
+    assert apply_payload["result"]["phase"] == "waiting-confirm"
+    apply_decision_id = apply_payload["result"]["decision_request_id"]
+    assert apply_decision_id
+
+    apply_approval = client.post(
+        f"/runtime-center/decisions/{apply_decision_id}/approve",
+        json={"resolution": "Apply through governance.", "execute": True},
+    )
+    assert apply_approval.status_code == 200
+    assert apply_approval.json()["phase"] == "completed"
+    assert apply_approval.json()["decision_request_id"] == apply_decision_id
 
     rollback_response = client.post(
         f"/runtime-center/learning/patches/{patch_id}/rollback",
         json={"actor": "runtime-reviewer"},
     )
     assert rollback_response.status_code == 200
-    assert rollback_response.json()["status"] == "rolled_back"
+    rollback_payload = rollback_response.json()
+    assert rollback_payload["rolled_back"] is False
+    assert rollback_payload["result"]["phase"] == "waiting-confirm"
+    rollback_decision_id = rollback_payload["result"]["decision_request_id"]
+    assert rollback_decision_id
+
+    rollback_approval = client.post(
+        f"/runtime-center/decisions/{rollback_decision_id}/approve",
+        json={"resolution": "Rollback through governance.", "execute": True},
+    )
+    assert rollback_approval.status_code == 200
+    assert rollback_approval.json()["phase"] == "completed"
+    assert rollback_approval.json()["decision_request_id"] == rollback_decision_id
+
+
+def test_legacy_learning_patch_action_write_routes_are_retired(tmp_path) -> None:
+    app = _build_learning_app(tmp_path)
+    client = TestClient(app)
+
+    created_patch = client.post(
+        "/learning/patches",
+        json={
+            "kind": "plan_patch",
+            "title": "Retired patch route",
+            "description": "Legacy /learning patch action routes should be removed.",
+            "diff_summary": "goal_id=goal-retired;plan_steps=Inspect|Apply",
+            "risk_level": "confirm",
+        },
+    )
+    assert created_patch.status_code == 200
+    patch_id = created_patch.json()["patch"]["id"]
+
+    for path in (
+        f"/learning/patches/{patch_id}/approve",
+        f"/learning/patches/{patch_id}/reject",
+        f"/learning/patches/{patch_id}/apply",
+        f"/learning/patches/{patch_id}/rollback",
+    ):
+        response = client.post(path, json={"actor": "runtime-reviewer"})
+        assert response.status_code == 404
 
 
 def test_learning_api_auto_patch_defaults_to_main_brain_approval(tmp_path) -> None:

@@ -198,11 +198,7 @@ class CapabilityExecutionFacade:
         payload = dict(task.payload or {})
         if capability_id.startswith("system:"):
             payload.setdefault("task_id", task.id)
-            if capability_id not in {
-                "system:dispatch_goal",
-                "system:dispatch_active_goals",
-            }:
-                payload.setdefault("owner_agent_id", task.owner_agent_id)
+            payload.setdefault("owner_agent_id", task.owner_agent_id)
             payload.setdefault("goal_id", task.goal_id)
             payload.setdefault("environment_ref", task.environment_ref)
 

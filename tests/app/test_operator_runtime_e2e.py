@@ -151,6 +151,7 @@ def _build_operator_app(tmp_path) -> FastAPI:
     app.state.task_repository = task_repository
     app.state.task_runtime_repository = task_runtime_repository
     app.state.runtime_frame_repository = runtime_frame_repository
+    app.state.goal_override_repository = goal_override_repository
     app.state.schedule_repository = schedule_repository
     app.state.decision_request_repository = decision_request_repository
     app.state.evidence_ledger = evidence_ledger
@@ -269,17 +270,16 @@ def test_operator_runtime_e2e_covers_feedback_governance_and_runtime_center(
     assert compiler_meta["feedback_evidence_refs"] == [evidence.id]
 
     dispatch_payload = asyncio.run(
-        app.state.goal_service.dispatch_goal(
+        app.state.goal_service.dispatch_goal_execute_now(
             goal_id,
             context={"owner_agent_id": "ops-agent"},
             owner_agent_id="ops-agent",
-            execute=True,
             activate=True,
         )
     )
     assert dispatch_payload["dispatch_results"][0]["executed"] is True
 
-    goal_detail = client.get(f"/runtime-center/goals/{goal_id}")
+    goal_detail = client.get(f"/goals/{goal_id}/detail")
     assert goal_detail.status_code == 200
     goal_detail_payload = goal_detail.json()
     assert goal_detail_payload["goal"]["id"] == goal_id
@@ -330,7 +330,10 @@ def test_operator_runtime_e2e_covers_feedback_governance_and_runtime_center(
     overview = client.get("/runtime-center/overview")
     assert overview.status_code == 200
     cards = {card["key"]: card for card in overview.json()["cards"]}
-    assert any(entry["id"] == goal_id for entry in cards["goals"]["entries"])
+    assert any(
+        entry["id"] == goal_task_entry["task"]["id"]
+        for entry in cards["tasks"]["entries"]
+    )
     assert any(entry["id"] == applied_patch.id for entry in cards["patches"]["entries"])
     assert cards["growth"]["key"] == "growth"
 
@@ -373,7 +376,9 @@ def test_operator_runtime_e2e_covers_rejection_visibility_in_runtime_center(
     task_payload = task_detail.json()
     assert task_payload["task"]["status"] == "cancelled"
     assert task_payload["runtime"]["current_phase"] == "cancelled"
-    assert task_payload["review"]["blocked_reason"] == "Rejected in operator flow."
+    assert task_payload["review"]["blocked_reason"] == "runtime-error"
+    assert task_payload["review"]["stuck_reason"] == "Rejected in operator flow."
+    assert task_payload["review"]["headline"] == "Rejected in operator flow."
     assert any(item["status"] == "rejected" for item in task_payload["decisions"])
     assert any(
         item["result_summary"] == "Rejected in operator flow."
@@ -397,6 +402,157 @@ def test_operator_runtime_e2e_covers_rejection_visibility_in_runtime_center(
     assert any(
         entry["id"] == decision_id and entry["status"] == "rejected"
         for entry in cards["decisions"]["entries"]
+    )
+
+
+def test_operator_runtime_e2e_covers_governed_patch_apply_writeback(
+    tmp_path,
+) -> None:
+    app = _build_operator_app(tmp_path)
+    client = TestClient(app)
+
+    created = client.post(
+        "/goals",
+        json={
+            "title": "Apply governed patch",
+            "summary": "Lock the approval and writeback chain for runtime-center patch apply.",
+            "status": "active",
+            "priority": 2,
+        },
+    )
+    assert created.status_code == 200
+    goal_id = created.json()["id"]
+
+    patch_result = app.state.learning_service.create_patch(
+        kind="plan_patch",
+        title="Governed patch apply",
+        description="Use runtime-center governance to apply the patch.",
+        goal_id=goal_id,
+        diff_summary=f"goal_id={goal_id};plan_steps=Inspect governed flow|Write back result",
+        risk_level="confirm",
+    )
+    patch_id = patch_result["patch"].id
+
+    approve_patch = client.post(
+        f"/runtime-center/learning/patches/{patch_id}/approve",
+        json={"actor": "ops-reviewer"},
+    )
+    assert approve_patch.status_code == 200
+    assert approve_patch.json()["status"] == "approved"
+
+    apply_patch = client.post(
+        f"/runtime-center/learning/patches/{patch_id}/apply",
+        json={"actor": "ops-reviewer"},
+    )
+    assert apply_patch.status_code == 200
+    apply_payload = apply_patch.json()
+    assert apply_payload["applied"] is False
+    assert apply_payload["result"]["phase"] == "waiting-confirm"
+    decision_id = apply_payload["result"]["decision_request_id"]
+    task_id = apply_payload["result"]["task_id"]
+    assert decision_id
+    assert task_id
+
+    decision_detail = client.get(f"/runtime-center/decisions/{decision_id}")
+    assert decision_detail.status_code == 200
+    assert decision_detail.json()["status"] == "open"
+
+    approved = client.post(
+        f"/runtime-center/decisions/{decision_id}/approve",
+        json={"resolution": "Apply the governed patch now.", "execute": True},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["phase"] == "completed"
+    assert approved.json()["decision_request_id"] == decision_id
+
+    goal_override = app.state.goal_override_repository.get_override(goal_id)
+    assert goal_override is not None
+    assert goal_override.plan_steps == [
+        "Inspect governed flow",
+        "Write back result",
+    ]
+
+    patch_detail = client.get(f"/runtime-center/learning/patches/{patch_id}")
+    assert patch_detail.status_code == 200
+    assert any(item["source_patch_id"] == patch_id for item in patch_detail.json()["growth"])
+
+    task_detail = client.get(f"/runtime-center/tasks/{task_id}")
+    assert task_detail.status_code == 200
+    assert any(item["id"] == decision_id for item in task_detail.json()["decisions"])
+    assert any(
+        item["capability_ref"] == "system:apply_patch"
+        for item in task_detail.json()["evidence"]
+    )
+
+
+def test_operator_runtime_e2e_covers_governed_patch_rejection_evidence(
+    tmp_path,
+) -> None:
+    app = _build_operator_app(tmp_path)
+    client = TestClient(app)
+
+    created = client.post(
+        "/goals",
+        json={
+            "title": "Reject governed patch",
+            "summary": "Lock rejection evidence for runtime-center patch governance.",
+            "status": "active",
+            "priority": 2,
+        },
+    )
+    assert created.status_code == 200
+    goal_id = created.json()["id"]
+
+    patch_result = app.state.learning_service.create_patch(
+        kind="plan_patch",
+        title="Governed patch rejection",
+        description="Use runtime-center governance to reject the patch apply.",
+        goal_id=goal_id,
+        diff_summary=f"goal_id={goal_id};plan_steps=Keep plan unchanged",
+        risk_level="confirm",
+    )
+    patch_id = patch_result["patch"].id
+
+    approve_patch = client.post(
+        f"/runtime-center/learning/patches/{patch_id}/approve",
+        json={"actor": "ops-reviewer"},
+    )
+    assert approve_patch.status_code == 200
+    assert approve_patch.json()["status"] == "approved"
+
+    apply_patch = client.post(
+        f"/runtime-center/learning/patches/{patch_id}/apply",
+        json={"actor": "ops-reviewer"},
+    )
+    assert apply_patch.status_code == 200
+    apply_payload = apply_patch.json()
+    decision_id = apply_payload["result"]["decision_request_id"]
+    task_id = apply_payload["result"]["task_id"]
+    assert decision_id
+    assert task_id
+
+    rejected = client.post(
+        f"/runtime-center/decisions/{decision_id}/reject",
+        json={"resolution": "Do not apply this patch yet."},
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["phase"] == "cancelled"
+    assert rejected.json()["decision_request_id"] == decision_id
+
+    assert app.state.goal_override_repository.get_override(goal_id) is None
+    assert app.state.learning_service.get_patch(patch_id).status == "approved"
+
+    decision_detail = client.get(f"/runtime-center/decisions/{decision_id}")
+    assert decision_detail.status_code == 200
+    assert decision_detail.json()["status"] == "rejected"
+    assert decision_detail.json()["resolution"] == "Do not apply this patch yet."
+
+    task_detail = client.get(f"/runtime-center/tasks/{task_id}")
+    assert task_detail.status_code == 200
+    assert any(item["status"] == "rejected" for item in task_detail.json()["decisions"])
+    assert any(
+        item["result_summary"] == "Do not apply this patch yet."
+        for item in task_detail.json()["evidence"]
     )
 
 

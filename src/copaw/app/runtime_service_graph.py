@@ -404,6 +404,9 @@ def build_runtime_bootstrap(
     query_execution_service = domain_services.query_execution_service
     main_brain_chat_service = domain_services.main_brain_chat_service
     main_brain_orchestrator = domain_services.main_brain_orchestrator
+    governance_service.set_environment_service(environment_service)
+    governance_service.set_human_assist_task_service(human_assist_task_service)
+    governance_service.set_industry_service(industry_service)
     _warm_runtime_memory_services(
         repositories=repositories,
         derived_memory_index_service=derived_memory_index_service,

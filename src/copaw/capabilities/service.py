@@ -53,6 +53,7 @@ class CapabilityService:
         skill_service: CapabilitySkillService | None = None,
         state_store: "SQLiteStateStore | None" = None,
         environment_service: object | None = None,
+        cron_manager: object | None = None,
     ) -> None:
         self._registry = registry or CapabilityRegistry()
         self._evidence_ledger = evidence_ledger
@@ -74,6 +75,7 @@ class CapabilityService:
         self._skill_service = skill_service or default_skill_service
         self._state_store = state_store
         self._environment_service = environment_service
+        self._cron_manager = cron_manager
 
         self._catalog = CapabilityCatalogFacade(
             registry=self._registry,
@@ -111,6 +113,7 @@ class CapabilityService:
             actor_supervisor=self._actor_supervisor,
             capability_discovery_service=self._discovery_service,
             environment_service=self._environment_service,
+            cron_manager=self._cron_manager,
         )
         self._execution = CapabilityExecutionFacade(
             get_capability_fn=self.get_capability,
@@ -256,6 +259,10 @@ class CapabilityService:
     def set_environment_service(self, environment_service: object | None) -> None:
         self._environment_service = environment_service
         self._system_handler.set_environment_service(environment_service)
+
+    def set_cron_manager(self, cron_manager: object | None) -> None:
+        self._cron_manager = cron_manager
+        self._system_handler.set_cron_manager(cron_manager)
 
     def list_accessible_capabilities(
         self,

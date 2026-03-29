@@ -34,6 +34,32 @@ def _mapping(value: object | None) -> dict[str, Any]:
     return {}
 
 
+def _merge_resume_state(
+    verification_payload: object | None,
+    *,
+    status: str,
+    summary: str | None = None,
+    reason: str | None = None,
+    resume_payload: Mapping[str, Any] | None = None,
+    updated_at: datetime,
+) -> dict[str, Any]:
+    payload = _mapping(verification_payload)
+    resume_state = _mapping(payload.get("resume"))
+    resume_state["status"] = status
+    resume_state["updated_at"] = updated_at.isoformat()
+    summary_text = _string(summary)
+    if summary_text is not None:
+        resume_state["summary"] = summary_text
+    reason_text = _string(reason)
+    if reason_text is not None:
+        resume_state["reason"] = reason_text
+    normalized_resume_payload = _mapping(resume_payload)
+    if normalized_resume_payload:
+        resume_state["result"] = normalized_resume_payload
+    payload["resume"] = resume_state
+    return payload
+
+
 def _string_list(value: object | None) -> list[str]:
     if value is None:
         return []
@@ -166,6 +192,70 @@ class HumanAssistTaskService:
         )
         return persisted
 
+    def ensure_host_handoff_task(
+        self,
+        *,
+        chat_thread_id: str,
+        title: str,
+        summary: str,
+        required_action: str,
+        industry_instance_id: str | None = None,
+        assignment_id: str | None = None,
+        task_id: str | None = None,
+        resume_checkpoint_ref: str | None = None,
+        verification_anchor: str | None = None,
+        block_evidence_refs: Sequence[str] | None = None,
+    ) -> HumanAssistTaskRecord:
+        normalized_thread_id = _string(chat_thread_id)
+        if normalized_thread_id is None:
+            raise ValueError("Host handoff human assist task requires a chat thread id")
+        normalized_task_id = _string(task_id)
+        for existing in self._repository.list_tasks(chat_thread_id=normalized_thread_id, limit=50):
+            if existing.status in self._TERMINAL_STATUSES:
+                continue
+            if existing.task_type != "host-handoff-return":
+                continue
+            if normalized_task_id is not None and existing.task_id not in {None, normalized_task_id}:
+                continue
+            return existing
+
+        anchor = (
+            _string(verification_anchor)
+            or _string(resume_checkpoint_ref)
+            or "human-return"
+        )
+        anchor_hint = f"“{anchor}”" if anchor else "完成返回条件"
+        record = HumanAssistTaskRecord(
+            industry_instance_id=_string(industry_instance_id),
+            assignment_id=_string(assignment_id),
+            task_id=normalized_task_id,
+            chat_thread_id=normalized_thread_id,
+            title=_string(title) or "Return host handoff",
+            summary=_string(summary) or "Runtime handoff is blocking automatic continuation.",
+            task_type="host-handoff-return",
+            reason_code="host-handoff-active",
+            reason_summary=(
+                _string(summary)
+                or "Runtime handoff is still active and needs host-side confirmation."
+            ),
+            required_action=(
+                _string(required_action)
+                or f"完成宿主侧处理后，请在聊天里回报并包含 {anchor_hint}。"
+            ),
+            submission_mode="chat-message",
+            acceptance_mode="anchor_verified",
+            acceptance_spec={
+                "version": "v1",
+                "hard_anchors": [anchor],
+                "failure_hint": (
+                    f"还需要宿主返回确认，请在聊天里说明已完成并包含 {anchor_hint}。"
+                ),
+            },
+            resume_checkpoint_ref=_string(resume_checkpoint_ref) or anchor,
+            block_evidence_refs=_string_list(block_evidence_refs),
+        )
+        return self.issue_task(record)
+
     def submit_task(
         self,
         task_id: str,
@@ -230,6 +320,8 @@ class HumanAssistTaskService:
             return self._finalize_verification(
                 current,
                 outcome="rejected",
+                status="rejected",
+                action_summary="reject human assist task",
                 message="检测到不通过锚点，当前提交未通过验收。",
                 matched_hard_anchors=matched_hard,
                 matched_result_anchors=matched_result,
@@ -244,6 +336,8 @@ class HumanAssistTaskService:
             return self._finalize_verification(
                 current,
                 outcome="need_more_evidence",
+                status="need_more_evidence",
+                action_summary="request more evidence for human assist task",
                 message=failure_hint,
                 matched_hard_anchors=matched_hard,
                 matched_result_anchors=matched_result,
@@ -257,7 +351,7 @@ class HumanAssistTaskService:
         reward_result["granted"] = True
         accepted = current.model_copy(
             update={
-                "status": "resume_queued",
+                "status": "accepted",
                 "reward_result": reward_result,
                 "verification_payload": {
                     "matched_hard_anchors": matched_hard,
@@ -272,7 +366,7 @@ class HumanAssistTaskService:
         self._append_evidence(
             persisted,
             action_summary="accept human assist task",
-            result_summary="human assist task accepted and resume queued",
+            result_summary="human assist task accepted",
             metadata={"status": persisted.status, "reward_result": persisted.reward_result},
         )
         return HumanAssistVerificationResult(
@@ -284,7 +378,7 @@ class HumanAssistTaskService:
             missing_hard_anchors=[],
             missing_result_anchors=[],
             matched_negative_anchors=[],
-            resume_queued=True,
+            resume_queued=False,
         )
 
     def submit_and_verify(
@@ -308,11 +402,102 @@ class HumanAssistTaskService:
             observed_payload=submission_payload,
         )
 
+    def mark_resume_queued(self, task_id: str) -> HumanAssistTaskRecord:
+        current = self._require_task(task_id)
+        now = _utc_now()
+        updated = current.model_copy(
+            update={
+                "status": "resume_queued",
+                "verification_payload": _merge_resume_state(
+                    current.verification_payload,
+                    status="resume_queued",
+                    summary="系统已排队继续原流程。",
+                    updated_at=now,
+                ),
+                "updated_at": now,
+            },
+        )
+        persisted = self._repository.upsert_task(updated)
+        self._append_evidence(
+            persisted,
+            action_summary="queue human assist resume",
+            result_summary="human assist task queued for resume",
+            metadata={"status": persisted.status},
+        )
+        return persisted
+
+    def mark_closed(
+        self,
+        task_id: str,
+        *,
+        summary: str | None = None,
+        resume_payload: Mapping[str, Any] | None = None,
+    ) -> HumanAssistTaskRecord:
+        current = self._require_task(task_id)
+        now = _utc_now()
+        result_summary = _string(summary) or "系统已继续原流程。"
+        updated = current.model_copy(
+            update={
+                "status": "closed",
+                "verification_payload": _merge_resume_state(
+                    current.verification_payload,
+                    status="closed",
+                    summary=result_summary,
+                    resume_payload=resume_payload,
+                    updated_at=now,
+                ),
+                "closed_at": now,
+                "updated_at": now,
+            },
+        )
+        persisted = self._repository.upsert_task(updated)
+        self._append_evidence(
+            persisted,
+            action_summary="close human assist task",
+            result_summary=result_summary,
+            metadata={"status": persisted.status},
+        )
+        return persisted
+
+    def mark_handoff_blocked(
+        self,
+        task_id: str,
+        *,
+        reason: str | None = None,
+        resume_payload: Mapping[str, Any] | None = None,
+    ) -> HumanAssistTaskRecord:
+        current = self._require_task(task_id)
+        now = _utc_now()
+        reason_text = _string(reason) or "系统暂时没接上后续流程。"
+        updated = current.model_copy(
+            update={
+                "status": "handoff_blocked",
+                "verification_payload": _merge_resume_state(
+                    current.verification_payload,
+                    status="handoff_blocked",
+                    reason=reason_text,
+                    resume_payload=resume_payload,
+                    updated_at=now,
+                ),
+                "updated_at": now,
+            },
+        )
+        persisted = self._repository.upsert_task(updated)
+        self._append_evidence(
+            persisted,
+            action_summary="block human assist resume",
+            result_summary=reason_text,
+            metadata={"status": persisted.status},
+        )
+        return persisted
+
     def _finalize_verification(
         self,
         task: HumanAssistTaskRecord,
         *,
         outcome: str,
+        status: str,
+        action_summary: str,
         message: str,
         matched_hard_anchors: list[str],
         matched_result_anchors: list[str],
@@ -322,7 +507,6 @@ class HumanAssistTaskService:
         resume_queued: bool,
     ) -> HumanAssistVerificationResult:
         now = _utc_now()
-        status = "rejected"
         updated = task.model_copy(
             update={
                 "status": status,
@@ -341,7 +525,7 @@ class HumanAssistTaskService:
         persisted = self._repository.upsert_task(updated)
         self._append_evidence(
             persisted,
-            action_summary="reject human assist task",
+            action_summary=action_summary,
             result_summary=message,
             metadata={
                 "status": persisted.status,

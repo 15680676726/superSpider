@@ -7,6 +7,7 @@ import type {
   RuntimeHumanAssistTaskDetail,
   RuntimeHumanAssistTaskSummary,
 } from "../../api/modules/runtimeCenter";
+import { queueHumanAssistSubmissionForNextMessage } from "./runtimeTransport";
 import styles from "./index.module.less";
 
 type ChatHumanAssistPanelProps = {
@@ -55,8 +56,11 @@ function statusLabel(status: string | null | undefined): string {
   if (normalized === "issued") return "待提交";
   if (normalized === "submitted") return "已提交";
   if (normalized === "verifying") return "验证中";
+  if (normalized === "accepted") return "已通过";
+  if (normalized === "need_more_evidence") return "待补证";
   if (normalized === "resume_queued") return "已验收";
-  if (normalized === "rejected") return "待补证";
+  if (normalized === "handoff_blocked") return "\u6062\u590d\u53d7\u963b";
+  if (normalized === "rejected") return "未通过";
   if (normalized === "closed") return "已关闭";
   if (normalized === "expired") return "已过期";
   if (normalized === "cancelled") return "已取消";
@@ -65,7 +69,8 @@ function statusLabel(status: string | null | undefined): string {
 
 function statusColor(status: string | null | undefined): string {
   const normalized = String(status || "").trim().toLowerCase();
-  if (normalized === "resume_queued") return "success";
+  if (normalized === "accepted" || normalized === "resume_queued") return "success";
+  if (normalized === "need_more_evidence" || normalized === "handoff_blocked") return "warning";
   if (normalized === "rejected") return "warning";
   if (normalized === "verifying") return "processing";
   if (normalized === "submitted") return "gold";
@@ -256,6 +261,29 @@ export function ChatHumanAssistPanel({
   const rewardPreview = entryList(selectedTaskDetail?.task.reward_preview);
   const rewardResult = entryList(selectedTaskDetail?.task.reward_result);
   const hasTaskStrip = Boolean(activeChatThreadId);
+  const currentTaskTitle = currentTask ? currentTask.title : "当前无待协作任务";
+  const currentTaskSummary = currentTask
+    ? firstNonEmptyString(
+        currentTask.required_action,
+        currentTask.summary,
+        currentTask.reason_summary,
+      ) || "请在聊天窗口提交完成证明，系统会自动验收。"
+    : "点击任务记录查看本线程的协作任务历史、验收结果和奖励记录。";
+  const detailSummary = selectedTaskDetail
+    ? firstNonEmptyString(
+        selectedTaskDetail.task.summary,
+        selectedTaskDetail.task.reason_summary,
+      ) || "无补充说明"
+    : null;
+  const detailAction = selectedTaskDetail
+    ? firstNonEmptyString(selectedTaskDetail.task.required_action) || "无"
+    : null;
+  const armHumanAssistSubmission = useCallback(() => {
+    if (!activeChatThreadId || !currentTask) {
+      return;
+    }
+    queueHumanAssistSubmissionForNextMessage(activeChatThreadId);
+  }, [activeChatThreadId, currentTask]);
 
   if (!hasTaskStrip) {
     return null;
@@ -272,29 +300,28 @@ export function ChatHumanAssistPanel({
           <div className={styles.humanAssistStripBadge}>任务</div>
           <div className={styles.humanAssistStripBody}>
             <div className={styles.humanAssistStripTitleRow}>
-              <span className={styles.humanAssistStripTitle}>
-                {currentTask ? currentTask.title : "当前无待协作任务"}
+              <span className={styles.humanAssistStripTitle} title={currentTaskTitle}>
+                {currentTaskTitle}
               </span>
               <Tag bordered={false} color={statusColor(currentTask?.status)}>
                 {currentTask ? statusLabel(currentTask.status) : "空闲"}
               </Tag>
             </div>
-            <div className={styles.humanAssistStripSummary}>
-              {currentTask
-                ? firstNonEmptyString(
-                    currentTask.required_action,
-                    currentTask.summary,
-                    currentTask.reason_summary,
-                  ) || "请在聊天窗口提交完成证明，系统会自动验收。"
-                : "点击任务记录查看本线程的协作任务历史、验收结果和奖励记录。"}
+            <div className={styles.humanAssistStripSummary} title={currentTaskSummary}>
+              {currentTaskSummary}
             </div>
           </div>
         </div>
         <div className={styles.humanAssistStripActions}>
           {currentTask ? (
-            <Button size="small" onClick={() => void openTaskList(currentTask.id)}>
-              查看详情
-            </Button>
+            <>
+              <Button size="small" type="primary" onClick={armHumanAssistSubmission}>
+                提交任务
+              </Button>
+              <Button size="small" onClick={() => void openTaskList(currentTask.id)}>
+                查看详情
+              </Button>
+            </>
           ) : null}
           <Button
             size="small"
@@ -335,6 +362,12 @@ export function ChatHumanAssistPanel({
               <div className={styles.humanAssistTaskListInner}>
                 {tasks.map((item) => {
                   const selected = item.id === selectedTaskId;
+                  const itemSummary =
+                    firstNonEmptyString(
+                      item.required_action,
+                      item.summary,
+                      item.reason_summary,
+                    ) || "无说明";
                   return (
                     <button
                       key={item.id}
@@ -348,17 +381,21 @@ export function ChatHumanAssistPanel({
                       }}
                     >
                       <div className={styles.humanAssistTaskCardTop}>
-                        <span className={styles.humanAssistTaskCardTitle}>{item.title}</span>
+                        <span
+                          className={styles.humanAssistTaskCardTitle}
+                          title={item.title}
+                        >
+                          {item.title}
+                        </span>
                         <Tag bordered={false} color={statusColor(item.status)}>
                           {statusLabel(item.status)}
                         </Tag>
                       </div>
-                      <div className={styles.humanAssistTaskCardSummary}>
-                        {firstNonEmptyString(
-                          item.required_action,
-                          item.summary,
-                          item.reason_summary,
-                        ) || "无说明"}
+                      <div
+                        className={styles.humanAssistTaskCardSummary}
+                        title={itemSummary}
+                      >
+                        {itemSummary}
                       </div>
                       <div className={styles.humanAssistTaskCardMeta}>
                         {formatDateTime(
@@ -379,15 +416,18 @@ export function ChatHumanAssistPanel({
             ) : selectedTaskDetail ? (
               <div className={styles.humanAssistDetailBody}>
                 <div className={styles.humanAssistDetailHeader}>
-                  <div>
-                    <div className={styles.humanAssistDetailTitle}>
+                  <div className={styles.humanAssistDetailHeading}>
+                    <div
+                      className={styles.humanAssistDetailTitle}
+                      title={selectedTaskDetail.task.title}
+                    >
                       {selectedTaskDetail.task.title}
                     </div>
-                    <div className={styles.humanAssistDetailSubtitle}>
-                      {firstNonEmptyString(
-                        selectedTaskDetail.task.summary,
-                        selectedTaskDetail.task.reason_summary,
-                      ) || "无补充说明"}
+                    <div
+                      className={styles.humanAssistDetailSubtitle}
+                      title={detailSummary || undefined}
+                    >
+                      {detailSummary}
                     </div>
                   </div>
                   <Tag bordered={false} color={statusColor(selectedTaskDetail.task.status)}>
@@ -397,8 +437,11 @@ export function ChatHumanAssistPanel({
 
                 <div className={styles.humanAssistDetailBlock}>
                   <div className={styles.humanAssistDetailLabel}>宿主动作</div>
-                  <div className={styles.humanAssistDetailValue}>
-                    {firstNonEmptyString(selectedTaskDetail.task.required_action) || "无"}
+                  <div
+                    className={styles.humanAssistDetailValue}
+                    title={detailAction || undefined}
+                  >
+                    {detailAction}
                   </div>
                 </div>
 

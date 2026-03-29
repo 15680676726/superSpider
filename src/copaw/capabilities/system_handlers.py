@@ -11,6 +11,7 @@ from .system_discovery_handlers import SystemCapabilityDiscoveryFacade
 from .system_dispatch import SystemDispatchFacade
 from .system_learning_handlers import SystemLearningCapabilityFacade
 from .system_routine_handlers import SystemRoutineCapabilityFacade
+from .system_schedule_handlers import SystemScheduleCapabilityFacade
 from .system_skill_handlers import SystemSkillCapabilityFacade
 from .system_team_handlers import SystemTeamCapabilityFacade
 
@@ -45,6 +46,15 @@ _DISCOVERY_CAPABILITIES = {
     "system:discover_capabilities",
 }
 
+_SCHEDULE_CAPABILITIES = {
+    "system:create_schedule",
+    "system:update_schedule",
+    "system:delete_schedule",
+    "system:pause_schedule",
+    "system:resume_schedule",
+    "system:run_schedule",
+}
+
 
 class SystemCapabilityHandler:
     def __init__(
@@ -71,6 +81,7 @@ class SystemCapabilityHandler:
         actor_supervisor: object | None = None,
         capability_discovery_service: object | None = None,
         environment_service: object | None = None,
+        cron_manager: object | None = None,
     ) -> None:
         self._dispatch = SystemDispatchFacade(
             channel_manager=channel_manager,
@@ -108,6 +119,9 @@ class SystemCapabilityHandler:
         self._routine = SystemRoutineCapabilityFacade(
             routine_service=routine_service,
             fixed_sop_service=fixed_sop_service,
+        )
+        self._schedule = SystemScheduleCapabilityFacade(
+            cron_manager=cron_manager,
         )
         self._learning = SystemLearningCapabilityFacade(
             learning_service=learning_service,
@@ -150,6 +164,9 @@ class SystemCapabilityHandler:
 
     def set_state_store(self, state_store: object | None) -> None:
         self._discovery.set_state_store(state_store)
+
+    def set_cron_manager(self, cron_manager: object | None) -> None:
+        self._schedule.set_cron_manager(cron_manager)
 
     def set_capability_discovery_service(
         self,
@@ -212,9 +229,6 @@ class SystemCapabilityHandler:
         if capability_id == "system:run_host_recovery":
             return await self._execute_host_recovery(resolved_payload)
 
-        if capability_id in {"system:dispatch_goal", "system:dispatch_active_goals"}:
-            return await self._team.handle_goal_dispatch(capability_id, resolved_payload)
-
         if capability_id in _ACTOR_CAPABILITIES:
             return await self._actor.execute(capability_id, resolved_payload)
 
@@ -223,6 +237,9 @@ class SystemCapabilityHandler:
 
         if capability_id in _DISCOVERY_CAPABILITIES:
             return await self._discovery.handle_discover_capabilities(resolved_payload)
+
+        if capability_id in _SCHEDULE_CAPABILITIES:
+            return await self._schedule.execute(capability_id, resolved_payload)
 
         if capability_id in _CONFIG_CAPABILITIES:
             return self._execute_config_capability(capability_id, resolved_payload)

@@ -45,21 +45,62 @@ class _FakeEnvironmentService:
         return dict(self._detail)
 
 
-def _host_detail(*, recommended_scheduler_action: str) -> dict[str, object]:
+def _host_detail(
+    *,
+    recommended_scheduler_action: str,
+    requires_human_return: bool = False,
+    legal_recovery_path: str = "resume",
+    legal_recovery_reason: str | None = None,
+    host_blocker_family: str | None = None,
+    host_blocker_response: str | None = None,
+) -> dict[str, object]:
     return {
         "environment_id": "env-desktop-1",
         "session_mount_id": "session-desktop-1",
+        "host_companion_session": {
+            "session_mount_id": "session-desktop-1",
+            "environment_id": "env-desktop-1",
+            "continuity_status": (
+                "restorable" if recommended_scheduler_action == "continue" else "attached"
+            ),
+            "continuity_source": "live-handle",
+            "locality": {
+                "same_host": True,
+                "same_process": False,
+                "startup_recovery_required": requires_human_return,
+            },
+        },
         "host_twin": {
             "continuity": {
                 "status": "attached",
-                "valid": recommended_scheduler_action == "continue",
+                "valid": True,
                 "continuity_source": "live-handle",
-                "requires_human_return": recommended_scheduler_action == "handoff",
+                "requires_human_return": requires_human_return,
+            },
+            "legal_recovery": {
+                "path": legal_recovery_path,
+                "reason": legal_recovery_reason,
+            },
+            "latest_blocking_event": {
+                "event_family": host_blocker_family,
+                "recommended_runtime_response": host_blocker_response,
             },
             "execution_mutation_ready": {
                 "desktop_app": recommended_scheduler_action == "continue",
                 "browser": False,
                 "file_docs": False,
+            },
+            "app_family_twins": {
+                "office_document": {
+                    "active": True,
+                    "family_kind": "office_document",
+                    "surface_ref": "window:excel:main",
+                    "contract_status": (
+                        "verified-writer" if recommended_scheduler_action == "continue" else "blocked"
+                    ),
+                    "family_scope_ref": "app:excel",
+                    "writer_lock_scope": "workbook:monthly-report",
+                },
             },
             "coordination": {
                 "seat_owner_ref": "ops-agent",
@@ -67,6 +108,9 @@ def _host_detail(*, recommended_scheduler_action: str) -> dict[str, object]:
                 "writer_owner_ref": (
                     "ops-agent" if recommended_scheduler_action == "continue" else None
                 ),
+                "candidate_seat_refs": ["env-desktop-1"],
+                "selected_seat_ref": "env-desktop-1",
+                "seat_selection_policy": "sticky-active-seat",
                 "contention_forecast": {
                     "severity": (
                         "clear" if recommended_scheduler_action == "continue" else "blocked"
@@ -78,6 +122,25 @@ def _host_detail(*, recommended_scheduler_action: str) -> dict[str, object]:
                     ),
                 },
                 "recommended_scheduler_action": recommended_scheduler_action,
+                "expected_release_at": None,
+            },
+            "scheduler_inputs": {
+                "active_blocker_family": host_blocker_family,
+                "requires_human_return": requires_human_return,
+                "recommended_scheduler_action": recommended_scheduler_action,
+            },
+            "host_companion_session": {
+                "session_mount_id": "session-desktop-1",
+                "environment_id": "env-desktop-1",
+                "continuity_status": (
+                    "restorable" if recommended_scheduler_action == "continue" else "attached"
+                ),
+                "continuity_source": "live-handle",
+                "locality": {
+                    "same_host": True,
+                    "same_process": False,
+                    "startup_recovery_required": requires_human_return,
+                },
             },
         },
     }
@@ -176,6 +239,7 @@ def test_fixed_sop_service_blocks_mutating_run_when_host_preflight_requires_hand
 
     assert doctor.status == "blocked"
     assert doctor.host_preflight["coordination"]["recommended_scheduler_action"] == "handoff"
+    assert doctor.host_preflight["host_twin_summary"]["host_companion_status"] == "attached"
 
     with pytest.raises(ValueError, match="host preflight"):
         asyncio.run(
@@ -225,6 +289,7 @@ def test_fixed_sop_service_records_host_snapshot_in_run_and_evidence(tmp_path) -
 
     detail = service.get_run(response.workflow_run_id or "")
     assert detail.host_preflight["coordination"]["recommended_scheduler_action"] == "continue"
+    assert detail.host_preflight["host_twin_summary"]["host_companion_status"] == "restorable"
     assert detail.environment_id == "env-desktop-1"
     assert detail.session_mount_id == "session-desktop-1"
     assert detail.host_requirement["app_family"] == "office_document"
@@ -237,3 +302,56 @@ def test_fixed_sop_service_records_host_snapshot_in_run_and_evidence(tmp_path) -
     assert evidence[0].metadata["host_preflight"]["coordination"][
         "recommended_scheduler_action"
     ] == "continue"
+    assert evidence[0].metadata["host_preflight"]["host_twin_summary"][
+        "host_companion_status"
+    ] == "restorable"
+
+
+def test_fixed_sop_service_blocks_mutating_run_when_host_recovery_requires_human_return(
+    tmp_path,
+) -> None:
+    service = _build_service(
+        tmp_path,
+        environment_service=_FakeEnvironmentService(
+            _host_detail(
+                recommended_scheduler_action="continue",
+                requires_human_return=True,
+                legal_recovery_path="handoff",
+                legal_recovery_reason="Manual login must be completed before control can return.",
+            ),
+        ),
+    )
+    binding = service.create_binding(
+        FixedSopBindingCreateRequest(
+            template_id="fixed-sop-http-routine-bridge",
+            binding_name="Recovered Host SOP",
+            status="active",
+            metadata={
+                "environment_id": "env-desktop-1",
+                "session_mount_id": "session-desktop-1",
+                "host_requirement": {
+                    "surface_kind": "desktop",
+                    "app_family": "office_document",
+                    "mutating": True,
+                },
+            },
+        )
+    )
+
+    doctor = service.run_doctor(binding.binding.binding_id)
+
+    assert doctor.status == "blocked"
+    host_check = next(item for item in doctor.checks if item.key == "host-preflight")
+    assert "manual login" in host_check.message.lower() or "control can return" in host_check.message.lower()
+    assert doctor.host_preflight["host_twin_summary"]["host_companion_status"] == "attached"
+
+    with pytest.raises(ValueError, match="host preflight"):
+        asyncio.run(
+            service.run_binding(
+                binding.binding.binding_id,
+                FixedSopRunRequest(
+                    environment_id="env-desktop-1",
+                    session_mount_id="session-desktop-1",
+                ),
+            )
+        )

@@ -15,17 +15,17 @@ export const CURATED_PAGE_SIZE = 8;
 export const MCP_PAGE_SIZE = 12;
 
 export const CURATED_CATEGORY_DEFINITIONS = [
-  { key: "all", label: "All" },
-  { key: "operations", label: "Operations" },
-  { key: "ecommerce", label: "Ecommerce" },
-  { key: "customer", label: "Customer" },
-  { key: "content", label: "Content" },
-  { key: "research", label: "Research" },
-  { key: "browser", label: "Browser" },
-  { key: "data", label: "Data" },
-  { key: "image", label: "Image" },
-  { key: "code", label: "Code" },
-  { key: "general", label: "General" },
+  { key: "all", label: "全部" },
+  { key: "operations", label: "经营协同" },
+  { key: "ecommerce", label: "电商" },
+  { key: "customer", label: "客户" },
+  { key: "content", label: "内容" },
+  { key: "research", label: "研究" },
+  { key: "browser", label: "浏览器" },
+  { key: "data", label: "数据" },
+  { key: "image", label: "图像" },
+  { key: "code", label: "代码" },
+  { key: "general", label: "通用" },
 ] as const;
 
 export type CuratedCategoryKey = (typeof CURATED_CATEGORY_DEFINITIONS)[number]["key"];
@@ -122,11 +122,11 @@ export function parseTemplateConfigValue(field: TemplateConfigField, value: unkn
 }
 
 export function capabilityKindLabel(kind: CapabilityMount["kind"]): string {
-  if (kind === "local-tool") return "Local Tool";
+  if (kind === "local-tool") return "本地工具";
   if (kind === "remote-mcp") return "MCP";
-  if (kind === "skill-bundle") return "Skill";
-  if (kind === "provider-admin") return "Provider";
-  if (kind === "system-op") return "System";
+  if (kind === "skill-bundle") return "技能";
+  if (kind === "provider-admin") return "模型提供方";
+  if (kind === "system-op") return "系统";
   return kind;
 }
 
@@ -153,11 +153,19 @@ export function doctorStatusColor(status: "ready" | "degraded" | "blocked"): str
   return "red";
 }
 
+export function presentTemplateAvailabilityLabel(
+  template: Pick<CapabilityMarketInstallTemplateSpec, "installed" | "ready">,
+): string {
+  if (template.ready) return "已就绪";
+  if (template.installed) return "已安装";
+  return "待安装";
+}
+
 export function presentMcpInstallStatus(item: McpRegistryCatalogItem): string {
-  if (item.update_available) return "Update available";
-  if (item.installed_client_key) return item.installed_via_registry ? "Installed" : "Client exists";
-  if (!item.install_supported) return "Not supported";
-  return "Installable";
+  if (item.update_available) return "可更新";
+  if (item.installed_client_key) return item.installed_via_registry ? "已安装" : "客户端已存在";
+  if (!item.install_supported) return "暂不支持";
+  return "可安装";
 }
 
 export function mcpInstallStatusColor(item: McpRegistryCatalogItem): string {
@@ -170,12 +178,12 @@ export function mcpInstallStatusColor(item: McpRegistryCatalogItem): string {
 export function presentMcpTransportLabel(transport: string): string {
   if (transport === "streamable_http") return "HTTP";
   if (transport === "sse") return "SSE";
-  return "stdio";
+  return "标准输入输出";
 }
 
 export function presentMcpOptionSummary(option: McpRegistryInstallOption): string {
-  if (option.install_kind === "remote") return option.url_template || option.summary || "Remote MCP";
-  return [option.registry_type || "package", option.runtime_command || "-", option.identifier || option.summary || "-"]
+  if (option.install_kind === "remote") return option.url_template || option.summary || "远程 MCP";
+  return [option.registry_type || "包", option.runtime_command || "-", option.identifier || option.summary || "-"]
     .filter(Boolean)
     .join(" / ");
 }

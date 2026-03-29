@@ -473,6 +473,9 @@ class MemoryRecallService:
         backend_id: str,
     ) -> MemoryRecallHit:
         metadata = dict(entry.metadata or {})
+        source_ref = metadata.get("source_ref")
+        if not isinstance(source_ref, str) or not source_ref.strip():
+            source_ref = entry.source_ref
         return MemoryRecallHit(
             entry_id=entry.id,
             kind=entry.source_type,
@@ -480,7 +483,7 @@ class MemoryRecallService:
             summary=entry.summary,
             content_excerpt=entry.content_excerpt,
             source_type=entry.source_type,
-            source_ref=entry.source_ref,
+            source_ref=source_ref,
             source_route=source_route_for_entry(entry),
             scope_type=entry.scope_type,
             scope_id=entry.scope_id,

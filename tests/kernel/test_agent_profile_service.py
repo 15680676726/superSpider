@@ -220,6 +220,36 @@ def test_agent_profile_service_builds_prompt_capability_projection(tmp_path) -> 
     assert projection["mcp"] == []
 
 
+def test_agent_profile_service_hides_legacy_goal_dispatch_from_prompt_projection(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    override_repo = SqliteAgentProfileOverrideRepository(store)
+    override_repo.upsert_override(
+        AgentProfileOverrideRecord(
+            agent_id="industry-execution-core-ops",
+            name="Execution Core",
+            role_name="Execution Core",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="execution-core",
+            capabilities=["system:dispatch_goal"],
+        ),
+    )
+
+    service = AgentProfileService(override_repository=override_repo)
+    projection = service.get_prompt_capability_projection("industry-execution-core-ops")
+
+    assert projection is not None
+    assert all(
+        item["id"] != "system:dispatch_goal"
+        for item in projection["system_dispatch"]
+    )
+    assert all(
+        item["id"] != "system:dispatch_goal"
+        for item in projection["system_governance"]
+    )
+
+
 def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp_path) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
     runtime_repo = SqliteAgentRuntimeRepository(store)
@@ -289,6 +319,9 @@ def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp
     profile = service.get_agent("agent-1")
 
     assert profile is not None
+    assert profile.current_focus_kind == "goal"
+    assert profile.current_focus_id == "goal-runtime"
+    assert profile.current_focus == "Runtime projected goal"
     assert profile.current_goal_id == "goal-runtime"
     assert profile.current_goal == "Runtime projected goal"
     assert profile.current_task_id == "task-runtime"

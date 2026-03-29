@@ -38,6 +38,7 @@ import {
   CURATED_PAGE_SIZE,
   MARKET_TAB_KEY_SET,
   parseTemplateConfigValue,
+  presentTemplateAvailabilityLabel,
   templateStatusColor,
   type TemplateConfigField,
 } from "./presentation";
@@ -103,7 +104,7 @@ export default function CapabilityMarketPage() {
     async (item: CuratedSkillCatalogEntry) => {
       const installKey = buildCuratedInstallKey(item);
       if (item.review_required && !curatedReviewAcknowledgements[installKey]) {
-        message.warning("璇峰厛纭瀹℃牳鎻愮ず");
+        message.warning("请先确认审核提示");
         return;
       }
       setInstallingCuratedId(installKey);
@@ -114,7 +115,7 @@ export default function CapabilityMarketPage() {
           review_acknowledged: Boolean(curatedReviewAcknowledgements[installKey]),
           enable: true,
         });
-        message.success("瀹夎鎴愬姛");
+        message.success("安装成功");
       } catch (error) {
         message.error(error instanceof Error ? error.message : String(error));
       } finally {
@@ -141,7 +142,7 @@ export default function CapabilityMarketPage() {
     try {
       const config = await buildTemplateConfigPayload();
       const result = await api.installCapabilityMarketInstallTemplate(requestedTemplateId, { config, enabled: true });
-      setTemplateInstallSummary(result.summary || "瀹夎鎴愬姛");
+      setTemplateInstallSummary(result.summary || "安装成功");
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -159,7 +160,7 @@ export default function CapabilityMarketPage() {
   return (
     <div className={styles.page}>
       <Space style={{ marginBottom: 12 }}>
-        <Button icon={<ReloadOutlined />} onClick={() => void handleRefreshAll()}>鍒锋柊</Button>
+        <Button icon={<ReloadOutlined />} onClick={() => void handleRefreshAll()}>刷新</Button>
       </Space>
       {curatedError ? <Alert type="error" showIcon message={curatedError} /> : null}
       <Tabs
@@ -168,13 +169,13 @@ export default function CapabilityMarketPage() {
         items={[
           {
             key: "curated",
-            label: "绮鹃€変腑蹇?",
+            label: "精选中心",
             children: (
               <div className={styles.hubStack}>
                 <div className={styles.searchBar}>
                   <Input value={curatedQuery} prefix={<Sparkles size={16} />} onChange={(e) => setCuratedQuery(e.currentTarget.value)} onPressEnter={() => void handleCuratedSearch()} />
-                  <Button onClick={() => void handleCuratedSearch()}>鎼滅储</Button>
-                  <Button icon={<ReloadOutlined />} onClick={() => void loadCurated(curatedQuery.trim())}>鍒锋柊</Button>
+                  <Button onClick={() => void handleCuratedSearch()}>搜索</Button>
+                  <Button icon={<ReloadOutlined />} onClick={() => void loadCurated(curatedQuery.trim())}>刷新</Button>
                 </div>
                 <Space wrap>{CURATED_CATEGORY_DEFINITIONS.map((d) => <Button key={d.key} type={curatedCategory === d.key ? "primary" : "default"} onClick={() => setCuratedCategory(d.key)}>{d.label} ({categoryCounts[d.key] || 0})</Button>)}</Space>
                 <Tag>{curatedRangeText}</Tag>
@@ -194,8 +195,8 @@ export default function CapabilityMarketPage() {
                               <Tag>{presentRemoteVersion(item.version)}</Tag>
                             </Space>
                             {item.review_summary ? <Paragraph type="secondary">{localizeRemoteSkillText(item.review_summary)}</Paragraph> : null}
-                            {item.review_required ? <Checkbox checked={Boolean(curatedReviewAcknowledgements[installKey])} onChange={(e) => setCuratedReviewAcknowledgements((current) => ({ ...current, [installKey]: e.target.checked }))}>鎴戝凡闃呰</Checkbox> : null}
-                            <Button loading={installingCuratedId === installKey} onClick={() => void installCuratedSkill(item)}>瀹夎</Button>
+                            {item.review_required ? <Checkbox checked={Boolean(curatedReviewAcknowledgements[installKey])} onChange={(e) => setCuratedReviewAcknowledgements((current) => ({ ...current, [installKey]: e.target.checked }))}>已确认审核提示</Checkbox> : null}
+                            <Button loading={installingCuratedId === installKey} onClick={() => void installCuratedSkill(item)}>安装</Button>
                           </Card>
                         );
                       })}
@@ -208,26 +209,26 @@ export default function CapabilityMarketPage() {
           },
           {
             key: "install-templates",
-            label: "瀹夎妯℃澘",
+            label: "安装模板",
             children: (
               <div className={styles.templateGrid}>
-                <Card title="妯℃澘" className={styles.templateList} loading={templatesLoading}>
-                  <List dataSource={templates} renderItem={(item) => <List.Item onClick={() => updateSearchParams({ template: item.id, tab: "install-templates" })}><Space><Text>{item.name}</Text><Tag color={templateStatusColor(item)}>{item.ready ? "ready" : item.installed ? "installed" : "new"}</Tag><Tag>{presentRecommendationInstallKind(item.install_kind)}</Tag></Space></List.Item>} />
+                <Card title="模板" className={styles.templateList} loading={templatesLoading}>
+                  <List dataSource={templates} renderItem={(item) => <List.Item onClick={() => updateSearchParams({ template: item.id, tab: "install-templates" })}><Space><Text>{item.name}</Text><Tag color={templateStatusColor(item)}>{presentTemplateAvailabilityLabel(item)}</Tag><Tag>{presentRecommendationInstallKind(item.install_kind)}</Tag></Space></List.Item>} />
                 </Card>
                 <Card className={styles.templateDetail}>
                   {selectedTemplate ? (
                     <Space direction="vertical" style={{ width: "100%" }}>
                       {templateInstallSummary ? <Alert type="success" message={templateInstallSummary} /> : null}
                       <Form form={templateForm} layout="vertical">{selectedTemplate.config_schema?.fields?.map(renderTemplateConfigField)}</Form>
-                      <Button type="primary" loading={templateActionKey === `install:${selectedTemplate.id}`} onClick={() => void handleInstallTemplate()}>瀹夎</Button>
+                      <Button type="primary" loading={templateActionKey === `install:${selectedTemplate.id}`} onClick={() => void handleInstallTemplate()}>安装</Button>
                     </Space>
                   ) : <Empty />}
                 </Card>
               </div>
             ),
           },
-          { key: "installed", label: "宸插畨瑁?", children: <Card><List dataSource={[]} renderItem={() => null} /></Card> },
-          { key: "skills", label: "Skills", children: <Card><List dataSource={[]} renderItem={() => null} /></Card> },
+          { key: "installed", label: "已安装", children: <Card><List dataSource={[]} renderItem={() => null} /></Card> },
+          { key: "skills", label: "技能", children: <Card><List dataSource={[]} renderItem={() => null} /></Card> },
           {
             key: "mcp",
             label: "MCP",

@@ -21,26 +21,6 @@ async def get_runtime_conversation(
     except RuntimeError as exc:
         raise HTTPException(503, detail=str(exc)) from exc
 
-
-@router.post("/goals/{goal_id}/compile", response_model=list[dict[str, object]])
-async def compile_goal(
-    goal_id: str,
-    request: Request,
-    response: Response,
-    payload: GoalCompileActionRequest | None = None,
-) -> list[dict[str, object]]:
-    apply_runtime_center_surface_headers(response, surface="runtime-center")
-    service = _get_goal_service(request)
-    try:
-        specs = service.compile_goal(
-            goal_id,
-            context=payload.context if payload is not None else {},
-        )
-    except KeyError as exc:
-        raise HTTPException(404, detail=str(exc)) from exc
-    return [_model_dump_or_dict(spec) or {"value": str(spec)} for spec in specs]
-
-
 @router.get("/heartbeat", response_model=dict[str, object])
 async def get_runtime_heartbeat(
     request: Request,
@@ -172,12 +152,28 @@ async def create_schedule(
     existing = await manager.get_job(spec.id)
     if existing is not None:
         raise HTTPException(409, detail=f"Schedule '{spec.id}' already exists")
-    try:
-        await manager.create_or_replace_job(spec)
-    except ValueError as exc:
-        raise HTTPException(400, detail=str(exc)) from exc
+    result = await _dispatch_runtime_mutation(
+        request,
+        capability_ref="system:create_schedule",
+        title=f"Create schedule '{spec.id}'",
+        payload={
+            "actor": "copaw-operator",
+            "owner_agent_id": "copaw-operator",
+            "job": spec.model_dump(mode="json"),
+            "disable_main_brain_auto_adjudicate": True,
+        },
+        fallback_risk="confirm",
+    )
+    if not result.get("success"):
+        if result.get("phase") == "waiting-confirm":
+            return {
+                "created": False,
+                "result": result,
+                "schedule": spec.model_dump(mode="json"),
+            }
+        raise HTTPException(400, detail=result.get("error") or "Schedule creation failed")
     detail = await _get_schedule_surface(spec.id, request, response)
-    return {"created": True, "schedule": detail}
+    return {"created": True, "result": result, "schedule": detail}
 
 
 @router.put("/schedules/{schedule_id}", response_model=dict[str, object])
@@ -194,12 +190,29 @@ async def update_schedule(
     existing = await manager.get_job(schedule_id)
     if existing is None:
         raise HTTPException(404, detail=f"Schedule '{schedule_id}' not found")
-    try:
-        await manager.create_or_replace_job(spec)
-    except ValueError as exc:
-        raise HTTPException(400, detail=str(exc)) from exc
+    result = await _dispatch_runtime_mutation(
+        request,
+        capability_ref="system:update_schedule",
+        title=f"Update schedule '{schedule_id}'",
+        payload={
+            "actor": "copaw-operator",
+            "owner_agent_id": "copaw-operator",
+            "schedule_id": schedule_id,
+            "job": spec.model_dump(mode="json"),
+            "disable_main_brain_auto_adjudicate": True,
+        },
+        fallback_risk="confirm",
+    )
+    if not result.get("success"):
+        if result.get("phase") == "waiting-confirm":
+            return {
+                "updated": False,
+                "result": result,
+                "schedule": await _get_schedule_surface(schedule_id, request, response),
+            }
+        raise HTTPException(400, detail=result.get("error") or "Schedule update failed")
     detail = await _get_schedule_surface(schedule_id, request, response)
-    return {"updated": True, "schedule": detail}
+    return {"updated": True, "result": result, "schedule": detail}
 
 
 @router.delete("/schedules/{schedule_id}", response_model=dict[str, object])
@@ -210,11 +223,33 @@ async def delete_schedule(
 ) -> dict[str, object]:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
     manager = _get_cron_manager(request)
-    deleted = await manager.delete_job(schedule_id)
-    if not deleted:
+    existing = await manager.get_job(schedule_id)
+    if existing is None:
         raise HTTPException(404, detail=f"Schedule '{schedule_id}' not found")
+    result = await _dispatch_runtime_mutation(
+        request,
+        capability_ref="system:delete_schedule",
+        title=f"Delete schedule '{schedule_id}'",
+        payload={
+            "actor": "copaw-operator",
+            "owner_agent_id": "copaw-operator",
+            "schedule_id": schedule_id,
+            "disable_main_brain_auto_adjudicate": True,
+        },
+        fallback_risk="confirm",
+    )
+    if not result.get("success"):
+        if result.get("phase") == "waiting-confirm":
+            return {
+                "deleted": False,
+                "result": result,
+                "schedule_id": schedule_id,
+                "route": f"/api/runtime-center/schedules/{schedule_id}",
+            }
+        raise HTTPException(400, detail=result.get("error") or "Schedule deletion failed")
     return {
         "deleted": True,
+        "result": result,
         "schedule_id": schedule_id,
         "route": f"/api/runtime-center/schedules/{schedule_id}",
     }
@@ -228,14 +263,23 @@ async def run_schedule(
 ) -> dict[str, object]:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
     manager = _get_cron_manager(request)
-    try:
-        await manager.run_job(schedule_id)
-    except KeyError as exc:
-        raise HTTPException(404, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(400, detail=str(exc)) from exc
+    if await manager.get_job(schedule_id) is None:
+        raise HTTPException(404, detail=f"Schedule '{schedule_id}' not found")
+    result = await _dispatch_runtime_mutation(
+        request,
+        capability_ref="system:run_schedule",
+        title=f"Run schedule '{schedule_id}'",
+        payload={
+            "actor": "copaw-operator",
+            "schedule_id": schedule_id,
+        },
+    )
+    if not result.get("success"):
+        if result.get("phase") == "waiting-confirm":
+            return {"started": False, "result": result}
+        raise HTTPException(400, detail=result.get("error") or "Schedule run failed")
     detail = await _get_schedule_surface(schedule_id, request, response)
-    return {"started": True, "schedule": detail}
+    return {"started": True, "result": result, "schedule": detail}
 
 
 @router.post("/schedules/{schedule_id}/pause", response_model=dict[str, object])
@@ -246,12 +290,23 @@ async def pause_schedule(
 ) -> dict[str, object]:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
     manager = _get_cron_manager(request)
-    try:
-        await manager.pause_job(schedule_id)
-    except Exception as exc:
-        raise HTTPException(400, detail=str(exc)) from exc
+    if await manager.get_job(schedule_id) is None:
+        raise HTTPException(404, detail=f"Schedule '{schedule_id}' not found")
+    result = await _dispatch_runtime_mutation(
+        request,
+        capability_ref="system:pause_schedule",
+        title=f"Pause schedule '{schedule_id}'",
+        payload={
+            "actor": "copaw-operator",
+            "schedule_id": schedule_id,
+        },
+    )
+    if not result.get("success"):
+        if result.get("phase") == "waiting-confirm":
+            return {"paused": False, "result": result}
+        raise HTTPException(400, detail=result.get("error") or "Schedule pause failed")
     detail = await _get_schedule_surface(schedule_id, request, response)
-    return {"paused": True, "schedule": detail}
+    return {"paused": True, "result": result, "schedule": detail}
 
 
 @router.post("/schedules/{schedule_id}/resume", response_model=dict[str, object])
@@ -262,12 +317,23 @@ async def resume_schedule(
 ) -> dict[str, object]:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
     manager = _get_cron_manager(request)
-    try:
-        await manager.resume_job(schedule_id)
-    except Exception as exc:
-        raise HTTPException(400, detail=str(exc)) from exc
+    if await manager.get_job(schedule_id) is None:
+        raise HTTPException(404, detail=f"Schedule '{schedule_id}' not found")
+    result = await _dispatch_runtime_mutation(
+        request,
+        capability_ref="system:resume_schedule",
+        title=f"Resume schedule '{schedule_id}'",
+        payload={
+            "actor": "copaw-operator",
+            "schedule_id": schedule_id,
+        },
+    )
+    if not result.get("success"):
+        if result.get("phase") == "waiting-confirm":
+            return {"resumed": False, "result": result}
+        raise HTTPException(400, detail=result.get("error") or "Schedule resume failed")
     detail = await _get_schedule_surface(schedule_id, request, response)
-    return {"resumed": True, "schedule": detail}
+    return {"resumed": True, "result": result, "schedule": detail}
 
 
 

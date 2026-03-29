@@ -108,6 +108,13 @@ class _QueryExecutionPromptMixin:
         activation_mode = (
             getattr(profile, "activation_mode", None) if profile is not None else None
         )
+        current_focus_kind = (
+            getattr(profile, "current_focus_kind", None) if profile is not None else None
+        )
+        current_focus_id = (
+            getattr(profile, "current_focus_id", None) if profile is not None else None
+        )
+        current_focus = getattr(profile, "current_focus", None) if profile is not None else None
         current_goal_id = (
             getattr(profile, "current_goal_id", None) if profile is not None else None
         )
@@ -169,6 +176,12 @@ class _QueryExecutionPromptMixin:
         if goal_focus is not None:
             current_goal_id = _first_non_empty(goal_focus.get("goal_id"), current_goal_id)
             current_goal = _first_non_empty(goal_focus.get("title"), current_goal)
+        current_focus_kind = (
+            current_focus_kind
+            or ("goal" if current_goal_id or current_goal else None)
+        )
+        current_focus_id = _first_non_empty(current_focus_id, current_goal_id)
+        current_focus = _first_non_empty(current_focus, current_goal)
         execution_feedback = self._resolve_recent_execution_feedback(
             goal_id=_first_non_empty(getattr(request, "goal_id", None), current_goal_id),
             task_id=_first_non_empty(
@@ -215,11 +228,11 @@ class _QueryExecutionPromptMixin:
             lines.append(
                 f"- Expected evidence: {', '.join(evidence_expectations[:6])}",
             )
-        if current_goal_id or current_goal:
-            goal_text = current_goal or current_goal_id
-            if current_goal_id and current_goal and current_goal_id != current_goal:
-                goal_text = f"{current_goal} ({current_goal_id})"
-            lines.append(f"- Current goal: {goal_text}")
+        if current_focus_id or current_focus:
+            focus_text = current_focus or current_focus_id
+            if current_focus_id and current_focus and current_focus_id != current_focus:
+                focus_text = f"{current_focus} ({current_focus_id})"
+            lines.append(f"- Current focus: {focus_text}")
         if current_task_id:
             lines.append(f"- Current task: {current_task_id}")
         if task_segment:
@@ -328,6 +341,10 @@ class _QueryExecutionPromptMixin:
             task_id=_first_non_empty(
                 getattr(request, "task_id", None),
                 current_task_id,
+            ),
+            work_context_id=_first_non_empty(
+                getattr(request, "work_context_id", None),
+                (execution_context or {}).get("work_context_id"),
             ),
             session_kind=session_kind,
         )
@@ -832,7 +849,10 @@ class _QueryExecutionPromptMixin:
             role_name = _first_non_empty(_field_value(agent, "role_name"))
             display_name = _first_non_empty(_field_value(agent, "name"))
             mission = _first_non_empty(_field_value(agent, "mission"))
-            current_goal = _first_non_empty(_field_value(agent, "current_goal"))
+            current_focus = _first_non_empty(
+                _field_value(agent, "current_focus"),
+                _field_value(agent, "current_goal"),
+            )
             allowed_capabilities = _string_list(
                 _field_value(agent, "allowed_capabilities", "capabilities"),
             )
@@ -857,8 +877,8 @@ class _QueryExecutionPromptMixin:
                 if len(allowed_capabilities) > 6:
                     preview = f"{preview}, ... (+{len(allowed_capabilities) - 6} more)"
                 fields.append(f"allowed_capabilities={preview}")
-            if current_goal:
-                fields.append(f"current_goal={current_goal}")
+            if current_focus:
+                fields.append(f"current_focus={current_focus}")
             if fields:
                 line = f"{line} | " + " | ".join(fields)
             lines.append(line)
@@ -1171,6 +1191,7 @@ class _QueryExecutionPromptMixin:
         industry_role_id: str | None,
         owner_scope: str | None,
         task_id: str | None = None,
+        work_context_id: str | None = None,
         session_kind: str | None = None,
     ) -> list[str]:
         service = self._knowledge_service
@@ -1184,14 +1205,14 @@ class _QueryExecutionPromptMixin:
         knowledge_retriever = getattr(service, "retrieve", None)
         memory_retriever = getattr(service, "retrieve_memory", None)
         recall = getattr(recall_service, "recall", None)
-        work_context_id = None
+        resolved_work_context_id = _first_non_empty(work_context_id)
         if task_id and self._task_repository is not None:
             try:
                 task_record = self._task_repository.get_task(task_id)
             except Exception:
                 task_record = None
-            if task_record is not None:
-                work_context_id = _first_non_empty(
+            if task_record is not None and resolved_work_context_id is None:
+                resolved_work_context_id = _first_non_empty(
                     getattr(task_record, "work_context_id", None),
                 )
         knowledge_chunks = (
@@ -1205,32 +1226,32 @@ class _QueryExecutionPromptMixin:
                 role=industry_role_id,
                 scope_type=(
                     "work_context"
-                    if work_context_id
+                    if resolved_work_context_id
                     else "task"
                     if task_id
                     else None
                 ),
-                scope_id=work_context_id or (
+                scope_id=resolved_work_context_id or (
                     task_id if task_id else None
                 ),
                 task_id=task_id,
-                work_context_id=work_context_id,
+                work_context_id=resolved_work_context_id,
                 agent_id=owner_agent_id,
                 industry_instance_id=industry_instance_id,
                 global_scope_id=owner_scope,
-                include_related_scopes=not (work_context_id or task_id),
+                include_related_scopes=not (resolved_work_context_id or task_id),
                 limit=4,
             )
             memory_chunks = list(getattr(recall_response, "hits", []) or [])
         elif callable(memory_retriever):
-            if work_context_id:
+            if resolved_work_context_id:
                 memory_chunks = memory_retriever(
                     query=query,
                     role=industry_role_id,
                     scope_type="work_context",
-                    scope_id=work_context_id,
+                    scope_id=resolved_work_context_id,
                     task_id=task_id,
-                    work_context_id=work_context_id,
+                    work_context_id=resolved_work_context_id,
                     include_related_scopes=False,
                     limit=4,
                 )

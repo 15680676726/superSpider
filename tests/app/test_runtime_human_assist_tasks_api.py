@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -18,6 +21,98 @@ from copaw.state.repositories import (
 )
 
 from .runtime_center_api_parts.shared import FakeTurnExecutor, build_runtime_center_app
+
+
+class _FakeQueryExecutionService:
+    def __init__(
+        self,
+        *,
+        resume_result: dict[str, object] | None = None,
+        resume_error: Exception | None = None,
+        resume_results: list[object] | None = None,
+    ) -> None:
+        self.calls: list[str] = []
+        self._resume_result = dict(resume_result or {"resumed": True, "summary": "resume finished"})
+        self._resume_error = resume_error
+        self._resume_results = list(resume_results or [])
+
+    def resume_human_assist_task(self, *, task: object) -> dict[str, object]:
+        self.calls.append(str(getattr(task, "id", "")))
+        if self._resume_results:
+            next_result = self._resume_results.pop(0)
+            if isinstance(next_result, Exception):
+                raise next_result
+            if isinstance(next_result, dict):
+                return dict(next_result)
+            return {"resumed": bool(next_result)}
+        if self._resume_error is not None:
+            raise self._resume_error
+        return dict(self._resume_result)
+
+
+class _AsyncQueryExecutionService:
+    def __init__(
+        self,
+        *,
+        resume_result: dict[str, object] | None = None,
+        delay_seconds: float = 0.2,
+    ) -> None:
+        self.calls: list[str] = []
+        self._resume_result = dict(
+            resume_result or {"resumed": True, "summary": "resume finished"},
+        )
+        self._delay_seconds = delay_seconds
+
+    async def resume_human_assist_task(self, *, task: object) -> dict[str, object]:
+        self.calls.append(str(getattr(task, "id", "")))
+        await asyncio.sleep(self._delay_seconds)
+        return dict(self._resume_result)
+
+
+class _RecordingHumanAssistTaskService:
+    def __init__(self, task: HumanAssistTaskRecord) -> None:
+        self._task = task
+        self.submit_calls: list[dict[str, object]] = []
+
+    def get_current_task(self, *, chat_thread_id: str):
+        if chat_thread_id != self._task.chat_thread_id:
+            return None
+        if str(self._task.status).strip().lower() in {"closed", "handoff_blocked"}:
+            return None
+        return self._task
+
+    def submit_and_verify(
+        self,
+        task_id: str,
+        *,
+        submission_text: str | None,
+        submission_evidence_refs: list[str],
+        submission_payload: dict[str, object],
+    ):
+        self.submit_calls.append(
+            {
+                "task_id": task_id,
+                "submission_text": submission_text,
+                "submission_evidence_refs": list(submission_evidence_refs),
+                "submission_payload": dict(submission_payload),
+            },
+        )
+        return SimpleNamespace(
+            outcome="accepted",
+            task=self._task,
+            message="accepted",
+            resume_queued=False,
+            matched_hard_anchors=["receipt"],
+            matched_result_anchors=["uploaded"],
+            missing_hard_anchors=[],
+            missing_result_anchors=[],
+            matched_negative_anchors=[],
+        )
+
+    def mark_closed(self, task_id: str, *, summary: str, resume_payload: dict[str, object]):
+        del task_id, summary, resume_payload
+        self._task = self._task.model_copy(update={"status": "closed"})
+        return self._task
 
 
 def _make_human_assist_task(*, task_id: str = "task-1") -> HumanAssistTaskRecord:
@@ -50,7 +145,7 @@ def _make_human_assist_task(*, task_id: str = "task-1") -> HumanAssistTaskRecord
     )
 
 
-def _build_human_assist_app(tmp_path):
+def _build_human_assist_app(tmp_path, *, query_execution_service: object | None = None):
     app = build_runtime_center_app()
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
     evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
@@ -68,12 +163,16 @@ def _build_human_assist_app(tmp_path):
         human_assist_task_service=service,
     )
     turn_executor = FakeTurnExecutor()
+    query_execution_service = query_execution_service or _FakeQueryExecutionService()
     app.state.turn_executor = turn_executor
-    return app, service, turn_executor
+    app.state.query_execution_service = query_execution_service
+    return app, service, turn_executor, query_execution_service
 
 
 def test_runtime_center_human_assist_task_endpoints(tmp_path) -> None:
-    app, service, _turn_executor = _build_human_assist_app(tmp_path)
+    app, service, _turn_executor, _query_execution_service = _build_human_assist_app(
+        tmp_path,
+    )
     issued = service.issue_task(_make_human_assist_task())
     client = TestClient(app)
 
@@ -98,8 +197,12 @@ def test_runtime_center_human_assist_task_endpoints(tmp_path) -> None:
     assert detail_response.json()["task"]["id"] == issued.id
 
 
-def test_runtime_center_chat_run_intercepts_human_assist_submission(tmp_path) -> None:
-    app, service, turn_executor = _build_human_assist_app(tmp_path)
+def test_runtime_center_chat_run_intercepts_human_assist_submission_when_explicit_action_is_set(
+    tmp_path,
+) -> None:
+    app, service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
+    )
     issued = service.issue_task(_make_human_assist_task())
     client = TestClient(app)
 
@@ -107,6 +210,102 @@ def test_runtime_center_chat_run_intercepts_human_assist_submission(tmp_path) ->
         "/runtime-center/chat/run",
         json={
             "id": "req-human-assist-accept",
+            "session_id": issued.chat_thread_id,
+            "thread_id": issued.chat_thread_id,
+            "user_id": "host-user",
+            "channel": "console",
+            "requested_actions": ["submit_human_assist"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Receipt uploaded.",
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(turn_executor.stream_calls) == 0
+    assert query_execution_service.calls == [issued.id]
+    assert service.get_task(issued.id).status == "closed"
+    assert '"outcome":"accepted"' in response.text
+
+    current_response = client.get(
+        "/runtime-center/human-assist-tasks/current",
+        params={"chat_thread_id": issued.chat_thread_id},
+    )
+    assert current_response.status_code == 404
+
+
+def test_runtime_center_chat_run_preserves_requested_actions_in_submission_payload(
+    tmp_path,
+) -> None:
+    task = _make_human_assist_task(task_id="task-requested-actions").model_copy(
+        update={"status": "issued"},
+    )
+    recording_service = _RecordingHumanAssistTaskService(task)
+    app, _service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
+        query_execution_service=_FakeQueryExecutionService(),
+    )
+    app.state.human_assist_task_service = recording_service
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-human-assist-requested-actions",
+            "session_id": task.chat_thread_id,
+            "thread_id": task.chat_thread_id,
+            "user_id": "host-user",
+            "channel": "console",
+            "requested_actions": ["submit_human_assist"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Receipt uploaded.",
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(turn_executor.stream_calls) == 0
+    assert query_execution_service.calls == [task.id]
+    assert recording_service.submit_calls[0]["submission_payload"]["requested_actions"] == [
+        "submit_human_assist",
+    ]
+    assert recording_service.submit_calls[0]["submission_payload"]["interaction_mode"] == "auto"
+    assert recording_service.submit_calls[0]["submission_payload"]["chat_thread_id"] == task.chat_thread_id
+    assert recording_service.get_current_task(chat_thread_id=task.chat_thread_id) is None
+
+
+def test_runtime_center_chat_run_accepts_human_assist_submission_from_plain_text_anchor_match(
+    tmp_path,
+) -> None:
+    app, service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
+    )
+    issued = service.issue_task(_make_human_assist_task(task_id="task-plain-text"))
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-human-assist-plain-text",
             "session_id": issued.chat_thread_id,
             "thread_id": issued.chat_thread_id,
             "user_id": "host-user",
@@ -129,18 +328,54 @@ def test_runtime_center_chat_run_intercepts_human_assist_submission(tmp_path) ->
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert len(turn_executor.stream_calls) == 0
-    assert service.get_task(issued.id).status == "resume_queued"
+    assert query_execution_service.calls == [issued.id]
+    assert service.get_task(issued.id).status == "closed"
     assert '"outcome":"accepted"' in response.text
 
-    current_response = client.get(
-        "/runtime-center/human-assist-tasks/current",
-        params={"chat_thread_id": issued.chat_thread_id},
+
+def test_runtime_center_chat_run_falls_back_to_normal_chat_when_no_current_human_assist_task(
+    tmp_path,
+) -> None:
+    app, _service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
     )
-    assert current_response.status_code == 404
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-human-assist-no-current-task",
+            "session_id": "industry-chat:industry-1:execution-core",
+            "thread_id": "industry-chat:industry-1:execution-core",
+            "user_id": "host-user",
+            "channel": "console",
+            "requested_actions": ["submit_human_assist"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Receipt uploaded.",
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(turn_executor.stream_calls) == 1
+    assert query_execution_service.calls == []
+    assert '"status": "completed"' in response.text
 
 
 def test_runtime_center_chat_run_reports_missing_human_assist_evidence(tmp_path) -> None:
-    app, service, turn_executor = _build_human_assist_app(tmp_path)
+    app, service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
+    )
     issued = service.issue_task(_make_human_assist_task(task_id="task-2"))
     client = TestClient(app)
 
@@ -152,6 +387,7 @@ def test_runtime_center_chat_run_reports_missing_human_assist_evidence(tmp_path)
             "thread_id": issued.chat_thread_id,
             "user_id": "host-user",
             "channel": "console",
+            "requested_actions": ["submit_human_assist"],
             "input": [
                 {
                     "role": "user",
@@ -167,5 +403,201 @@ def test_runtime_center_chat_run_reports_missing_human_assist_evidence(tmp_path)
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert len(turn_executor.stream_calls) == 0
-    assert service.get_task(issued.id).status == "rejected"
+    assert query_execution_service.calls == []
+    assert service.get_task(issued.id).status == "need_more_evidence"
     assert '"outcome":"need_more_evidence"' in response.text
+
+
+def test_runtime_center_chat_run_marks_handoff_blocked_when_resume_cannot_start(
+    tmp_path,
+) -> None:
+    app, service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
+        query_execution_service=_FakeQueryExecutionService(
+            resume_results=[
+                {"resumed": False, "reason": "resume_unavailable"},
+                {"resumed": False, "reason": "resume_unavailable"},
+            ],
+        ),
+    )
+    issued = service.issue_task(_make_human_assist_task(task_id="task-resume-fail"))
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-human-assist-resume-fail",
+            "session_id": issued.chat_thread_id,
+            "thread_id": issued.chat_thread_id,
+            "user_id": "host-user",
+            "channel": "console",
+            "requested_actions": ["submit_human_assist"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Receipt uploaded.",
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(turn_executor.stream_calls) == 0
+    assert query_execution_service.calls == [issued.id, issued.id]
+    assert service.get_task(issued.id).status == "handoff_blocked"
+    assert "没接上后续流程" in response.text
+
+
+def test_runtime_center_chat_run_retries_human_assist_resume_before_blocking(
+    tmp_path,
+) -> None:
+    app, service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
+        query_execution_service=_FakeQueryExecutionService(
+            resume_results=[
+                {"resumed": False, "reason": "resume_unavailable"},
+                {"resumed": True, "summary": "resume finished"},
+            ],
+        ),
+    )
+    issued = service.issue_task(_make_human_assist_task(task_id="task-resume-retry"))
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-human-assist-resume-retry",
+            "session_id": issued.chat_thread_id,
+            "thread_id": issued.chat_thread_id,
+            "user_id": "host-user",
+            "channel": "console",
+            "requested_actions": ["submit_human_assist"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Receipt uploaded.",
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(turn_executor.stream_calls) == 0
+    assert query_execution_service.calls == [issued.id, issued.id]
+    assert service.get_task(issued.id).status == "closed"
+    assert "没接上后续流程" not in response.text
+def test_runtime_center_chat_run_marks_resume_queued_before_async_resume_closes(
+    tmp_path,
+) -> None:
+    app, service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
+        query_execution_service=_AsyncQueryExecutionService(delay_seconds=0.2),
+    )
+    issued = service.issue_task(_make_human_assist_task(task_id="task-resume-queued"))
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-human-assist-resume-queued",
+            "session_id": issued.chat_thread_id,
+            "thread_id": issued.chat_thread_id,
+            "user_id": "host-user",
+            "channel": "console",
+            "requested_actions": ["submit_human_assist"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Receipt uploaded.",
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(turn_executor.stream_calls) == 0
+    assert query_execution_service.calls == [issued.id]
+    assert '"resume_queued":true' in response.text
+    assert '"status":"resume_queued"' in response.text
+
+    current_response = client.get(
+        "/runtime-center/human-assist-tasks/current",
+        params={"chat_thread_id": issued.chat_thread_id},
+    )
+    assert current_response.status_code == 404
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        if service.get_task(issued.id).status == "closed":
+            break
+        time.sleep(0.05)
+
+    assert service.get_task(issued.id).status == "closed"
+
+
+def test_runtime_center_chat_run_accepts_media_only_human_assist_submission(
+    tmp_path,
+) -> None:
+    app, service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
+    )
+    issued = service.issue_task(
+        _make_human_assist_task(task_id="task-media-only").model_copy(
+            update={
+                "status": "issued",
+                "acceptance_spec": {
+                    "version": "v1",
+                    "hard_anchors": ["analysis-receipt"],
+                    "result_anchors": ["analysis-uploaded"],
+                },
+            },
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-human-assist-media-only",
+            "session_id": issued.chat_thread_id,
+            "thread_id": issued.chat_thread_id,
+            "user_id": "host-user",
+            "channel": "console",
+            "media_analysis_ids": ["analysis-receipt", "analysis-uploaded"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(turn_executor.stream_calls) == 0
+    assert query_execution_service.calls == [issued.id]
+    assert service.get_task(issued.id).status == "closed"
+    assert '"outcome":"accepted"' in response.text

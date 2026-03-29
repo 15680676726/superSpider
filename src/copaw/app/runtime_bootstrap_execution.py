@@ -77,6 +77,7 @@ def build_runtime_execution_stack(
         learning_service=learning_service,
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
+        environment_service=environment_service,
     )
     kernel_task_store = kernel_task_store_cls(
         task_repository=repositories.task_repository,

@@ -269,10 +269,18 @@
 ### 建议字段
 
 - `owner`
+- `current_focus_kind`
+- `current_focus_id`
+- `current_focus`
 - `current_goal_id`
 - `current_primary_task_id`
 - `today_output_summary`
 - `latest_evidence_summary`
+
+说明：
+
+- `current_focus_*` 是 agent 当前执行焦点的正式前台口径，可指向 goal/backlog/assignment 等 live focus。
+- `current_goal_id` 暂时只应保留为 leaf goal backlink 或执行层兼容字段，不应继续被新的 operator/runtime 前台直接当主心智消费。
 
 ### 待验证字段
 
@@ -365,6 +373,7 @@
 
 `HumanAssistTask` 表示系统执行链上一个“必须由宿主补一段”的正式协作任务。它只用于
 `blocked-by-proof / human-owned checkpoint`，不是泛提醒，也不是第二聊天线程。
+当前正式 `task_type` 至少包括 `checkpoint / ui-assist / evidence-submit / host-handoff-return`。
 
 ### 稳定核心字段
 
@@ -1114,6 +1123,7 @@ Windows-first 约束：
 - 当前 Runtime Center 已提供 `/api/runtime-center/learning/growth/{event_id}` detail 读面
 - 当前 `GrowthEvent` 已能由 learning patch apply 流自动写入，并与 patch/evidence/task 建立显式关联
 - 当前 approved/applied patch 与 recent growth 已会被编译层回收为 `feedback_summary / feedback_items / feedback_patch_ids / feedback_growth_ids / feedback_evidence_refs / next_plan_hints`，作为下一轮 planning/compile 的稳定输入
+- `2026-03-29` 补充：single-item patch 写链也已正式收口到 governed Runtime Center surface；`/api/runtime-center/learning/patches/{id}/approve|reject|apply|rollback` 现全部通过 kernel-governed `system:*patch` mounts 执行，旧 `/api/learning/patches/{id}/*` 单条写入口已退役，`apply/rollback` 的 confirm 结果也会继续把 `DecisionRequest + KernelTask + EvidenceRecord + GrowthEvent/writeback` 串成同一条正式链路
 
 ---
 
@@ -1173,6 +1183,9 @@ Windows-first 约束：
 - `role_summary`
 - `status`
 - `risk_level`
+- `current_focus_kind`
+- `current_focus_id`
+- `current_focus`
 - `current_goal`
 - `current_task_id`
 - `environment_summary`
@@ -1262,6 +1275,7 @@ Windows-first 约束：
 - `2026-03-24` 对象补充：`IndustryInstanceDetail.staffing` 已成为 seat-gap/staffing 的正式读面，统一带出 `active_gap / pending_proposals / temporary_seats / researcher`，供 `/industry`、`Runtime Center`、主脑 prompt 与等待启动提示复用；补位状态不再只藏在 backlog metadata 或 decision repository 里
 - `/api/industry/v1/instances*` 与 `/api/runtime-center/industry*` 已把这些读模型作为正式 operator/read surface 暴露
 - 默认 schedule 仍通过既有 `ScheduleRecord` 主链持久化，而不是行业模块自带平行调度器
+- `2026-03-29` 补充：schedule 的正式 operator 写链现在也已收口到 kernel-governed mutation；`/api/runtime-center/schedules*` 与 `/cron/jobs*` 的 create/update/delete/run/pause/resume 不再直接调用 `CronManager`，而是统一物化为 `system:create_schedule / update_schedule / delete_schedule / run_schedule / pause_schedule / resume_schedule` task，再通过 `DecisionRequest`/kernel confirm 链完成落地
 - 日报/周报摘要当前是 evidence-driven read model，不是独立 reporting store
 - `2026-03-22` 对象补充：`IndustryInstanceDetail` 已显式带出 `acquisition_proposals / install_binding_plans / onboarding_runs`，用于表达“学习阶段发现缺口 -> proposal 审批 -> 物化安装/绑定计划 -> onboarding 验证”的正式读面，而不是把这条链藏在日志里
 
@@ -1958,7 +1972,7 @@ Persistence/query landing:
 - `TaskRecord / TaskRuntimeRecord` 继续作为执行单元与执行 runtime 对象。
 - 若旧 `GoalRecord` 主依赖被完全切掉，可直接删除而不是继续桥接。
 - `POST /runtime-center/tasks/{task_id}/delegate` 这类人类直打执行位的前台入口不再是数据模型的一部分；前台正式写链只允许进入 `MainBrainOrchestrator -> Backlog/Assignment/Report`。
-- 仍然留在 repo 内的 `GoalRecord` / `dispatch_active_goals` 语义，只能解释为执行层 phase/leaf object，不得再被前台、prompt 或 UI 文案描述成主脑规划中心。
+- 仍然留在 repo 内的 `GoalRecord` 与 legacy goal-dispatch 语义，只能解释为执行层 phase/leaf object，不得再被前台、prompt 或 UI 文案描述成主脑规划中心；当前服务层只保留显式 goal leaf dispatch family（`compile_goal_dispatch / dispatch_goal_execute_now / dispatch_goal_background / dispatch_goal_deferred_background`），prediction 侧对 retired goal-dispatch 只保留启动期历史 recommendation 清理语义，而不是运行期正式对象能力。
 
 ### 13.1 永续对象
 
@@ -2013,6 +2027,18 @@ Persistence/query landing:
 - `cycle`
 - `assignment`
 - `agent report`
+- `host_twin`
+- `workspace_graph`
+- `host_event_summary`
+
+补充约束：
+
+- `Runtime Center / /industry / Chat kickoff prompt` 必须显式消费 `strategy / lanes / current cycle / assignments / agent reports` 这类主脑 planning surface；不允许这些对象只存在于后端 read-model 而前台继续停留在旧 `goal / task / schedule` 心智。
+- execution-side 前台必须把 `host_twin` 当作正式结构化对象来展示 current owner、continuity、legal recovery、coordination、blocked surfaces 与 app-family twins，不允许继续只把 `host_twin` 当 raw JSON detail 递归展开。
+- `host_twin` 对 stale blocker / stale handoff history 的抑制只能发生在“当前 host/session 事实已恢复 clean + latest handoff event 明确进入 `return-ready / return-complete`”时；不得仅凭残留 recovery metadata 就把 live blocker 误判为已恢复。
+- workflow / cron / fixed-SOP 可以持有 `host_snapshot`、`environment_ref`、`session_mount_id` 等执行缓存，但这些字段都必须视为 canonical `host_twin / environment detail` 的派生投影，不得被消费面重新升格为第二套 host 真相源。
+- 当 backlog 明确来自 `source_report_id` 或 `synthesis_kind=followup-needed` 时，single-industry 的默认 runtime focus 允许优先呈现该 report follow-up backlog，并携带 supervisor/staffing/writeback metadata；这属于同一条 live focus 主链中的优先级选择，不构成第二套 planning/runtime 真相。
+- 记忆/媒体 follow-up 读链里，`work_context_id` 是正式优先 scope；`task_id` 仅作为兜底，不允许消费面跳过 `work_context` 直接各自猜 recall scope。
 
 ### 13.5.1 硬切 reset 约束
 
@@ -2073,6 +2099,7 @@ Persistence/query landing:
   - `work_context_id`
   - `context_key`
   - `work_context` summary
+- media/chat writeback 与 memory recall 也必须显式把 `work_context_id` 作为正式 scope 消费；当媒体分析、长期记忆或 report drill-down 已绑定共享工作上下文时，不允许再次退回只靠 `task_id` 猜当前工作身份
 - `control_thread_id`、`task-session:*` 这类线程锚点可以参与解析，但不应单独充当正式工作身份
 
 ## 13.7 Fixed SOP Kernel

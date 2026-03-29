@@ -320,7 +320,7 @@ def _format_team_roster(
                 f"{_first_non_empty(getattr(profile, 'role_name', None), '未标注职责')} | "
                 f"职责：{_clip_text(getattr(profile, 'role_summary', ''), limit=70) or '未提供'} | "
                 f"能力范围：{_clip_text(capability_summary, limit=70)} | "
-                f"当前派工：{_clip_text(getattr(profile, 'current_goal', ''), limit=50) or '当前无显式派工'} | "
+                f"当前焦点：{_clip_text(_first_non_empty(getattr(profile, 'current_focus', None), getattr(profile, 'current_goal', '')), limit=50) or '当前无显式焦点'} | "
                 "回报时机：跨角色冲突/高风险/需要主脑拍板时回到主脑"
             )
         )
@@ -336,6 +336,7 @@ def _format_runtime_snapshot(detail: object | None) -> str:
     cycle_line = _first_non_empty(
         current_cycle.get("title"),
         current_cycle.get("summary"),
+        execution.get("current_focus"),
         execution.get("current_goal"),
     ) or "暂无明确 cycle"
     lane_lines = [

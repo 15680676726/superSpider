@@ -208,7 +208,9 @@ export function useChatRuntimeState({
       ? normalizeSpiderMeshBrand(threadMeta.agent_name)
       : activeAgentId || runtimeWindow.currentUserId || "";
   const currentGoal =
-    typeof threadMeta.current_goal === "string" ? threadMeta.current_goal : "";
+    typeof threadMeta.current_focus === "string"
+      ? threadMeta.current_focus
+      : "";
   const hasIndustryContext = Boolean(activeIndustryId);
   const hasAgentBinding =
     (typeof threadMeta.agent_id === "string" &&

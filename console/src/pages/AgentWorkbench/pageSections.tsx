@@ -177,10 +177,10 @@ function ProfileCard({
           {localizeWorkbenchText(linkedGoal.title)}
         </Paragraph>
       ) : null}
-      {agent.current_goal ? (
+      {agent.current_focus ? (
         <Paragraph>
           <Text strong>{agentWorkbenchText.currentGoalLabel}:</Text>{" "}
-          {localizeWorkbenchText(agent.current_goal)}
+          {localizeWorkbenchText(agent.current_focus)}
         </Paragraph>
       ) : null}
       {agent.environment_summary ? (

@@ -9,7 +9,7 @@ def task_route(task_id: str) -> str:
 
 
 def goal_route(goal_id: str) -> str:
-    return f"/api/runtime-center/goals/{goal_id}"
+    return f"/api/goals/{goal_id}/detail"
 
 
 def agent_route(agent_id: str) -> str:

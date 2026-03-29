@@ -10,7 +10,7 @@ from .local_models import router as local_models_router
 from .learning import router as learning_router
 from .media import router as media_router
 from .providers import router as providers_router
-from .goals import router as goals_router
+from .goals import public_router as goals_public_router
 from .routines import router as routines_router
 from .runtime_center import router as runtime_center_router
 from .system import router as system_router
@@ -46,7 +46,7 @@ router.include_router(workflow_templates_router)
 router.include_router(workflow_runs_router)
 router.include_router(workspace_router)
 router.include_router(envs_router)
-router.include_router(goals_router)
+router.include_router(goals_public_router)
 router.include_router(industry_router)
 
 __all__ = ["router"]

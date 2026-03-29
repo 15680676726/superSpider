@@ -100,6 +100,11 @@
   - Runtime Center 已提供 `current / list / detail` 读面
   - `POST /api/runtime-center/chat/run` 已可在当前控制线程拦截宿主提交，自动走 `submit -> verify -> accepted|need_more_evidence -> resume_queued`
   - 聊天页已补任务条、任务记录弹层与详情读面，宿主可直接在聊天窗口提交并查看历史
+- `2026-03-29` 补充：`HumanAssistTask` 已补上第一条真实 producer 主链。runtime governance 在发现 `host_twin` 要求人接管/人返回时，会正式物化 `task_type=host-handoff-return` 的协作任务，不再只在 governance summary 或 host-twin blocker 文案里提示。
+- `2026-03-29` 补充：聊天前门对活动 `HumanAssistTask` 的宿主回执不再只认显式 `submit_human_assist` 或纯 `media_analysis_ids`；当消息文本命中验收锚点或明确完成话术时，也会正式进入 `submitted -> verifying -> accepted|need_more_evidence` 链，再决定是否恢复执行。
+- `2026-03-28` 补充：`need_more_evidence` 现已是正式持久化状态，不再和 `rejected` 混写；`accepted` 之后的恢复链也已接回真实消费者，前门会先自动重试一次恢复，再决定是否阻塞。立即恢复成功会收尾到 `closed`，恢复失败才会落到 `handoff_blocked`，异步恢复则短暂进入 `resume_queued` 后再按结果收尾。
+- `2026-03-28` 补充：`KernelTurnExecutor auto` 的聊天/执行分流已继续收紧为“显式 `requested_actions` + 主脑 intake contract”双来源；`生成一下 / 开始吧 / 好的` 这类自然话术不再由 `turn_executor` 自己关键词猜执行。`query_execution_runtime / query_execution_team` 的 writeback/kickoff 侧效现在也只认已挂到 request 的 intake contract，不再在内部偷偷补跑一份 sync intake heuristics。
+- `2026-03-28` 补充：`main_brain_intake.py` 里的 `resolve_main_brain_intake_contract_sync / resolve_request_main_brain_intake_contract_sync` 已从代码基线移除；当前主链只保留异步 intake 解析 + 已挂载 contract 读取，不再保留 sync 兼容后门。
 - 当前产品口径已经固定为：
   - 人类默认先和主脑说话
   - 主脑决定本轮是继续聊天还是进入执行编排
@@ -135,9 +140,24 @@
 - `2026-03-25` 补充：`ProviderManager` 已降为 compat façade；`providers` 包已拆出 `provider_registry / provider_storage / provider_resolution_service / provider_chat_model_factory / provider_fallback_service`，runtime/query/industry 等可注入调用点优先改走显式实例，残余 `get_instance()` 已收口到 bootstrapping、router/CLI、`memory_manager` 兼容链与 façade 静态入口。
 - `2026-03-25` 补充：`POST /api/runtime-center/tasks/{task_id}/delegate` 已从 runtime-center router 物理删除；人类前台不再保留 direct delegate API，assignment/delegation 只留在内核与 system capability 内部。
 - `2026-03-25` 补充：`dispatch_active_goals` 与旧 goal-dispatch 文案已从前台 capability / insights surface 删除；残留 `GoalRecord` 与 goal service 只作为执行层 phase/leaf object 保留，不再代表主脑规划真相。
-- `2026-03-25` 补充：execution-core 的正式能力基线、runtime query system tools、prompt capability projection、Runtime Center actor capability surface 与 automation loop 已全部摘掉 `dispatch_active_goals`；该能力现在只允许停留在 `/goals` 与 goal service 这类执行层 leaf 兼容边界，主脑/Runtime Center 不再把它当成正式派工入口。
+- `2026-03-25` 补充：execution-core 的正式能力基线、runtime query system tools、prompt capability projection、Runtime Center actor capability surface 与 automation loop 已全部摘掉 `dispatch_active_goals`；主脑/Runtime Center 不再把它当成正式派工入口，后续残留边界也只允许继续向 history-only 的 recommendation 识别/归一化收口。
 - `2026-03-25` 补充：execution-core 的正式能力基线、runtime query tool registry、prompt capability card 与 Runtime Center capability assignment surface 也已同步摘掉 `dispatch_goal`；该能力仅保留给 goal service / workflow / prediction 等执行层内部叶子边界，不再作为主脑或 execution-core 的正式可见能力。
+- `2026-03-28` 补充：`system:dispatch_active_goals` 与 `system:dispatch_goal` 已从 system capability registry 物理退役；prediction service 启动时会直接清除残留旧 recommendation，不再把 retired goal-dispatch recommendation 改写后继续展示，运行期读面也不再长期背这条 compat 分支。governance 默认阻断集合也不再把 `dispatch_goal` 当作现役 system capability。当前旧 goal-dispatch runtime compat 已收口到 `/goals` 叶子显式 dispatch family 与 prediction 启动期旧 recommendation 清理边界；`GoalService.dispatch_active_goals()` 已从服务层物理删除。现役 `manual:coordinate-main-brain` recommendation 也不再泄露 `goal_id / owner_agent_id / execute / activate / context` 这类旧 dispatch payload，前后端正式只靠 `target_goal_id / target_agent_id + routes.coordinate` 进入主脑协调。
+- `2026-03-28` 补充：goal leaf dispatch 的返回面也已继续瘦身，不再把 `compiled_specs` 和顶层 `trigger` 当作 dispatch 结果镜像直接抛给调用方；正式结果只保留 `goal / compiled_tasks / dispatch_results`，而 trigger 事实继续通过 goal compiler context 与 runtime event 留证。
+- `2026-03-28` 补充：goal leaf dispatch 的执行 API 也已继续收口；compile-only 入口现已正式改名为 `compile_goal_dispatch(...)`，旧公共 `dispatch_goal(...)` 名称已退役，不再保留为现役 service surface。前台同步执行统一改走 `dispatch_goal_execute_now(...)`，即时后台执行统一改走 `dispatch_goal_background(...)`，延迟 release 统一改走 `dispatch_goal_deferred_background(...) + release_deferred_goal_dispatch(...)`；industry / workflow 等调用方不再自行拼接旧 dispatch 开关组合，也不再继续依赖旧公共名。
+- `2026-03-28` 补充：CLI `goals dispatch` 也已从命令面物理删除，不再保留 retired shell；CLI 只剩 `goals list / compile` 这类只读/编译辅助面。
 - `2026-03-26` 补充：`Runtime Center` 的行业 kickoff 提示、overview meta 与 execution focus 卡片已停止把 `goal / active goal` 当作 operator 主口径；当前正式摘要统一改成 `backlog / cycle / assignment / report`，详情卡文案也改成 `Current Focus / No active focus`。
+- `2026-03-29` 补充：`Runtime Center / /industry / 行业 kickoff prompt` 现在已把 `strategy + lanes + current cycle + assignments + agent reports` 提成正式 planning surface，而不是只把这些对象留在后端 read-model。`Runtime Center` 的行业 focus section 已新增 `Main-Brain Planning` 卡；`/industry` 已新增 `工作泳道` 正式展示；kickoff prompt 也会显式带出 `lane/backlog/cycle/assignment/report` 计数与 lane 摘要。
+- `2026-03-29` 补充：hard-cut 回归面继续扩大到根路由/OpenAPI 层；`/runtime-center/chat/intake`、`/runtime-center/chat/orchestrate`、`/runtime-center/tasks/{task_id}/delegate`、`/runtime-center/goals/{goal_id}`、`/runtime-center/goals/{goal_id}/dispatch`、`/goals/{goal_id}/dispatch` 与 `/goals/automation/dispatch-active` 现已在 assembled root-router 合同里明确锁成“未注册 + 404”，不再只靠局部 app/feature 测试兜底。
+- `2026-03-29` 补充：assembled root app 上的公开 `goals` frontdoor 也已继续收口为 detail-only。根路由/OpenAPI 现在只保留 `GET /goals/{goal_id}/detail` 作为 leaf detail 读面；`GET/POST /goals`、`GET/PATCH/DELETE /goals/{goal_id}` 与 `POST /goals/{goal_id}/compile` 已从 root-router 退役，专项测试 app 如需完整 `/goals` router 仍需手工显式挂载。
+- `2026-03-29` 补充：`goals` 公开 router 里的 `GET /goals/{goal_id}` 也已一起退役，public leaf read 现只保留 `GET /goals/{goal_id}/detail`。这意味着 assembled root app 与专项测试 app 都不再把旧 `GoalRecord` 裸读面继续当正式 operator surface。
+- `2026-03-29` 补充：`Runtime Center` 的行业 `Current Focus` 卡片也已继续从 legacy goal 视角退场；前端正式优先打开 live `assignment / backlog` route，并通过 `focus_selection + selected assignment/backlog` 呈现 focused subview，不再因为旧 `current_goal_id` 残留而把 operator 带回 goal detail。
+- `2026-03-29` 补充：`/industry` 前端也已开始对齐同一条 focused runtime 心智。行业页现在支持按 `assignment_id / backlog_item_id` 重新加载 focused subview，并把 `agent_report.work_context_id` 继续带回 report drill-down chat；staffing closure surface 也不再只留最薄摘要。
+- `2026-03-29` 补充：`/runtime-center/industry/{instance_id}` 的后端 detail 投影也已同步切到 live `assignment / backlog`。正式 schema 已从 `execution.current_goal / main_chain.current_goal` 收敛到 `execution.current_focus / main_chain.current_focus`，并在存在 live assignment/backlog 时优先反映执行焦点；`assignment / backlog` 节点 route 统一锚定到 `industry detail + assignment_id/backlog_item_id`，不再回跳 legacy goal surface。
+- `2026-03-29` 补充：`AgentProfile / governance override / chat meta / prompt appendix` 这条 legacy `current_goal` 心智也已开始正式收口；`AgentProfile` 与 `AgentProfileOverrideRecord` 现已新增 `current_focus_kind / current_focus_id / current_focus`，`Runtime Center conversations`、overview agent meta、主脑聊天 roster 与 query execution prompt 已优先消费 focus 字段。`current_goal / current_goal_id` 暂时只保留为 leaf backlink 兼容，不再作为新的前台主口径继续扩散。
+- `2026-03-29` 补充：execution-side 的 `host_twin` 也已开始按正式前台对象被看见，而不是继续只靠 raw detail 递归字典。`Runtime Center` detail drawer 现在会把 `host_twin` 提成结构化 `Host Twin` section，显式展示 continuity、legal recovery、coordination、active app-family twins 与 blocked surfaces；`projection_kind / is_projection / is_truth_store` 这类投影元信息不再挤占主要读面。
+- `2026-03-29` 补充：`host_twin` 的后端消费面也已继续收口为正式摘要对象。`RuntimeCenterStateQueryService` 现在会回填 `host_twin_summary`；task review payload 与 overview governance card 都会优先消费 `seat_owner_ref / recommended_scheduler_action / active_app_family_keys / blocked_surface_count / legal_recovery_mode` 这类派生摘要，而不是继续把 raw `host_twin` JSON 整块透传给首屏 summary。
+- `2026-03-29` 补充：`/goals/{goal_id}/detail` 也已收掉一个隐蔽 compat 副作用。goal detail 读面不再在读取时偷偷调用 `reconcile_goal_status()` 推进状态，正式边界恢复为“读面只读、状态推进走显式 reconcile/write 链”，避免 leaf goal detail 再次变相承接规划/执行 mutation。
 - `2026-03-26` 补充：`/industry` summary/detail/runtime main-chain、agent detail stats、industry team update result、state reporting snapshot 已继续摘掉 `goal_count / active_goal_count` 这类 operator/runtime 兼容统计；行业实例列表也不再按“是否有 goal”决定可见性，而是按真实 team/runtime surface 判定。当前仓库里保留的 `goal_count` 只剩 `/goals` 叶子 dispatch 内部结果，不再属于主脑或运行中心主口径。
 - `2026-03-26` 补充：`LearningService` 已切成正式 façade，公开入口保留在 `src/copaw/learning/service.py`，内部运行逻辑下沉到 `runtime_core + proposal_service + patch_service + growth_service + acquisition_service`；runtime bootstrap 已开始通过 `LearningRuntimeBindings.configure_bindings(...)` 一次性接线，不再继续在 live 装配层堆 learning setter。
 - `2026-03-26` 补充：`RuntimeCenterQueryService` 已切成 thin façade，overview 主装配改为 `service.py -> overview_cards.py -> overview_helpers.py`；`/runtime-center/overview` 已正式退休 `goals / schedules` 卡片，只保留 runtime-first operator 读面。
@@ -164,6 +184,7 @@
 - `2026-03-26` 补充：Industry 主链已继续朝“单一状态入口”硬化。`build_industry_service_runtime_bindings(...)` 不再基于 `state_store` 临时补造 repo/service，运行时绑定只接受显式注入协作者；`reconcile_instance_status_for_goal()` 也已改成按 `goal_id` 定向读取实例，不再每次 goal 变化都全表扫行业实例。
 - `2026-03-26` 补充：query runtime 的前门意图判定与 durable writeback 策略已统一改走共享 `query_execution_intent_policy.py`，不再在 `shared/runtime/writeback` 三处各自复制“目标委托 / 假设性提问 / 是否写回”的启发式；`LearningRuntimeCore` 公开 patch/growth/trial 入口也已继续瘦身为 thin delegate，proposal/patch/growth/acquisition 责任边界开始稳定落位。
 - `2026-03-26` 补充：前端 page-god 收口继续推进。`Chat` 输入区已移除对第三方聊天框的 DOM 手术式解锁；`/industry` 与 `CapabilityMarket` 的页面级加载、刷新、选择与动作编排已分别下沉到 `useIndustryPageState` / `useCapabilityMarketState`，页面组件本身不再继续兼当 application service。
+- `2026-03-29` 补充：`IndustryService._build_instance_detail(...)` 的 runtime detail/read-model 组装已继续从 `service_strategy.py` 下沉到 `service_runtime_views.py`，`IndustryViewService` 也保持了“无 focused 参数时按旧签名调用”的兼容边界；当前拆分已经开始把行业 detail/read-model 责任从策略服务里剥离出来。
 - `2026-03-26` 补充：`Chat` 运行时 transport 也已开始从页面状态 hook 中下沉。`useChatRuntimeState` 不再内联模型可用性检查、runtime request 组装、附件合并与流式 response 健康/结束判定；上述逻辑已抽到 `console/src/pages/Chat/runtimeTransport.ts`，并新增前端测试锁住 canonical request body 与 streamed completion 行为。
 - `2026-03-26` 补充：`RuntimeCenter` 的治理/恢复/application orchestration 也已开始从页面层下沉。governance status、capability optimization、recovery/self-check、batch decision/patch actions 与 emergency stop/resume 相关状态机已抽到 `console/src/pages/RuntimeCenter/useRuntimeCenterAdminState.ts`；`RuntimeCenter/index.tsx` 继续回退为 tab 路由与视图组合壳，并新增 hook 测试锁住 governance tab 加载与 batch approve 刷新语义。
 - `2026-03-26` 补充：`Chat` 绑定恢复状态机也已从 `useChatRuntimeState` 抽离。默认 execution-core 自动绑定、失败控制线程重绑、缺 owner reset-chat 等恢复判定现统一收口到 `console/src/pages/Chat/chatBindingRecovery.ts`，页面状态 hook 不再散着维护 3 段 rebind/reset `useEffect`。
@@ -175,6 +196,8 @@
 - `2026-03-25` 补充：execution-core 默认身份文案、行业 detail fallback 身份与 Runtime Center 战略样例数据已统一改成“主脑不亲自执行叶子动作；缺岗位时补位 / 改派 / 提案”，不再残留“没有合适执行位时主脑亲自执行”的旧口径。
 - `2026-03-25` 补充：surface routing 的 hard-hint 逻辑已进一步收紧；未知应用在仅凭 mount/env 推断时优先落到 `desktop/browser` 交互面，不再因为挂了通用 `write_file` 就额外伪命中 `file` 面，app 名关键词继续只做兜底而不是主判据。
 - `2026-03-25` 补充：runtime chat media 前门已补齐正式写回；行业 control thread 上的新附件与既有 `media_analysis_ids` 现在都会在进入 turn executor 前完成 `analysis -> prompt context -> backlog/strategy writeback`，不再只停留在“回答时参考附件”的半闭环。
+- `2026-03-29` 补充：记忆 recall 对 `work_context_id` 的正式优先级也已补上。`KernelQueryExecutionService` / prompt recall 现在在存在 `work_context_id` 时会优先按共享工作上下文读取媒体/记忆命中，而不是只按 `task_id` 兜底；这使得同一 work context 下的素材分析与长期记忆在后续 follow-up turn 里不再容易漏召回。
+- `2026-03-29` 补充：runtime chat media 这条链也已继续补厚成正式 `work_context` 闭环。行业 control thread 的 `media analyze / adopt existing analysis / memory retain / memory recall` 现在都会显式透传 `work_context_id`，媒体 writeback 会进入 `memory:work_context:*` scope，recall consumer 也会优先回显原始 `source_ref`，不再只看到 retain chunk 的内部 id。
 - `2026-03-25` 补充：`run_operating_cycle()` 已切掉 `goal` 物化中转；backlog 现在直接生成 `Assignment` 并编译成 assignment-backed `TaskRecord`，`AgentReport` 也优先按 `assignment_id` 回收，不再走旧 goal-phase 假链。
 - `2026-03-25` 补充：`main_chain.routine` 在没有 live task 时，会回锚到最新 `AgentReport` 对应的 assignment/task 元数据；已完成的固定 SOP / routine 执行不会再在主链上丢失执行面信息。
 
@@ -235,6 +258,9 @@
   - workflow preview / launch / run detail / resume / cron 已统一消费 canonical host truth：`host_requirements`、`host_snapshot`、schedule `environment_ref / environment_id / session_mount_id / host_requirement` 与 cron dispatch host meta 已全部落到正式链路，不再回退成仅靠 `session:{channel}:{session_id}` 猜环境。
   - fixed SOP doctor / run / run detail 已统一消费 canonical host preflight，正式暴露并落证 `environment_id / session_mount_id / host_requirement / host_preflight`；非法 writable path 会被 doctor 阻断，并在 run 入口返回显式错误，而不是盲跑。
   - `tests/app/test_cron_executor.py` 已补入 Phase 6 验收面，用于锁住 cron 对 stored host refs / scheduler inputs 的消费契约。
+- `2026-03-29` 补充：execution-side 成熟态扩面已继续补到 canonical host truth 本身。`host_twin` 对 stale blocker / stale handoff history 的抑制现在只会在“当前 host/session 事实已恢复 clean + latest handoff event 明确进入 return-ready/return-complete”时生效，不再因为残留 recovery metadata 就把 live blocker 错误吞掉；`Runtime Center` overview/task-review 也已优先消费同一条 canonical `host_twin_summary`，不会再把 `recommended_scheduler_action=proceed` 误当阻断。
+- `2026-03-29` 补充：workflow resume / cron / fixed SOP 这条 host-aware 执行链也已继续补厚。workflow run detail、resume 与 schedule meta 现在会从 live `host_twin` 回填 `host_snapshot / environment_ref / environment_id / session_mount_id / host_requirement`，fixed SOP doctor/run 也会正式阻断 `requires_human_return`、`legal_recovery.path=handoff` 及需要 `handoff/recover/retry` 的 blocker event，不再让“handoff-only 恢复路径”假装可执行。
+- `2026-03-29` 补充：`Runtime Center / /industry` 的 execution-side 可见化也已对齐长跑读面。`Host Twin` section 现会显式展示 `handoff owner / recovery checkpoint / verification channel / blocking-event state / mutation readiness / active app-family surfaces / trusted anchors`；`/industry` focused runtime 与 planning surface 也会带出 supervisor follow-up pressure、recommended actions、control-contract items 与 staffing pressure，不再只剩最薄摘要。
 - `2026-03-27` 补充：当前仓库在 worktree 模式下做 Phase 6 验收时，必须显式把 `PYTHONPATH` 指到 `D:\\word\\copaw\\.worktrees\\codex-phase6-host-twin\\src`；否则 `pytest` 会从主仓 `D:\\word\\copaw\\src` 导入，存在假完成/假失败风险。当前已用该导入路径复核 `copaw.__file__` 与 `FixedSopRunRequest` 字段面，确认验收到的是本 worktree 代码。
 
 
@@ -332,6 +358,13 @@
 - 已有 UI surface
 - `2026-03-24` 补充：surface-first 路由、seat gap 回填、supervisor-only backlog/schedule 元数据、监督链可见化与对应回归已完成一轮正式收口。
 - `2026-03-26` 补充：更大回归面已再次通过，`tests/app/industry_api_parts/bootstrap_lifecycle.py`、`tests/app/industry_api_parts/runtime_updates.py`、`tests/app/industry_api_parts/retirement_chain.py`、`tests/state/test_main_brain_hard_cut.py` 与 `console/src/runtime/staffingGapPresentation.test.ts` 均通过；`single-industry autonomy closure` 的 seat-gap、temporary seat、staffing read surface 与 UI helper 现阶段已形成稳定代码基线。
+- `2026-03-28` 补充：seat proposal 在批准并完成 `system:update_industry_team` 后，`IndustryInstanceDetail.staffing.active_gap / pending_proposals` 现会随 live team 实际闭合而消失，不再被 backlog 上残留的 `waiting-confirm` 元数据长期卡住；同一轮里，失败/阻塞 assignment 的 follow-up backlog 已改成“新 follow-up 接棒、原 materialized backlog 收尾 completed”，避免旧 backlog 永远悬在已物化态。
+- `2026-03-29` 补充：long-horizon governance 写链已继续收口到统一 kernel 壳。`/runtime-center/schedules*` 与 `/cron/jobs*` 的 create/update/delete/run/pause/resume 现全部通过 `system:create_schedule / update_schedule / delete_schedule / run_schedule / pause_schedule / resume_schedule` 进入 governed mutation，不再让 HTTP frontdoor 直接调用 `CronManager`；`/runtime-center/learning/patches/{id}/approve|reject|apply|rollback` 也已统一走 kernel-governed system mounts，旧 `/learning/patches/{id}/*` 单条写入口已物理退役。
+- `2026-03-29` 补充：`GovernanceStatus` 已扩成正式 runtime blocker 读面，新增 `host_twin / handoff / staffing / human_assist` 摘要；`GovernanceService.admission_block_reason(...)` 现会在 `system:dispatch_query / system:dispatch_command` 前正式检查 handoff、人协作阻塞与 staffing confirmation，而不再只看 emergency stop。
+- `2026-03-29` 补充：新的治理主链回归已补齐 `submit -> waiting-confirm -> approve/reject -> evidence/writeback`。当前已通过 `tests/app/test_learning_api.py`、`tests/app/runtime_center_api_parts/overview_governance.py`、`tests/app/runtime_center_api_parts/detail_environment.py`、`tests/kernel/test_governance.py`、`tests/app/test_operator_runtime_e2e.py` 与 `tests/app/test_capabilities_execution.py` 的相关套件。
+- `2026-03-29` 补充：single-industry 的真实长跑闭环已继续从“主链存在”推进到“监督/补位/重排链成套回归”。当前已锁住 `staffing approval -> materialization -> failed assignment report -> follow-up backlog -> synthesis/replan` 这条链；follow-up backlog 会继承原 supervisor/staffing/writeback metadata，并在默认 focused runtime 里优先于无关 active assignment 进入当前执行焦点，而不再被旧 assignment 或旧 backlog 抢焦点。
+- `2026-03-29` 补充：治理层对 long-run staffing truth 的拦截也已继续补严。即使最新 `active_gap` 已转成 `routing-pending`，只要仍有 pending staffing proposal 未决，dispatch admission 仍会被正式阻断；这保证了 single-industry 的“岗位补位确认”不会因为 backlog/route 重排而被静默绕过。
+- `2026-03-29` 补充：更宽的 industry 长跑回归已再次通过，当前已重新跑过 `tests/app/industry_api_parts/runtime_updates.py`、`tests/app/industry_api_parts/bootstrap_lifecycle.py`、`tests/app/industry_api_parts/retirement_chain.py` 与 `tests/industry/test_report_synthesis.py` / `tests/industry/test_seat_gap_policy.py` 的关键套件；seat staffing、report synthesis、follow-up replan 与 focused runtime 读面现阶段已形成稳定代码基线。
 - `2026-03-26` 补充：learning/runtime-center P1-P3 硬切已完成一轮正式验证，已通过
   `tests/app/test_learning_api.py`、
   `tests/app/test_runtime_center_api.py`、
@@ -440,6 +473,26 @@
 4. 完成媒体/记忆闭环剩余接线，把 `analysis -> writeback -> strategy -> execution` 做成稳定产品主链。
 5. 拆分过重的行业层与前端运行中心页面，降低后续维护认知密度。
 6. 继续扩大 hard-cut 回归面，优先跑更大批量的 industry / runtime 聚合测试与 live smoke。
+
+### 6.1 长期自治成熟态硬清单（`2026-03-29`）
+
+1. execution-side 宿主成熟态：`[当前定义范围内已收口 / 下一阶段继续扩面]`
+   - 现状：`Seat Runtime / Workspace Graph / Host Event Bus / host_twin` 已是正式运行边界；stale blocker/history 抑制、workflow/fixed-SOP host-aware 执行链、Runtime Center `Host Twin` 结构化读面与 canonical `host_twin_summary` 现均已补入同一条真实主链并完成宽回归。
+   - 下一阶段扩面：更多 `app_family_twins`、更深的 multi-seat/multi-agent coordination，以及更长时间的 live-host simulation / companion-session smoke。
+2. single-industry 真实世界覆盖：`[当前定义范围内已收口 / 下一阶段继续扩面]`
+   - 现状：`strategy -> lane -> backlog -> cycle -> assignment -> report -> synthesis/replan` 已成正式主链；focused subview、staffing closure、report drill-down、planning surface，以及 `staffing approval -> materialization -> failed report -> follow-up backlog -> replan` 的长跑链路都已有正式回归。
+   - 下一阶段扩面：更长周期、更高并发、更多 supervisor/handoff/staffing 组合与跨 vertical 的真实世界长跑 smoke。
+3. 媒体/记忆闭环：`[当前定义范围内已收口 / 下一阶段继续扩面]`
+   - 现状：`analysis -> memory recall -> strategy/execution` 已补上 `work_context_id` 优先读链，媒体 analyze/adopt/retain/recall 与聊天附件 writeback 已形成正式 `work_context` 闭环。
+   - 下一阶段扩面：更大范围的 live ingestion/retrieval/writeback 组合 smoke，以及更重的多线程共享 work-context 压力回归。
+4. Goal 叶子兼容边界：`[已清零到显式 leaf dispatch family]`
+   - 现状：公开 `/goals` frontdoor、公开 `GET /goals/{goal_id}`、retired dispatch alias 与旧公共 `dispatch_goal(...)` 名称都已退役；当前只剩显式 `compile_goal_dispatch / dispatch_goal_execute_now / dispatch_goal_background / dispatch_goal_deferred_background` 这组 leaf dispatch family，prediction 侧只保留启动期 retired recommendation 清理，已不再构成运行期 compat 分支。
+5. hard-cut 全量收口：`[当前定义范围内已收口 / 下一阶段继续扩面]`
+   - 现状：retired frontdoor、legacy goal alias、runtime-center 写面与治理壳的关键合同已锁住，并已补到更宽的 industry/runtime/workflow/fixed-SOP 聚合回归。
+   - 下一阶段扩面：如继续补 live smoke，属于更大阶段的成熟态验证，不再是当前这张尾巴清单里的已知漏项。
+6. 重模块继续拆分：`[持续工程 / 非当前尾巴清单阻断项]`
+   - 现状：`/industry` planning surface、Chat transport media、Runtime Center environment section 等已开始拆成更小读面组件。
+   - 下一阶段扩面：行业层超重 service、Runtime Center/Chat 仍有重文件需要继续下沉与切片；这属于持续治理，不再是当前闭环验收的挂账尾巴。
 
 ---
 

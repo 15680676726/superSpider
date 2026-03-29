@@ -11,6 +11,18 @@ from .service_shared import *  # noqa: F401,F403
 
 
 class _PredictionServiceRefreshMixin:
+    def _purge_retired_goal_dispatch_recommendations(self) -> int:
+        removed_count = 0
+        for item in self._recommendation_repository.list_recommendations():
+            if item.action_kind not in {
+                "system:dispatch_goal",
+                "system:dispatch_active_goals",
+            }:
+                continue
+            if self._recommendation_repository.delete_recommendation(item.recommendation_id):
+                removed_count += 1
+        return removed_count
+
     def _case_confidence(
         self,
         signals: list[PredictionSignalRecord],
@@ -93,8 +105,6 @@ class _PredictionServiceRefreshMixin:
         self,
         record: PredictionRecommendationRecord,
     ) -> tuple[PredictionRecommendationRecord, bool]:
-        if record.status == "manual-only":
-            return record, False
         update: dict[str, Any] = {}
         if record.decision_request_id and self._decision_request_repository is not None:
             decision = self._decision_request_repository.get_decision_request(record.decision_request_id)
@@ -174,7 +184,10 @@ class _PredictionServiceRefreshMixin:
         )
         if industry_instance_id:
             routes["industry"] = f"/api/runtime-center/industry/{industry_instance_id}"
-        if refreshed.executable and refreshed.status not in {"executed", "rejected", "failed", "manual-only"}:
+        supports_coordinate = refreshed.executable or (
+            refreshed.action_kind == "manual:coordinate-main-brain"
+        )
+        if supports_coordinate and refreshed.status not in {"executed", "rejected", "failed"}:
             routes["coordinate"] = (
                 f"/api/predictions/{refreshed.case_id}/recommendations/"
                 f"{refreshed.recommendation_id}/coordinate"
@@ -182,7 +195,7 @@ class _PredictionServiceRefreshMixin:
         if refreshed.decision_request_id:
             routes["decision"] = f"/api/runtime-center/decisions/{refreshed.decision_request_id}"
         if refreshed.target_goal_id:
-            routes["goal"] = f"/api/runtime-center/goals/{refreshed.target_goal_id}"
+            routes["goal"] = f"/api/goals/{refreshed.target_goal_id}/detail"
         if refreshed.target_agent_id:
             routes["agent"] = f"/api/runtime-center/agents/{refreshed.target_agent_id}"
         if refreshed.execution_evidence_id:

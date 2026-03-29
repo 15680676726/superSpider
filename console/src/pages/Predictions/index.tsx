@@ -154,18 +154,27 @@ function getDecisionPreferredRoute(
   return null;
 }
 
+function canCoordinateRecommendation(
+  item: Pick<PredictionRecommendationView, "recommendation" | "routes">,
+): boolean {
+  return Boolean(readString(item.routes?.coordinate));
+}
+
 function presentRecommendationActionKind(actionKind?: string | null): string {
   const normalized = readString(actionKind);
   if (
     normalized === "system:dispatch_goal" ||
     normalized === "system:dispatch_active_goals"
   ) {
-    return "编入执行链";
+    return "内部编排";
+  }
+  if (normalized === "manual:coordinate-main-brain") {
+    return "主脑协调";
   }
   return normalized || "-";
 }
 
-export { presentRecommendationActionKind };
+export { canCoordinateRecommendation, presentRecommendationActionKind };
 
 export default function PredictionsPage() {
   const navigate = useNavigate();
@@ -749,7 +758,7 @@ export default function PredictionsPage() {
                                 去聊天确认
                               </Button>
                             ) : null,
-                            item.recommendation.executable ? (
+                            canCoordinateRecommendation(item) ? (
                               <Button
                                 key="execute"
                                 type="primary"

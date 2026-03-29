@@ -38,6 +38,7 @@ class MediaAnalysisRecord(UpdatedRecord):
     analysis_id: str = Field(default_factory=_new_record_id, min_length=1)
     industry_instance_id: str | None = None
     thread_id: str | None = None
+    work_context_id: str | None = None
     entry_point: str = Field(default="chat", min_length=1)
     purpose: str = Field(default="reference-only", min_length=1)
     source_kind: str = Field(default="upload", min_length=1)

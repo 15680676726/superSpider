@@ -23,6 +23,8 @@ from copaw.state import (
     DecisionRequestRecord,
     GoalRecord,
     IndustryInstanceRecord,
+    PredictionCaseRecord,
+    PredictionRecommendationRecord,
     SQLiteStateStore,
     StrategyMemoryRecord,
     TaskRecord,
@@ -153,6 +155,8 @@ def _build_predictions_app(
     *,
     enable_remote_hub_search: bool = False,
     enable_remote_curated_search: bool = False,
+    seed_cases: list[PredictionCaseRecord] | None = None,
+    seed_recommendations: list[PredictionRecommendationRecord] | None = None,
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(predictions_router)
@@ -254,6 +258,10 @@ def _build_predictions_app(
         runtime_bindings=industry_runtime_bindings,
     )
     capability_service.set_industry_service(industry_service)
+    for item in seed_cases or []:
+        prediction_case_repository.upsert_case(item)
+    for item in seed_recommendations or []:
+        prediction_recommendation_repository.upsert_recommendation(item)
     prediction_service = PredictionService(
         case_repository=prediction_case_repository,
         scenario_repository=prediction_scenario_repository,
@@ -479,10 +487,18 @@ def test_predictions_api_create_list_and_detail(tmp_path) -> None:
     assert capability_recommendation["recommendation"]["metadata"]["strategy_id"] == (
         "strategy:industry:industry-demo:copaw-agent-runner"
     )
-    assert any(
-        item["recommendation"]["action_kind"] == "system:dispatch_goal"
+    main_brain_handoff = next(
+        item
         for item in detail_payload["recommendations"]
+        if item["recommendation"]["action_kind"] == "manual:coordinate-main-brain"
     )
+    assert main_brain_handoff["recommendation"]["executable"] is False
+    assert main_brain_handoff["recommendation"]["status"] == "manual-only"
+    assert main_brain_handoff["recommendation"]["target_goal_id"] == "goal-prediction"
+    assert main_brain_handoff["recommendation"]["target_agent_id"]
+    assert main_brain_handoff["recommendation"]["action_payload"] == {}
+    assert "compat_goal_handoff" not in main_brain_handoff["recommendation"]["metadata"]
+    assert main_brain_handoff["routes"]["coordinate"].endswith("/coordinate")
 
 
 def test_predictions_recommend_schedule_copy_points_to_fixed_sop_instead_of_workflow_templates(
@@ -609,7 +625,7 @@ def test_prediction_recommendation_executes_through_kernel(tmp_path) -> None:
     executable = next(
         item
         for item in created["recommendations"]
-        if item["recommendation"]["action_kind"] == "system:dispatch_goal"
+        if item["recommendation"]["action_kind"] == "system:update_mcp_client"
     )
     recommendation_id = executable["recommendation"]["recommendation_id"]
 
@@ -636,7 +652,7 @@ def test_prediction_recommendation_coordinate_route_hands_off_to_main_brain(tmp_
     executable = next(
         item
         for item in created["recommendations"]
-        if item["recommendation"]["action_kind"] == "system:dispatch_goal"
+        if item["recommendation"]["action_kind"] == "manual:coordinate-main-brain"
     )
     recommendation_id = executable["recommendation"]["recommendation_id"]
 
@@ -654,6 +670,96 @@ def test_prediction_recommendation_coordinate_route_hands_off_to_main_brain(tmp_
     assert payload["coordination_reason"] in {"open-backlog", "cycle-inflight"}
 
 
+def test_prediction_service_drops_retired_dispatch_goal_recommendations_on_startup(
+    tmp_path,
+) -> None:
+    app = _build_predictions_app(
+        tmp_path,
+        seed_cases=[
+            PredictionCaseRecord(
+                case_id="case-retired-dispatch-goal",
+                title="Retired dispatch goal",
+                summary="Seed case for startup compat migration.",
+                status="open",
+            ),
+        ],
+        seed_recommendations=[
+            PredictionRecommendationRecord(
+                recommendation_id="legacy-dispatch-goal",
+                case_id="case-retired-dispatch-goal",
+                recommendation_type="plan_recommendation",
+                title="派发目标“Stabilize outbound execution”",
+                summary="当前范围内已存在目标“Stabilize outbound execution”，但尚未进入本案例的受治理执行链。",
+                action_kind="system:dispatch_goal",
+                executable=True,
+                auto_eligible=True,
+                status="proposed",
+                target_goal_id="goal-prediction",
+                target_agent_id="copaw-agent-runner",
+                action_payload={
+                    "goal_id": "goal-prediction",
+                    "owner_agent_id": "copaw-agent-runner",
+                    "execute": True,
+                    "activate": True,
+                },
+                metadata={"goal_title": "Stabilize outbound execution"},
+            ),
+        ],
+    )
+    client = TestClient(app)
+
+    retained = app.state.prediction_service._recommendation_repository.get_recommendation(
+        "legacy-dispatch-goal",
+    )
+
+    assert retained is None
+
+    detail = client.get("/predictions/case-retired-dispatch-goal")
+
+    assert detail.status_code == 200
+    payload = detail.json()
+    assert all(
+        item["recommendation"]["recommendation_id"] != "legacy-dispatch-goal"
+        for item in payload["recommendations"]
+    )
+
+
+def test_prediction_service_drops_retired_dispatch_active_goals_recommendations_on_startup(
+    tmp_path,
+) -> None:
+    app = _build_predictions_app(
+        tmp_path,
+        seed_cases=[
+            PredictionCaseRecord(
+                case_id="case-retired-dispatch-active-goals",
+                title="Retired dispatch active goals",
+                summary="Seed case for startup compat migration.",
+                status="open",
+            ),
+        ],
+        seed_recommendations=[
+            PredictionRecommendationRecord(
+                recommendation_id="legacy-dispatch-active-goals",
+                case_id="case-retired-dispatch-active-goals",
+                recommendation_type="plan_recommendation",
+                title="批量派发当前 active goals",
+                summary="旧批量 goal dispatch recommendation 应在启动时被清洗。",
+                action_kind="system:dispatch_active_goals",
+                executable=True,
+                auto_eligible=True,
+                status="proposed",
+                metadata={"goal_title": "Stabilize outbound execution"},
+            ),
+        ],
+    )
+
+    retained = app.state.prediction_service._recommendation_repository.get_recommendation(
+        "legacy-dispatch-active-goals",
+    )
+
+    assert retained is None
+
+
 def test_prediction_recommendation_execute_route_is_retired(tmp_path) -> None:
     client = TestClient(_build_predictions_app(tmp_path))
     created = _create_prediction_case(client)
@@ -661,7 +767,7 @@ def test_prediction_recommendation_execute_route_is_retired(tmp_path) -> None:
     executable = next(
         item
         for item in created["recommendations"]
-        if item["recommendation"]["action_kind"] == "system:dispatch_goal"
+        if item["recommendation"]["action_kind"] == "manual:coordinate-main-brain"
     )
     recommendation_id = executable["recommendation"]["recommendation_id"]
 
@@ -762,7 +868,7 @@ def test_reporting_surface_prediction_metrics(tmp_path) -> None:
     executable = next(
         item
         for item in created["recommendations"]
-        if item["recommendation"]["action_kind"] == "system:dispatch_goal"
+        if item["recommendation"]["action_kind"] == "system:update_mcp_client"
     )
     recommendation_id = executable["recommendation"]["recommendation_id"]
 

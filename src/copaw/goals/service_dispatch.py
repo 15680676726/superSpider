@@ -5,7 +5,79 @@ from .service_shared import *  # noqa: F401,F403
 
 
 class _GoalServiceDispatchMixin:
-    async def dispatch_goal(
+    async def compile_goal_dispatch(
+        self,
+        goal_id: str,
+        *,
+        context: dict[str, object] | None = None,
+        owner_agent_id: str | None = None,
+        activate: bool = True,
+    ) -> dict[str, object]:
+        return await self._dispatch_goal(
+            goal_id,
+            context=context,
+            owner_agent_id=owner_agent_id,
+            execute=False,
+            execute_background=False,
+            activate=activate,
+            schedule_background_execution=True,
+        )
+
+    async def dispatch_goal_execute_now(
+        self,
+        goal_id: str,
+        *,
+        context: dict[str, object] | None = None,
+        owner_agent_id: str | None = None,
+        activate: bool = True,
+    ) -> dict[str, object]:
+        return await self._dispatch_goal(
+            goal_id,
+            context=context,
+            owner_agent_id=owner_agent_id,
+            execute=True,
+            execute_background=False,
+            activate=activate,
+            schedule_background_execution=True,
+        )
+
+    async def dispatch_goal_background(
+        self,
+        goal_id: str,
+        *,
+        context: dict[str, object] | None = None,
+        owner_agent_id: str | None = None,
+        activate: bool = True,
+    ) -> dict[str, object]:
+        return await self._dispatch_goal(
+            goal_id,
+            context=context,
+            owner_agent_id=owner_agent_id,
+            execute=True,
+            execute_background=True,
+            activate=activate,
+            schedule_background_execution=True,
+        )
+
+    async def dispatch_goal_deferred_background(
+        self,
+        goal_id: str,
+        *,
+        context: dict[str, object] | None = None,
+        owner_agent_id: str | None = None,
+        activate: bool = True,
+    ) -> dict[str, object]:
+        return await self._dispatch_goal(
+            goal_id,
+            context=context,
+            owner_agent_id=owner_agent_id,
+            execute=True,
+            execute_background=True,
+            activate=activate,
+            schedule_background_execution=False,
+        )
+
+    async def _dispatch_goal(
         self,
         goal_id: str,
         *,
@@ -15,7 +87,6 @@ class _GoalServiceDispatchMixin:
         execute_background: bool = False,
         activate: bool = True,
         schedule_background_execution: bool = True,
-        background_task_ids_sink: list[str] | None = None,
     ) -> dict[str, object]:
         goal = self.get_goal(goal_id)
         if goal is None:
@@ -45,7 +116,7 @@ class _GoalServiceDispatchMixin:
         }
         if resolved_owner_agent_id is not None:
             compile_context["owner_agent_id"] = resolved_owner_agent_id
-        unit, compiled_specs, kernel_tasks = self._compile_goal_bundle(
+        unit, _compiled_specs, kernel_tasks = self._compile_goal_bundle(
             goal,
             context=compile_context,
         )
@@ -105,8 +176,6 @@ class _GoalServiceDispatchMixin:
                 },
             )
 
-        if background_task_ids_sink is not None and background_task_ids:
-            background_task_ids_sink.extend(background_task_ids)
         if background_task_ids:
             self._record_background_goal_chain(
                 goal_id=goal.id,
@@ -123,9 +192,7 @@ class _GoalServiceDispatchMixin:
         payload = {
             "goal": goal.model_dump(mode="json"),
             "compiled_tasks": [task.model_dump(mode="json") for task in kernel_tasks],
-            "compiled_specs": [spec.model_dump(mode="json") for spec in compiled_specs],
             "dispatch_results": results,
-            "trigger": trigger_context,
         }
         self._record_goal_dispatch_state(
             goal.id,
@@ -149,89 +216,18 @@ class _GoalServiceDispatchMixin:
         )
         return payload
 
-    def schedule_background_goal_execution(
+    def release_deferred_goal_dispatch(
         self,
         *,
         goal_id: str,
-        task_ids: list[str],
+        dispatch_results: list[dict[str, object]] | None,
     ) -> None:
+        task_ids = [
+            str(item.get("task_id"))
+            for item in list(dispatch_results or [])
+            if item.get("scheduled_execution") is True and item.get("task_id")
+        ]
         self._schedule_background_goal_execution(goal_id=goal_id, task_ids=task_ids)
-
-    async def dispatch_active_goals(
-        self,
-        *,
-        owner_agent_id: str | None = None,
-        execute: bool = False,
-        limit: int | None = None,
-        context: dict[str, object] | None = None,
-    ) -> list[dict[str, object]]:
-        self.reconcile_goal_statuses(statuses={"active", "blocked", "completed"})
-        goals = self.list_goals(status="active")
-        dispatch_limit = max(0, limit) if limit is not None else None
-        results: list[dict[str, object]] = []
-        skipped_goal_count = 0
-        skipped_no_progress_count = 0
-        automation_source = self._dispatch_trigger_source(context)
-        for goal in goals:
-            if dispatch_limit is not None and len(results) >= dispatch_limit:
-                break
-            if self._goal_has_inflight_tasks(goal.id):
-                skipped_goal_count += 1
-                continue
-            progress_snapshot = self._build_goal_progress_snapshot(goal.id)
-            if automation_source.startswith("automation:"):
-                skip_reason = self._automation_skip_reason(
-                    goal_id=goal.id,
-                    progress_snapshot=progress_snapshot,
-                )
-                if skip_reason is not None:
-                    skipped_goal_count += 1
-                    skipped_no_progress_count += 1
-                    self._record_goal_automation_skip(
-                        goal_id=goal.id,
-                        progress_snapshot=progress_snapshot,
-                        source=automation_source,
-                        reason=skip_reason,
-                    )
-                    self._publish_runtime_event(
-                        topic="goal",
-                        action="dispatch-skipped",
-                        payload={
-                            "goal_id": goal.id,
-                            "source": automation_source,
-                            "reason": skip_reason,
-                        },
-                    )
-                    continue
-            result = await self.dispatch_goal(
-                goal.id,
-                context=context,
-                owner_agent_id=owner_agent_id,
-                execute=execute,
-                activate=False,
-            )
-            if automation_source.startswith("automation:"):
-                self._record_goal_automation_progress(
-                    goal_id=goal.id,
-                    source=automation_source,
-                    progress_snapshot=self._build_goal_progress_snapshot(goal.id),
-                    dispatch_result=result,
-                )
-            results.append(result)
-        self._publish_runtime_event(
-            topic="goal",
-            action="dispatch-active",
-            payload={
-                "requested_goal_count": len(goals),
-                "goal_count": len(results),
-                "skipped_goal_count": skipped_goal_count,
-                "skipped_no_progress_count": skipped_no_progress_count,
-                "owner_agent_id": owner_agent_id,
-                "execute": execute,
-                "trigger_source": automation_source or None,
-            },
-        )
-        return results
 
     def _resolve_dispatch_trigger_context(
         self,
@@ -314,235 +310,6 @@ class _GoalServiceDispatchMixin:
                 },
             },
             reason="Goal dispatch metadata",
-        )
-
-    def _build_goal_progress_snapshot(self, goal_id: str) -> dict[str, object]:
-        goal = self.get_goal(goal_id)
-        tasks = (
-            self._task_repository.list_tasks(goal_id=goal_id)
-            if self._task_repository is not None
-            else []
-        )
-        task_ids = [task.id for task in tasks]
-        runtimes = (
-            {
-                runtime.task_id: runtime
-                for runtime in self._task_runtime_repository.list_runtimes(task_ids=task_ids)
-            }
-            if self._task_runtime_repository is not None and task_ids
-            else {}
-        )
-        decisions = (
-            list(
-                self._decision_request_repository.list_decision_requests(
-                    task_ids=task_ids,
-                ),
-            )
-            if self._decision_request_repository is not None and task_ids
-            else []
-        )
-        pending_decision_count = sum(
-            1
-            for decision in decisions
-            if getattr(decision, "status", None) in {"open", "reviewing"}
-        )
-        evidence_count = 0
-        latest_evidence_id: str | None = None
-        latest_evidence_at: str | None = None
-        if self._evidence_ledger is not None:
-            for task_id in task_ids:
-                records = self._evidence_ledger.list_by_task(task_id)
-                evidence_count += len(records)
-                for record in records:
-                    created_at = (
-                        record.created_at.isoformat()
-                        if getattr(record, "created_at", None) is not None
-                        else ""
-                    )
-                    if created_at > (latest_evidence_at or ""):
-                        latest_evidence_at = created_at or None
-                        latest_evidence_id = (
-                            str(record.id).strip()
-                            if getattr(record, "id", None) is not None
-                            else None
-                        )
-        task_entries: list[dict[str, object]] = []
-        latest_task_updated_at: str | None = None
-        latest_task_id: str | None = None
-        latest_task_status: str | None = None
-        latest_task_phase: str | None = None
-        latest_task_runtime_status: str | None = None
-        for task in sorted(tasks, key=lambda item: item.id):
-            runtime = runtimes.get(task.id)
-            updated_at = (
-                runtime.updated_at.isoformat()
-                if runtime is not None and runtime.updated_at is not None
-                else task.updated_at.isoformat()
-                if task.updated_at is not None
-                else ""
-            )
-            if updated_at > (latest_task_updated_at or ""):
-                latest_task_updated_at = updated_at or None
-                latest_task_id = task.id
-                latest_task_status = task.status
-                latest_task_phase = (
-                    getattr(runtime, "current_phase", None) if runtime is not None else None
-                )
-                latest_task_runtime_status = (
-                    getattr(runtime, "runtime_status", None) if runtime is not None else None
-                )
-            task_entries.append(
-                {
-                    "id": task.id,
-                    "status": task.status,
-                    "runtime_status": (
-                        getattr(runtime, "runtime_status", None)
-                        if runtime is not None
-                        else None
-                    ),
-                    "phase": (
-                        getattr(runtime, "current_phase", None)
-                        if runtime is not None
-                        else None
-                    ),
-                    "updated_at": updated_at or None,
-                    "last_evidence_id": (
-                        getattr(runtime, "last_evidence_id", None)
-                        if runtime is not None
-                        else None
-                    ),
-                },
-            )
-        fingerprint_payload = {
-            "goal_id": goal_id,
-            "goal_status": getattr(goal, "status", None),
-            "goal_updated_at": (
-                goal.updated_at.isoformat()
-                if goal is not None and getattr(goal, "updated_at", None) is not None
-                else None
-            ),
-            "task_entries": task_entries,
-            "pending_decision_count": pending_decision_count,
-            "evidence_count": evidence_count,
-            "latest_evidence_id": latest_evidence_id,
-            "latest_evidence_at": latest_evidence_at,
-        }
-        return {
-            "fingerprint": _stable_payload_signature(fingerprint_payload),
-            "latest_task_updated_at": latest_task_updated_at,
-            "latest_task_id": latest_task_id,
-            "latest_task_status": latest_task_status,
-            "latest_task_phase": latest_task_phase,
-            "latest_task_runtime_status": latest_task_runtime_status,
-            "pending_decision_count": pending_decision_count,
-            "evidence_count": evidence_count,
-            "latest_evidence_id": latest_evidence_id,
-            "latest_evidence_at": latest_evidence_at,
-        }
-
-    def _automation_skip_reason(
-        self,
-        *,
-        goal_id: str,
-        progress_snapshot: dict[str, object],
-    ) -> str | None:
-        if self._override_repository is None:
-            return None
-        override = self._override_repository.get_override(goal_id)
-        if override is None or not isinstance(override.compiler_context, dict):
-            return None
-        automation_state = _mapping(override.compiler_context.get("automation_state"))
-        last_fingerprint = str(
-            automation_state.get("last_observed_progress_fingerprint") or "",
-        ).strip()
-        current_fingerprint = str(progress_snapshot.get("fingerprint") or "").strip()
-        if (
-            last_fingerprint
-            and current_fingerprint
-            and last_fingerprint == current_fingerprint
-        ):
-            return "No new progress since the last automation cycle."
-        return None
-
-    def _record_goal_automation_skip(
-        self,
-        *,
-        goal_id: str,
-        progress_snapshot: dict[str, object],
-        source: str,
-        reason: str,
-    ) -> None:
-        now = _utc_now().isoformat()
-        self._update_goal_compiler_context(
-            goal_id,
-            updater=lambda compiler_context: {
-                **compiler_context,
-                "automation_state": {
-                    **_mapping(compiler_context.get("automation_state")),
-                    "last_observed_progress_fingerprint": progress_snapshot.get("fingerprint"),
-                    "last_observed_at": now,
-                    "last_skip_at": now,
-                    "last_skip_source": source,
-                    "last_skip_reason": reason,
-                    "no_progress_skip_count": int(
-                        _mapping(compiler_context.get("automation_state")).get(
-                            "no_progress_skip_count",
-                        )
-                        or 0,
-                    )
-                    + 1,
-                },
-            },
-            reason="Goal automation no-progress skip",
-        )
-
-    def _record_goal_automation_progress(
-        self,
-        *,
-        goal_id: str,
-        source: str,
-        progress_snapshot: dict[str, object],
-        dispatch_result: dict[str, object],
-    ) -> None:
-        dispatch_results = (
-            list(dispatch_result.get("dispatch_results"))
-            if isinstance(dispatch_result.get("dispatch_results"), list)
-            else []
-        )
-        first_phase = next(
-            (
-                str(item.get("phase") or "").strip()
-                for item in dispatch_results
-                if str(item.get("phase") or "").strip()
-            ),
-            "pending",
-        )
-        first_summary = next(
-            (
-                str(item.get("summary") or "").strip()
-                for item in dispatch_results
-                if str(item.get("summary") or "").strip()
-            ),
-            "",
-        )
-        now = _utc_now().isoformat()
-        self._update_goal_compiler_context(
-            goal_id,
-            updater=lambda compiler_context: {
-                **compiler_context,
-                "automation_state": {
-                    **_mapping(compiler_context.get("automation_state")),
-                    "last_observed_progress_fingerprint": progress_snapshot.get("fingerprint"),
-                    "last_observed_at": now,
-                    "last_dispatch_at": now,
-                    "last_dispatch_source": source,
-                    "last_dispatch_phase": first_phase,
-                    "last_dispatch_summary": first_summary or None,
-                    "last_skip_reason": None,
-                    "no_progress_skip_count": 0,
-                },
-            },
-            reason="Goal automation progress",
         )
 
     def _update_goal_compiler_context(
@@ -769,43 +536,6 @@ class _GoalServiceDispatchMixin:
             goal_id=task.goal_id,
             task_ids=remaining_task_ids,
         )
-
-    def _goal_has_inflight_tasks(self, goal_id: str) -> bool:
-        if self._task_repository is None:
-            return False
-        tasks = self._task_repository.list_tasks(goal_id=goal_id)
-        task_ids = [task.id for task in tasks]
-        runtimes_by_task_id = (
-            {
-                runtime.task_id: runtime
-                for runtime in self._task_runtime_repository.list_runtimes(task_ids=task_ids)
-            }
-            if self._task_runtime_repository is not None and task_ids
-            else {}
-        )
-        for task in tasks:
-            if task.status in {"queued", "running", "needs-confirm"}:
-                return True
-            runtime = runtimes_by_task_id.get(task.id)
-            if runtime is None:
-                continue
-            if runtime.current_phase in {"risk-check", "executing", "waiting-confirm"}:
-                return True
-            if runtime.runtime_status in {"hydrating", "active", "waiting-confirm"}:
-                return True
-        ordered_background_task_ids = self._latest_background_chain_task_ids(
-            goal_id,
-            tasks=tasks,
-        )
-        if ordered_background_task_ids:
-            tasks_by_id = {task.id: task for task in tasks}
-            if self._background_chain_has_staged_followups(
-                ordered_task_ids=ordered_background_task_ids,
-                tasks_by_id=tasks_by_id,
-                runtimes_by_task_id=runtimes_by_task_id,
-            ):
-                return True
-        return False
 
     def reconcile_goal_status(
         self,

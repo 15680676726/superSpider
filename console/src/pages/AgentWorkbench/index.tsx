@@ -324,7 +324,7 @@ export default function AgentWorkbenchPage() {
                 <Paragraph hidden type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
                   {localizeWorkbenchText(
                     executionCoreAgent.role_summary ||
-                      executionCoreAgent.current_goal ||
+                      executionCoreAgent.current_focus ||
                       executionCoreAgent.mission,
                   ) || "负责拆解目标、分派执行位、回收证据并监督结果。"}
                 </Paragraph>
@@ -359,7 +359,7 @@ export default function AgentWorkbenchPage() {
                   <div hidden style={{ marginTop: 4 }}>
                     <Text type="secondary">
                       {localizeWorkbenchText(
-                        agent.current_goal ||
+                        agent.current_focus ||
                           agent.role_summary ||
                           agent.environment_summary,
                       ) || "由 Spider Mesh 主脑统一分派任务。"}

@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
+import inspect
+
 from .runtime_center_shared_core import *  # noqa: F401,F403
 
 from agentscope.message import Msg
@@ -10,6 +13,10 @@ from agentscope_runtime.engine.schemas.agent_schemas import (
     RunStatus,
     SequenceNumberGenerator,
 )
+from starlette.background import BackgroundTask
+
+_HUMAN_ASSIST_RESUME_MAX_ATTEMPTS = 2
+_HUMAN_ASSIST_RESUME_RETRY_DELAY_SECONDS = 0.15
 
 
 def _merge_runtime_chat_requested_actions(
@@ -146,31 +153,66 @@ def _looks_like_human_assist_submission(
     request_payload: AgentRequest,
     *,
     message_text: str | None,
+    task: object | None = None,
 ) -> bool:
     if _string_list(getattr(request_payload, "media_analysis_ids", None)):
         return True
-    normalized = str(message_text or "").strip().lower()
-    if not normalized:
+    requested_actions = _normalize_requested_actions(
+        getattr(request_payload, "requested_actions", None),
+    )
+    if "submit_human_assist" in requested_actions:
+        return True
+    normalized_text = str(message_text or "").strip().lower()
+    if not normalized_text:
         return False
-    markers = (
-        "我完成了",
+    task_payload = _as_mapping(task)
+    submission_mode = _first_non_empty_text(task_payload.get("submission_mode"))
+    if submission_mode not in {None, "chat-message"}:
+        return False
+    acceptance_spec = _as_mapping(task_payload.get("acceptance_spec"))
+    anchors = [
+        *(
+            anchor.lower()
+            for anchor in _string_list(acceptance_spec.get("hard_anchors"))
+        ),
+        *(
+            anchor.lower()
+            for anchor in _string_list(acceptance_spec.get("result_anchors"))
+        ),
+    ]
+    if any(anchor and anchor in normalized_text for anchor in anchors):
+        return True
+    completion_markers = (
+        "i finished",
+        "i'm done",
+        "im done",
+        "it is done",
+        "uploaded",
+        "submitted",
+        "cleared",
         "已完成",
         "完成了",
-        "完成这个任务",
-        "done",
-        "finished",
-        "completed",
-        "uploaded",
-        "upload",
-        "submitted",
-        "submit",
+        "搞定了",
+        "搞定",
+        "已上传",
+        "上传了",
+        "已提交",
+        "提交了",
+        "已清除",
+        "清除了",
     )
-    return any(marker in normalized for marker in markers)
+    return any(marker in normalized_text for marker in completion_markers)
 
 
 def _human_assist_task_is_submission_open(task: object) -> bool:
     status = str(getattr(task, "status", "") or "").strip().lower()
-    return status in {"issued", "in_progress", "submitted", "rejected"}
+    return status in {
+        "issued",
+        "in_progress",
+        "submitted",
+        "need_more_evidence",
+        "rejected",
+    }
 
 
 def _format_human_assist_reward(reward_payload: object) -> str | None:
@@ -195,25 +237,47 @@ def _build_human_assist_reply_text(result: object) -> str:
     outcome = str(getattr(result, "outcome", "") or "").strip().lower()
     message = _first_non_empty_text(getattr(result, "message", None))
     reward_text = _format_human_assist_reward(getattr(task, "reward_result", None))
+    task_status = str(getattr(task, "status", "") or "").strip().lower()
+    verification_payload = _as_mapping(getattr(task, "verification_payload", None))
+    resume_payload = _as_mapping(verification_payload.get("resume"))
     if outcome == "accepted":
-        parts = [
-            f"叮，{title} 验收通过。",
-            "系统已记录你的提交，准备继续恢复执行。",
-        ]
+        if task_status == "handoff_blocked":
+            parts = [
+                f"{title} 已通过。",
+                _first_non_empty_text(
+                    resume_payload.get("reason"),
+                    "但系统暂时没接上后续流程。",
+                )
+                or "但系统暂时没接上后续流程。",
+            ]
+        elif task_status == "closed":
+            parts = [
+                f"{title} 已通过。",
+                _first_non_empty_text(
+                    resume_payload.get("summary"),
+                    "系统已继续处理。",
+                )
+                or "系统已继续处理。",
+            ]
+        else:
+            parts = [
+                f"{title} 已通过。",
+                "系统继续往下做。",
+            ]
         if reward_text:
-            parts.append(f"本次奖励：{reward_text}。")
+            parts.append(f"奖励：{reward_text}")
         return "\n".join(parts)
     if outcome == "need_more_evidence":
         return "\n".join(
             [
-                f"叮，{title} 已收到，但暂时还不能通过验收。",
-                message or "还缺少可验证的完成证据。",
+                f"{title} 还没过。",
+                message or "还差证明材料。",
             ],
         )
     return "\n".join(
         [
-            f"叮，{title} 未通过验收。",
-            message or "当前提交没有满足验收条件。",
+            f"{title} 没通过。",
+            message or "这次提交不符合要求。",
         ],
     )
 
@@ -270,6 +334,180 @@ async def _stream_human_assist_result(
     yield _encode_sse_event(seq_gen.yield_with_sequence(response.completed()))
 
 
+def _human_assist_resume_payload(result: object) -> dict[str, object]:
+    return _as_mapping(result)
+
+
+def _human_assist_resume_succeeded(result: object) -> bool:
+    payload = _human_assist_resume_payload(result)
+    if "resumed" in payload:
+        return bool(payload.get("resumed"))
+    return bool(result)
+
+
+def _human_assist_resume_close_summary(result: object) -> str:
+    del result
+    return "系统已继续处理。"
+
+
+def _human_assist_resume_block_reason(
+    result: object | None = None,
+    *,
+    fallback: str = "系统暂时没接上后续流程。",
+) -> str:
+    del result
+    return fallback
+
+
+def _load_human_assist_task_snapshot(
+    service: object,
+    *,
+    task_id: str,
+    fallback_task: object,
+) -> object:
+    get_task = getattr(service, "get_task", None)
+    if not callable(get_task):
+        return fallback_task
+    latest = get_task(task_id)
+    if latest is None:
+        return fallback_task
+    return latest
+
+
+def _invoke_human_assist_resume(
+    app: object,
+    *,
+    task: object,
+) -> object:
+    query_execution_service = getattr(getattr(app, "state", None), "query_execution_service", None)
+    resume = getattr(query_execution_service, "resume_human_assist_task", None)
+    if not callable(resume):
+        raise RuntimeError("human assist resume service is unavailable")
+    return resume(task=task)
+
+
+async def _finalize_human_assist_resume(
+    *,
+    app: object,
+    service: object,
+    task_id: str,
+    task_snapshot: object,
+    resume_result: object,
+) -> None:
+    mark_closed = getattr(service, "mark_closed", None)
+    mark_handoff_blocked = getattr(service, "mark_handoff_blocked", None)
+    latest_result = resume_result
+    latest_payload = None
+    for attempt in range(_HUMAN_ASSIST_RESUME_MAX_ATTEMPTS):
+        try:
+            latest_payload = (
+                await latest_result if inspect.isawaitable(latest_result) else latest_result
+            )
+        except Exception:
+            latest_payload = None
+        else:
+            if _human_assist_resume_succeeded(latest_payload):
+                if callable(mark_closed):
+                    mark_closed(
+                        task_id,
+                        summary=_human_assist_resume_close_summary(latest_payload),
+                        resume_payload=_human_assist_resume_payload(latest_payload),
+                    )
+                return
+        if attempt + 1 >= _HUMAN_ASSIST_RESUME_MAX_ATTEMPTS:
+            break
+        await asyncio.sleep(_HUMAN_ASSIST_RESUME_RETRY_DELAY_SECONDS)
+        current_task = _load_human_assist_task_snapshot(
+            service,
+            task_id=task_id,
+            fallback_task=task_snapshot,
+        )
+        try:
+            latest_result = _invoke_human_assist_resume(
+                app,
+                task=current_task,
+            )
+        except Exception:
+            latest_result = None
+    if callable(mark_handoff_blocked):
+        mark_handoff_blocked(
+            task_id,
+            reason=_human_assist_resume_block_reason(latest_payload),
+            resume_payload=_human_assist_resume_payload(latest_payload),
+        )
+
+
+def _resume_human_assist_task(
+    request: Request,
+    *,
+    task: object,
+    service: object,
+) -> tuple[object, bool, BackgroundTask | None]:
+    task_id = _first_non_empty_text(getattr(task, "id", None))
+    mark_resume_queued = getattr(service, "mark_resume_queued", None)
+    mark_closed = getattr(service, "mark_closed", None)
+    mark_handoff_blocked = getattr(service, "mark_handoff_blocked", None)
+    if task_id is None:
+        return task, False, None
+    current_task = task
+    latest_result = None
+    for attempt in range(_HUMAN_ASSIST_RESUME_MAX_ATTEMPTS):
+        try:
+            latest_result = _invoke_human_assist_resume(
+                request.app,
+                task=current_task,
+            )
+        except Exception:
+            latest_result = None
+        else:
+            if inspect.isawaitable(latest_result):
+                queued_task = current_task
+                if callable(mark_resume_queued):
+                    queued_task = mark_resume_queued(task_id)
+                return (
+                    queued_task,
+                    True,
+                    BackgroundTask(
+                        _finalize_human_assist_resume,
+                        app=request.app,
+                        service=service,
+                        task_id=task_id,
+                        task_snapshot=queued_task,
+                        resume_result=latest_result,
+                    ),
+                )
+            if _human_assist_resume_succeeded(latest_result):
+                if callable(mark_closed):
+                    return (
+                        mark_closed(
+                            task_id,
+                            summary=_human_assist_resume_close_summary(latest_result),
+                            resume_payload=_human_assist_resume_payload(latest_result),
+                        ),
+                        False,
+                        None,
+                    )
+                return current_task, False, None
+        if attempt + 1 >= _HUMAN_ASSIST_RESUME_MAX_ATTEMPTS:
+            break
+        current_task = _load_human_assist_task_snapshot(
+            service,
+            task_id=task_id,
+            fallback_task=current_task,
+        )
+    if callable(mark_handoff_blocked):
+        return (
+            mark_handoff_blocked(
+                task_id,
+                reason=_human_assist_resume_block_reason(latest_result),
+                resume_payload=_human_assist_resume_payload(latest_result),
+            ),
+            False,
+            None,
+        )
+    return current_task, False, None
+
+
 async def _maybe_intercept_human_assist_chat_turn(
     *,
     request_payload: AgentRequest,
@@ -290,13 +528,33 @@ async def _maybe_intercept_human_assist_chat_turn(
     if not _looks_like_human_assist_submission(
         request_payload,
         message_text=message_text,
+        task=current_task,
     ):
         return None
     media_analysis_ids = _string_list(getattr(request_payload, "media_analysis_ids", None))
+    requested_actions = _normalize_requested_actions(
+        getattr(request_payload, "requested_actions", None),
+    )
     submission_payload = {
         "chat_thread_id": chat_thread_id,
         "request_id": getattr(request_payload, "id", None),
+        "session_id": getattr(request_payload, "session_id", None),
+        "control_thread_id": getattr(request_payload, "control_thread_id", None),
+        "user_id": getattr(request_payload, "user_id", None),
+        "channel": getattr(request_payload, "channel", None),
+        "industry_instance_id": getattr(request_payload, "industry_instance_id", None),
+        "industry_role_id": getattr(request_payload, "industry_role_id", None),
+        "industry_role_name": getattr(request_payload, "industry_role_name", None),
+        "industry_label": getattr(request_payload, "industry_label", None),
+        "entry_source": getattr(request_payload, "entry_source", None),
+        "owner_scope": getattr(request_payload, "owner_scope", None),
+        "session_kind": getattr(request_payload, "session_kind", None),
+        "main_brain_runtime": (
+            getattr(request_payload, "_copaw_main_brain_runtime_context", None)
+            or getattr(request_payload, "main_brain_runtime", None)
+        ),
         "media_analysis_ids": media_analysis_ids,
+        "requested_actions": requested_actions,
         "interaction_mode": getattr(request_payload, "interaction_mode", None),
     }
     result = submit_and_verify(
@@ -305,12 +563,22 @@ async def _maybe_intercept_human_assist_chat_turn(
         submission_evidence_refs=media_analysis_ids,
         submission_payload=submission_payload,
     )
+    background_task = None
+    if getattr(result, "outcome", None) == "accepted":
+        updated_task, resume_queued, background_task = _resume_human_assist_task(
+            request,
+            task=getattr(result, "task", None),
+            service=service,
+        )
+        result.task = updated_task
+        result.resume_queued = resume_queued
     return StreamingResponse(
         _stream_human_assist_result(
             request_payload=request_payload,
             result=result,
         ),
         media_type="text/event-stream",
+        background=background_task,
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
@@ -716,22 +984,3 @@ async def get_work_context_detail(
     if detail is None:
         raise HTTPException(404, detail=f"Work context '{context_id}' not found")
     return detail if isinstance(detail, dict) else {"work_context": detail}
-
-
-@router.get("/goals/{goal_id}", response_model=dict[str, object])
-async def get_goal_detail(
-    goal_id: str,
-    request: Request,
-    response: Response,
-) -> dict[str, object]:
-    apply_runtime_center_surface_headers(response, surface="runtime-center")
-    state_query = _get_state_query_service(request)
-    detail = await _call_runtime_query_method(
-        state_query,
-        "get_goal_detail",
-        not_available_detail="Goal detail queries are not available",
-        goal_id=goal_id,
-    )
-    if detail is None:
-        raise HTTPException(404, detail=f"Goal '{goal_id}' not found")
-    return detail if isinstance(detail, dict) else {"goal": detail}

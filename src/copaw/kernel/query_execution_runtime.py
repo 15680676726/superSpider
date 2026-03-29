@@ -8,9 +8,8 @@ from ..providers import ProviderManager
 from .main_brain_intake import (
     build_industry_chat_action_kwargs,
     normalize_main_brain_runtime_context,
+    read_attached_main_brain_intake_contract,
     resolve_execution_core_industry_instance_id,
-    resolve_request_main_brain_intake_contract,
-    resolve_request_main_brain_intake_contract_sync,
 )
 from .query_execution_shared import *  # noqa: F401,F403
 
@@ -746,6 +745,200 @@ class _QueryExecutionRuntimeMixin:
             "task_id": kernel_task_id,
             "stream_events": stream_events,
             "summary": final_summary or "query tool confirmation resumed",
+        }
+
+    async def resume_human_assist_task(
+        self,
+        *,
+        task: Any,
+    ) -> dict[str, Any]:
+        task_payload = _mapping_value(task)
+        task_id = _first_non_empty(task_payload.get("id"))
+        chat_thread_id = _first_non_empty(task_payload.get("chat_thread_id"))
+        if task_id is None or chat_thread_id is None:
+            return {
+                "resumed": False,
+                "reason": "human_assist_task_missing_context",
+            }
+
+        submission_payload = _mapping_value(task_payload.get("submission_payload"))
+        industry_instance_id = _first_non_empty(
+            submission_payload.get("industry_instance_id"),
+            task_payload.get("industry_instance_id"),
+        )
+        request_context: dict[str, Any] = {
+            "session_id": _first_non_empty(
+                submission_payload.get("session_id"),
+                chat_thread_id,
+            ),
+            "control_thread_id": _first_non_empty(
+                submission_payload.get("control_thread_id"),
+                chat_thread_id,
+            ),
+            "user_id": _first_non_empty(
+                submission_payload.get("user_id"),
+                "runtime-center",
+            ),
+            "channel": _first_non_empty(
+                submission_payload.get("channel"),
+                DEFAULT_CHANNEL,
+            ),
+            "entry_source": _first_non_empty(
+                submission_payload.get("entry_source"),
+                "human-assist-resume",
+            ),
+            "owner_scope": _first_non_empty(submission_payload.get("owner_scope")),
+            "industry_instance_id": industry_instance_id,
+            "industry_role_id": _first_non_empty(
+                submission_payload.get("industry_role_id"),
+                EXECUTION_CORE_ROLE_ID if industry_instance_id else None,
+            ),
+            "industry_role_name": _first_non_empty(
+                submission_payload.get("industry_role_name"),
+            ),
+            "industry_label": _first_non_empty(submission_payload.get("industry_label")),
+            "session_kind": _first_non_empty(
+                submission_payload.get("session_kind"),
+                "industry-control-thread" if chat_thread_id.startswith("industry-chat:") else None,
+            ),
+            "main_brain_runtime": _mapping_value(
+                submission_payload.get("main_brain_runtime"),
+            ),
+        }
+        provisional_owner_agent_id = (
+            _first_non_empty(
+                submission_payload.get("agent_id"),
+                submission_payload.get("target_agent_id"),
+            )
+            or EXECUTION_CORE_AGENT_ID
+        )
+        request = _build_query_resume_request(
+            request_context=request_context,
+            owner_agent_id=provisional_owner_agent_id,
+        )
+        control_thread_id = _first_non_empty(request_context.get("control_thread_id"))
+        if control_thread_id is not None:
+            setattr(request, "control_thread_id", control_thread_id)
+        resume_checkpoint_ref = _first_non_empty(task_payload.get("resume_checkpoint_ref"))
+        if resume_checkpoint_ref is not None:
+            setattr(request, "resume_checkpoint_id", resume_checkpoint_ref)
+            setattr(request, "checkpoint_id", resume_checkpoint_ref)
+        owner_agent_id = self.resolve_request_owner_agent_id(request=request)
+        title = _first_non_empty(task_payload.get("title")) or task_id
+        required_action = _first_non_empty(task_payload.get("required_action"))
+        submission_text = _first_non_empty(task_payload.get("submission_text"))
+        evidence_refs = _string_list(task_payload.get("submission_evidence_refs"))
+
+        control_parts = [
+            f"宿主协作任务已通过验收，请从当前会话继续原流程。任务：{title}。",
+        ]
+        if required_action:
+            control_parts.append(f"已完成动作：{required_action}")
+        if submission_text:
+            control_parts.append(f"宿主提交：{submission_text}")
+        if evidence_refs:
+            control_parts.append(f"证据：{', '.join(evidence_refs[:6])}")
+        if resume_checkpoint_ref:
+            control_parts.append(f"恢复点：{resume_checkpoint_ref}")
+        control_msg = Msg(
+            name="runtime-center",
+            role="user",
+            content=" ".join(control_parts),
+            metadata={
+                "human_assist_task_id": task_id,
+                "transient": True,
+                "resume_kind": "human-assist",
+                "resume_checkpoint_ref": resume_checkpoint_ref,
+            },
+        )
+        dispatcher = self._kernel_dispatcher
+        kernel_task_id: str | None = None
+        managed_by_kernel_dispatcher = False
+        final_summary: str | None = None
+        stream_events = 0
+        if dispatcher is not None:
+            admitted = dispatcher.submit(
+                KernelTask(
+                    title=f"Resume human assist task {title}",
+                    capability_ref="system:dispatch_query",
+                    environment_ref=f"session:{request.channel}:{request.session_id}",
+                    owner_agent_id=owner_agent_id,
+                    risk_level="auto",
+                    payload={
+                        "request_context": dict(request_context),
+                        "channel": request.channel,
+                        "user_id": request.user_id,
+                        "session_id": request.session_id,
+                        "dispatch_events": False,
+                        "resume_kind": "human-assist",
+                        "human_assist_task_id": task_id,
+                        "resume_checkpoint_ref": resume_checkpoint_ref,
+                    },
+                ),
+            )
+            kernel_task_id = _first_non_empty(getattr(admitted, "task_id", None))
+            managed_by_kernel_dispatcher = getattr(admitted, "phase", None) == "executing"
+            if kernel_task_id is None:
+                return {
+                    "resumed": False,
+                    "reason": "resume_task_admission_missing_task_id",
+                    "human_assist_task_id": task_id,
+                }
+            if getattr(admitted, "phase", None) != "executing":
+                return {
+                    "resumed": False,
+                    "reason": "resume_task_not_executing",
+                    "human_assist_task_id": task_id,
+                    "task_id": kernel_task_id,
+                    "phase": getattr(admitted, "phase", None),
+                    "summary": getattr(admitted, "summary", None),
+                }
+        try:
+            async for msg, _last in self.execute_stream(
+                msgs=[control_msg],
+                request=request,
+                kernel_task_id=kernel_task_id,
+                transient_input_message_ids={control_msg.id},
+            ):
+                stream_events += 1
+                final_summary = _message_preview(msg) or final_summary
+        except Exception:
+            if managed_by_kernel_dispatcher and kernel_task_id is not None and dispatcher is not None:
+                try:
+                    dispatcher.fail_task(
+                        kernel_task_id,
+                        error="Human assist resume failed.",
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to record human assist resume failure for %s",
+                        task_id,
+                    )
+            raise
+        if managed_by_kernel_dispatcher and kernel_task_id is not None and dispatcher is not None:
+            try:
+                dispatcher.complete_task(
+                    kernel_task_id,
+                    summary=final_summary or "Human assist resume finished",
+                    metadata={
+                        "source": "human-assist-resume",
+                        "human_assist_task_id": task_id,
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to complete human assist resume task for %s",
+                    task_id,
+                )
+        return {
+            "resumed": True,
+            "human_assist_task_id": task_id,
+            "owner_agent_id": owner_agent_id,
+            "session_id": request.session_id,
+            "channel": getattr(request, "channel", DEFAULT_CHANNEL),
+            "task_id": kernel_task_id,
+            "stream_events": stream_events,
+            "summary": final_summary or "human assist resumed",
         }
 
     async def _get_or_create_resident_agent(
@@ -1776,10 +1969,8 @@ class _QueryExecutionRuntimeMixin:
         msgs: list[Any],
         request: Any,
     ):
-        intake_contract = await resolve_request_main_brain_intake_contract(
-            request=request,
-            msgs=msgs,
-        )
+        _ = msgs
+        intake_contract = read_attached_main_brain_intake_contract(request=request)
         if intake_contract is None:
             return None
         if intake_contract.writeback_requested and not intake_contract.has_active_writeback_plan:
@@ -1794,10 +1985,8 @@ class _QueryExecutionRuntimeMixin:
         msgs: list[Any],
         request: Any,
     ) -> ChatWritebackPlan | None:
-        intake_contract = resolve_request_main_brain_intake_contract_sync(
-            request=request,
-            msgs=msgs,
-        )
+        _ = msgs
+        intake_contract = read_attached_main_brain_intake_contract(request=request)
         if intake_contract is not None and intake_contract.writeback_requested and not intake_contract.has_active_writeback_plan:
             raise RuntimeError(
                 "Structured chat writeback was explicitly requested but could not be materialized.",

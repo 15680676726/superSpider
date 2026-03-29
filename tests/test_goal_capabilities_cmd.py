@@ -88,7 +88,7 @@ def test_capabilities_cli_execute_acceptance_matrix(monkeypatch) -> None:
         assert calls == []
 
 
-def test_goals_cli_dispatch_is_retired(monkeypatch) -> None:
+def test_goals_cli_dispatch_command_is_removed(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         goals_cmd_module,
@@ -110,5 +110,5 @@ def test_goals_cli_dispatch_is_retired(monkeypatch) -> None:
     )
 
     assert result.exit_code != 0
-    assert "goals dispatch" in result.output
+    assert "No such command 'dispatch'" in result.output
     assert calls == []

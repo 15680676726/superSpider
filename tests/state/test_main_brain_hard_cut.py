@@ -89,3 +89,78 @@ def test_runtime_center_delegate_endpoint_is_removed_after_hard_cut(tmp_path) ->
     )
 
     assert response.status_code == 404
+
+
+def test_runtime_center_goal_dispatch_endpoint_is_removed_after_hard_cut(tmp_path) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/goals/goal-1/dispatch",
+        json={
+            "trigger": "manual",
+            "source": "runtime-center",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_runtime_center_retired_frontdoors_stay_removed_after_hard_cut(tmp_path) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    retired_routes = [
+        (
+            "/runtime-center/chat/intake",
+            {
+                "id": "req-intake",
+                "session_id": "industry-chat:industry-v1-ops:execution-core",
+                "user_id": "ops-user",
+                "channel": "console",
+                "input": [
+                    {
+                        "role": "user",
+                        "type": "message",
+                        "content": [{"type": "text", "text": "开始执行并给我结果"}],
+                    }
+                ],
+            },
+        ),
+        (
+            "/runtime-center/chat/orchestrate",
+            {
+                "id": "req-orchestrate",
+                "session_id": "industry-chat:industry-v1-ops:execution-core",
+                "user_id": "ops-user",
+                "channel": "console",
+                "input": [
+                    {
+                        "role": "user",
+                        "type": "message",
+                        "content": [{"type": "text", "text": "开始执行并给我结果"}],
+                    }
+                ],
+                "control_thread_id": "industry-chat:industry-v1-ops:execution-core",
+            },
+        ),
+        (
+            "/runtime-center/tasks/task-1/delegate",
+            {
+                "title": "Worker follow-up",
+                "owner_agent_id": "worker",
+                "prompt_text": "Review the evidence and draft the next step.",
+            },
+        ),
+        (
+            "/runtime-center/goals/goal-1/dispatch",
+            {
+                "trigger": "manual",
+                "source": "runtime-center",
+            },
+        ),
+    ]
+
+    for route, payload in retired_routes:
+        response = client.post(route, json=payload)
+        assert response.status_code == 404, route

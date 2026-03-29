@@ -176,6 +176,7 @@
   background: rgba(255, 255, 255, 0.02);
   border: var(--baize-border);
   border-radius: 14px;
+  min-width: 0;
 }
 
 .memoryStatusLabel {
@@ -187,11 +188,34 @@
 }
 
 .memoryStatusValue {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   color: var(--baize-text-main);
   font-size: 14px;
   font-weight: 500;
   line-height: 1.5;
-  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memoryStatusItem :global(.ant-tag) {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memoryStatusTagText {
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 /* ---- Table card ---- */

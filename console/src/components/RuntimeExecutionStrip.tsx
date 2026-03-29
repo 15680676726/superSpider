@@ -229,6 +229,31 @@ export default function RuntimeExecutionStrip({
               const nextStepText = localizeWorkbenchText(
                 item.nextStep || item.blockedReason || item.stuckReason || "",
               );
+              const currentGoalText = item.currentGoal
+                ? `目标：${localizeWorkbenchText(item.currentGoal)}`
+                : null;
+              const currentOwnerText = item.currentOwnerName
+                ? `负责人：${localizeWorkbenchText(item.currentOwnerName)}`
+                : null;
+              const currentEnvironmentText = item.currentEnvironmentId
+                ? `环境：${item.currentEnvironmentId}`
+                : null;
+              const triggerLabel = triggerText ? `触发：${triggerText}` : null;
+              const nextStepLabel = nextStepText ? `下一步：${nextStepText}` : null;
+              const primaryRiskText = item.primaryRisk
+                ? `风险：${localizeWorkbenchText(item.primaryRisk)}`
+                : null;
+              const evidenceText = item.latestEvidenceSummary
+                ? `证据：${localizeWorkbenchText(item.latestEvidenceSummary)}`
+                : null;
+              const assessmentText = localizeWorkbenchText(
+                currentSignal?.detail ||
+                  item.blockedReason ||
+                  item.stuckReason ||
+                  item.nextStep ||
+                  item.currentWorkSummary ||
+                  "暂无补充说明。",
+              );
               return (
                 <div key={item.agentId} className={styles.itemCard}>
                   <div className={styles.itemHeader}>
@@ -240,8 +265,14 @@ export default function RuntimeExecutionStrip({
                         ) : null}
                         {classLabel ? <Tag>{classLabel}</Tag> : null}
                       </div>
-                      <p className={styles.itemWork}>{workTitle}</p>
-                      {workSummary ? <p className={styles.itemSummary}>{workSummary}</p> : null}
+                      <p className={styles.itemWork} title={workTitle}>
+                        {workTitle}
+                      </p>
+                      {workSummary ? (
+                        <p className={styles.itemSummary} title={workSummary}>
+                          {workSummary}
+                        </p>
+                      ) : null}
                     </div>
                     <Space wrap size={6}>
                       <Tag color={runtimeStatusColor(item.runtimeStatus)}>
@@ -257,8 +288,12 @@ export default function RuntimeExecutionStrip({
                           {`派单：${assignmentStatusLabel}`}
                         </Tag>
                       ) : null}
-                      {item.currentGoal ? (
-                        <Tag color="cyan">{`目标：${localizeWorkbenchText(item.currentGoal)}`}</Tag>
+                      {currentGoalText ? (
+                        <Tag color="cyan" title={currentGoalText}>
+                          <span className={styles.tagText} title={currentGoalText}>
+                            {currentGoalText}
+                          </span>
+                        </Tag>
                       ) : null}
                       {item.desiredState !== item.runtimeStatus ? (
                         <Tag>{`调度目标：${presentDesiredStateLabel(item.desiredState)}`}</Tag>
@@ -268,40 +303,74 @@ export default function RuntimeExecutionStrip({
                   </div>
 
                   <div className={styles.metaRow}>
-                    <Text type="secondary">
+                    <Text
+                      type="secondary"
+                      className={styles.metaText}
+                      title={`最近心跳：${formatRuntimeRelativeAge(item.lastHeartbeatAt)}`}
+                    >
                       {`最近心跳：${formatRuntimeRelativeAge(item.lastHeartbeatAt)}`}
                     </Text>
-                    {item.currentOwnerName ? (
-                      <Text type="secondary">
-                        {`负责人：${localizeWorkbenchText(item.currentOwnerName)}`}
+                    {currentOwnerText ? (
+                      <Text
+                        type="secondary"
+                        className={styles.metaText}
+                        title={currentOwnerText}
+                      >
+                        {currentOwnerText}
                       </Text>
                     ) : null}
-                    {item.currentEnvironmentId ? (
-                      <Text type="secondary">{`环境：${item.currentEnvironmentId}`}</Text>
+                    {currentEnvironmentText ? (
+                      <Text
+                        type="secondary"
+                        className={styles.metaText}
+                        title={currentEnvironmentText}
+                      >
+                        {currentEnvironmentText}
+                      </Text>
                     ) : null}
                   </div>
 
-                  {triggerText || nextStepText ? (
+                  {triggerLabel || nextStepLabel ? (
                     <div className={styles.metaRow}>
-                      {triggerText ? (
-                        <Text type="secondary">{`触发：${triggerText}`}</Text>
+                      {triggerLabel ? (
+                        <Text
+                          type="secondary"
+                          className={styles.metaText}
+                          title={triggerLabel}
+                        >
+                          {triggerLabel}
+                        </Text>
                       ) : null}
-                      {nextStepText ? (
-                        <Text type="secondary">{`下一步：${nextStepText}`}</Text>
+                      {nextStepLabel ? (
+                        <Text
+                          type="secondary"
+                          className={styles.metaText}
+                          title={nextStepLabel}
+                        >
+                          {nextStepLabel}
+                        </Text>
                       ) : null}
                     </div>
                   ) : null}
 
-                  {item.primaryRisk || item.latestEvidenceSummary ? (
+                  {primaryRiskText || evidenceText ? (
                     <div className={styles.metaRow}>
-                      {item.primaryRisk ? (
-                        <Text type="secondary">
-                          {`风险：${localizeWorkbenchText(item.primaryRisk)}`}
+                      {primaryRiskText ? (
+                        <Text
+                          type="secondary"
+                          className={styles.metaText}
+                          title={primaryRiskText}
+                        >
+                          {primaryRiskText}
                         </Text>
                       ) : null}
-                      {item.latestEvidenceSummary ? (
-                        <Text type="secondary">
-                          {`证据：${localizeWorkbenchText(item.latestEvidenceSummary)}`}
+                      {evidenceText ? (
+                        <Text
+                          type="secondary"
+                          className={styles.metaText}
+                          title={evidenceText}
+                        >
+                          {evidenceText}
                         </Text>
                       ) : null}
                     </div>
@@ -322,15 +391,8 @@ export default function RuntimeExecutionStrip({
                     <div className={styles.assessmentTitle}>
                       {currentSignal?.label || "当前状态"}
                     </div>
-                    <p className={styles.assessmentText}>
-                      {localizeWorkbenchText(
-                        currentSignal?.detail ||
-                          item.blockedReason ||
-                          item.stuckReason ||
-                          item.nextStep ||
-                          item.currentWorkSummary ||
-                          "暂无补充说明。",
-                      )}
+                    <p className={styles.assessmentText} title={assessmentText}>
+                      {assessmentText}
                     </p>
                   </div>
 

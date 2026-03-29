@@ -47,9 +47,18 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     repositories = SimpleNamespace(
         work_context_repository=object(),
         industry_instance_repository=SimpleNamespace(list_instances=lambda limit=None: []),
+        human_assist_task_repository=object(),
     )
     capability_service = SimpleNamespace(
         set_turn_executor=lambda value: calls.setdefault("turn_executor", value),
+    )
+    governance_service = SimpleNamespace(
+        set_environment_service=lambda value: calls.setdefault("governance_environment_service", value),
+        set_human_assist_task_service=lambda value: calls.setdefault(
+            "governance_human_assist_task_service",
+            value,
+        ),
+        set_industry_service=lambda value: calls.setdefault("governance_industry_service", value),
     )
     domain_services = SimpleNamespace(
         goal_service="goal-service",
@@ -116,7 +125,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
         "_build_kernel_runtime",
         lambda **kwargs: (
             "learning-service",
-            "governance-service",
+            governance_service,
             "kernel-task-store",
             "kernel-tool-bridge",
             capability_service,
@@ -160,6 +169,8 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
 
     assert calls["domain_builder_kwargs"]["work_context_service"] == "work-context-service"
     assert calls["domain_builder_kwargs"]["capability_service"] is capability_service
+    assert calls["governance_environment_service"] == "environment-service"
+    assert calls["governance_industry_service"] == "industry-service"
     assert bootstrap.goal_service == "goal-service"
     assert bootstrap.main_brain_orchestrator == "main-brain-orchestrator"
     assert bootstrap.turn_executor == "turn-executor"

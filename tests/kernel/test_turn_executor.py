@@ -133,6 +133,39 @@ class _FakeIndustryServiceForAsyncIntake:
         return {"activated": True}
 
 
+def _make_main_brain_intake_contract(
+    *,
+    message_text: str = "model",
+    intent_kind: str = "chat",
+    should_writeback: bool = False,
+    kickoff_allowed: bool = False,
+    explicit_execution_confirmation: bool = False,
+    writeback_plan: object | None = None,
+) -> MainBrainIntakeContract:
+    return MainBrainIntakeContract(
+        message_text=message_text,
+        decision=SimpleNamespace(
+            intent_kind=intent_kind,
+            should_writeback=should_writeback,
+            kickoff_allowed=kickoff_allowed,
+            explicit_execution_confirmation=explicit_execution_confirmation,
+        ),
+        intent_kind=intent_kind,
+        writeback_requested=should_writeback,
+        writeback_plan=writeback_plan,
+        should_kickoff=kickoff_allowed or explicit_execution_confirmation,
+    )
+
+
+def _async_intake_resolver(
+    contract: MainBrainIntakeContract | None,
+):
+    async def _resolver(**_kwargs):
+        return contract
+
+    return _resolver
+
+
 @pytest.mark.asyncio
 async def test_kernel_turn_executor_delegates_query_execution_to_service():
     query_execution_service = FakeQueryExecutionService()
@@ -230,7 +263,9 @@ async def test_kernel_turn_executor_auto_mode_routes_questions_to_chat_service()
 
 
 @pytest.mark.asyncio
-async def test_kernel_turn_executor_auto_mode_routes_action_instructions_to_query_execution_service():
+async def test_kernel_turn_executor_auto_mode_keeps_action_wording_in_chat_without_intake_result(
+    monkeypatch,
+):
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()
     executor = KernelTurnExecutor(
@@ -248,13 +283,101 @@ async def test_kernel_turn_executor_auto_mode_routes_action_instructions_to_quer
     request.interaction_mode = "auto"
     msgs = [Msg(name="user", role="user", content="生成一份测试报告")]
 
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(None),
+    )
+
     streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
 
     assert len(streamed) == 1
-    assert streamed[0][0].get_text_content() == "kernel done"
+    assert streamed[0][0].get_text_content() == "chat done"
     assert streamed[0][1] is True
-    assert query_execution_service.calls != []
-    assert main_brain_chat_service.calls == []
+    assert query_execution_service.calls == []
+    assert len(main_brain_chat_service.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_auto_mode_does_not_guess_execution_from_action_wording(
+    monkeypatch,
+):
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+    )
+    request = AgentRequest(
+        id="req-auto-no-guess-action",
+        session_id="sess-auto-no-guess-action",
+        user_id="user-auto-no-guess-action",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "auto"
+    msgs = [Msg(name="user", role="user", content="生成一份测试报告")]
+
+    async def _fake_intake_resolver(**_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _fake_intake_resolver,
+        raising=False,
+    )
+
+    streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "chat done"
+    assert len(main_brain_chat_service.calls) == 1
+    assert query_execution_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_auto_mode_does_not_guess_execution_from_plain_confirmation(
+    monkeypatch,
+):
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+    )
+    request = AgentRequest(
+        id="req-auto-no-guess-confirm",
+        session_id="sess-auto-no-guess-confirm",
+        user_id="user-auto-no-guess-confirm",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "auto"
+    msgs = [
+        Msg(
+            name="assistant",
+            role="assistant",
+            content="如果你确认，我下一条就进入执行编排。",
+        ),
+        Msg(name="user", role="user", content="好的"),
+    ]
+
+    async def _fake_intake_resolver(**_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _fake_intake_resolver,
+        raising=False,
+    )
+
+    streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "chat done"
+    assert len(main_brain_chat_service.calls) == 1
+    assert query_execution_service.calls == []
 
 
 @pytest.mark.asyncio
@@ -315,8 +438,6 @@ async def test_kernel_turn_executor_auto_mode_routes_goal_setting_to_query_execu
 async def test_kernel_turn_executor_auto_mode_prefers_model_resolution_for_main_brain_request(
     monkeypatch,
 ):
-    from copaw.kernel.main_brain_intake import MainBrainIntakeContract
-
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()
     executor = KernelTurnExecutor(
@@ -334,19 +455,12 @@ async def test_kernel_turn_executor_auto_mode_prefers_model_resolution_for_main_
     request.interaction_mode = "auto"
     request.industry_instance_id = "industry-v1-demo"
     monkeypatch.setattr(
-        "copaw.kernel.turn_executor.resolve_main_brain_intake_contract_sync",
-        lambda **_kwargs: MainBrainIntakeContract(
-            message_text="model",
-            decision=SimpleNamespace(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(
+            _make_main_brain_intake_contract(
                 intent_kind="execute-task",
                 kickoff_allowed=True,
-                explicit_execution_confirmation=False,
-                should_writeback=False,
             ),
-            intent_kind="execute-task",
-            writeback_requested=False,
-            writeback_plan=None,
-            should_kickoff=True,
         ),
     )
     msgs = [Msg(name="user", role="user", content="这件事你接过去往前推，落到主线里")]
@@ -363,8 +477,6 @@ async def test_kernel_turn_executor_auto_mode_prefers_model_resolution_for_main_
 async def test_kernel_turn_executor_auto_mode_prefers_model_chat_resolution_over_keyword_fallback(
     monkeypatch,
 ):
-    from copaw.kernel.main_brain_intake import MainBrainIntakeContract
-
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()
     executor = KernelTurnExecutor(
@@ -382,19 +494,11 @@ async def test_kernel_turn_executor_auto_mode_prefers_model_chat_resolution_over
     request.interaction_mode = "auto"
     request.industry_instance_id = "industry-v1-demo"
     monkeypatch.setattr(
-        "copaw.kernel.turn_executor.resolve_main_brain_intake_contract_sync",
-        lambda **_kwargs: MainBrainIntakeContract(
-            message_text="model",
-            decision=SimpleNamespace(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(
+            _make_main_brain_intake_contract(
                 intent_kind="chat",
-                kickoff_allowed=False,
-                explicit_execution_confirmation=False,
-                should_writeback=False,
             ),
-            intent_kind="chat",
-            writeback_requested=False,
-            writeback_plan=None,
-            should_kickoff=False,
         ),
     )
     msgs = [Msg(name="user", role="user", content="帮我看一下")]
@@ -495,6 +599,53 @@ async def test_kernel_turn_executor_routes_non_chat_turns_through_orchestrator_p
 
 
 @pytest.mark.asyncio
+async def test_main_brain_orchestrator_reuses_attached_intake_contract():
+    query_execution_service = FakeQueryExecutionService()
+    attached_contract = _make_main_brain_intake_contract(
+        message_text="Continue the assigned desktop flow.",
+        intent_kind="execute-task",
+        kickoff_allowed=True,
+    )
+
+    async def _raising_resolver(**_kwargs):
+        raise AssertionError("orchestrator should reuse attached intake contract")
+
+    main_brain_orchestrator = MainBrainOrchestrator(
+        query_execution_service=query_execution_service,
+        intake_contract_resolver=_raising_resolver,
+    )
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=FakeMainBrainChatService(),
+        main_brain_orchestrator=main_brain_orchestrator,
+    )
+    request = AgentRequest(
+        id="req-orchestrator-reuse-attached-intake",
+        session_id="sess-orchestrator-reuse-attached-intake",
+        user_id="user-orchestrator-reuse-attached-intake",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "orchestrate"
+    request.environment_ref = "desktop:session-1"
+    request._copaw_main_brain_intake_contract = attached_contract
+
+    streamed = [
+        item
+        async for item in executor.handle_query(
+            msgs=[Msg(name="user", role="user", content="Continue the assigned desktop flow.")],
+            request=request,
+        )
+    ]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "kernel done"
+    runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
+    assert runtime_context["source_intent_kind"] == "execute-task"
+
+
+@pytest.mark.asyncio
 async def test_kernel_turn_executor_syncs_environment_service_into_orchestrator_runtime_context():
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()
@@ -563,8 +714,6 @@ async def test_kernel_turn_executor_syncs_environment_service_into_orchestrator_
 async def test_kernel_turn_executor_auto_mode_routes_control_thread_execute_request_to_orchestrator(
     monkeypatch,
 ):
-    from copaw.kernel.main_brain_intake import MainBrainIntakeContract
-
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()
     main_brain_orchestrator = FakeMainBrainOrchestrator()
@@ -587,19 +736,13 @@ async def test_kernel_turn_executor_auto_mode_routes_control_thread_execute_requ
     msgs = [Msg(name="user", role="user", content="生成一份测试报告并推进下去")]
 
     monkeypatch.setattr(
-        "copaw.kernel.turn_executor.resolve_main_brain_intake_contract_sync",
-        lambda **_kwargs: MainBrainIntakeContract(
-            message_text="生成一份测试报告并推进下去",
-            decision=SimpleNamespace(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(
+            _make_main_brain_intake_contract(
+                message_text="生成一份测试报告并推进下去",
                 intent_kind="execute-task",
                 kickoff_allowed=True,
-                explicit_execution_confirmation=False,
-                should_writeback=False,
             ),
-            intent_kind="execute-task",
-            writeback_requested=False,
-            writeback_plan=None,
-            should_kickoff=True,
         ),
     )
 
@@ -616,8 +759,6 @@ async def test_kernel_turn_executor_auto_mode_routes_control_thread_execute_requ
 async def test_kernel_turn_executor_auto_mode_routes_industry_execution_request_through_shared_intake(
     monkeypatch,
 ):
-    from copaw.kernel.main_brain_intake import MainBrainIntakeContract
-
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()
     executor = KernelTurnExecutor(
@@ -635,19 +776,15 @@ async def test_kernel_turn_executor_auto_mode_routes_industry_execution_request_
     request.interaction_mode = "auto"
     request.industry_instance_id = "industry-v1-demo"
     monkeypatch.setattr(
-        "copaw.kernel.turn_executor.resolve_main_brain_intake_contract_sync",
-        lambda **_kwargs: MainBrainIntakeContract(
-            message_text="把这件事接过去继续推进",
-            decision=SimpleNamespace(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(
+            _make_main_brain_intake_contract(
+                message_text="把这件事接过去继续推进",
                 intent_kind="execute-task",
                 should_writeback=True,
                 kickoff_allowed=True,
-                explicit_execution_confirmation=False,
+                writeback_plan=SimpleNamespace(active=True),
             ),
-            intent_kind="execute-task",
-            writeback_requested=True,
-            writeback_plan=SimpleNamespace(active=True),
-            should_kickoff=True,
         ),
     )
 
@@ -666,7 +803,7 @@ async def test_kernel_turn_executor_auto_mode_routes_industry_execution_request_
 
 
 @pytest.mark.asyncio
-async def test_kernel_turn_executor_auto_mode_recognizes_contextual_execution_confirmation():
+async def test_kernel_turn_executor_auto_mode_keeps_contextual_confirmation_in_chat_without_intake_result():
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()
     executor = KernelTurnExecutor(
@@ -694,9 +831,9 @@ async def test_kernel_turn_executor_auto_mode_recognizes_contextual_execution_co
     streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
 
     assert len(streamed) == 1
-    assert streamed[0][0].get_text_content() == "kernel done"
-    assert query_execution_service.calls != []
-    assert main_brain_chat_service.calls == []
+    assert streamed[0][0].get_text_content() == "chat done"
+    assert query_execution_service.calls == []
+    assert len(main_brain_chat_service.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -727,7 +864,9 @@ async def test_kernel_turn_executor_auto_mode_keeps_plain_acknowledgement_in_cha
 
 
 @pytest.mark.asyncio
-async def test_kernel_turn_executor_auto_mode_routes_short_inspection_request_to_query_execution_service():
+async def test_kernel_turn_executor_auto_mode_keeps_short_inspection_request_in_chat_without_intake_result(
+    monkeypatch,
+):
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()
     kernel_dispatcher = FakeKernelDispatcher()
@@ -747,22 +886,25 @@ async def test_kernel_turn_executor_auto_mode_routes_short_inspection_request_to
     request.interaction_mode = "auto"
     msgs = [Msg(name="user", role="user", content="帮我看一下")]
 
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(None),
+    )
+
     streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
 
     assert len(streamed) == 1
-    assert streamed[0][0].get_text_content() == "kernel done"
+    assert streamed[0][0].get_text_content() == "chat done"
     assert streamed[0][1] is True
-    assert query_execution_service.calls != []
-    assert main_brain_chat_service.calls == []
-    assert kernel_dispatcher.submitted != []
+    assert query_execution_service.calls == []
+    assert len(main_brain_chat_service.calls) == 1
+    assert kernel_dispatcher.submitted == []
 
 
 @pytest.mark.asyncio
 async def test_kernel_turn_executor_stream_request_attaches_resolved_interaction_mode_metadata(
     monkeypatch,
 ):
-    from copaw.kernel.main_brain_intake import MainBrainIntakeContract
-
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()
     executor = KernelTurnExecutor(
@@ -784,6 +926,11 @@ async def test_kernel_turn_executor_stream_request_attaches_resolved_interaction
         ],
     )
     request.interaction_mode = "auto"
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(None),
+    )
 
     found = False
     async for event in executor.stream_request(request):
@@ -816,7 +963,7 @@ async def test_kernel_turn_executor_stream_request_attaches_resolved_interaction
             continue
         meta = getattr(event, "metadata", None)
         assert isinstance(meta, dict)
-        assert meta.get("resolved_interaction_mode") == "orchestrate"
+        assert meta.get("resolved_interaction_mode") == "chat"
         found2 = True
         break
     assert found2 is True
@@ -838,19 +985,13 @@ async def test_kernel_turn_executor_stream_request_attaches_resolved_interaction
     request3.control_thread_id = "control-thread-1"
 
     monkeypatch.setattr(
-        "copaw.kernel.turn_executor.resolve_main_brain_intake_contract_sync",
-        lambda **_kwargs: MainBrainIntakeContract(
-            message_text="生成一份测试报告",
-            decision=SimpleNamespace(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(
+            _make_main_brain_intake_contract(
+                message_text="生成一份测试报告",
                 intent_kind="execute-task",
                 kickoff_allowed=True,
-                explicit_execution_confirmation=False,
-                should_writeback=False,
             ),
-            intent_kind="execute-task",
-            writeback_requested=False,
-            writeback_plan=None,
-            should_kickoff=True,
         ),
     )
 
@@ -966,58 +1107,76 @@ def test_formal_chat_writeback_helper_only_honors_explicit_actions() -> None:
 def test_query_execution_runtime_writeback_plan_no_longer_depends_on_text_gate(
     monkeypatch,
 ) -> None:
-    from copaw.kernel.main_brain_intake import MainBrainIntakeContract
-
     service = KernelQueryExecutionService(session_backend=object())
+    request = SimpleNamespace(
+        _copaw_main_brain_intake_contract=_make_main_brain_intake_contract(
+            message_text="model",
+            intent_kind="discussion",
+            should_writeback=True,
+            writeback_plan=SimpleNamespace(active=True),
+        ),
+    )
 
     monkeypatch.setattr(
         "copaw.kernel.query_execution_runtime._should_attempt_formal_chat_writeback",
         lambda **_kwargs: False,
     )
-    monkeypatch.setattr(
-        "copaw.kernel.query_execution_runtime.resolve_request_main_brain_intake_contract_sync",
-        lambda **_kwargs: MainBrainIntakeContract(
-            message_text="model",
-            decision=SimpleNamespace(should_writeback=True),
-            intent_kind="discussion",
-            writeback_requested=True,
-            writeback_plan=SimpleNamespace(active=True),
-            should_kickoff=False,
-        ),
-    )
-
     plan = service._resolve_requested_chat_writeback_plan(  # pylint: disable=protected-access
         msgs=[Msg(name="user", role="user", content="先按这个方向长期推进")],
-        request=SimpleNamespace(),
+        request=request,
     )
 
     assert plan is not None
     assert plan.active is True
 
 
+def test_query_execution_runtime_writeback_plan_requires_attached_intake_contract() -> None:
+    service = KernelQueryExecutionService(session_backend=object())
+
+    plan = service._resolve_requested_chat_writeback_plan(  # pylint: disable=protected-access
+        msgs=[Msg(name="user", role="user", content="先按这个方向长期推进")],
+        request=SimpleNamespace(),
+    )
+
+    assert plan is None
+
+
 @pytest.mark.asyncio
-async def test_query_execution_team_kickoff_uses_model_decision_even_without_text_gate(
-    monkeypatch,
-):
+async def test_query_execution_team_kickoff_uses_attached_intake_contract_even_without_text_gate():
     industry_service = _FakeIndustryServiceForAsyncIntake()
     service = KernelQueryExecutionService(
         session_backend=object(),
         industry_service=industry_service,
     )
-
-    monkeypatch.setattr(
-        "copaw.kernel.query_execution_team.resolve_request_main_brain_intake_contract_sync",
-        lambda **_kwargs: MainBrainIntakeContract(
+    request = SimpleNamespace(
+        industry_instance_id="industry-v1-demo",
+        industry_role_id="execution-core",
+        session_id="sess-kickoff",
+        channel="console",
+        _copaw_main_brain_intake_contract=_make_main_brain_intake_contract(
             message_text="接过去往前推",
-            decision=SimpleNamespace(
-                kickoff_allowed=True,
-                explicit_execution_confirmation=False,
-            ),
             intent_kind="execute-task",
-            writeback_requested=False,
-            writeback_plan=None,
-            should_kickoff=True,
+            kickoff_allowed=True,
         ),
+    )
+
+    result = await service._apply_industry_chat_kickoff_intent(  # pylint: disable=protected-access
+        msgs=[Msg(name="user", role="user", content="接过去往前推")],
+        request=request,
+        owner_agent_id="copaw-agent-runner",
+        agent_profile=None,
+    )
+
+    assert result == {"activated": True}
+    assert len(industry_service.kickoff_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_query_execution_team_kickoff_requires_attached_intake_contract():
+    industry_service = _FakeIndustryServiceForAsyncIntake()
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        industry_service=industry_service,
     )
 
     result = await service._apply_industry_chat_kickoff_intent(  # pylint: disable=protected-access
@@ -1032,8 +1191,8 @@ async def test_query_execution_team_kickoff_uses_model_decision_even_without_tex
         agent_profile=None,
     )
 
-    assert result == {"activated": True}
-    assert len(industry_service.kickoff_calls) == 1
+    assert result is None
+    assert industry_service.kickoff_calls == []
 
 
 @pytest.mark.asyncio
@@ -1044,19 +1203,6 @@ async def test_query_execution_team_kickoff_reuses_attached_intake_contract(
     service = KernelQueryExecutionService(
         session_backend=object(),
         industry_service=industry_service,
-    )
-
-    monkeypatch.setattr(
-        "copaw.kernel.main_brain_intake.resolve_main_brain_intake_contract_sync",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("team kickoff should reuse the attached intake contract"),
-        ),
-    )
-    monkeypatch.setattr(
-        "copaw.kernel.query_execution_shared._resolve_chat_writeback_model_decision_sync",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("team kickoff should not re-run model decision when contract exists"),
-        ),
     )
 
     request = SimpleNamespace(
@@ -1090,8 +1236,6 @@ async def test_query_execution_team_kickoff_reuses_attached_intake_contract(
 async def test_kernel_turn_executor_control_thread_execute_request_no_longer_relies_on_chat_background_work(
     monkeypatch,
 ):
-    from copaw.kernel.main_brain_intake import MainBrainIntakeContract
-
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()
     main_brain_orchestrator = FakeMainBrainOrchestrator()
@@ -1114,19 +1258,15 @@ async def test_kernel_turn_executor_control_thread_execute_request_no_longer_rel
     request.control_thread_id = "control-thread-1"
 
     monkeypatch.setattr(
-        "copaw.kernel.turn_executor.resolve_main_brain_intake_contract_sync",
-        lambda **_kwargs: MainBrainIntakeContract(
-            message_text="把这个需求接过去，持续推进",
-            decision=SimpleNamespace(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(
+            _make_main_brain_intake_contract(
+                message_text="把这个需求接过去，持续推进",
                 intent_kind="execute-task",
-                kickoff_allowed=True,
-                explicit_execution_confirmation=False,
                 should_writeback=True,
+                kickoff_allowed=True,
+                writeback_plan=SimpleNamespace(active=True),
             ),
-            intent_kind="execute-task",
-            writeback_requested=True,
-            writeback_plan=SimpleNamespace(active=True),
-            should_kickoff=True,
         ),
     )
 
@@ -1149,57 +1289,31 @@ async def test_kernel_turn_executor_control_thread_execute_request_no_longer_rel
 async def test_query_execution_runtime_reuses_shared_intake_contract_for_writeback_and_kickoff(
     monkeypatch,
 ):
-    from copaw.kernel.main_brain_intake import materialize_main_brain_intake_contract
-
     industry_service = _FakeIndustryServiceForAsyncIntake()
     service = KernelQueryExecutionService(
         session_backend=object(),
         industry_service=industry_service,
     )
+    writeback_plan = SimpleNamespace(active=True, anchor="runtime-shared-contract")
     request = SimpleNamespace(
         industry_instance_id="industry-v1-demo",
         industry_role_id="execution-core",
         session_id="sess-shared-intake",
         channel="console",
-    )
-    writeback_plan = SimpleNamespace(active=True, anchor="runtime-shared-contract")
-    resolve_calls: list[str] = []
-    sync_calls: list[str] = []
-
-    async def _fake_resolve(*, request=None, msgs=None):
-        _ = request
-        text: str | None = None
-        if text is None:
-            assert msgs is not None
-            text = msgs[-1].get_text_content()
-        resolve_calls.append(text)
-        contract = materialize_main_brain_intake_contract(
-            message_text=text,
-            decision=SimpleNamespace(
-                intent_kind="execute-task",
-                should_writeback=True,
-                approved_targets=["backlog"],
-                strategy=None,
-                goal=None,
-                schedule=None,
-                kickoff_allowed=True,
-                explicit_execution_confirmation=False,
-            ),
-        )
-        assert contract is not None
-        contract.writeback_plan = writeback_plan
-        return contract
-
-    monkeypatch.setattr(
-        "copaw.kernel.query_execution_runtime.resolve_request_main_brain_intake_contract",
-        _fake_resolve,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "copaw.kernel.query_execution_runtime.resolve_request_main_brain_intake_contract_sync",
-        lambda **_kwargs: sync_calls.append("sync") or (_ for _ in ()).throw(
-            AssertionError("sync intake resolver should not be used from runtime async code"),
+        _copaw_main_brain_intake_contract=_make_main_brain_intake_contract(
+            message_text="把这件事接过去，继续往前推",
+            intent_kind="execute-task",
+            should_writeback=True,
+            kickoff_allowed=True,
+            writeback_plan=writeback_plan,
         ),
+    )
+    monkeypatch.setattr(
+        "copaw.kernel.main_brain_intake.resolve_request_main_brain_intake_contract",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("runtime async code should reuse attached intake contract"),
+        ),
+        raising=False,
     )
 
     chat_writeback_summary, industry_kickoff_summary = (
@@ -1211,13 +1325,55 @@ async def test_query_execution_runtime_reuses_shared_intake_contract_for_writeba
         )
     )
 
-    assert resolve_calls == ["把这件事接过去，继续往前推"]
-    assert sync_calls == []
     assert chat_writeback_summary == {"applied": True}
     assert industry_kickoff_summary == {"activated": True}
     assert len(industry_service.writeback_calls) == 1
     assert industry_service.writeback_calls[0]["writeback_plan"] is writeback_plan
     assert len(industry_service.kickoff_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_query_execution_runtime_requested_main_brain_intake_requires_attached_contract(
+    monkeypatch,
+):
+    industry_service = _FakeIndustryServiceForAsyncIntake()
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        industry_service=industry_service,
+    )
+
+    monkeypatch.setattr(
+        "copaw.kernel.main_brain_intake.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(
+            _make_main_brain_intake_contract(
+                message_text="fallback",
+                intent_kind="execute-task",
+                should_writeback=True,
+                kickoff_allowed=True,
+                writeback_plan=SimpleNamespace(active=True),
+            ),
+        ),
+        raising=False,
+    )
+
+    chat_writeback_summary, industry_kickoff_summary = (
+        await service._apply_requested_main_brain_intake(  # pylint: disable=protected-access
+            msgs=[Msg(name="user", role="user", content="把这件事接过去，继续往前推")],
+            request=SimpleNamespace(
+                industry_instance_id="industry-v1-demo",
+                industry_role_id="execution-core",
+                session_id="sess-shared-intake",
+                channel="console",
+            ),
+            owner_agent_id="copaw-agent-runner",
+            agent_profile=None,
+        )
+    )
+
+    assert chat_writeback_summary is None
+    assert industry_kickoff_summary is None
+    assert industry_service.writeback_calls == []
+    assert industry_service.kickoff_calls == []
 
 
 def test_tool_preflight_allows_host_observation_without_explicit_request() -> None:

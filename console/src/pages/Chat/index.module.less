@@ -740,6 +740,7 @@
   align-items: center;
   gap: 10px;
   margin-bottom: 4px;
+  min-width: 0;
 }
 
 .humanAssistStripTitle {
@@ -756,6 +757,9 @@
   color: var(--baize-text-secondary);
   font-size: 12px;
   line-height: 1.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .humanAssistStripActions {
@@ -831,19 +835,28 @@
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 6px;
+  min-width: 0;
 }
 
 .humanAssistTaskCardTitle {
+  min-width: 0;
+  flex: 1;
   color: var(--baize-text-main);
   font-size: 13px;
   font-weight: 700;
   line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .humanAssistTaskCardSummary {
   color: var(--baize-text-secondary);
   font-size: 12px;
   line-height: 1.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .humanAssistTaskCardMeta {
@@ -865,11 +878,19 @@
   gap: 10px;
 }
 
+.humanAssistDetailHeading {
+  min-width: 0;
+  flex: 1;
+}
+
 .humanAssistDetailTitle {
   color: var(--baize-text-main);
   font-size: 18px;
   font-weight: 700;
   line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .humanAssistDetailSubtitle {
@@ -877,6 +898,9 @@
   color: var(--baize-text-secondary);
   font-size: 13px;
   line-height: 1.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .humanAssistDetailGrid {
@@ -904,6 +928,9 @@
   color: var(--baize-text-main);
   font-size: 13px;
   line-height: 1.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .humanAssistMuted {

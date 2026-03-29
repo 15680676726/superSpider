@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from .main_brain_intake import (
     build_industry_chat_action_kwargs,
+    read_attached_main_brain_intake_contract,
     resolve_execution_core_industry_instance_id,
-    resolve_request_main_brain_intake_contract_sync,
 )
 from .decision_policy import decision_chat_route, decision_chat_thread_id
 from .query_execution_shared import *  # noqa: F401,F403
@@ -320,10 +320,8 @@ class _QueryExecutionTeamMixin:
         )
         if industry_instance_id is None:
             return None
-        intake_contract = resolve_request_main_brain_intake_contract_sync(
-            request=request,
-            msgs=msgs,
-        )
+        _ = msgs
+        intake_contract = read_attached_main_brain_intake_contract(request=request)
         if intake_contract is None or not intake_contract.should_kickoff:
             return None
         service = self._industry_service

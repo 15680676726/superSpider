@@ -141,6 +141,7 @@ class MediaAnalysisSummary(BaseModel):
     analysis_id: str
     industry_instance_id: str | None = None
     thread_id: str | None = None
+    work_context_id: str | None = None
     entry_point: str
     purpose: str
     source_kind: str
@@ -194,6 +195,7 @@ class MediaAnalysisRequest(BaseModel):
     sources: list[MediaSourceSpec] = Field(default_factory=list)
     industry_instance_id: str | None = None
     thread_id: str | None = None
+    work_context_id: str | None = None
     entry_point: MediaEntryPoint = "chat"
     purpose: MediaPurpose = "reference-only"
     writeback: bool = False

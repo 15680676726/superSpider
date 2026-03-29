@@ -852,12 +852,12 @@ class _PredictionServiceRecommendationMixin:
                     },
                 )
 
-        dispatch_goal_candidates = [
+        coordinate_goal_candidates = [
             goal
             for goal in facts.goals
             if str(goal.status).lower() in {"active", "draft"}
         ]
-        dispatch_goal_candidates.sort(
+        coordinate_goal_candidates.sort(
             key=lambda goal: (
                 -goal_alignment_score(goal),
                 0 if str(goal.status).lower() == "active" else 1,
@@ -865,20 +865,21 @@ class _PredictionServiceRecommendationMixin:
                 goal.title.lower(),
             ),
         )
-        dispatch_goal = dispatch_goal_candidates[0] if dispatch_goal_candidates else None
-        if dispatch_goal is not None:
+        coordinate_goal = coordinate_goal_candidates[0] if coordinate_goal_candidates else None
+        if coordinate_goal is not None:
             preferred_owner = (
                 case.owner_agent_id
                 or (_string(hottest_agent.get("agent_id")) if hottest_agent else None)
                 or EXECUTION_CORE_AGENT_ID
             )
-            aligned_to_strategy = goal_alignment_score(dispatch_goal) > 0
+            aligned_to_strategy = goal_alignment_score(coordinate_goal) > 0
             append_recommendation(
                 recommendation_type="plan_recommendation",
-                title=f"派发目标“{dispatch_goal.title}”",
+                title=f"交给主脑协调“{coordinate_goal.title}”",
                 summary=(
-                    f"当前范围内已存在目标“{dispatch_goal.title}”，"
-                    "但尚未进入本案例的受治理执行链。"
+                    f"当前范围内已存在目标“{coordinate_goal.title}”，"
+                    "但它仍停留在旧 GoalRecord 兼容边界。"
+                    "请交给主脑决定是否把它纳入当前 backlog / cycle。"
                 ),
                 priority=88 if aligned_to_strategy else 76,
                 confidence=min(
@@ -886,28 +887,15 @@ class _PredictionServiceRecommendationMixin:
                     confidence_baseline + (0.1 if aligned_to_strategy else 0.06),
                 ),
                 risk_level="guarded",
-                action_kind="system:dispatch_goal",
-                executable=True,
-                auto_eligible=True,
-                status="proposed",
+                action_kind="manual:coordinate-main-brain",
+                executable=False,
+                auto_eligible=False,
+                status="manual-only",
                 target_agent_id=preferred_owner,
-                target_goal_id=dispatch_goal.id,
-                action_payload={
-                    "goal_id": dispatch_goal.id,
-                    "owner_agent_id": preferred_owner,
-                    "execute": True,
-                    "activate": True,
-                    "context": {
-                        "source": "prediction",
-                        "case_id": case.case_id,
-                        "topic_type": case.topic_type,
-                        "strategy_id": _string(strategy.get("strategy_id")),
-                        "strategy_north_star": north_star,
-                        "strategy_priority_order": priority_order[:5],
-                    },
-                },
+                target_goal_id=coordinate_goal.id,
+                action_payload={},
                 metadata={
-                    "goal_title": dispatch_goal.title,
+                    "goal_title": coordinate_goal.title,
                     "aligned_to_strategy": aligned_to_strategy,
                 },
             )

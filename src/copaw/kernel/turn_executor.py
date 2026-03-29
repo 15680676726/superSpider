@@ -35,7 +35,7 @@ from ..app.runtime_commands import (
 from ..providers.model_diagnostics import normalize_runtime_exception
 from .main_brain_intake import (
     extract_main_brain_intake_text,
-    resolve_main_brain_intake_contract_sync,
+    resolve_request_main_brain_intake_contract,
 )
 from .main_brain_chat_service import MainBrainChatService
 from .main_brain_orchestrator import MainBrainOrchestrator
@@ -45,7 +45,6 @@ from .query_execution import KernelQueryExecutionService
 from .query_execution_shared import (
     _first_non_empty,
     _is_hypothetical_control_text,
-    _looks_like_goal_setting_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -193,343 +192,49 @@ def _admission_blocked_message(*, summary: str | None) -> Msg:
     )
 
 
-def _needs_human_mode_choice_message(*, query: str | None) -> Msg:
-    preview = (query or "").strip()
-    if preview:
-        preview = preview[:80]
-    detail = f"- 你刚才说：{preview}" if preview else "- 你刚才的输入较短，我无法判断你的意图。"
-    return Msg(
-        name="Spider Mesh",
-        role="assistant",
-        content=[
-            TextBlock(
-                type="text",
-                text=(
-                    "**需要补一句你的意图**\n\n"
-                    f"{detail}\n"
-                    "- 如果你的意思是让我直接接手推进，我会按主脑编排继续处理\n"
-                    "- 如果你只是想先讨论/澄清，请直接说明“先分析”“先讨论”之类的意图"
-                ),
-            ),
-        ],
-    )
-
-
-def _looks_like_question(text: str) -> bool:
-    stripped = text.strip()
-    if not stripped:
-        return True
-    if "?" in stripped or "？" in stripped:
-        return True
-    lowered = stripped.lower()
-    for prefix in (
-        "why",
-        "how",
-        "what",
-        "can you",
-        "could you",
-        "would you",
-        "should we",
-        "怎么",
-        "如何",
-        "为什么",
-        "是否",
-        "能否",
-        "可以吗",
-        "行不行",
-        "要不要",
-        "如果",
-        "会不会",
-        "会怎样",
-    ):
-        if lowered.startswith(prefix) or prefix in lowered:
-            return True
-    return False
-
-
-def _message_text(message: Any) -> str:
-    getter = getattr(message, "get_text_content", None)
-    if callable(getter):
-        try:
-            text = getter()
-        except Exception:
-            text = None
-        if isinstance(text, str) and text.strip():
-            return text.strip()
-    content = getattr(message, "content", None)
-    if isinstance(content, str) and content.strip():
-        return content.strip()
-    return ""
-
-
-def _message_role(message: Any) -> str:
-    role = getattr(message, "role", None)
-    if isinstance(role, str) and role.strip():
-        return role.strip().lower()
-    return ""
-
-
-def _latest_assistant_text(msgs: list[Any]) -> str:
-    for message in reversed(list(msgs or [])[:-1]):
-        if _message_role(message) != "assistant":
-            continue
-        text = _message_text(message)
-        if text:
-            return text
-    return ""
-
-
-def _looks_like_execution_confirmation(*, text: str, msgs: list[Any]) -> bool:
-    normalized = str(text or "").strip().lower().strip("。.!！~～")
-    if not normalized or _looks_like_question(normalized):
-        return False
-    confirmation_phrases = (
-        "确认",
-        "确认继续",
-        "同意",
-        "同意执行",
-        "好的",
-        "好",
-        "行",
-        "可以",
-        "ok",
-        "okay",
-        "收到",
-        "继续",
-        "继续吧",
-        "开始吧",
-        "那你开始吧",
-        "那就开始吧",
-        "就这么办",
-        "按这个来",
-        "照这个来",
-        "就按这个来",
-        "推进吧",
-        "去推进",
-        "去做吧",
-        "那就做吧",
-        "开干",
-        "开始干",
-    )
-    if normalized not in confirmation_phrases:
-        return False
-    assistant_text = _latest_assistant_text(msgs).lower()
-    if not assistant_text:
-        return False
-    execution_cues = (
-        "进入执行编排",
-        "开始执行",
-        "开始推进",
-        "继续推进",
-        "继续执行",
-        "确认继续",
-        "同意执行",
-        "下一条进入执行编排",
-        "如果你确认",
-        "如果确认",
-        "确认后",
-        "要不要开始执行",
-        "可以开始执行",
-        "可以开始推进",
-        "当前还没进入执行阶段",
-        "进入执行阶段",
-    )
-    return any(cue in assistant_text for cue in execution_cues)
-
-
-def _looks_like_explicit_execution_request(text: str) -> bool:
-    normalized = str(text or "").strip()
-    if not normalized or _is_hypothetical_control_text(normalized):
-        return False
-    lowered = normalized.lower()
-    action_prefixes = (
-        "登录",
-        "打开",
-        "进入",
-        "点击",
-        "检查",
-        "排查",
-        "核对",
-        "核查",
-        "看看",
-        "看下",
-        "看一下",
-        "整理",
-        "生成",
-        "创建",
-        "删除",
-        "修改",
-        "提交",
-        "发送",
-        "导出",
-        "下载",
-        "上传",
-        "安装",
-        "运行",
-        "执行",
-        "启动",
-        "抓取",
-        "同步",
-    )
-    if any(lowered.startswith(prefix) for prefix in action_prefixes):
-        return True
-    direct_execution_phrases = (
-        "开始执行",
-        "现在执行",
-        "马上执行",
-        "进入执行编排",
-        "执行编排",
-        "那你开始吧",
-        "你开始吧",
-        "那就开始吧",
-        "开始吧",
-        "你来推进",
-        "帮我推进",
-        "继续推进",
-        "开始推进",
-        "推进下去",
-        "帮我落地",
-        "落地一下",
-        "开始干",
-        "开干",
-        "那就做",
-        "就去做",
-        "去做吧",
-        "你来做",
-        "按这个做",
-        "按这个推进",
-        "照这个推进",
-        "给我做计划",
-        "帮我做计划",
-    )
-    if any(phrase in lowered for phrase in direct_execution_phrases):
-        return True
-    polite_action_tokens = ("帮我", "麻烦", "请", "替我", "给我", "你来")
-    if any(token in lowered for token in polite_action_tokens) and any(
-        token in lowered
-        for token in (
-            "登录",
-            "打开",
-            "进入",
-            "点击",
-            "整理",
-            "生成",
-            "创建",
-            "删除",
-            "修改",
-            "提交",
-            "发送",
-            "导出",
-            "下载",
-            "上传",
-            "安装",
-            "运行",
-            "执行",
-            "启动",
-            "检查",
-            "排查",
-            "核对",
-            "核查",
-            "看看",
-            "看下",
-            "看一下",
-            "抓取",
-            "同步",
-            "推进",
-            "落地",
-            "开干",
-        )
-    ):
-        return True
-    return False
-
-
-def _should_use_model_auto_mode_resolution(request: AgentRequest) -> bool:
-    industry_instance_id = str(getattr(request, "industry_instance_id", "") or "").strip()
-    if industry_instance_id:
-        return True
-    control_thread_id = str(getattr(request, "control_thread_id", "") or "").strip()
-    if control_thread_id:
-        return True
-    session_kind = str(getattr(request, "session_kind", "") or "").strip().lower()
-    if session_kind.startswith("industry"):
-        return True
-    owner_scope = str(getattr(request, "owner_scope", "") or "").strip().lower()
-    return owner_scope.startswith("industry")
-
-
-def _resolve_auto_chat_mode_from_model(
+async def _resolve_auto_chat_mode(
     *,
+    query: str | None,
     request: AgentRequest,
     msgs: list[Any],
-) -> str | None:
-    if not _should_use_model_auto_mode_resolution(request):
-        return None
-    query = extract_main_brain_intake_text(msgs)
-    if not query:
-        return None
-    if _is_hypothetical_control_text(query):
-        return "chat"
-    try:
-        intake_contract = resolve_main_brain_intake_contract_sync(msgs=msgs)
-    except Exception:
-        logger.debug("Model-assisted auto mode resolution failed", exc_info=True)
-        return None
-    if intake_contract is None:
-        return None
-    if intake_contract.should_route_to_orchestrate:
-        return "orchestrate"
-    if intake_contract.intent_kind in {"discussion", "status-query", "chat"}:
-        return "chat"
-    return None
-
-
-def _resolve_auto_chat_mode(*, query: str | None, request: AgentRequest, msgs: list[Any]) -> str:
-    """Return the effective interaction mode for chat surface.
-
-    Default to main-brain autonomy: normal target-setting and execution entrustment
-    should enter orchestration unless the turn is clearly discussion-only.
-    """
+) -> str:
+    """Return the effective interaction mode for chat surface."""
     requested_actions = getattr(request, "requested_actions", None)
     if isinstance(requested_actions, list):
-        if any(str(item or "").strip() for item in requested_actions):
+        orchestrate_actions = {
+            str(item or "").strip()
+            for item in requested_actions
+            if str(item or "").strip()
+        }
+        orchestrate_actions.discard("submit_human_assist")
+        if orchestrate_actions:
             return "orchestrate"
 
     text = str(extract_main_brain_intake_text(msgs) or query or "").strip()
     if not text:
         return "chat"
-
-    lowered = text.lower()
-    if any(token in lowered for token in ("只聊天", "先聊", "不要执行", "不执行", "别执行", "仅讨论")):
+    if _is_hypothetical_control_text(text):
         return "chat"
-
-    model_mode = _resolve_auto_chat_mode_from_model(
-        request=request,
-        msgs=msgs,
-    )
-    if model_mode is not None:
-        return model_mode
-
-    if _looks_like_execution_confirmation(text=text, msgs=msgs):
-        return "orchestrate"
-
-    if _looks_like_explicit_execution_request(text):
-        return "orchestrate"
-
-    if _looks_like_goal_setting_text(text):
-        return "orchestrate"
-
-    if _looks_like_question(text):
-        return "chat"
-
-    ambiguous_markers = ("处理一下", "看一下", "帮忙", "弄一下", "搞一下", "执行一下", "做一下")
-    if any(token in lowered for token in ambiguous_markers) and len(text) <= 18:
-        return "needs_human"
-
+    try:
+        intake_contract = await resolve_request_main_brain_intake_contract(
+            request=request,
+            msgs=msgs,
+        )
+    except Exception:
+        logger.debug("Main-brain auto mode resolution failed", exc_info=True)
+        intake_contract = None
+    if intake_contract is not None:
+        _set_request_runtime_value(
+            request,
+            "_copaw_main_brain_intake_contract",
+            intake_contract,
+        )
+        if intake_contract.should_route_to_orchestrate:
+            return "orchestrate"
     return "chat"
 
 
-def _resolve_effective_interaction_mode(
+async def _resolve_effective_interaction_mode(
     *,
     request: AgentRequest,
     msgs: list[Any],
@@ -538,11 +243,52 @@ def _resolve_effective_interaction_mode(
     interaction_mode = _resolve_interaction_mode(request)
     if interaction_mode != "auto":
         return interaction_mode
-    return _resolve_auto_chat_mode(
+    return await _resolve_auto_chat_mode(
         query=query,
         request=request,
         msgs=msgs,
     )
+
+
+async def _prepare_request_interaction_mode(
+    *,
+    request: AgentRequest,
+    msgs: list[Any],
+    query: str | None,
+) -> tuple[str, str]:
+    requested_interaction_mode = str(
+        getattr(request, "_copaw_requested_interaction_mode", "") or "",
+    ).strip().lower()
+    resolved_interaction_mode = str(
+        getattr(request, "_copaw_resolved_interaction_mode", "") or "",
+    ).strip().lower()
+    if (
+        requested_interaction_mode in {"auto", "chat", "orchestrate"}
+        and resolved_interaction_mode in {"chat", "orchestrate"}
+    ):
+        return requested_interaction_mode, resolved_interaction_mode
+
+    requested_interaction_mode = _resolve_interaction_mode(request)
+    resolved_interaction_mode = await _resolve_effective_interaction_mode(
+        request=request,
+        msgs=msgs,
+        query=query,
+    )
+    _set_request_runtime_value(
+        request,
+        "_copaw_requested_interaction_mode",
+        requested_interaction_mode,
+    )
+    _set_request_runtime_value(
+        request,
+        "_copaw_resolved_interaction_mode",
+        resolved_interaction_mode,
+    )
+    if resolved_interaction_mode == "orchestrate":
+        _set_request_runtime_value(request, "interaction_mode", "orchestrate")
+    elif resolved_interaction_mode == "chat":
+        _set_request_runtime_value(request, "interaction_mode", "chat")
+    return requested_interaction_mode, resolved_interaction_mode
 
 
 class KernelTurnExecutor:
@@ -784,26 +530,11 @@ class KernelTurnExecutor:
         transient_input_message_ids: set[str] | None = None,
     ) -> AsyncIterator[tuple[Msg, bool]]:
         query = extract_main_brain_intake_text(msgs)
-        interaction_mode = _resolve_interaction_mode(request)
-        effective_interaction_mode = _resolve_effective_interaction_mode(
+        _requested_interaction_mode, effective_interaction_mode = await _prepare_request_interaction_mode(
             request=request,
             msgs=msgs,
             query=query,
         )
-        _set_request_runtime_value(
-            request,
-            "_copaw_requested_interaction_mode",
-            interaction_mode,
-        )
-        _set_request_runtime_value(
-            request,
-            "_copaw_resolved_interaction_mode",
-            effective_interaction_mode,
-        )
-        if effective_interaction_mode == "orchestrate":
-            _set_request_runtime_value(request, "interaction_mode", "orchestrate")
-        elif effective_interaction_mode == "chat":
-            _set_request_runtime_value(request, "interaction_mode", "chat")
 
         last_output_summary = None
         managed_by_kernel_dispatcher = False
@@ -812,10 +543,6 @@ class KernelTurnExecutor:
         channel = getattr(request, "channel", DEFAULT_CHANNEL)
         owner_agent_id = self._resolve_request_owner_agent_id(request)
         try:
-            if effective_interaction_mode == "needs_human":
-                yield _needs_human_mode_choice_message(query=query), True
-                return
-
             if effective_interaction_mode == "chat":
                 async for msg, last in self._main_brain_chat_service.execute_stream(
                     msgs=msgs,
@@ -1072,21 +799,10 @@ class KernelTurnExecutor:
         if not isinstance(msgs, list):
             msgs = [msgs]
 
-        requested_interaction_mode = _resolve_interaction_mode(request)
-        resolved_interaction_mode = _resolve_effective_interaction_mode(
+        requested_interaction_mode, resolved_interaction_mode = await _prepare_request_interaction_mode(
             request=request,
             msgs=msgs,
             query=extract_main_brain_intake_text(msgs),
-        )
-        _set_request_runtime_value(
-            request,
-            "_copaw_requested_interaction_mode",
-            requested_interaction_mode,
-        )
-        _set_request_runtime_value(
-            request,
-            "_copaw_resolved_interaction_mode",
-            resolved_interaction_mode,
         )
 
         seq_gen = SequenceNumberGenerator()

@@ -922,6 +922,7 @@ def test_sqlite_repositories_support_media_analysis_records(tmp_path) -> None:
         analysis_id="media-analysis-1",
         industry_instance_id="industry-1",
         thread_id="industry-chat:industry-1:execution-core",
+        work_context_id="ctx-industry-1",
         entry_point="chat",
         purpose="chat-answer",
         source_kind="link",
@@ -980,9 +981,13 @@ def test_sqlite_repositories_support_media_analysis_records(tmp_path) -> None:
     assert stored_first.timeline_summary == [{"at": "00:00", "note": "open"}]
     assert stored_first.asset_artifact_ids == ["artifact-1"]
     assert stored_first.metadata == {"source_label": "demo"}
+    assert stored_first.work_context_id == "ctx-industry-1"
 
     by_thread = media_repo.list_analyses(thread_id=first.thread_id)
     assert [item.analysis_id for item in by_thread] == [first.analysis_id]
+
+    by_work_context = media_repo.list_analyses(work_context_id="ctx-industry-1")
+    assert [item.analysis_id for item in by_work_context] == [first.analysis_id]
 
     by_entry = media_repo.list_analyses(entry_point="industry-preview")
     assert [item.analysis_id for item in by_entry] == [second.analysis_id]
@@ -1352,6 +1357,9 @@ def test_sqlite_override_repositories_crud_round_trip(tmp_path) -> None:
         suspendable=True,
         reports_to="copaw-agent-runner",
         mission="Tighten the operating loop.",
+        current_focus_kind="goal",
+        current_focus_id="goal-1",
+        current_focus="Launch runtime center",
         current_goal_id="goal-1",
         current_goal="Launch runtime center",
         industry_instance_id="industry-v1-ops",
@@ -1368,6 +1376,9 @@ def test_sqlite_override_repositories_crud_round_trip(tmp_path) -> None:
     assert stored_agent.agent_class == "business"
     assert stored_agent.employment_mode == "career"
     assert stored_agent.suspendable is True
+    assert stored_agent.current_focus_kind == "goal"
+    assert stored_agent.current_focus_id == "goal-1"
+    assert stored_agent.current_focus == "Launch runtime center"
     assert stored_agent.current_goal_id == "goal-1"
     assert stored_agent.industry_instance_id == "industry-v1-ops"
     assert stored_agent.environment_constraints == ["workspace draft/edit allowed"]

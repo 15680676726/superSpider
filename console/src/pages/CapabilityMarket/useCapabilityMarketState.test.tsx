@@ -6,9 +6,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../api", async () => {
-  const actual = await vi.importActual<typeof import("../../api")>(
-    "../../api",
-  );
+  const actual = await vi.importActual<typeof import("../../api")>("../../api");
   return {
     ...actual,
     default: {
@@ -73,9 +71,34 @@ describe("useCapabilityMarketState", () => {
 
     await waitFor(() => {
       expect(mockedGetOverview.mock.calls.length).toBeGreaterThan(initialOverviewCalls);
-      expect(mockedListTemplates.mock.calls.length).toBeGreaterThan(
-        initialTemplateCalls,
-      );
+      expect(mockedListTemplates.mock.calls.length).toBeGreaterThan(initialTemplateCalls);
+    });
+  });
+
+  it("uses a readable Chinese fallback label for the MCP category list", async () => {
+    mockedGetOverview.mockResolvedValue({ installed: [], mcp_clients: [] } as never);
+    mockedSearchMcpCatalog.mockResolvedValue({
+      items: [],
+      categories: [],
+      next_cursor: null,
+    } as never);
+    mockedListTemplates.mockResolvedValue([] as never);
+    mockedSearchCurated.mockResolvedValue({ items: [] } as never);
+
+    const { result } = renderHook(() => {
+      const [templateForm] = Form.useForm<Record<string, unknown>>();
+      const [mcpForm] = Form.useForm<Record<string, any>>();
+      const [searchParams, setSearchParams] = useState(new URLSearchParams());
+      return useCapabilityMarketState({
+        templateForm,
+        mcpForm,
+        searchParams,
+        setSearchParams,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.mcpCategoryOptions).toEqual([{ key: "all", label: "全部" }]);
     });
   });
 });

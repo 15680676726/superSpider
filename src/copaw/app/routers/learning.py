@@ -344,58 +344,6 @@ async def create_patch(
     }
 
 
-@router.post("/patches/{patch_id}/approve", response_model=dict[str, object])
-async def approve_patch(
-    service: LearningServiceDep,
-    patch_id: str,
-    payload: PatchActionRequest,
-) -> dict[str, object]:
-    try:
-        patch = service.approve_patch(patch_id, approved_by=payload.actor)
-    except KeyError as exc:
-        raise HTTPException(404, detail=str(exc)) from exc
-    return patch.model_dump(mode="json")
-
-
-@router.post("/patches/{patch_id}/reject", response_model=dict[str, object])
-async def reject_patch(
-    service: LearningServiceDep,
-    patch_id: str,
-    payload: PatchActionRequest,
-) -> dict[str, object]:
-    try:
-        patch = service.reject_patch(patch_id, rejected_by=payload.actor)
-    except KeyError as exc:
-        raise HTTPException(404, detail=str(exc)) from exc
-    return patch.model_dump(mode="json")
-
-
-@router.post("/patches/{patch_id}/apply", response_model=dict[str, object])
-async def apply_patch(
-    service: LearningServiceDep,
-    patch_id: str,
-    payload: PatchActionRequest,
-) -> dict[str, object]:
-    try:
-        patch = service.apply_patch(patch_id, applied_by=payload.actor)
-    except (KeyError, ValueError) as exc:
-        raise HTTPException(400, detail=str(exc)) from exc
-    return patch.model_dump(mode="json")
-
-
-@router.post("/patches/{patch_id}/rollback", response_model=dict[str, object])
-async def rollback_patch(
-    service: LearningServiceDep,
-    patch_id: str,
-    payload: PatchActionRequest,
-) -> dict[str, object]:
-    try:
-        patch = service.rollback_patch(patch_id, rolled_back_by=payload.actor)
-    except KeyError as exc:
-        raise HTTPException(404, detail=str(exc)) from exc
-    return patch.model_dump(mode="json")
-
-
 @router.post("/automation/auto-apply", response_model=dict[str, object])
 async def auto_apply_patches(
     service: LearningServiceDep,

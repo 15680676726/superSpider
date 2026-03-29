@@ -1,13 +1,84 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { providerApi } from "../../api/modules/provider";
 
 import {
   buildRuntimeChatRequest,
+  createRuntimeTransport,
   parseRuntimeResponseChunk,
+  queueHumanAssistSubmissionForNextMessage,
+  resetRuntimeTransportForTests,
 } from "./runtimeTransport";
 
 describe("runtimeTransport", () => {
+  afterEach(() => {
+    resetRuntimeTransportForTests();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("queues a one-shot human assist submit action for the matching thread", () => {
+    queueHumanAssistSubmissionForNextMessage(
+      "industry-chat:industry-1:execution-core",
+    );
+
+    const request = buildRuntimeChatRequest({
+      data: {
+        input: [
+          {
+            session: {
+              session_id: "session-thread",
+              user_id: "session-user",
+              channel: "session-channel",
+            },
+          },
+        ],
+      },
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      threadMeta: {
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      },
+      pendingMediaSources: [],
+      selectedMediaAnalysisIds: [],
+    });
+
+    expect(request.requested_actions).toEqual(["submit_human_assist"]);
+
+    const nextRequest = buildRuntimeChatRequest({
+      data: {
+        input: [
+          {
+            session: {
+              session_id: "session-thread",
+              user_id: "session-user",
+              channel: "session-channel",
+            },
+          },
+        ],
+      },
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      threadMeta: {
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      },
+      pendingMediaSources: [],
+      selectedMediaAnalysisIds: [],
+    });
+
+    expect(nextRequest.requested_actions).toBeUndefined();
+  });
+
   it("builds one canonical runtime chat request from session, thread meta, and media state", () => {
     const request = buildRuntimeChatRequest({
       data: {
@@ -83,6 +154,81 @@ describe("runtimeTransport", () => {
     expect(request.industry_role_name).toBe("执行中枢");
     expect(request.interaction_mode).toBe("auto");
     expect(request.stream).toBe(true);
+  });
+
+  it("sends queued human assist submissions through the real runtime transport and marks dirty on completion", async () => {
+    queueHumanAssistSubmissionForNextMessage(
+      "industry-chat:industry-1:execution-core",
+    );
+    vi.stubGlobal("BASE_URL", "http://testserver");
+    vi.spyOn(providerApi, "getActiveModels").mockResolvedValue({
+      resolved_llm: {
+        provider_id: "test-provider",
+        model: "test-model",
+      },
+    } as never);
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            object: "response",
+            status: "completed",
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      );
+    const dispatchHumanAssistDirty = vi.fn();
+    const transport = createRuntimeTransport({
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      optionsBaseUrl: undefined,
+      getThreadMeta: () => ({
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      }),
+      getPendingMediaSources: () => [],
+      clearPendingMediaDrafts: vi.fn(),
+      refreshThreadMediaAnalyses: vi.fn(),
+      getSelectedMediaAnalysisIds: () => [],
+      setRuntimeHealthNotice: vi.fn(),
+      setRuntimeWaitState: vi.fn(),
+      setShowModelPrompt: vi.fn(),
+      dispatchHumanAssistDirty,
+    });
+
+    await transport.fetch({
+      input: [
+        {
+          session: {
+            session_id: "session-thread",
+            user_id: "session-user",
+            channel: "session-channel",
+          },
+        },
+      ],
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, fetchInit] = fetchSpy.mock.calls[0];
+    const requestBody = JSON.parse(String(fetchInit?.body || "{}"));
+    expect(requestBody.requested_actions).toEqual(["submit_human_assist"]);
+    expect(requestBody.thread_id).toBe("industry-chat:industry-1:execution-core");
+    transport.responseParser(
+      JSON.stringify({
+        object: "response",
+        status: "completed",
+      }),
+    );
+    expect(dispatchHumanAssistDirty).toHaveBeenCalledTimes(1);
   });
 
   it("clears wait state and broadcasts governance refresh when a streamed response finishes", () => {

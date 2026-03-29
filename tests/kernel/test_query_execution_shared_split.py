@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from agentscope.message import Msg
-
-from copaw.kernel.main_brain_intake import resolve_main_brain_intake_contract_sync
+import copaw.kernel.main_brain_intake as main_brain_intake_module
 from copaw.kernel.query_execution_confirmation import (
     build_query_resume_request,
     runtime_decision_actions,
 )
+from copaw.kernel.query_execution_shared import _prompt_capability_bucket
 from copaw.kernel.query_execution_writeback import (
     build_chat_writeback_plan_from_model_decision,
 )
@@ -75,12 +74,13 @@ def test_build_chat_writeback_plan_from_model_decision_still_structures_fuzzy_go
     assert plan.goal.plan_steps
 
 
-def test_main_brain_intake_sync_keeps_formal_execution_resolution_alive() -> None:
-    contract = resolve_main_brain_intake_contract_sync(
-        msgs=[Msg(name="user", role="user", content="确认继续，帮我把这个目标推进下去")],
-    )
+def test_main_brain_intake_sync_helpers_removed() -> None:
+    assert not hasattr(main_brain_intake_module, "resolve_main_brain_intake_contract_sync")
+    assert not hasattr(main_brain_intake_module, "resolve_request_main_brain_intake_contract_sync")
 
-    assert contract is not None
-    assert contract.intent_kind == "execute-task"
-    assert contract.should_kickoff is True
-    assert contract.should_route_to_orchestrate is True
+
+def test_prompt_capability_bucket_treats_legacy_goal_dispatch_as_governance() -> None:
+    assert (
+        _prompt_capability_bucket("system:dispatch_goal", source_kind="system")
+        == "system_governance"
+    )

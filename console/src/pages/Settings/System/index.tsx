@@ -47,7 +47,7 @@ interface SystemAgentProfile {
   role_summary: string;
   status: string;
   risk_level: string;
-  current_goal: string;
+  current_focus?: string | null;
 }
 
 const SYSTEM_AGENTS_ROUTE = "/runtime-center/agents?view=system";
@@ -510,7 +510,7 @@ export default function SystemSettingsPage() {
                         </Tag>
                       </Space>
                       <Typography.Text type="secondary">
-                        {agent.current_goal || agent.role_summary}
+                        {agent.current_focus || agent.role_summary}
                       </Typography.Text>
                       <Typography.Text type="secondary">
                         {agent.agent_id}

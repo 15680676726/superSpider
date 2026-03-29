@@ -3,6 +3,7 @@ import { providerApi } from "../../api/modules/provider";
 import type { ActiveModelsInfo } from "../../api/types/provider";
 import type { MediaSourceSpec } from "../../api/modules/media";
 import { CHAT_RUNTIME_TEXT, normalizeThreadId } from "./chatPageHelpers";
+import { normalizeRuntimeMediaSources } from "./runtimeTransportMedia";
 import {
   extractRuntimeHealthNotice,
   hasRuntimeStartedResponding,
@@ -58,6 +59,10 @@ interface CreateRuntimeTransportArgs {
   dispatchHumanAssistDirty?: () => void;
 }
 
+type QueuedHumanAssistSubmission = {
+  threadId: string;
+};
+
 interface ParseRuntimeResponseChunkArgs {
   setRuntimeHealthNotice: (notice: RuntimeHealthNotice | null) => void;
   setRuntimeWaitState: (state: RuntimeWaitState | null) => void;
@@ -66,6 +71,32 @@ interface ParseRuntimeResponseChunkArgs {
 }
 
 const ACTIVE_MODELS_CACHE_TTL_MS = 30_000;
+let queuedHumanAssistSubmission: QueuedHumanAssistSubmission | null = null;
+
+export function queueHumanAssistSubmissionForNextMessage(threadId: string): void {
+  const normalized = firstNonEmptyString(threadId);
+  if (!normalized) {
+    return;
+  }
+  queuedHumanAssistSubmission = {
+    threadId: normalized,
+  };
+}
+
+export function resetRuntimeTransportForTests(): void {
+  queuedHumanAssistSubmission = null;
+}
+
+function consumeQueuedHumanAssistSubmission(threadId: string | null): string[] {
+  if (!queuedHumanAssistSubmission) {
+    return [];
+  }
+  if (!threadId || queuedHumanAssistSubmission.threadId !== threadId) {
+    return [];
+  }
+  queuedHumanAssistSubmission = null;
+  return ["submit_human_assist"];
+}
 
 function resolveRuntimeChatUrl(baseUrl: string | undefined): string {
   const trimmed = typeof baseUrl === "string" ? baseUrl.trim() : "";
@@ -86,46 +117,6 @@ export function firstNonEmptyString(...values: unknown[]): string | null {
     }
   }
   return null;
-}
-
-function normalizeMediaSource(value: unknown): MediaSourceSpec | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const candidate = value as Partial<MediaSourceSpec>;
-  if (typeof candidate.source_kind !== "string" || !candidate.source_kind.trim()) {
-    return null;
-  }
-  return { ...candidate, source_kind: candidate.source_kind } as MediaSourceSpec;
-}
-
-function mediaSourceKey(source: MediaSourceSpec): string {
-  return (
-    source.source_id ||
-    source.artifact_id ||
-    source.storage_uri ||
-    source.url ||
-    source.filename ||
-    JSON.stringify(source)
-  );
-}
-
-function dedupeMediaSources(items: unknown[]): MediaSourceSpec[] {
-  const deduped: MediaSourceSpec[] = [];
-  const seen = new Set<string>();
-  items.forEach((item) => {
-    const normalized = normalizeMediaSource(item);
-    if (!normalized) {
-      return;
-    }
-    const key = mediaSourceKey(normalized);
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    deduped.push(normalized);
-  });
-  return deduped;
 }
 
 function beginRuntimeWait(
@@ -208,7 +199,19 @@ export function buildRuntimeChatRequest({
       : null,
     controlThreadId ? `control-thread:${controlThreadId}` : null,
   );
-  const mediaInputs = dedupeMediaSources([
+  const requestedActions = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(biz_params?.requested_actions)
+          ? (biz_params.requested_actions as unknown[])
+          : []),
+        ...consumeQueuedHumanAssistSubmission(session_id),
+      ]
+        .map((item) => String(item || "").trim())
+        .filter((item) => item.length > 0),
+    ),
+  );
+  const mediaInputs = normalizeRuntimeMediaSources([
     ...(Array.isArray(biz_params?.media_inputs)
       ? (biz_params.media_inputs as unknown[])
       : []),
@@ -236,6 +239,7 @@ export function buildRuntimeChatRequest({
     control_thread_id: controlThreadId || undefined,
     work_context_id: workContextId || undefined,
     context_key: contextKey || undefined,
+    requested_actions: requestedActions.length > 0 ? requestedActions : undefined,
     media_analysis_ids: Array.from(
       new Set(
         [
