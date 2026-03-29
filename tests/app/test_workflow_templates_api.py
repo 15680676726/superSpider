@@ -1148,9 +1148,9 @@ def test_workflow_preview_prefers_canonical_host_twin_summary_over_stale_handoff
         continuity_source="live-handle",
         handoff_state=None,
         handoff_reason=None,
-        active_alert_families=[],
-        host_blocker_family=None,
-        host_blocker_response=None,
+        active_alert_families=["modal-uac-login"],
+        host_blocker_family="modal-uac-login",
+        host_blocker_response="handoff",
     )
     detail["host_contract"] = {
         "handoff_state": "active",
@@ -1231,6 +1231,7 @@ def test_workflow_preview_prefers_canonical_host_twin_summary_over_stale_handoff
     blocker_codes = {item["code"] for item in payload["launch_blockers"]}
     assert "host-twin-recovery-handoff-only" not in blocker_codes
     assert "host-twin-contention-forecast-blocked" not in blocker_codes
+    assert "host-twin-active-host-blockers" not in blocker_codes
 
 
 def test_workflow_run_diagnosis_keeps_host_snapshot_and_resume_rechecks_live_host_truth(
@@ -1358,6 +1359,7 @@ def test_workflow_resume_refreshes_schedule_host_meta_from_live_host_twin(
         client,
         template_id="industry-weekly-research-synthesis",
         industry_instance_id=instance_id,
+        environment_id=str(initial_detail["environment_id"]),
         session_mount_id=str(initial_detail["session_mount_id"]),
         parameters={
             "focus_area": "channel conversion",

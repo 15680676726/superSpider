@@ -1905,8 +1905,8 @@ def test_report_synthesis_deduplicates_same_topic_followups_into_one_backlog_ite
         if item["metadata"].get("synthesis_kind") == "followup-needed"
     )
     source_report_ids = followup_backlog["metadata"]["source_report_ids"]
-    assert len(source_report_ids) == 1
-    assert source_report_ids[0] in {report_a.id, report_b.id}
+    assert len(source_report_ids) == 2
+    assert set(source_report_ids) == {report_a.id, report_b.id}
 
 
 def test_failed_assignment_report_completes_original_backlog_after_followup_is_recorded(

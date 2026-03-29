@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import base64
+
+import pytest
+
 from copaw.goals import GoalService
 from copaw.kernel import KernelQueryExecutionService
+from copaw.media import MediaAnalysisRequest, MediaService, MediaSourceSpec
 from copaw.memory import (
     DerivedMemoryIndexService,
     MemoryRecallService,
@@ -11,6 +16,7 @@ from copaw.memory import (
 )
 from copaw.memory.models import MemoryRecallHit, MemoryRecallResponse
 from copaw.state import GoalRecord, SQLiteStateStore
+from copaw.evidence import EvidenceLedger
 from copaw.state.knowledge_service import StateKnowledgeService
 from copaw.state.repositories import (
     SqliteGoalRepository,
@@ -19,6 +25,7 @@ from copaw.state.repositories import (
     SqliteMemoryFactIndexRepository,
     SqliteMemoryOpinionViewRepository,
     SqliteMemoryReflectionRunRepository,
+    SqliteMediaAnalysisRepository,
     SqliteStrategyMemoryRepository,
 )
 
@@ -208,3 +215,130 @@ def test_retain_chat_writeback_creates_work_context_scoped_recall_hit(tmp_path) 
     assert hits[0].scope_id == "ctx-media-ops"
     assert hits[0].source_ref == "media-analysis:media-1"
     assert hits[0].metadata["source_ref"] == "media-analysis:media-1"
+
+
+def test_retain_chat_writeback_isolates_same_source_ref_across_work_contexts(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "memory.sqlite3")
+    store.initialize()
+    knowledge_repo = SqliteKnowledgeChunkRepository(store)
+    strategy_repo = SqliteStrategyMemoryRepository(store)
+    fact_repo = SqliteMemoryFactIndexRepository(store)
+    entity_repo = SqliteMemoryEntityViewRepository(store)
+    opinion_repo = SqliteMemoryOpinionViewRepository(store)
+    reflection_repo = SqliteMemoryReflectionRunRepository(store)
+    derived = DerivedMemoryIndexService(
+        fact_index_repository=fact_repo,
+        entity_view_repository=entity_repo,
+        opinion_view_repository=opinion_repo,
+        reflection_run_repository=reflection_repo,
+        knowledge_repository=knowledge_repo,
+        strategy_repository=strategy_repo,
+    )
+    reflection = MemoryReflectionService(
+        derived_index_service=derived,
+        entity_view_repository=entity_repo,
+        opinion_view_repository=opinion_repo,
+        reflection_run_repository=reflection_repo,
+    )
+    knowledge = StateKnowledgeService(
+        repository=knowledge_repo,
+        derived_index_service=derived,
+        reflection_service=reflection,
+    )
+    retain = MemoryRetainService(
+        knowledge_service=knowledge,
+        derived_index_service=derived,
+        reflection_service=reflection,
+    )
+    recall = MemoryRecallService(derived_index_service=derived)
+
+    retain.retain_chat_writeback(
+        industry_instance_id="industry-1",
+        work_context_id="ctx-a",
+        title="Follow-up A",
+        content="Follow-up chain A stays in context A.",
+        source_ref="media-analysis:shared-source",
+        tags=["follow-up"],
+    )
+    retain.retain_chat_writeback(
+        industry_instance_id="industry-1",
+        work_context_id="ctx-b",
+        title="Follow-up B",
+        content="Follow-up chain B stays in context B.",
+        source_ref="media-analysis:shared-source",
+        tags=["follow-up"],
+    )
+
+    chunks_a = knowledge.list_chunks(document_id="memory:work_context:ctx-a", limit=None)
+    chunks_b = knowledge.list_chunks(document_id="memory:work_context:ctx-b", limit=None)
+    assert len(chunks_a) == 1
+    assert len(chunks_b) == 1
+    assert "context A" in chunks_a[0].content
+    assert "context B" in chunks_b[0].content
+
+    hits_a = recall.recall(
+        query="follow-up chain context A",
+        work_context_id="ctx-a",
+        include_related_scopes=False,
+        limit=3,
+    ).hits
+    hits_b = recall.recall(
+        query="follow-up chain context B",
+        work_context_id="ctx-b",
+        include_related_scopes=False,
+        limit=3,
+    ).hits
+    assert hits_a and hits_b
+    assert hits_a[0].scope_type == "work_context"
+    assert hits_a[0].scope_id == "ctx-a"
+    assert hits_b[0].scope_type == "work_context"
+    assert hits_b[0].scope_id == "ctx-b"
+
+
+@pytest.mark.asyncio
+async def test_media_analysis_followup_updates_existing_analysis_work_context(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    store.initialize()
+    media_repository = SqliteMediaAnalysisRepository(store)
+    service = MediaService(
+        repository=media_repository,
+        evidence_ledger=EvidenceLedger(tmp_path / "evidence.sqlite3"),
+    )
+    payload = base64.b64encode(
+        b"Follow-up continuity notes for media analysis context binding."
+    ).decode("ascii")
+    source = MediaSourceSpec(
+        source_id="media-src:shared",
+        source_kind="upload",
+        title="Shared media note",
+        filename="shared.txt",
+        mime_type="text/plain",
+        upload_base64=payload,
+    )
+
+    first = await service.analyze(
+        MediaAnalysisRequest(
+            sources=[source],
+            industry_instance_id="industry-1",
+            thread_id="thread-initial",
+            entry_point="chat",
+            purpose="chat-answer",
+            writeback=False,
+        ),
+    )
+    assert first.analyses and first.analyses[0].work_context_id is None
+
+    second = await service.analyze(
+        MediaAnalysisRequest(
+            sources=[source],
+            industry_instance_id="industry-1",
+            thread_id="thread-followup",
+            work_context_id="ctx-followup-media",
+            entry_point="chat",
+            purpose="chat-answer",
+            writeback=False,
+        ),
+    )
+    assert second.analyses
+    assert second.analyses[0].work_context_id == "ctx-followup-media"
+    assert second.analyses[0].thread_id == "thread-followup"

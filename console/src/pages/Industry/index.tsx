@@ -25,9 +25,6 @@ import { useNavigate } from "react-router-dom";
 import type {
   IndustryCapabilityRecommendationSection,
   IndustryDraftPlan,
-  IndustryRuntimeAgentReport,
-  IndustryRuntimeAssignment,
-  IndustryRuntimeBacklogItem,
 } from "../../api/modules/industry";
 import type { MediaAnalysisSummary } from "../../api/modules/media";
 import {
@@ -84,6 +81,12 @@ import {
   deriveIndustryTeamStatus,
 } from "./pageHelpers";
 import IndustryRuntimeCockpitPanel from "./IndustryRuntimeCockpitPanel";
+import {
+  isFocusedAssignment,
+  isFocusedBacklog,
+  resolveReportWorkContextId,
+  runtimeSurfaceCardStyle,
+} from "./industryPagePresentation";
 import IndustryPlanningSurface from "./runtimePlanningSurface";
 import { useIndustryPageState } from "./useIndustryPageState";
 
@@ -103,56 +106,6 @@ function presentRecommendationSubsectionTitle(
     return "多人共用";
   }
   return normalizeSpiderMeshBrand(section.role_name || section.title) || section.title;
-}
-
-function isFocusedAssignment(
-  assignment: IndustryRuntimeAssignment,
-  selection: { selection_kind: "assignment" | "backlog"; assignment_id?: string | null } | null | undefined,
-): boolean {
-  return Boolean(
-    assignment.selected ||
-      (selection?.selection_kind === "assignment" &&
-        selection.assignment_id === assignment.assignment_id),
-  );
-}
-
-function isFocusedBacklog(
-  backlogItem: IndustryRuntimeBacklogItem,
-  selection: { selection_kind: "assignment" | "backlog"; backlog_item_id?: string | null } | null | undefined,
-): boolean {
-  return Boolean(
-    backlogItem.selected ||
-      (selection?.selection_kind === "backlog" &&
-        selection.backlog_item_id === backlogItem.backlog_item_id),
-  );
-}
-
-function resolveReportWorkContextId(report: IndustryRuntimeAgentReport): string | null {
-  const workContextId = report.work_context_id?.trim();
-  if (workContextId) {
-    return workContextId;
-  }
-  const metadata = report.metadata;
-  if (
-    metadata &&
-    typeof metadata === "object" &&
-    typeof metadata.work_context_id === "string" &&
-    metadata.work_context_id.trim()
-  ) {
-    return metadata.work_context_id.trim();
-  }
-  return null;
-}
-
-function runtimeSurfaceCardStyle(selected: boolean) {
-  return {
-    borderRadius: 12,
-    border: `1px solid ${
-      selected ? "var(--ant-primary-color, #1677ff)" : "var(--baize-border-color)"
-    }`,
-    background: selected ? "rgba(22,119,255,0.08)" : "rgba(255,255,255,0.02)",
-    boxShadow: selected ? "0 0 0 1px rgba(22,119,255,0.12)" : "none",
-  } as const;
 }
 
 export default function IndustryPage() {

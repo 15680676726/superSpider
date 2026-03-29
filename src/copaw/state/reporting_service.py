@@ -326,6 +326,24 @@ class StateReportingService:
             highlights.append(f"建议 {prediction.recommendation_count}")
         if prediction.review_count > 0:
             highlights.append(f"预测复盘 {prediction.review_count}")
+        routes = {
+            "detail": self._report_route(
+                window=window,
+                scope_type=scope_type,
+                scope_id=scope_id,
+            ),
+            "performance": self._performance_route(
+                window=window,
+                scope_type=scope_type,
+                scope_id=scope_id,
+            ),
+        }
+        work_context_ids = self._window_work_context_ids(dataset)
+        if work_context_ids:
+            routes["work_contexts"] = [
+                f"/api/runtime-center/work-contexts/{context_id}"
+                for context_id in work_context_ids
+            ]
         return ReportRecord(
             id=_report_id(
                 window=window,
@@ -390,18 +408,7 @@ class StateReportingService:
             task_ids=sorted(dataset.window_task_ids),
             goal_ids=sorted(dataset.window_goal_ids),
             agent_ids=list(dataset.agent_ids),
-            routes={
-                "detail": self._report_route(
-                    window=window,
-                    scope_type=scope_type,
-                    scope_id=scope_id,
-                ),
-                "performance": self._performance_route(
-                    window=window,
-                    scope_type=scope_type,
-                    scope_id=scope_id,
-                ),
-            },
+            routes=routes,
         )
 
     def _build_focus_items(self, dataset: _WindowDataset) -> list[str]:
@@ -444,6 +451,21 @@ class StateReportingService:
             last_error_summary=runtime.last_error_summary if runtime is not None else None,
             updated_at=_task_activity_at(task, runtime),
             route=f"/api/runtime-center/tasks/{task.id}",
+        )
+
+    def _task_continuity_suffix(self, task: TaskRecord | None) -> str:
+        if task is None:
+            return ""
+        work_context_id = _normalize_text(task.work_context_id)
+        if not work_context_id:
+            return ""
+        return f" [work_context:{work_context_id}]"
+
+    def _window_work_context_ids(self, dataset: _WindowDataset) -> list[str]:
+        return _unique_strings(
+            task.work_context_id
+            for task in dataset.tasks
+            if task.id in dataset.window_task_ids and task.work_context_id
         )
 
     def _build_completed_tasks(self, dataset: _WindowDataset) -> list[ReportTaskDigest]:
@@ -533,7 +555,7 @@ class StateReportingService:
                 or _normalize_text(task.summary)
                 or task.status
             )
-            blockers.append(f"{task.title}: {reason}")
+            blockers.append(f"{task.title}{self._task_continuity_suffix(task)}: {reason}")
         blockers.extend(
             decision.summary
             for decision in dataset.decisions
@@ -554,12 +576,13 @@ class StateReportingService:
             reverse=True,
         )
         next_steps = [
-            f"{task.title}: {_normalize_text(task.summary) or task.status}"
+            f"{task.title}{self._task_continuity_suffix(task)}: {_normalize_text(task.summary) or task.status}"
             for task in active_tasks[:5]
         ]
         if not next_steps:
+            tasks_by_id = {task.id: task for task in dataset.tasks}
             next_steps = [
-                decision.summary
+                f"{decision.summary}{self._task_continuity_suffix(tasks_by_id.get(str(decision.task_id or '')))}"
                 for decision in dataset.decisions
                 if decision.status not in {"approved", "rejected", "resolved", "cancelled"}
             ]

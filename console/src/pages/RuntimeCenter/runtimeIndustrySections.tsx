@@ -129,12 +129,41 @@ function detailText(value: unknown): string | null {
   );
 }
 
+function numberValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  const record = recordValue(value);
+  if (!record) {
+    return null;
+  }
+  const candidate = record.count ?? record.total ?? record.visible_count ?? record.recent_count;
+  if (typeof candidate === "number" && Number.isFinite(candidate)) {
+    return candidate;
+  }
+  if (typeof candidate === "string" && candidate.trim()) {
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
 function routeText(value: unknown): string | null {
   const record = recordValue(value);
   if (!record) {
     return null;
   }
   return textValue(record.route);
+}
+
+function signalSource(mainBrainMeta: Record<string, unknown>, key: string): unknown {
+  const signalMap = recordValue(mainBrainMeta.signals);
+  if (signalMap && key in signalMap) {
+    return signalMap[key];
+  }
+  return mainBrainMeta[key];
 }
 
 function buildSignal(
@@ -171,14 +200,29 @@ export function buildRuntimeIndustryCockpitSignals(
   const industryEntry = industryCard?.entries?.[0] ?? null;
   const industryRoute = textValue(industryEntry?.route) || textValue(industryCard?.entries?.[0]?.route);
 
-  const strategySource = mainBrainMeta.strategy ?? industryCard?.summary ?? industryEntry?.summary;
-  const lanesSource = mainBrainMeta.lanes ?? industryMeta.lane_count;
-  const cycleSource = mainBrainMeta.current_cycle ?? industryCard?.summary ?? industryEntry?.summary;
-  const assignmentsSource = mainBrainMeta.assignments ?? industryMeta.assignment_count;
-  const agentReportsSource = mainBrainMeta.agent_reports ?? industryMeta.report_count;
-  const evidenceSource = mainBrainMeta.evidence ?? evidenceCard?.summary ?? evidenceCard?.count;
-  const decisionsSource = mainBrainMeta.decisions ?? decisionsCard?.summary ?? decisionsCard?.count;
-  const patchesSource = mainBrainMeta.patches ?? patchesCard?.summary ?? patchesCard?.count;
+  const strategySource =
+    signalSource(mainBrainMeta, "strategy") ?? industryCard?.summary ?? industryEntry?.summary;
+  const lanesSource = signalSource(mainBrainMeta, "lanes") ?? industryMeta.lane_count;
+  const backlogSource = signalSource(mainBrainMeta, "backlog") ?? industryMeta.backlog_count;
+  const cycleSource =
+    signalSource(mainBrainMeta, "current_cycle") ?? industryCard?.summary ?? industryEntry?.summary;
+  const assignmentsSource =
+    signalSource(mainBrainMeta, "assignments") ?? industryMeta.assignment_count;
+  const agentReportsSource =
+    signalSource(mainBrainMeta, "agent_reports") ?? industryMeta.report_count;
+  const evidenceSource =
+    signalSource(mainBrainMeta, "evidence") ?? evidenceCard?.summary ?? evidenceCard?.count;
+  const decisionsSource =
+    signalSource(mainBrainMeta, "decisions") ?? decisionsCard?.summary ?? decisionsCard?.count;
+  const patchesSource =
+    signalSource(mainBrainMeta, "patches") ?? patchesCard?.summary ?? patchesCard?.count;
+  const assignmentsRoute = routeText(assignmentsSource) || industryRoute;
+  const reportsRoute = routeText(agentReportsSource) || industryRoute;
+  const unconsumedReports =
+    numberValue(recordValue(agentReportsSource)?.unconsumed_count) ||
+    numberValue(recordValue(agentReportsSource)?.pending_count) ||
+    numberValue(recordValue(agentReportsSource)?.unconsumed_reports) ||
+    0;
 
   return [
     buildSignal(
@@ -204,6 +248,14 @@ export function buildRuntimeIndustryCockpitSignals(
       "Lane detail",
     ),
     buildSignal(
+      "backlog",
+      countText(backlogSource, textValue(industryMeta.backlog_count) || "0"),
+      detailText(backlogSource) || firstTextValue(industryMeta.backlog_count),
+      routeText(backlogSource) || industryRoute,
+      "default",
+      "Backlog detail",
+    ),
+    buildSignal(
       "current_cycle",
       firstTextValue(cycleSource) || "No active cycle",
       detailText(cycleSource) ||
@@ -216,16 +268,19 @@ export function buildRuntimeIndustryCockpitSignals(
       "assignments",
       countText(assignmentsSource, textValue(industryMeta.assignment_count) || "0"),
       detailText(assignmentsSource) || firstTextValue(industryMeta.assignment_count),
-      industryRoute,
+      assignmentsRoute,
       "default",
       "Assignments detail",
     ),
     buildSignal(
       "agent_reports",
       countText(agentReportsSource, textValue(industryMeta.report_count) || "0"),
-      detailText(agentReportsSource) || firstTextValue(industryMeta.report_count),
-      industryRoute,
-      "default",
+      detailText(agentReportsSource) ||
+        (unconsumedReports > 0
+          ? `Unconsumed ${unconsumedReports}`
+          : firstTextValue(industryMeta.report_count)),
+      reportsRoute,
+      unconsumedReports > 0 ? "warning" : "default",
       "Reports detail",
     ),
     buildSignal(
@@ -253,6 +308,120 @@ export function buildRuntimeIndustryCockpitSignals(
       "Patch detail",
     ),
   ];
+}
+
+export function renderOperatorBacklogSection(
+  sectionKey: string,
+  sectionValue: unknown,
+  openRoute: (route: string, title: string) => void,
+  focusSelection?: Record<string, unknown> | null,
+) {
+  if (!Array.isArray(sectionValue)) {
+    return null;
+  }
+  const backlogItems = sectionValue.filter(isRecord);
+  const focusedBacklogId = focusedSelectionId(focusSelection, "backlog", "backlog_item_id");
+  const openCount = backlogItems.filter(
+    (item) => typeof item.status === "string" && item.status === "open",
+  ).length;
+  const queuedCount = backlogItems.filter(
+    (item) => typeof item.status === "string" && item.status === "queued",
+  ).length;
+
+  return (
+    <section key={sectionKey} className={styles.detailSection}>
+      <div className={styles.detailSectionTitle}>
+        {translateRuntimeSectionLabel(sectionKey)} <Tag>{sectionValue.length}</Tag>
+      </div>
+
+      {backlogItems.length > 0 ? (
+        <Space wrap size={[6, 6]} style={{ marginTop: 8 }}>
+          {openCount > 0 ? <Tag color="blue">{`Open ${openCount}`}</Tag> : null}
+          {queuedCount > 0 ? <Tag>{`Queued ${queuedCount}`}</Tag> : null}
+        </Space>
+      ) : null}
+
+      {sectionValue.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无内容" />
+      ) : (
+        <div className={styles.detailArray}>
+          {sectionValue.map((item, index) => {
+            if (!isRecord(item)) {
+              return (
+                <pre key={`${sectionKey}:${index}`} className={styles.detailPre}>
+                  {formatPrimitiveValue(item)}
+                </pre>
+              );
+            }
+            const backlogId =
+              typeof item.backlog_item_id === "string" && item.backlog_item_id
+                ? item.backlog_item_id
+                : null;
+            const title =
+              (typeof item.title === "string" && item.title) ||
+              (typeof item.summary === "string" && item.summary) ||
+              backlogId ||
+              `Backlog ${index + 1}`;
+            const summary = typeof item.summary === "string" ? item.summary : null;
+            const status = typeof item.status === "string" && item.status ? item.status : "unknown";
+            const sourceKind =
+              typeof item.source_kind === "string" && item.source_kind ? item.source_kind : null;
+            const route = typeof item.route === "string" && item.route ? item.route : null;
+            const selected =
+              item.selected === true || (backlogId && backlogId === focusedBacklogId);
+            const laneId = typeof item.lane_id === "string" && item.lane_id ? item.lane_id : null;
+            const cycleId =
+              typeof item.cycle_id === "string" && item.cycle_id ? item.cycle_id : null;
+            const assignmentId =
+              typeof item.assignment_id === "string" && item.assignment_id
+                ? item.assignment_id
+                : null;
+            const evidenceCount = Array.isArray(item.evidence_ids) ? item.evidence_ids.length : 0;
+            return (
+              <Card
+                key={backlogId || `${sectionKey}:${index}`}
+                size="small"
+                style={
+                  selected
+                    ? {
+                        border: "1px solid rgba(22, 119, 255, 0.35)",
+                        boxShadow: "0 0 0 1px rgba(22, 119, 255, 0.08)",
+                      }
+                    : undefined
+                }
+              >
+                <Space wrap size={[6, 6]} style={{ marginBottom: summary ? 6 : 0 }}>
+                  <Text strong>{title}</Text>
+                  <Tag color={runtimeStatusColor(status)}>{translateRuntimeStatus(status)}</Tag>
+                  {selected ? <Tag color="blue">Focused</Tag> : null}
+                  {sourceKind ? <Tag>{sourceKind}</Tag> : null}
+                  {evidenceCount > 0 ? <Tag>{`Evidence ${evidenceCount}`}</Tag> : null}
+                </Space>
+                {summary ? <Text type="secondary">{summary}</Text> : null}
+                <Space wrap size={[8, 6]} className={styles.selectionMeta}>
+                  {laneId ? <span>{`Lane ${laneId}`}</span> : null}
+                  {cycleId ? <span>{`Cycle ${cycleId}`}</span> : null}
+                  {assignmentId ? <span>{`Assignment ${assignmentId}`}</span> : null}
+                </Space>
+                {route ? (
+                  <div className={styles.routeActions}>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        openRoute(route, title);
+                      }}
+                    >
+                      Open Backlog
+                    </Button>
+                  </div>
+                ) : null}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function focusedSelectionId(

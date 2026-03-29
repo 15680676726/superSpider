@@ -113,3 +113,31 @@ def test_cron_executor_uses_scheduler_inputs_from_host_snapshot_before_session_f
     assert submitted.environment_ref == "env:from-scheduler-inputs"
     assert submitted.payload["meta"]["session_mount_id"] == "session:from-scheduler-inputs"
     assert submitted.payload["meta"]["host_snapshot"]["environment_id"] == "env:host-snapshot"
+
+
+def test_cron_executor_prefers_scheduler_host_refs_over_stale_direct_meta_refs() -> None:
+    dispatcher = _FakeKernelDispatcher()
+    executor = CronExecutor(kernel_dispatcher=dispatcher)
+    job = _agent_job(
+        meta={
+            "environment_ref": "env:stale-direct-meta",
+            "environment_id": "env:stale-direct-meta",
+            "session_mount_id": "session:stale-direct-meta",
+            "host_snapshot": {
+                "environment_id": "env:host-snapshot",
+                "session_mount_id": "session:host-snapshot",
+                "scheduler_inputs": {
+                    "environment_ref": "env:fresh-scheduler-inputs",
+                    "environment_id": "env:fresh-scheduler-inputs",
+                    "session_mount_id": "session:fresh-scheduler-inputs",
+                },
+            },
+        }
+    )
+
+    asyncio.run(executor.execute(job))
+
+    assert len(dispatcher.tasks) == 1
+    submitted = dispatcher.tasks[0]
+    assert submitted.environment_ref == "env:fresh-scheduler-inputs"
+    assert submitted.payload["meta"]["session_mount_id"] == "session:fresh-scheduler-inputs"

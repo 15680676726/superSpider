@@ -182,6 +182,16 @@ interface IndustryRuntimeCockpitPanelProps {
   onSelectBacklogFocus: (backlogItemId: string) => void;
 }
 
+interface RuntimeChainNode {
+  key: string;
+  label: string;
+  value: string;
+  note?: string | null;
+  status?: string | null;
+  actionLabel?: string | null;
+  onAction?: (() => void) | null;
+}
+
 export default function IndustryRuntimeCockpitPanel({
   detail,
   locale,
@@ -207,6 +217,118 @@ export default function IndustryRuntimeCockpitPanel({
     decision: detail.decisions.length,
     patch: detail.patches.length,
   };
+  const runtimeChainNodes: RuntimeChainNode[] = [
+    {
+      key: "carrier",
+      label: "Carrier",
+      value: detail.execution_core_identity?.role_name
+        ? normalizeSpiderMeshBrand(detail.execution_core_identity.role_name)
+        : "Execution core",
+      note: detail.execution_core_identity?.mission || null,
+      status: detail.status,
+    },
+    {
+      key: "strategy",
+      label: "Strategy",
+      value:
+        detail.strategy_memory?.north_star ||
+        detail.strategy_memory?.summary ||
+        "No strategy memory yet.",
+      note: presentList(detail.strategy_memory?.current_focuses as string[] | undefined),
+      status: String(detail.strategy_memory?.status || detail.status),
+    },
+    {
+      key: "lane",
+      label: "Lane",
+      value: `${lanes.length} lanes`,
+      note: lanes[0]?.title || null,
+      status: detail.status,
+    },
+    {
+      key: "backlog",
+      label: "Backlog",
+      value: `${detail.backlog.length} live`,
+      note: focusedBacklog?.title || detail.backlog[0]?.title || null,
+      status: focusedBacklog?.status || detail.backlog[0]?.status || detail.status,
+      actionLabel:
+        focusedBacklog?.backlog_item_id || detail.backlog[0]?.backlog_item_id
+          ? "Focus backlog"
+          : null,
+      onAction:
+        focusedBacklog?.backlog_item_id
+          ? () => onSelectBacklogFocus(focusedBacklog.backlog_item_id)
+          : detail.backlog[0]?.backlog_item_id
+            ? () => onSelectBacklogFocus(detail.backlog[0].backlog_item_id)
+            : null,
+    },
+    {
+      key: "cycle",
+      label: "Cycle",
+      value: detail.current_cycle
+        ? detail.current_cycle.title || detail.current_cycle.cycle_id
+        : "No active cycle",
+      note: detail.current_cycle?.summary || null,
+      status: detail.current_cycle?.status || detail.status,
+    },
+    {
+      key: "assignment",
+      label: "Assignment",
+      value: `${runtimeSignalCounts.assignment} live`,
+      note: focusedAssignment?.title || detail.assignments[0]?.title || null,
+      status: focusedAssignment?.status || detail.assignments[0]?.status || detail.status,
+      actionLabel:
+        focusedAssignment?.assignment_id || detail.assignments[0]?.assignment_id
+          ? "Focus assignment"
+          : null,
+      onAction:
+        focusedAssignment?.assignment_id
+          ? () => onSelectAssignmentFocus(focusedAssignment.assignment_id)
+          : detail.assignments[0]?.assignment_id
+            ? () => onSelectAssignmentFocus(detail.assignments[0].assignment_id)
+            : null,
+    },
+    {
+      key: "report",
+      label: "Report",
+      value: `${runtimeSignalCounts.report} live`,
+      note:
+        followupReports[0]?.headline ||
+        detail.agent_reports[0]?.headline ||
+        detail.agent_reports[0]?.report_id ||
+        null,
+      status: followupReports[0]?.status || detail.agent_reports[0]?.status || detail.status,
+      actionLabel: detail.agent_reports[0] ? "Open report chat" : null,
+      onAction: detail.agent_reports[0] ? () => onOpenAgentReportChat(detail.agent_reports[0]) : null,
+    },
+    {
+      key: "environment",
+      label: "Environment",
+      value: environmentVisibility.environment || "Not exposed",
+      note: environmentVisibility.hostTwinSummary || null,
+      status: detail.status,
+    },
+    {
+      key: "evidence",
+      label: "Evidence",
+      value: `${runtimeSignalCounts.evidence} records`,
+      note: detail.execution?.latest_evidence_summary || null,
+      status: detail.status,
+    },
+    {
+      key: "decision",
+      label: "Decision",
+      value: `${runtimeSignalCounts.decision} records`,
+      note: runtimeSignalCounts.decision > 0 ? "Awaiting governance consumption." : null,
+      status: runtimeSignalCounts.decision > 0 ? "guarded" : detail.status,
+    },
+    {
+      key: "patch",
+      label: "Patch",
+      value: `${runtimeSignalCounts.patch} records`,
+      note: runtimeSignalCounts.patch > 0 ? "Pending learning patch review." : null,
+      status: runtimeSignalCounts.patch > 0 ? "guarded" : detail.status,
+    },
+  ];
 
   const runtimeFocusSummary =
     focusSelection?.summary ||
@@ -432,6 +554,42 @@ export default function IndustryRuntimeCockpitPanel({
               },
             ]}
           />
+        </Space>
+      </Card>
+
+      <Card className="baize-card" size="small" title="Unified Runtime Chain">
+        <Space direction="vertical" size={8} style={{ width: "100%" }}>
+          {runtimeChainNodes.map((node) => (
+            <Card
+              key={`chain:${node.key}`}
+              size="small"
+              style={{ ...runtimeSurfaceCardStyle(false), width: "100%" }}
+            >
+              <Space
+                align="start"
+                style={{ width: "100%", justifyContent: "space-between" }}
+                wrap
+              >
+                <Space direction="vertical" size={2} style={{ minWidth: 0, flex: 1 }}>
+                  <Space wrap size={[6, 6]}>
+                    <Text strong style={{ color: "var(--baize-text-main)" }}>
+                      {node.label}
+                    </Text>
+                    <Tag color={pageRuntimeStatusColor(node.status || detail.status)}>
+                      {presentIndustryRuntimeStatus(node.status || detail.status)}
+                    </Tag>
+                  </Space>
+                  <Text>{node.value}</Text>
+                  {node.note ? <Text type="secondary">{node.note}</Text> : null}
+                </Space>
+                {node.actionLabel && node.onAction ? (
+                  <Button size="small" onClick={node.onAction}>
+                    {node.actionLabel}
+                  </Button>
+                ) : null}
+              </Space>
+            </Card>
+          ))}
         </Space>
       </Card>
 

@@ -7,6 +7,11 @@ import type {
   RuntimeHumanAssistTaskDetail,
   RuntimeHumanAssistTaskSummary,
 } from "../../api/modules/runtimeCenter";
+import {
+  buildHumanAssistDetailPresentation,
+  firstNonEmptyString,
+  normalizeTaskSummary,
+} from "./chatHumanAssistPresentation";
 import { queueHumanAssistSubmissionForNextMessage } from "./runtimeTransport";
 import styles from "./index.module.less";
 
@@ -14,42 +19,6 @@ type ChatHumanAssistPanelProps = {
   activeChatThreadId: string | null;
   threadMeta: Record<string, unknown>;
 };
-
-function firstNonEmptyString(...values: unknown[]): string | null {
-  for (const value of values) {
-    if (typeof value !== "string") {
-      continue;
-    }
-    const normalized = value.trim();
-    if (normalized) {
-      return normalized;
-    }
-  }
-  return null;
-}
-
-function normalizeTaskSummary(value: unknown): RuntimeHumanAssistTaskSummary | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  const candidate = value as Partial<RuntimeHumanAssistTaskSummary>;
-  const id = firstNonEmptyString(candidate.id);
-  const title = firstNonEmptyString(candidate.title);
-  const chatThreadId = firstNonEmptyString(candidate.chat_thread_id);
-  const route = firstNonEmptyString(candidate.route);
-  const status = firstNonEmptyString(candidate.status);
-  if (!id || !title || !chatThreadId || !route || !status) {
-    return null;
-  }
-  return {
-    ...candidate,
-    id,
-    title,
-    chat_thread_id: chatThreadId,
-    route,
-    status,
-  } as RuntimeHumanAssistTaskSummary;
-}
 
 export function resolveHumanAssistStatusPresentation(
   status: string | null | undefined,
@@ -82,24 +51,6 @@ function formatDateTime(value: string | null | undefined): string | null {
   return date.toLocaleString("zh-CN", {
     hour12: false,
   });
-}
-
-function stringList(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean);
-}
-
-function entryList(value: unknown): Array<[string, string]> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return [];
-  }
-  return Object.entries(value as Record<string, unknown>)
-    .filter(([key, entryValue]) => key !== "granted" && entryValue != null && entryValue !== "")
-    .map(([key, entryValue]) => [key, String(entryValue)]);
 }
 
 function buildErrorMessage(error: unknown, fallback: string): string {
@@ -242,16 +193,14 @@ export function ChatHumanAssistPanel({
     };
   }, [activeChatThreadId, loadTaskList, refreshCurrentTask, selectedTaskId, taskListOpen]);
 
-  const acceptanceSpec =
-    selectedTaskDetail?.task.acceptance_spec &&
-    typeof selectedTaskDetail.task.acceptance_spec === "object"
-      ? selectedTaskDetail.task.acceptance_spec
-      : {};
-  const hardAnchors = stringList((acceptanceSpec as Record<string, unknown>).hard_anchors);
-  const resultAnchors = stringList((acceptanceSpec as Record<string, unknown>).result_anchors);
-  const negativeAnchors = stringList((acceptanceSpec as Record<string, unknown>).negative_anchors);
-  const rewardPreview = entryList(selectedTaskDetail?.task.reward_preview);
-  const rewardResult = entryList(selectedTaskDetail?.task.reward_result);
+  const detailPresentation = buildHumanAssistDetailPresentation(selectedTaskDetail);
+  const {
+    hardAnchors,
+    negativeAnchors,
+    resultAnchors,
+    rewardPreview,
+    rewardResult,
+  } = detailPresentation;
   const hasTaskStrip = Boolean(activeChatThreadId);
   const currentTaskTitle = currentTask ? currentTask.title : "当前无待协作任务";
   const currentTaskStatusPresentation = resolveHumanAssistStatusPresentation(

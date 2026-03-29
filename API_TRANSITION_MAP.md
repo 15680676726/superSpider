@@ -771,9 +771,9 @@
 
 - `Full Host Digital Twin` 扩面（基线为 `Execution-Grade Host Twin`；后续仍会继续补 multi-seat/multi-agent coordination 与更长时间的 live smoke）
 - single-industry 真实世界扩面（更长周期、更高并发、更真实的 supervisor/handoff/staffing 组合）
-- 主脑 cockpit 扩面（把 `strategy / lanes / backlog / cycles / assignments / agent reports` 从读面继续推进到更完整的治理写链与可见化）
+- 主脑 cockpit 扩面（当前 repo 定义内的 unified runtime chain read surface 已收口；后续继续把 `strategy / lanes / backlog / cycles / assignments / agent reports` 推进到更完整的治理写链与可见化）
 - 回归与 live smoke 扩面（优先扩 `industry/runtime/human-assist/host recovery` 聚合回归与真实宿主链）
-- 重模块拆分（router/service/query presenter/console pages 继续下沉拆分，降低后续维护成本）
+- 重模块拆分（Chat runtime derivation / human-assist presenter / transport request 与 industry page presenter 已完成一轮下沉；router/service/query presenter/console pages 后续仍要继续拆）
 
 ### 第一优先级（Phase 1 收口）
 
@@ -873,7 +873,7 @@
 
 下一正式阶段的迁移目标不是在 `industry` 旁边再造第二套执行器，而是在现有 `IndustryService + Runtime Center` 基线之上把主脑自治对象与 API 硬切成唯一正式主链。
 
-现状（截至 `2026-03-29`）：`Runtime Center / /industry / kickoff prompt` 已把 `strategy / lanes / current cycle / assignments / agent reports` 提升为正式 planning 读面基线，但“更完整的 cockpit 写链、治理动作、回归与 live smoke 扩面”仍属于 phase-next。
+现状（截至 `2026-03-29`）：`Runtime Center / /industry / kickoff prompt` 已把 `strategy / lanes / current cycle / assignments / agent reports` 提升为正式 planning 读面基线；这一轮又继续补上 `Unified Runtime Chain` 聚合读面、`focus_kind + focus_id` drill-down、以及 `/runtime-center/reports` 的 `industry / assignment / lane / cycle / needs_followup / processed` 过滤面。但“更完整的 cockpit 写链、治理动作、回归与 live smoke 扩面”仍属于 phase-next。
 
 phase-next 候选独立 surfaces（如后续需要把 cockpit 从 `industry detail` 投影进一步拆成专用 endpoint，再锁定最终路径命名）：
 

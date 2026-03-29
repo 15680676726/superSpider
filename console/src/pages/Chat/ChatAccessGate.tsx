@@ -1,4 +1,4 @@
-import { ExclamationCircleOutlined, LinkOutlined, SettingOutlined } from "@ant-design/icons";
+import { ExclamationCircleOutlined, SettingOutlined } from "@ant-design/icons";
 import { Alert, Button, Input, Modal, Popover, Result, Space, Spin, Tag } from "antd";
 
 import type { IndustryInstanceSummary } from "../../api/modules/industry";
@@ -20,7 +20,7 @@ type ChatAccessGateProps = {
   onOpenIndustryCenter: () => void;
   onOpenWorkbench: () => void;
   onReload: () => void;
-  onOpenSuggestedIndustryChat: (instance: IndustryInstanceSummary) => Promise<void> | void;
+  onOpenSuggestedIndustryChat: (instance: IndustryInstanceSummary) => Promise<boolean>;
 };
 
 export function ChatAccessGate({
@@ -161,4 +161,3 @@ export function ChatAccessGate({
     </>
   );
 }
-

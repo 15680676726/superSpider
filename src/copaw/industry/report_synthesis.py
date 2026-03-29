@@ -129,6 +129,35 @@ def _build_report_action(
     }
 
 
+def _append_action_source_report_id(
+    action: dict[str, Any],
+    report_id: str | None,
+) -> None:
+    normalized_report_id = _string(report_id)
+    if normalized_report_id is None:
+        return
+    metadata = action.get("metadata")
+    if not isinstance(metadata, dict):
+        return
+    source_report_ids = [
+        item
+        for item in [
+            _string(value)
+            for value in (
+                metadata.get("source_report_ids")
+                if isinstance(metadata.get("source_report_ids"), list)
+                else []
+            )
+        ]
+        if item is not None
+    ]
+    if normalized_report_id not in source_report_ids:
+        source_report_ids.append(normalized_report_id)
+    metadata["source_report_ids"] = source_report_ids
+    if source_report_ids:
+        metadata["source_report_id"] = source_report_ids[0]
+
+
 def _detect_holes_and_actions(
     reports: Sequence[AgentReportRecord],
     conflicts: Sequence[dict[str, Any]],
@@ -137,11 +166,15 @@ def _detect_holes_and_actions(
     actions: list[dict[str, Any]] = []
     seen_source_refs: set[str] = set()
     seen_issue_keys: set[str] = set()
+    action_by_issue_key: dict[str, dict[str, Any]] = {}
     for report in reports:
         result = (_string(report.result) or "").lower()
         issue_key = _report_topic_key(report) or report.id
         if result in _FAILED_RESULTS:
             if issue_key in seen_issue_keys:
+                existing_action = action_by_issue_key.get(issue_key)
+                if isinstance(existing_action, dict):
+                    _append_action_source_report_id(existing_action, report.id)
                 continue
             seen_issue_keys.add(issue_key)
             holes.append(
@@ -157,12 +190,17 @@ def _detect_holes_and_actions(
                 source_ref=f"agent-report:{report.id}",
                 synthesis_kind="failed-report",
             )
+            _append_action_source_report_id(action, report.id)
+            action_by_issue_key[issue_key] = action
             if action["source_ref"] not in seen_source_refs:
                 seen_source_refs.add(action["source_ref"])
                 actions.append(action)
             continue
         if report.needs_followup or _string(report.followup_reason):
             if issue_key in seen_issue_keys:
+                existing_action = action_by_issue_key.get(issue_key)
+                if isinstance(existing_action, dict):
+                    _append_action_source_report_id(existing_action, report.id)
                 continue
             seen_issue_keys.add(issue_key)
             holes.append(
@@ -179,6 +217,8 @@ def _detect_holes_and_actions(
                 source_ref=f"agent-report-followup:{report.id}",
                 synthesis_kind="followup-needed",
             )
+            _append_action_source_report_id(action, report.id)
+            action_by_issue_key[issue_key] = action
             if action["source_ref"] not in seen_source_refs:
                 seen_source_refs.add(action["source_ref"])
                 actions.append(action)

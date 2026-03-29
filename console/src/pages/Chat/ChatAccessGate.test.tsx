@@ -11,13 +11,30 @@ const suggestedInstance: IndustryInstanceSummary = {
   label: "Northwind Robotics",
   summary: "Inspection orchestration",
   owner_scope: "industry",
+  bootstrap_kind: "industry-v1",
+  profile: {
+    schema_version: "industry-profile-v1",
+    industry: "manufacturing",
+    target_customers: [],
+    channels: [],
+    goals: [],
+    constraints: [],
+    experience_mode: "system-led",
+    operator_requirements: [],
+  },
+  team: {
+    schema_version: "industry-team-blueprint-v1",
+    team_id: "team-1",
+    label: "Robotics Team",
+    summary: "Handles inspection",
+    agents: [],
+  },
+  execution_core_identity: null,
+  strategy_memory: null,
   status: "active",
-  goal_count: 0,
-  active_goal_count: 0,
-  schedule_count: 0,
-  lane_count: 0,
-  backlog_count: 0,
-  assignment_count: 0,
+  updated_at: null,
+  stats: { total_goals: 0 },
+  routes: {},
 };
 
 describe("ChatAccessGate", () => {
@@ -29,7 +46,7 @@ describe("ChatAccessGate", () => {
     const onOpenIndustryCenter = vi.fn();
     const onOpenWorkbench = vi.fn();
     const onReload = vi.fn();
-    const onOpenSuggestedIndustryChat = vi.fn();
+    const onOpenSuggestedIndustryChat = vi.fn().mockResolvedValue(true);
 
     render(
       <ChatAccessGate

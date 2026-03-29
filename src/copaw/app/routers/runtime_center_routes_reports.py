@@ -11,6 +11,12 @@ async def list_runtime_reports(
     window: Literal["daily", "weekly", "monthly"] | None = None,
     scope_type: Literal["global", "industry", "agent"] = "global",
     scope_id: str | None = None,
+    industry_instance_id: str | None = None,
+    assignment_id: str | None = None,
+    lane_id: str | None = None,
+    cycle_id: str | None = None,
+    needs_followup: bool | None = None,
+    processed: bool | None = None,
 ) -> list[dict[str, object]]:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
     service = _get_reporting_service(request)
@@ -22,7 +28,24 @@ async def list_runtime_reports(
         )
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc).strip("'")) from exc
-    return [report.model_dump(mode="json") for report in reports]
+    payload = [report.model_dump(mode="json") for report in reports]
+
+    def _matches(report_payload: dict[str, object]) -> bool:
+        if industry_instance_id and report_payload.get("industry_instance_id") != industry_instance_id:
+            return False
+        if assignment_id and report_payload.get("assignment_id") != assignment_id:
+            return False
+        if lane_id and report_payload.get("lane_id") != lane_id:
+            return False
+        if cycle_id and report_payload.get("cycle_id") != cycle_id:
+            return False
+        if needs_followup is not None and bool(report_payload.get("needs_followup")) is not needs_followup:
+            return False
+        if processed is not None and bool(report_payload.get("processed")) is not processed:
+            return False
+        return True
+
+    return [item for item in payload if _matches(item)]
 
 
 @router.get("/performance", response_model=dict[str, object])

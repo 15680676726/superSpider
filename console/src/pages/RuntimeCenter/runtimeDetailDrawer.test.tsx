@@ -149,6 +149,19 @@ describe("runtimeDetailDrawer", () => {
                 route: "/api/runtime-center/industry/industry-1?assignment_id=assignment-1",
               } as any,
             ],
+            backlog: [
+              {
+                backlog_item_id: "backlog-1",
+                title: "Backlog item 1",
+                summary: "Follow up unconsumed operator writeback",
+                status: "open",
+                source_kind: "chat-writeback",
+                priority: 1,
+                evidence_ids: [],
+                selected: true,
+                route: "/api/runtime-center/industry/industry-1?backlog_item_id=backlog-1",
+              } as any,
+            ],
             agent_reports: [
               {
                 report_id: "report-1",
@@ -202,9 +215,10 @@ describe("runtimeDetailDrawer", () => {
     expect(screen.getByText("Main-Brain Planning")).toBeTruthy();
     expect(screen.getByText("Spider Main Chain")).toBeTruthy();
     expect(screen.getByText("Focused Assignment")).toBeTruthy();
-    expect(screen.getByText("增长获客")).toBeTruthy();
-    expect(screen.getByText("本周增长与交付协调")).toBeTruthy();
+    expect(screen.getAllByText("增长获客").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("本周增长与交付协调").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Open Assignment").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Open Backlog").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Open Report").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Unconsumed").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Needs follow-up").length).toBeGreaterThan(0);

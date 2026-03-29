@@ -35,6 +35,7 @@ import {
   renderIndustryExecutionFocusSection,
   renderIndustryMainChainSection,
   renderOperatorAgentReportsSection,
+  renderOperatorBacklogSection,
   renderOperatorAssignmentsSection,
   renderTaskReviewSection,
 } from "./runtimeIndustrySections";
@@ -155,7 +156,6 @@ export function renderDetailSection(
   sectionKey: string,
   sectionValue: unknown,
   openRoute: (route: string, title: string) => void,
-  focusSelection?: Record<string, unknown> | null,
 ) {
   if (sectionValue === null || sectionValue === undefined || sectionValue === "") {
     return null;
@@ -217,7 +217,17 @@ export function renderDetailSection(
       sectionKey,
       sectionValue,
       openRoute,
-      focusSelection,
+    );
+    if (rendered) {
+      return rendered;
+    }
+  }
+
+  if (sectionKey === "backlog") {
+    const rendered = renderOperatorBacklogSection(
+      sectionKey,
+      sectionValue,
+      openRoute,
     );
     if (rendered) {
       return rendered;
@@ -229,7 +239,6 @@ export function renderDetailSection(
       sectionKey,
       sectionValue,
       openRoute,
-      focusSelection,
     );
     if (rendered) {
       return rendered;
@@ -399,9 +408,6 @@ export function renderRuntimeDetailDrawer(
               sectionKey,
               sectionValue,
               openDetail,
-              isRecord(industryDetailPayload?.focus_selection)
-                ? industryDetailPayload.focus_selection
-                : null,
             ),
           )}
         </div>

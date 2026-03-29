@@ -426,6 +426,7 @@ _RUNTIME_SURFACE_FORMAL_KEYS = {
     "cooperative_adapter_availability",
     "workspace_graph",
     "host_twin",
+    "host_twin_summary",
     "host_event_summary",
     "host_events",
 }

@@ -1152,7 +1152,6 @@ def build_task_review_payload(
             host_twin_summary_payload.get("contention_reason")
             if host_twin_summary_payload is not None
             else None,
-            host_twin_blocker_family,
             coordination_contention.get("reason")
             if coordination_contention is not None
             else None,

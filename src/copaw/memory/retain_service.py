@@ -1,9 +1,18 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .derived_index_service import normalize_scope_id, parse_memory_document_id
+
+
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _chunk_token(value: object | None, *, fallback: str) -> str:
+    normalized = _NON_ALNUM_RE.sub("-", str(value or "").strip().lower()).strip("-")
+    return normalized or fallback
 
 
 class MemoryRetainService:
@@ -111,29 +120,49 @@ class MemoryRetainService:
         role_bindings: list[str] | None = None,
         tags: list[str] | None = None,
     ) -> object | None:
-        scope_type = "work_context" if str(work_context_id or "").strip() else "industry"
-        scope_id = str(work_context_id or industry_instance_id).strip()
+        normalized_industry_instance_id = str(industry_instance_id or "").strip()
+        normalized_work_context_id = str(work_context_id or "").strip() or None
+        scope_type = "work_context" if normalized_work_context_id else "industry"
+        scope_id = normalized_work_context_id or normalized_industry_instance_id
+        if not scope_id:
+            return None
+        normalized_source_ref = str(source_ref or "").strip()
+        chunk_id = ":".join(
+            [
+                "retain",
+                "chat-writeback",
+                _chunk_token(scope_type, fallback="scope"),
+                _chunk_token(scope_id, fallback="runtime"),
+                _chunk_token(normalized_source_ref, fallback="source"),
+            ],
+        )
         self._upsert_memory_chunk(
-            chunk_id=f"retain:chat-writeback:{normalize_scope_id(source_ref)}",
+            chunk_id=chunk_id,
             document_id=f"memory:{scope_type}:{scope_id}",
             title=title,
             content=content,
-            source_ref=source_ref,
+            source_ref=normalized_source_ref or None,
             role_bindings=role_bindings,
-            tags=["retain", "chat-writeback", *(tags or [])],
+            tags=[
+                "retain",
+                "chat-writeback",
+                f"scope:{scope_type}",
+                f"scope-id:{normalize_scope_id(scope_id)}",
+                *(tags or []),
+            ],
         )
         self._reflect_scope(
             scope_type=scope_type,
             scope_id=scope_id,
-            industry_instance_id=industry_instance_id,
+            industry_instance_id=normalized_industry_instance_id or None,
             trigger_kind="retain-chat-writeback",
         )
         return {
-            "industry_instance_id": industry_instance_id,
-            "work_context_id": work_context_id,
+            "industry_instance_id": normalized_industry_instance_id,
+            "work_context_id": normalized_work_context_id,
             "scope_type": scope_type,
             "scope_id": scope_id,
-            "source_ref": source_ref,
+            "source_ref": normalized_source_ref,
         }
 
     def retain_report_snapshot(self, report: object) -> object | None:

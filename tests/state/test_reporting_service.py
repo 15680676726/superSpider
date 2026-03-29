@@ -22,7 +22,11 @@ from copaw.state.repositories import (
 )
 
 
-def _build_service(tmp_path) -> StateReportingService:
+def _build_service(
+    tmp_path,
+    *,
+    task_two_work_context_id: str | None = None,
+) -> StateReportingService:
     store = SQLiteStateStore(tmp_path / "state.db")
     task_repository = SqliteTaskRepository(store)
     task_runtime_repository = SqliteTaskRuntimeRepository(store)
@@ -62,6 +66,7 @@ def _build_service(tmp_path) -> StateReportingService:
             task_type="analysis",
             status="failed",
             owner_agent_id="research-agent",
+            work_context_id=task_two_work_context_id,
         ),
     )
     task_runtime_repository.upsert_runtime(
@@ -305,3 +310,20 @@ def test_reporting_service_ignores_stale_scope_objects_without_window_activity(t
     assert overview["agent_breakdown"] == []
     metric_map = {metric["key"]: metric for metric in overview["metrics"]}
     assert metric_map["active_task_load"]["value"] == 0.0
+
+
+def test_reporting_service_exposes_work_context_continuity_in_followup_outputs(tmp_path) -> None:
+    service = _build_service(
+        tmp_path,
+        task_two_work_context_id="ctx-followup-chain",
+    )
+
+    weekly = service.get_report(window="weekly")
+
+    assert any("[work_context:ctx-followup-chain]" in item for item in weekly.blockers)
+    assert weekly.next_steps == [
+        "Confirm whether to rollback the signal change. [work_context:ctx-followup-chain]"
+    ]
+    assert weekly.routes["work_contexts"] == [
+        "/api/runtime-center/work-contexts/ctx-followup-chain"
+    ]

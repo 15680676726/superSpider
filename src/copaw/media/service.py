@@ -600,6 +600,12 @@ class MediaService:
         for existing in self._repository.list_analyses(limit=None):
             if existing.analysis_mode != prepared.analysis_mode:
                 continue
+            if (
+                work_context_id
+                and existing.work_context_id
+                and existing.work_context_id != work_context_id
+            ):
+                continue
             if source_hash and existing.source_hash == source_hash:
                 existing_match = existing
                 break
@@ -607,19 +613,28 @@ class MediaService:
                 existing_match = existing
                 break
         if existing_match is not None:
+            updates: dict[str, Any] = {}
+            rebind_industry = False
             if industry_instance_id and existing_match.industry_instance_id != industry_instance_id:
+                updates["industry_instance_id"] = industry_instance_id
+                rebind_industry = True
+            if thread_id and existing_match.thread_id != thread_id:
+                updates["thread_id"] = thread_id
+            if work_context_id and existing_match.work_context_id != work_context_id:
+                updates["work_context_id"] = work_context_id
+            if updates:
                 existing_match = existing_match.model_copy(
                     update={
-                        "industry_instance_id": industry_instance_id,
-                        "thread_id": thread_id or existing_match.thread_id,
-                        "work_context_id": work_context_id or existing_match.work_context_id,
+                        **updates,
                         "updated_at": _utc_now(),
-                    }
+                    },
                 )
+            if rebind_industry:
                 existing_match = await self._apply_industry_writeback(
                     existing_match,
                     industry_instance_id=industry_instance_id,
                 )
+            if updates or rebind_industry:
                 self._repository.upsert_analysis(existing_match)
             return self._summary_from_record(existing_match), warnings
 

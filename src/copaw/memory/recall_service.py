@@ -36,15 +36,28 @@ def _scope_score(entry: MemoryFactIndexRecord, selector: MemoryScopeSelector) ->
     candidates = build_scope_candidates(selector)
     if not candidates:
         return 0.0
-    entry_scope = (entry.scope_type, entry.scope_id)
+    entry_scope = (
+        str(entry.scope_type or "").strip().lower() or "global",
+        str(entry.scope_id or "").strip() or "runtime",
+    )
     if entry_scope not in candidates:
         return -0.2
     if selector.scope_type and selector.scope_id and entry_scope == (
-        selector.scope_type,
-        selector.scope_id,
+        str(selector.scope_type or "").strip().lower(),
+        str(selector.scope_id or "").strip(),
     ):
-        return 0.35
-    return 0.18
+        return 0.42
+    if selector.work_context_id and entry_scope == ("work_context", str(selector.work_context_id).strip()):
+        return 0.3
+    if selector.task_id and entry_scope == ("task", str(selector.task_id).strip()):
+        return 0.24
+    if selector.agent_id and entry_scope == ("agent", str(selector.agent_id).strip()):
+        return 0.2
+    if selector.industry_instance_id and entry_scope == ("industry", str(selector.industry_instance_id).strip()):
+        return 0.16
+    if selector.global_scope_id and entry_scope == ("global", str(selector.global_scope_id).strip()):
+        return 0.12
+    return 0.1
 
 
 def _role_matches(entry: MemoryFactIndexRecord, role: str | None) -> bool:
@@ -83,6 +96,22 @@ def _opinion_query_keys(
         if haystack and query_tokens.intersection(haystack):
             matched.add(opinion_key)
     return matched
+
+
+def _recall_view_scope(selector: MemoryScopeSelector) -> tuple[str | None, str | None]:
+    if selector.scope_type and selector.scope_id:
+        return str(selector.scope_type).strip(), str(selector.scope_id).strip()
+    for scope_type, scope_id in (
+        ("work_context", selector.work_context_id),
+        ("task", selector.task_id),
+        ("agent", selector.agent_id),
+        ("industry", selector.industry_instance_id),
+        ("global", selector.global_scope_id),
+    ):
+        normalized_scope_id = str(scope_id or "").strip()
+        if normalized_scope_id:
+            return scope_type, normalized_scope_id
+    return None, None
 
 
 def _lexical_score(
@@ -250,9 +279,24 @@ class MemoryRecallService:
         global_scope_id: str | None = None,
         include_related_scopes: bool = True,
     ) -> MemoryRecallResponse:
+        effective_scope_type = scope_type
+        effective_scope_id = scope_id
+        if (not effective_scope_type or not effective_scope_id) and not include_related_scopes:
+            for candidate_scope_type, candidate_scope_id in (
+                ("work_context", work_context_id),
+                ("task", task_id),
+                ("agent", agent_id),
+                ("industry", industry_instance_id),
+                ("global", global_scope_id),
+            ):
+                normalized_candidate_scope_id = str(candidate_scope_id or "").strip()
+                if normalized_candidate_scope_id:
+                    effective_scope_type = candidate_scope_type
+                    effective_scope_id = normalized_candidate_scope_id
+                    break
         selector = MemoryScopeSelector(
-            scope_type=scope_type,
-            scope_id=scope_id,
+            scope_type=effective_scope_type,
+            scope_id=effective_scope_id,
             task_id=task_id,
             work_context_id=work_context_id,
             agent_id=agent_id,
@@ -328,14 +372,15 @@ class MemoryRecallService:
             local_backend = self._local_backends["hybrid-local"]
 
         query_tokens = set(tokenize(query))
+        view_scope_type, view_scope_id = _recall_view_scope(selector)
         entity_views = self._derived_index_service.list_entity_views(
-            scope_type=scope_type,
-            scope_id=scope_id,
+            scope_type=view_scope_type,
+            scope_id=view_scope_id,
             limit=None,
         )
         opinion_views = self._derived_index_service.list_opinion_views(
-            scope_type=scope_type,
-            scope_id=scope_id,
+            scope_type=view_scope_type,
+            scope_id=view_scope_id,
             limit=None,
         )
         query_entity_keys = _entity_query_keys(
@@ -476,6 +521,10 @@ class MemoryRecallService:
         source_ref = metadata.get("source_ref")
         if not isinstance(source_ref, str) or not source_ref.strip():
             source_ref = entry.source_ref
+        source_ref = str(source_ref or "").strip() or entry.source_ref
+        metadata["source_ref"] = source_ref
+        metadata.setdefault("scope_type", entry.scope_type)
+        metadata.setdefault("scope_id", entry.scope_id)
         return MemoryRecallHit(
             entry_id=entry.id,
             kind=entry.source_type,

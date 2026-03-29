@@ -544,13 +544,20 @@ class FixedSopService:
         summary_recovery_mode = str(
             host_twin_summary.get("legal_recovery_mode") or "",
         ).strip()
-        if (
+        try:
+            summary_blocked_surface_count = int(
+                host_twin_summary.get("blocked_surface_count") or 0,
+            )
+        except (TypeError, ValueError):
+            summary_blocked_surface_count = 0
+        canonical_host_ready = (
             bool(host_twin_summary)
             and bool(recommended_action)
             and recommended_action not in self._HOST_PRELIGHT_BLOCKING_RESPONSES
             and summary_recovery_mode != "handoff"
-            and int(host_twin_summary.get("blocked_surface_count") or 0) == 0
-        ):
+            and summary_blocked_surface_count == 0
+        )
+        if canonical_host_ready:
             requires_human_return = False
             writable = True
             if summary_recovery_mode:
@@ -582,10 +589,16 @@ class FixedSopService:
         elif not writable:
             blocked = True
             reason = coordination_reason or reason
-        elif recommended_action in self._HOST_PRELIGHT_BLOCKING_RESPONSES:
+        elif (
+            not canonical_host_ready
+            and recommended_action in self._HOST_PRELIGHT_BLOCKING_RESPONSES
+        ):
             blocked = True
             reason = coordination_reason or reason
-        elif recommended_runtime_response in self._HOST_PRELIGHT_BLOCKING_RESPONSES:
+        elif (
+            not canonical_host_ready
+            and recommended_runtime_response in self._HOST_PRELIGHT_BLOCKING_RESPONSES
+        ):
             blocked = True
             reason = (
                 coordination_reason

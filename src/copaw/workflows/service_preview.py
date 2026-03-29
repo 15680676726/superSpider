@@ -22,6 +22,26 @@ class _WorkflowServicePreviewMixin:
     }
     _HOST_TWIN_BLOCKING_RESPONSES = {"recover", "handoff", "retry"}
 
+    def _canonical_host_summary_ready(self, host_twin_summary: dict[str, Any]) -> bool:
+        if not host_twin_summary:
+            return False
+        recommended_scheduler_action = self._first_string(
+            host_twin_summary.get("recommended_scheduler_action"),
+        )
+        legal_recovery_mode = self._first_string(
+            host_twin_summary.get("legal_recovery_mode"),
+        )
+        try:
+            blocked_surface_count = int(host_twin_summary.get("blocked_surface_count") or 0)
+        except (TypeError, ValueError):
+            blocked_surface_count = 0
+        return bool(
+            recommended_scheduler_action
+            and recommended_scheduler_action not in self._HOST_TWIN_BLOCKING_RESPONSES
+            and legal_recovery_mode != "handoff"
+            and blocked_surface_count == 0
+        )
+
     def get_run_detail(self, run_id: str) -> WorkflowRunDetail:
         run = self._workflow_run_repository.get_run(run_id)
         if run is None:
@@ -422,12 +442,22 @@ class _WorkflowServicePreviewMixin:
         preview: WorkflowTemplatePreview,
     ) -> WorkflowPreviewRequest:
         metadata = dict(run.metadata or {})
+        host_snapshot = self._mapping(metadata.get("host_snapshot"))
+        scheduler_inputs = self._mapping(host_snapshot.get("scheduler_inputs"))
         return WorkflowPreviewRequest(
             owner_scope=preview.owner_scope or run.owner_scope,
             industry_instance_id=preview.industry_instance_id or run.industry_instance_id,
             owner_agent_id=run.owner_agent_id,
-            environment_id=_string(metadata.get("environment_id")),
-            session_mount_id=_string(metadata.get("session_mount_id")),
+            environment_id=(
+                _string(scheduler_inputs.get("environment_id"))
+                or _string(host_snapshot.get("environment_id"))
+                or _string(metadata.get("environment_id"))
+            ),
+            session_mount_id=(
+                _string(scheduler_inputs.get("session_mount_id"))
+                or _string(host_snapshot.get("session_mount_id"))
+                or _string(metadata.get("session_mount_id"))
+            ),
             preset_id=_string(metadata.get("preset_id")),
             parameters=dict(run.parameter_payload or preview.parameters or {}),
         )
@@ -567,9 +597,12 @@ class _WorkflowServicePreviewMixin:
         host_twin_scheduler = self._mapping(host_twin.get("scheduler_inputs"))
         host_twin_execution_ready = self._mapping(host_twin.get("execution_mutation_ready"))
         host_twin_coordination = self._mapping(host_twin.get("coordination"))
-        host_twin_summary = (
+        explicit_host_twin_summary = (
             self._mapping(detail.get("host_twin_summary"))
             or self._mapping(host_twin.get("host_twin_summary"))
+        )
+        host_twin_summary = (
+            explicit_host_twin_summary
             or build_host_twin_summary(
                 host_twin,
                 host_companion_session=self._mapping(detail.get("host_companion_session")),
@@ -707,13 +740,8 @@ class _WorkflowServicePreviewMixin:
                     host_twin_coordination.get("recommended_scheduler_action"),
                     host_twin_scheduler.get("recommended_scheduler_action"),
                 )
-                canonical_host_ready = (
-                    bool(host_twin_summary)
-                    and bool(recommended_scheduler_action)
-                    and recommended_scheduler_action
-                    not in self._HOST_TWIN_BLOCKING_RESPONSES
-                    and legal_recovery_path != "handoff"
-                    and int(host_twin_summary.get("blocked_surface_count") or 0) == 0
+                canonical_host_ready = bool(explicit_host_twin_summary) and self._canonical_host_summary_ready(
+                    host_twin_summary,
                 )
                 if canonical_host_ready:
                     writable_surface_available = True
@@ -743,21 +771,23 @@ class _WorkflowServicePreviewMixin:
                         ),
                     )
 
-                blocking_families = set(active_alert_families)
-                host_blocker_family = self._first_string(host_blocker.get("event_family"))
-                host_blocker_response = self._first_string(
-                    host_blocker.get("recommended_runtime_response"),
-                )
-                scheduler_blocker_family = self._first_string(
-                    host_twin_scheduler.get("active_blocker_family"),
-                )
-                if scheduler_blocker_family is not None:
-                    blocking_families.add(scheduler_blocker_family)
-                if (
-                    host_blocker_family is not None
-                    and host_blocker_response in self._HOST_TWIN_BLOCKING_RESPONSES
-                ):
-                    blocking_families.add(host_blocker_family)
+                blocking_families: set[str] = set()
+                if not canonical_host_ready:
+                    blocking_families = set(active_alert_families)
+                    host_blocker_family = self._first_string(host_blocker.get("event_family"))
+                    host_blocker_response = self._first_string(
+                        host_blocker.get("recommended_runtime_response"),
+                    )
+                    scheduler_blocker_family = self._first_string(
+                        host_twin_scheduler.get("active_blocker_family"),
+                    )
+                    if scheduler_blocker_family is not None:
+                        blocking_families.add(scheduler_blocker_family)
+                    if (
+                        host_blocker_family is not None
+                        and host_blocker_response in self._HOST_TWIN_BLOCKING_RESPONSES
+                    ):
+                        blocking_families.add(host_blocker_family)
                 if blocking_families:
                     blockers.append(
                         WorkflowTemplateLaunchBlocker(
@@ -779,8 +809,9 @@ class _WorkflowServicePreviewMixin:
                     host_twin_summary.get("contention_severity"),
                     contention_forecast.get("severity"),
                 )
-                if contention_severity == "blocked" or (
-                    recommended_scheduler_action in self._HOST_TWIN_BLOCKING_RESPONSES
+                if (not canonical_host_ready) and (
+                    contention_severity == "blocked"
+                    or recommended_scheduler_action in self._HOST_TWIN_BLOCKING_RESPONSES
                 ):
                     blockers.append(
                         WorkflowTemplateLaunchBlocker(

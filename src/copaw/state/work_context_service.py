@@ -20,6 +20,20 @@ def _text(value: object | None) -> str | None:
     return text or None
 
 
+def _merge_metadata(
+    base: dict[str, Any] | None,
+    patch: dict[str, Any] | None,
+) -> dict[str, Any]:
+    merged = dict(base or {})
+    for key, value in dict(patch or {}).items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = _merge_metadata(existing, value)
+            continue
+        merged[key] = value
+    return merged
+
+
 class WorkContextService:
     """Resolve and persist formal continuous work boundaries."""
 
@@ -76,15 +90,12 @@ class WorkContextService:
                 source_kind=_text(source_kind),
                 source_ref=_text(source_ref),
                 parent_work_context_id=_text(parent_work_context_id),
-                metadata=dict(metadata or {}),
+                metadata=_merge_metadata(None, metadata),
                 created_at=now,
                 updated_at=now,
             )
             return self._repository.upsert_context(record)
-        merged_metadata = {
-            **dict(existing.metadata or {}),
-            **dict(metadata or {}),
-        }
+        merged_metadata = _merge_metadata(existing.metadata, metadata)
         updated = existing.model_copy(
             update={
                 "title": title.strip() or existing.title,

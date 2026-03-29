@@ -823,6 +823,7 @@ class _RuntimeCenterOverviewCardsSupport:
                 strategy_id=strategy_id,
                 industry_instance_id=industry_instance_id,
                 stats=stats,
+                carrier=self._mapping(industry) or {},
                 decision_count=decision_count,
                 patch_count=patch_count,
                 evidence_count=evidence_count,
@@ -854,6 +855,7 @@ class _RuntimeCenterOverviewCardsSupport:
                 strategy_id=None,
                 industry_instance_id=instance_id,
                 stats=stats,
+                carrier=self._mapping(industry) or {},
                 decision_count=decision_count,
                 patch_count=patch_count,
                 evidence_count=evidence_count,
@@ -866,6 +868,7 @@ class _RuntimeCenterOverviewCardsSupport:
         strategy_id: str | None,
         industry_instance_id: str | None,
         stats: Mapping[str, Any],
+        carrier: Mapping[str, Any],
         decision_count: int,
         patch_count: int,
         evidence_count: int,
@@ -875,17 +878,43 @@ class _RuntimeCenterOverviewCardsSupport:
         cycle_count = self._int(stats.get("cycle_count"), 0)
         assignment_count = self._int(stats.get("assignment_count"), 0)
         report_count = self._int(stats.get("report_count"), 0)
+        carrier_route = self._string(
+            (self._mapping(carrier.get("routes")) or {}).get("runtime_detail"),
+        )
+        unconsumed_report_count = self._int(
+            stats.get("unconsumed_report_count")
+            or stats.get("pending_report_count")
+            or stats.get("report_unconsumed_count"),
+            0,
+        )
         return {
             "strategy_id": strategy_id,
             "industry_instance_id": industry_instance_id,
+            "industry_route": carrier_route
+            or (
+                f"/api/runtime-center/industry/{industry_instance_id}"
+                if industry_instance_id
+                else None
+            ),
+            "carrier_label": self._string(
+                carrier.get("label")
+                or carrier.get("title")
+                or industry_instance_id,
+            ),
+            "carrier_status": self._string(carrier.get("status")),
             "lane_count": lane_count,
             "backlog_count": backlog_count,
             "cycle_count": cycle_count,
             "assignment_count": assignment_count,
             "report_count": report_count,
+            "unconsumed_report_count": unconsumed_report_count,
             "decision_count": decision_count,
             "patch_count": patch_count,
             "evidence_count": evidence_count,
+            "current_cycle_title": self._string(stats.get("current_cycle_title")),
+            "current_cycle_status": self._string(stats.get("current_cycle_status")),
+            "current_focus_count": self._int(stats.get("current_focus_count"), 0),
+            "next_cycle_due_at": self._string(stats.get("next_cycle_due_at")),
         }
 
     def _main_brain_card_meta(
@@ -895,21 +924,138 @@ class _RuntimeCenterOverviewCardsSupport:
         total: int,
     ) -> dict[str, Any]:
         entry_meta = dict(first_entry.meta or {})
-        return {
-            "strategy": {
-                "value": first_entry.title,
-                "detail": first_entry.summary,
-                "route": first_entry.route,
+        industry_route = self._string(entry_meta.get("industry_route"))
+        lane_count = self._int(entry_meta.get("lane_count"), 0)
+        backlog_count = self._int(entry_meta.get("backlog_count"), 0)
+        cycle_count = self._int(entry_meta.get("cycle_count"), 0)
+        assignment_count = self._int(entry_meta.get("assignment_count"), 0)
+        report_count = self._int(entry_meta.get("report_count"), 0)
+        unconsumed_report_count = self._int(entry_meta.get("unconsumed_report_count"), 0)
+        evidence_count = self._int(entry_meta.get("evidence_count"), 0)
+        decision_count = self._int(entry_meta.get("decision_count"), 0)
+        patch_count = self._int(entry_meta.get("patch_count"), 0)
+        cycle_title = self._string(entry_meta.get("current_cycle_title"))
+        cycle_status = self._string(entry_meta.get("current_cycle_status")) or "active"
+        cycle_focus_count = self._int(entry_meta.get("current_focus_count"), 0)
+        next_cycle_due_at = self._string(entry_meta.get("next_cycle_due_at"))
+        strategy_signal = {
+            "value": first_entry.title,
+            "detail": first_entry.summary,
+            "route": first_entry.route,
+            "status": first_entry.status,
+        }
+        signals = {
+            "carrier": {
+                "key": "carrier",
+                "value": self._string(entry_meta.get("carrier_label"))
+                or self._string(first_entry.owner)
+                or "Main Brain Carrier",
+                "detail": self._string(first_entry.owner) or first_entry.summary,
+                "route": industry_route or first_entry.route,
+                "status": self._string(entry_meta.get("carrier_status")) or first_entry.status,
             },
-            "lanes": entry_meta.get("lane_count"),
-            "current_cycle": entry_meta.get("cycle_count"),
-            "assignments": entry_meta.get("assignment_count"),
-            "agent_reports": entry_meta.get("report_count"),
-            "evidence": entry_meta.get("evidence_count"),
-            "decisions": entry_meta.get("decision_count"),
-            "patches": entry_meta.get("patch_count"),
+            "strategy": {"key": "strategy", **strategy_signal},
+            "lanes": {
+                "key": "lanes",
+                "count": lane_count,
+                "detail": f"{lane_count} lane(s) currently visible in the operating cockpit.",
+                "route": industry_route,
+            },
+            "backlog": {
+                "key": "backlog",
+                "count": backlog_count,
+                "detail": f"{backlog_count} backlog item(s) pending cycle scheduling.",
+                "route": industry_route,
+            },
+            "current_cycle": {
+                "key": "current_cycle",
+                "count": cycle_count,
+                "title": cycle_title,
+                "status": cycle_status,
+                "focus_count": cycle_focus_count if cycle_focus_count > 0 else None,
+                "next_cycle_due_at": next_cycle_due_at,
+                "detail": (
+                    f"{cycle_count} cycle(s) linked."
+                    + (
+                        f" Current cycle: {cycle_title}."
+                        if cycle_title
+                        else ""
+                    )
+                ),
+                "route": industry_route,
+            },
+            "assignments": {
+                "key": "assignments",
+                "count": assignment_count,
+                "detail": f"{assignment_count} assignment(s) currently in the runtime envelope.",
+                "route": industry_route,
+            },
+            "agent_reports": {
+                "key": "agent_reports",
+                "count": report_count,
+                "unconsumed_count": unconsumed_report_count,
+                "detail": (
+                    f"{report_count} report(s) available."
+                    + (
+                        f" {unconsumed_report_count} report(s) still unconsumed."
+                        if unconsumed_report_count > 0
+                        else ""
+                    )
+                ),
+                "route": industry_route,
+            },
+            "environment": {
+                "key": "environment",
+                "summary": "Open governance host-twin and environment continuity surface.",
+                "route": "/api/runtime-center/governance/status",
+            },
+            "evidence": {
+                "key": "evidence",
+                "count": evidence_count,
+                "detail": f"{evidence_count} evidence record(s) available for runtime replay.",
+                "route": "/api/runtime-center/evidence",
+            },
+            "decisions": {
+                "key": "decisions",
+                "count": decision_count,
+                "detail": f"{decision_count} governance decision(s) pending or recorded.",
+                "route": "/api/runtime-center/decisions",
+            },
+            "patches": {
+                "key": "patches",
+                "count": patch_count,
+                "detail": f"{patch_count} learning patch(es) tracked in runtime center.",
+                "route": "/api/runtime-center/learning/patches",
+            },
+        }
+        return {
+            "carrier": signals["carrier"],
+            "strategy": signals["strategy"],
+            "signals": signals,
+            "control_chain": [
+                signals["carrier"],
+                signals["strategy"],
+                signals["lanes"],
+                signals["backlog"],
+                signals["current_cycle"],
+                signals["assignments"],
+                signals["agent_reports"],
+                signals["environment"],
+                signals["evidence"],
+                signals["decisions"],
+                signals["patches"],
+            ],
+            "lanes": lane_count,
+            "backlog": backlog_count,
+            "current_cycle": cycle_count,
+            "assignments": assignment_count,
+            "agent_reports": report_count,
+            "evidence": evidence_count,
+            "decisions": decision_count,
+            "patches": patch_count,
             "strategy_id": entry_meta.get("strategy_id"),
             "industry_instance_id": entry_meta.get("industry_instance_id"),
+            "industry_route": industry_route,
             "visible_count": 1 if total > 0 else 0,
             "truncated": total > 1,
         }
@@ -917,13 +1063,16 @@ class _RuntimeCenterOverviewCardsSupport:
     def _summarize_main_brain_card(self, first_entry: RuntimeOverviewEntry) -> str:
         meta = dict(first_entry.meta or {})
         lane_count = self._int(meta.get("lane_count"), 0)
+        backlog_count = self._int(meta.get("backlog_count"), 0)
         assignment_count = self._int(meta.get("assignment_count"), 0)
         report_count = self._int(meta.get("report_count"), 0)
+        evidence_count = self._int(meta.get("evidence_count"), 0)
         decision_count = self._int(meta.get("decision_count"), 0)
         patch_count = self._int(meta.get("patch_count"), 0)
         return (
             "Main-brain cockpit tracks "
-            f"{lane_count} lane(s), {assignment_count} assignment(s), {report_count} report(s), "
+            f"{lane_count} lane(s), {backlog_count} backlog item(s), {assignment_count} assignment(s), "
+            f"{report_count} report(s), {evidence_count} evidence record(s), "
             f"{decision_count} decision(s), and {patch_count} patch(es)."
         )
 

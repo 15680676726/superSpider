@@ -17,6 +17,7 @@ from copaw.memory import (
     QmdRecallBackend,
 )
 from copaw.state import AgentReportRecord, SQLiteStateStore, StrategyMemoryRecord
+from copaw.state.work_context_service import WorkContextService
 from copaw.state.knowledge_service import StateKnowledgeService
 from copaw.state.repositories import (
     SqliteAgentReportRepository,
@@ -26,6 +27,7 @@ from copaw.state.repositories import (
     SqliteMemoryOpinionViewRepository,
     SqliteMemoryReflectionRunRepository,
     SqliteStrategyMemoryRepository,
+    SqliteWorkContextRepository,
 )
 from copaw.state.strategy_memory_service import StateStrategyMemoryService
 
@@ -381,6 +383,80 @@ def test_memory_retain_service_turns_agent_report_into_canonical_memory(tmp_path
     )
     assert len(fact_entries) == 1
     assert fact_entries[0].industry_instance_id == "industry-1"
+
+
+def test_memory_recall_prefers_work_context_hits_over_related_scopes(tmp_path) -> None:
+    _store, knowledge, _strategy, _retain, recall, _reflection, _derived = _build_memory_services(tmp_path)
+
+    knowledge.remember_fact(
+        title="Continuity anchor",
+        content="Use this anchor for follow-up reporting and replan continuity.",
+        scope_type="work_context",
+        scope_id="ctx-followup",
+        role_bindings=["execution-core"],
+        tags=["follow-up", "continuity"],
+    )
+    knowledge.remember_fact(
+        title="Continuity anchor",
+        content="Use this anchor for follow-up reporting and replan continuity.",
+        scope_type="industry",
+        scope_id="industry-1",
+        role_bindings=["execution-core"],
+        tags=["follow-up", "continuity"],
+    )
+
+    recalled = recall.recall(
+        query="follow-up reporting replan continuity anchor",
+        work_context_id="ctx-followup",
+        industry_instance_id="industry-1",
+        role="execution-core",
+        include_related_scopes=True,
+        limit=5,
+    )
+
+    assert recalled.hits
+    assert recalled.hits[0].scope_type == "work_context"
+    assert recalled.hits[0].scope_id == "ctx-followup"
+    assert recalled.hits[0].metadata["source_ref"] == recalled.hits[0].source_ref
+
+
+def test_work_context_service_deep_merges_metadata_payloads(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    store.initialize()
+    service = WorkContextService(
+        repository=SqliteWorkContextRepository(store),
+    )
+    created = service.ensure_context(
+        context_id="ctx-1",
+        title="Context 1",
+        metadata={
+            "continuity": {
+                "thread_id": "thread-1",
+                "scheduler": {
+                    "action": "resume",
+                },
+            },
+        },
+    )
+    updated = service.ensure_context(
+        context_id=created.id,
+        title="Context 1",
+        metadata={
+            "continuity": {
+                "scheduler": {
+                    "approved": True,
+                },
+            },
+            "notes": {
+                "owner": "execution-core",
+            },
+        },
+    )
+
+    assert updated.metadata["continuity"]["thread_id"] == "thread-1"
+    assert updated.metadata["continuity"]["scheduler"]["action"] == "resume"
+    assert updated.metadata["continuity"]["scheduler"]["approved"] is True
+    assert updated.metadata["notes"]["owner"] == "execution-core"
 
 
 def test_qmd_sidecar_materializes_derived_entries_and_reports_metadata(tmp_path) -> None:

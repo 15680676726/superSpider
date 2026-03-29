@@ -231,6 +231,7 @@ def test_synthesize_reports_collapses_duplicate_followups_for_the_same_claim() -
     assert len(synthesis["recommended_actions"]) == 1
     assert synthesis["recommended_actions"][0]["metadata"]["source_report_ids"] == [
         reports[0].id,
+        reports[1].id,
     ]
     assert synthesis["replan_reasons"] == [
         "Warehouse variance still lacks a validated cause.",

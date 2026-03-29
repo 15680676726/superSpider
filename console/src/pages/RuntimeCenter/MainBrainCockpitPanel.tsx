@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Descriptions, Skeleton, Space, Tag } from "antd";
+import { Alert, Button, Card, Descriptions, Skeleton, Space, Tag, Typography } from "antd";
 import {
   Activity,
   Bot,
@@ -44,6 +44,7 @@ const SIGNAL_ICONS: Record<string, ReactNode> = {
   carrier: <Activity size={18} color="#1B4FD8" />,
   strategy: <Waypoints size={18} color="#C9A84C" />,
   lanes: <Waypoints size={18} color="#1B4FD8" />,
+  backlog: <Waypoints size={18} color="#1B4FD8" />,
   current_cycle: <RotateCcw size={18} color="#C9A84C" />,
   assignments: <Bot size={18} color="#10b981" />,
   agent_reports: <Bot size={18} color="#10b981" />,
@@ -52,6 +53,8 @@ const SIGNAL_ICONS: Record<string, ReactNode> = {
   decisions: <ShieldAlert size={18} color="#f43f5e" />,
   patches: <RotateCcw size={18} color="#f97316" />,
 };
+
+const { Text } = Typography;
 
 function signalToneColor(signal: RuntimeCockpitSignal): string {
   switch (signal.tone) {
@@ -237,6 +240,22 @@ export default function MainBrainCockpitPanel({
   const industrySignals = buildRuntimeIndustryCockpitSignals(data);
   const surface = data?.surface;
   const signalCards = [...environmentSignals, ...industrySignals];
+  const chainOrder = [
+    "carrier",
+    "strategy",
+    "lanes",
+    "backlog",
+    "current_cycle",
+    "assignments",
+    "agent_reports",
+    "environment",
+    "evidence",
+    "decisions",
+    "patches",
+  ];
+  const chainSignals = chainOrder
+    .map((key) => signalCards.find((signal) => signal.key === key) ?? null)
+    .filter((signal): signal is RuntimeCockpitSignal => signal !== null);
 
   const carrierSignal = environmentSignals.find((signal) => signal.key === "carrier") ?? null;
   const strategySignal = industrySignals.find((signal) => signal.key === "strategy") ?? null;
@@ -346,6 +365,42 @@ export default function MainBrainCockpitPanel({
           },
         ]}
       />
+
+      {chainSignals.length > 0 ? (
+        <Card size="small" title="Unified Runtime Chain" style={{ marginBottom: 16 }}>
+          <Space direction="vertical" size={10} style={{ width: "100%" }}>
+            {chainSignals.map((signal) => (
+              <div
+                key={`chain:${signal.key}`}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <Space size={[8, 8]} wrap>
+                  <Tag color={signalToneColor(signal)}>{signal.label}</Tag>
+                  <Text strong>{signal.value}</Text>
+                  {signal.detail ? <Text type="secondary">{signal.detail}</Text> : null}
+                </Space>
+                {signal.route ? (
+                  <Button
+                    size="small"
+                    aria-label={`Open ${signal.label} chain detail`}
+                    onClick={() => {
+                      onOpenRoute(signal.route!, signal.routeTitle || signal.label);
+                    }}
+                  >
+                    Open Detail
+                  </Button>
+                ) : null}
+              </div>
+            ))}
+          </Space>
+        </Card>
+      ) : null}
 
       <section className={styles.metrics}>
         {signalCards.map((signal) => renderSignalCard(signal, onOpenRoute))}

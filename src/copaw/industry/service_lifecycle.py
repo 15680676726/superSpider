@@ -408,42 +408,99 @@ class _IndustryLifecycleMixin:
         action_metadata: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
         metadata = dict(action_metadata or {})
-        source_report_id = _string(metadata.get("source_report_id"))
-        if source_report_id is None:
-            source_report_ids = metadata.get("source_report_ids")
-            if isinstance(source_report_ids, list):
-                source_report_id = next(
-                    (
-                        _string(item)
-                        for item in source_report_ids
-                        if _string(item) is not None
-                    ),
-                    None,
-                )
-        if source_report_id is None:
+        source_report_ids = _unique_strings(
+            metadata.get("source_report_ids"),
+            metadata.get("source_report_id"),
+        )
+        if not source_report_ids:
             return {}
-        report = None
+        reports: list[AgentReportRecord] = []
         if self._agent_report_repository is not None:
             getter = getattr(self._agent_report_repository, "get_report", None)
             if callable(getter):
-                report = getter(source_report_id)
-        assignment = None
-        if report is not None and self._assignment_repository is not None:
-            assignment_id = _string(getattr(report, "assignment_id", None))
-            if assignment_id is not None:
-                getter = getattr(self._assignment_repository, "get_assignment", None)
-                if callable(getter):
-                    assignment = getter(assignment_id)
-        original_backlog_item = None
-        if assignment is not None and self._backlog_service is not None:
-            backlog_item_id = _string(getattr(assignment, "backlog_item_id", None))
-            if backlog_item_id is not None:
-                original_backlog_item = self._backlog_service.get_item(backlog_item_id)
-        return self._build_report_followup_metadata(
-            report=report,
-            assignment=assignment,
-            original_backlog_item=original_backlog_item,
+                for report_id in source_report_ids:
+                    report = getter(report_id)
+                    if isinstance(report, AgentReportRecord):
+                        reports.append(report)
+
+        contexts: list[
+            tuple[AgentReportRecord | None, AssignmentRecord | None, BacklogItemRecord | None]
+        ] = []
+        if reports:
+            seen_assignment_ids: set[str] = set()
+            assignments_by_report_id: dict[str, AssignmentRecord | None] = {}
+            if self._assignment_repository is not None:
+                assignment_getter = getattr(self._assignment_repository, "get_assignment", None)
+            else:
+                assignment_getter = None
+            if callable(assignment_getter):
+                for report in reports:
+                    assignment_id = _string(getattr(report, "assignment_id", None))
+                    assignment = None
+                    if assignment_id is not None and assignment_id not in seen_assignment_ids:
+                        assignment = assignment_getter(assignment_id)
+                        seen_assignment_ids.add(assignment_id)
+                    elif assignment_id is not None:
+                        assignment = assignments_by_report_id.get(assignment_id)
+                    assignments_by_report_id[assignment_id or ""] = assignment
+
+            for report in reports:
+                assignment = assignments_by_report_id.get(_string(report.assignment_id) or "")
+                original_backlog_item = None
+                if assignment is not None and self._backlog_service is not None:
+                    backlog_item_id = _string(getattr(assignment, "backlog_item_id", None))
+                    if backlog_item_id is not None:
+                        original_backlog_item = self._backlog_service.get_item(backlog_item_id)
+                contexts.append((report, assignment, original_backlog_item))
+        else:
+            contexts.append((None, None, None))
+
+        merged: dict[str, Any] = {}
+        for report, assignment, original_backlog_item in contexts:
+            continuity = self._build_report_followup_metadata(
+                report=report,
+                assignment=assignment,
+                original_backlog_item=original_backlog_item,
+            )
+            if not merged:
+                merged = continuity
+            elif continuity:
+                merged = self._merge_report_followup_metadata(merged, continuity)
+
+        if not merged:
+            return {}
+        merged_source_ids = _unique_strings(merged.get("source_report_ids"), source_report_ids)
+        if merged_source_ids:
+            merged["source_report_ids"] = list(merged_source_ids)
+            merged.setdefault("source_report_id", merged_source_ids[0])
+        return merged
+
+    def _merge_report_followup_metadata(
+        self,
+        base: Mapping[str, Any],
+        extra: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        merged = dict(base)
+        for key, value in extra.items():
+            if merged.get(key) in (None, "") and value not in (None, ""):
+                merged[key] = value
+        merged_surfaces = _unique_strings(
+            merged.get("seat_requested_surfaces"),
+            merged.get("chat_writeback_requested_surfaces"),
+            extra.get("seat_requested_surfaces"),
+            extra.get("chat_writeback_requested_surfaces"),
         )
+        if merged_surfaces:
+            merged["seat_requested_surfaces"] = list(merged_surfaces)
+            merged["chat_writeback_requested_surfaces"] = list(merged_surfaces)
+        merged_source_ids = _unique_strings(
+            merged.get("source_report_ids"),
+            extra.get("source_report_ids"),
+        )
+        if merged_source_ids:
+            merged["source_report_ids"] = list(merged_source_ids)
+            merged.setdefault("source_report_id", merged_source_ids[0])
+        return merged
 
     def _build_report_followup_metadata(
         self,
@@ -470,11 +527,25 @@ class _IndustryLifecycleMixin:
         )
         supervisor_owner_agent_id = _string(
             original_metadata.get("supervisor_owner_agent_id"),
+        ) or _string(
+            assignment_metadata.get("supervisor_owner_agent_id"),
+        ) or _string(
+            report_metadata.get("supervisor_owner_agent_id"),
         )
         supervisor_industry_role_id = _string(
             original_metadata.get("supervisor_industry_role_id"),
+        ) or _string(
+            assignment_metadata.get("supervisor_industry_role_id"),
+        ) or _string(
+            report_metadata.get("supervisor_industry_role_id"),
         )
-        supervisor_role_name = _string(original_metadata.get("supervisor_role_name"))
+        supervisor_role_name = _string(
+            original_metadata.get("supervisor_role_name"),
+        ) or _string(
+            assignment_metadata.get("supervisor_role_name"),
+        ) or _string(
+            report_metadata.get("supervisor_role_name"),
+        )
         for key in (
             "supervisor_owner_agent_id",
             "supervisor_industry_role_id",
@@ -3393,14 +3464,16 @@ class _IndustryLifecycleMixin:
                     assignment=assignment,
                     original_backlog_item=original_backlog_item,
                 )
-                followup_metadata.update(
-                    {
-                        "source_report_id": report.id,
-                        "owner_agent_id": report.owner_agent_id,
-                        "industry_role_id": report.owner_role_id,
-                        "report_back_mode": "summary",
-                    }
+                followup_metadata.setdefault("source_report_id", report.id)
+                followup_source_ids = _unique_strings(
+                    followup_metadata.get("source_report_ids"),
+                    report.id,
                 )
+                if followup_source_ids:
+                    followup_metadata["source_report_ids"] = list(followup_source_ids)
+                followup_metadata.setdefault("owner_agent_id", report.owner_agent_id)
+                followup_metadata.setdefault("industry_role_id", report.owner_role_id)
+                followup_metadata.setdefault("report_back_mode", "summary")
                 self._backlog_service.record_chat_writeback(
                     industry_instance_id=record.instance_id,
                     lane_id=_string(report.lane_id) or (assignment.lane_id if assignment is not None else None),

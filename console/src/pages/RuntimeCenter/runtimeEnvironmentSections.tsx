@@ -99,26 +99,6 @@ function routeText(value: unknown): string | null {
   return textValue(record.route);
 }
 
-function countText(value: unknown, fallback = "0"): string {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-  const record = signalRecordValue(value);
-  if (record) {
-    const candidate = record.count ?? record.total ?? record.visible_count ?? record.recent_count;
-    const text = textValue(candidate);
-    if (text) {
-      return text;
-    }
-    const nested = firstTextValue(record.title, record.name, record.label, record.summary);
-    if (nested) {
-      return nested;
-    }
-  }
-  const text = textValue(value);
-  return text || fallback;
-}
-
 function buildSignal(
   key: string,
   value: string,

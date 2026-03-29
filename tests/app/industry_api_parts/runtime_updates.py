@@ -1763,6 +1763,218 @@ def test_report_followup_backlog_wins_next_cycle_over_unrelated_open_backlog_whe
     assert replan_node["metrics"]["recommended_action"] is not None
 
 
+def test_failed_report_followup_uses_supervisor_metadata_without_original_backlog(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["keep governed browser/desktop follow-up stable"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    cycle_id = record.current_cycle_id
+    assert cycle_id is not None
+
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+    environment_ref = f"session:console:industry:{instance_id}"
+
+    assignment = AssignmentRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        owner_agent_id="support-specialist-agent",
+        owner_role_id="support-specialist",
+        title="Specialist browser handoff attempt",
+        summary="Try the specialist handoff path without a persisted backlog anchor.",
+        status="failed",
+        metadata={
+            "supervisor_owner_agent_id": "copaw-agent-runner",
+            "supervisor_industry_role_id": "execution-core",
+            "supervisor_role_name": "Execution Core",
+            "chat_writeback_requested_surfaces": ["browser", "desktop"],
+            "seat_requested_surfaces": ["browser", "desktop"],
+            "control_thread_id": control_thread_id,
+            "session_id": control_thread_id,
+            "environment_ref": environment_ref,
+            "recommended_scheduler_action": "handoff",
+            "decision_request_id": "decision:staffing-followup",
+            "proposal_status": "waiting-confirm",
+        },
+    )
+    app.state.assignment_repository.upsert_assignment(assignment)
+
+    report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=assignment.id,
+        owner_agent_id="support-specialist-agent",
+        owner_role_id="support-specialist",
+        headline="Specialist browser handoff failed",
+        summary="The specialist handoff remains blocked and needs governed supervisor follow-up.",
+        status="recorded",
+        result="failed",
+        findings=["Browser handoff is still blocked and must return to execution-core supervision."],
+        recommendation="Escalate this to the execution-core queue with the same control thread.",
+        processed=False,
+        work_context_id="work-context:test-supervisor-followup",
+    )
+    app.state.agent_report_repository.upsert_report(report)
+
+    processed = app.state.industry_service._process_pending_agent_reports(
+        record=record,
+        cycle_id=cycle_id,
+    )
+    assert [item.id for item in processed] == [report.id]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    followup_backlog = next(
+        item
+        for item in detail.backlog
+        if item["metadata"].get("source_report_id") == report.id
+    )
+    metadata = followup_backlog["metadata"]
+    assert metadata["supervisor_owner_agent_id"] == "copaw-agent-runner"
+    assert metadata["supervisor_industry_role_id"] == "execution-core"
+    assert metadata["owner_agent_id"] == "copaw-agent-runner"
+    assert metadata["industry_role_id"] == "execution-core"
+    assert metadata["control_thread_id"] == control_thread_id
+    assert metadata["session_id"] == control_thread_id
+    assert metadata["environment_ref"] == environment_ref
+    assert metadata["recommended_scheduler_action"] == "handoff"
+    assert metadata["work_context_id"] == report.work_context_id
+    assert "browser" in metadata["seat_requested_surfaces"]
+    assert "desktop" in metadata["seat_requested_surfaces"]
+
+
+def test_runtime_replan_node_persists_previous_cycle_synthesis_after_rollover(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["keep report synthesis continuity after cycle rollover"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    original_cycle_id = record.current_cycle_id
+    assert original_cycle_id is not None
+
+    assignment = AssignmentRecord(
+        industry_instance_id=instance_id,
+        cycle_id=original_cycle_id,
+        owner_agent_id="support-specialist-agent",
+        owner_role_id="support-specialist",
+        title="Rollover synthesis continuity check",
+        summary="Create a failed report to seed replan synthesis.",
+        status="failed",
+    )
+    app.state.assignment_repository.upsert_assignment(assignment)
+
+    report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=original_cycle_id,
+        assignment_id=assignment.id,
+        owner_agent_id="support-specialist-agent",
+        owner_role_id="support-specialist",
+        headline="Rollover synthesis continuity failed",
+        summary="The failed report should keep replan visible after cycle rollover.",
+        status="recorded",
+        result="failed",
+        findings=["A governed follow-up is still required."],
+        recommendation="Keep replan pressure visible until follow-up is dispatched.",
+        processed=False,
+    )
+    app.state.agent_report_repository.upsert_report(report)
+
+    processed = app.state.industry_service._process_pending_agent_reports(
+        record=record,
+        cycle_id=original_cycle_id,
+    )
+    assert [item.id for item in processed] == [report.id]
+
+    original_cycle = app.state.operating_cycle_repository.get_cycle(original_cycle_id)
+    assert original_cycle is not None
+    assert (original_cycle.metadata or {}).get("report_synthesis", {}).get("needs_replan") is True
+
+    rollover_cycle = app.state.operating_cycle_service.start_cycle(
+        industry_instance_id=instance_id,
+        label=record.label,
+        cycle_kind="daily",
+        status="active",
+        focus_lane_ids=[],
+        backlog_item_ids=[],
+        source_ref="test:cycle-rollover",
+        summary="Rollover cycle without direct synthesis metadata.",
+        metadata={},
+    )
+    app.state.industry_instance_repository.upsert_instance(
+        record.model_copy(
+            update={
+                "current_cycle_id": rollover_cycle.id,
+                "updated_at": rollover_cycle.updated_at,
+            },
+        ),
+    )
+
+    runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    replan_node = next(
+        node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
+    )
+    assert replan_node["status"] == "active"
+    assert replan_node["current_ref"] == original_cycle_id
+    assert replan_node["metrics"]["needs_replan"] is True
+    assert replan_node["metrics"]["replan_reason_count"] >= 1
+    assert any(
+        "requires main-brain follow-up" in reason
+        for reason in replan_node["metrics"]["replan_reasons"]
+    )
+
+
 def test_industry_chat_writeback_updates_priority_without_duplicate_history(tmp_path) -> None:
     app = _build_industry_app(tmp_path)
     client = TestClient(app)

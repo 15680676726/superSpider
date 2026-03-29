@@ -643,13 +643,18 @@ class RuntimeCenterStateQueryService:
             if isinstance(section, dict):
                 feedback[key] = dict(section)
         host_twin = feedback.get("host_twin")
+        existing_summary = feedback.get("host_twin_summary")
         if isinstance(host_twin, dict):
-            summary = build_host_twin_summary(
+            derived_summary = build_host_twin_summary(
                 host_twin,
                 host_companion_session=feedback.get("host_companion_session"),
             )
-            if summary is not None:
-                feedback["host_twin_summary"] = summary
+            if isinstance(existing_summary, dict):
+                merged_summary = dict(derived_summary or {})
+                merged_summary.update(existing_summary)
+                feedback["host_twin_summary"] = merged_summary
+            elif derived_summary is not None:
+                feedback["host_twin_summary"] = derived_summary
         return feedback
 
     def _candidate_environment_ids(self, environment_ref: str) -> list[str]:

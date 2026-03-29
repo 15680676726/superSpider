@@ -95,6 +95,11 @@ function createRuntimeCenterState() {
               count: 4,
               summary: "4 lanes active",
             },
+            backlog: {
+              count: 6,
+              summary: "6 backlog items",
+              route: "/api/runtime-center/industry/industry-1?backlog_item_id=backlog-1",
+            },
             current_cycle: {
               title: "Cycle 12",
               summary: "Weekly cadence",
@@ -224,11 +229,13 @@ describe("RuntimeCenterPage", () => {
     expect(screen.getAllByText("Strategy").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Current Cycle").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Agent Reports").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Backlog").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Cycle Deadline").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Focus Count").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Unconsumed Reports").length).toBeGreaterThan(0);
     expect(screen.getAllByText("2026-03-31 23:59Z").length).toBeGreaterThan(0);
     expect(screen.getAllByText("9").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("6").length).toBeGreaterThan(0);
     expect(screen.getAllByText("5").length).toBeGreaterThan(0);
     expect(screen.getAllByText("North star: weekly alignment").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Cycle 12").length).toBeGreaterThan(0);
@@ -239,6 +246,12 @@ describe("RuntimeCenterPage", () => {
 
     expect(mockOpenDetail).toHaveBeenCalledWith(
       "/api/runtime-center/industry/industry-1?cycle_id=cycle-12",
+      expect.any(String),
+    );
+
+    fireEvent.click(screen.getByLabelText("Open Backlog detail"));
+    expect(mockOpenDetail).toHaveBeenCalledWith(
+      "/api/runtime-center/industry/industry-1?backlog_item_id=backlog-1",
       expect.any(String),
     );
   });

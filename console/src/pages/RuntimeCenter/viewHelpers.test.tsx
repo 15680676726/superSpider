@@ -35,9 +35,16 @@ const baseDetail = {
     agents: [],
   },
   status: "active",
+  autonomy_status: null,
+  lifecycle_status: null,
   updated_at: "2026-03-26T08:00:00Z",
   stats: {},
   routes: {},
+  execution: null,
+  main_chain: null,
+  focus_selection: null,
+  strategy_memory: null,
+  execution_core_identity: null,
   goals: [],
   agents: [],
   schedules: [],
@@ -195,9 +202,13 @@ describe("runtimeCenter viewHelpers", () => {
               plan_steps: [],
               status: "active",
               priority: 1,
+              owner_scope: null,
               owner_agent_id: "agent-legacy",
               role_id: "role-legacy",
               route: "/api/runtime-center/goals/goal-legacy",
+              task_count: 0,
+              decision_count: 0,
+              evidence_count: 0,
               created_at: "2026-03-26T08:00:00Z",
               updated_at: "2026-03-26T08:00:00Z",
             },
@@ -401,6 +412,11 @@ describe("runtimeCenter viewHelpers", () => {
               count: 4,
               summary: "4 lanes active",
             },
+            backlog: {
+              count: 7,
+              summary: "7 backlog items",
+              route: "/api/runtime-center/industry/industry-1?backlog_item_id=backlog-1",
+            },
             current_cycle: {
               title: "Cycle 12",
               summary: "Weekly cadence",
@@ -410,10 +426,12 @@ describe("runtimeCenter viewHelpers", () => {
             assignments: {
               count: 3,
               summary: "3 active assignments",
+              route: "/api/runtime-center/industry/industry-1?assignment_id=assignment-1",
             },
             agent_reports: {
               count: 2,
               summary: "2 agent reports",
+              route: "/api/runtime-center/industry/industry-1?report_id=report-1",
             },
             evidence: {
               count: 5,
@@ -444,12 +462,19 @@ describe("runtimeCenter viewHelpers", () => {
       "North star: weekly alignment",
     );
     expect(industrySignals.find((signal) => signal.key === "lanes")?.value).toBe("4");
+    expect(industrySignals.find((signal) => signal.key === "backlog")?.value).toBe("7");
     expect(industrySignals.find((signal) => signal.key === "current_cycle")?.value).toBe(
       "Cycle 12",
     );
     expect(industrySignals.find((signal) => signal.key === "assignments")?.value).toBe("3");
+    expect(industrySignals.find((signal) => signal.key === "assignments")?.route).toBe(
+      "/api/runtime-center/industry/industry-1?assignment_id=assignment-1",
+    );
     expect(industrySignals.find((signal) => signal.key === "agent_reports")?.value).toBe(
       "2",
+    );
+    expect(industrySignals.find((signal) => signal.key === "agent_reports")?.route).toBe(
+      "/api/runtime-center/industry/industry-1?report_id=report-1",
     );
     expect(industrySignals.find((signal) => signal.key === "evidence")?.value).toBe("5");
     expect(industrySignals.find((signal) => signal.key === "decisions")?.value).toBe("1");

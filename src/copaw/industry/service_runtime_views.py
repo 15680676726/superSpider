@@ -190,12 +190,7 @@ class _IndustryRuntimeViewsMixin:
         )
         current_backlog_is_report_followup = (
             isinstance(current_backlog, dict)
-            and (
-                _string(_mapping(current_backlog.get("metadata")).get("source_report_id"))
-                is not None
-                or _string(_mapping(current_backlog.get("metadata")).get("synthesis_kind"))
-                == "followup-needed"
-            )
+            and self._backlog_item_is_report_followup(current_backlog)
         )
         current_assignment_status = (
             _string(current_assignment.get("status"))
@@ -289,6 +284,52 @@ class _IndustryRuntimeViewsMixin:
             "current_focus_id": current_focus_id,
             "current_focus_title": current_focus_title,
         }
+
+    def _resolve_cycle_synthesis_payload(
+        self,
+        cycle_entry: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(cycle_entry, dict):
+            return {}
+        payload = _mapping(cycle_entry.get("synthesis"))
+        if payload:
+            return payload
+        return _mapping(_mapping(cycle_entry.get("metadata")).get("report_synthesis"))
+
+    def _cycle_has_replan_payload(
+        self,
+        cycle_entry: dict[str, Any] | None,
+    ) -> bool:
+        payload = self._resolve_cycle_synthesis_payload(cycle_entry)
+        if not payload:
+            return False
+        return bool(
+            payload.get("needs_replan")
+            or list(payload.get("conflicts") or [])
+            or list(payload.get("holes") or [])
+            or list(payload.get("replan_reasons") or [])
+            or list(payload.get("recommended_actions") or [])
+        )
+
+    def _resolve_replan_cycle_entry(
+        self,
+        *,
+        current_cycle: dict[str, Any] | None,
+        current_cycle_entry: dict[str, Any] | None,
+        cycles: Sequence[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if self._cycle_has_replan_payload(current_cycle):
+            return current_cycle
+        if self._cycle_has_replan_payload(current_cycle_entry):
+            return current_cycle_entry
+        for cycle in cycles:
+            if self._cycle_has_replan_payload(cycle):
+                return cycle
+        if isinstance(current_cycle, dict):
+            return current_cycle
+        if isinstance(current_cycle_entry, dict):
+            return current_cycle_entry
+        return cycles[0] if cycles else None
 
     def _build_instance_main_chain(
         self,
@@ -412,8 +453,12 @@ class _IndustryRuntimeViewsMixin:
             if isinstance(current_cycle_entry, dict)
             else None
         )
-        replan_cycle_entry = (
-            current_cycle if isinstance(current_cycle, dict) else current_cycle_entry
+        replan_cycle_entry = self._resolve_replan_cycle_entry(
+            current_cycle=current_cycle if isinstance(current_cycle, dict) else None,
+            current_cycle_entry=(
+                current_cycle_entry if isinstance(current_cycle_entry, dict) else None
+            ),
+            cycles=[item for item in cycles if isinstance(item, dict)],
         )
         replan_cycle_id = (
             _string(replan_cycle_entry.get("cycle_id"))
@@ -712,26 +757,7 @@ class _IndustryRuntimeViewsMixin:
             if isinstance(current_backlog, dict)
             else None
         )
-        current_cycle_synthesis = _mapping(_mapping(replan_cycle_entry).get("synthesis"))
-        if not current_cycle_synthesis:
-            current_cycle_synthesis = _mapping(
-                _mapping(_mapping(replan_cycle_entry).get("metadata")).get("report_synthesis"),
-            )
-        synthesis_conflicts = list(current_cycle_synthesis.get("conflicts") or [])
-        synthesis_holes = list(current_cycle_synthesis.get("holes") or [])
-        synthesis_replan_reasons = [
-            _string(item)
-            for item in list(current_cycle_synthesis.get("replan_reasons") or [])
-            if _string(item) is not None
-        ]
-        replan_needed = bool(current_cycle_synthesis.get("needs_replan")) or bool(
-            synthesis_conflicts or synthesis_holes
-        )
-        replan_summary = (
-            f"Conflicts={len(synthesis_conflicts)}, holes={len(synthesis_holes)}; main brain should compare reports and decide whether to dispatch a follow-up cycle."
-            if replan_needed
-            else "No explicit replan request is pending."
-        )
+        current_cycle_synthesis = self._resolve_cycle_synthesis_payload(replan_cycle_entry)
         followup_backlog_items = [
             item
             for item in live_backlog_items
@@ -752,6 +778,28 @@ class _IndustryRuntimeViewsMixin:
             for surface in followup_pressure_surfaces
             if surface in {"browser", "desktop", "document", "file"}
         ]
+        followup_control_thread_ids = _unique_strings(
+            *[
+                _mapping(item.get("metadata")).get("control_thread_id")
+                for item in followup_backlog_items
+            ],
+            *[
+                _mapping(item.get("metadata")).get("session_id")
+                for item in followup_backlog_items
+            ],
+        )
+        followup_environment_refs = _unique_strings(
+            *[
+                _mapping(item.get("metadata")).get("environment_ref")
+                for item in followup_backlog_items
+            ],
+        )
+        followup_scheduler_actions = _unique_strings(
+            *[
+                _mapping(item.get("metadata")).get("recommended_scheduler_action")
+                for item in followup_backlog_items
+            ],
+        )
         pending_followup_confirmations = [
             item
             for item in followup_backlog_items
@@ -759,6 +807,33 @@ class _IndustryRuntimeViewsMixin:
             and _string(_mapping(item.get("metadata")).get("proposal_status"))
             in {"waiting-confirm", "reviewing", "submitted", "verifying", "need_more_evidence"}
         ]
+        synthesis_conflicts = list(current_cycle_synthesis.get("conflicts") or [])
+        synthesis_holes = list(current_cycle_synthesis.get("holes") or [])
+        synthesis_replan_reasons = [
+            _string(item)
+            for item in list(current_cycle_synthesis.get("replan_reasons") or [])
+            if _string(item) is not None
+        ]
+        replan_needed = bool(current_cycle_synthesis.get("needs_replan")) or bool(
+            synthesis_conflicts
+            or synthesis_holes
+            or synthesis_replan_reasons
+            or followup_backlog_items
+        )
+        if synthesis_conflicts or synthesis_holes:
+            replan_summary = (
+                f"Conflicts={len(synthesis_conflicts)}, holes={len(synthesis_holes)}; "
+                "main brain should compare reports and decide whether to dispatch a follow-up cycle."
+            )
+        elif followup_backlog_items:
+            replan_summary = (
+                f"{len(followup_backlog_items)} follow-up backlog item(s) remain open; "
+                "keep replan active until continuity pressure is closed."
+            )
+        elif replan_needed:
+            replan_summary = "Main brain should review the latest cycle synthesis before dispatching more work."
+        else:
+            replan_summary = "No explicit replan request is pending."
         recommended_replan_action = None
         if pending_followup_confirmations:
             recommended_replan_action = "close-staffing-or-human-handoff-before-dispatch"
@@ -1057,6 +1132,9 @@ class _IndustryRuntimeViewsMixin:
                     "followup_pressure_count": len(followup_backlog_items),
                     "pending_followup_confirmation_count": len(pending_followup_confirmations),
                     "followup_pressure_surfaces": followup_pressure_surfaces,
+                    "followup_control_thread_ids": followup_control_thread_ids,
+                    "followup_environment_refs": followup_environment_refs,
+                    "followup_scheduler_actions": followup_scheduler_actions,
                     "recommended_action": recommended_replan_action,
                 },
             ),

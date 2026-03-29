@@ -443,7 +443,7 @@
   `console/src/runtime/controlChainPresentation.test.ts`、
   `console/src/runtime/staffingGapPresentation.test.ts`
   与 `console tsc --noEmit` 验证。
-- 高阶遗留已明显下降，但 `Chat/index.tsx` 仍是当前最大的前端重文件；后续如继续压缩，应优先再拆 sidebar / media shell，而不是回头堆平行 surface。
+- 高阶遗留已明显下降；`Chat/index.tsx` 的 runtime derivation、human-assist presentation 与 transport request 组装已继续下沉。当前若再压缩，优先应继续拆 sidebar / media shell，而不是回头堆平行 surface。
 - 仍需持续做性能和交互回归
 
 ### 4.4 第三优先级：媒体与记忆闭环继续接线
@@ -483,25 +483,28 @@
 
 ### 6.1 长期自治成熟态硬清单（`2026-03-29`）
 
-1. execution-side 宿主成熟态：`[基线已验收到 Execution-Grade Host Twin；phase-next=Full Host Digital Twin 扩面]`
-   - 现状：`Seat Runtime / Workspace Graph / Host Event Bus / host_twin` 已是正式运行边界；stale blocker/history 抑制、workflow/fixed-SOP host-aware 执行链、Runtime Center `Host Twin` 结构化读面与 canonical `host_twin_summary` 现均已补入同一条真实主链并完成宽回归。
+1. execution-side 宿主成熟态：`[基线已验收到 Execution-Grade Host Twin；当前 repo 定义内的 host-truth 收口已完成；phase-next=Full Host Digital Twin 继续扩面]`
+   - 现状：`Seat Runtime / Workspace Graph / Host Event Bus / host_twin` 已是正式运行边界；runtime query / workflow preview-run-resume / cron / fixed-SOP / Runtime Center 现统一优先消费显式 canonical `host_twin_summary`，只有在 summary 缺位时才回退 raw blocker/handoff metadata，不再把 stale handoff/blocker history 误判成 live 阻断。
    - 下一阶段扩面：更多 `app_family_twins`、更深的 multi-seat/multi-agent coordination，以及更长时间的 live-host simulation / companion-session smoke。
-2. single-industry 真实世界覆盖：`[已跑通单行业闭环基线；phase-next=真实世界扩面 + 更宽回归/live smoke]`
-   - 现状：`strategy -> lane -> backlog -> cycle -> assignment -> report -> synthesis/replan` 已成正式主链；focused subview、staffing closure、report drill-down、planning surface，以及 `staffing approval -> materialization -> failed report -> follow-up backlog -> replan` 的长跑链路都已有正式回归。
+2. single-industry 真实世界覆盖：`[当前 repo 定义内的长跑 continuity 收口已完成；phase-next=真实世界扩面 + 更宽回归/live smoke]`
+   - 现状：`strategy -> lane -> backlog -> cycle -> assignment -> report -> synthesis/replan` 已成正式主链；failed-report follow-up 现在会累积 `source_report_ids`、在缺少原 backlog link 时继续保留 supervisor continuity、并把 `control_thread/session/environment/recommended_scheduler_action` 持续带入 runtime replan/focus 读面，`replan` 也不会在 cycle rollover 后静默丢失。
    - 下一阶段扩面：更长周期、更高并发、更多 supervisor/handoff/staffing 组合与跨 vertical 的真实世界长跑 smoke。
-3. 媒体/记忆闭环：`[已打通 work_context 基线；phase-next=更宽 ingestion/retrieval/writeback 回归与并发压力]`
-   - 现状：`analysis -> memory recall -> strategy/execution` 已补上 `work_context_id` 优先读链，媒体 analyze/adopt/retain/recall 与聊天附件 writeback 已形成正式 `work_context` 闭环。
+3. 媒体/记忆闭环：`[当前 repo 定义内的 continuity 收口已完成；phase-next=更宽 ingestion/retrieval/writeback 回归与并发压力]`
+   - 现状：`analysis -> memory recall -> strategy/execution` 已补上 `work_context_id` 优先读链；chat writeback retain 现使用 scope-aware chunk id，跨 `work_context` 的同一 `source_ref` 不再互相覆盖；recall 对 `work_context` scope 的优先级和 strict fallback 已补严，report/work-context 路由也会把同一 continuity key 显式回给前台。
    - 下一阶段扩面：更大范围的 live ingestion/retrieval/writeback 组合 smoke，以及更重的多线程共享 work-context 压力回归。
-4. Goal 叶子兼容边界：`[已清零到显式 leaf dispatch family]`
+4. 主脑 cockpit / Unified Runtime Chain：`[当前 repo 定义内的统一运行中心 read surface 已收口；phase-next=治理写链与更大 live smoke]`
+   - 现状：`Runtime Center / /industry` 现已把 `carrier / strategy / lanes / backlog / cycle / assignment / report / environment / evidence / decision / patch` 补成同一条 `Unified Runtime Chain` 读面；`/runtime-center/industry/{instance_id}` 已支持 `focus_kind + focus_id` drill-down，`/runtime-center/reports` 也已支持按 `industry / assignment / lane / cycle / needs_followup / processed` 过滤，不再只剩 detail 卡堆叠。
+   - 下一阶段扩面：如后续继续把 cockpit 从聚合读面推进到更多治理写面或独立 surface，应继续经 `MainBrainOrchestrator` 收口，不另造第二执行器。
+5. Goal 叶子兼容边界：`[已清零到显式 leaf dispatch family]`
    - 现状：公开 `/goals` frontdoor、公开 `GET /goals/{goal_id}`、retired dispatch alias 与旧公共 `dispatch_goal(...)` 名称都已退役；当前只剩显式 `compile_goal_dispatch / dispatch_goal_execute_now / dispatch_goal_background / dispatch_goal_deferred_background` 这组 leaf dispatch family，prediction 侧只保留启动期 retired recommendation 清理，已不再构成运行期 compat 分支。
-5. hard-cut 全量收口：`[合同硬切已锁住基线；phase-next=更宽回归 + live smoke]`
+6. hard-cut 全量收口：`[合同硬切已锁住基线；phase-next=更宽回归 + live smoke]`
    - 现状：retired frontdoor、legacy goal alias、runtime-center 写面与治理壳的关键合同已锁住，并已补到更宽的 industry/runtime/workflow/fixed-SOP 聚合回归。
    - 下一阶段扩面：如继续补 live smoke，属于更大阶段的成熟态验证，不再是当前这张尾巴清单里的已知漏项。
 - `2026-03-29` 补充：phase-next smoke 现已继续覆盖 `host recovery reentry / schedule pause-resume / human-assist resume / shared work_context_id / evidence-decision-patch continuity`。对应 `tests/app/test_phase_next_autonomy_smoke.py`、`tests/app/test_runtime_human_assist_tasks_api.py`、`tests/app/runtime_center_api_parts/overview_governance.py` 与 `tests/app/runtime_center_api_parts/detail_environment.py` 的聚合回归已再次通过。
-6. 重模块继续拆分：`[持续工程 / 非当前尾巴清单阻断项]`
-   - 现状：`/industry` planning surface、Chat transport media、Runtime Center environment section 等已开始拆成更小读面组件。
+7. 重模块继续拆分：`[持续工程 / 非当前尾巴清单阻断项]`
+   - 现状：`/industry` planning surface、Chat transport media、Runtime Center environment section 等已开始拆成更小读面组件；Chat runtime derivation、human-assist presentation、transport request assembly 与 industry page focus/work-context presenter 也已正式下沉到独立 helper，不再继续堆回页级组件。
    - 下一阶段扩面：行业层超重 service、Runtime Center/Chat 仍有重文件需要继续下沉与切片；这属于持续治理，不再是当前闭环验收的挂账尾巴。
-- `2026-03-29` 补充：重模块拆分本轮又完成一轮正式下沉。`runtime_center_routes_core.py` 已抽出共享 list/detail query helper，Chat 侧也已把 runtime model/wait/session-thread normalization 与 human-assist status presentation 下沉到独立 helper；这些派生读逻辑不再继续堆回 `Chat/index.tsx` 与路由主文件里。
+- `2026-03-29` 补充：重模块拆分本轮又完成一轮正式下沉。`runtime_center_routes_core.py` 已抽出共享 list/detail query helper；Chat 侧现已继续拆出 `chatRuntimePresentation / chatHumanAssistPresentation / runtimeTransportRequest`，行业页也已补出共享 `industryPagePresentation`；这些派生读逻辑不再继续堆回 `Chat/index.tsx` 与页级路由主文件里。
 
 ---
 

@@ -304,20 +304,20 @@ class CronExecutor:
             else {}
         )
         environment_ref = (
-            _string_value(meta.get("environment_ref"))
-            or _string_value(scheduler_inputs.get("environment_ref"))
+            _string_value(scheduler_inputs.get("environment_ref"))
             or _string_value(host_snapshot.get("environment_ref"))
-            or _string_value(meta.get("environment_id"))
             or _string_value(scheduler_inputs.get("environment_id"))
             or _string_value(host_snapshot.get("environment_id"))
+            or _string_value(meta.get("environment_ref"))
+            or _string_value(meta.get("environment_id"))
         )
         host_meta: Dict[str, Any] = {}
         if environment_ref is not None:
             host_meta["environment_ref"] = environment_ref
         session_mount_id = (
-            _string_value(meta.get("session_mount_id"))
-            or _string_value(scheduler_inputs.get("session_mount_id"))
+            _string_value(scheduler_inputs.get("session_mount_id"))
             or _string_value(host_snapshot.get("session_mount_id"))
+            or _string_value(meta.get("session_mount_id"))
         )
         if session_mount_id is not None:
             host_meta["session_mount_id"] = session_mount_id

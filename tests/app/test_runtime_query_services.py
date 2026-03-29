@@ -792,6 +792,143 @@ def test_runtime_query_services_read_state_backed_surfaces(tmp_path) -> None:
     }
 
 
+def test_runtime_query_services_prefer_canonical_top_level_host_twin_summary(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    schedule_repository = SqliteScheduleRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
+
+    timestamp = datetime(2026, 3, 29, 13, 0, tzinfo=timezone.utc)
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-host-summary-canonical-1",
+            title="Canonical host summary check",
+            summary="Ensure canonical top-level host summary wins over stale nested metadata.",
+            task_type="system:dispatch_query",
+            status="running",
+            owner_agent_id="ops-agent",
+            acceptance_criteria='{"kind":"kernel-task-meta-v1"}',
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-host-summary-canonical-1",
+            runtime_status="active",
+            current_phase="executing",
+            risk_level="guarded",
+            active_environment_id="session:console:canonical-host-summary",
+            last_result_summary="Canonical host summary indicates reentry is clean.",
+            last_owner_agent_id="ops-agent",
+            updated_at=timestamp,
+        ),
+    )
+
+    class StubEnvironmentService:
+        def get_session_detail(
+            self,
+            session_mount_id: str,
+            *,
+            limit: int = 20,
+        ) -> dict[str, object] | None:
+            _ = limit
+            if session_mount_id != "session:console:canonical-host-summary":
+                return None
+            return {
+                "id": session_mount_id,
+                "host_companion_session": {
+                    "session_mount_id": session_mount_id,
+                    "environment_id": "env:canonical-host-summary",
+                    "continuity_status": "attached",
+                    "continuity_source": "live-handle",
+                },
+                "host_twin_summary": {
+                    "recommended_scheduler_action": "proceed",
+                    "blocked_surface_count": 0,
+                    "legal_recovery_mode": "resume-environment",
+                    "contention_severity": "clear",
+                    "contention_reason": "clean-reentry",
+                    "seat_owner_ref": "ops-agent",
+                    "active_app_family_keys": ["office_document"],
+                },
+                "host_twin": {
+                    "continuity": {
+                        "status": "attached",
+                        "valid": True,
+                    },
+                    "legal_recovery": {
+                        "path": "handoff",
+                        "resume_kind": "resume-runtime",
+                    },
+                    "blocked_surfaces": [
+                        {
+                            "surface_kind": "desktop_app",
+                            "surface_ref": "window:excel:orders",
+                            "reason": "stale-captcha",
+                            "event_family": "modal-uac-login",
+                        },
+                    ],
+                    "coordination": {
+                        "recommended_scheduler_action": "handoff",
+                        "contention_forecast": {
+                            "severity": "blocked",
+                            "reason": "stale-captcha",
+                        },
+                    },
+                    "host_twin_summary": {
+                        "recommended_scheduler_action": "handoff",
+                        "blocked_surface_count": 1,
+                        "legal_recovery_mode": "handoff",
+                        "contention_severity": "blocked",
+                        "contention_reason": "stale-captcha",
+                    },
+                },
+                "host_contract": {
+                    "handoff_state": "handoff-required",
+                    "handoff_reason": "stale-handoff",
+                    "blocked_reason": "stale-host-blocker",
+                },
+                "recovery": {
+                    "status": "pending",
+                    "mode": "attach-environment",
+                },
+            }
+
+        def get_environment_detail(
+            self,
+            env_id: str,
+            *,
+            limit: int = 20,
+        ) -> dict[str, object] | None:
+            _ = env_id, limit
+            return None
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        schedule_repository=schedule_repository,
+        decision_request_repository=decision_request_repository,
+        evidence_ledger=evidence_ledger,
+        environment_service=StubEnvironmentService(),
+    )
+
+    review = state_query.get_task_review("task-host-summary-canonical-1")
+    assert review is not None
+    review_payload = review["review"]
+    assert (
+        review_payload["execution_runtime"]["host_twin_summary"]["recommended_scheduler_action"]
+        == "proceed"
+    )
+    assert review_payload["execution_runtime"]["host_twin_summary"]["blocked_surface_count"] == 0
+    assert review_payload["continuity"]["handoff"]["state"] is None
+    assert not any("Handoff:" in line for line in review_payload["summary_lines"])
+
+
 def test_runtime_query_services_expose_human_assist_task_surfaces(tmp_path) -> None:
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
     evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")

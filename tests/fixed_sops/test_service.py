@@ -387,6 +387,8 @@ def test_fixed_sop_service_ignores_stale_handoff_metadata_when_canonical_summary
         requires_human_return=True,
         legal_recovery_path="handoff",
         legal_recovery_reason="stale handoff metadata should not block canonical proceed",
+        host_blocker_family="modal-uac-login",
+        host_blocker_response="handoff",
     )
     detail["host_twin"]["host_twin_summary"] = {
         "active_app_family_keys": ["office_document"],

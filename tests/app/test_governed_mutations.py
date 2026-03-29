@@ -7,6 +7,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from copaw.capabilities.models import CapabilityMount, CapabilitySummary
+
 from copaw.app.routers.capabilities import router as capabilities_router
 
 
@@ -28,21 +30,59 @@ class _FakeDispatcher:
 
 
 class _FakeCapabilityService:
-    def get_capability(self, capability_id: str):
-        enabled = capability_id != "skill:missing"
-        if capability_id in {"skill:research", "system:set_capability_enabled"}:
-            return SimpleNamespace(
-                id=capability_id,
-                enabled=enabled,
+    def __init__(self) -> None:
+        self._public_mounts: dict[str, CapabilityMount] = {
+            "skill:research": CapabilityMount(
+                id="skill:research",
+                name="Research Capability",
+                summary="Test capability for research workflows.",
+                kind="skill-bundle",
                 risk_level="guarded",
-            )
-        return None
+            ),
+            "system:set_capability_enabled": CapabilityMount(
+                id="system:set_capability_enabled",
+                name="Set Capability Enabled",
+                summary="Governed mutation for toggling capability enablement.",
+                kind="system-op",
+                risk_level="guarded",
+            ),
+        }
+
+    def get_capability(self, capability_id: str):
+        return self._public_mounts.get(capability_id)
+
+    def get_public_capability(self, capability_id: str):
+        return self._public_mounts.get(capability_id)
 
     def list_capabilities(self, *, kind=None, enabled_only=False):
-        return []
+        return self.list_public_capabilities(kind=kind, enabled_only=enabled_only)
+
+    def list_public_capabilities(self, *, kind=None, enabled_only=False):
+        mounts = list(self._public_mounts.values())
+        if kind is not None:
+            mounts = [mount for mount in mounts if mount.kind == kind]
+        if enabled_only:
+            mounts = [mount for mount in mounts if mount.enabled]
+        return mounts
 
     def summarize(self):
-        return SimpleNamespace(total=0, enabled=0, by_kind={})
+        return self.summarize_public()
+
+    def summarize_public(self):
+        mounts = list(self._public_mounts.values())
+        return CapabilitySummary(
+            total=len(mounts),
+            enabled=sum(1 for mount in mounts if mount.enabled),
+            by_kind=self._count_by_attr(mounts, "kind"),
+            by_source=self._count_by_attr(mounts, "source_kind"),
+        )
+
+    def _count_by_attr(self, mounts: list[CapabilityMount], attr: str) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for mount in mounts:
+            key = getattr(mount, attr)
+            counts[key] = counts.get(key, 0) + 1
+        return counts
 
 
 def build_app() -> FastAPI:

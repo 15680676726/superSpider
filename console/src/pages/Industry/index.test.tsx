@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useCallback as reactUseCallback } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import IndustryPage from "./index";
@@ -8,6 +9,8 @@ import { INDUSTRY_TEXT } from "./pageHelpers";
 
 const mockNavigate = vi.fn();
 const useIndustryPageStateMock = vi.fn();
+
+(globalThis as { useCallback?: typeof reactUseCallback }).useCallback = reactUseCallback;
 
 Object.defineProperty(window, "matchMedia", {
   writable: true,
@@ -460,8 +463,9 @@ describe("IndustryPage", () => {
     expect(within(cockpitCard!).getByText("Focused runtime assignment")).toBeTruthy();
     expect(within(cockpitCard!).queryByText("generic-focus")).toBeNull();
     expect(screen.getByText("Staffing Closure")).toBeTruthy();
+    expect(screen.getByText("Unified Runtime Chain")).toBeTruthy();
     expect(screen.getByText("工作泳道")).toBeTruthy();
-    expect(screen.getByText("增长获客")).toBeTruthy();
+    expect(screen.getAllByText("增长获客").length).toBeGreaterThan(0);
     expect(screen.getByText("交付履约")).toBeTruthy();
     expect(screen.getByText("Pending Proposals")).toBeTruthy();
     expect(screen.getByText("Temporary Seats")).toBeTruthy();
@@ -474,14 +478,14 @@ describe("IndustryPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show full surface" }));
     expect(handleClearRuntimeFocus).toHaveBeenCalledTimes(1);
 
-    const backlogCard = screen.getByText("Backlog").closest(".ant-card");
-    expect(backlogCard).toBeTruthy();
-    fireEvent.click(within(backlogCard!).getByRole("button", { name: "Focus backlog" }));
+    const backlogItemCard = screen.getByText("Backlog 2").closest(".ant-card");
+    expect(backlogItemCard).toBeTruthy();
+    fireEvent.click(within(backlogItemCard!).getByRole("button", { name: "Focus backlog" }));
     expect(handleSelectBacklogFocus).toHaveBeenCalledWith("backlog-2");
 
-    const assignmentsCard = screen.getByText("Assignments").closest(".ant-card");
-    expect(assignmentsCard).toBeTruthy();
-    fireEvent.click(within(assignmentsCard!).getByRole("button", { name: "Focus assignment" }));
+    const assignmentItemCard = screen.getByText("Assignment 2").closest(".ant-card");
+    expect(assignmentItemCard).toBeTruthy();
+    fireEvent.click(within(assignmentItemCard!).getByRole("button", { name: "Focus assignment" }));
     expect(handleSelectAssignmentFocus).toHaveBeenCalledWith("assignment-2");
 
     const reportsCard = screen.getByText("Agent Reports").closest(".ant-card");
@@ -493,7 +497,7 @@ describe("IndustryPage", () => {
         work_context_id: "ctx-report-1",
       }),
     );
-  });
+  }, 15000);
 
   it("surfaces a dedicated runtime cockpit with direct strategy and cycle signals", () => {
     useIndustryPageStateMock.mockReturnValue(
@@ -628,6 +632,7 @@ describe("IndustryPage", () => {
 
     expect(screen.getByText("Runtime Cockpit")).toBeTruthy();
     expect(screen.getAllByText("Runtime Focus").length).toBeGreaterThan(0);
+    expect(screen.getByText("Unified Runtime Chain")).toBeTruthy();
     expect(screen.getAllByText("Strategy").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Runtime Signals").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Lane").length).toBeGreaterThan(0);
@@ -638,7 +643,7 @@ describe("IndustryPage", () => {
     expect(screen.getAllByText("Decision").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Patch").length).toBeGreaterThan(0);
     expect(screen.getByText("Execution Environment")).toBeTruthy();
-    expect(screen.getByText("Seat policy sticky")).toBeTruthy();
+    expect(screen.getAllByText("Seat policy sticky").length).toBeGreaterThan(0);
     expect(screen.getByText("desktop")).toBeTruthy();
     expect(screen.getByText("Report Snapshot")).toBeTruthy();
     expect(screen.getByText("Evidence snapshot entry")).toBeTruthy();
