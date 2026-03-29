@@ -10,8 +10,14 @@ from types import SimpleNamespace
 from typing import Any
 
 from ...utils.runtime_action_links import build_decision_actions, build_patch_actions
+from .overview_helpers import build_runtime_surface
 from .task_review_projection import build_host_twin_summary
-from .models import RuntimeOverviewCard, RuntimeOverviewEntry
+from .models import (
+    RuntimeMainBrainResponse,
+    RuntimeMainBrainSection,
+    RuntimeOverviewCard,
+    RuntimeOverviewEntry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -184,36 +190,10 @@ class _RuntimeCenterOverviewCardsSupport:
         industries = [] if industry_items is _MISSING else list(industry_items)
         industry_by_instance_id = self._index_industry_by_instance_id(industries)
 
-        decision_items = await self._call_list_method(
-            getattr(app_state, "state_query_service", None),
-            "list_decision_requests",
-            "list_decisions",
-            "get_decision_requests",
-        )
-        decisions = [] if decision_items is _MISSING else list(decision_items)
-
-        patch_items = await self._call_list_method(
-            self._learning_source(app_state),
-            "list_patches",
-        )
-        patches = [] if patch_items is _MISSING else list(patch_items)
-
-        evidence_items = await self._call_list_method(
-            getattr(app_state, "evidence_query_service", None),
-            "list_recent_records",
-            "list_recent_evidence",
-            "list_evidence",
-            "list_records",
-        )
-        evidence = [] if evidence_items is _MISSING else list(evidence_items)
-
         entries = self._map_main_brain_entries(
             strategies=strategies,
             industries=industries,
             industry_by_instance_id=industry_by_instance_id,
-            decision_count=len(decisions),
-            patch_count=len(patches),
-            evidence_count=len(evidence),
         )
         if not entries:
             return self._unavailable_card(
@@ -222,10 +202,16 @@ class _RuntimeCenterOverviewCardsSupport:
                 "Main-brain cockpit is not connected yet.",
             )
         total = len(entries)
+        source_values: list[str] = []
+        if strategy_items is not _MISSING:
+            source_values.append("strategy_memory_service")
+        if industry_items is not _MISSING:
+            source_values.append("industry_service")
+        combined_source = ",".join(dict.fromkeys(source_values)) or "unavailable"
         return RuntimeOverviewCard(
             key="main-brain",
             title="Main Brain",
-            source="strategy_memory_service",
+            source=combined_source,
             status="state-service",
             count=total,
             summary=self._summarize_main_brain_card(entries[0]),
@@ -761,9 +747,6 @@ class _RuntimeCenterOverviewCardsSupport:
         strategies: list[Any],
         industries: list[Any],
         industry_by_instance_id: Mapping[str, Any],
-        decision_count: int,
-        patch_count: int,
-        evidence_count: int,
     ) -> list[RuntimeOverviewEntry]:
         if strategies:
             return self._build_mapped_entries(
@@ -773,9 +756,6 @@ class _RuntimeCenterOverviewCardsSupport:
                 builder=lambda item: self._build_main_brain_entry_from_strategy(
                     item,
                     industry_by_instance_id=industry_by_instance_id,
-                    decision_count=decision_count,
-                    patch_count=patch_count,
-                    evidence_count=evidence_count,
                 ),
             )
         if not industries:
@@ -786,9 +766,6 @@ class _RuntimeCenterOverviewCardsSupport:
             "created_at",
             builder=lambda item: self._build_main_brain_entry_from_industry(
                 item,
-                decision_count=decision_count,
-                patch_count=patch_count,
-                evidence_count=evidence_count,
             ),
         )
 
@@ -797,9 +774,6 @@ class _RuntimeCenterOverviewCardsSupport:
         strategy: Any,
         *,
         industry_by_instance_id: Mapping[str, Any],
-        decision_count: int,
-        patch_count: int,
-        evidence_count: int,
     ) -> RuntimeOverviewEntry:
         strategy_id = self._string(self._get_field(strategy, "strategy_id", "id")) or "main-brain"
         industry_instance_id = self._string(
@@ -824,19 +798,12 @@ class _RuntimeCenterOverviewCardsSupport:
                 industry_instance_id=industry_instance_id,
                 stats=stats,
                 carrier=self._mapping(industry) or {},
-                decision_count=decision_count,
-                patch_count=patch_count,
-                evidence_count=evidence_count,
             ),
         )
 
     def _build_main_brain_entry_from_industry(
         self,
         industry: Any,
-        *,
-        decision_count: int,
-        patch_count: int,
-        evidence_count: int,
     ) -> RuntimeOverviewEntry:
         instance_id = self._string(self._get_field(industry, "instance_id", "id")) or "unknown-industry"
         stats = self._mapping(self._get_field(industry, "stats")) or {}
@@ -856,9 +823,6 @@ class _RuntimeCenterOverviewCardsSupport:
                 industry_instance_id=instance_id,
                 stats=stats,
                 carrier=self._mapping(industry) or {},
-                decision_count=decision_count,
-                patch_count=patch_count,
-                evidence_count=evidence_count,
             ),
         )
 
@@ -869,15 +833,15 @@ class _RuntimeCenterOverviewCardsSupport:
         industry_instance_id: str | None,
         stats: Mapping[str, Any],
         carrier: Mapping[str, Any],
-        decision_count: int,
-        patch_count: int,
-        evidence_count: int,
     ) -> dict[str, Any]:
         lane_count = self._int(stats.get("lane_count"), 0)
         backlog_count = self._int(stats.get("backlog_count"), 0)
         cycle_count = self._int(stats.get("cycle_count"), 0)
         assignment_count = self._int(stats.get("assignment_count"), 0)
         report_count = self._int(stats.get("report_count"), 0)
+        decision_count = self._int(stats.get("decision_count"), 0)
+        patch_count = self._int(stats.get("patch_count"), 0)
+        evidence_count = self._int(stats.get("evidence_count"), 0)
         carrier_route = self._string(
             (self._mapping(carrier.get("routes")) or {}).get("runtime_detail"),
         )
@@ -1074,6 +1038,185 @@ class _RuntimeCenterOverviewCardsSupport:
             f"{lane_count} lane(s), {backlog_count} backlog item(s), {assignment_count} assignment(s), "
             f"{report_count} report(s), {evidence_count} evidence record(s), "
             f"{decision_count} decision(s), and {patch_count} patch(es)."
+        )
+
+    async def build_main_brain_payload(self, app_state: Any) -> RuntimeMainBrainResponse:
+        main_brain_card = await self._build_main_brain_card(app_state)
+        evidence_card = await self._build_evidence_card(app_state)
+        decisions_card = await self._build_decisions_card(app_state)
+        patches_card = await self._build_patches_card(app_state)
+        governance_card = await self._build_governance_card(app_state)
+        cards = [
+            main_brain_card,
+            evidence_card,
+            decisions_card,
+            patches_card,
+            governance_card,
+        ]
+        entry = main_brain_card.entries[0] if main_brain_card.entries else None
+        entry_meta = dict(entry.meta or {}) if entry is not None else {}
+        industry_instance_id = self._string(entry_meta.get("industry_instance_id"))
+        industry_detail = await self._load_industry_detail_payload(
+            getattr(app_state, "industry_service", None),
+            industry_instance_id,
+        )
+        strategy = await self._resolve_main_brain_strategy_payload(
+            getattr(app_state, "strategy_memory_service", None),
+            industry_instance_id=industry_instance_id,
+            entry=entry,
+            entry_meta=entry_meta,
+        )
+        carrier = self._resolve_main_brain_carrier_payload(
+            entry=entry,
+            entry_meta=entry_meta,
+            industry_detail=industry_detail,
+        )
+        return RuntimeMainBrainResponse(
+            surface=build_runtime_surface(cards),
+            strategy=strategy,
+            carrier=carrier,
+            lanes=self._normalize_list(industry_detail.get("lanes")),
+            current_cycle=self._mapping(industry_detail.get("current_cycle")),
+            assignments=self._normalize_list(industry_detail.get("assignments")),
+            reports=self._normalize_list(industry_detail.get("agent_reports")),
+            environment=self._build_main_brain_environment_payload(governance_card),
+            evidence=self._build_main_brain_section(evidence_card),
+            decisions=self._build_main_brain_section(decisions_card),
+            patches=self._build_main_brain_section(patches_card),
+            signals=dict(main_brain_card.meta.get("signals") or {}),
+            meta={
+                **dict(main_brain_card.meta or {}),
+                "control_chain": list(main_brain_card.meta.get("control_chain") or []),
+                "overview_entry_count": main_brain_card.count,
+                "lane_count": self._int(entry_meta.get("lane_count"), 0),
+                "backlog_count": self._int(entry_meta.get("backlog_count"), 0),
+                "cycle_count": self._int(entry_meta.get("cycle_count"), 0),
+                "assignment_count": self._int(entry_meta.get("assignment_count"), 0),
+                "report_count": self._int(entry_meta.get("report_count"), 0),
+                "decision_count": self._int(entry_meta.get("decision_count"), 0),
+                "patch_count": self._int(entry_meta.get("patch_count"), 0),
+                "evidence_count": self._int(entry_meta.get("evidence_count"), 0),
+            },
+        )
+
+    async def _load_industry_detail_payload(
+        self,
+        industry_service: Any,
+        industry_instance_id: str | None,
+    ) -> dict[str, Any]:
+        if industry_service is None or industry_instance_id is None:
+            return {}
+        getter = getattr(industry_service, "get_instance_detail", None)
+        if getter is None:
+            return {}
+        try:
+            detail = getter(industry_instance_id)
+        except Exception:
+            logger.debug("runtime_center main-brain detail failed", exc_info=True)
+            return {}
+        return self._model_dump(await self._maybe_await(detail))
+
+    async def _resolve_main_brain_strategy_payload(
+        self,
+        strategy_service: Any,
+        *,
+        industry_instance_id: str | None,
+        entry: RuntimeOverviewEntry | None,
+        entry_meta: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        records = await self._call_list_method(strategy_service, "list_strategies")
+        strategies = [] if records is _MISSING else list(records)
+        if industry_instance_id is not None:
+            strategies = [
+                item
+                for item in strategies
+                if self._string(self._get_field(item, "industry_instance_id", "scope_id"))
+                == industry_instance_id
+            ] or strategies
+        strategy = strategies[0] if strategies else None
+        payload = self._model_dump(strategy)
+        if not payload and entry is not None:
+            payload = {
+                "strategy_id": entry_meta.get("strategy_id"),
+                "title": entry.title,
+                "summary": entry.summary,
+                "status": entry.status,
+                "owner_agent_id": entry.owner,
+                "route": entry.route,
+            }
+        else:
+            payload.setdefault("strategy_id", entry_meta.get("strategy_id"))
+            payload.setdefault("route", entry.route if entry is not None else None)
+        return payload
+
+    def _resolve_main_brain_carrier_payload(
+        self,
+        *,
+        entry: RuntimeOverviewEntry | None,
+        entry_meta: Mapping[str, Any],
+        industry_detail: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        if industry_detail:
+            routes = self._mapping(industry_detail.get("routes")) or {}
+            return {
+                "industry_instance_id": self._string(
+                    industry_detail.get("instance_id") or entry_meta.get("industry_instance_id"),
+                ),
+                "label": self._string(industry_detail.get("label"))
+                or self._string(entry_meta.get("carrier_label")),
+                "summary": self._string(industry_detail.get("summary"))
+                or (entry.summary if entry is not None else None),
+                "status": self._string(industry_detail.get("status"))
+                or self._string(entry_meta.get("carrier_status"))
+                or (entry.status if entry is not None else None),
+                "owner_scope": self._string(industry_detail.get("owner_scope"))
+                or (entry.owner if entry is not None else None),
+                "route": self._string(routes.get("runtime_detail"))
+                or self._string(entry_meta.get("industry_route"))
+                or (entry.route if entry is not None else None),
+            }
+        return {
+            "industry_instance_id": self._string(entry_meta.get("industry_instance_id")),
+            "label": self._string(entry_meta.get("carrier_label")),
+            "summary": entry.summary if entry is not None else None,
+            "status": self._string(entry_meta.get("carrier_status"))
+            or (entry.status if entry is not None else None),
+            "owner_scope": entry.owner if entry is not None else None,
+            "route": self._string(entry_meta.get("industry_route"))
+            or (entry.route if entry is not None else None),
+        }
+
+    def _build_main_brain_environment_payload(
+        self,
+        governance_card: RuntimeOverviewCard,
+    ) -> dict[str, Any]:
+        meta = dict(governance_card.meta or {})
+        return {
+            "route": "/api/runtime-center/governance/status",
+            "status": governance_card.status,
+            "summary": governance_card.summary,
+            "host_twin_summary": self._mapping(meta.get("host_twin_summary")) or {},
+            "handoff": self._mapping(meta.get("handoff")) or {},
+            "staffing": self._mapping(meta.get("staffing")) or {},
+            "human_assist": self._mapping(meta.get("human_assist")) or {},
+        }
+
+    def _build_main_brain_section(
+        self,
+        card: RuntimeOverviewCard,
+    ) -> RuntimeMainBrainSection:
+        route = None
+        if card.entries:
+            route = card.entries[0].route
+        meta = dict(card.meta or {})
+        if route is None:
+            route = self._string(meta.get("route"))
+        return RuntimeMainBrainSection(
+            count=card.count,
+            summary=card.summary,
+            route=route,
+            entries=[entry.model_dump(mode="json") for entry in card.entries],
+            meta=meta,
         )
 
     def _index_industry_by_instance_id(self, items: list[Any]) -> dict[str, Any]:
@@ -1479,6 +1622,14 @@ class RuntimeCenterOverviewBuilder:
         for builder in builders:
             cards.extend(await builder.build_cards(app_state))
         return cards
+
+    async def build_main_brain_card(self, app_state: Any) -> RuntimeOverviewCard:
+        support = _RuntimeCenterOverviewCardsSupport(item_limit=self._item_limit)
+        return await support._build_main_brain_card(app_state)
+
+    async def build_main_brain_payload(self, app_state: Any) -> RuntimeMainBrainResponse:
+        support = _RuntimeCenterOverviewCardsSupport(item_limit=self._item_limit)
+        return await support.build_main_brain_payload(app_state)
 
 
 __all__ = ["RuntimeCenterOverviewBuilder"]

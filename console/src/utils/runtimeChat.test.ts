@@ -35,7 +35,6 @@ describe("runtimeChat", () => {
       current_focus_kind: "goal",
       current_focus_id: "goal-1",
       current_focus: "Launch runtime center",
-      current_goal: "Legacy goal title",
       industry_instance_id: "industry-1",
       industry_role_id: "operations",
     });

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { message } from "antd";
+import { isApiError } from "../../api/errors";
 import { request } from "../../api";
 import { subscribe } from "../../runtime/eventBus";
+import type { RuntimeMainBrainResponse } from "../../api/modules/runtimeCenter";
 import {
   normalizeRuntimePath,
+  requestRuntimeMainBrain,
   requestRuntimeOverview,
   requestRuntimeRecord,
 } from "../../runtime/runtimeSurfaceClient";
@@ -151,6 +154,11 @@ export function useRuntimeCenter() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mainBrainData, setMainBrainData] =
+    useState<RuntimeMainBrainResponse | null>(null);
+  const [mainBrainLoading, setMainBrainLoading] = useState(true);
+  const [mainBrainError, setMainBrainError] = useState<string | null>(null);
+  const [mainBrainUnavailable, setMainBrainUnavailable] = useState(false);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [detail, setDetail] = useState<RuntimeCenterDetailState | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -163,8 +171,15 @@ export function useRuntimeCenter() {
     } else {
       setRefreshing(true);
     }
+    setMainBrainLoading(true);
+    setMainBrainError(null);
+    setMainBrainUnavailable(false);
+    const overviewPromise =
+      requestRuntimeOverview<RuntimeCenterOverviewPayload>();
+    const mainBrainPromise = requestRuntimeMainBrain<RuntimeMainBrainResponse>();
+
     try {
-      const payload = await requestRuntimeOverview<RuntimeCenterOverviewPayload>();
+      const payload = await overviewPromise;
       setData(normalizeOverview(payload));
       setError(null);
     } catch (err) {
@@ -177,6 +192,27 @@ export function useRuntimeCenter() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+
+    try {
+      const payload = await mainBrainPromise;
+      setMainBrainData(payload);
+      setMainBrainError(null);
+      setMainBrainUnavailable(false);
+    } catch (err) {
+      if (isApiError(err) && err.isNotFound) {
+        setMainBrainUnavailable(true);
+        setMainBrainData(null);
+        setMainBrainError(null);
+      } else {
+        const detail = localizeRuntimeText(
+          err instanceof Error ? err.message : String(err),
+        );
+        setMainBrainError(detail);
+        setMainBrainData(null);
+      }
+    } finally {
+      setMainBrainLoading(false);
     }
   }, []);
 
@@ -302,6 +338,10 @@ export function useRuntimeCenter() {
     loading,
     refreshing,
     error,
+    mainBrainData,
+    mainBrainError,
+    mainBrainLoading,
+    mainBrainUnavailable,
     busyActionId,
     detail,
     detailLoading,

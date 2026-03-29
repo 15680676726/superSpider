@@ -18,7 +18,7 @@ vi.mock("../../api", async () => {
 
 vi.mock("./FixedSopPanel", () => ({
   default: () => <div data-testid="fixed-sop-panel" />,
-}), { virtual: true });
+}));
 
 import api from "../../api";
 import AutomationTab from "./AutomationTab";

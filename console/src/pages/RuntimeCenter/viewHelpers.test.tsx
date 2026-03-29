@@ -209,8 +209,6 @@ describe("runtimeCenter viewHelpers", () => {
               task_count: 0,
               decision_count: 0,
               evidence_count: 0,
-              created_at: "2026-03-26T08:00:00Z",
-              updated_at: "2026-03-26T08:00:00Z",
             },
           ],
           execution: {
@@ -305,9 +303,11 @@ describe("runtimeCenter viewHelpers", () => {
             summary: "先稳交付，再补增长。",
             status: "active",
             focus_lane_ids: ["lane-growth"],
+            goal_ids: [],
             backlog_item_ids: ["backlog-1"],
             assignment_ids: ["assignment-1"],
             report_ids: ["report-1"],
+            metadata: {},
             synthesis: {
               latest_findings: [
                 {
@@ -353,10 +353,12 @@ describe("runtimeCenter viewHelpers", () => {
             {
               report_id: "report-1",
               headline: "交付风险提醒",
+              report_kind: "status",
               status: "recorded",
               findings: [],
               uncertainties: [],
               needs_followup: true,
+              processed: false,
               evidence_ids: [],
               decision_ids: [],
               metadata: {},

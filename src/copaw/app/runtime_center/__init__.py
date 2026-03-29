@@ -12,6 +12,8 @@ from .evidence_query import (
 from .conversations import RuntimeConversationFacade, RuntimeConversationPayload
 from .models import (
     RuntimeCenterSurfaceInfo,
+    RuntimeMainBrainResponse,
+    RuntimeMainBrainSection,
     RuntimeOverviewCard,
     RuntimeOverviewEntry,
     RuntimeOverviewResponse,
@@ -25,6 +27,8 @@ RuntimeEvidenceQueryService = RuntimeCenterEvidenceQueryService
 __all__ = [
     "RUNTIME_CENTER_OVERVIEW_PATH",
     "RuntimeCenterSurfaceInfo",
+    "RuntimeMainBrainResponse",
+    "RuntimeMainBrainSection",
     "Phase1EvidenceQueryService",
     "RuntimeCenterEvidenceQueryService",
     "RuntimeConversationFacade",

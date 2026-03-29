@@ -61,8 +61,8 @@ def test_phase_next_runtime_center_overview_surfaces_main_brain_cockpit_card() -
     assert entry["meta"]["lane_count"] == 2
     assert entry["meta"]["assignment_count"] == 2
     assert entry["meta"]["report_count"] == 1
-    assert entry["meta"]["decision_count"] == 1
-    assert entry["meta"]["patch_count"] == 1
+    assert entry["meta"]["decision_count"] == 2
+    assert entry["meta"]["patch_count"] == 3
     assert entry["meta"]["strategy_id"] == "strategy:industry:industry-v1-ops:copaw-agent-runner"
 
 

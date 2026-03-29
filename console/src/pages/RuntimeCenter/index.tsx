@@ -68,6 +68,10 @@ export default function RuntimeCenterPage() {
     loading,
     refreshing,
     error,
+    mainBrainData,
+    mainBrainError,
+    mainBrainLoading,
+    mainBrainUnavailable,
     busyActionId,
     detail,
     detailLoading,
@@ -230,15 +234,19 @@ export default function RuntimeCenterPage() {
       {activeTab === "overview" ? (
         <>
           <Space direction="vertical" size={24} style={{ width: "100%", marginBottom: 32 }}>
-            <MainBrainCockpitPanel
-              data={data}
-              loading={loading}
-              refreshing={refreshing}
-              error={error}
-              onRefresh={() => {
-                void refreshActiveTabData();
-              }}
-              onOpenRoute={(route, title) => {
+          <MainBrainCockpitPanel
+            data={data}
+            loading={loading}
+            refreshing={refreshing}
+            error={error}
+            mainBrainData={mainBrainData}
+            mainBrainError={mainBrainError}
+            mainBrainLoading={mainBrainLoading}
+            mainBrainUnavailable={mainBrainUnavailable}
+            onRefresh={() => {
+              void refreshActiveTabData();
+            }}
+            onOpenRoute={(route, title) => {
                 void openSurfaceRoute(route, title);
               }}
             />

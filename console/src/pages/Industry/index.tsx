@@ -38,7 +38,6 @@ import {
 } from "../../utils/remoteSkillPresentation";
 import { normalizeSpiderMeshBrand } from "../../utils/brand";
 import { employmentModeColor } from "../../runtime/executionPresentation";
-import { buildStaffingPresentation } from "../../runtime/staffingGapPresentation";
 import {
   analysisStatusColor,
   buildAnalysisModeOptions,
@@ -54,7 +53,6 @@ import {
   INDUSTRY_TEXT,
   INDUSTRY_EXPERIENCE_TEXT,
   formatCountLabel,
-  formatIndustryDetailStats,
   uniqueStrings,
   CAPABILITY_FAMILY_OPTIONS,
   INSTALL_ASSIGNMENT_MODE_OPTIONS,
@@ -63,7 +61,6 @@ import {
   createBlankRole,
   createBlankGoal,
   createBlankSchedule,
-  formatIndustryDisplayToken,
   presentIndustryEmploymentMode,
   presentIndustryReadinessStatus,
   presentIndustryRiskLevel,
@@ -73,21 +70,9 @@ import {
   roleColor,
   isSystemRole,
   formatTimestamp,
-  presentText,
-  presentList,
   runtimeStatusColor,
-  deriveIndustryAgentStatus,
-  deriveIndustryScheduleStatus,
-  deriveIndustryTeamStatus,
 } from "./pageHelpers";
 import IndustryRuntimeCockpitPanel from "./IndustryRuntimeCockpitPanel";
-import {
-  isFocusedAssignment,
-  isFocusedBacklog,
-  resolveReportWorkContextId,
-  runtimeSurfaceCardStyle,
-} from "./industryPagePresentation";
-import IndustryPlanningSurface from "./runtimePlanningSurface";
 import { useIndustryPageState } from "./useIndustryPageState";
 
 const { Paragraph, Text } = Typography;
@@ -180,8 +165,6 @@ export default function IndustryPage() {
     draftForm,
     navigate,
   });
-  const focusSelection = detail?.focus_selection || null;
-  const staffingPresentation = buildStaffingPresentation(detail?.staffing);
   const renderMediaAnalysisList = useCallback(
     (
       analyses: MediaAnalysisSummary[],
@@ -988,7 +971,7 @@ export default function IndustryPage() {
             <div style={{ padding: 48, textAlign: "center" }}><Spin /></div>
           ) : !detail ? (
             <Empty description={INDUSTRY_TEXT.selectTeamHint} />
-          ) : true ? (
+          ) : (
             <IndustryRuntimeCockpitPanel
               detail={detail}
               locale={locale}
@@ -997,501 +980,11 @@ export default function IndustryPage() {
               onSelectAssignmentFocus={(assignmentId) => void handleSelectAssignmentFocus(assignmentId)}
               onSelectBacklogFocus={(backlogItemId) => void handleSelectBacklogFocus(backlogItemId)}
             />
-          ) : (
-            /* 详情模式（只读） */
-            <Space direction="vertical" size={24} style={{ width: "100%" }}>
-              <Descriptions size="small" column={2} bordered items={[
-                { key: "instance", label: INDUSTRY_TEXT.detailInstance, children: detail.instance_id },
-                { key: "owner", label: INDUSTRY_TEXT.detailOwnerScope, children: detail.owner_scope },
-                { key: "status", label: INDUSTRY_TEXT.detailStatus, children: presentIndustryRuntimeStatus(deriveIndustryTeamStatus(detail)) },
-                { key: "stats", label: INDUSTRY_TEXT.statsLabel, children: formatIndustryDetailStats(detail.stats) },
-              ]} />
-
-              {focusSelection ? (
-                <Alert
-                  showIcon
-                  type="info"
-                  message={
-                    focusSelection.selection_kind === "assignment"
-                      ? "Focused Assignment"
-                      : "Focused Backlog"
-                  }
-                  description={[
-                    focusSelection.summary || focusSelection.title || "Runtime detail is scoped to a selected subview.",
-                    focusSelection.status
-                      ? `Status ${presentIndustryRuntimeStatus(focusSelection.status)}`
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" | ")}
-                  action={
-                    <Button size="small" onClick={() => void handleClearRuntimeFocus()}>
-                      Show full surface
-                    </Button>
-                  }
-                />
-              ) : null}
-
-              {detail.execution ? (
-                <div>
-                  <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>执行面板</Text>
-                  <div style={{ marginTop: 8 }}>
-                    <Space wrap style={{ marginBottom: 8 }}>
-                      <Tag color={runtimeStatusColor(detail.execution.status)}>{presentIndustryRuntimeStatus(detail.execution.status)}</Tag>
-                      {detail.execution.current_owner ? <Tag>{detail.execution.current_owner}</Tag> : null}
-                      {detail.execution.current_stage ? <Tag>{formatIndustryDisplayToken(detail.execution.current_stage)}</Tag> : null}
-                      {detail.execution.updated_at ? <Text type="secondary" style={{ fontSize: 12 }}>{formatTimestamp(detail.execution.updated_at, locale)}</Text> : null}
-                    </Space>
-                    <Descriptions size="small" column={2} items={[
-                      { key: "focus", label: "当前焦点", children: detail.execution.current_focus || "-" },
-                      { key: "owner", label: "当前负责人", children: detail.execution.current_owner || "-" },
-                      { key: "risk", label: "当前风险", children: detail.execution.current_risk ? presentIndustryRiskLevel(detail.execution.current_risk) : "-" },
-                      { key: "evidence", label: "最新证据", children: detail.execution.latest_evidence_summary || (detail.execution.evidence_count > 0 ? `共 ${detail.execution.evidence_count} 条证据` : "暂无证据") },
-                      { key: "next", label: "下一步", children: detail.execution.next_step || "-" },
-                      { key: "trigger", label: "触发来源", children: detail.execution.trigger_reason || detail.execution.trigger_source || "-" },
-                    ]} />
-                    {detail.execution.blocked_reason || detail.execution.stuck_reason ? (
-                      <Alert showIcon type={detail.execution.status === "failed" || detail.execution.status === "idle-loop" ? "warning" : "info"} message={detail.execution.blocked_reason || detail.execution.stuck_reason || ""} style={{ marginTop: 8 }} />
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-              {detail.execution_core_identity || detail.strategy_memory ? (
-                <div>
-                  <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                    执行中枢身份
-                  </Text>
-                  <div style={{ marginTop: 8 }}>
-                    <Space wrap style={{ marginBottom: 8 }}>
-                      {detail.strategy_memory?.status ? (
-                        <Tag color={runtimeStatusColor(String(detail.strategy_memory.status))}>
-                          {presentIndustryRuntimeStatus(String(detail.strategy_memory.status))}
-                        </Tag>
-                      ) : null}
-                      {detail.execution_core_identity?.role_name ? (
-                        <Tag>{normalizeSpiderMeshBrand(String(detail.execution_core_identity.role_name))}</Tag>
-                      ) : null}
-                      {detail.execution_core_identity?.operating_mode ? (
-                        <Tag>
-                          {String(detail.execution_core_identity.operating_mode) === "control-core"
-                            ? "主脑中控"
-                            : formatIndustryDisplayToken(
-                                detail.execution_core_identity.operating_mode as string | undefined,
-                              )}
-                        </Tag>
-                      ) : null}
-                    </Space>
-                    <Descriptions
-                      size="small"
-                      column={2}
-                      items={[
-                        {
-                          key: "mission",
-                          label: "长期使命",
-                          children: presentText(detail.execution_core_identity?.mission as string | undefined),
-                        },
-                        {
-                          key: "north-star",
-                          label: "北极星",
-                          children: presentText(
-                            (detail.strategy_memory?.north_star as string | undefined) ||
-                              (detail.strategy_memory?.summary as string | undefined),
-                          ),
-                        },
-                        {
-                          key: "focuses",
-                          label: "当前关注",
-                          children: presentList(detail.strategy_memory?.current_focuses as string[] | undefined),
-                        },
-                        {
-                          key: "priorities",
-                          label: "优先顺序",
-                          children: presentList(detail.strategy_memory?.priority_order as string[] | undefined),
-                        },
-                        {
-                          key: "thinking-axes",
-                          label: "思考轴",
-                          children: presentList(detail.execution_core_identity?.thinking_axes as string[] | undefined),
-                        },
-                        {
-                          key: "delegation-policy",
-                          label: "分派原则",
-                          children: presentList(detail.execution_core_identity?.delegation_policy as string[] | undefined),
-                        },
-                      ]}
-                    />
-                  </div>
-                </div>
-              ) : null}
-
-              <div>
-                <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                  素材分析
-                </Text>
-                <Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
-                  这里只保留已经写回行业实例的素材分析结果，供主脑聊天和后续执行复用。
-                </Paragraph>
-                {renderMediaAnalysisList(detail.media_analyses || [], {
-                  emptyText: "当前行业实例还没有写回的素材分析。",
-                  adoptedTag: "已接入身份",
-                  showWriteback: true,
-                })}
-              </div>
-
-              <IndustryPlanningSurface detail={detail} locale={locale} />
-
-              {staffingPresentation.hasAnyState ? (
-                <div>
-                  <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                    Staffing Closure
-                  </Text>
-                  <div style={{ marginTop: 8 }}>
-                    <Space wrap style={{ marginBottom: 8 }}>
-                      {staffingPresentation.activeGap ? <Tag color="warning">Active gap</Tag> : null}
-                      {staffingPresentation.pendingProposals.length ? (
-                        <Tag>{`Pending proposals ${staffingPresentation.pendingProposals.length}`}</Tag>
-                      ) : null}
-                      {staffingPresentation.temporarySeats.length ? (
-                        <Tag>{`Temporary seats ${staffingPresentation.temporarySeats.length}`}</Tag>
-                      ) : null}
-                      {staffingPresentation.researcher ? <Tag>Researcher active</Tag> : null}
-                    </Space>
-                    <Space direction="vertical" size={10} style={{ width: "100%" }}>
-                      {staffingPresentation.activeGap ? (
-                        <Alert
-                          showIcon
-                          type={
-                            staffingPresentation.activeGap.badges.includes("Needs approval")
-                              ? "warning"
-                              : "info"
-                          }
-                          message={staffingPresentation.activeGap.title}
-                          description={[
-                            staffingPresentation.activeGap.detail,
-                            staffingPresentation.activeGap.meta.join(" / "),
-                          ]
-                            .filter(Boolean)
-                            .join(" | ")}
-                        />
-                      ) : null}
-                      {staffingPresentation.pendingProposals.length ? (
-                        <Card size="small" title="Pending Proposals">
-                          <Space direction="vertical" size={6} style={{ width: "100%" }}>
-                            {staffingPresentation.pendingProposals.map((item) => (
-                              <Text key={item}>{item}</Text>
-                            ))}
-                          </Space>
-                        </Card>
-                      ) : null}
-                      {staffingPresentation.temporarySeats.length ? (
-                        <Card size="small" title="Temporary Seats">
-                          <Space direction="vertical" size={6} style={{ width: "100%" }}>
-                            {staffingPresentation.temporarySeats.map((item) => (
-                              <Text key={item}>{item}</Text>
-                            ))}
-                          </Space>
-                        </Card>
-                      ) : null}
-                      {staffingPresentation.researcher ? (
-                        <Card size="small" title="Researcher">
-                          <Space direction="vertical" size={6} style={{ width: "100%" }}>
-                            <Text strong>{staffingPresentation.researcher.headline}</Text>
-                            <Text type="secondary">{staffingPresentation.researcher.detail}</Text>
-                            <Space wrap>
-                              {staffingPresentation.researcher.badges.map((badge) => (
-                                <Tag key={badge}>{badge}</Tag>
-                              ))}
-                            </Space>
-                          </Space>
-                        </Card>
-                      ) : null}
-                    </Space>
-                  </div>
-                </div>
-              ) : null}
-
-              <div>
-                <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                  {INDUSTRY_TEXT.detailBacklog}
-                </Text>
-                {detail.backlog.length === 0 ? (
-                  <Empty description="No backlog is active yet." style={{ margin: "8px 0" }} />
-                ) : (
-                  <List
-                    size="small"
-                    style={{ marginTop: 8 }}
-                    dataSource={detail.backlog}
-                    renderItem={(backlogItem) => {
-                      const selected = isFocusedBacklog(backlogItem, focusSelection);
-                      return (
-                        <List.Item style={{ padding: "8px 0" }}>
-                          <Card
-                            size="small"
-                            style={{ width: "100%", ...runtimeSurfaceCardStyle(selected) }}
-                            extra={
-                              <Button
-                                size="small"
-                                type={selected ? "primary" : "default"}
-                                onClick={() => void handleSelectBacklogFocus(backlogItem.backlog_item_id)}
-                              >
-                                {selected ? "Focused" : "Focus backlog"}
-                              </Button>
-                            }
-                          >
-                            <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                              <Space wrap>
-                                <Text strong style={{ color: "var(--baize-text-main)" }}>
-                                  {backlogItem.title || backlogItem.backlog_item_id}
-                                </Text>
-                                <Tag color={runtimeStatusColor(backlogItem.status)}>
-                                  {presentIndustryRuntimeStatus(backlogItem.status)}
-                                </Tag>
-                                <Tag>{`P${backlogItem.priority}`}</Tag>
-                                <Tag>{backlogItem.source_kind}</Tag>
-                                {selected ? <Tag color="blue">Selected</Tag> : null}
-                              </Space>
-                              <Text type="secondary">
-                                {backlogItem.summary || backlogItem.source_ref || "No summary captured yet."}
-                              </Text>
-                              <Space wrap>
-                                {backlogItem.assignment_id ? (
-                                  <Tag>{`Assignment ${backlogItem.assignment_id}`}</Tag>
-                                ) : null}
-                                <Tag>{`Evidence ${backlogItem.evidence_ids.length}`}</Tag>
-                                {backlogItem.updated_at ? (
-                                  <Text type="secondary" style={{ fontSize: 12 }}>
-                                    {formatTimestamp(backlogItem.updated_at, locale)}
-                                  </Text>
-                                ) : null}
-                              </Space>
-                            </Space>
-                          </Card>
-                        </List.Item>
-                      );
-                    }}
-                  />
-                )}
-              </div>
-
-              <div>
-                <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                  {INDUSTRY_TEXT.detailAssignments}
-                </Text>
-                {detail.assignments.length === 0 ? (
-                  <Empty description="No live assignments yet." style={{ margin: "8px 0" }} />
-                ) : (
-                  <List
-                    size="small"
-                    style={{ marginTop: 8 }}
-                    dataSource={detail.assignments}
-                    renderItem={(assignment) => {
-                      const selected = isFocusedAssignment(assignment, focusSelection);
-                      return (
-                        <List.Item style={{ padding: "8px 0" }}>
-                          <Card
-                            size="small"
-                            style={{ width: "100%", ...runtimeSurfaceCardStyle(selected) }}
-                            extra={
-                              <Button
-                                size="small"
-                                type={selected ? "primary" : "default"}
-                                onClick={() => void handleSelectAssignmentFocus(assignment.assignment_id)}
-                              >
-                                {selected ? "Focused" : "Focus assignment"}
-                              </Button>
-                            }
-                          >
-                            <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                              <Space wrap>
-                                <Text strong style={{ color: "var(--baize-text-main)" }}>
-                                  {assignment.title || assignment.assignment_id}
-                                </Text>
-                                <Tag color={runtimeStatusColor(assignment.status)}>
-                                  {presentIndustryRuntimeStatus(assignment.status)}
-                                </Tag>
-                                {assignment.report_back_mode ? (
-                                  <Tag>{assignment.report_back_mode}</Tag>
-                                ) : null}
-                                {selected ? <Tag color="blue">Selected</Tag> : null}
-                              </Space>
-                              <Text type="secondary">
-                                {assignment.summary || "No assignment summary captured yet."}
-                              </Text>
-                              <Space wrap>
-                                {assignment.backlog_item_id ? (
-                                  <Tag>{`Backlog ${assignment.backlog_item_id}`}</Tag>
-                                ) : null}
-                                {assignment.goal_id ? <Tag>{`Goal ${assignment.goal_id}`}</Tag> : null}
-                                <Tag>{`Evidence ${assignment.evidence_ids.length}`}</Tag>
-                                {assignment.updated_at ? (
-                                  <Text type="secondary" style={{ fontSize: 12 }}>
-                                    {formatTimestamp(assignment.updated_at, locale)}
-                                  </Text>
-                                ) : null}
-                              </Space>
-                            </Space>
-                          </Card>
-                        </List.Item>
-                      );
-                    }}
-                  />
-                )}
-              </div>
-
-              <div>
-                <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                  {INDUSTRY_TEXT.detailAgentReports}
-                </Text>
-                {detail.agent_reports.length === 0 ? (
-                  <Empty description="No agent reports yet." style={{ margin: "8px 0" }} />
-                ) : (
-                  <List
-                    size="small"
-                    style={{ marginTop: 8 }}
-                    dataSource={detail.agent_reports}
-                    renderItem={(report) => {
-                      const workContextId = resolveReportWorkContextId(report);
-                      const summary =
-                        report.summary ||
-                        report.recommendation ||
-                        report.findings[0] ||
-                        "No report summary captured yet.";
-                      return (
-                        <List.Item style={{ padding: "8px 0" }}>
-                          <Card
-                            size="small"
-                            style={{ width: "100%", ...runtimeSurfaceCardStyle(false) }}
-                            extra={
-                              <Space wrap>
-                                {report.assignment_id ? (
-                                  <Button
-                                    size="small"
-                                    onClick={() => void handleSelectAssignmentFocus(report.assignment_id!)}
-                                  >
-                                    Focus linked assignment
-                                  </Button>
-                                ) : null}
-                                <Button
-                                  size="small"
-                                  type="primary"
-                                  onClick={() => void handleOpenAgentReportChat(report)}
-                                >
-                                  Open report chat
-                                </Button>
-                              </Space>
-                            }
-                          >
-                            <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                              <Space wrap>
-                                <Text strong style={{ color: "var(--baize-text-main)" }}>
-                                  {report.headline || report.report_id}
-                                </Text>
-                                <Tag color={runtimeStatusColor(report.status)}>
-                                  {presentIndustryRuntimeStatus(report.status)}
-                                </Tag>
-                                <Tag>{report.report_kind}</Tag>
-                                {report.result ? <Tag>{report.result}</Tag> : null}
-                                {report.processed ? <Tag color="green">Processed</Tag> : null}
-                                {report.needs_followup ? <Tag color="orange">Follow-up</Tag> : null}
-                                {workContextId ? <Tag color="blue">{workContextId}</Tag> : null}
-                              </Space>
-                              <Text type="secondary">{summary}</Text>
-                              <Space wrap>
-                                {report.followup_reason ? <Tag>{report.followup_reason}</Tag> : null}
-                                <Tag>{`Findings ${report.findings.length}`}</Tag>
-                                <Tag>{`Evidence ${report.evidence_ids.length}`}</Tag>
-                                {report.updated_at ? (
-                                  <Text type="secondary" style={{ fontSize: 12 }}>
-                                    {formatTimestamp(report.updated_at, locale)}
-                                  </Text>
-                                ) : null}
-                              </Space>
-                            </Space>
-                          </Card>
-                        </List.Item>
-                      );
-                    }}
-                  />
-                )}
-              </div>
-
-              {/* Agents */}
-              <div>
-                <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>{INDUSTRY_TEXT.detailAgents}</Text>
-                <List size="small" style={{ marginTop: 8 }} dataSource={detail.agents} renderItem={(agent) => (
-                  <List.Item style={{ padding: "6px 0" }}>
-                    <Space direction="vertical" size={2}>
-                      <Space wrap>
-                        <Text strong style={{ color: "var(--baize-text-main)" }}>{normalizeSpiderMeshBrand(String(agent.role_name || agent.name))}</Text>
-                        <Tag color={runtimeStatusColor(deriveIndustryAgentStatus(agent))}>{presentIndustryRuntimeStatus(deriveIndustryAgentStatus(agent))}</Tag>
-                        {agent.agent_class ? <Tag>{presentIndustryRoleClass(agent.agent_class)}</Tag> : null}
-                        {agent.employment_mode ? (
-                          <Tag color={employmentModeColor(agent.employment_mode)}>
-                            {presentIndustryEmploymentMode(agent.employment_mode)}
-                          </Tag>
-                        ) : null}
-                        {agent.activation_mode ? <Tag>{agent.activation_mode === "on-demand" ? "按需唤起" : "常驻"}</Tag> : null}
-                      </Space>
-                      <Text type="secondary" style={{ fontSize: 12 }}>{normalizeSpiderMeshBrand(String(agent.role_summary || agent.environment_summary || ""))}</Text>
-                    </Space>
-                  </List.Item>
-                )} />
-              </div>
-
-              {/* Goals */}
-              <div>
-                <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>{INDUSTRY_TEXT.goalsTitle}</Text>
-                <List size="small" style={{ marginTop: 8 }} dataSource={detail.goals} renderItem={(goal) => (
-                  <List.Item style={{ padding: "6px 0" }}>
-                    <Space direction="vertical" size={2}>
-                      <Space wrap>
-                        <Text strong style={{ color: "var(--baize-text-main)" }}>{String(goal.title || goal.kind || "未命名目标")}</Text>
-                        <Tag>{presentIndustryRuntimeStatus(goal.status || "active")}</Tag>
-                        {goal.role_name ? <Tag>{normalizeSpiderMeshBrand(String(goal.role_name))}</Tag> : null}
-                      </Space>
-                      <Text type="secondary" style={{ fontSize: 12 }}>{String(goal.summary || "")}</Text>
-                    </Space>
-                  </List.Item>
-                )} />
-              </div>
-
-              {/* Schedules */}
-              <div>
-                <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>{INDUSTRY_TEXT.schedulesTitle}</Text>
-                {detail.schedules.length === 0 ? <Empty description={INDUSTRY_TEXT.noSchedules} style={{ margin: "8px 0" }} /> : (
-                  <List size="small" style={{ marginTop: 8 }} dataSource={detail.schedules} renderItem={(schedule) => (
-                    <List.Item style={{ padding: "6px 0" }}>
-                      <Space wrap>
-                        <Text strong style={{ color: "var(--baize-text-main)" }}>{String(schedule.title || schedule.schedule_id)}</Text>
-                        <Tag color={runtimeStatusColor(deriveIndustryScheduleStatus(schedule))}>{presentIndustryRuntimeStatus(deriveIndustryScheduleStatus(schedule))}</Tag>
-                        <Tag>{String(schedule.cron || "-")}</Tag>
-                        <Tag>{String(schedule.timezone || "UTC")}</Tag>
-                      </Space>
-                    </List.Item>
-                  )} />
-                )}
-              </div>
-
-              {/* 日报 */}
-              <div>
-                <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>{INDUSTRY_TEXT.dailyReport}</Text>
-                <Space wrap style={{ marginTop: 8 }}>
-                  <Tag>{INDUSTRY_TEXT.reportEvidence} {detail.reports.daily.evidence_count}</Tag>
-                  <Tag>{INDUSTRY_TEXT.reportDecisions} {detail.reports.daily.decision_count}</Tag>
-                  <Tag>{INDUSTRY_TEXT.reportProposals} {detail.reports.daily.proposal_count}</Tag>
-                  <Tag>{INDUSTRY_TEXT.reportPatches} {detail.reports.daily.patch_count}</Tag>
-                </Space>
-                {detail.reports.daily.highlights.length === 0 ? <Empty description={INDUSTRY_TEXT.noHighlights} style={{ margin: "8px 0" }} /> : (
-                  <List size="small" style={{ marginTop: 8 }} dataSource={detail.reports.daily.highlights} renderItem={(item) => <List.Item style={{ padding: "4px 0" }}>{item}</List.Item>} />
-                )}
-              </div>
-            </Space>
           )}
         </Card>
       </div>
     </div>
   );
 }
-
 
 

@@ -201,14 +201,15 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
     assert cards["governance"]["count"] == 1
     assert cards["governance"]["meta"]["host_twin_summary"]["blocked_surface_count"] == 0
     assert cards["governance"]["meta"]["host_twin_summary"]["active_app_family_count"] == 0
-    assert cards["main-brain"]["source"] == "strategy_memory_service"
+    assert cards["main-brain"]["source"] == "strategy_memory_service,industry_service"
     assert cards["main-brain"]["count"] == 1
     main_brain_entry = cards["main-brain"]["entries"][0]
     assert main_brain_entry["meta"]["lane_count"] == 2
     assert main_brain_entry["meta"]["assignment_count"] == 2
     assert main_brain_entry["meta"]["report_count"] == 1
-    assert main_brain_entry["meta"]["decision_count"] == 1
-    assert main_brain_entry["meta"]["patch_count"] == 1
+    assert main_brain_entry["meta"]["decision_count"] == 2
+    assert main_brain_entry["meta"]["patch_count"] == 3
+    assert main_brain_entry["meta"]["evidence_count"] == 4
     assert main_brain_entry["meta"]["strategy_id"] == "strategy:industry:industry-v1-ops:copaw-agent-runner"
     assert cards["decisions"]["entries"][0]["status"] == "open"
     assert cards["decisions"]["entries"][0]["actions"]["approve"] == "/api/runtime-center/decisions/decision-1/approve"
@@ -218,6 +219,44 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
         cards["patches"]["entries"][0]["actions"]["apply"]
         == "/api/runtime-center/learning/patches/patch-1/apply"
     )
+
+
+def test_runtime_center_main_brain_route_exposes_industry_stats():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["surface"]["status"] == "state-service"
+    assert payload["strategy"]["strategy_id"] == "strategy:industry:industry-v1-ops:copaw-agent-runner"
+    assert payload["carrier"]["industry_instance_id"] == "industry-v1-ops"
+    assert payload["carrier"]["route"] == "/api/runtime-center/industry/industry-v1-ops"
+    assert len(payload["lanes"]) == 2
+    assert payload["current_cycle"]["cycle_id"] == "cycle-1"
+    assert len(payload["assignments"]) == 1
+    assert len(payload["reports"]) == 1
+    assert payload["environment"]["route"] == "/api/runtime-center/governance/status"
+    assert payload["meta"]["lane_count"] == 2
+    assert payload["meta"]["assignment_count"] == 2
+    assert payload["meta"]["report_count"] == 1
+    assert payload["meta"]["decision_count"] == 2
+    assert payload["meta"]["patch_count"] == 3
+    assert payload["meta"]["evidence_count"] == 4
+    assert payload["meta"]["industry_instance_id"] == "industry-v1-ops"
+    assert payload["signals"]["decisions"]["count"] == 2
+    assert payload["signals"]["patches"]["count"] == 3
+    assert payload["signals"]["evidence"]["count"] == 4
 
 
 def test_runtime_center_overview_governance_uses_canonical_host_twin_summary_for_ready_runtime():

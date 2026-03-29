@@ -102,6 +102,11 @@ def test_cron_executor_uses_scheduler_inputs_from_host_snapshot_before_session_f
                     "environment_ref": "env:from-scheduler-inputs",
                     "session_mount_id": "session:from-scheduler-inputs",
                 },
+                "host_twin_summary": {
+                    "recommended_scheduler_action": "continue",
+                    "blocked_surface_count": 0,
+                    "legal_recovery_mode": "resume",
+                },
             },
         }
     )
@@ -113,6 +118,8 @@ def test_cron_executor_uses_scheduler_inputs_from_host_snapshot_before_session_f
     assert submitted.environment_ref == "env:from-scheduler-inputs"
     assert submitted.payload["meta"]["session_mount_id"] == "session:from-scheduler-inputs"
     assert submitted.payload["meta"]["host_snapshot"]["environment_id"] == "env:host-snapshot"
+    assert submitted.payload["meta"]["host_snapshot"]["host_twin_summary"]["recommended_scheduler_action"] == "continue"
+    assert submitted.payload["meta"]["host_snapshot"]["host_twin_summary"]["blocked_surface_count"] == 0
 
 
 def test_cron_executor_prefers_scheduler_host_refs_over_stale_direct_meta_refs() -> None:

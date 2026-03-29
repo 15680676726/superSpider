@@ -16,6 +16,7 @@ import {
   MAIN_BRAIN_COCKPIT_TEXT,
   RUNTIME_CENTER_TEXT,
   formatCnTimestamp,
+  formatMainBrainSignalLabel,
   formatRuntimeFieldLabel,
   formatRuntimeSourceList,
   formatRuntimeStatus,
@@ -30,12 +31,17 @@ import {
   buildRuntimeIndustryCockpitSignals,
   type RuntimeCockpitSignal,
 } from "./runtimeIndustrySections";
+import type { RuntimeMainBrainResponse } from "../../api/modules/runtimeCenter";
 
 type MainBrainCockpitPanelProps = {
   data: RuntimeCenterOverviewPayload | null;
   loading: boolean;
   refreshing: boolean;
   error: string | null;
+  mainBrainData: RuntimeMainBrainResponse | null;
+  mainBrainLoading: boolean;
+  mainBrainError: string | null;
+  mainBrainUnavailable: boolean;
   onRefresh: () => void;
   onOpenRoute: (route: string, title: string) => void;
 };
@@ -55,6 +61,134 @@ const SIGNAL_ICONS: Record<string, ReactNode> = {
 };
 
 const { Text } = Typography;
+
+function stringOrNumber(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+function toneFromStatus(value: unknown): RuntimeCockpitSignal["tone"] {
+  if (typeof value !== "string") {
+    return "default";
+  }
+  const normalized = value.trim().toLowerCase();
+  if (
+    ["state-service", "success", "ready", "active", "clear", "proceed", "ok"].some(
+      (token) => normalized.includes(token),
+    )
+  ) {
+    return "success";
+  }
+  if (
+    ["degraded", "warning", "caution", "pending"].some((token) =>
+      normalized.includes(token),
+    )
+  ) {
+    return "warning";
+  }
+  if (
+    ["blocked", "error", "danger", "retry"].some((token) =>
+      normalized.includes(token),
+    )
+  ) {
+    return "danger";
+  }
+  return "default";
+}
+
+function detailFromSignal(record: Record<string, unknown>): string | null {
+  return firstString(
+    record.detail,
+    record.note,
+    record.summary,
+    record.description,
+    record.reason,
+    record.status,
+  );
+}
+
+function routeFromSignal(record: Record<string, unknown>): string | null {
+  return (
+    stringOrNumber(record.route) ??
+    stringOrNumber(record.route_title) ??
+    stringOrNumber(record.routeTitle)
+  );
+}
+
+function routeTitleFromSignal(record: Record<string, unknown>): string | null {
+  return stringOrNumber(record.route_title) ?? stringOrNumber(record.routeTitle);
+}
+
+function valueFromSignal(record: Record<string, unknown>): string {
+  return (
+    firstString(
+      record.value,
+      record.count,
+      record.title,
+      record.summary,
+      record.label,
+      record.status,
+      record.total,
+    ) ?? RUNTIME_CENTER_TEXT.emptyValue
+  );
+}
+
+function convertDedicatedSignal(
+  key: string,
+  data: unknown,
+): RuntimeCockpitSignal {
+  const record = isRecord(data) ? (data as Record<string, unknown>) : {};
+  const tone =
+    typeof record.tone === "string"
+      ? (record.tone as RuntimeCockpitSignal["tone"])
+      : toneFromStatus(record.status ?? record.summary ?? record.value);
+  return {
+    key,
+    label: formatMainBrainSignalLabel(key),
+    value: valueFromSignal(record),
+    detail: detailFromSignal(record),
+    route: routeFromSignal(record),
+    routeTitle: routeTitleFromSignal(record),
+    tone,
+  };
+}
+
+function buildDedicatedSignals(payload: RuntimeMainBrainResponse | null): RuntimeCockpitSignal[] {
+  if (!payload?.signals) {
+    return [];
+  }
+  return Object.entries(payload.signals).map(([key, value]) =>
+    convertDedicatedSignal(key, value),
+  );
+}
+
+function buildDedicatedChainSignals(
+  payload: RuntimeMainBrainResponse | null,
+): RuntimeCockpitSignal[] | null {
+  const chain = payload?.meta?.control_chain;
+  if (!Array.isArray(chain) || chain.length === 0) {
+    return null;
+  }
+  const signals = chain
+    .map((item) => {
+      if (!isRecord(item)) {
+        return null;
+      }
+      const record = item as Record<string, unknown>;
+      const key = typeof record.key === "string" && record.key ? record.key : null;
+      if (!key) {
+        return null;
+      }
+      return convertDedicatedSignal(key, record);
+    })
+    .filter((signal): signal is RuntimeCockpitSignal => signal !== null);
+  return signals.length > 0 ? signals : null;
+}
 
 function signalToneColor(signal: RuntimeCockpitSignal): string {
   switch (signal.tone) {
@@ -193,7 +327,25 @@ function extractFocusCount(value: unknown): number | null {
   return null;
 }
 
-function deriveUnconsumedReportCount(payload: RuntimeCenterOverviewPayload | null): number | null {
+function deriveUnconsumedReportCount(
+  payload: RuntimeCenterOverviewPayload | null,
+  mainBrainPayload?: RuntimeMainBrainResponse | null,
+): number | null {
+  if (mainBrainPayload?.meta) {
+    const agentReports = mainBrainPayload.meta.agent_reports;
+    if (isRecord(agentReports)) {
+      for (const key of [
+        "unconsumed_count",
+        "pending_count",
+        "unconsumed_reports",
+      ] as const) {
+        const value = agentReports[key];
+        if (typeof value === "number" && Number.isFinite(value)) {
+          return value;
+        }
+      }
+    }
+  }
   const mainBrainMeta = overviewCardMeta(payload, "main-brain");
   const reportsSignal = isRecord(mainBrainMeta.agent_reports) ? mainBrainMeta.agent_reports : null;
   if (reportsSignal) {
@@ -233,13 +385,21 @@ export default function MainBrainCockpitPanel({
   loading,
   refreshing,
   error,
+  mainBrainData,
+  mainBrainLoading,
+  mainBrainError,
+  mainBrainUnavailable,
   onRefresh,
   onOpenRoute,
 }: MainBrainCockpitPanelProps) {
-  const environmentSignals = buildRuntimeEnvironmentCockpitSignals(data);
-  const industrySignals = buildRuntimeIndustryCockpitSignals(data);
-  const surface = data?.surface;
-  const signalCards = [...environmentSignals, ...industrySignals];
+  const dedicatedSignals = buildDedicatedSignals(mainBrainData);
+  const hasDedicatedSignals = dedicatedSignals.length > 0;
+  const environmentSignals = hasDedicatedSignals ? [] : buildRuntimeEnvironmentCockpitSignals(data);
+  const industrySignals = hasDedicatedSignals ? [] : buildRuntimeIndustryCockpitSignals(data);
+  const signalCards =
+    hasDedicatedSignals && dedicatedSignals.length > 0
+      ? dedicatedSignals
+      : [...environmentSignals, ...industrySignals];
   const chainOrder = [
     "carrier",
     "strategy",
@@ -253,28 +413,37 @@ export default function MainBrainCockpitPanel({
     "decisions",
     "patches",
   ];
-  const chainSignals = chainOrder
+  const fallbackChainSignals = chainOrder
     .map((key) => signalCards.find((signal) => signal.key === key) ?? null)
     .filter((signal): signal is RuntimeCockpitSignal => signal !== null);
+  const dedicatedChainSignals = buildDedicatedChainSignals(mainBrainData);
+  const chainSignals = dedicatedChainSignals ?? fallbackChainSignals;
 
-  const carrierSignal = environmentSignals.find((signal) => signal.key === "carrier") ?? null;
-  const strategySignal = industrySignals.find((signal) => signal.key === "strategy") ?? null;
+  const carrierSignal = signalCards.find((signal) => signal.key === "carrier") ?? null;
+  const strategySignal = signalCards.find((signal) => signal.key === "strategy") ?? null;
   const mainBrainMeta = overviewCardMeta(data, "main-brain");
   const industryMeta = overviewCardMeta(data, "industry");
+  const surface = mainBrainData?.surface ?? data?.surface;
+  const generatedAt = mainBrainData?.generated_at ?? data?.generated_at;
+  const errorMessage = mainBrainError ?? error;
   const cycleSignal =
+    mainBrainData?.current_cycle ??
     (isRecord(mainBrainMeta.current_cycle) ? mainBrainMeta.current_cycle : null) ??
     (isRecord(industryMeta.current_cycle) ? industryMeta.current_cycle : null);
   const cycleDeadline = formatUtcMinute(extractTimestamp(cycleSignal));
   const focusCountValue = extractFocusCount(cycleSignal);
   const focusCount =
     focusCountValue === null ? RUNTIME_CENTER_TEXT.emptyValue : String(focusCountValue);
-  const unconsumedReportsValue = deriveUnconsumedReportCount(data);
+  const unconsumedReportsValue = deriveUnconsumedReportCount(data, mainBrainData);
   const unconsumedReports =
     unconsumedReportsValue === null
       ? RUNTIME_CENTER_TEXT.emptyValue
       : String(unconsumedReportsValue);
 
-  if (loading && !data) {
+  const isInitialLoading =
+    (loading && !data) ||
+    (mainBrainLoading && !mainBrainData && !mainBrainUnavailable);
+  if (isInitialLoading) {
     return (
       <Card className="baize-card">
         <div className={styles.panelHeader}>
@@ -314,12 +483,12 @@ export default function MainBrainCockpitPanel({
         </Space>
       </div>
 
-      {error ? (
+      {errorMessage ? (
         <Alert
           showIcon
           type="error"
           message="主脑驾驶舱加载失败"
-          description={error}
+          description={errorMessage}
           style={{ marginBottom: 20 }}
         />
       ) : null}
@@ -327,8 +496,8 @@ export default function MainBrainCockpitPanel({
       <Space wrap size={[8, 8]} style={{ marginBottom: 16 }}>
         {surface?.source ? <Tag>{formatRuntimeSourceList(surface.source)}</Tag> : null}
         {surface?.note ? <Tag>{formatRuntimeSurfaceNote(surface.note)}</Tag> : null}
-        {data?.generated_at ? (
-          <Tag>{RUNTIME_CENTER_TEXT.generatedAt(formatCnTimestamp(data.generated_at))}</Tag>
+        {generatedAt ? (
+          <Tag>{RUNTIME_CENTER_TEXT.generatedAt(formatCnTimestamp(generatedAt))}</Tag>
         ) : null}
       </Space>
 

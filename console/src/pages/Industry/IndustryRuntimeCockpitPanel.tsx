@@ -99,13 +99,15 @@ function resolveExecutionEnvironmentVisibility(detail: IndustryInstanceDetail): 
 
   const constraintsFromIdentity = Array.isArray(detail.execution_core_identity?.environment_constraints)
     ? detail.execution_core_identity!.environment_constraints.filter(
-        (item): item is string => typeof item === "string" && item.trim(),
+        (item): item is string =>
+          typeof item === "string" && item.trim().length > 0,
       )
     : [];
   const constraintsFromEnv =
     envRecord && Array.isArray(envRecord.environment_constraints)
       ? envRecord.environment_constraints.filter(
-          (item): item is string => typeof item === "string" && item.trim(),
+          (item): item is string =>
+            typeof item === "string" && item.trim().length > 0,
         )
       : [];
 

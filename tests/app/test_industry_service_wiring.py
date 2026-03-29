@@ -331,6 +331,12 @@ def test_industry_view_service_owns_read_model_logic_without_lifecycle_mixin(
             AssertionError("view service should own detail logic"),
         ),
     )
+    monkeypatch.setattr(
+        "copaw.industry.view_service.IndustryViewService.reconcile_instance_status",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("public read surfaces must not invoke reconcile"),
+        ),
+    )
 
     summaries = view_service.list_instances(status="active", limit=None)
 

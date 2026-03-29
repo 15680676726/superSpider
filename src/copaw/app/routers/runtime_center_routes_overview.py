@@ -15,6 +15,17 @@ async def get_runtime_overview(
     return await service.get_overview(request.app.state)
 
 
+@router.get("/main-brain", response_model=RuntimeMainBrainResponse)
+async def get_runtime_main_brain(
+    request: Request,
+    response: Response,
+) -> RuntimeMainBrainResponse:
+    """Return the dedicated Runtime Center main-brain cockpit payload."""
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = RuntimeCenterQueryService()
+    return await service.get_main_brain(request.app.state)
+
+
 @router.get("/events")
 async def stream_runtime_events(
     request: Request,

@@ -53,6 +53,22 @@ def _host_detail(
     host_blocker_family: str | None = None,
     host_blocker_response: str | None = None,
 ) -> dict[str, object]:
+    summary = {
+        "host_companion_status": (
+            "restorable" if recommended_scheduler_action == "continue" else "attached"
+        ),
+        "seat_owner_ref": "ops-agent",
+        "active_app_family_keys": ["office_document"],
+        "blocked_surface_refs": [],
+        "blocked_surface_count": 0,
+        "legal_recovery_mode": (
+            "resume-environment" if legal_recovery_path == "resume" else legal_recovery_path
+        ),
+        "recommended_scheduler_action": recommended_scheduler_action,
+        "contention_severity": "clear" if recommended_scheduler_action == "continue" else "blocked",
+        "contention_reason": legal_recovery_reason or "host coordination is clear",
+        "requires_human_return": requires_human_return,
+    }
     return {
         "environment_id": "env-desktop-1",
         "session_mount_id": "session-desktop-1",
@@ -70,6 +86,11 @@ def _host_detail(
             },
         },
         "host_twin": {
+            "projection_kind": "host_twin_projection",
+            "is_projection": True,
+            "is_truth_store": False,
+            "environment_id": "env-desktop-1",
+            "session_mount_id": "session-desktop-1",
             "continuity": {
                 "status": "attached",
                 "valid": True,
@@ -141,6 +162,7 @@ def _host_detail(
                     "startup_recovery_required": requires_human_return,
                 },
             },
+            "host_twin_summary": summary,
         },
     }
 
@@ -290,7 +312,9 @@ def test_fixed_sop_run_detail_exposes_host_preflight_snapshot(tmp_path) -> None:
     assert detail_payload["host_preflight"]["host_twin_summary"]["active_app_family_keys"]
     assert detail_payload["host_preflight"]["host_twin_summary"]["seat_owner_ref"] == "ops-agent"
     assert detail_payload["host_preflight"]["host_twin_summary"]["blocked_surface_count"] == 0
-    assert detail_payload["host_preflight"]["host_twin_summary"]["legal_recovery_mode"] == "resume"
+    assert detail_payload["host_preflight"]["host_twin_summary"]["legal_recovery_mode"] == (
+        "resume-environment"
+    )
     assert detail_payload["host_preflight"]["host_twin_summary"][
         "recommended_scheduler_action"
     ] == "continue"

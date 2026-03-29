@@ -66,6 +66,10 @@ export async function requestRuntimeBusinessAgents<T>(
   return request<T>(buildRuntimeBusinessAgentsPath(industryInstanceId));
 }
 
+export async function requestRuntimeMainBrain<T>(): Promise<T> {
+  return request<T>("/runtime-center/main-brain");
+}
+
 export async function requestRuntimeAgentDetail<T>(agentId: string): Promise<T> {
   return request<T>(
     `/runtime-center/agents/${encodeURIComponent(agentId)}`,

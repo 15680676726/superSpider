@@ -181,15 +181,24 @@ def host_twin_summary_ready(
     legal_recovery_mode = first_non_empty(
         host_twin_summary.get("legal_recovery_mode"),
     )
+    host_companion_status = first_non_empty(
+        host_twin_summary.get("host_companion_status"),
+    )
     try:
         blocked_surface_count = int(host_twin_summary.get("blocked_surface_count") or 0)
     except (TypeError, ValueError):
         blocked_surface_count = 0
+    host_companion_ready = (
+        host_companion_status in {"attached", "restorable", "same-host-other-process"}
+        if host_companion_status is not None
+        else True
+    )
     return bool(
         recommended_action
         and recommended_action not in {"recover", "handoff", "retry"}
         and legal_recovery_mode != "handoff"
         and blocked_surface_count == 0
+        and host_companion_ready
     )
 
 

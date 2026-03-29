@@ -67,3 +67,34 @@ class RuntimeOverviewResponse(BaseModel):
     )
     surface: RuntimeCenterSurfaceInfo
     cards: list[RuntimeOverviewCard] = Field(default_factory=list)
+
+
+class RuntimeMainBrainSection(BaseModel):
+    """Compact section payload used by the dedicated main-brain cockpit."""
+
+    count: int = 0
+    summary: str | None = None
+    route: str | None = None
+    entries: list[dict[str, Any]] = Field(default_factory=list)
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeMainBrainResponse(BaseModel):
+    """Dedicated main-brain cockpit payload for Runtime Center."""
+
+    generated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+    )
+    surface: RuntimeCenterSurfaceInfo
+    strategy: dict[str, Any] = Field(default_factory=dict)
+    carrier: dict[str, Any] = Field(default_factory=dict)
+    lanes: list[dict[str, Any]] = Field(default_factory=list)
+    current_cycle: dict[str, Any] | None = None
+    assignments: list[dict[str, Any]] = Field(default_factory=list)
+    reports: list[dict[str, Any]] = Field(default_factory=list)
+    environment: dict[str, Any] = Field(default_factory=dict)
+    evidence: RuntimeMainBrainSection = Field(default_factory=RuntimeMainBrainSection)
+    decisions: RuntimeMainBrainSection = Field(default_factory=RuntimeMainBrainSection)
+    patches: RuntimeMainBrainSection = Field(default_factory=RuntimeMainBrainSection)
+    signals: dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, Any] = Field(default_factory=dict)

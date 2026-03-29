@@ -287,8 +287,6 @@ export interface IndustryRuntimeAgent {
   runtime_status?: string;
   desired_state?: string;
   risk_level: string;
-  current_goal_id?: string | null;
-  current_goal?: string;
   current_task_id?: string | null;
   industry_instance_id?: string | null;
   industry_role_id?: string | null;

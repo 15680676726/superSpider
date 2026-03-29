@@ -458,10 +458,15 @@ describe("IndustryPage", () => {
     render(<IndustryPage />);
 
     expect(screen.getAllByText("Focused Assignment").length).toBeGreaterThan(0);
-    const cockpitCard = screen.getByText("Runtime Cockpit").closest(".ant-card");
+    const cockpitCard = screen.getByText("Runtime Cockpit")
+      .closest(".ant-card") as HTMLElement | null;
     expect(cockpitCard).toBeTruthy();
-    expect(within(cockpitCard!).getByText("Focused runtime assignment")).toBeTruthy();
-    expect(within(cockpitCard!).queryByText("generic-focus")).toBeNull();
+    expect(
+      within(cockpitCard as HTMLElement).getByText("Focused runtime assignment"),
+    ).toBeTruthy();
+    expect(
+      within(cockpitCard as HTMLElement).queryByText("generic-focus"),
+    ).toBeNull();
     expect(screen.getByText("Staffing Closure")).toBeTruthy();
     expect(screen.getByText("Unified Runtime Chain")).toBeTruthy();
     expect(screen.getByText("工作泳道")).toBeTruthy();
@@ -478,19 +483,34 @@ describe("IndustryPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show full surface" }));
     expect(handleClearRuntimeFocus).toHaveBeenCalledTimes(1);
 
-    const backlogItemCard = screen.getByText("Backlog 2").closest(".ant-card");
+    const backlogItemCard = screen.getByText("Backlog 2")
+      .closest(".ant-card") as HTMLElement | null;
     expect(backlogItemCard).toBeTruthy();
-    fireEvent.click(within(backlogItemCard!).getByRole("button", { name: "Focus backlog" }));
+    fireEvent.click(
+      within(backlogItemCard as HTMLElement).getByRole("button", {
+        name: "Focus backlog",
+      }),
+    );
     expect(handleSelectBacklogFocus).toHaveBeenCalledWith("backlog-2");
 
-    const assignmentItemCard = screen.getByText("Assignment 2").closest(".ant-card");
+    const assignmentItemCard = screen.getByText("Assignment 2")
+      .closest(".ant-card") as HTMLElement | null;
     expect(assignmentItemCard).toBeTruthy();
-    fireEvent.click(within(assignmentItemCard!).getByRole("button", { name: "Focus assignment" }));
+    fireEvent.click(
+      within(assignmentItemCard as HTMLElement).getByRole("button", {
+        name: "Focus assignment",
+      }),
+    );
     expect(handleSelectAssignmentFocus).toHaveBeenCalledWith("assignment-2");
 
-    const reportsCard = screen.getByText("Agent Reports").closest(".ant-card");
+    const reportsCard = screen.getByText("Agent Reports")
+      .closest(".ant-card") as HTMLElement | null;
     expect(reportsCard).toBeTruthy();
-    fireEvent.click(within(reportsCard!).getByRole("button", { name: "Open report chat" }));
+    fireEvent.click(
+      within(reportsCard as HTMLElement).getByRole("button", {
+        name: "Open report chat",
+      }),
+    );
     expect(handleOpenAgentReportChat).toHaveBeenCalledWith(
       expect.objectContaining({
         report_id: "report-1",

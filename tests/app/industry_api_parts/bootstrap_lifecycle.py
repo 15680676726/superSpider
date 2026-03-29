@@ -2157,6 +2157,9 @@ def test_failed_report_followup_carries_control_thread_and_surface_pressure_with
     assert followup_backlog["metadata"]["recommended_scheduler_action"] == "handoff"
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    for agent in runtime_payload.get("agents") or []:
+        assert "current_goal_id" not in agent
+        assert "current_goal" not in agent
     replan_node = next(
         node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
     )

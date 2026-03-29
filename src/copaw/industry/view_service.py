@@ -18,13 +18,12 @@ class IndustryViewService:
         status: str | None = "active",
         limit: int | None = None,
     ):
-        records = [
-            self.reconcile_instance_status(record.instance_id) or record
-            for record in self._facade._industry_instance_repository.list_instances(
+        records = list(
+            self._facade._industry_instance_repository.list_instances(
                 status=None,
                 limit=None,
             )
-        ]
+        )
         summaries = [
             summary
             for summary in (self._facade._build_instance_summary(record) for record in records)
@@ -54,7 +53,7 @@ class IndustryViewService:
         return len(self.list_instances(status="active", limit=None))
 
     def get_instance_record(self, instance_id: str):
-        return self.reconcile_instance_status(instance_id)
+        return self._facade._industry_instance_repository.get_instance(instance_id)
 
     def get_instance_detail(
         self,
@@ -63,7 +62,7 @@ class IndustryViewService:
         assignment_id: str | None = None,
         backlog_item_id: str | None = None,
     ):
-        record = self.reconcile_instance_status(instance_id)
+        record = self._facade._industry_instance_repository.get_instance(instance_id)
         if record is None:
             return None
         if assignment_id is None and backlog_item_id is None:

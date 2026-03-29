@@ -192,6 +192,41 @@ export interface RuntimeHumanAssistTaskDetail {
   };
 }
 
+export interface RuntimeCenterSurfaceInfo {
+  version: "runtime-center-v1";
+  mode: "operator-surface";
+  status: "state-service" | "degraded" | "unavailable";
+  read_only: boolean;
+  source: string;
+  note: string;
+  services?: string[];
+}
+
+export interface RuntimeMainBrainSection {
+  count: number;
+  summary?: string | null;
+  route?: string | null;
+  entries: Record<string, unknown>[];
+  meta: Record<string, unknown>;
+}
+
+export interface RuntimeMainBrainResponse {
+  generated_at: string;
+  surface: RuntimeCenterSurfaceInfo;
+  strategy: Record<string, unknown>;
+  carrier: Record<string, unknown>;
+  lanes: Record<string, unknown>[];
+  current_cycle: Record<string, unknown> | null;
+  assignments: Record<string, unknown>[];
+  reports: Record<string, unknown>[];
+  environment: Record<string, unknown>;
+  evidence: RuntimeMainBrainSection;
+  decisions: RuntimeMainBrainSection;
+  patches: RuntimeMainBrainSection;
+  signals: Record<string, unknown>;
+  meta: Record<string, unknown>;
+}
+
 export const runtimeCenterApi = {
   getRuntimeTaskDetail: (taskId: string) =>
     request<RuntimeTaskDetail>(

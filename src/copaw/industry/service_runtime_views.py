@@ -113,6 +113,11 @@ class _IndustryRuntimeViewsMixin:
             ),
             None,
         )
+        report_followup_backlog_id = (
+            _string(report_followup_backlog.get("backlog_item_id"))
+            if isinstance(report_followup_backlog, dict)
+            else None
+        )
         current_backlog = None
         if selected_backlog_item_id is not None:
             current_backlog = next(
@@ -190,7 +195,10 @@ class _IndustryRuntimeViewsMixin:
         )
         current_backlog_is_report_followup = (
             isinstance(current_backlog, dict)
-            and self._backlog_item_is_report_followup(current_backlog)
+            and (
+                self._backlog_item_is_report_followup(current_backlog)
+                or _string(current_backlog.get("backlog_item_id")) == report_followup_backlog_id
+            )
         )
         current_assignment_status = (
             _string(current_assignment.get("status"))
@@ -267,6 +275,7 @@ class _IndustryRuntimeViewsMixin:
             and open_backlog_items
             and not assignment_backlog_attached
             and not current_backlog_is_report_followup
+            and current_backlog_id != report_followup_backlog_id
         ):
             current_backlog = open_backlog_items[0]
             current_backlog_id = _string(current_backlog.get("backlog_item_id"))
@@ -1275,9 +1284,6 @@ class _IndustryRuntimeViewsMixin:
             item["direct_execution_policy"] = list(
                 execution_core_identity.direct_execution_policy,
             )
-            if current_goal is not None:
-                item["current_goal_id"] = current_goal.get("goal_id")
-                item["current_goal"] = current_goal.get("title")
             return agents
 
         seed = self._get_agent_snapshot(EXECUTION_CORE_AGENT_ID) or {}
@@ -1310,9 +1316,6 @@ class _IndustryRuntimeViewsMixin:
             execution_core_identity.direct_execution_policy,
         )
         item.setdefault("status", "running")
-        if current_goal is not None:
-            item["current_goal_id"] = current_goal.get("goal_id")
-            item["current_goal"] = current_goal.get("title")
         item["route"] = f"/api/runtime-center/agents/{EXECUTION_CORE_AGENT_ID}"
         agents.append(item)
         agents.sort(
@@ -2489,6 +2492,9 @@ class _IndustryRuntimeViewsMixin:
         )
 
         agents = self._list_instance_agents(agent_ids)
+        for agent in agents:
+            agent.pop("current_goal_id", None)
+            agent.pop("current_goal", None)
 
         agents = self._apply_execution_core_identity_to_agents(
 

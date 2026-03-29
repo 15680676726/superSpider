@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from .models import RuntimeOverviewResponse
+from .models import (
+    RuntimeMainBrainResponse,
+    RuntimeOverviewResponse,
+)
 from .overview_cards import RuntimeCenterOverviewBuilder
 from .overview_helpers import build_runtime_surface
 
@@ -28,6 +31,10 @@ class RuntimeCenterQueryService:
             surface=build_runtime_surface(cards),
             cards=cards,
         )
+
+    async def get_main_brain(self, app_state: Any) -> RuntimeMainBrainResponse:
+        """Return the dedicated Runtime Center main-brain cockpit payload."""
+        return await self._overview_builder.build_main_brain_payload(app_state)
 
 
 __all__ = ["RuntimeCenterQueryService"]

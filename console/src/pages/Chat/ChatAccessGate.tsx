@@ -1,5 +1,5 @@
 import { ExclamationCircleOutlined, SettingOutlined } from "@ant-design/icons";
-import { Alert, Button, Input, Modal, Popover, Result, Space, Spin, Tag } from "antd";
+import { Alert, Button, Modal, Result, Space, Spin } from "antd";
 
 import type { IndustryInstanceSummary } from "../../api/modules/industry";
 import type { ChatNoticeVariant } from "./noticeState";

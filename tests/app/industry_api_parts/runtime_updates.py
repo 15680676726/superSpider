@@ -1420,6 +1420,10 @@ def test_staffed_assignment_failure_keeps_supervisor_chain_and_replan_truth(
     assert "browser" in followup_backlog["metadata"]["seat_requested_surfaces"]
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    for agent in runtime_payload.get("agents") or []:
+        assert "current_goal_id" not in agent
+        assert "current_goal" not in agent
+    assert runtime_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
     replan_node = next(
         node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
     )
@@ -2233,7 +2237,18 @@ def test_industry_instance_status_reconciles_from_goal_states(tmp_path) -> None:
     record = app.state.industry_service.get_instance_record("industry-v1-northwind-robotics")
 
     assert record is not None
-    assert record.status == "completed"
+    assert record.status == "active"
+
+    reconciled = app.state.industry_service.reconcile_instance_status(
+        "industry-v1-northwind-robotics",
+    )
+
+    assert reconciled is not None
+    assert reconciled.status == "completed"
+    assert (
+        app.state.industry_service.get_instance_record("industry-v1-northwind-robotics").status
+        == "completed"
+    )
 
 
 def test_industry_instance_status_completes_with_static_team_membership_only(
@@ -2283,7 +2298,15 @@ def test_industry_instance_status_completes_with_static_team_membership_only(
     record = app.state.industry_service.get_instance_record("industry-v1-staffed")
 
     assert record is not None
-    assert record.status == "completed"
+    assert record.status == "active"
+
+    reconciled = app.state.industry_service.reconcile_instance_status("industry-v1-staffed")
+
+    assert reconciled is not None
+    assert reconciled.status == "completed"
+    assert app.state.industry_service.get_instance_record("industry-v1-staffed").status == (
+        "completed"
+    )
 
 def test_industry_detail_backfills_execution_core_identity_with_delegation_first_defaults(
     tmp_path,

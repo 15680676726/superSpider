@@ -627,7 +627,7 @@ def test_industry_chat_kickoff_executes_in_background_without_blocking_response(
         assert elapsed < 2.0
 
 
-def test_industry_bootstrap_defaults_to_live_learning_contract(
+def test_industry_bootstrap_defaults_to_live_coordinating_contract(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
@@ -668,8 +668,8 @@ def test_industry_bootstrap_defaults_to_live_learning_contract(
 
         instance_id = payload["team"]["team_id"]
         runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
-        assert runtime_payload["autonomy_status"] == "learning"
-        assert runtime_payload["execution"]["status"] == "learning"
+        assert runtime_payload["autonomy_status"] == "coordinating"
+        assert runtime_payload["execution"]["status"] == "coordinating"
         assert runtime_payload["current_cycle"]["status"] == "active"
         assert all(goal["status"] == "active" for goal in runtime_payload["goals"])
         assert all(schedule["enabled"] is True for schedule in runtime_payload["schedules"])
@@ -794,7 +794,7 @@ def test_industry_runtime_detail_and_goal_detail_use_formal_instance_store(
     assert "goals." not in nodes_by_id["carrier"]["summary"]
 
 
-def test_industry_bootstrap_auto_activate_enters_live_learning_contract(
+def test_industry_bootstrap_auto_activate_enters_live_coordinating_contract(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
@@ -826,8 +826,8 @@ def test_industry_bootstrap_auto_activate_enters_live_learning_contract(
     runtime_detail = client.get(f"/runtime-center/industry/{instance_id}")
     assert runtime_detail.status_code == 200
     runtime_payload = runtime_detail.json()
-    assert runtime_payload["autonomy_status"] == "learning"
-    assert runtime_payload["execution"]["status"] == "learning"
+    assert runtime_payload["autonomy_status"] == "coordinating"
+    assert runtime_payload["execution"]["status"] == "coordinating"
     assert all(goal["status"] == "active" for goal in runtime_payload["goals"])
     assert all(schedule["enabled"] is True for schedule in runtime_payload["schedules"])
     assert runtime_payload["current_cycle"]["status"] == "active"
@@ -880,8 +880,8 @@ def test_industry_runtime_main_chain_exposes_live_assignment_chain_after_auto_ac
     instance_id = response.json()["team"]["team_id"]
 
     waiting_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
-    assert waiting_payload["autonomy_status"] == "learning"
-    assert waiting_payload["execution"]["status"] == "learning"
+    assert waiting_payload["autonomy_status"] == "coordinating"
+    assert waiting_payload["execution"]["status"] == "coordinating"
     target_goal = next(
         goal
         for goal in waiting_payload["goals"]
@@ -957,7 +957,7 @@ def test_industry_runtime_main_chain_exposes_live_assignment_chain_after_auto_ac
     runtime_detail = client.get(f"/runtime-center/industry/{instance_id}")
     assert runtime_detail.status_code == 200
     runtime_payload = runtime_detail.json()
-    assert runtime_payload["execution"]["status"] == "learning"
+    assert runtime_payload["execution"]["status"] == "coordinating"
     assert runtime_payload["team"]["status"] in {"learning", "coordinating", "active", "running"}
 
     nodes = {node["node_id"]: node for node in runtime_payload["main_chain"]["nodes"]}

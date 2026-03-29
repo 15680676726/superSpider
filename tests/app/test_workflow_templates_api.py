@@ -481,6 +481,8 @@ def _desktop_host_preflight_detail(
     coordination_severity: str = "clear",
     coordination_reason: str | None = None,
     recommended_scheduler_action: str = "continue",
+    blocked_surface_count: int = 0,
+    legal_recovery_mode: str | None = None,
 ) -> dict[str, object]:
     gap = current_gap_or_blocker or handoff_reason
     mutation_ready = (
@@ -489,6 +491,27 @@ def _desktop_host_preflight_detail(
         and active_window_ref is not None
         and writer_lock_scope is not None
     )
+    summary = {
+        "host_companion_status": continuity_status,
+        "seat_owner_ref": "ops-agent",
+        "active_app_family_keys": [
+            "office_document",
+            "desktop_specialized",
+        ],
+        "blocked_surface_refs": [],
+        "blocked_surface_count": max(blocked_surface_count, 0),
+        "legal_recovery_mode": (
+            legal_recovery_mode
+            or ("handoff" if handoff_state else "resume")
+        ),
+        "recommended_scheduler_action": recommended_scheduler_action,
+        "contention_severity": coordination_severity,
+        "contention_reason": (
+            coordination_reason
+            or current_gap_or_blocker
+            or "host coordination is clear"
+        ),
+    }
     return {
         "environment_id": environment_id,
         "session_mount_id": session_mount_id,
@@ -610,6 +633,7 @@ def _desktop_host_preflight_detail(
                     },
                 },
             },
+            "host_twin_summary": summary,
         },
     }
 

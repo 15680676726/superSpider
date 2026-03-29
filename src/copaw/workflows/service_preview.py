@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 from .service_shared import *  # noqa: F401,F403
-from ..app.runtime_center.task_review_projection import build_host_twin_summary
+from ..app.runtime_center.task_review_projection import (
+    build_host_twin_summary,
+    host_twin_summary_ready,
+)
 
 
 class _WorkflowServicePreviewMixin:
@@ -23,24 +26,18 @@ class _WorkflowServicePreviewMixin:
     _HOST_TWIN_BLOCKING_RESPONSES = {"recover", "handoff", "retry"}
 
     def _canonical_host_summary_ready(self, host_twin_summary: dict[str, Any]) -> bool:
-        if not host_twin_summary:
+        return host_twin_summary_ready(host_twin_summary)
+
+    def _canonical_host_summary_overrides_live_blockers(
+        self,
+        host_twin_summary: dict[str, Any],
+    ) -> bool:
+        if not self._canonical_host_summary_ready(host_twin_summary):
             return False
         recommended_scheduler_action = self._first_string(
             host_twin_summary.get("recommended_scheduler_action"),
         )
-        legal_recovery_mode = self._first_string(
-            host_twin_summary.get("legal_recovery_mode"),
-        )
-        try:
-            blocked_surface_count = int(host_twin_summary.get("blocked_surface_count") or 0)
-        except (TypeError, ValueError):
-            blocked_surface_count = 0
-        return bool(
-            recommended_scheduler_action
-            and recommended_scheduler_action not in self._HOST_TWIN_BLOCKING_RESPONSES
-            and legal_recovery_mode != "handoff"
-            and blocked_surface_count == 0
-        )
+        return recommended_scheduler_action in {"proceed", "ready", "clear"}
 
     def get_run_detail(self, run_id: str) -> WorkflowRunDetail:
         run = self._workflow_run_repository.get_run(run_id)
@@ -625,13 +622,9 @@ class _WorkflowServicePreviewMixin:
             host_twin.get("active_blocker_families"),
             host_event_summary.get("active_alert_families"),
         )
-        continuity_status = self._first_string(
-            host_twin_continuity.get("status"),
-            host_companion.get("continuity_status"),
-            recovery.get("status"),
-        )
         recovery_status = self._first_string(recovery.get("status"))
         handoff_state = self._first_string(host_contract.get("handoff_state"))
+        canonical_host_ready = self._canonical_host_summary_ready(host_twin_summary)
         blockers: list[WorkflowTemplateLaunchBlocker] = []
         requirements_by_surface: dict[str, list[dict[str, Any]]] = {}
         for requirement in requirements:
@@ -678,14 +671,13 @@ class _WorkflowServicePreviewMixin:
             capability_ids = self._step_requirement_capability_ids(surface_requirements)
             agent_id = self._step_requirement_agent_id(surface_requirements)
 
-            if continuity_status not in self._HOST_TWIN_VALID_CONTINUITY_STATUSES:
+            if not canonical_host_ready:
                 blockers.append(
                     WorkflowTemplateLaunchBlocker(
                         code="host-twin-continuity-invalid",
                         message=(
-                            f"{surface_kind.capitalize()} host continuity is "
-                            f"'{continuity_status or 'unknown'}'. "
-                            f"{current_gap or 'Attach or recover a valid host twin before launch.'}"
+                            f"{surface_kind.capitalize()} host canonical summary indicates the writer path is not ready. "
+                            f"{current_gap or 'Confirm canonical host readiness before launch.'}"
                         ),
                         agent_id=agent_id,
                         capability_ids=capability_ids,
@@ -740,9 +732,7 @@ class _WorkflowServicePreviewMixin:
                     host_twin_coordination.get("recommended_scheduler_action"),
                     host_twin_scheduler.get("recommended_scheduler_action"),
                 )
-                canonical_host_ready = bool(explicit_host_twin_summary) and self._canonical_host_summary_ready(
-                    host_twin_summary,
-                )
+                canonical_host_ready = self._canonical_host_summary_ready(host_twin_summary)
                 if canonical_host_ready:
                     writable_surface_available = True
                 if (
@@ -772,7 +762,9 @@ class _WorkflowServicePreviewMixin:
                     )
 
                 blocking_families: set[str] = set()
-                if not canonical_host_ready:
+                if not self._canonical_host_summary_overrides_live_blockers(
+                    host_twin_summary,
+                ):
                     blocking_families = set(active_alert_families)
                     host_blocker_family = self._first_string(host_blocker.get("event_family"))
                     host_blocker_response = self._first_string(
