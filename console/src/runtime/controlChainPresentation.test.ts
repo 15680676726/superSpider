@@ -104,7 +104,7 @@ const detailFixture = {
   proposals: [],
   execution: {
     status: "active",
-    current_goal: "Recover the live operating chain",
+    current_focus: "Recover the live operating chain",
     current_owner: "Main Brain",
     current_risk: "guarded",
     evidence_count: 3,
@@ -113,7 +113,7 @@ const detailFixture = {
   main_chain: {
     schema_version: "industry-main-chain-v1",
     loop_state: "active",
-    current_goal: "Recover the live operating chain",
+    current_focus: "Recover the live operating chain",
     current_owner: "Main Brain",
     current_risk: "guarded",
     latest_evidence_summary: "Latest execution evidence",
@@ -246,7 +246,7 @@ describe("controlChainPresentation", () => {
       "Report",
       "Replan",
     ]);
-    expect(model.currentGoal).toBe("Recover the live operating chain");
+    expect(model.currentFocus).toBe("Recover the live operating chain");
     expect(model.currentOwner).toBe("Main Brain");
     expect(model.currentRisk).toBe("guarded");
     expect(model.synthesis).toMatchObject({

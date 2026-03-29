@@ -14,6 +14,7 @@ import type {
   IndustryInstanceDetail,
   IndustryInstanceSummary,
   IndustryPreviewResponse,
+  IndustryRuntimeAgentReport,
   IndustryRoleBlueprint,
 } from "../../api/modules/industry";
 import { buildIndustryRoleChatBinding, openRuntimeChat, resolveIndustryExecutionCoreRole } from "../../utils/runtimeChat";
@@ -39,6 +40,11 @@ type RecommendationDisplayGroup = {
   title: string;
   summary: string;
   sections: IndustryCapabilityRecommendationSection[];
+};
+
+type IndustryDetailLoadOptions = {
+  assignmentId?: string | null;
+  backlogItemId?: string | null;
 };
 
 type BootstrapChatContext = Pick<
@@ -167,7 +173,10 @@ export function useIndustryPageState({
     [],
   );
 
-  const loadDetail = useCallback(async (instanceId: string | null) => {
+  const loadDetail = useCallback(async (
+    instanceId: string | null,
+    options?: IndustryDetailLoadOptions,
+  ) => {
     if (!instanceId) {
       setDetail(null);
       return null;
@@ -175,7 +184,7 @@ export function useIndustryPageState({
     setLoadingDetail(true);
     try {
       setError(null);
-      const payload = await api.getRuntimeIndustryDetail(instanceId);
+      const payload = await api.getRuntimeIndustryDetail(instanceId, options);
       setDetail(payload);
       return payload;
     } catch (fetchError) {
@@ -483,6 +492,84 @@ export function useIndustryPageState({
     }
   }, [detail, navigate, selectedExecutionCoreRole]);
 
+  const handleSelectAssignmentFocus = useCallback(
+    async (assignmentId: string) => {
+      if (!selectedInstanceId) {
+        return null;
+      }
+      return loadDetail(selectedInstanceId, {
+        assignmentId,
+      });
+    },
+    [loadDetail, selectedInstanceId],
+  );
+
+  const handleSelectBacklogFocus = useCallback(
+    async (backlogItemId: string) => {
+      if (!selectedInstanceId) {
+        return null;
+      }
+      return loadDetail(selectedInstanceId, {
+        backlogItemId,
+      });
+    },
+    [loadDetail, selectedInstanceId],
+  );
+
+  const handleClearRuntimeFocus = useCallback(async () => {
+    if (!selectedInstanceId) {
+      return null;
+    }
+    return loadDetail(selectedInstanceId);
+  }, [loadDetail, selectedInstanceId]);
+
+  const handleOpenAgentReportChat = useCallback(
+    async (report: IndustryRuntimeAgentReport) => {
+      if (!detail || !selectedExecutionCoreRole) {
+        return;
+      }
+      const reportMetadata =
+        report.metadata && typeof report.metadata === "object" ? report.metadata : {};
+      const workContextId =
+        report.work_context_id?.trim() ||
+        (typeof reportMetadata.work_context_id === "string"
+          ? reportMetadata.work_context_id.trim()
+          : "") ||
+        undefined;
+      const contextKey =
+        report.context_key?.trim() ||
+        (typeof reportMetadata.context_key === "string"
+          ? reportMetadata.context_key.trim()
+          : "") ||
+        undefined;
+      try {
+        const binding = buildIndustryRoleChatBinding(detail, selectedExecutionCoreRole);
+        await openRuntimeChat(
+          {
+            ...binding,
+            meta: {
+              ...(binding.meta || {}),
+              work_context_id: workContextId,
+              context_key: contextKey || binding.meta?.context_key,
+              current_focus_kind: "agent-report",
+              current_focus_id: report.report_id,
+              current_focus: report.headline || report.summary || undefined,
+              assignment_id: report.assignment_id || undefined,
+            },
+          },
+          navigate,
+        );
+      } catch (chatError) {
+        message.error(
+          chatError instanceof Error
+            ? chatError.message
+            : INDUSTRY_TEXT.chatOpenFailed,
+        );
+      }
+    },
+    [detail, navigate, selectedExecutionCoreRole],
+  );
+
   const roleOptions = useMemo(() => {
     const seen = new Set<string>();
     return draftAgents.reduce<Array<{ label: string; value: string }>>((items, role, index) => {
@@ -695,11 +782,15 @@ export function useIndustryPageState({
     handleChangeRecommendationReviewAcknowledgement,
     handleChangeRecommendationTargets,
     handleDeleteInstance,
+    handleClearRuntimeFocus,
+    handleOpenAgentReportChat,
     handleOpenExecutionCoreChat,
     handlePatchInstallPlanItem,
     handlePreview,
     handleRemoveBriefMediaItem,
     handleRemoveInstallPlanItem,
+    handleSelectAssignmentFocus,
+    handleSelectBacklogFocus,
     handleToggleRecommendation,
     hasCapabilityPlanning,
     installPlan,

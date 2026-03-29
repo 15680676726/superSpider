@@ -335,8 +335,8 @@ export interface IndustryReportSnapshot {
 
 export interface IndustryExecutionSummary {
   status: string;
-  current_goal_id?: string | null;
-  current_goal?: string | null;
+  current_focus_id?: string | null;
+  current_focus?: string | null;
   current_owner_agent_id?: string | null;
   current_owner?: string | null;
   current_risk?: string | null;
@@ -439,6 +439,7 @@ export interface IndustryRuntimeBacklogItem {
   metadata: Record<string, unknown>;
   created_at?: string | null;
   updated_at?: string | null;
+  selected?: boolean;
   route?: string | null;
 }
 
@@ -544,6 +545,7 @@ export interface IndustryRuntimeAssignment {
   metadata: Record<string, unknown>;
   created_at?: string | null;
   updated_at?: string | null;
+  selected?: boolean;
   route?: string | null;
 }
 
@@ -571,6 +573,8 @@ export interface IndustryRuntimeAgentReport {
   decision_ids: string[];
   processed: boolean;
   processed_at?: string | null;
+  work_context_id?: string | null;
+  context_key?: string | null;
   metadata: Record<string, unknown>;
   created_at?: string | null;
   updated_at?: string | null;
@@ -669,13 +673,23 @@ export interface IndustryMainChainNode {
 export interface IndustryMainChainGraph {
   schema_version: "industry-main-chain-v1";
   loop_state: string;
-  current_goal_id?: string | null;
-  current_goal?: string | null;
+  current_focus_id?: string | null;
+  current_focus?: string | null;
   current_owner_agent_id?: string | null;
   current_owner?: string | null;
   current_risk?: string | null;
   latest_evidence_summary?: string | null;
   nodes: IndustryMainChainNode[];
+}
+
+export interface IndustryDetailFocusSelection {
+  selection_kind: "assignment" | "backlog";
+  assignment_id?: string | null;
+  backlog_item_id?: string | null;
+  title?: string | null;
+  summary?: string | null;
+  status?: string | null;
+  route?: string | null;
 }
 
 export interface IndustryInstanceSummary {
@@ -715,6 +729,7 @@ export interface IndustryInstanceDetail extends IndustryInstanceSummary {
   proposals: Array<Record<string, unknown>>;
   execution?: IndustryExecutionSummary | null;
   main_chain?: IndustryMainChainGraph | null;
+  focus_selection?: IndustryDetailFocusSelection | null;
   reports: {
     daily: IndustryReportSnapshot;
     weekly: IndustryReportSnapshot;
@@ -795,10 +810,25 @@ export const industryApi = {
       `/industry/v1/instances/${encodeURIComponent(instanceId)}`,
     ),
 
-  getRuntimeIndustryDetail: (instanceId: string) =>
-    request<IndustryInstanceDetail>(
-      `/runtime-center/industry/${encodeURIComponent(instanceId)}`,
-    ),
+  getRuntimeIndustryDetail: (
+    instanceId: string,
+    options?: {
+      assignmentId?: string | null;
+      backlogItemId?: string | null;
+    },
+  ) => {
+    const params = new URLSearchParams();
+    if (options?.assignmentId) {
+      params.set("assignment_id", options.assignmentId);
+    }
+    if (options?.backlogItemId) {
+      params.set("backlog_item_id", options.backlogItemId);
+    }
+    const suffix = params.size > 0 ? `?${params.toString()}` : "";
+    return request<IndustryInstanceDetail>(
+      `/runtime-center/industry/${encodeURIComponent(instanceId)}${suffix}`,
+    );
+  },
 
   deleteIndustryInstance: (instanceId: string) =>
     request<IndustryDeleteResponse>(

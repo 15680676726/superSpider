@@ -595,7 +595,7 @@ class _IndustryTeamRuntimeMixin:
                 title="Kernel dispatch path",
                 status=(
                     "ready"
-                    if callable(getattr(self._goal_service, "dispatch_goal", None))
+                    if getattr(self._goal_service, "_dispatcher", None) is not None
                     else "missing"
                 ),
                 detail="Goal actions will be compiled and dispatched through the unified kernel.",

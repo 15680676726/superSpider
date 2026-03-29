@@ -92,6 +92,10 @@ export function primaryTitle(
   payload: Record<string, unknown>,
   fallback: string,
 ): string {
+  const focusSelection = payload.focus_selection;
+  if (isRecord(focusSelection) && typeof focusSelection.title === "string" && focusSelection.title) {
+    return focusSelection.title;
+  }
   for (const key of [
     "schedule",
     "work_context",
@@ -191,17 +195,6 @@ export function isIndustryInstanceDetailPayload(
     Array.isArray(value.agents) &&
     Array.isArray(value.tasks)
   );
-}
-
-export function findIndustryGoalRoute(
-  payload: IndustryInstanceDetail,
-  goalId?: string | null,
-): string | null {
-  if (!goalId) {
-    return null;
-  }
-  const matched = payload.goals.find((goal) => goal.goal_id === goalId);
-  return matched?.route ?? null;
 }
 
 export function findIndustryAgentRoute(

@@ -36,6 +36,7 @@ import {
   renderIndustryMainChainSection,
   renderTaskReviewSection,
 } from "./runtimeIndustrySections";
+import { renderHostTwinSection } from "./runtimeEnvironmentSections";
 
 const { Text } = Typography;
 
@@ -43,6 +44,7 @@ export function renderRecordCard(
   key: string,
   record: Record<string, unknown>,
   openRoute: (route: string, title: string) => void,
+  selected = false,
 ) {
   const rows = objectRows(record).slice(0, 8);
   const nestedEntries = Object.entries(record).filter(([, value]) => {
@@ -56,7 +58,23 @@ export function renderRecordCard(
   });
 
   return (
-    <div key={key} className={styles.detailItem}>
+    <div
+      key={key}
+      className={styles.detailItem}
+      style={
+        selected
+          ? {
+              border: "1px solid rgba(22, 119, 255, 0.35)",
+              boxShadow: "0 0 0 1px rgba(22, 119, 255, 0.08)",
+            }
+          : undefined
+      }
+    >
+      {selected ? (
+        <div style={{ marginBottom: 8 }}>
+          <Tag color="blue">Focused</Tag>
+        </div>
+      ) : null}
       {rows.length > 0 ? (
         <Descriptions
           size="small"
@@ -135,6 +153,7 @@ export function renderDetailSection(
   sectionKey: string,
   sectionValue: unknown,
   openRoute: (route: string, title: string) => void,
+  focusSelection?: Record<string, unknown> | null,
 ) {
   if (sectionValue === null || sectionValue === undefined || sectionValue === "") {
     return null;
@@ -187,7 +206,20 @@ export function renderDetailSection(
     return renderTaskReviewSection(sectionKey, sectionValue, openRoute);
   }
 
+  if (sectionKey === "host_twin" && isRecord(sectionValue)) {
+    return renderHostTwinSection(sectionKey, sectionValue);
+  }
+
   if (Array.isArray(sectionValue)) {
+    const isFocusableSection = sectionKey === "assignments" || sectionKey === "backlog";
+    const orderedItems =
+      isFocusableSection && sectionValue.length > 1
+        ? [...sectionValue].sort((left, right) => {
+            const leftSelected = isRecord(left) && left.selected === true ? 1 : 0;
+            const rightSelected = isRecord(right) && right.selected === true ? 1 : 0;
+            return rightSelected - leftSelected;
+          })
+        : sectionValue;
     return (
       <section key={sectionKey} className={styles.detailSection}>
         <div className={styles.detailSectionTitle}>
@@ -200,9 +232,14 @@ export function renderDetailSection(
           />
         ) : (
           <div className={styles.detailArray}>
-            {sectionValue.map((item, index) =>
+            {orderedItems.map((item, index) =>
               isRecord(item) ? (
-                renderRecordCard(`${sectionKey}:${index}`, item, openRoute)
+                renderRecordCard(
+                  `${sectionKey}:${index}`,
+                  item,
+                  openRoute,
+                  item.selected === true,
+                )
               ) : (
                 <pre key={`${sectionKey}:${index}`} className={styles.detailPre}>
                   {primitiveValue(item)}
@@ -221,7 +258,12 @@ export function renderDetailSection(
         <div className={styles.detailSectionTitle}>
           {translateRuntimeSectionLabel(sectionKey)}
         </div>
-        {renderRecordCard(sectionKey, sectionValue, openRoute)}
+        {renderRecordCard(
+          sectionKey,
+          sectionValue,
+          openRoute,
+          sectionValue.selected === true,
+        )}
       </section>
     );
   }
@@ -271,7 +313,14 @@ export function renderRuntimeDetailDrawer(
     : [];
   const visibleSectionEntries = industryDetailPayload
     ? sectionEntries.filter(
-        ([sectionKey]) => !["execution", "main_chain"].includes(sectionKey),
+        ([sectionKey]) =>
+          ![
+            "execution",
+            "main_chain",
+            "strategy_memory",
+            "lanes",
+            "current_cycle",
+          ].includes(sectionKey),
       )
     : sectionEntries;
 
@@ -320,7 +369,14 @@ export function renderRuntimeDetailDrawer(
             ? renderIndustryMainChainSection(industryMainChain, openDetail)
             : null}
           {visibleSectionEntries.map(([sectionKey, sectionValue]) =>
-            renderDetailSection(sectionKey, sectionValue, openDetail),
+            renderDetailSection(
+              sectionKey,
+              sectionValue,
+              openDetail,
+              isRecord(industryDetailPayload?.focus_selection)
+                ? industryDetailPayload.focus_selection
+                : null,
+            ),
           )}
         </div>
       ) : (

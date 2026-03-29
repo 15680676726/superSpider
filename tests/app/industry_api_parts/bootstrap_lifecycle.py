@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from .shared import *  # noqa: F401,F403
 from ..test_capability_market_api import FakeMcpRegistryCatalog
 from copaw.app.console_push_store import take_all
@@ -1684,6 +1686,268 @@ def test_report_synthesis_conflict_backlog_stays_handled_across_replay(tmp_path)
     assert stored_conflict_backlog.cycle_id == "cycle-linked"
     assert stored_conflict_backlog.goal_id == "goal-linked"
     assert stored_conflict_backlog.assignment_id == "assignment-linked"
+
+
+def test_report_synthesis_deduplicates_same_topic_followups_into_one_backlog_item(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    execution_core_agent_id = preview_payload["draft"]["team"]["agents"][0]["agent_id"]
+    support_role = _build_support_role(execution_core_agent_id)
+    facade = _build_team_capability_facade(app)
+
+    created = asyncio.run(
+        facade.handle_update_industry_team(
+            {
+                "instance_id": instance_id,
+                "operation": "add-role",
+                "role": support_role.model_dump(mode="json"),
+            },
+        ),
+    )
+    assert created["success"] is True
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    cycle_id = record.current_cycle_id
+    assert cycle_id is not None
+
+    assignment_a = AssignmentRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        owner_agent_id=support_role.agent_id,
+        owner_role_id=support_role.role_id,
+        title="Warehouse variance review A",
+        summary="Review whether the warehouse variance still lacks a validated cause.",
+        status="completed",
+    )
+    assignment_b = AssignmentRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        owner_agent_id=support_role.agent_id,
+        owner_role_id=support_role.role_id,
+        title="Warehouse variance review B",
+        summary="Review the same warehouse variance claim from a second pass.",
+        status="completed",
+    )
+    app.state.assignment_repository.upsert_assignment(assignment_a)
+    app.state.assignment_repository.upsert_assignment(assignment_b)
+
+    report_a = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=assignment_a.id,
+        owner_agent_id=support_role.agent_id,
+        owner_role_id=support_role.role_id,
+        headline="Warehouse variance review A",
+        summary="Warehouse variance still lacks a validated cause.",
+        status="recorded",
+        result="completed",
+        findings=["Warehouse variance still lacks a validated cause."],
+        needs_followup=True,
+        followup_reason="Warehouse variance still lacks a validated cause.",
+        metadata={"claim_key": "warehouse-variance"},
+        processed=False,
+    )
+    report_b = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=assignment_b.id,
+        owner_agent_id=support_role.agent_id,
+        owner_role_id=support_role.role_id,
+        headline="Warehouse variance review B",
+        summary="Warehouse variance still lacks a validated cause.",
+        status="recorded",
+        result="completed",
+        findings=["Warehouse variance still lacks a validated cause."],
+        needs_followup=True,
+        followup_reason="Warehouse variance still lacks a validated cause.",
+        metadata={"claim_key": "warehouse-variance"},
+        processed=False,
+    )
+    app.state.agent_report_repository.upsert_report(report_a)
+    app.state.agent_report_repository.upsert_report(report_b)
+
+    processed = app.state.industry_service._process_pending_agent_reports(
+        record=record,
+        cycle_id=cycle_id,
+    )
+    assert {item.id for item in processed} == {report_a.id, report_b.id}
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    assert detail.current_cycle is not None
+    assert detail.current_cycle["synthesis"]["needs_replan"] is True
+    assert len(detail.current_cycle["synthesis"]["holes"]) == 1
+    assert len(detail.current_cycle["synthesis"]["recommended_actions"]) == 1
+
+    followup_backlog = next(
+        item
+        for item in detail.backlog
+        if item["metadata"].get("synthesis_kind") == "followup-needed"
+    )
+    source_report_ids = followup_backlog["metadata"]["source_report_ids"]
+    assert len(source_report_ids) == 1
+    assert source_report_ids[0] in {report_a.id, report_b.id}
+
+
+def test_failed_assignment_report_completes_original_backlog_after_followup_is_recorded(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    execution_core_agent_id = preview_payload["draft"]["team"]["agents"][0]["agent_id"]
+    support_role = _build_support_role(execution_core_agent_id)
+    facade = _build_team_capability_facade(app)
+
+    created = asyncio.run(
+        facade.handle_update_industry_team(
+            {
+                "instance_id": instance_id,
+                "operation": "add-role",
+                "role": support_role.model_dump(mode="json"),
+            },
+        ),
+    )
+    assert created["success"] is True
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    cycle_id = record.current_cycle_id
+    assert cycle_id is not None
+
+    backlog_item = app.state.industry_service._backlog_service.record_chat_writeback(
+        industry_instance_id=instance_id,
+        lane_id=None,
+        title="Support evidence collection",
+        summary="Collect the missing evidence before the next staffing review.",
+        priority=3,
+        source_ref="chat-writeback:test-failed-followup",
+        metadata={
+            "owner_agent_id": support_role.agent_id,
+            "industry_role_id": support_role.role_id,
+            "source": "chat-writeback",
+        },
+    )
+    assignment = AssignmentRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        backlog_item_id=backlog_item.id,
+        owner_agent_id=support_role.agent_id,
+        owner_role_id=support_role.role_id,
+        title="Support evidence collection",
+        summary="Collect the missing evidence before the next staffing review.",
+        status="failed",
+    )
+    app.state.assignment_repository.upsert_assignment(assignment)
+    app.state.backlog_item_repository.upsert_item(
+        backlog_item.model_copy(
+            update={
+                "cycle_id": cycle_id,
+                "assignment_id": assignment.id,
+                "status": "materialized",
+            },
+        ),
+    )
+    report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=assignment.id,
+        owner_agent_id=support_role.agent_id,
+        owner_role_id=support_role.role_id,
+        headline="Support evidence collection failed",
+        summary="The evidence package is still missing the external audit trail.",
+        status="recorded",
+        result="failed",
+        findings=["The external audit trail is still missing."],
+        processed=False,
+    )
+    app.state.agent_report_repository.upsert_report(report)
+
+    processed = app.state.industry_service._process_pending_agent_reports(
+        record=record,
+        cycle_id=cycle_id,
+    )
+    assert [item.id for item in processed] == [report.id]
+
+    stored_original_backlog = app.state.backlog_item_repository.get_item(backlog_item.id)
+    assert stored_original_backlog is not None
+    assert stored_original_backlog.status == "completed"
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    followup_backlog = next(
+        item
+        for item in detail.backlog
+        if item["metadata"].get("source_report_id") == report.id
+    )
+    assert followup_backlog["status"] == "open"
+
+    runtime_detail = client.get(f"/runtime-center/industry/{instance_id}")
+    assert runtime_detail.status_code == 200
+    runtime_payload = runtime_detail.json()
+    assert runtime_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
+    assert runtime_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
+    assert runtime_payload["execution"]["current_focus"] == followup_backlog["title"]
+    assert runtime_payload["main_chain"]["current_focus"] == followup_backlog["title"]
+
+    focused_backlog_detail = client.get(
+        f"/runtime-center/industry/{instance_id}?backlog_item_id={quote(followup_backlog['backlog_item_id'])}"
+    )
+    assert focused_backlog_detail.status_code == 200
+    focused_backlog_payload = focused_backlog_detail.json()
+    assert focused_backlog_payload["focus_selection"]["selection_kind"] == "backlog"
+    assert focused_backlog_payload["focus_selection"]["backlog_item_id"] == followup_backlog["backlog_item_id"]
+    assert focused_backlog_payload["focus_selection"]["route"] == (
+        f"/api/runtime-center/industry/{instance_id}?backlog_item_id={quote(followup_backlog['backlog_item_id'])}"
+    )
+    assert focused_backlog_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
+    assert focused_backlog_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
+    assert focused_backlog_payload["execution"]["current_focus"] == followup_backlog["title"]
+    assert focused_backlog_payload["main_chain"]["current_focus"] == followup_backlog["title"]
 
 
 def test_completed_temporary_role_auto_retires_after_report_processing(tmp_path) -> None:

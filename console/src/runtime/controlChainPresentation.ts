@@ -59,7 +59,7 @@ export interface ControlChainSynthesisPresentation {
 export interface ControlChainPresentation {
   loopState: string | null;
   loopStateLabel: string;
-  currentGoal: string | null;
+  currentFocus: string | null;
   currentOwner: string | null;
   currentRisk: string | null;
   latestEvidenceSummary: string | null;
@@ -217,7 +217,7 @@ export function presentControlChain(
   return {
     loopState: normalizeNonEmpty(graph?.loop_state || undefined),
     loopStateLabel: presentRuntimeStatusLabel(graph?.loop_state || null),
-    currentGoal: normalizeNonEmpty(graph?.current_goal || undefined),
+    currentFocus: normalizeNonEmpty(graph?.current_focus || undefined),
     currentOwner: normalizeNonEmpty(graph?.current_owner || undefined),
     currentRisk: normalizeNonEmpty(graph?.current_risk || undefined),
     latestEvidenceSummary: normalizeNonEmpty(graph?.latest_evidence_summary || undefined),

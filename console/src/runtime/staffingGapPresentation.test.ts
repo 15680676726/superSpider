@@ -128,4 +128,45 @@ describe("staffingGapPresentation", () => {
       }),
     ).toBe("Permanent seat");
   });
+
+  it("keeps browser seat proposals visible and governed in the runtime surface", () => {
+    const browserProposalFixture: IndustryStaffingState = {
+      ...staffingFixture,
+      active_gap: {
+        ...staffingFixture.active_gap,
+        kind: "temporary-seat-proposal",
+        target_role_id: "browser-operator",
+        target_role_name: "Browser Operator",
+        target_agent_id: "industry-browser-operator-demo",
+        requested_surfaces: ["browser"],
+        requires_confirmation: true,
+        proposal_status: "open",
+      },
+      pending_proposals: [
+        {
+          ...staffingFixture.pending_proposals[0],
+          kind: "temporary-seat-proposal",
+          target_role_name: "Browser Operator",
+          target_agent_id: "industry-browser-operator-demo",
+          requested_surfaces: ["browser"],
+          requires_confirmation: true,
+        },
+      ],
+      temporary_seats: [],
+      researcher: null,
+    };
+
+    const presentation = buildStaffingPresentation(browserProposalFixture);
+
+    expect(presentation.hasAnyState).toBe(true);
+    expect(presentation.activeGap?.badges).toContain("Needs approval");
+    expect(presentation.activeGap?.meta).toContain("browser");
+    expect(
+      presentSeatLifecycleState({
+        staffing: browserProposalFixture,
+        agentId: "industry-browser-operator-demo",
+        employmentMode: "temporary",
+      }),
+    ).toBe("Pending approval");
+  });
 });

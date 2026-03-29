@@ -237,7 +237,9 @@ class RuntimeConversationFacade:
                 "industry_role_id": binding.industry_role_id,
                 "industry_role_name": role_name,
                 "owner_scope": binding.owner_scope,
-                "current_goal": _field_value(agent_profile, "current_goal"),
+                "current_focus_kind": _field_value(agent_profile, "current_focus_kind"),
+                "current_focus_id": _field_value(agent_profile, "current_focus_id"),
+                "current_focus": _field_value(agent_profile, "current_focus"),
                 "thread_binding_kind": binding.binding_kind,
                 "canonical_thread_id": canonical_thread_id,
                 "control_thread_id": control_thread_id,
@@ -318,7 +320,9 @@ class RuntimeConversationFacade:
                 "industry_role_id": EXECUTION_CORE_ROLE_ID,
                 "industry_role_name": resolved_role_name,
                 "owner_scope": _field_value(detail, "owner_scope"),
-                "current_goal": _field_value(agent_profile, "current_goal"),
+                "current_focus_kind": _field_value(agent_profile, "current_focus_kind"),
+                "current_focus_id": _field_value(agent_profile, "current_focus_id"),
+                "current_focus": _field_value(agent_profile, "current_focus"),
                 "control_thread_id": conversation_id,
                 "requested_agent_id": (
                     requested_agent_id
@@ -563,6 +567,8 @@ def _build_industry_kickoff_prompt(
         _field_value(current_cycle, "title"),
         _field_value(current_cycle, "summary"),
     )
+    lanes = _field_value(detail, "lanes")
+    lane_count = len(lanes) if isinstance(lanes, list) else 0
     backlog_count = len(_field_value(detail, "backlog")) if isinstance(_field_value(detail, "backlog"), list) else 0
     cycle_count = len(_field_value(detail, "cycles")) if isinstance(_field_value(detail, "cycles"), list) else 0
     if cycle_count <= 0 and current_cycle is not None:
@@ -570,10 +576,23 @@ def _build_industry_kickoff_prompt(
     assignment_count = len(_field_value(detail, "assignments")) if isinstance(_field_value(detail, "assignments"), list) else 0
     report_count = len(_field_value(detail, "agent_reports")) if isinstance(_field_value(detail, "agent_reports"), list) else 0
     summary_line = (
-        f"当前待编排：backlog {backlog_count} / cycle {cycle_count} / assignment {assignment_count} / report {report_count}。"
+        f"当前待编排：lane {lane_count} / backlog {backlog_count} / cycle {cycle_count} / assignment {assignment_count} / report {report_count}。"
     )
     if current_focus:
         summary_line = f"{summary_line} 当前 cycle：{current_focus}。"
+    lane_titles: list[str] = []
+    if isinstance(lanes, list):
+        for lane in lanes:
+            if not isinstance(lane, dict):
+                continue
+            title = _first_non_empty(lane.get("title"), lane.get("lane_key"), lane.get("lane_id"))
+            if title is None:
+                continue
+            lane_titles.append(title)
+            if len(lane_titles) >= 3:
+                break
+    if lane_titles:
+        summary_line = f"{summary_line} 当前 lane：{'、'.join(lane_titles)}。"
     return (
         f"“{label}” 已创建完成，当前停在主脑启动确认。\n"
         "系统不会直接把执行位推入干活，而是会先进入行业学习阶段：由 researcher 补齐行业、客户、竞争和平台信号，再自动转入后续协调与执行。\n"
@@ -599,6 +618,35 @@ def _build_kickoff_staffing_suffix(detail: object | None) -> str:
         if gap_decision_id:
             gap_line = f"{gap_line}，decision {gap_decision_id}"
         lines.append(f"{gap_line}。")
+    pending_proposals = staffing.get("pending_proposals")
+    if isinstance(pending_proposals, list) and pending_proposals:
+        valid_pending_proposals = [
+            item for item in pending_proposals if isinstance(item, dict)
+        ]
+        preview_items: list[str] = []
+        for item in valid_pending_proposals[:3]:
+            proposal_role = _first_non_empty(
+                item.get("target_role_name"),
+                item.get("target_role_id"),
+            ) or "pending proposal"
+            proposal_kind = _first_non_empty(item.get("kind"))
+            proposal_decision_id = _first_non_empty(item.get("decision_request_id"))
+            details = [
+                value
+                for value in (
+                    proposal_kind,
+                    f"decision {proposal_decision_id}" if proposal_decision_id else None,
+                )
+                if value
+            ]
+            if details:
+                proposal_role = f"{proposal_role}（{'，'.join(details)}）"
+            preview_items.append(proposal_role)
+        if preview_items:
+            preview = ", ".join(preview_items)
+            if len(valid_pending_proposals) > 3:
+                preview = f"{preview} 等 {len(valid_pending_proposals)} 项"
+            lines.append(f"待确认 proposals：{preview}。")
     temporary_seats = staffing.get("temporary_seats")
     if isinstance(temporary_seats, list) and temporary_seats:
         preview = ", ".join(

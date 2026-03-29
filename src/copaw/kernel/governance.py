@@ -22,11 +22,15 @@ _BLOCKED_SYSTEM_CAPABILITIES = frozenset(
         "system:dispatch_query",
         "system:dispatch_command",
         "system:send_channel_text",
-        "system:dispatch_goal",
-        "system:dispatch_active_goals",
         "system:run_learning_strategy",
         "system:auto_apply_patches",
         "system:apply_patch",
+    }
+)
+_RUNTIME_GOVERNANCE_BLOCKED_CAPABILITIES = frozenset(
+    {
+        "system:dispatch_query",
+        "system:dispatch_command",
     }
 )
 
@@ -62,6 +66,45 @@ def _mapping_value(value: object) -> dict[str, object]:
     return {}
 
 
+def _string_list(value: object | None) -> list[str]:
+    raw_items = value if isinstance(value, (list, tuple, set)) else [value]
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        text = _first_non_empty(item)
+        if text is None:
+            continue
+        lowered = text.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized.append(text)
+    return normalized
+
+
+def _dict_list(value: object | None) -> list[dict[str, object]]:
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    payloads: list[dict[str, object]] = []
+    for item in value:
+        payload = _mapping_value(item)
+        if payload:
+            payloads.append(payload)
+    return payloads
+
+
+def _staffing_confirmation_required(entry: object | None) -> bool:
+    payload = _mapping_value(entry)
+    if not payload:
+        return False
+    if bool(payload.get("requires_confirmation")):
+        return True
+    status = _first_non_empty(payload.get("status")) or "unknown"
+    if status in {"approved", "rejected", "expired", "completed", "cancelled"}:
+        return False
+    return _first_non_empty(payload.get("decision_request_id")) is not None
+
+
 def _batch_action_label(action: str) -> str:
     mapping = {
         "approve": "批准",
@@ -83,6 +126,10 @@ class GovernanceStatus(BaseModel):
     pending_decisions: int = 0
     proposed_patches: int = 0
     pending_patches: int = 0
+    host_twin: dict[str, object] = Field(default_factory=dict)
+    handoff: dict[str, object] = Field(default_factory=dict)
+    staffing: dict[str, object] = Field(default_factory=dict)
+    human_assist: dict[str, object] = Field(default_factory=dict)
     metadata: dict[str, object] = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=_utc_now)
 
@@ -112,6 +159,9 @@ class GovernanceService:
         cron_manager: Any | None = None,
         channel_manager: Any | None = None,
         kernel_dispatcher: Any | None = None,
+        environment_service: Any | None = None,
+        human_assist_task_service: Any | None = None,
+        industry_service: Any | None = None,
     ) -> None:
         self._control_repository = control_repository
         self._decision_request_repository = decision_request_repository
@@ -121,6 +171,9 @@ class GovernanceService:
         self._cron_manager = cron_manager
         self._channel_manager = channel_manager
         self._kernel_dispatcher = kernel_dispatcher
+        self._environment_service = environment_service
+        self._human_assist_task_service = human_assist_task_service
+        self._industry_service = industry_service
 
     def set_runtime_managers(
         self,
@@ -133,6 +186,15 @@ class GovernanceService:
 
     def set_kernel_dispatcher(self, dispatcher: Any | None) -> None:
         self._kernel_dispatcher = dispatcher
+
+    def set_environment_service(self, environment_service: Any | None) -> None:
+        self._environment_service = environment_service
+
+    def set_human_assist_task_service(self, human_assist_task_service: Any | None) -> None:
+        self._human_assist_task_service = human_assist_task_service
+
+    def set_industry_service(self, industry_service: Any | None) -> None:
+        self._industry_service = industry_service
 
     def get_control(self) -> GovernanceControlRecord:
         control = self._control_repository.get_control(_CONTROL_ID)
@@ -175,6 +237,9 @@ class GovernanceService:
             blocked = sorted(
                 [*sorted(_BLOCKED_SYSTEM_CAPABILITIES), "skill:*", "mcp:*", "tool:*"]
             )
+        host_twin, handoff = self._summarize_host_runtime_governance()
+        staffing = self._summarize_staffing_governance()
+        human_assist = self._summarize_human_assist_governance()
         return GovernanceStatus(
             control_id=control.id,
             emergency_stop_active=control.emergency_stop_active,
@@ -186,20 +251,397 @@ class GovernanceService:
             pending_decisions=pending_decisions,
             proposed_patches=proposed_patches,
             pending_patches=pending_patches,
+            host_twin=host_twin,
+            handoff=handoff,
+            staffing=staffing,
+            human_assist=human_assist,
             metadata=dict(control.metadata),
             updated_at=control.updated_at,
         )
 
     def admission_block_reason(self, task: Any) -> str | None:
         control = self.get_control()
-        if not control.emergency_stop_active:
-            return None
         capability_ref = str(getattr(task, "capability_ref", "") or "")
-        if not self._should_block_capability(capability_ref):
+        if control.emergency_stop_active and self._should_block_capability(capability_ref):
+            reason = control.emergency_reason or "Emergency stop is active."
+            return f"Emergency stop blocked capability '{capability_ref}'. {reason}"
+        if capability_ref not in _RUNTIME_GOVERNANCE_BLOCKED_CAPABILITIES:
             return None
-        reason = control.emergency_reason or "紧急停止已生效。"
+        return self._runtime_governance_block_reason(task)
+
+    def _runtime_governance_block_reason(self, task: Any) -> str | None:
+        environment_reason = self._environment_handoff_block_reason(task)
+        if environment_reason is not None:
+            return environment_reason
+        human_assist_reason = self._human_assist_block_reason(task)
+        if human_assist_reason is not None:
+            return human_assist_reason
+        staffing_reason = self._staffing_block_reason(task)
+        if staffing_reason is not None:
+            return staffing_reason
+        return None
+
+    def _environment_handoff_block_reason(self, task: Any) -> str | None:
+        service = self._environment_service
+        if service is None:
+            return None
+        payload = _mapping_value(getattr(task, "payload", None))
+        session_ref = _first_non_empty(
+            getattr(task, "environment_ref", None),
+            payload.get("environment_ref"),
+        )
+        if session_ref is None:
+            return None
+        getter = getattr(service, "get_session_detail", None)
+        if not callable(getter):
+            return None
+        try:
+            detail = getter(session_ref, limit=20)
+        except TypeError:
+            detail = getter(session_ref)
+        except Exception:
+            logger.exception("Failed to inspect environment handoff governance")
+            return None
+        detail_payload = _mapping_value(detail)
+        host_twin = _mapping_value(detail_payload.get("host_twin"))
+        if not self._host_twin_requires_handoff(host_twin):
+            return None
+        self._ensure_environment_handoff_human_assist_task(
+            task=task,
+            session_ref=session_ref,
+            host_twin=host_twin,
+        )
+        owner_ref = _first_non_empty(
+            _mapping_value(host_twin.get("ownership")).get("handoff_owner_ref"),
+            host_twin.get("handoff_owner_ref"),
+        )
+        owner_suffix = f" Owner: {owner_ref}." if owner_ref else ""
         return (
-            f"紧急停止已阻断能力“{capability_ref}”。{reason}"
+            f"Runtime handoff is active for environment '{session_ref}'. "
+            f"Dispatch must wait for the human handoff to return.{owner_suffix}"
+        )
+
+    def _ensure_environment_handoff_human_assist_task(
+        self,
+        *,
+        task: Any,
+        session_ref: str,
+        host_twin: dict[str, object],
+    ) -> None:
+        service = self._human_assist_task_service
+        ensure_task = getattr(service, "ensure_host_handoff_task", None)
+        if not callable(ensure_task):
+            return
+        payload = _mapping_value(getattr(task, "payload", None))
+        chat_thread_id = _first_non_empty(payload.get("chat_thread_id"))
+        if chat_thread_id is None:
+            return
+        legal_recovery = _mapping_value(host_twin.get("legal_recovery"))
+        coordination = _mapping_value(host_twin.get("coordination"))
+        ownership = _mapping_value(host_twin.get("ownership"))
+        verification_anchor = _first_non_empty(
+            legal_recovery.get("return_condition"),
+            legal_recovery.get("checkpoint_ref"),
+            legal_recovery.get("resume_kind"),
+            ownership.get("handoff_owner_ref"),
+            "human-return",
+        )
+        task_title = _first_non_empty(
+            getattr(task, "title", None),
+            payload.get("title"),
+            "runtime work",
+        ) or "runtime work"
+        summary = _first_non_empty(
+            coordination.get("summary"),
+            legal_recovery.get("summary"),
+            f"Runtime handoff is active for environment '{session_ref}'.",
+        ) or f"Runtime handoff is active for environment '{session_ref}'."
+        required_action = (
+            f"请在宿主侧完成当前交接后，回到聊天里说明已完成，并包含“{verification_anchor}”。"
+        )
+        try:
+            ensure_task(
+                chat_thread_id=chat_thread_id,
+                title=f"Return host handoff for {task_title}",
+                summary=summary,
+                required_action=required_action,
+                industry_instance_id=_first_non_empty(payload.get("industry_instance_id")),
+                assignment_id=_first_non_empty(payload.get("assignment_id")),
+                task_id=_first_non_empty(payload.get("task_id")),
+                resume_checkpoint_ref=_first_non_empty(
+                    legal_recovery.get("checkpoint_ref"),
+                    verification_anchor,
+                ),
+                verification_anchor=verification_anchor,
+                block_evidence_refs=[
+                    session_ref,
+                    _first_non_empty(legal_recovery.get("checkpoint_ref")),
+                ],
+            )
+        except Exception:
+            logger.exception("Failed to ensure host handoff human assist task")
+
+    def _human_assist_block_reason(self, task: Any) -> str | None:
+        service = self._human_assist_task_service
+        if service is None:
+            return None
+        payload = _mapping_value(getattr(task, "payload", None))
+        chat_thread_id = _first_non_empty(payload.get("chat_thread_id"))
+        if chat_thread_id is None:
+            return None
+        list_tasks = getattr(service, "list_tasks", None)
+        if not callable(list_tasks):
+            return None
+        try:
+            tasks = list_tasks(chat_thread_id=chat_thread_id, limit=50)
+        except TypeError:
+            tasks = list_tasks(chat_thread_id=chat_thread_id)
+        except Exception:
+            logger.exception("Failed to inspect human assist governance")
+            return None
+        for task_record in tasks or []:
+            payload_record = _mapping_value(task_record)
+            status = _first_non_empty(payload_record.get("status")) or "unknown"
+            if status in {"closed", "cancelled", "expired", "resume_queued"}:
+                continue
+            if status == "need_more_evidence":
+                return (
+                    f"Human assist evidence is still incomplete for chat thread '{chat_thread_id}'. "
+                    "Dispatch must wait for more evidence."
+                )
+            return (
+                f"Human assist handoff is still open for chat thread '{chat_thread_id}'. "
+                f"Current status: {status}."
+            )
+        return None
+
+    def _staffing_block_reason(self, task: Any) -> str | None:
+        service = self._industry_service
+        if service is None:
+            return None
+        payload = _mapping_value(getattr(task, "payload", None))
+        instance_id = _first_non_empty(payload.get("industry_instance_id"))
+        if instance_id is None:
+            return None
+        getter = getattr(service, "get_instance_detail", None)
+        if not callable(getter):
+            return None
+        try:
+            detail = getter(instance_id)
+        except Exception:
+            logger.exception("Failed to inspect staffing governance")
+            return None
+        staffing = _mapping_value(_mapping_value(detail).get("staffing"))
+        active_gap = _mapping_value(staffing.get("active_gap"))
+        pending_proposals = _dict_list(staffing.get("pending_proposals"))
+        blocker = (
+            active_gap
+            if _staffing_confirmation_required(active_gap)
+            else next(
+                (
+                    item
+                    for item in pending_proposals
+                    if _staffing_confirmation_required(item)
+                ),
+                None,
+            )
+        )
+        if blocker is not None:
+            role_name = _first_non_empty(
+                blocker.get("target_role_name"),
+                blocker.get("summary"),
+            ) or instance_id
+            return (
+                f"Staffing confirmation is still required for industry '{instance_id}' "
+                f"before dispatch can continue. Pending gap: {role_name}."
+            )
+        return None
+
+    def _summarize_host_runtime_governance(self) -> tuple[dict[str, object], dict[str, object]]:
+        host_twin_summary = {
+            "blocking_session_count": 0,
+            "blocking_families": [],
+            "session_ids": [],
+        }
+        handoff_summary = {
+            "active": False,
+            "session_ids": [],
+            "owner_refs": [],
+            "blocking_families": [],
+        }
+        service = self._environment_service
+        if service is None:
+            return host_twin_summary, handoff_summary
+        list_sessions = getattr(service, "list_sessions", None)
+        detail_getter = getattr(service, "get_session_detail", None)
+        if not callable(list_sessions) or not callable(detail_getter):
+            return host_twin_summary, handoff_summary
+        try:
+            sessions = list_sessions(limit=200)
+        except TypeError:
+            sessions = list_sessions()
+        except Exception:
+            logger.exception("Failed to list runtime sessions for governance")
+            return host_twin_summary, handoff_summary
+        blocking_families: list[str] = []
+        owner_refs: list[str] = []
+        for session in sessions or []:
+            session_payload = _mapping_value(session)
+            session_id = _first_non_empty(
+                session_payload.get("session_mount_id"),
+                session_payload.get("id"),
+            )
+            if session_id is None:
+                continue
+            try:
+                detail = detail_getter(session_id, limit=20)
+            except TypeError:
+                detail = detail_getter(session_id)
+            except Exception:
+                logger.exception("Failed to inspect runtime session '%s'", session_id)
+                continue
+            host_twin = _mapping_value(_mapping_value(detail).get("host_twin"))
+            families = _string_list(host_twin.get("active_blocker_families"))
+            if families:
+                host_twin_summary["blocking_session_count"] = int(host_twin_summary["blocking_session_count"]) + 1
+                host_twin_summary["session_ids"] = [*host_twin_summary["session_ids"], session_id]
+                blocking_families.extend(families)
+            if self._host_twin_requires_handoff(host_twin):
+                handoff_summary["active"] = True
+                handoff_summary["session_ids"] = [*handoff_summary["session_ids"], session_id]
+                owner_ref = _first_non_empty(
+                    _mapping_value(host_twin.get("ownership")).get("handoff_owner_ref"),
+                    host_twin.get("handoff_owner_ref"),
+                )
+                if owner_ref is not None:
+                    owner_refs.append(owner_ref)
+                handoff_summary["blocking_families"] = [*handoff_summary["blocking_families"], *families]
+        host_twin_summary["blocking_families"] = _string_list(blocking_families)
+        host_twin_summary["session_ids"] = _string_list(host_twin_summary["session_ids"])
+        handoff_summary["session_ids"] = _string_list(handoff_summary["session_ids"])
+        handoff_summary["owner_refs"] = _string_list(owner_refs)
+        handoff_summary["blocking_families"] = _string_list(handoff_summary["blocking_families"])
+        return host_twin_summary, handoff_summary
+
+    def _summarize_staffing_governance(self) -> dict[str, object]:
+        summary = {
+            "active_gap_count": 0,
+            "pending_confirmation_count": 0,
+            "instance_ids": [],
+            "decision_request_ids": [],
+        }
+        service = self._industry_service
+        if service is None:
+            return summary
+        list_instances = getattr(service, "list_instances", None)
+        detail_getter = getattr(service, "get_instance_detail", None)
+        if not callable(list_instances) or not callable(detail_getter):
+            return summary
+        try:
+            instances = list_instances(status=None, limit=200)
+        except TypeError:
+            instances = list_instances(limit=200)
+        except Exception:
+            logger.exception("Failed to list industry instances for governance")
+            return summary
+        decision_ids: list[str] = []
+        instance_ids: list[str] = []
+        for instance in instances or []:
+            instance_payload = _mapping_value(instance)
+            instance_id = _first_non_empty(instance_payload.get("instance_id"), instance_payload.get("id"))
+            if instance_id is None:
+                continue
+            try:
+                detail = detail_getter(instance_id)
+            except Exception:
+                logger.exception("Failed to inspect industry instance '%s'", instance_id)
+                continue
+            staffing = _mapping_value(_mapping_value(detail).get("staffing"))
+            active_gap = _mapping_value(staffing.get("active_gap"))
+            pending_proposals = _dict_list(staffing.get("pending_proposals"))
+            has_pending_confirmation = any(
+                _staffing_confirmation_required(item) for item in pending_proposals
+            )
+            if active_gap:
+                summary["active_gap_count"] = int(summary["active_gap_count"]) + 1
+                instance_ids.append(instance_id)
+                if _staffing_confirmation_required(active_gap) or has_pending_confirmation:
+                    summary["pending_confirmation_count"] = int(summary["pending_confirmation_count"]) + 1
+                decision_id = _first_non_empty(active_gap.get("decision_request_id"))
+                if decision_id is not None:
+                    decision_ids.append(decision_id)
+            elif has_pending_confirmation:
+                summary["pending_confirmation_count"] = int(summary["pending_confirmation_count"]) + 1
+            for item in pending_proposals:
+                decision_id = _first_non_empty(item.get("decision_request_id"))
+                if decision_id is not None:
+                    decision_ids.append(decision_id)
+        summary["instance_ids"] = _string_list(instance_ids)
+        summary["decision_request_ids"] = _string_list(decision_ids)
+        return summary
+
+    def _summarize_human_assist_governance(self) -> dict[str, object]:
+        summary = {
+            "open_count": 0,
+            "blocked_count": 0,
+            "need_more_evidence_count": 0,
+            "task_ids": [],
+            "chat_thread_ids": [],
+        }
+        service = self._human_assist_task_service
+        if service is None:
+            return summary
+        list_tasks = getattr(service, "list_tasks", None)
+        if not callable(list_tasks):
+            return summary
+        try:
+            tasks = list_tasks(limit=200)
+        except TypeError:
+            tasks = list_tasks()
+        except Exception:
+            logger.exception("Failed to list human assist tasks for governance")
+            return summary
+        task_ids: list[str] = []
+        chat_thread_ids: list[str] = []
+        for task_record in tasks or []:
+            payload = _mapping_value(task_record)
+            status = _first_non_empty(payload.get("status")) or "unknown"
+            if status in {"closed", "cancelled", "expired", "resume_queued"}:
+                continue
+            summary["open_count"] = int(summary["open_count"]) + 1
+            if status in {"handoff_blocked", "blocked"}:
+                summary["blocked_count"] = int(summary["blocked_count"]) + 1
+            if status == "need_more_evidence":
+                summary["need_more_evidence_count"] = int(summary["need_more_evidence_count"]) + 1
+            task_id = _first_non_empty(payload.get("task_id"), payload.get("id"))
+            if task_id is not None:
+                task_ids.append(task_id)
+            chat_thread_id = _first_non_empty(payload.get("chat_thread_id"))
+            if chat_thread_id is not None:
+                chat_thread_ids.append(chat_thread_id)
+        summary["task_ids"] = _string_list(task_ids)
+        summary["chat_thread_ids"] = _string_list(chat_thread_ids)
+        return summary
+
+    @staticmethod
+    def _host_twin_requires_handoff(host_twin: dict[str, object]) -> bool:
+        continuity = _mapping_value(host_twin.get("continuity"))
+        coordination = _mapping_value(host_twin.get("coordination"))
+        legal_recovery = _mapping_value(host_twin.get("legal_recovery"))
+        ownership = _mapping_value(host_twin.get("ownership"))
+        recommended_action = _first_non_empty(
+            coordination.get("recommended_scheduler_action"),
+            coordination.get("recommended_action"),
+        )
+        legal_path = _first_non_empty(
+            legal_recovery.get("path"),
+            legal_recovery.get("recovery_path"),
+        )
+        return bool(
+            continuity.get("requires_human_return")
+            or ownership.get("handoff_owner_ref")
+            or recommended_action == "handoff"
+            or legal_path == "handoff"
         )
 
     async def emergency_stop(

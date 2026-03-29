@@ -676,8 +676,8 @@ class IndustryInstanceSummary(BaseModel):
 
 class IndustryExecutionSummary(BaseModel):
     status: str = "idle"
-    current_goal_id: str | None = None
-    current_goal: str | None = None
+    current_focus_id: str | None = None
+    current_focus: str | None = None
     current_owner_agent_id: str | None = None
     current_owner: str | None = None
     current_risk: str | None = None
@@ -710,13 +710,23 @@ class IndustryMainChainNode(BaseModel):
 class IndustryMainChainGraph(BaseModel):
     schema_version: Literal["industry-main-chain-v1"] = "industry-main-chain-v1"
     loop_state: str = "idle"
-    current_goal_id: str | None = None
-    current_goal: str | None = None
+    current_focus_id: str | None = None
+    current_focus: str | None = None
     current_owner_agent_id: str | None = None
     current_owner: str | None = None
     current_risk: str | None = None
     latest_evidence_summary: str | None = None
     nodes: list[IndustryMainChainNode] = Field(default_factory=list)
+
+
+class IndustryDetailFocusSelection(BaseModel):
+    selection_kind: Literal["assignment", "backlog"]
+    assignment_id: str | None = None
+    backlog_item_id: str | None = None
+    title: str | None = None
+    summary: str | None = None
+    status: str | None = None
+    route: str | None = None
 
 
 class IndustryInstanceDetail(IndustryInstanceSummary):
@@ -741,6 +751,7 @@ class IndustryInstanceDetail(IndustryInstanceSummary):
     onboarding_runs: list[dict[str, Any]] = Field(default_factory=list)
     execution: IndustryExecutionSummary | None = None
     main_chain: IndustryMainChainGraph | None = None
+    focus_selection: IndustryDetailFocusSelection | None = None
     reports: dict[str, IndustryReportSnapshot] = Field(default_factory=dict)
     media_analyses: list[MediaAnalysisSummary] = Field(default_factory=list)
 

@@ -609,6 +609,7 @@ def _build_industry_app(
     app.state.agent_profile_service = agent_profile_service
     app.state.state_query_service = state_query_service
     app.state.evidence_query_service = evidence_query_service
+    app.state.kernel_dispatcher = dispatcher
     app.state.reporting_service = reporting_service
     app.state.strategy_memory_service = strategy_memory_service
     app.state.schedule_repository = schedule_repository

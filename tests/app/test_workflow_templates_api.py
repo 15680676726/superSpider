@@ -492,6 +492,20 @@ def _desktop_host_preflight_detail(
     return {
         "environment_id": environment_id,
         "session_mount_id": session_mount_id,
+        "host_companion_session": {
+            "session_mount_id": session_mount_id,
+            "environment_id": environment_id,
+            "continuity_status": continuity_status,
+            "continuity_source": continuity_source,
+            "locality": {
+                "same_host": True,
+                "same_process": False,
+                "startup_recovery_required": handoff_state in {
+                    "active",
+                    "manual-only-terminal",
+                },
+            },
+        },
         "host_twin": {
             "projection_kind": "host_twin_projection",
             "is_projection": True,
@@ -582,6 +596,20 @@ def _desktop_host_preflight_detail(
                     else []
                 ),
             },
+            "host_companion_session": {
+                "session_mount_id": session_mount_id,
+                "environment_id": environment_id,
+                "continuity_status": continuity_status,
+                "continuity_source": continuity_source,
+                "locality": {
+                    "same_host": True,
+                    "same_process": False,
+                    "startup_recovery_required": handoff_state in {
+                        "active",
+                        "manual-only-terminal",
+                    },
+                },
+            },
         },
     }
 
@@ -594,11 +622,23 @@ def _browser_host_preflight_detail(
     continuity_source: str = "live-handle",
     active_blocker_families: list[str] | None = None,
     coordination_severity: str = "clear",
+    coordination_reason: str | None = None,
     recommended_scheduler_action: str = "continue",
 ) -> dict[str, object]:
     return {
         "environment_id": environment_id,
         "session_mount_id": session_mount_id,
+        "host_companion_session": {
+            "session_mount_id": session_mount_id,
+            "environment_id": environment_id,
+            "continuity_status": continuity_status,
+            "continuity_source": continuity_source,
+            "locality": {
+                "same_host": True,
+                "same_process": False,
+                "startup_recovery_required": False,
+            },
+        },
         "host_twin": {
             "projection_kind": "host_twin_projection",
             "is_projection": True,
@@ -650,7 +690,7 @@ def _browser_host_preflight_detail(
                 "seat_selection_policy": "sticky-active-seat",
                 "contention_forecast": {
                     "severity": coordination_severity,
-                    "reason": "browser coordination is clear",
+                    "reason": coordination_reason or "browser coordination is clear",
                 },
                 "legal_owner_transition": {
                     "allowed": True,
@@ -666,6 +706,17 @@ def _browser_host_preflight_detail(
             },
             "recovery_inputs": {
                 "pending_recovery_families": [],
+            },
+            "host_companion_session": {
+                "session_mount_id": session_mount_id,
+                "environment_id": environment_id,
+                "continuity_status": continuity_status,
+                "continuity_source": continuity_source,
+                "locality": {
+                    "same_host": True,
+                    "same_process": False,
+                    "startup_recovery_required": False,
+                },
             },
         },
     }
@@ -1128,6 +1179,11 @@ def test_workflow_run_diagnosis_keeps_host_snapshot_and_resume_rechecks_live_hos
     assert launched.diagnosis.host_snapshot["coordination"]["recommended_scheduler_action"] == (
         "continue"
     )
+    assert launched.diagnosis.host_snapshot["host_companion_session"][
+        "continuity_status"
+    ] == "attached"
+    assert launched.diagnosis.host_snapshot["host_twin_summary"]["host_companion_status"] == "attached"
+    assert launched.diagnosis.host_snapshot["host_twin_summary"]["seat_count"] == 1
 
     environment_service._session_details[str(initial_detail["session_mount_id"])] = (
         _desktop_host_preflight_detail(
@@ -1156,9 +1212,102 @@ def test_workflow_run_diagnosis_keeps_host_snapshot_and_resume_rechecks_live_hos
     assert detail_payload["diagnosis"]["host_snapshot"]["coordination"][
         "recommended_scheduler_action"
     ] == "handoff"
+    assert detail_payload["diagnosis"]["host_snapshot"]["host_twin_summary"][
+        "host_companion_status"
+    ] == "attached"
     assert "host-twin-contention-forecast-blocked" in detail_payload["diagnosis"][
         "blocking_codes"
     ]
+
+
+def test_workflow_resume_refreshes_schedule_host_meta_from_live_host_twin(
+    tmp_path,
+) -> None:
+    initial_detail = _browser_host_preflight_detail(
+        environment_id="env-browser-host-a",
+        session_mount_id="session-browser-host-a",
+        continuity_source="live-handle",
+        coordination_reason="initial browser writer path is clear",
+        recommended_scheduler_action="continue",
+    )
+    environment_service = FakeWorkflowEnvironmentService(
+        session_details={str(initial_detail["session_mount_id"]): initial_detail},
+    )
+    client = TestClient(
+        _build_workflow_app(tmp_path, environment_service=environment_service),
+    )
+    instance_id = _bootstrap_industry(client)
+
+    launched = _launch_workflow_via_service(
+        client,
+        template_id="industry-weekly-research-synthesis",
+        industry_instance_id=instance_id,
+        session_mount_id=str(initial_detail["session_mount_id"]),
+        parameters={
+            "focus_area": "channel conversion",
+            "weekly_review_cron": "0 12 * * 2",
+            "timezone": "UTC",
+        },
+    )
+    run_id = launched.run["run_id"]
+    schedule_id = launched.schedules[0]["id"]
+    schedule_record = client.app.state.workflow_template_service._schedule_repository.get_schedule(
+        schedule_id,
+    )
+    assert schedule_record is not None
+    client.app.state.workflow_template_service._schedule_repository.upsert_schedule(
+        schedule_record.model_copy(
+            update={
+                "enabled": False,
+                "status": "paused",
+            }
+        )
+    )
+
+    rebound_detail = _browser_host_preflight_detail(
+        environment_id="env-browser-host-b",
+        session_mount_id="session-browser-host-a",
+        continuity_source="rebound-live-handle",
+        coordination_reason="browser writer path was rebound after recovery",
+        recommended_scheduler_action="continue",
+    )
+    environment_service._session_details[str(initial_detail["session_mount_id"])] = (
+        rebound_detail
+    )
+
+    resumed = asyncio.run(
+        client.app.state.workflow_template_service.resume_run(
+            run_id,
+            actor="copaw-operator",
+        ),
+    )
+
+    assert resumed.diagnosis.host_snapshot["environment_id"] == "env-browser-host-b"
+    assert resumed.diagnosis.host_snapshot["host_twin_summary"]["host_companion_status"] == "attached"
+    schedule_payload = client.app.state.workflow_template_service._schedule_repository.get_schedule(
+        schedule_id,
+    )
+    assert schedule_payload is not None
+    assert schedule_payload.spec_payload["meta"]["environment_ref"] == "env-browser-host-b"
+    assert schedule_payload.spec_payload["meta"]["environment_id"] == "env-browser-host-b"
+    assert schedule_payload.spec_payload["meta"]["session_mount_id"] == "session-browser-host-a"
+    assert schedule_payload.spec_payload["meta"]["host_snapshot"]["continuity"][
+        "continuity_source"
+    ] == "rebound-live-handle"
+    assert schedule_payload.spec_payload["meta"]["host_snapshot"]["host_twin_summary"][
+        "host_companion_source"
+    ] == "rebound-live-handle"
+    assert schedule_payload.spec_payload["meta"]["host_snapshot"]["coordination"][
+        "contention_forecast"
+    ]["reason"] == "browser writer path was rebound after recovery"
+    stored_run = client.app.state.workflow_run_repository.get_run(run_id)
+    assert stored_run is not None
+    assert stored_run.metadata["host_snapshot"]["environment_id"] == "env-browser-host-b"
+    assert stored_run.metadata["host_snapshot"]["continuity"][
+        "continuity_source"
+    ] == "rebound-live-handle"
+    assert stored_run.metadata["host_snapshot"]["host_twin_summary"]["host_companion_source"] == "rebound-live-handle"
+
 
 def test_workflow_preview_uses_candidate_role_strategy_when_primary_role_is_missing(
     tmp_path,

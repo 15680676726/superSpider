@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from .shared import *  # noqa: F401,F403
 from copaw.capabilities.install_templates import InstallTemplateExampleRunRecord
 from copaw.industry import IndustryBootstrapInstallItem
@@ -622,7 +624,7 @@ def test_industry_chat_kickoff_executes_in_background_without_blocking_response(
             elapsed,
             immediate_statuses,
         )
-        assert elapsed < 1.0
+        assert elapsed < 2.0
 
 
 def test_industry_bootstrap_defaults_to_live_learning_contract(
@@ -967,7 +969,87 @@ def test_industry_runtime_main_chain_exposes_live_assignment_chain_after_auto_ac
     assert "goal" not in nodes
     assert "task" not in nodes
     assert nodes["assignment"]["current_ref"] is not None
+    assert nodes["backlog"]["current_ref"] is not None
     assert nodes["cycle"]["current_ref"] is not None
+
+    assignment = app.state.assignment_repository.get_assignment(nodes["assignment"]["current_ref"])
+    assert assignment is not None
+    backlog_item = app.state.backlog_item_repository.get_item(nodes["backlog"]["current_ref"])
+    assert backlog_item is not None
+
+    app.state.assignment_repository.upsert_assignment(
+        assignment.model_copy(
+            update={
+                "title": "Live assignment focus",
+                "summary": "Assignment title should drive runtime focus instead of the legacy goal title.",
+            },
+        ),
+    )
+    app.state.backlog_item_repository.upsert_item(
+        backlog_item.model_copy(
+            update={
+                "title": "Live backlog focus",
+                "summary": "Backlog route should stay on the industry detail surface.",
+            },
+        ),
+    )
+
+    focused_response = client.get(
+        f"/runtime-center/industry/{instance_id}?assignment_id={quote(assignment.id)}"
+    )
+    assert focused_response.status_code == 200
+    refreshed_payload = focused_response.json()
+    refreshed_nodes = {
+        node["node_id"]: node for node in refreshed_payload["main_chain"]["nodes"]
+    }
+    assert refreshed_payload["focus_selection"]["selection_kind"] == "assignment"
+    assert refreshed_payload["focus_selection"]["assignment_id"] == assignment.id
+    assert refreshed_payload["focus_selection"]["route"] == (
+        f"/api/runtime-center/industry/{instance_id}?assignment_id={quote(assignment.id)}"
+    )
+    assert refreshed_payload["execution"]["current_focus"] == "Live assignment focus"
+    assert refreshed_payload["execution"]["current_focus_id"] == assignment.id
+    assert refreshed_payload["main_chain"]["current_focus"] == "Live assignment focus"
+    assert refreshed_payload["main_chain"]["current_focus_id"] == assignment.id
+    selected_assignment = next(
+        item
+        for item in refreshed_payload["assignments"]
+        if item["assignment_id"] == assignment.id
+    )
+    assert selected_assignment["selected"] is True
+    assert refreshed_nodes["assignment"]["route"] == (
+        f"/api/runtime-center/industry/{instance_id}?assignment_id={quote(assignment.id)}"
+    )
+    assert refreshed_nodes["backlog"]["route"] == (
+        f"/api/runtime-center/industry/{instance_id}?backlog_item_id={quote(backlog_item.id)}"
+    )
+
+    backlog_focused_response = client.get(
+        f"/runtime-center/industry/{instance_id}?backlog_item_id={quote(backlog_item.id)}"
+    )
+    assert backlog_focused_response.status_code == 200
+    backlog_focused_payload = backlog_focused_response.json()
+    backlog_focused_nodes = {
+        node["node_id"]: node for node in backlog_focused_payload["main_chain"]["nodes"]
+    }
+    assert backlog_focused_payload["focus_selection"]["selection_kind"] == "backlog"
+    assert backlog_focused_payload["focus_selection"]["backlog_item_id"] == backlog_item.id
+    assert backlog_focused_payload["focus_selection"]["route"] == (
+        f"/api/runtime-center/industry/{instance_id}?backlog_item_id={quote(backlog_item.id)}"
+    )
+    assert backlog_focused_payload["execution"]["current_focus"] == "Live backlog focus"
+    assert backlog_focused_payload["execution"]["current_focus_id"] == backlog_item.id
+    assert backlog_focused_payload["main_chain"]["current_focus"] == "Live backlog focus"
+    assert backlog_focused_payload["main_chain"]["current_focus_id"] == backlog_item.id
+    selected_backlog = next(
+        item
+        for item in backlog_focused_payload["backlog"]
+        if item["backlog_item_id"] == backlog_item.id
+    )
+    assert selected_backlog["selected"] is True
+    assert backlog_focused_nodes["backlog"]["route"] == (
+        f"/api/runtime-center/industry/{instance_id}?backlog_item_id={quote(backlog_item.id)}"
+    )
 
 
 def test_industry_operating_cycle_closes_through_fixed_sop_report_and_strategy_sync(

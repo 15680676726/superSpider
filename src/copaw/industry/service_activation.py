@@ -121,7 +121,7 @@ class _IndustryActivationMixin:
                     override=override.model_dump(mode="json"),
                     dispatch=None,
                     routes={
-                        "goal": f"/api/runtime-center/goals/{goal.id}",
+                        "goal": f"/api/goals/{goal.id}/detail",
                         "agent": f"/api/runtime-center/agents/{seed.owner_agent_id}",
                         "industry": f"/api/runtime-center/industry/{team_id}",
                     },
@@ -254,7 +254,7 @@ class _IndustryActivationMixin:
                     assignment_id=assignment.id if assignment is not None else None,
                 )
 
-        deferred_background_dispatches: list[tuple[str, list[str]]] = []
+        deferred_background_dispatches: list[tuple[str, list[dict[str, object]]]] = []
         if auto_dispatch:
             assignment_by_goal_id = {
                 assignment.goal_id: assignment
@@ -263,26 +263,35 @@ class _IndustryActivationMixin:
             }
             dispatch_by_goal_id: dict[str, dict[str, Any]] = {}
             for goal, _override, seed in goal_seed_links:
-                background_task_ids: list[str] = []
                 assignment = assignment_by_goal_id.get(goal.id)
-                dispatch = await self._goal_service.dispatch_goal(
-                    goal.id,
-                    context={
-                        **build_goal_dispatch_context(seed),
-                        "lane_id": goal.lane_id,
-                        "cycle_id": current_cycle.id if current_cycle is not None else None,
-                        "assignment_id": assignment.id if assignment is not None else None,
-                        "report_back_mode": "summary",
-                    },
-                    owner_agent_id=seed.owner_agent_id,
-                    execute=execute,
-                    execute_background=execute,
-                    activate=auto_activate,
-                    schedule_background_execution=False,
-                    background_task_ids_sink=background_task_ids,
-                )
-                if background_task_ids:
-                    deferred_background_dispatches.append((goal.id, background_task_ids))
+                dispatch_context = {
+                    **build_goal_dispatch_context(seed),
+                    "lane_id": goal.lane_id,
+                    "cycle_id": current_cycle.id if current_cycle is not None else None,
+                    "assignment_id": assignment.id if assignment is not None else None,
+                    "report_back_mode": "summary",
+                }
+                if execute:
+                    dispatch = await self._goal_service.dispatch_goal_deferred_background(
+                        goal.id,
+                        context=dispatch_context,
+                        owner_agent_id=seed.owner_agent_id,
+                        activate=auto_activate,
+                    )
+                else:
+                    dispatch = await self._goal_service.compile_goal_dispatch(
+                        goal.id,
+                        context=dispatch_context,
+                        owner_agent_id=seed.owner_agent_id,
+                        activate=auto_activate,
+                    )
+                deferred_results = [
+                    dict(item)
+                    for item in list(dispatch.get("dispatch_results") or [])
+                    if item.get("scheduled_execution") is True and item.get("task_id")
+                ]
+                if deferred_results:
+                    deferred_background_dispatches.append((goal.id, deferred_results))
                 dispatch_by_goal_id[goal.id] = dispatch
             for index, item in enumerate(goal_results):
                 goal_id = _string(item.goal.get("id")) if isinstance(item.goal, dict) else None
@@ -384,10 +393,10 @@ class _IndustryActivationMixin:
                 analysis_ids=plan.media_analysis_ids,
             )
         summary = self._build_instance_summary(final_record)
-        for goal_id, task_ids in deferred_background_dispatches:
-            self._goal_service.schedule_background_goal_execution(
+        for goal_id, dispatch_results in deferred_background_dispatches:
+            self._goal_service.release_deferred_goal_dispatch(
                 goal_id=goal_id,
-                task_ids=task_ids,
+                dispatch_results=dispatch_results,
             )
 
         return IndustryBootstrapResponse(
@@ -408,7 +417,7 @@ class _IndustryActivationMixin:
                     for agent in plan.draft.team.agents
                 ],
                 "goals": [
-                    f"/api/runtime-center/goals/{item.goal['id']}"
+                    f"/api/goals/{item.goal['id']}/detail"
                     for item in goal_results
                 ],
                 "schedules": [

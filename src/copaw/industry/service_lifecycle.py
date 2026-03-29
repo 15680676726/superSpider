@@ -176,6 +176,31 @@ class _IndustryLifecycleMixin:
             cycle_id=cycle_id,
             limit=limit,
         )
+    def _backlog_item_staffing_resolution_closed(
+        self,
+        item: BacklogItemRecord,
+    ) -> bool:
+        metadata = dict(item.metadata or {})
+        target_role_id = _string(metadata.get("seat_target_role_id")) or _string(
+            metadata.get("industry_role_id"),
+        )
+        target_agent_id = _string(metadata.get("seat_target_agent_id")) or _string(
+            metadata.get("owner_agent_id"),
+        )
+        if target_role_id is None and target_agent_id is None:
+            return False
+        record = self._industry_instance_repository.get_instance(item.industry_instance_id)
+        if record is None:
+            return False
+        team = self._materialize_team_blueprint(record)
+        return (
+            self._match_instance_team_role(
+                team,
+                role_id=target_role_id,
+                agent_id=target_agent_id,
+            )
+            is not None
+        )
     def _backlog_item_waits_for_staffing_resolution(
         self,
         item: BacklogItemRecord,
@@ -185,6 +210,8 @@ class _IndustryLifecycleMixin:
         metadata = dict(item.metadata or {})
         source = _string(metadata.get("source")) or _string(item.source_ref)
         if source != "chat-writeback" and not str(source or "").startswith("chat-writeback:"):
+            return False
+        if self._backlog_item_staffing_resolution_closed(item):
             return False
         gap_kind = _string(metadata.get("chat_writeback_gap_kind"))
         seat_resolution_kind = _string(metadata.get("seat_resolution_kind"))
@@ -214,8 +241,58 @@ class _IndustryLifecycleMixin:
         return [
             item
             for item in items
-            if not self._backlog_item_waits_for_staffing_resolution(item)
+            if self._backlog_item_is_report_followup(item)
+            or not self._backlog_item_waits_for_staffing_resolution(item)
         ]
+
+    def _backlog_item_value(
+        self,
+        item: object,
+        key: str,
+    ) -> object | None:
+        if isinstance(item, dict):
+            return item.get(key)
+        return getattr(item, key, None)
+
+    def _backlog_item_metadata(
+        self,
+        item: object,
+    ) -> dict[str, Any]:
+        metadata = self._backlog_item_value(item, "metadata")
+        return metadata if isinstance(metadata, dict) else {}
+
+    def _backlog_item_is_report_followup(self, item: object) -> bool:
+        metadata = self._backlog_item_metadata(item)
+        if _string(metadata.get("source_report_id")) is not None:
+            return True
+        source_report_ids = metadata.get("source_report_ids")
+        if isinstance(source_report_ids, list) and any(
+            _string(value) is not None for value in source_report_ids
+        ):
+            return True
+        return _string(metadata.get("synthesis_kind")) in {
+            "followup-needed",
+            "failed-report",
+            "conflict",
+        }
+
+    def _rank_materializable_backlog_items(
+        self,
+        items: list[Any],
+    ) -> list[Any]:
+        return sorted(
+            items,
+            key=lambda item: (
+                1 if self._backlog_item_is_report_followup(item) else 0,
+                int(self._backlog_item_value(item, "priority") or 0),
+                _sort_timestamp(
+                    self._backlog_item_value(item, "updated_at")
+                    or self._backlog_item_value(item, "created_at"),
+                ),
+            ),
+            reverse=True,
+        )
+
     def _current_operating_cycle_record(
         self,
         instance_id: str,
@@ -302,6 +379,15 @@ class _IndustryLifecycleMixin:
             if source_ref is None or title is None:
                 continue
             metadata = action.get("metadata")
+            action_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+            carried_metadata = self._resolve_report_followup_metadata(
+                action_metadata=action_metadata,
+            )
+            metadata = dict(action_metadata)
+            if carried_metadata:
+                metadata.update(carried_metadata)
+            if not metadata:
+                metadata = None
             try:
                 priority = int(action.get("priority", 4))
             except (TypeError, ValueError):
@@ -315,6 +401,119 @@ class _IndustryLifecycleMixin:
                 source_ref=source_ref,
                 metadata=dict(metadata) if isinstance(metadata, dict) else None,
             )
+
+    def _resolve_report_followup_metadata(
+        self,
+        *,
+        action_metadata: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        metadata = dict(action_metadata or {})
+        source_report_id = _string(metadata.get("source_report_id"))
+        if source_report_id is None:
+            source_report_ids = metadata.get("source_report_ids")
+            if isinstance(source_report_ids, list):
+                source_report_id = next(
+                    (
+                        _string(item)
+                        for item in source_report_ids
+                        if _string(item) is not None
+                    ),
+                    None,
+                )
+        if source_report_id is None:
+            return {}
+        report = None
+        if self._agent_report_repository is not None:
+            getter = getattr(self._agent_report_repository, "get_report", None)
+            if callable(getter):
+                report = getter(source_report_id)
+        assignment = None
+        if report is not None and self._assignment_repository is not None:
+            assignment_id = _string(getattr(report, "assignment_id", None))
+            if assignment_id is not None:
+                getter = getattr(self._assignment_repository, "get_assignment", None)
+                if callable(getter):
+                    assignment = getter(assignment_id)
+        original_backlog_item = None
+        if assignment is not None and self._backlog_service is not None:
+            backlog_item_id = _string(getattr(assignment, "backlog_item_id", None))
+            if backlog_item_id is not None:
+                original_backlog_item = self._backlog_service.get_item(backlog_item_id)
+        return self._build_report_followup_metadata(
+            report=report,
+            assignment=assignment,
+            original_backlog_item=original_backlog_item,
+        )
+
+    def _build_report_followup_metadata(
+        self,
+        *,
+        report: AgentReportRecord | None,
+        assignment: AssignmentRecord | None,
+        original_backlog_item: BacklogItemRecord | None,
+    ) -> dict[str, Any]:
+        carried: dict[str, Any] = {}
+        original_metadata = (
+            dict(original_backlog_item.metadata or {})
+            if original_backlog_item is not None
+            else {}
+        )
+        supervisor_owner_agent_id = _string(
+            original_metadata.get("supervisor_owner_agent_id"),
+        )
+        supervisor_industry_role_id = _string(
+            original_metadata.get("supervisor_industry_role_id"),
+        )
+        supervisor_role_name = _string(original_metadata.get("supervisor_role_name"))
+        for key in (
+            "supervisor_owner_agent_id",
+            "supervisor_industry_role_id",
+            "supervisor_role_name",
+            "environment_constraints",
+            "evidence_expectations",
+            "report_back_mode",
+            "source",
+            "chat_writeback_fingerprint",
+            "chat_writeback_instruction",
+            "chat_writeback_classes",
+            "chat_writeback_target_role_name",
+            "chat_writeback_target_match_signals",
+            "chat_writeback_requested_surfaces",
+            "chat_writeback_gap_kind",
+            "seat_resolution_kind",
+            "seat_resolution_reason",
+            "seat_requested_surfaces",
+            "seat_target_role_id",
+            "seat_target_role_name",
+            "seat_target_agent_id",
+            "decision_request_id",
+            "proposal_status",
+        ):
+            if key in original_metadata and original_metadata[key] is not None:
+                carried[key] = original_metadata[key]
+        if supervisor_owner_agent_id is not None:
+            carried["owner_agent_id"] = supervisor_owner_agent_id
+        if supervisor_industry_role_id is not None:
+            carried["industry_role_id"] = supervisor_industry_role_id
+            carried.setdefault("goal_kind", supervisor_industry_role_id)
+        if supervisor_role_name is not None:
+            carried["industry_role_name"] = supervisor_role_name
+            carried["role_name"] = supervisor_role_name
+            carried.setdefault("role_summary", supervisor_role_name)
+        carried.setdefault("task_mode", "report-followup")
+        if report is not None:
+            if _string(report.owner_agent_id) is not None:
+                carried.setdefault("source_owner_agent_id", report.owner_agent_id)
+            if _string(report.owner_role_id) is not None:
+                carried.setdefault("source_industry_role_id", report.owner_role_id)
+        if assignment is not None:
+            if _string(assignment.owner_agent_id) is not None:
+                carried.setdefault("source_owner_agent_id", assignment.owner_agent_id)
+            if _string(assignment.owner_role_id) is not None:
+                carried.setdefault("source_industry_role_id", assignment.owner_role_id)
+        if original_backlog_item is not None and original_backlog_item.source_ref is not None:
+            carried.setdefault("upstream_backlog_source_ref", original_backlog_item.source_ref)
+        return carried
     def _persist_cycle_report_synthesis(
         self,
         *,
@@ -700,6 +899,12 @@ class _IndustryLifecycleMixin:
             if (
                 _string(metadata.get("owner_agent_id")) == normalized_agent_id
                 or normalize_industry_role_id(_string(metadata.get("industry_role_id")))
+                == normalized_role_id
+                or _string(metadata.get("seat_target_agent_id")) == normalized_agent_id
+                or normalize_industry_role_id(_string(metadata.get("seat_target_role_id")))
+                == normalized_role_id
+                or _string(metadata.get("source_owner_agent_id")) == normalized_agent_id
+                or normalize_industry_role_id(_string(metadata.get("source_industry_role_id")))
                 == normalized_role_id
             ):
                 return True
@@ -1155,11 +1360,21 @@ class _IndustryLifecycleMixin:
         return len(self.list_instances(status="active", limit=None))
     def get_instance_record(self, instance_id: str) -> IndustryInstanceRecord | None:
         return self.reconcile_instance_status(instance_id)
-    def get_instance_detail(self, instance_id: str) -> IndustryInstanceDetail | None:
+    def get_instance_detail(
+        self,
+        instance_id: str,
+        *,
+        assignment_id: str | None = None,
+        backlog_item_id: str | None = None,
+    ) -> IndustryInstanceDetail | None:
         record = self.reconcile_instance_status(instance_id)
         if record is None:
             return None
-        return self._build_instance_detail(record)
+        return self._build_instance_detail(
+            record,
+            assignment_id=assignment_id,
+            backlog_item_id=backlog_item_id,
+        )
     def reconcile_instance_status(
         self,
         instance_id: str,
@@ -1371,39 +1586,47 @@ class _IndustryLifecycleMixin:
             )
             goal_owner_agent_id = _string(goal_context.get("owner_agent_id"))
             assignment = assignment_by_goal_id.get(goal.id)
+            dispatch_context = {
+                "channel": "industry-chat",
+                "bootstrap_kind": _string(goal_context.get("bootstrap_kind")) or "industry-v1",
+                "owner_scope": record.owner_scope,
+                "industry_instance_id": record.instance_id,
+                "lane_id": _string(goal_context.get("lane_id")) or goal.lane_id,
+                "cycle_id": (
+                    _string(goal_context.get("cycle_id"))
+                    or goal.cycle_id
+                    or (current_cycle.id if current_cycle is not None else None)
+                ),
+                "assignment_id": (
+                    assignment.id
+                    if assignment is not None
+                    else _string(goal_context.get("assignment_id"))
+                ),
+                "report_back_mode": _string(goal_context.get("report_back_mode")) or "summary",
+                "source": "industry-chat-kickoff",
+                "trigger_source": trigger_source or "chat:industry-control-thread",
+                "trigger_actor": owner_agent_id or EXECUTION_CORE_AGENT_ID,
+                "trigger_reason": trigger_reason,
+                "trigger_message_text": trigger_message_text,
+                "trigger_session_id": _string(session_id),
+                "trigger_channel": _string(channel),
+                "kickoff_stage": kickoff_stage,
+            }
             dispatches.append(
-                await self._goal_service.dispatch_goal(
-                    goal.id,
-                    context={
-                        "channel": "industry-chat",
-                        "bootstrap_kind": _string(goal_context.get("bootstrap_kind")) or "industry-v1",
-                        "owner_scope": record.owner_scope,
-                        "industry_instance_id": record.instance_id,
-                        "lane_id": _string(goal_context.get("lane_id")) or goal.lane_id,
-                        "cycle_id": (
-                            _string(goal_context.get("cycle_id"))
-                            or goal.cycle_id
-                            or (current_cycle.id if current_cycle is not None else None)
-                        ),
-                        "assignment_id": (
-                            assignment.id
-                            if assignment is not None
-                            else _string(goal_context.get("assignment_id"))
-                        ),
-                        "report_back_mode": _string(goal_context.get("report_back_mode")) or "summary",
-                        "source": "industry-chat-kickoff",
-                        "trigger_source": trigger_source or "chat:industry-control-thread",
-                        "trigger_actor": owner_agent_id or EXECUTION_CORE_AGENT_ID,
-                        "trigger_reason": trigger_reason,
-                        "trigger_message_text": trigger_message_text,
-                        "trigger_session_id": _string(session_id),
-                        "trigger_channel": _string(channel),
-                        "kickoff_stage": kickoff_stage,
-                    },
-                    owner_agent_id=goal_owner_agent_id,
-                    execute=True,
-                    execute_background=execute_background,
-                    activate=True,
+                await (
+                    self._goal_service.dispatch_goal_deferred_background(
+                        goal.id,
+                        context=dispatch_context,
+                        owner_agent_id=goal_owner_agent_id,
+                        activate=True,
+                    )
+                    if execute_background
+                    else self._goal_service.dispatch_goal_execute_now(
+                        goal.id,
+                        context=dispatch_context,
+                        owner_agent_id=goal_owner_agent_id,
+                        activate=True,
+                    )
                 ),
             )
             started_goal_ids.append(goal.id)
@@ -2735,11 +2958,8 @@ class _IndustryLifecycleMixin:
             open_backlog = [
                 item for item in open_backlog if item.id in scoped_backlog_ids
             ]
-        open_backlog = self._materializable_backlog_items(open_backlog)
-        open_backlog = sorted(
-            open_backlog,
-            key=lambda item: (int(item.priority), _sort_timestamp(item.updated_at)),
-            reverse=True,
+        open_backlog = self._rank_materializable_backlog_items(
+            self._materializable_backlog_items(open_backlog),
         )
         pending_reports = self._list_agent_report_records(
             record.instance_id,
@@ -3088,15 +3308,32 @@ class _IndustryLifecycleMixin:
         }
         for report in pending_reports:
             assignment = assignments.get(report.assignment_id or "")
+            original_backlog_item: BacklogItemRecord | None = None
             if assignment is not None and assignment.backlog_item_id is not None:
-                item = (
+                original_backlog_item = (
                     self._backlog_service.get_item(assignment.backlog_item_id)
                     if self._backlog_service is not None
                     else None
                 )
-                if item is not None and report.result in {"completed", "success"}:
-                    self._backlog_service.mark_item_completed(item)
+                if (
+                    original_backlog_item is not None
+                    and report.result in {"completed", "success"}
+                ):
+                    self._backlog_service.mark_item_completed(original_backlog_item)
             if report.result in {"failed", "cancelled", "blocked"}:
+                followup_metadata = self._build_report_followup_metadata(
+                    report=report,
+                    assignment=assignment,
+                    original_backlog_item=original_backlog_item,
+                )
+                followup_metadata.update(
+                    {
+                        "source_report_id": report.id,
+                        "owner_agent_id": report.owner_agent_id,
+                        "industry_role_id": report.owner_role_id,
+                        "report_back_mode": "summary",
+                    }
+                )
                 self._backlog_service.record_chat_writeback(
                     industry_instance_id=record.instance_id,
                     lane_id=_string(report.lane_id) or (assignment.lane_id if assignment is not None else None),
@@ -3104,13 +3341,10 @@ class _IndustryLifecycleMixin:
                     summary=report.summary,
                     priority=4,
                     source_ref=f"agent-report:{report.id}",
-                    metadata={
-                        "source_report_id": report.id,
-                        "owner_agent_id": report.owner_agent_id,
-                        "industry_role_id": report.owner_role_id,
-                        "report_back_mode": "summary",
-                    },
+                    metadata=followup_metadata,
                 )
+                if original_backlog_item is not None:
+                    self._backlog_service.mark_item_completed(original_backlog_item)
             self._write_agent_report_back_to_control_thread(
                 record=record,
                 report=report,

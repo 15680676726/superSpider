@@ -43,7 +43,6 @@ import {
   translateRuntimeCardTitle,
   translateRuntimeCardSummary,
   translateRuntimeSourceList,
-  translateRuntimeSurfaceNote,
   translateRuntimeEntryTitle,
   translateRuntimeEntrySummary,
   translateRuntimeFieldLabel,
@@ -54,8 +53,8 @@ import {
   renderEntry,
   summaryRows,
   toggleSelection,
-  renderLoading,
 } from "./viewHelpers";
+import MainBrainCockpitPanel from "./MainBrainCockpitPanel";
 import { runtimeStatusColor } from "../../runtime/tagSemantics";
 
 const { Text } = Typography;
@@ -79,13 +78,13 @@ export default function RuntimeCenterPage() {
     closeDetail,
   } = useRuntimeCenter();
 
-  const surface = data?.surface;
   const rawTab = searchParams.get("tab");
   const activeTab: RuntimeCenterTab =
     rawTab === "governance" || rawTab === "recovery" || rawTab === "automation"
       ? rawTab
       : "overview";
   const focusScope = searchParams.get("scope");
+  const surface = data?.surface;
 
   const decisionEntries = useMemo(
     () => data?.cards.find((card) => card.key === "decisions")?.entries ?? [],
@@ -165,26 +164,11 @@ export default function RuntimeCenterPage() {
     [navigate, openDetail],
   );
 
-  const overviewMetrics = {
-    cards: data?.cards.length ?? 0,
-    entries: data?.cards.reduce((total, card) => total + card.count, 0) ?? 0,
-    decisions: data?.cards.find((card) => card.key === "decisions")?.count ?? 0,
-    agents: data?.cards.find((card) => card.key === "agents")?.count ?? 0,
-  };
   const recoveryRows = summaryRows(recoverySummary);
-  const healthHighlights = useMemo(() => {
-    const byName = new Map(
-      (selfCheck?.checks ?? []).map((check) => [check.name, check]),
-    );
-    return [
-      "core_runtime_ready",
-      "memory_vector_ready",
-      "browser_surface_ready",
-      "desktop_surface_ready",
-    ]
-      .map((name) => byName.get(name))
-      .filter((item): item is NonNullable<typeof item> => Boolean(item));
-  }, [selfCheck]);
+  const healthHighlights = useMemo(
+    () => (selfCheck?.checks ?? []).slice(0, 4),
+    [selfCheck],
+  );
 
   return (
     <div className={`${styles.page} page-container`}>
@@ -246,52 +230,20 @@ export default function RuntimeCenterPage() {
       {activeTab === "overview" ? (
         <>
           <Space direction="vertical" size={24} style={{ width: "100%", marginBottom: 32 }}>
-            <Alert
-              showIcon
-              type={surface?.status === "state-service" ? "success" : "warning"}
-              message={translateRuntimeSourceList(surface?.source)}
-              description={translateRuntimeSurfaceNote(surface?.note)}
+            <MainBrainCockpitPanel
+              data={data}
+              loading={loading}
+              refreshing={refreshing}
+              error={error}
+              onRefresh={() => {
+                void refreshActiveTabData();
+              }}
+              onOpenRoute={(route, title) => {
+                void openSurfaceRoute(route, title);
+              }}
             />
-            {error ? (
-              <Alert
-                showIcon
-                type="error"
-                message={RUNTIME_CENTER_TEXT.requestFailed}
-                description={error}
-              />
-            ) : null}
           </Space>
-          <section className={styles.metrics}>
-            <Card className="baize-card" style={{ padding: "12px" }}>
-              <div className={styles.metricIcon}><Activity size={18} color="#1B4FD8" /></div>
-              <div>
-                <div className={styles.metricLabel}>{RUNTIME_CENTER_TEXT.metricCards}</div>
-                <div className={styles.metricValue} style={{ color: "white", fontWeight: 800 }}>{overviewMetrics.cards}</div>
-              </div>
-            </Card>
-            <Card className="baize-card" style={{ padding: "12px" }}>
-              <div className={styles.metricIcon}><Waypoints size={18} color="#C9A84C" /></div>
-              <div>
-                <div className={styles.metricLabel}>{RUNTIME_CENTER_TEXT.metricEntries}</div>
-                <div className={styles.metricValue} style={{ color: "white", fontWeight: 800 }}>{overviewMetrics.entries}</div>
-              </div>
-            </Card>
-            <Card className="baize-card" style={{ padding: "12px" }}>
-              <div className={styles.metricIcon}><ShieldAlert size={18} color="#f43f5e" /></div>
-              <div>
-                <div className={styles.metricLabel}>{RUNTIME_CENTER_TEXT.metricDecisions}</div>
-                <div className={styles.metricValue} style={{ color: "white", fontWeight: 800 }}>{overviewMetrics.decisions}</div>
-              </div>
-            </Card>
-            <Card className="baize-card" style={{ padding: "12px" }}>
-              <div className={styles.metricIcon}><Bot size={18} color="#10b981" /></div>
-              <div>
-                <div className={styles.metricLabel}>{RUNTIME_CENTER_TEXT.metricAgents}</div>
-                <div className={styles.metricValue} style={{ color: "white", fontWeight: 800 }}>{overviewMetrics.agents}</div>
-              </div>
-            </Card>
-          </section>
-          {loading || !data ? renderLoading() : (
+          {data ? (
             <section className={styles.grid}>
               {data.cards.map((card) => (
                 <Card key={card.key} className="baize-card">
@@ -313,9 +265,9 @@ export default function RuntimeCenterPage() {
                     <div className={styles.emptyWrap}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={RUNTIME_CENTER_TEXT.cardEmpty(translateRuntimeCardTitle(card.key, card.title))} /></div>
                   )}
                 </Card>
-              ))}
+                ))}
             </section>
-          )}
+          ) : null}
         </>
       ) : null}
 

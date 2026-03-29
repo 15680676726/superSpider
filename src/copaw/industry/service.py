@@ -70,8 +70,20 @@ class IndustryService(
     def get_instance_record(self, instance_id: str):
         return self._view_service.get_instance_record(instance_id)
 
-    def get_instance_detail(self, instance_id: str):
-        return self._view_service.get_instance_detail(instance_id)
+    def get_instance_detail(
+        self,
+        instance_id: str,
+        *,
+        assignment_id: str | None = None,
+        backlog_item_id: str | None = None,
+    ):
+        if assignment_id is None and backlog_item_id is None:
+            return self._view_service.get_instance_detail(instance_id)
+        return self._view_service.get_instance_detail(
+            instance_id,
+            assignment_id=assignment_id,
+            backlog_item_id=backlog_item_id,
+        )
 
     def reconcile_instance_status(self, instance_id: str):
         return self._view_service.reconcile_instance_status(instance_id)

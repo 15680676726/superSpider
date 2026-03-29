@@ -12,6 +12,7 @@ from ..state.repositories import (
     SqliteFixedSopTemplateRepository,
     SqliteWorkflowRunRepository,
 )
+from ..app.runtime_center.task_review_projection import build_host_twin_summary
 from .builtin_templates import builtin_fixed_sop_templates
 from .models import (
     FixedSopBindingCreateRequest,
@@ -28,6 +29,8 @@ from .models import (
 
 
 class FixedSopService:
+    _HOST_PRELIGHT_BLOCKING_RESPONSES = {"handoff", "recover", "retry"}
+
     def __init__(
         self,
         *,
@@ -469,13 +472,33 @@ class FixedSopService:
             if callable(getter):
                 detail = getter(session_mount_id, limit=20)
                 if isinstance(detail, dict):
-                    return dict(detail.get("host_twin") or {})
+                    host_twin = dict(detail.get("host_twin") or {})
+                    host_companion_session = dict(detail.get("host_companion_session") or {})
+                    if host_companion_session:
+                        host_twin["host_companion_session"] = host_companion_session
+                    summary = dict(detail.get("host_twin_summary") or {}) or build_host_twin_summary(
+                        host_twin,
+                        host_companion_session=host_companion_session,
+                    )
+                    if summary:
+                        host_twin["host_twin_summary"] = summary
+                    return host_twin
         if environment_id:
             getter = getattr(service, "get_environment_detail", None)
             if callable(getter):
                 detail = getter(environment_id, limit=20)
                 if isinstance(detail, dict):
-                    return dict(detail.get("host_twin") or {})
+                    host_twin = dict(detail.get("host_twin") or {})
+                    host_companion_session = dict(detail.get("host_companion_session") or {})
+                    if host_companion_session:
+                        host_twin["host_companion_session"] = host_companion_session
+                    summary = dict(detail.get("host_twin_summary") or {}) or build_host_twin_summary(
+                        host_twin,
+                        host_companion_session=host_companion_session,
+                    )
+                    if summary:
+                        host_twin["host_twin_summary"] = summary
+                    return host_twin
         return {}
 
     def _evaluate_host_preflight(
@@ -487,8 +510,11 @@ class FixedSopService:
         if not bool(host_requirement.get("mutating")):
             return None
         continuity = dict(host_preflight.get("continuity") or {})
+        legal_recovery = dict(host_preflight.get("legal_recovery") or {})
+        latest_blocking_event = dict(host_preflight.get("latest_blocking_event") or {})
         execution_mutation_ready = dict(host_preflight.get("execution_mutation_ready") or {})
         coordination = dict(host_preflight.get("coordination") or {})
+        scheduler_inputs = dict(host_preflight.get("scheduler_inputs") or {})
         surface_kind = str(host_requirement.get("surface_kind") or "").strip() or "desktop"
         surface_key = "desktop_app" if surface_kind == "desktop" else "browser"
         continuity_valid = bool(
@@ -499,16 +525,55 @@ class FixedSopService:
         recommended_action = str(
             coordination.get("recommended_scheduler_action") or "",
         ).strip()
-        reason = (
-            str(dict(coordination.get("contention_forecast") or {}).get("reason") or "").strip()
-            or "host preflight could not confirm a legal writable path"
+        recommended_runtime_response = str(
+            latest_blocking_event.get("recommended_runtime_response") or "",
+        ).strip()
+        active_blocker_family = str(
+            latest_blocking_event.get("event_family")
+            or scheduler_inputs.get("active_blocker_family")
+            or "",
+        ).strip()
+        legal_recovery_path = str(legal_recovery.get("path") or "").strip()
+        requires_human_return = bool(
+            continuity.get("requires_human_return")
+            or scheduler_inputs.get("requires_human_return")
         )
-        blocked = (
-            not host_preflight
-            or not continuity_valid
-            or not writable
-            or recommended_action in {"handoff", "recover", "retry"}
-        )
+        coordination_reason = str(
+            dict(coordination.get("contention_forecast") or {}).get("reason") or "",
+        ).strip()
+        legal_recovery_reason = str(
+            legal_recovery.get("reason")
+            or dict(coordination.get("legal_owner_transition") or {}).get("reason")
+            or "",
+        ).strip()
+        reason = "host preflight could not confirm a legal writable path"
+        blocked = False
+        if not host_preflight:
+            blocked = True
+        elif not continuity_valid:
+            blocked = True
+            reason = (
+                str(continuity.get("status") or "").strip()
+                or "host continuity is not currently attached"
+            )
+        elif requires_human_return or legal_recovery_path == "handoff":
+            blocked = True
+            reason = (
+                legal_recovery_reason
+                or "human return is required before the host can resume writer work"
+            )
+        elif not writable:
+            blocked = True
+            reason = coordination_reason or reason
+        elif recommended_action in self._HOST_PRELIGHT_BLOCKING_RESPONSES:
+            blocked = True
+            reason = coordination_reason or reason
+        elif recommended_runtime_response in self._HOST_PRELIGHT_BLOCKING_RESPONSES:
+            blocked = True
+            reason = (
+                coordination_reason
+                or f"active host blocker '{active_blocker_family or 'unknown'}' requires {recommended_runtime_response}"
+            )
         return FixedSopDoctorCheck(
             key="host-preflight",
             label="Host Preflight",

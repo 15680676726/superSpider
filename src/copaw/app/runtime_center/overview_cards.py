@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from ...utils.runtime_action_links import build_decision_actions, build_patch_actions
+from .task_review_projection import build_host_twin_summary
 from .models import RuntimeOverviewCard, RuntimeOverviewEntry
 
 logger = logging.getLogger(__name__)
@@ -164,6 +165,74 @@ class _RuntimeCenterOverviewCardsSupport:
             mapper=self._map_industry_entries,
         )
 
+    async def _build_main_brain_card(self, app_state: Any) -> RuntimeOverviewCard:
+        strategy_items = await self._call_list_method(
+            getattr(app_state, "strategy_memory_service", None),
+            "list_strategies",
+        )
+        strategies = [] if strategy_items is _MISSING else list(strategy_items)
+        strategies = [
+            item
+            for item in strategies
+            if (self._string(self._get_field(item, "status")) or "active") in {"active", "reviewing"}
+        ] or strategies
+
+        industry_items = await self._call_list_method(
+            getattr(app_state, "industry_service", None),
+            "list_instances",
+        )
+        industries = [] if industry_items is _MISSING else list(industry_items)
+        industry_by_instance_id = self._index_industry_by_instance_id(industries)
+
+        decision_items = await self._call_list_method(
+            getattr(app_state, "state_query_service", None),
+            "list_decision_requests",
+            "list_decisions",
+            "get_decision_requests",
+        )
+        decisions = [] if decision_items is _MISSING else list(decision_items)
+
+        patch_items = await self._call_list_method(
+            self._learning_source(app_state),
+            "list_patches",
+        )
+        patches = [] if patch_items is _MISSING else list(patch_items)
+
+        evidence_items = await self._call_list_method(
+            getattr(app_state, "evidence_query_service", None),
+            "list_recent_records",
+            "list_recent_evidence",
+            "list_evidence",
+            "list_records",
+        )
+        evidence = [] if evidence_items is _MISSING else list(evidence_items)
+
+        entries = self._map_main_brain_entries(
+            strategies=strategies,
+            industries=industries,
+            industry_by_instance_id=industry_by_instance_id,
+            decision_count=len(decisions),
+            patch_count=len(patches),
+            evidence_count=len(evidence),
+        )
+        if not entries:
+            return self._unavailable_card(
+                "main-brain",
+                "Main Brain",
+                "Main-brain cockpit is not connected yet.",
+            )
+        total = len(entries)
+        return RuntimeOverviewCard(
+            key="main-brain",
+            title="Main Brain",
+            source="strategy_memory_service",
+            status="state-service",
+            count=total,
+            summary=self._summarize_main_brain_card(entries[0]),
+            entries=entries,
+            meta=self._main_brain_card_meta(entries[0], total=total),
+        )
+
     async def _build_capabilities_card(self, app_state: Any) -> RuntimeOverviewCard:
         capability_service = getattr(app_state, "capability_service", None)
         if capability_service is None:
@@ -221,12 +290,92 @@ class _RuntimeCenterOverviewCardsSupport:
             )
         payload = self._model_dump(status)
         emergency_active = bool(payload.get("emergency_stop_active"))
-        current_status = "active" if emergency_active else "idle"
-        summary = (
-            payload.get("emergency_reason")
-            if emergency_active
-            else "运行时正在接收新工作。"
-        ) or "运行时正在接收新工作。"
+        handoff = self._mapping(payload.get("handoff")) or {}
+        staffing = self._mapping(payload.get("staffing")) or {}
+        human_assist = self._mapping(payload.get("human_assist")) or {}
+        host_twin = self._mapping(payload.get("host_twin")) or {}
+        host_companion_session = self._mapping(payload.get("host_companion_session")) or {}
+        host_twin_summary_payload = self._mapping(payload.get("host_twin_summary")) or build_host_twin_summary(
+            host_twin,
+            host_companion_session=host_companion_session,
+        )
+        host_twin_blocked = False
+        if isinstance(host_twin_summary_payload, dict):
+            recommended_scheduler_action = self._string(
+                host_twin_summary_payload.get("recommended_scheduler_action"),
+            )
+            normalized_scheduler_action = (
+                recommended_scheduler_action.strip().lower()
+                if recommended_scheduler_action is not None
+                else ""
+            )
+            host_twin_blocked = bool(
+                (
+                    recommended_scheduler_action
+                    and normalized_scheduler_action not in {"proceed", "ready", "clear", "none"}
+                )
+                or (
+                    host_twin_summary_payload.get("contention_severity")
+                    and str(host_twin_summary_payload.get("contention_severity")).lower()
+                    not in {"clear", "ok", "ready"}
+                )
+                or int(host_twin_summary_payload.get("blocked_surface_count") or 0) > 0
+            )
+        runtime_blocked = bool(
+            handoff.get("active")
+            or int(staffing.get("pending_confirmation_count") or 0) > 0
+            or int(human_assist.get("blocked_count") or 0) > 0
+            or host_twin_blocked
+        )
+        current_status = "active" if emergency_active else ("blocked" if runtime_blocked else "idle")
+        summary = payload.get("emergency_reason")
+        if not summary and handoff.get("active"):
+            summary = "Human handoff is active and runtime dispatch is temporarily gated."
+        if not summary and int(staffing.get("pending_confirmation_count") or 0) > 0:
+            summary = "Staffing confirmation is still pending for active runtime work."
+        if not summary and int(human_assist.get("blocked_count") or 0) > 0:
+            summary = "Human assist tasks are still blocking automatic continuation."
+        if (
+            not summary
+            and isinstance(host_twin_summary_payload, dict)
+            and host_twin_summary_payload.get("recommended_scheduler_action")
+        ):
+            active_family_keys = [
+                str(value).strip()
+                for value in list(host_twin_summary_payload.get("active_app_family_keys") or [])
+                if str(value).strip()
+            ]
+            selected_seat_ref = self._string(
+                host_twin_summary_payload.get("selected_seat_ref"),
+            )
+            seat_selection_policy = self._string(
+                host_twin_summary_payload.get("seat_selection_policy"),
+            )
+            coordination_action = self._string(
+                host_twin_summary_payload.get("recommended_scheduler_action"),
+            )
+            normalized_scheduler_action = (
+                coordination_action.strip().lower()
+                if coordination_action is not None
+                else ""
+            )
+            if normalized_scheduler_action in {"proceed", "ready", "clear", "none"}:
+                summary = "Host twin ready"
+                if selected_seat_ref:
+                    summary += f" on {selected_seat_ref}"
+                if seat_selection_policy:
+                    summary += f" via {seat_selection_policy}"
+                if active_family_keys:
+                    summary += "; active app families: " + ", ".join(active_family_keys)
+                summary += "."
+            else:
+                active_count = int(host_twin_summary_payload.get("active_app_family_count") or 0)
+                summary = (
+                    "Host twin coordination recommends "
+                    f"{coordination_action} "
+                    f"with {active_count} active app family twin(s)."
+                )
+        summary = summary or "运行时正在接收新工作。"
         entry = RuntimeOverviewEntry(
             id=str(payload.get("control_id") or "runtime"),
             title="运行治理",
@@ -241,6 +390,12 @@ class _RuntimeCenterOverviewCardsSupport:
                 "pending_patches": payload.get("pending_patches"),
                 "paused_schedule_ids": payload.get("paused_schedule_ids"),
                 "channel_shutdown_applied": payload.get("channel_shutdown_applied"),
+                "host_twin": payload.get("host_twin"),
+                "host_companion_session": payload.get("host_companion_session"),
+                "host_twin_summary": host_twin_summary_payload,
+                "handoff": handoff,
+                "staffing": staffing,
+                "human_assist": human_assist,
             },
         )
         return RuntimeOverviewCard(
@@ -251,7 +406,7 @@ class _RuntimeCenterOverviewCardsSupport:
             count=1,
             summary=str(summary),
             entries=[entry],
-            meta=payload,
+            meta={**payload, "host_twin_summary": host_twin_summary_payload},
         )
 
     async def _build_evidence_card(self, app_state: Any) -> RuntimeOverviewCard:
@@ -583,8 +738,9 @@ class _RuntimeCenterOverviewCardsSupport:
             route=f"/api/runtime-center/agents/{agent_id}",
             meta={
                 "risk_level": self._string(self._get_field(item, "risk_level")),
-                "current_goal_id": self._string(self._get_field(item, "current_goal_id")),
-                "current_goal": self._string(self._get_field(item, "current_goal")),
+                "current_focus_kind": self._string(self._get_field(item, "current_focus_kind")),
+                "current_focus_id": self._string(self._get_field(item, "current_focus_id")),
+                "current_focus": self._string(self._get_field(item, "current_focus")),
                 "current_task_id": self._string(self._get_field(item, "current_task_id")),
                 "environment_summary": self._string(self._get_field(item, "environment_summary")),
                 "capability_count": len(capabilities),
@@ -598,6 +754,186 @@ class _RuntimeCenterOverviewCardsSupport:
             "created_at",
             builder=self._build_industry_entry,
         )
+
+    def _map_main_brain_entries(
+        self,
+        *,
+        strategies: list[Any],
+        industries: list[Any],
+        industry_by_instance_id: Mapping[str, Any],
+        decision_count: int,
+        patch_count: int,
+        evidence_count: int,
+    ) -> list[RuntimeOverviewEntry]:
+        if strategies:
+            return self._build_mapped_entries(
+                strategies,
+                "updated_at",
+                "created_at",
+                builder=lambda item: self._build_main_brain_entry_from_strategy(
+                    item,
+                    industry_by_instance_id=industry_by_instance_id,
+                    decision_count=decision_count,
+                    patch_count=patch_count,
+                    evidence_count=evidence_count,
+                ),
+            )
+        if not industries:
+            return []
+        return self._build_mapped_entries(
+            industries,
+            "updated_at",
+            "created_at",
+            builder=lambda item: self._build_main_brain_entry_from_industry(
+                item,
+                decision_count=decision_count,
+                patch_count=patch_count,
+                evidence_count=evidence_count,
+            ),
+        )
+
+    def _build_main_brain_entry_from_strategy(
+        self,
+        strategy: Any,
+        *,
+        industry_by_instance_id: Mapping[str, Any],
+        decision_count: int,
+        patch_count: int,
+        evidence_count: int,
+    ) -> RuntimeOverviewEntry:
+        strategy_id = self._string(self._get_field(strategy, "strategy_id", "id")) or "main-brain"
+        industry_instance_id = self._string(
+            self._get_field(strategy, "industry_instance_id", "scope_id"),
+        )
+        industry = industry_by_instance_id.get(industry_instance_id or "")
+        stats = self._mapping(self._get_field(industry, "stats")) or {}
+        route = "/api/runtime-center/strategy-memory"
+        if industry_instance_id:
+            route += f"?industry_instance_id={industry_instance_id}"
+        return RuntimeOverviewEntry(
+            id=strategy_id,
+            title=self._string(self._get_field(strategy, "title")) or strategy_id,
+            kind="main-brain",
+            status=self._string(self._get_field(strategy, "status")) or "active",
+            owner=self._string(self._get_field(strategy, "owner_agent_id", "owner_scope")),
+            summary=self._string(self._get_field(strategy, "summary", "mission")),
+            updated_at=self._dt(self._get_field(strategy, "updated_at", "created_at")),
+            route=route,
+            meta=self._main_brain_entry_meta(
+                strategy_id=strategy_id,
+                industry_instance_id=industry_instance_id,
+                stats=stats,
+                decision_count=decision_count,
+                patch_count=patch_count,
+                evidence_count=evidence_count,
+            ),
+        )
+
+    def _build_main_brain_entry_from_industry(
+        self,
+        industry: Any,
+        *,
+        decision_count: int,
+        patch_count: int,
+        evidence_count: int,
+    ) -> RuntimeOverviewEntry:
+        instance_id = self._string(self._get_field(industry, "instance_id", "id")) or "unknown-industry"
+        stats = self._mapping(self._get_field(industry, "stats")) or {}
+        routes = self._mapping(self._get_field(industry, "routes")) or {}
+        route = self._string(routes.get("runtime_detail")) or f"/api/runtime-center/industry/{instance_id}"
+        return RuntimeOverviewEntry(
+            id=f"main-brain:{instance_id}",
+            title=self._string(self._get_field(industry, "label", "title")) or instance_id,
+            kind="main-brain",
+            status=self._string(self._get_field(industry, "status")) or "active",
+            owner=self._string(self._get_field(industry, "owner_scope")),
+            summary=self._string(self._get_field(industry, "summary")),
+            updated_at=self._dt(self._get_field(industry, "updated_at", "created_at")),
+            route=route,
+            meta=self._main_brain_entry_meta(
+                strategy_id=None,
+                industry_instance_id=instance_id,
+                stats=stats,
+                decision_count=decision_count,
+                patch_count=patch_count,
+                evidence_count=evidence_count,
+            ),
+        )
+
+    def _main_brain_entry_meta(
+        self,
+        *,
+        strategy_id: str | None,
+        industry_instance_id: str | None,
+        stats: Mapping[str, Any],
+        decision_count: int,
+        patch_count: int,
+        evidence_count: int,
+    ) -> dict[str, Any]:
+        lane_count = self._int(stats.get("lane_count"), 0)
+        backlog_count = self._int(stats.get("backlog_count"), 0)
+        cycle_count = self._int(stats.get("cycle_count"), 0)
+        assignment_count = self._int(stats.get("assignment_count"), 0)
+        report_count = self._int(stats.get("report_count"), 0)
+        return {
+            "strategy_id": strategy_id,
+            "industry_instance_id": industry_instance_id,
+            "lane_count": lane_count,
+            "backlog_count": backlog_count,
+            "cycle_count": cycle_count,
+            "assignment_count": assignment_count,
+            "report_count": report_count,
+            "decision_count": decision_count,
+            "patch_count": patch_count,
+            "evidence_count": evidence_count,
+        }
+
+    def _main_brain_card_meta(
+        self,
+        first_entry: RuntimeOverviewEntry,
+        *,
+        total: int,
+    ) -> dict[str, Any]:
+        entry_meta = dict(first_entry.meta or {})
+        return {
+            "strategy": {
+                "value": first_entry.title,
+                "detail": first_entry.summary,
+                "route": first_entry.route,
+            },
+            "lanes": entry_meta.get("lane_count"),
+            "current_cycle": entry_meta.get("cycle_count"),
+            "assignments": entry_meta.get("assignment_count"),
+            "agent_reports": entry_meta.get("report_count"),
+            "evidence": entry_meta.get("evidence_count"),
+            "decisions": entry_meta.get("decision_count"),
+            "patches": entry_meta.get("patch_count"),
+            "strategy_id": entry_meta.get("strategy_id"),
+            "industry_instance_id": entry_meta.get("industry_instance_id"),
+            "visible_count": 1 if total > 0 else 0,
+            "truncated": total > 1,
+        }
+
+    def _summarize_main_brain_card(self, first_entry: RuntimeOverviewEntry) -> str:
+        meta = dict(first_entry.meta or {})
+        lane_count = self._int(meta.get("lane_count"), 0)
+        assignment_count = self._int(meta.get("assignment_count"), 0)
+        report_count = self._int(meta.get("report_count"), 0)
+        decision_count = self._int(meta.get("decision_count"), 0)
+        patch_count = self._int(meta.get("patch_count"), 0)
+        return (
+            "Main-brain cockpit tracks "
+            f"{lane_count} lane(s), {assignment_count} assignment(s), {report_count} report(s), "
+            f"{decision_count} decision(s), and {patch_count} patch(es)."
+        )
+
+    def _index_industry_by_instance_id(self, items: list[Any]) -> dict[str, Any]:
+        indexed: dict[str, Any] = {}
+        for item in items:
+            instance_id = self._string(self._get_field(item, "instance_id", "id"))
+            if instance_id:
+                indexed[instance_id] = item
+        return indexed
 
     def _build_industry_entry(self, item: Any) -> RuntimeOverviewEntry:
         instance_id = (
@@ -984,12 +1320,13 @@ class RuntimeCenterOverviewBuilder:
             RuntimeCenterOperationsCardsBuilder,
         )
 
+        support = _RuntimeCenterOverviewCardsSupport(item_limit=self._item_limit)
         builders = (
             RuntimeCenterOperationsCardsBuilder(item_limit=self._item_limit),
             RuntimeCenterControlCardsBuilder(item_limit=self._item_limit),
             RuntimeCenterLearningCardsBuilder(item_limit=self._item_limit),
         )
-        cards: list[RuntimeOverviewCard] = []
+        cards: list[RuntimeOverviewCard] = [await support._build_main_brain_card(app_state)]
         for builder in builders:
             cards.extend(await builder.build_cards(app_state))
         return cards

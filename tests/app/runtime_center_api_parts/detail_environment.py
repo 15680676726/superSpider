@@ -1,7 +1,43 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from pathlib import Path
+
 from .shared import *  # noqa: F401,F403
+
+from copaw.capabilities import CapabilityService
+from copaw.evidence import EvidenceLedger
+from copaw.kernel import KernelDispatcher, KernelTaskStore
+from copaw.state import SQLiteStateStore
+from copaw.state.repositories import (
+    SqliteDecisionRequestRepository,
+    SqliteTaskRepository,
+    SqliteTaskRuntimeRepository,
+)
+
+
+def _wire_governed_patch_runtime(app: FastAPI, tmp_path: Path) -> None:
+    state_store = SQLiteStateStore(tmp_path / "patch-governance.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    evidence_ledger = EvidenceLedger(tmp_path / "patch-governance.evidence.sqlite3")
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+        learning_service=app.state.learning_service,
+    )
+    kernel_dispatcher = KernelDispatcher(
+        task_store=KernelTaskStore(
+            task_repository=task_repository,
+            task_runtime_repository=task_runtime_repository,
+            decision_request_repository=decision_request_repository,
+            evidence_ledger=evidence_ledger,
+        ),
+        capability_service=capability_service,
+    )
+    app.state.capability_service = capability_service
+    app.state.kernel_dispatcher = kernel_dispatcher
+    app.state.decision_request_repository = decision_request_repository
 
 
 def test_runtime_center_detail_endpoints() -> None:
@@ -20,19 +56,29 @@ def test_runtime_center_detail_endpoints() -> None:
     assert tasks.status_code == 200
     assert tasks.json()[0]["id"] == "task-1"
 
+    agents = client.get("/runtime-center/agents")
+    assert agents.status_code == 200
+    assert agents.json()[0]["agent_id"] == "ops-agent"
+    assert "current_goal_id" not in agents.json()[0]
+    assert "current_goal" not in agents.json()[0]
+
     task_detail = client.get("/runtime-center/tasks/task-1")
     assert task_detail.status_code == 200
     assert task_detail.json()["task"]["id"] == "task-1"
     assert task_detail.json()["route"] == "/api/runtime-center/tasks/task-1"
 
-    goal_detail = client.get("/runtime-center/goals/goal-1")
+    goal_detail = client.get("/goals/goal-1/detail")
     assert goal_detail.status_code == 200
     assert goal_detail.json()["goal"]["id"] == "goal-1"
 
     agent_detail = client.get("/runtime-center/agents/ops-agent")
     assert agent_detail.status_code == 200
     assert agent_detail.json()["agent"]["agent_id"] == "ops-agent"
-    assert agent_detail.json()["agent"]["current_goal_id"] == "goal-1"
+    assert agent_detail.json()["agent"]["current_focus_kind"] == "goal"
+    assert agent_detail.json()["agent"]["current_focus_id"] == "goal-1"
+    assert agent_detail.json()["agent"]["current_focus"] == "Launch runtime center"
+    assert "current_goal_id" not in agent_detail.json()["agent"]
+    assert "current_goal" not in agent_detail.json()["agent"]
     assert agent_detail.json()["tasks"][0]["route"] == "/api/runtime-center/tasks/task-1"
     assert agent_detail.json()["workspace"]["files_supported"] is True
     assert (
@@ -43,7 +89,7 @@ def test_runtime_center_detail_endpoints() -> None:
     patch_detail = client.get("/runtime-center/learning/patches/patch-1")
     assert patch_detail.status_code == 200
     assert patch_detail.json()["patch"]["id"] == "patch-1"
-    assert patch_detail.json()["routes"]["goal"] == "/api/runtime-center/goals/goal-1"
+    assert patch_detail.json()["routes"]["goal"] == "/api/goals/goal-1/detail"
     assert (
         patch_detail.json()["actions"]["apply"]
         == "/api/runtime-center/learning/patches/patch-1/apply"
@@ -985,6 +1031,56 @@ def test_runtime_center_environment_read_endpoints() -> None:
     assert artifact_detail.json()["storage_uri"] == "file:///tmp/artifact-1.txt"
 
 
+def test_runtime_center_environment_detail_surfaces_host_twin_summary() -> None:
+    class _RichEnvironmentService:
+        def get_environment_detail(self, env_id: str, *args, **kwargs):
+            _ = args, kwargs
+            if env_id != "env:session:session:web:main":
+                return None
+            return {
+                "ref": "session:web:main",
+                "host_companion_session": {
+                    "session_mount_id": "session:web:main",
+                    "environment_id": "env:session:session:web:main",
+                    "continuity_status": "restorable",
+                    "continuity_source": "live-handle",
+                },
+                "host_twin_summary": {
+                    "host_companion_status": "restorable",
+                    "host_companion_source": "live-handle",
+                    "seat_count": 2,
+                    "ready_app_family_keys": [
+                        "browser_backoffice",
+                        "office_document",
+                    ],
+                    "blocked_app_family_keys": ["desktop_specialized"],
+                },
+            }
+
+        def get_session_detail(self, session_mount_id: str, *args, **kwargs):
+            _ = args, kwargs
+            return self.get_environment_detail(session_mount_id)
+
+    app = build_runtime_center_app()
+    app.state.environment_service = _RichEnvironmentService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/environments/env:session:session:web:main")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["host_twin_summary"]["host_companion_status"] == "restorable"
+    assert payload["host_twin_summary"]["host_companion_source"] == "live-handle"
+    assert payload["host_twin_summary"]["seat_count"] == 2
+    assert payload["host_twin_summary"]["ready_app_family_keys"] == [
+        "browser_backoffice",
+        "office_document",
+    ]
+    assert payload["host_twin_summary"]["blocked_app_family_keys"] == [
+        "desktop_specialized",
+    ]
+
+
 def test_runtime_center_environment_action_endpoints() -> None:
     app = build_runtime_center_app()
     app.state.environment_service = FakeEnvironmentService()
@@ -1006,12 +1102,13 @@ def test_runtime_center_environment_action_endpoints() -> None:
     assert execute_replay.status_code == 404
 
 
-def test_runtime_center_patch_actions_are_first_class_routes() -> None:
+def test_runtime_center_patch_actions_are_first_class_routes(tmp_path) -> None:
     app = build_runtime_center_app()
     app.state.learning_service = FakeLearningService(
         patch_status="proposed",
         risk_level="confirm",
     )
+    _wire_governed_patch_runtime(app, tmp_path)
 
     client = TestClient(app)
 
@@ -1041,14 +1138,38 @@ def test_runtime_center_patch_actions_are_first_class_routes() -> None:
         json={"actor": "reviewer"},
     )
     assert applied.status_code == 200
-    assert applied.json()["status"] == "applied"
+    applied_payload = applied.json()
+    assert applied_payload["applied"] is False
+    assert applied_payload["result"]["phase"] == "waiting-confirm"
+    apply_decision_id = applied_payload["result"]["decision_request_id"]
+    assert apply_decision_id
+
+    approve_apply = client.post(
+        f"/runtime-center/decisions/{apply_decision_id}/approve",
+        json={"resolution": "Apply the approved patch.", "execute": True},
+    )
+    assert approve_apply.status_code == 200
+    assert approve_apply.json()["phase"] == "completed"
+    assert approve_apply.json()["decision_request_id"] == apply_decision_id
 
     rolled_back = client.post(
         "/runtime-center/learning/patches/patch-1/rollback",
         json={"actor": "reviewer"},
     )
     assert rolled_back.status_code == 200
-    assert rolled_back.json()["status"] == "rolled_back"
+    rolled_back_payload = rolled_back.json()
+    assert rolled_back_payload["rolled_back"] is False
+    assert rolled_back_payload["result"]["phase"] == "waiting-confirm"
+    rollback_decision_id = rolled_back_payload["result"]["decision_request_id"]
+    assert rollback_decision_id
+
+    approve_rollback = client.post(
+        f"/runtime-center/decisions/{rollback_decision_id}/approve",
+        json={"resolution": "Rollback the patch.", "execute": True},
+    )
+    assert approve_rollback.status_code == 200
+    assert approve_rollback.json()["phase"] == "completed"
+    assert approve_rollback.json()["decision_request_id"] == rollback_decision_id
 
 
 def test_routines_api_detail_diagnosis_and_runs() -> None:

@@ -37,6 +37,7 @@ from ...state.repositories import (
 )
 from .task_review_projection import (
     build_task_review_payload,
+    build_host_twin_summary,
     extract_chat_thread_payload,
     first_non_empty,
     serialize_child_rollup,
@@ -632,13 +633,23 @@ class RuntimeCenterStateQueryService:
             "recovery",
             "host_event_summary",
             "seat_runtime",
+            "host_companion_session",
             "browser_site_contract",
             "desktop_app_contract",
             "host_twin",
+            "host_twin_summary",
         ):
             section = detail_payload.get(key)
             if isinstance(section, dict):
                 feedback[key] = dict(section)
+        host_twin = feedback.get("host_twin")
+        if isinstance(host_twin, dict):
+            summary = build_host_twin_summary(
+                host_twin,
+                host_companion_session=feedback.get("host_companion_session"),
+            )
+            if summary is not None:
+                feedback["host_twin_summary"] = summary
         return feedback
 
     def _candidate_environment_ids(self, environment_ref: str) -> list[str]:

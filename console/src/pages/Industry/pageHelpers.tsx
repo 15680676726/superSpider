@@ -193,7 +193,6 @@ function formatCountLabel(label: string, count: number): string {
 }
 
 function formatIndustryDetailStats(stats?: {
-  goal_count?: number | null;
   agent_count?: number | null;
   schedule_count?: number | null;
   lane_count?: number | null;

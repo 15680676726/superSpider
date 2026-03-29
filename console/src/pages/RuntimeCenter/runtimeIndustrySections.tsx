@@ -14,22 +14,246 @@ import {
 import styles from "./index.module.less";
 import {
   formatPrimitiveValue,
+  formatMainBrainSignalLabel,
   formatRuntimeFieldLabel,
   formatRuntimeSectionLabel as translateRuntimeSectionLabel,
   formatRuntimeStatus as translateRuntimeStatus,
+  localizeRuntimeText,
 } from "./text";
 import {
   findChainNode,
   findIndustryAgentRoute,
-  findIndustryGoalRoute,
   isIndustryExecutionSummary,
   isIndustryMainChainGraph,
+  isRecord,
   metaNumberValue,
   metaStringValue,
   stringListValue,
 } from "./runtimeDetailPrimitives";
+import type { RuntimeCenterOverviewPayload } from "./useRuntimeCenter";
 
 const { Text } = Typography;
+
+function nonEmpty(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+export interface RuntimeCockpitSignal {
+  key: string;
+  label: string;
+  value: string;
+  detail?: string | null;
+  route?: string | null;
+  routeTitle?: string | null;
+  tone?: "default" | "success" | "warning" | "danger";
+}
+
+function runtimeCardMap(payload: RuntimeCenterOverviewPayload | null) {
+  return new Map((payload?.cards ?? []).map((card) => [card.key, card]));
+}
+
+function textValue(value: unknown): string | null {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized ? localizeRuntimeText(normalized) : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null;
+}
+
+function firstTextValue(...values: unknown[]): string | null {
+  for (const value of values) {
+    const record = recordValue(value);
+    if (record) {
+      const nested = firstTextValue(
+        record.title,
+        record.name,
+        record.label,
+        record.summary,
+        record.value,
+        record.count,
+        record.total,
+      );
+      if (nested) {
+        return nested;
+      }
+      continue;
+    }
+    const text = textValue(value);
+    if (text) {
+      return text;
+    }
+  }
+  return null;
+}
+
+function countText(value: unknown, fallback = "0"): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  const record = recordValue(value);
+  if (record) {
+    const candidate = record.count ?? record.total ?? record.visible_count ?? record.recent_count;
+    const text = textValue(candidate);
+    if (text) {
+      return text;
+    }
+    const nested = firstTextValue(record.title, record.name, record.label, record.summary);
+    if (nested) {
+      return nested;
+    }
+  }
+  const text = textValue(value);
+  return text || fallback;
+}
+
+function detailText(value: unknown): string | null {
+  const record = recordValue(value);
+  if (!record) {
+    return null;
+  }
+  return firstTextValue(
+    record.detail,
+    record.note,
+    record.summary,
+    record.description,
+    record.reason,
+    record.status,
+  );
+}
+
+function routeText(value: unknown): string | null {
+  const record = recordValue(value);
+  if (!record) {
+    return null;
+  }
+  return textValue(record.route);
+}
+
+function buildSignal(
+  key: string,
+  value: string,
+  detail: string | null,
+  route: string | null,
+  tone?: RuntimeCockpitSignal["tone"],
+  routeTitle?: string,
+): RuntimeCockpitSignal {
+  return {
+    key,
+    label: formatMainBrainSignalLabel(key),
+    value,
+    detail,
+    route,
+    routeTitle,
+    tone,
+  };
+}
+
+export function buildRuntimeIndustryCockpitSignals(
+  payload: RuntimeCenterOverviewPayload | null,
+): RuntimeCockpitSignal[] {
+  const cards = runtimeCardMap(payload);
+  const mainBrainCard = cards.get("main-brain") ?? null;
+  const industryCard = cards.get("industry") ?? null;
+  const evidenceCard = cards.get("evidence") ?? null;
+  const decisionsCard = cards.get("decisions") ?? null;
+  const patchesCard = cards.get("patches") ?? null;
+  const mainBrainMeta = recordValue(mainBrainCard?.meta) ?? {};
+  const industryMeta = recordValue(industryCard?.meta) ?? {};
+  const mainBrainEntry = mainBrainCard?.entries?.[0] ?? null;
+  const industryEntry = industryCard?.entries?.[0] ?? null;
+  const industryRoute = textValue(industryEntry?.route) || textValue(industryCard?.entries?.[0]?.route);
+
+  const strategySource = mainBrainMeta.strategy ?? industryCard?.summary ?? industryEntry?.summary;
+  const lanesSource = mainBrainMeta.lanes ?? industryMeta.lane_count;
+  const cycleSource = mainBrainMeta.current_cycle ?? industryCard?.summary ?? industryEntry?.summary;
+  const assignmentsSource = mainBrainMeta.assignments ?? industryMeta.assignment_count;
+  const agentReportsSource = mainBrainMeta.agent_reports ?? industryMeta.report_count;
+  const evidenceSource = mainBrainMeta.evidence ?? evidenceCard?.summary ?? evidenceCard?.count;
+  const decisionsSource = mainBrainMeta.decisions ?? decisionsCard?.summary ?? decisionsCard?.count;
+  const patchesSource = mainBrainMeta.patches ?? patchesCard?.summary ?? patchesCard?.count;
+
+  return [
+    buildSignal(
+      "strategy",
+      firstTextValue(strategySource) || "No strategy signal",
+      detailText(strategySource) || firstTextValue(mainBrainEntry?.summary, industryEntry?.summary),
+      routeText(strategySource) || industryRoute,
+      "success",
+      "Strategy detail",
+    ),
+    buildSignal(
+      "lanes",
+      countText(lanesSource, textValue(industryMeta.lane_count) || "0"),
+      detailText(lanesSource) ||
+        firstTextValue(
+          industryMeta.backlog_count,
+          industryMeta.cycle_count,
+          industryMeta.assignment_count,
+          industryMeta.report_count,
+        ),
+      industryRoute,
+      "default",
+      "Lane detail",
+    ),
+    buildSignal(
+      "current_cycle",
+      firstTextValue(cycleSource) || "No active cycle",
+      detailText(cycleSource) ||
+        firstTextValue(recordValue(cycleSource)?.status),
+      routeText(cycleSource) || industryRoute,
+      "default",
+      "Cycle detail",
+    ),
+    buildSignal(
+      "assignments",
+      countText(assignmentsSource, textValue(industryMeta.assignment_count) || "0"),
+      detailText(assignmentsSource) || firstTextValue(industryMeta.assignment_count),
+      industryRoute,
+      "default",
+      "Assignments detail",
+    ),
+    buildSignal(
+      "agent_reports",
+      countText(agentReportsSource, textValue(industryMeta.report_count) || "0"),
+      detailText(agentReportsSource) || firstTextValue(industryMeta.report_count),
+      industryRoute,
+      "default",
+      "Reports detail",
+    ),
+    buildSignal(
+      "evidence",
+      countText(evidenceSource, textValue(evidenceCard?.count) || "0"),
+      detailText(evidenceSource) || textValue(evidenceCard?.summary),
+      textValue(evidenceCard?.entries?.[0]?.route) || null,
+      "default",
+      "Evidence detail",
+    ),
+    buildSignal(
+      "decisions",
+      countText(decisionsSource, textValue(decisionsCard?.count) || "0"),
+      detailText(decisionsSource) || textValue(decisionsCard?.summary),
+      textValue(decisionsCard?.entries?.[0]?.route) || null,
+      "warning",
+      "Decision detail",
+    ),
+    buildSignal(
+      "patches",
+      countText(patchesSource, textValue(patchesCard?.count) || "0"),
+      detailText(patchesSource) || textValue(patchesCard?.summary),
+      textValue(patchesCard?.entries?.[0]?.route) || null,
+      "warning",
+      "Patch detail",
+    ),
+  ];
+}
 
 export function renderIndustryExecutionFocusSection(
   payload: IndustryInstanceDetail,
@@ -41,14 +265,23 @@ export function renderIndustryExecutionFocusSection(
   const mainChain = isIndustryMainChainGraph(payload.main_chain)
     ? payload.main_chain
     : null;
-  const goalNode = findChainNode(mainChain, "goal");
+  const focusSelection = payload.focus_selection || null;
   const evidenceNode = findChainNode(mainChain, "evidence");
-  const currentGoalId =
-    execution?.current_goal_id || mainChain?.current_goal_id || null;
+  const assignmentNode = findChainNode(mainChain, "assignment");
+  const backlogNode = findChainNode(mainChain, "backlog");
   const currentOwnerAgentId =
     execution?.current_owner_agent_id || mainChain?.current_owner_agent_id || null;
+  const liveFocusSummary =
+    assignmentNode?.route
+      ? assignmentNode.summary || assignmentNode.label
+      : backlogNode?.route
+        ? backlogNode.summary || backlogNode.label
+        : null;
   const currentFocus =
-    execution?.current_goal || mainChain?.current_goal || "No active focus";
+    liveFocusSummary ||
+    execution?.current_focus ||
+    mainChain?.current_focus ||
+    "No active focus";
   const currentOwner =
     execution?.current_owner ||
     mainChain?.current_owner ||
@@ -61,20 +294,39 @@ export function renderIndustryExecutionFocusSection(
     "No evidence written yet";
   const loopState = mainChain?.loop_state || execution?.status || payload.status;
   const evidenceCount = execution?.evidence_count ?? payload.evidence.length;
-  const currentGoalRoute = goalNode?.route || findIndustryGoalRoute(payload, currentGoalId);
+  const currentFocusRoute = assignmentNode?.route || backlogNode?.route || null;
   const currentOwnerRoute = findIndustryAgentRoute(payload, currentOwnerAgentId);
   const latestEvidenceRoute = evidenceNode?.route || null;
   const staffingPresentation = buildStaffingPresentation(payload.staffing);
+  const lanes = Array.isArray(payload.lanes) ? payload.lanes : [];
+  const focusedLaneIds = new Set(payload.current_cycle?.focus_lane_ids || []);
+  const visibleLanes = lanes.slice(0, 4);
+  const pendingSignalCount =
+    typeof payload.staffing?.researcher?.pending_signal_count === "number"
+      ? payload.staffing.researcher.pending_signal_count
+      : 0;
+  const followupReports = (Array.isArray(payload.agent_reports) ? payload.agent_reports : []).filter(
+    (report) => report.needs_followup || report.processed === false,
+  );
+  const strategySummary =
+    payload.strategy_memory?.north_star ||
+    payload.strategy_memory?.summary ||
+    null;
   const cycleSynthesis = payload.current_cycle?.synthesis;
   const synthesisConflicts = cycleSynthesis?.conflicts || [];
   const synthesisHoles = cycleSynthesis?.holes || [];
   const synthesisFindings = cycleSynthesis?.latest_findings || [];
+  const synthesisFollowups = synthesisFindings.filter(
+    (finding) => finding.needs_followup || nonEmpty(finding.followup_reason),
+  );
+  const recommendedActions = cycleSynthesis?.recommended_actions || [];
+  const controlCoreContract = cycleSynthesis?.control_core_contract || [];
   const synthesisSummary = cycleSynthesis
     ? [
         `Findings ${synthesisFindings.length}`,
         `Conflicts ${synthesisConflicts.length}`,
         `Holes ${synthesisHoles.length}`,
-        `Actions ${(cycleSynthesis.recommended_actions || []).length}`,
+        `Actions ${recommendedActions.length}`,
       ].join(" / ")
     : "No cycle synthesis yet.";
 
@@ -86,10 +338,11 @@ export function renderIndustryExecutionFocusSection(
       note:
         execution?.current_stage ||
         execution?.next_step ||
-        goalNode?.summary ||
+        assignmentNode?.summary ||
+        backlogNode?.summary ||
         null,
       status: loopState,
-      route: currentGoalRoute,
+      route: currentFocusRoute,
       routeTitle: currentFocus,
     },
     {
@@ -135,6 +388,21 @@ export function renderIndustryExecutionFocusSection(
   return (
     <section key="industry-focus" className={styles.detailSection}>
       <div className={styles.detailSectionTitle}>Runtime Focus</div>
+      {focusSelection ? (
+        <Alert
+          showIcon
+          type="info"
+          message={
+            focusSelection.selection_kind === "assignment"
+              ? "Focused Assignment"
+              : "Focused Backlog"
+          }
+          description={
+            focusSelection.summary || focusSelection.title || "Focused runtime subview"
+          }
+          style={{ marginBottom: 16 }}
+        />
+      ) : null}
       <div className={styles.industryFocusGrid}>
         {items.map((item) => (
           <div key={item.key} className={styles.industryFocusCard}>
@@ -169,6 +437,96 @@ export function renderIndustryExecutionFocusSection(
           </div>
         ))}
       </div>
+      <Card size="small" title="Main-Brain Planning" style={{ marginTop: 16 }}>
+        <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
+          <Tag>{`Lanes ${lanes.length}`}</Tag>
+          <Tag>{`Assignments ${payload.assignments.length}`}</Tag>
+          <Tag>{`Reports ${payload.agent_reports.length}`}</Tag>
+          {followupReports.length > 0 ? (
+            <Tag color="warning">{`Follow-ups ${followupReports.length}`}</Tag>
+          ) : null}
+          {payload.staffing?.pending_proposals.length ? (
+            <Tag>{`Staffing proposals ${payload.staffing.pending_proposals.length}`}</Tag>
+          ) : null}
+          {payload.staffing?.temporary_seats.length ? (
+            <Tag>{`Temporary seats ${payload.staffing.temporary_seats.length}`}</Tag>
+          ) : null}
+          {pendingSignalCount > 0 ? (
+            <Tag color="warning">{`Pending signals ${pendingSignalCount}`}</Tag>
+          ) : null}
+          {payload.current_cycle?.status ? (
+            <Tag color={runtimeStatusColor(payload.current_cycle.status)}>
+              {translateRuntimeStatus(payload.current_cycle.status)}
+            </Tag>
+          ) : null}
+        </Space>
+        <Text type="secondary">
+          {strategySummary || "No strategy summary is available yet."}
+        </Text>
+        {payload.current_cycle ? (
+          <div style={{ marginTop: 10 }}>
+            <Text strong>{payload.current_cycle.title || "Current cycle"}</Text>
+            {payload.current_cycle.summary ? (
+              <div style={{ marginTop: 4 }}>
+                <Text type="secondary">{payload.current_cycle.summary}</Text>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {visibleLanes.length > 0 ? (
+          <div style={{ marginTop: 10 }}>
+            <div className={styles.detailSectionTitle}>Operating Lanes</div>
+            <Space wrap size={[6, 6]}>
+              {visibleLanes.map((lane) => (
+                <Tag
+                  key={lane.lane_id}
+                  color={
+                    focusedLaneIds.has(lane.lane_id)
+                      ? "blue"
+                      : runtimeStatusColor(lane.status || "unknown")
+                  }
+                >
+                  {lane.title || lane.lane_id}
+                </Tag>
+              ))}
+            </Space>
+          </div>
+        ) : null}
+        {followupReports.length > 0 ? (
+          <div style={{ marginTop: 10 }}>
+            <div className={styles.detailSectionTitle}>Pending Report Follow-ups</div>
+            <Space direction="vertical" size={4} style={{ width: "100%" }}>
+              {followupReports.slice(0, 3).map((report) => (
+                <Text key={report.report_id} type="secondary">
+                  {String(report.headline || report.summary || report.report_id)}
+                </Text>
+              ))}
+            </Space>
+          </div>
+        ) : null}
+        {synthesisFollowups.length > 0 ? (
+          <div style={{ marginTop: 10 }}>
+            <div className={styles.detailSectionTitle}>Supervisor Follow-ups</div>
+            <Space direction="vertical" size={4} style={{ width: "100%" }}>
+              {synthesisFollowups.slice(0, 3).map((finding) => (
+                <Space
+                  key={finding.report_id}
+                  direction="vertical"
+                  size={0}
+                  style={{ width: "100%" }}
+                >
+                  <Text type="secondary">
+                    {String(finding.headline || finding.summary || finding.report_id)}
+                  </Text>
+                  {nonEmpty(finding.followup_reason) ? (
+                    <Text type="secondary">{nonEmpty(finding.followup_reason)}</Text>
+                  ) : null}
+                </Space>
+              ))}
+            </Space>
+          </div>
+        ) : null}
+      </Card>
       <Card size="small" title="Main-Brain Synthesis" style={{ marginTop: 16 }}>
         <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
           <Tag>{`Findings ${synthesisFindings.length}`}</Tag>
@@ -195,6 +553,30 @@ export function renderIndustryExecutionFocusSection(
             </Space>
           </>
         ) : null}
+        {synthesisFollowups.length > 0 ? (
+          <>
+            <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
+              Supervisor Follow-ups
+            </div>
+            <Space direction="vertical" size={4} style={{ width: "100%" }}>
+              {synthesisFollowups.slice(0, 3).map((finding) => (
+                <Space
+                  key={`${finding.report_id}:synthesis`}
+                  direction="vertical"
+                  size={0}
+                  style={{ width: "100%" }}
+                >
+                  <Text type="secondary">
+                    {String(finding.headline || finding.summary || finding.report_id)}
+                  </Text>
+                  {nonEmpty(finding.followup_reason) ? (
+                    <Text type="secondary">{nonEmpty(finding.followup_reason)}</Text>
+                  ) : null}
+                </Space>
+              ))}
+            </Space>
+          </>
+        ) : null}
         {synthesisHoles.length > 0 ? (
           <>
             <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
@@ -204,6 +586,34 @@ export function renderIndustryExecutionFocusSection(
               {synthesisHoles.slice(0, 3).map((hole) => (
                 <Text key={hole.hole_id} type="secondary">
                   {String(hole.summary || hole.hole_id)}
+                </Text>
+              ))}
+            </Space>
+          </>
+        ) : null}
+        {recommendedActions.length > 0 ? (
+          <>
+            <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
+              Recommended Actions
+            </div>
+            <Space direction="vertical" size={4} style={{ width: "100%" }}>
+              {recommendedActions.slice(0, 3).map((action) => (
+                <Text key={action.action_id} type="secondary">
+                  {String(action.title || action.summary || action.action_id)}
+                </Text>
+              ))}
+            </Space>
+          </>
+        ) : null}
+        {controlCoreContract.length > 0 ? (
+          <>
+            <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
+              Control Contract
+            </div>
+            <Space direction="vertical" size={4} style={{ width: "100%" }}>
+              {controlCoreContract.map((item) => (
+                <Text key={item} type="secondary">
+                  {item}
                 </Text>
               ))}
             </Space>
@@ -281,9 +691,9 @@ export function renderIndustryMainChainSection(
         <Tag color={runtimeStatusColor(controlChain.loopState || "unknown")}>
           {controlChain.loopStateLabel}
         </Tag>
-        {controlChain.currentGoal ? (
+        {controlChain.currentFocus ? (
           <span className={styles.mainChainHeaderText}>
-            Goal: {controlChain.currentGoal}
+            Focus: {controlChain.currentFocus}
           </span>
         ) : null}
         {controlChain.currentOwner ? (

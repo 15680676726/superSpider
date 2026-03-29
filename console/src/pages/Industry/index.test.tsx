@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import IndustryPage from "./index";
 import { INDUSTRY_TEXT } from "./pageHelpers";
@@ -37,8 +37,14 @@ vi.mock("./useIndustryPageState", () => ({
   useIndustryPageState: (...args: unknown[]) => useIndustryPageStateMock(...args),
 }));
 
-function createPageState() {
-  return {
+afterEach(() => {
+  cleanup();
+  mockNavigate.mockReset();
+  useIndustryPageStateMock.mockReset();
+});
+
+function createPageState(overrides: Record<string, unknown> = {}) {
+  const baseState = {
     allTeams: [
       {
         instance_id: "industry-1",
@@ -110,6 +116,7 @@ function createPageState() {
         assignment_count: 7,
       },
       routes: {},
+      focus_selection: null,
       goals: [],
       agents: [],
       schedules: [],
@@ -175,11 +182,15 @@ function createPageState() {
     handleChangeRecommendationReviewAcknowledgement: vi.fn(),
     handleChangeRecommendationTargets: vi.fn(),
     handleDeleteInstance: vi.fn(),
+    handleClearRuntimeFocus: vi.fn(),
+    handleOpenAgentReportChat: vi.fn(),
     handleOpenExecutionCoreChat: vi.fn(),
     handlePatchInstallPlanItem: vi.fn(),
     handlePreview: vi.fn(),
     handleRemoveBriefMediaItem: vi.fn(),
     handleRemoveInstallPlanItem: vi.fn(),
+    handleSelectAssignmentFocus: vi.fn(),
+    handleSelectBacklogFocus: vi.fn(),
     handleToggleRecommendation: vi.fn(),
     hasCapabilityPlanning: false,
     installPlan: [],
@@ -208,6 +219,20 @@ function createPageState() {
     setSelectedInstanceId: vi.fn(),
     watchedExperienceMode: "operator-guided",
   } as const;
+
+  const nextDetail =
+    overrides.detail && typeof overrides.detail === "object"
+      ? {
+          ...baseState.detail,
+          ...(overrides.detail as object),
+        }
+      : baseState.detail;
+
+  return {
+    ...baseState,
+    ...overrides,
+    detail: nextDetail,
+  } as const;
 }
 
 describe("IndustryPage", () => {
@@ -223,5 +248,338 @@ describe("IndustryPage", () => {
         && String(node.textContent || "").includes(`${INDUSTRY_TEXT.metricGoals} 9`),
       ),
     ).toHaveLength(0);
+  });
+
+  it("renders focused runtime surfaces with staffing visibility and report drill-down actions", () => {
+    const handleClearRuntimeFocus = vi.fn();
+    const handleOpenAgentReportChat = vi.fn();
+    const handleSelectAssignmentFocus = vi.fn();
+    const handleSelectBacklogFocus = vi.fn();
+
+    useIndustryPageStateMock.mockReturnValue(
+      createPageState({
+        detail: {
+          focus_selection: {
+            selection_kind: "assignment",
+            assignment_id: "assignment-1",
+            title: "Assignment 1",
+            summary: "Focused runtime assignment",
+          },
+          lanes: [
+            {
+              lane_id: "lane-growth",
+              lane_key: "growth",
+              title: "增长获客",
+              summary: "跟进新增线索与转化动作。",
+              status: "active",
+              priority: 3,
+              metadata: {},
+            },
+            {
+              lane_id: "lane-fulfillment",
+              lane_key: "fulfillment",
+              title: "交付履约",
+              summary: "盯住本周交付节奏与风险。",
+              status: "queued",
+              priority: 2,
+              metadata: {},
+            },
+          ],
+          current_cycle: {
+            cycle_id: "cycle-1",
+            cycle_kind: "weekly",
+            title: "本周增长与交付协调",
+            summary: "优先稳住履约，再补获客节奏。",
+            status: "active",
+            focus_lane_ids: ["lane-growth"],
+            backlog_item_ids: ["backlog-1", "backlog-2"],
+            assignment_ids: ["assignment-1", "assignment-2"],
+            report_ids: ["report-1"],
+            synthesis: {
+              latest_findings: [
+                {
+                  report_id: "report-1",
+                  headline: "Weekly handoff",
+                  summary: "Need follow-up from the main brain.",
+                  findings: [],
+                  uncertainties: [],
+                  needs_followup: true,
+                  followup_reason: "Awaiting explicit approval",
+                },
+              ],
+              conflicts: [],
+              holes: [
+                {
+                  hole_id: "hole-1",
+                  kind: "follow-up",
+                  summary: "Weekend variance still lacks a validated cause.",
+                },
+              ],
+              recommended_actions: [
+                {
+                  action_id: "action-1",
+                  action_type: "staffing-follow-up",
+                  title: "Approve closer staffing",
+                  summary: "Approve closer seating for live follow-up.",
+                },
+              ],
+              needs_replan: true,
+              control_core_contract: ["synthesize-before-reassign"],
+            },
+          },
+          staffing: {
+            active_gap: {
+              kind: "career-seat-proposal",
+              target_role_name: "Closer",
+              requested_surfaces: ["industry", "runtime-center"],
+              requires_confirmation: true,
+              reason: "Need closer coverage for live follow-up.",
+              status: "waiting-resource",
+            },
+            pending_proposals: [
+              {
+                kind: "career-seat-proposal",
+                target_role_name: "Closer",
+                requested_surfaces: [],
+                requires_confirmation: false,
+                decision_request_id: "decision-1",
+                status: "pending",
+              },
+            ],
+            temporary_seats: [
+              {
+                role_id: "role-temp-copy",
+                role_name: "Temp Copywriter",
+                agent_id: "agent-temp-copy",
+                status: "active",
+                current_assignment: {
+                  title: "Draft launch assets",
+                },
+              },
+            ],
+            researcher: {
+              role_id: "role-researcher",
+              role_name: "Researcher",
+              agent_id: "agent-researcher",
+              status: "active",
+              pending_signal_count: 3,
+              waiting_for_main_brain: true,
+              current_assignment: {
+                title: "Track competitor moves",
+              },
+              latest_report: {
+                headline: "Signal pack",
+              },
+            },
+          },
+          backlog: [
+            {
+              backlog_item_id: "backlog-1",
+              title: "Backlog 1",
+              status: "open",
+              priority: 1,
+              source_kind: "chat-writeback",
+              evidence_ids: [],
+              metadata: {},
+              selected: true,
+              summary: "Selected backlog item",
+            },
+            {
+              backlog_item_id: "backlog-2",
+              title: "Backlog 2",
+              status: "queued",
+              priority: 2,
+              source_kind: "strategy-writeback",
+              evidence_ids: [],
+              metadata: {},
+              summary: "Next backlog item",
+            },
+          ],
+          assignments: [
+            {
+              assignment_id: "assignment-1",
+              title: "Assignment 1",
+              status: "running",
+              evidence_ids: [],
+              metadata: {},
+              selected: true,
+              summary: "Selected assignment",
+            },
+            {
+              assignment_id: "assignment-2",
+              title: "Assignment 2",
+              status: "queued",
+              evidence_ids: [],
+              metadata: {},
+              summary: "Queued assignment",
+            },
+          ],
+          agent_reports: [
+            {
+              report_id: "report-1",
+              headline: "Weekly handoff",
+              summary: "Need follow-up from the main brain.",
+              report_kind: "summary",
+              status: "recorded",
+              result: "follow-up-needed",
+              findings: ["Lead list updated"],
+              uncertainties: [],
+              recommendation: "Review handoff and approve the next step.",
+              needs_followup: true,
+              followup_reason: "Awaiting explicit approval",
+              risk_level: "guarded",
+              evidence_ids: [],
+              decision_ids: [],
+              processed: true,
+              metadata: {},
+              work_context_id: "ctx-report-1",
+              assignment_id: "assignment-1",
+            },
+          ],
+        },
+        handleClearRuntimeFocus,
+        handleOpenAgentReportChat,
+        handleSelectAssignmentFocus,
+        handleSelectBacklogFocus,
+      }),
+    );
+
+    render(<IndustryPage />);
+
+    expect(screen.getByText("Focused Assignment")).toBeTruthy();
+    expect(screen.getByText("Staffing Closure")).toBeTruthy();
+    expect(screen.getByText("工作泳道")).toBeTruthy();
+    expect(screen.getByText("增长获客")).toBeTruthy();
+    expect(screen.getByText("交付履约")).toBeTruthy();
+    expect(screen.getByText("Pending Proposals")).toBeTruthy();
+    expect(screen.getByText("Temporary Seats")).toBeTruthy();
+    expect(screen.getByText("Researcher")).toBeTruthy();
+    expect(screen.getByText("Approve closer staffing")).toBeTruthy();
+    expect(screen.getByText("synthesize-before-reassign")).toBeTruthy();
+    expect(screen.getAllByText("Selected").length).toBeGreaterThan(0);
+    expect(screen.getByText("ctx-report-1")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show full surface" }));
+    expect(handleClearRuntimeFocus).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Focus backlog" }));
+    expect(handleSelectBacklogFocus).toHaveBeenCalledWith("backlog-2");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Focus assignment" })[1]);
+    expect(handleSelectAssignmentFocus).toHaveBeenCalledWith("assignment-2");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open report chat" }));
+    expect(handleOpenAgentReportChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        report_id: "report-1",
+        work_context_id: "ctx-report-1",
+      }),
+    );
+  });
+
+  it("surfaces a dedicated runtime cockpit with direct strategy and cycle signals", () => {
+    useIndustryPageStateMock.mockReturnValue(
+      createPageState({
+        detail: {
+          execution: {
+            status: "active",
+            current_focus: "运营中枢巡检",
+            current_owner: "Spider Mesh 主脑",
+            current_risk: "guarded",
+            evidence_count: 12,
+            latest_evidence_summary: "最新证据链已接入当前执行面板。",
+            next_step: "Review the latest patch queue.",
+            trigger_source: "chat",
+            trigger_reason: "Operator requested a cockpit review.",
+            updated_at: "2026-03-27T09:30:00Z",
+          },
+          execution_core_identity: {
+            role_name: "Spider Mesh 主脑",
+            operating_mode: "control-core",
+            mission: "Keep the industry runtime aligned with live evidence.",
+            thinking_axes: ["carrier", "strategy", "lane", "cycle"],
+            delegation_policy: ["assign by lane", "escalate by risk"],
+          },
+          strategy_memory: {
+            status: "active",
+            north_star: "One runtime truth across carrier, strategy, lane, and cycle.",
+            current_focuses: ["assignment", "report", "decision", "patch"],
+            priority_order: ["lane", "cycle", "assignment", "report"],
+          },
+          current_cycle: {
+            cycle_id: "cycle-1",
+            cycle_kind: "weekly",
+            title: "本周运行循环",
+            summary: "The cockpit should keep the long-run loop visible.",
+            status: "active",
+            focus_lane_ids: ["lane-growth"],
+            backlog_item_ids: ["backlog-1"],
+            assignment_ids: ["assignment-1"],
+            report_ids: ["report-1"],
+            synthesis: {
+              latest_findings: [],
+              conflicts: [],
+              holes: [],
+              recommended_actions: [],
+              needs_replan: false,
+              control_core_contract: [],
+            },
+          },
+          lanes: [
+            {
+              lane_id: "lane-growth",
+              lane_key: "growth",
+              title: "增长获客",
+              summary: "Keep the growth lane visible in the cockpit.",
+              status: "active",
+              priority: 3,
+              metadata: {},
+            },
+          ],
+          assignments: [
+            {
+              assignment_id: "assignment-1",
+              title: "Assignment 1",
+              status: "running",
+              evidence_ids: ["evidence-1"],
+              metadata: {},
+            },
+          ],
+          agent_reports: [
+            {
+              report_id: "report-1",
+              headline: "Runtime report",
+              report_kind: "summary",
+              status: "recorded",
+              findings: ["Acknowledge the patch queue."],
+              uncertainties: [],
+              needs_followup: false,
+              evidence_ids: ["evidence-1"],
+              decision_ids: ["decision-1"],
+              processed: true,
+              metadata: {},
+              work_context_id: "ctx-report-1",
+            },
+          ],
+          decisions: [{ decision_id: "decision-1" }],
+          evidence: [{ evidence_id: "evidence-1" }],
+          patches: [{ patch_id: "patch-1" }],
+        },
+      }),
+    );
+
+    render(<IndustryPage />);
+
+    expect(screen.getByText("Runtime Cockpit")).toBeTruthy();
+    expect(screen.getAllByText("Runtime Focus").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Strategy").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Runtime Signals").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Lane").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Cycle").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Assignment").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Report").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Evidence").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Decision").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Patch").length).toBeGreaterThan(0);
   });
 });

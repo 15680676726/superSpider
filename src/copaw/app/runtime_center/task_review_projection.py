@@ -223,6 +223,230 @@ def host_twin_active_blocker_family(host_twin: dict[str, object] | None) -> str 
     )
 
 
+def build_host_twin_summary(
+    host_twin: dict[str, object] | None,
+    *,
+    host_companion_session: dict[str, object] | None = None,
+) -> dict[str, object] | None:
+    if host_twin is None:
+        return None
+    ownership = dict_from_value(host_twin.get("ownership")) or {}
+    coordination = dict_from_value(host_twin.get("coordination")) or {}
+    app_family_twins = dict_from_value(host_twin.get("app_family_twins")) or {}
+    host_companion_session = (
+        dict_from_value(host_companion_session)
+        or dict_from_value(host_twin.get("host_companion_session"))
+        or {}
+    )
+    continuity = dict_from_value(host_twin.get("continuity")) or {}
+    legal_recovery = dict_from_value(host_twin.get("legal_recovery")) or {}
+    multi_seat_coordination = (
+        dict_from_value(host_twin.get("multi_seat_coordination")) or {}
+    )
+    app_family_readiness = dict_from_value(host_twin.get("app_family_readiness")) or {}
+    blocked_surfaces = dict_list_from_value(host_twin.get("blocked_surfaces"))
+    active_app_family_keys = sorted(
+        family_key
+        for family_key, value in app_family_twins.items()
+        if isinstance(value, dict) and value.get("active") is True
+    )
+    ready_app_family_keys = string_list_from_values(
+        app_family_readiness.get("ready_family_keys"),
+    )
+    if not ready_app_family_keys:
+        ready_app_family_keys = sorted(
+            family_key
+            for family_key, value in app_family_twins.items()
+            if isinstance(value, dict)
+            and value.get("active") is True
+            and first_non_empty(value.get("contract_status")) not in {
+                "blocked",
+                "inactive",
+            }
+        )
+    blocked_app_family_keys = string_list_from_values(
+        app_family_readiness.get("blocked_family_keys"),
+    )
+    if not blocked_app_family_keys:
+        blocked_app_family_keys = sorted(
+            family_key
+            for family_key, value in app_family_twins.items()
+            if isinstance(value, dict)
+            and (
+                value.get("active") is not True
+                or first_non_empty(value.get("contract_status")) in {
+                    "blocked",
+                    "inactive",
+                }
+            )
+        )
+    candidate_seat_refs = string_list_from_values(
+        multi_seat_coordination.get("candidate_seat_refs"),
+        coordination.get("candidate_seat_refs"),
+    )
+    selected_seat_ref = first_non_empty(
+        multi_seat_coordination.get("selected_seat_ref"),
+        coordination.get("selected_seat_ref"),
+    )
+    seat_selection_policy = first_non_empty(
+        multi_seat_coordination.get("seat_selection_policy"),
+        coordination.get("seat_selection_policy"),
+    )
+    seat_count_value = multi_seat_coordination.get("seat_count")
+    if not isinstance(seat_count_value, int):
+        seat_count_value = len(candidate_seat_refs) or (1 if selected_seat_ref else 0)
+    host_companion_status = first_non_empty(
+        multi_seat_coordination.get("host_companion_status"),
+        host_companion_session.get("continuity_status"),
+    )
+    continuity_status = first_non_empty(continuity.get("status"))
+    legal_recovery_path = first_non_empty(
+        legal_recovery.get("path"),
+        legal_recovery.get("resume_kind"),
+    )
+    requires_human_return = bool(
+        continuity.get("requires_human_return"),
+    )
+    if (
+        continuity_status is not None
+        and host_companion_status == "restorable"
+        and (
+            requires_human_return
+            or legal_recovery_path == "handoff"
+        )
+    ):
+        host_companion_status = continuity_status
+    host_companion_source = first_non_empty(
+        host_companion_session.get("continuity_source"),
+    )
+    host_companion_session_mount_id = first_non_empty(
+        host_companion_session.get("session_mount_id"),
+    )
+    host_companion_environment_id = first_non_empty(
+        host_companion_session.get("environment_id"),
+    )
+    host_companion_locality = dict_from_value(host_companion_session.get("locality")) or {}
+    multi_seat_status = first_non_empty(multi_seat_coordination.get("status"))
+    app_family_statuses = {
+        family_key: {
+            "active": bool(value.get("active")),
+            "ready": family_key in set(ready_app_family_keys),
+            "contract_status": first_non_empty(value.get("contract_status")),
+            "surface_ref": first_non_empty(value.get("surface_ref")),
+            "family_scope_ref": first_non_empty(value.get("family_scope_ref")),
+            "writer_lock_scope": first_non_empty(value.get("writer_lock_scope")),
+        }
+        for family_key, value in app_family_twins.items()
+        if isinstance(value, dict)
+    }
+    return {
+        "seat_owner_ref": first_non_empty(
+            coordination.get("seat_owner_ref"),
+            ownership.get("seat_owner_ref"),
+            ownership.get("seat_owner_agent_id"),
+            host_twin.get("seat_owner_ref"),
+            dict_from_value(host_twin.get("seat_owner")).get("owner_ref")
+            if dict_from_value(host_twin.get("seat_owner")) is not None
+            else None,
+            dict_from_value(host_twin.get("seat_owner")).get("seat_owner_ref")
+            if dict_from_value(host_twin.get("seat_owner")) is not None
+            else None,
+            dict_from_value(host_twin.get("seat_owner")).get("actor_ref")
+            if dict_from_value(host_twin.get("seat_owner")) is not None
+            else None,
+            ownership.get("handoff_owner_ref"),
+            coordination.get("handoff_owner_ref"),
+        ),
+        "handoff_owner_ref": first_non_empty(
+            ownership.get("handoff_owner_ref"),
+            coordination.get("handoff_owner_ref"),
+            dict_from_value(host_twin.get("seat_owner")).get("actor_ref")
+            if dict_from_value(host_twin.get("seat_owner")) is not None
+            else None,
+        ),
+        "workspace_owner_ref": first_non_empty(
+            coordination.get("workspace_owner_ref"),
+            ownership.get("workspace_owner_ref"),
+        ),
+        "writer_owner_ref": first_non_empty(
+            coordination.get("writer_owner_ref"),
+            ownership.get("writer_owner_ref"),
+            ownership.get("seat_owner_ref"),
+        ),
+        "selected_seat_ref": selected_seat_ref,
+        "seat_selection_policy": seat_selection_policy,
+        "recommended_scheduler_action": first_non_empty(
+            coordination.get("recommended_scheduler_action"),
+            multi_seat_coordination.get("recommended_scheduler_action"),
+        ),
+        "contention_severity": first_non_empty(
+            dict_from_value(coordination.get("contention_forecast")).get("severity")
+            if dict_from_value(coordination.get("contention_forecast")) is not None
+            else None,
+            multi_seat_coordination.get("severity"),
+        ),
+        "contention_reason": first_non_empty(
+            dict_from_value(coordination.get("contention_forecast")).get("reason")
+            if dict_from_value(coordination.get("contention_forecast")) is not None
+            else None,
+            multi_seat_coordination.get("reason"),
+            host_twin_active_blocker_family(host_twin),
+        ),
+        "host_companion_status": host_companion_status,
+        "host_companion_source": host_companion_source,
+        "host_companion_session_mount_id": host_companion_session_mount_id,
+        "host_companion_environment_id": host_companion_environment_id,
+        "host_companion_locality": host_companion_locality,
+        "seat_count": seat_count_value,
+        "candidate_seat_refs": candidate_seat_refs,
+        "multi_seat_coordination": {
+            "seat_count": seat_count_value,
+            "candidate_seat_refs": candidate_seat_refs,
+            "selected_seat_ref": selected_seat_ref,
+            "seat_selection_policy": seat_selection_policy,
+            "occupancy_state": first_non_empty(
+                multi_seat_coordination.get("occupancy_state"),
+            ),
+            "status": multi_seat_status,
+            "host_companion_status": host_companion_status,
+            "active_surface_mix": string_list_from_values(
+                multi_seat_coordination.get("active_surface_mix"),
+            ),
+        },
+        "ready_app_family_keys": ready_app_family_keys,
+        "ready_app_family_count": len(ready_app_family_keys),
+        "blocked_app_family_keys": blocked_app_family_keys,
+        "blocked_app_family_count": len(blocked_app_family_keys),
+        "app_family_readiness": {
+            "active_family_keys": active_app_family_keys,
+            "active_family_count": len(active_app_family_keys),
+            "ready_family_keys": ready_app_family_keys,
+            "ready_family_count": len(ready_app_family_keys),
+            "blocked_family_keys": blocked_app_family_keys,
+            "blocked_family_count": len(blocked_app_family_keys),
+            "family_statuses": app_family_statuses,
+        },
+        "active_app_family_keys": active_app_family_keys[:4],
+        "active_app_family_count": len(active_app_family_keys),
+        "blocked_surface_refs": [
+            first_non_empty(
+                surface.get("surface_ref"),
+                surface.get("surface_kind"),
+            )
+            for surface in blocked_surfaces[:4]
+        ],
+        "blocked_surface_count": len(blocked_surfaces),
+        "active_blocker_families": string_list_from_values(
+            host_twin.get("active_blocker_families"),
+            host_twin.get("active_blocker_family"),
+        )[:4],
+        "legal_recovery_mode": host_twin_legal_recovery_mode(host_twin),
+        "legal_recovery_summary": host_twin_legal_recovery_summary(host_twin),
+        "writable_surface_label": host_twin_writable_surface_label(host_twin),
+        "trusted_anchor_ref": host_twin_trusted_anchor(host_twin),
+    }
+
+
 def trace_id_from_metadata(task_id: str, metadata: dict[str, Any]) -> str:
     value = metadata.get("trace_id") if isinstance(metadata, dict) else None
     if isinstance(value, str) and value.strip():
@@ -794,10 +1018,23 @@ def build_task_review_payload(
         runtime_metadata=runtime_metadata,
         key="desktop_app_contract",
     )
+    host_companion_session = projection_section(
+        feedback=feedback,
+        runtime_metadata=runtime_metadata,
+        key="host_companion_session",
+    )
     host_twin = projection_section(
         feedback=feedback,
         runtime_metadata=runtime_metadata,
         key="host_twin",
+    )
+    host_twin_summary_payload = projection_section(
+        feedback=feedback,
+        runtime_metadata=runtime_metadata,
+        key="host_twin_summary",
+    ) or build_host_twin_summary(
+        host_twin,
+        host_companion_session=host_companion_session,
     )
     host_twin_blocker_family = host_twin_active_blocker_family(host_twin)
     host_twin_recovery_mode = host_twin_legal_recovery_mode(host_twin)
@@ -819,26 +1056,41 @@ def build_task_review_payload(
         host_twin_coordination.get("recommended_scheduler_action")
         if host_twin_coordination is not None
         else None,
+        host_twin_summary_payload.get("recommended_scheduler_action")
+        if host_twin_summary_payload is not None
+        else None,
     )
     coordination_selected_seat_ref = first_non_empty(
         host_twin_coordination.get("selected_seat_ref")
         if host_twin_coordination is not None
+        else None,
+        host_twin_summary_payload.get("selected_seat_ref")
+        if host_twin_summary_payload is not None
         else None,
     )
     coordination_seat_policy = first_non_empty(
         host_twin_coordination.get("seat_selection_policy")
         if host_twin_coordination is not None
         else None,
+        host_twin_summary_payload.get("seat_selection_policy")
+        if host_twin_summary_payload is not None
+        else None,
     )
     coordination_severity = first_non_empty(
         coordination_contention.get("severity")
         if coordination_contention is not None
+        else None,
+        host_twin_summary_payload.get("contention_severity")
+        if host_twin_summary_payload is not None
         else None,
     )
     coordination_reason = first_non_empty(
         host_twin_blocker_family,
         coordination_contention.get("reason")
         if coordination_contention is not None
+        else None,
+        host_twin_summary_payload.get("contention_reason")
+        if host_twin_summary_payload is not None
         else None,
     )
     host_status = (
@@ -1098,6 +1350,54 @@ def build_task_review_payload(
             summary_lines.append(f"Handoff: {handoff_state} ({handoff_reason})")
         else:
             summary_lines.append(f"Handoff: {handoff_state}")
+    if host_twin_summary_payload:
+        host_companion_status = first_non_empty(
+            host_twin_summary_payload.get("host_companion_status"),
+        )
+        host_companion_source = first_non_empty(
+            host_twin_summary_payload.get("host_companion_source"),
+        )
+        if host_companion_status:
+            host_companion_label = host_companion_status
+            if host_companion_source:
+                host_companion_label += f" via {host_companion_source}"
+            summary_lines.append(f"Host companion: {host_companion_label}")
+        ready_app_family_keys = string_list_from_values(
+            host_twin_summary_payload.get("ready_app_family_keys"),
+        )
+        if ready_app_family_keys:
+            summary_lines.append(
+                f"App families ready: {', '.join(ready_app_family_keys)}"
+            )
+        active_family_keys = string_list_from_values(
+            host_twin_summary_payload.get("active_app_family_keys"),
+        )
+        if active_family_keys:
+            summary_lines.append(
+                f"Host twin families: {', '.join(active_family_keys)}"
+            )
+        seat_count = first_non_empty(host_twin_summary_payload.get("seat_count"))
+        multi_seat_coordination = dict_from_value(
+            host_twin_summary_payload.get("multi_seat_coordination"),
+        ) or {}
+        if seat_count or multi_seat_coordination.get("selected_seat_ref"):
+            seat_coordination_label = first_non_empty(
+                multi_seat_coordination.get("selected_seat_ref"),
+                host_twin_summary_payload.get("selected_seat_ref"),
+            )
+            if seat_count:
+                summary_lines.append(
+                    f"Seat coordination: {seat_count} seat(s)"
+                    + (f" via {seat_coordination_label}" if seat_coordination_label else "")
+                )
+        host_twin_coordination_label = first_non_empty(
+            host_twin_summary_payload.get("recommended_scheduler_action"),
+            host_twin_summary_payload.get("contention_severity"),
+        )
+        if host_twin_coordination_label:
+            summary_lines.append(
+                f"Host twin coordination: {host_twin_coordination_label}"
+            )
     if verification_status or verification_channel or latest_anchor:
         verification_label = first_non_empty(
             verification_status,
@@ -1260,6 +1560,7 @@ def build_task_review_payload(
             "browser_site_contract": browser_site_contract,
             "desktop_app_contract": desktop_app_contract,
             "host_twin": host_twin,
+            "host_twin_summary": host_twin_summary_payload,
         },
         "continuity": continuity,
         "evidence_status": evidence_status,
@@ -1277,7 +1578,7 @@ def build_task_review_payload(
         "child_task_count": child_task_count,
         "child_terminal_count": child_terminal_count,
         "child_completion_rate": child_completion_rate,
-        "summary_lines": summary_lines[:6],
+        "summary_lines": summary_lines[:7],
         "next_step": next_actions[0] if next_actions else None,
         "next_actions": next_actions[:4],
         "risks": risks[:4],

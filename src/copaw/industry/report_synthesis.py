@@ -136,9 +136,14 @@ def _detect_holes_and_actions(
     holes: list[dict[str, Any]] = []
     actions: list[dict[str, Any]] = []
     seen_source_refs: set[str] = set()
+    seen_issue_keys: set[str] = set()
     for report in reports:
         result = (_string(report.result) or "").lower()
+        issue_key = _report_topic_key(report) or report.id
         if result in _FAILED_RESULTS:
+            if issue_key in seen_issue_keys:
+                continue
+            seen_issue_keys.add(issue_key)
             holes.append(
                 {
                     "hole_id": f"failed-report:{report.id}",
@@ -157,6 +162,9 @@ def _detect_holes_and_actions(
                 actions.append(action)
             continue
         if report.needs_followup or _string(report.followup_reason):
+            if issue_key in seen_issue_keys:
+                continue
+            seen_issue_keys.add(issue_key)
             holes.append(
                 {
                     "hole_id": f"followup-needed:{report.id}",

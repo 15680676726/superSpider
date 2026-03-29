@@ -14,8 +14,21 @@ import {
 
 describe("formatIndustryDetailStats", () => {
   it("drops goal counts from runtime detail stats while keeping the runtime chain counts", () => {
-    const summary = formatIndustryDetailStats({
+    type DetailStatsInput = NonNullable<
+      Parameters<typeof formatIndustryDetailStats>[0]
+    >;
+    // @ts-expect-error goal_count should no longer be part of the public helper contract.
+    const stats: DetailStatsInput = {
       goal_count: 9,
+      agent_count: 3,
+      schedule_count: 4,
+      lane_count: 5,
+      backlog_count: 6,
+      assignment_count: 7,
+    };
+    void stats;
+
+    const summary = formatIndustryDetailStats({
       agent_count: 3,
       schedule_count: 4,
       lane_count: 5,

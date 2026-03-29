@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { IndustryInstanceDetail } from "../../api/modules/industry";
+import type { RuntimeCenterOverviewPayload } from "./useRuntimeCenter";
+import {
+  buildRuntimeEnvironmentCockpitSignals,
+} from "./runtimeEnvironmentSections";
+import { buildRuntimeIndustryCockpitSignals } from "./runtimeIndustrySections";
 import { renderIndustryExecutionFocusSection } from "./viewHelpers";
 
 const baseDetail = {
@@ -91,7 +96,7 @@ describe("runtimeCenter viewHelpers", () => {
           ...baseDetail,
           execution: {
             status: "active",
-            current_goal: "Handle the current backlog",
+            current_focus: "Handle the current backlog",
             current_owner: "Execution Core",
             current_risk: "auto",
             evidence_count: 0,
@@ -113,7 +118,7 @@ describe("runtimeCenter viewHelpers", () => {
           ...baseDetail,
           execution: {
             status: "idle",
-            current_goal: "",
+            current_focus: "",
             current_owner: "Execution Core",
             current_risk: "unknown",
             evidence_count: 0,
@@ -135,7 +140,7 @@ describe("runtimeCenter viewHelpers", () => {
           ...baseDetail,
           execution: {
             status: "active",
-            current_goal: "Handle the current backlog",
+            current_focus: "Handle the current backlog",
             current_owner: "Execution Core",
             current_risk: "guarded",
             evidence_count: 0,
@@ -157,7 +162,7 @@ describe("runtimeCenter viewHelpers", () => {
           ...baseDetail,
           execution: {
             status: "active",
-            current_goal: "Handle the current backlog",
+            current_focus: "Handle the current backlog",
             current_owner: "Execution Core",
             current_risk: "auto",
             evidence_count: 0,
@@ -173,5 +178,288 @@ describe("runtimeCenter viewHelpers", () => {
         .getAllByText("自治运行中")
         .some((node) => node.className.includes("ant-tag-green")),
     ).toBe(true);
+  });
+  it("opens the current focus card through the live assignment route instead of the legacy goal route", () => {
+    const openRoute = vi.fn();
+
+    render(
+      renderIndustryExecutionFocusSection(
+        {
+          ...baseDetail,
+          goals: [
+            {
+              goal_id: "goal-legacy",
+              kind: "legacy",
+              title: "Legacy Goal",
+              summary: "Legacy goal summary",
+              plan_steps: [],
+              status: "active",
+              priority: 1,
+              owner_agent_id: "agent-legacy",
+              role_id: "role-legacy",
+              route: "/api/runtime-center/goals/goal-legacy",
+              created_at: "2026-03-26T08:00:00Z",
+              updated_at: "2026-03-26T08:00:00Z",
+            },
+          ],
+          execution: {
+            status: "active",
+            current_focus_id: "assignment-1",
+            current_focus: null,
+            current_owner: "Execution Core",
+            current_risk: "auto",
+            evidence_count: 0,
+            latest_evidence_summary: "",
+          },
+          main_chain: {
+            schema_version: "industry-main-chain-v1",
+            loop_state: "active",
+            current_focus_id: "assignment-1",
+            current_focus: null,
+            current_owner_agent_id: null,
+            current_owner: "Execution Core",
+            current_risk: "auto",
+            latest_evidence_summary: "",
+            nodes: [
+              {
+                node_id: "assignment",
+                label: "Assignment",
+                status: "active",
+                truth_source: "AssignmentRecord",
+                current_ref: "assignment-1",
+                route: "/api/runtime-center/industry/industry-1?assignment_id=assignment-1",
+                summary: "Live Assignment Title",
+                backflow_port: "AssignmentService.reconcile_assignments()",
+                metrics: {},
+              },
+              {
+                node_id: "backlog",
+                label: "Backlog",
+                status: "materialized",
+                truth_source: "BacklogItemRecord",
+                current_ref: "backlog-1",
+                route: "/api/runtime-center/industry/industry-1?backlog_item_id=backlog-1",
+                summary: "Live Backlog Title",
+                backflow_port: "BacklogService.record_chat_writeback()",
+                metrics: {},
+              },
+            ],
+          },
+        },
+        openRoute,
+      ) as React.ReactElement,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Detail" }));
+
+    expect(openRoute).toHaveBeenCalledWith(
+      "/api/runtime-center/industry/industry-1?assignment_id=assignment-1",
+      "Live Assignment Title",
+    );
+    expect(openRoute).not.toHaveBeenCalledWith(
+      "/api/runtime-center/goals/goal-legacy",
+      expect.anything(),
+    );
+  });
+
+  it("surfaces main-brain planning with lanes, cycle, assignments, and reports", () => {
+    render(
+      renderIndustryExecutionFocusSection(
+        {
+          ...baseDetail,
+          lanes: [
+            {
+              lane_id: "lane-growth",
+              lane_key: "growth",
+              title: "增长获客",
+              summary: "推进新增获客。",
+              status: "active",
+              priority: 3,
+              metadata: {},
+            },
+            {
+              lane_id: "lane-fulfillment",
+              lane_key: "fulfillment",
+              title: "交付履约",
+              summary: "盯住本周交付节奏。",
+              status: "queued",
+              priority: 2,
+              metadata: {},
+            },
+          ],
+          current_cycle: {
+            cycle_id: "cycle-1",
+            cycle_kind: "weekly",
+            title: "本周增长与交付协调",
+            summary: "先稳交付，再补增长。",
+            status: "active",
+            focus_lane_ids: ["lane-growth"],
+            backlog_item_ids: ["backlog-1"],
+            assignment_ids: ["assignment-1"],
+            report_ids: ["report-1"],
+            synthesis: {
+              latest_findings: [
+                {
+                  report_id: "report-1",
+                  headline: "交付风险提醒",
+                  summary: "Need follow-up from the main brain.",
+                  findings: [],
+                  uncertainties: [],
+                  needs_followup: true,
+                  followup_reason: "Awaiting explicit approval",
+                },
+              ],
+              conflicts: [],
+              holes: [
+                {
+                  hole_id: "hole-1",
+                  kind: "follow-up",
+                  summary: "Weekend variance still lacks a validated cause.",
+                },
+              ],
+              recommended_actions: [
+                {
+                  action_id: "action-1",
+                  action_type: "staffing-follow-up",
+                  title: "Approve closer staffing",
+                  summary: "Approve closer seating for live follow-up.",
+                },
+              ],
+              needs_replan: true,
+              control_core_contract: ["synthesize-before-reassign"],
+            },
+          },
+          assignments: [
+            {
+              assignment_id: "assignment-1",
+              title: "跟进重点线索",
+              status: "active",
+              evidence_ids: [],
+              metadata: {},
+            },
+          ],
+          agent_reports: [
+            {
+              report_id: "report-1",
+              headline: "交付风险提醒",
+              status: "recorded",
+              findings: [],
+              uncertainties: [],
+              needs_followup: true,
+              evidence_ids: [],
+              decision_ids: [],
+              metadata: {},
+            },
+          ],
+        },
+        vi.fn(),
+      ) as React.ReactElement,
+    );
+
+    expect(screen.getAllByText("Main-Brain Planning").length).toBeGreaterThan(0);
+    expect(screen.getByText("增长获客")).toBeTruthy();
+    expect(screen.getByText("交付履约")).toBeTruthy();
+    expect(screen.getByText("本周增长与交付协调")).toBeTruthy();
+    expect(screen.getByText("Assignments 1")).toBeTruthy();
+    expect(screen.getByText("Reports 1")).toBeTruthy();
+    expect(screen.getAllByText("Awaiting explicit approval").length).toBeGreaterThan(0);
+    expect(screen.getByText("Approve closer staffing")).toBeTruthy();
+    expect(screen.getByText("synthesize-before-reassign")).toBeTruthy();
+  });
+
+  it("prefers the dedicated main-brain overview card when building cockpit signals", () => {
+    const payload = {
+      generated_at: "2026-03-29T09:00:00Z",
+      surface: {
+        version: "runtime-center-v1",
+        mode: "operator-surface",
+        status: "state-service",
+        read_only: true,
+        source: "state_query_service,governance_service",
+        note: "Shared runtime surface",
+        services: ["state_query_service", "governance_service"],
+      },
+      cards: [
+        {
+          key: "main-brain",
+          title: "Main-Brain",
+          source: "state_query_service",
+          status: "state-service",
+          count: 1,
+          summary: "Main brain cockpit",
+          entries: [],
+          meta: {
+            carrier: {
+              status: "state-service",
+              summary: "Carrier ready",
+              route: "/api/runtime-center/governance/status",
+            },
+            strategy: {
+              summary: "North star: weekly alignment",
+            },
+            lanes: {
+              count: 4,
+              summary: "4 lanes active",
+            },
+            current_cycle: {
+              title: "Cycle 12",
+              summary: "Weekly cadence",
+              status: "active",
+              route: "/api/runtime-center/industry/industry-1?cycle_id=cycle-12",
+            },
+            assignments: {
+              count: 3,
+              summary: "3 active assignments",
+            },
+            agent_reports: {
+              count: 2,
+              summary: "2 agent reports",
+            },
+            evidence: {
+              count: 5,
+              summary: "5 evidence records",
+            },
+            decisions: {
+              count: 1,
+              summary: "1 decision pending",
+            },
+            patches: {
+              count: 2,
+              summary: "2 patches pending",
+            },
+            environment: {
+              summary: "Host twin ready",
+              detail: "Workspace bound",
+              route: "/api/runtime-center/governance/status",
+            },
+          },
+        },
+      ],
+    } as RuntimeCenterOverviewPayload;
+
+    const industrySignals = buildRuntimeIndustryCockpitSignals(payload);
+    const environmentSignals = buildRuntimeEnvironmentCockpitSignals(payload);
+
+    expect(industrySignals.find((signal) => signal.key === "strategy")?.value).toBe(
+      "North star: weekly alignment",
+    );
+    expect(industrySignals.find((signal) => signal.key === "lanes")?.value).toBe("4");
+    expect(industrySignals.find((signal) => signal.key === "current_cycle")?.value).toBe(
+      "Cycle 12",
+    );
+    expect(industrySignals.find((signal) => signal.key === "assignments")?.value).toBe("3");
+    expect(industrySignals.find((signal) => signal.key === "agent_reports")?.value).toBe(
+      "2",
+    );
+    expect(industrySignals.find((signal) => signal.key === "evidence")?.value).toBe("5");
+    expect(industrySignals.find((signal) => signal.key === "decisions")?.value).toBe("1");
+    expect(industrySignals.find((signal) => signal.key === "patches")?.value).toBe("2");
+
+    expect(environmentSignals.find((signal) => signal.key === "carrier")?.route).toBe(
+      "/api/runtime-center/governance/status",
+    );
+    expect(environmentSignals.find((signal) => signal.key === "environment")?.detail).toBe(
+      "Workspace bound",
+    );
   });
 });

@@ -3,6 +3,12 @@ from __future__ import annotations
 
 from .shared import *  # noqa: F401,F403
 from copaw.industry.chat_writeback import build_chat_writeback_plan
+from copaw.kernel.governance import GovernanceService
+from copaw.kernel.models import KernelTask
+from copaw.state import AgentReportRecord, AssignmentRecord, SQLiteStateStore
+from copaw.state.repositories import SqliteGovernanceControlRepository
+from copaw.state.human_assist_task_service import HumanAssistTaskService
+from copaw.state.repositories import SqliteHumanAssistTaskRepository
 
 
 def test_industry_service_facade_reads_runtime_detail_from_view_service() -> None:
@@ -1117,6 +1123,623 @@ def test_industry_chat_writeback_routes_desktop_request_to_desktop_specialist(
     assert result["target_industry_role_id"] == "solution-lead"
     assert result["target_owner_agent_id"] != "copaw-agent-runner"
     assert "desktop capability match" in result["target_match_signals"]
+
+
+def test_industry_chat_writeback_surfaces_browser_seat_proposal_in_runtime_detail(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["build a stable inspection loop"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    message_text = "Please publish the customer notice in the browser and keep the handoff governed."
+    result = asyncio.run(
+        app.state.industry_service.apply_execution_chat_writeback(
+            industry_instance_id=instance_id,
+            message_text=message_text,
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry-chat:{instance_id}:execution-core",
+            channel="console",
+            writeback_plan=build_chat_writeback_plan(
+                message_text,
+                approved_classifications=["backlog"],
+                goal_title="Browser publish handoff",
+                goal_summary=message_text,
+                goal_plan_steps=[
+                    "Define the governed browser execution scope.",
+                    "Require approval before any external action.",
+                    "Write back the result and evidence.",
+                ],
+            ),
+        ),
+    )
+
+    assert result is not None
+    assert result["delegated"] is False
+    assert result["dispatch_deferred"] is True
+    assert "temporary-seat-proposal" in result["classification"]
+    assert result["decision_request_id"]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    assert detail.staffing["active_gap"]["kind"] == "temporary-seat-proposal"
+    assert detail.staffing["active_gap"]["requires_confirmation"] is True
+    assert "browser" in detail.staffing["active_gap"]["requested_surfaces"]
+    assert detail.staffing["pending_proposals"]
+    pending = detail.staffing["pending_proposals"][0]
+    assert pending["kind"] == "temporary-seat-proposal"
+    assert pending["requires_confirmation"] is True
+    assert "browser" in pending["requested_surfaces"]
+
+
+def test_industry_chat_writeback_approved_staffing_proposal_unblocks_materialization(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["build a stable inspection loop"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    message_text = "Please publish the customer notice in the browser and keep the handoff governed."
+    result = asyncio.run(
+        app.state.industry_service.apply_execution_chat_writeback(
+            industry_instance_id=instance_id,
+            message_text=message_text,
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry-chat:{instance_id}:execution-core",
+            channel="console",
+            writeback_plan=build_chat_writeback_plan(
+                message_text,
+                approved_classifications=["backlog"],
+                goal_title="Browser publish handoff",
+                goal_summary=message_text,
+                goal_plan_steps=[
+                    "Define the governed browser execution scope.",
+                    "Require approval before any external action.",
+                    "Write back the result and evidence.",
+                ],
+            ),
+        ),
+    )
+
+    assert result is not None
+    decision_id = result["decision_request_id"]
+    backlog_id = result["created_backlog_ids"][0]
+    assert decision_id
+
+    pending_detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert pending_detail is not None
+    assert pending_detail.staffing["active_gap"] is not None
+    assert pending_detail.staffing["pending_proposals"]
+
+    approved = client.post(
+        f"/runtime-center/decisions/{decision_id}/approve",
+        json={"resolution": "Approve the governed browser staffing seat.", "execute": True},
+    )
+    assert approved.status_code == 200
+    approved_payload = approved.json()
+    assert approved_payload["phase"] == "completed"
+    assert approved_payload["decision_request_id"] == decision_id
+
+    approved_detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert approved_detail is not None
+    assert approved_detail.staffing["active_gap"] is None
+    assert approved_detail.staffing["pending_proposals"] == []
+    assert any(
+        item["role_id"] == result["target_industry_role_id"]
+        for item in approved_detail.staffing["temporary_seats"]
+    )
+
+    cycle_result = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:approved-seat-proposal",
+            force=True,
+            backlog_item_ids=[backlog_id],
+            auto_dispatch_materialized_goals=False,
+        ),
+    )
+    assert cycle_result["count"] == 1
+    assert cycle_result["processed_instances"][0]["created_assignment_ids"]
+
+    backlog_item = app.state.backlog_item_repository.get_item(backlog_id)
+    assert backlog_item is not None
+    assert backlog_item.status == "materialized"
+    assert backlog_item.assignment_id is not None
+
+
+def test_staffed_assignment_failure_keeps_supervisor_chain_and_replan_truth(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["build a stable inspection loop"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    result = asyncio.run(
+        app.state.industry_service.apply_execution_chat_writeback(
+            industry_instance_id=instance_id,
+            message_text=(
+                "Please publish the customer notice in the browser, "
+                "keep the handoff governed, and report back."
+            ),
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry-chat:{instance_id}:execution-core",
+            channel="console",
+            writeback_plan=build_chat_writeback_plan(
+                "Please publish the customer notice in the browser, keep the handoff governed, and report back.",
+                approved_classifications=["backlog"],
+                goal_title="Browser publish handoff",
+                goal_summary="Publish the customer notice with governed browser handoff.",
+                goal_plan_steps=[
+                    "Define the governed browser execution scope.",
+                    "Require approval before any external action.",
+                    "Write back the result and evidence.",
+                ],
+            ),
+        ),
+    )
+
+    assert result is not None
+    decision_id = result["decision_request_id"]
+    backlog_id = result["created_backlog_ids"][0]
+    approved = client.post(
+        f"/runtime-center/decisions/{decision_id}/approve",
+        json={"resolution": "Approve the governed browser staffing seat.", "execute": True},
+    )
+    assert approved.status_code == 200
+
+    first_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:staffed-followup-cycle",
+            force=True,
+            backlog_item_ids=[backlog_id],
+            auto_dispatch_materialized_goals=False,
+        ),
+    )
+    assert first_cycle["count"] == 1
+    processed_instance = first_cycle["processed_instances"][0]
+    assignment_id = processed_instance["created_assignment_ids"][0]
+    cycle_id = processed_instance["started_cycle_id"]
+
+    report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=assignment_id,
+        owner_agent_id=result["target_owner_agent_id"],
+        owner_role_id=result["target_industry_role_id"],
+        headline="Browser publish handoff failed",
+        summary="The browser publish attempt is still blocked by the unresolved platform handoff.",
+        status="recorded",
+        result="failed",
+        findings=["The platform still requires a governed human handoff before publish can continue."],
+        recommendation="Resume the staffed browser seat after the human handoff closes.",
+        processed=False,
+    )
+    app.state.agent_report_repository.upsert_report(report)
+
+    second_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:staffed-followup-replan",
+            force=True,
+        ),
+    )
+    assert second_cycle["count"] == 1
+    assert report.id in second_cycle["processed_instances"][0]["processed_report_ids"]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    assert detail.staffing["active_gap"] is None
+    assert any(
+        seat["role_id"] == result["target_industry_role_id"]
+        for seat in detail.staffing["temporary_seats"]
+    )
+    assert detail.current_cycle is not None
+    assert detail.current_cycle["synthesis"]["needs_replan"] is True
+    assert "Browser publish handoff failed requires main-brain follow-up." in (
+        detail.current_cycle["synthesis"]["replan_reasons"]
+    )
+
+    followup_backlog = next(
+        item
+        for item in detail.backlog
+        if item["metadata"].get("source_report_id") == report.id
+    )
+    assert followup_backlog["metadata"]["synthesis_kind"] == "failed-report"
+    assert followup_backlog["metadata"]["supervisor_owner_agent_id"] == "copaw-agent-runner"
+    assert followup_backlog["metadata"]["supervisor_industry_role_id"] == "execution-core"
+
+    runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    replan_node = next(
+        node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
+    )
+    assert replan_node["status"] == "active"
+    assert replan_node["metrics"]["replan_reason_count"] >= 1
+    assert "Browser publish handoff failed requires main-brain follow-up." in (
+        replan_node["metrics"]["replan_reasons"]
+    )
+
+
+def test_governance_blocks_dispatch_when_pending_staffing_proposal_is_not_top_active_gap(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["build a stable inspection loop"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    result = asyncio.run(
+        app.state.industry_service.apply_execution_chat_writeback(
+            industry_instance_id=instance_id,
+            message_text="Please publish the customer notice in the browser and keep the handoff governed.",
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry-chat:{instance_id}:execution-core",
+            channel="console",
+            writeback_plan=build_chat_writeback_plan(
+                "Please publish the customer notice in the browser and keep the handoff governed.",
+                approved_classifications=["backlog"],
+                goal_title="Browser publish handoff",
+                goal_summary="Publish the customer notice with governed browser handoff.",
+                goal_plan_steps=[
+                    "Define the governed browser execution scope.",
+                    "Require approval before any external action.",
+                    "Write back the result and evidence.",
+                ],
+            ),
+        ),
+    )
+    assert result is not None
+    decision_id = result["decision_request_id"]
+
+    app.state.backlog_service.record_chat_writeback(
+        industry_instance_id=instance_id,
+        lane_id=None,
+        title="Investigate unmapped desktop routing",
+        summary="Keep the unmapped surface request in backlog until routing is clarified.",
+        priority=5,
+        source_ref="chat-writeback:test-routing-pending",
+        metadata={
+            "source": "chat-writeback",
+            "chat_writeback_gap_kind": "routing-pending",
+            "seat_resolution_kind": "routing-pending",
+            "chat_writeback_requested_surfaces": ["desktop", "browser"],
+            "seat_requested_surfaces": ["desktop", "browser"],
+            "chat_writeback_target_role_name": "Pending staffing resolution",
+        },
+    )
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    assert detail.staffing["active_gap"]["kind"] == "routing-pending"
+    assert any(
+        item["decision_request_id"] == decision_id
+        for item in detail.staffing["pending_proposals"]
+    )
+
+    governance = GovernanceService(
+        control_repository=SqliteGovernanceControlRepository(
+            SQLiteStateStore(tmp_path / "governance.sqlite3"),
+        ),
+        industry_service=app.state.industry_service,
+    )
+    task = KernelTask(
+        title="Dispatch governed browser work",
+        capability_ref="system:dispatch_command",
+        payload={"industry_instance_id": instance_id},
+    )
+
+    status = governance.get_status()
+    reason = governance.admission_block_reason(task)
+
+    assert status.staffing["active_gap_count"] == 1
+    assert status.staffing["pending_confirmation_count"] == 1
+    assert decision_id in status.staffing["decision_request_ids"]
+    assert reason is not None
+    assert "Staffing confirmation is still required" in reason
+
+
+def test_report_followup_backlog_wins_next_cycle_over_unrelated_open_backlog_when_handoff_and_staffing_are_live(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["build a stable inspection loop"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    result = asyncio.run(
+        app.state.industry_service.apply_execution_chat_writeback(
+            industry_instance_id=instance_id,
+            message_text=(
+                "Please publish the customer notice in the browser, "
+                "keep the handoff governed, and report back."
+            ),
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry-chat:{instance_id}:execution-core",
+            channel="console",
+            writeback_plan=build_chat_writeback_plan(
+                "Please publish the customer notice in the browser, keep the handoff governed, and report back.",
+                approved_classifications=["backlog"],
+                goal_title="Browser publish handoff",
+                goal_summary="Publish the customer notice with governed browser handoff.",
+                goal_plan_steps=[
+                    "Define the governed browser execution scope.",
+                    "Require approval before any external action.",
+                    "Write back the result and evidence.",
+                ],
+            ),
+        ),
+    )
+    assert result is not None
+    decision_id = result["decision_request_id"]
+    assert decision_id is not None
+    seed_backlog_id = result["created_backlog_ids"][0]
+
+    unrelated_backlog = app.state.backlog_service.record_chat_writeback(
+        industry_instance_id=instance_id,
+        lane_id=None,
+        title="Unrelated urgent cleanup",
+        summary="This should not steal the next operating cycle focus from the follow-up item.",
+        priority=5,
+        source_ref="chat-writeback:unrelated-urgent-cleanup",
+        metadata={
+            "source": "chat-writeback",
+            "report_back_mode": "summary",
+        },
+    )
+    assert unrelated_backlog is not None
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    current_cycle_id = record.current_cycle_id
+    assert current_cycle_id is not None
+
+    seed_backlog_record = app.state.backlog_item_repository.get_item(seed_backlog_id)
+    assert seed_backlog_record is not None
+
+    assignment = AssignmentRecord(
+        industry_instance_id=instance_id,
+        cycle_id=current_cycle_id,
+        backlog_item_id=seed_backlog_id,
+        owner_agent_id=result["target_owner_agent_id"],
+        owner_role_id=result["target_industry_role_id"],
+        title="Browser publish handoff",
+        summary="Publish the customer notice with governed browser handoff.",
+        status="failed",
+    )
+    app.state.assignment_repository.upsert_assignment(assignment)
+    app.state.backlog_item_repository.upsert_item(
+        seed_backlog_record.model_copy(
+            update={
+                "cycle_id": current_cycle_id,
+                "assignment_id": assignment.id,
+                "status": "materialized",
+            },
+        ),
+    )
+
+    report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=current_cycle_id,
+        assignment_id=assignment.id,
+        owner_agent_id=result["target_owner_agent_id"],
+        owner_role_id=result["target_industry_role_id"],
+        headline="Browser publish handoff failed",
+        summary="The browser publish attempt is still blocked by the unresolved platform handoff.",
+        status="recorded",
+        result="failed",
+        findings=["The platform still requires a governed human handoff before publish can continue."],
+        recommendation="Resume the staffed browser seat after the human handoff closes.",
+        processed=False,
+    )
+    app.state.agent_report_repository.upsert_report(report)
+
+    processed = app.state.industry_service._process_pending_agent_reports(
+        record=record,
+        cycle_id=current_cycle_id,
+    )
+    assert [item.id for item in processed] == [report.id]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    followup_backlog = next(
+        item
+        for item in detail.backlog
+        if item["metadata"].get("source_report_id") == report.id
+    )
+    assert followup_backlog["status"] == "open"
+    assert followup_backlog["metadata"]["owner_agent_id"] == "copaw-agent-runner"
+    assert followup_backlog["metadata"]["industry_role_id"] == "execution-core"
+    assert followup_backlog["metadata"]["decision_request_id"] == decision_id
+    assert followup_backlog["metadata"]["proposal_status"] == "waiting-confirm"
+
+    class _FakeEnvironmentService:
+        def list_sessions(self, limit=200):
+            return [
+                SimpleNamespace(
+                    session_mount_id=f"session:console:industry:{instance_id}",
+                ),
+            ]
+
+        def get_session_detail(self, session_id, limit=20):
+            return {
+                "host_twin": {
+                    "continuity": {"requires_human_return": True},
+                    "ownership": {"handoff_owner_ref": "host-owner"},
+                    "coordination": {"recommended_scheduler_action": "handoff"},
+                    "legal_recovery": {
+                        "path": "handoff",
+                        "checkpoint_ref": "host-handoff-checkpoint",
+                    },
+                },
+            }
+
+    human_assist_task_service = HumanAssistTaskService(
+        repository=SqliteHumanAssistTaskRepository(app.state.state_store),
+        evidence_ledger=app.state.evidence_ledger,
+    )
+    governance = GovernanceService(
+        control_repository=SqliteGovernanceControlRepository(
+            SQLiteStateStore(tmp_path / "governance.sqlite3"),
+        ),
+        industry_service=app.state.industry_service,
+        human_assist_task_service=human_assist_task_service,
+        environment_service=_FakeEnvironmentService(),
+    )
+    reason = governance.admission_block_reason(
+        KernelTask(
+            title="Dispatch governed browser work",
+            capability_ref="system:dispatch_command",
+            payload={
+                "industry_instance_id": instance_id,
+                "environment_ref": f"session:console:industry:{instance_id}",
+                "chat_thread_id": f"industry-chat:{instance_id}:execution-core",
+            },
+        ),
+    )
+    assert reason is not None
+    assert "Runtime handoff is active" in reason
+
+    status = governance.get_status()
+    assert status.handoff["active"] is True
+    assert status.handoff["session_ids"] == [f"session:console:industry:{instance_id}"]
+    assert status.human_assist["open_count"] == 1
+    assert status.staffing["pending_confirmation_count"] >= 1
+
+    second_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:followup-priority",
+            force=True,
+        ),
+    )
+    assert second_cycle["count"] == 1
+    created_assignment_id = second_cycle["processed_instances"][0]["created_assignment_ids"][0]
+    created_assignment = app.state.assignment_repository.get_assignment(created_assignment_id)
+    assert created_assignment is not None
+    assert created_assignment.backlog_item_id == followup_backlog["backlog_item_id"]
+    assert created_assignment.owner_agent_id == "copaw-agent-runner"
+    assert created_assignment.owner_role_id == "execution-core"
+
+    runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    assert runtime_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
+    assert runtime_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
+    assert runtime_payload["execution"]["current_focus"] == followup_backlog["title"]
+    assert runtime_payload["main_chain"]["current_focus"] == followup_backlog["title"]
+
+
 def test_industry_chat_writeback_updates_priority_without_duplicate_history(tmp_path) -> None:
     app = _build_industry_app(tmp_path)
     client = TestClient(app)

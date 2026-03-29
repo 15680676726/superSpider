@@ -18,6 +18,7 @@ from copaw.app.crons.models import (
     DispatchTarget,
     ScheduleSpec,
 )
+from copaw.app.routers.goals import router as goals_router
 from copaw.app.routers.routines import router as routines_router
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.capabilities import CapabilityService
@@ -31,6 +32,7 @@ from copaw.environments.models import (
     SessionMount,
 )
 from copaw.evidence import EvidenceLedger
+from copaw.goals import GoalService
 from copaw.kernel import KernelResult
 from copaw.kernel import KernelDispatcher
 from copaw.routines import (
@@ -301,7 +303,7 @@ class FakeStateQueryService:
                 "priority": 3,
                 "owner_scope": "ops",
                 "updated_at": "2026-03-09T07:40:00+00:00",
-                "route": "/api/runtime-center/goals/goal-1",
+                "route": "/api/goals/goal-1/detail",
             },
         ]
 
@@ -938,6 +940,9 @@ class FakeAgentProfileService:
                 "role_name": "operator",
                 "role_summary": "Owns runtime coordination.",
                 "risk_level": "guarded",
+                "current_focus_kind": "goal",
+                "current_focus_id": "goal-1",
+                "current_focus": "Launch runtime center",
                 "current_goal_id": "goal-1",
                 "current_goal": "Launch runtime center",
                 "current_task_id": "task-1",
@@ -1192,6 +1197,30 @@ class FakeGovernanceService:
             "pending_decisions": 0,
             "proposed_patches": 1,
             "pending_patches": 1,
+            "host_twin": {
+                "blocking_session_count": 0,
+                "blocking_families": [],
+                "session_ids": [],
+            },
+            "handoff": {
+                "active": False,
+                "session_ids": [],
+                "owner_refs": [],
+                "blocking_families": [],
+            },
+            "staffing": {
+                "active_gap_count": 0,
+                "pending_confirmation_count": 0,
+                "instance_ids": [],
+                "decision_request_ids": [],
+            },
+            "human_assist": {
+                "open_count": 0,
+                "blocked_count": 0,
+                "need_more_evidence_count": 0,
+                "task_ids": [],
+                "chat_thread_ids": [],
+            },
             "metadata": {},
             "updated_at": "2026-03-09T08:35:00+00:00",
         }
@@ -2280,7 +2309,10 @@ class FakeTaskRepository:
         )()
 
 
-class FakeGoalService:
+class FakeGoalService(GoalService):
+    def __init__(self) -> None:
+        pass
+
     def get_goal(self, goal_id: str):
         if goal_id != "goal-1":
             return None
@@ -2296,6 +2328,21 @@ class FakeGoalService:
                 }
             },
         )()
+
+    def get_goal_detail(self, goal_id: str):
+        if goal_id != "goal-1":
+            return None
+        return {
+            "goal": {
+                "id": "goal-1",
+                "title": "Launch runtime center",
+                "summary": "Make goals visible across runtime center and agent workbench.",
+                "status": "active",
+            },
+            "tasks": [{"task": {"id": "task-1"}}],
+            "patches": [{"id": "patch-1"}],
+            "growth": [{"id": "growth-1"}],
+        }
 
 
 class FakePredictionService:
@@ -2520,6 +2567,7 @@ class FakeTurnExecutor:
 def build_runtime_center_app() -> FastAPI:
     app = FastAPI()
     app.include_router(runtime_center_router)
+    app.include_router(goals_router)
     return app
 
 

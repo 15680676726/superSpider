@@ -8,6 +8,19 @@ const DEFAULT_RUNTIME_SURFACE_NOTE =
 const DEFAULT_RUNTIME_GOVERNANCE_TITLE = "运行治理";
 const DEFAULT_RUNTIME_ACCEPTING_SUMMARY = "运行时正在接收新工作。";
 
+const MAIN_BRAIN_SIGNAL_LABELS: Record<string, string> = {
+  carrier: "Carrier",
+  strategy: "Strategy",
+  lanes: "Lanes",
+  current_cycle: "Current Cycle",
+  assignments: "Assignments",
+  agent_reports: "Agent Reports",
+  environment: "Environment",
+  evidence: "Evidence",
+  decisions: "Decisions",
+  patches: "Patches",
+};
+
 const ACTION_LABELS: Record<string, string> = {
   compile: "编译",
   dispatch: "派发",
@@ -213,6 +226,7 @@ const SECTION_LABELS: Record<string, string> = {
   desktop_app_contract: "桌面应用合同",
   cooperative_adapter_availability: "协作适配器可用性",
   workspace_graph: "工作区图谱",
+  host_twin: "Host Twin",
   host_event_summary: "主机事件摘要",
   host_events: "主机事件",
   goal: "目标",
@@ -275,6 +289,8 @@ const ROUTE_TITLE_LABELS: Array<[string, string]> = [
   ["/runtime-center/tasks/", "任务详情"],
   ["/runtime-center/schedules/", "计划详情"],
   ["/runtime-center/goals/", "目标详情"],
+  ["/api/goals/", "目标详情"],
+  ["/goals/", "目标详情"],
   ["/runtime-center/decisions/", "决策详情"],
   ["/runtime-center/learning/patches/", "补丁详情"],
   ["/runtime-center/learning/growth/", "成长详情"],
@@ -862,6 +878,12 @@ export const CAPABILITY_SURFACE_TEXT = {
   capabilityDecisionQueueTitle: "治理队列",
 } as const;
 
+export const MAIN_BRAIN_COCKPIT_TEXT = {
+  title: "Main-Brain Cockpit",
+  description:
+    "Carrier, strategy, lanes, cycle, assignments, reports, environment, evidence, decisions, and patches in one cockpit read surface.",
+} as const;
+
 export function humanizeToken(value: string): string {
   return value
     .replace(/[_-]/g, " ")
@@ -956,6 +978,10 @@ export function formatRuntimeSectionLabel(key: string): string {
     return "关联线程";
   }
   return SECTION_LABELS[key] || humanizeToken(key);
+}
+
+export function formatMainBrainSignalLabel(key: string): string {
+  return MAIN_BRAIN_SIGNAL_LABELS[key] || humanizeToken(key);
 }
 
 export function formatRuntimeFieldLabel(key: string): string {
@@ -1065,6 +1091,9 @@ export function formatPrimitiveValue(value: unknown): string {
 }
 
 export function formatRouteTitle(route: string): string {
+  if (route.includes("/runtime-center/goals/")) {
+    return route;
+  }
   if (route.includes("/runtime-center/work-contexts/")) {
     return "工作上下文详情";
   }

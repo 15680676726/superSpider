@@ -7,6 +7,289 @@ from .service_recommendation_pack import *  # noqa: F401,F403
 
 
 class _IndustryRuntimeViewsMixin:
+    def _resolve_live_focus_payload(
+        self,
+        *,
+        execution: IndustryExecutionSummary | None,
+        assignments: list[dict[str, Any]],
+        backlog: list[dict[str, Any]],
+        tasks: list[dict[str, Any]],
+        selected_assignment_id: str | None = None,
+        selected_backlog_item_id: str | None = None,
+    ) -> dict[str, Any]:
+        focus_task = self._pick_execution_focus_task(tasks)
+        if focus_task is None and execution is not None and execution.current_task_id:
+            focus_task = next(
+                (
+                    item
+                    for item in tasks
+                    if _string(_mapping(item.get("task")).get("id"))
+                    == _string(execution.current_task_id)
+                ),
+                None,
+            )
+        current_task_payload = (
+            _mapping(focus_task.get("task")) if isinstance(focus_task, dict) else {}
+        )
+        current_task_id = _string(current_task_payload.get("id"))
+        assignments_by_id = {
+            _string(assignment.get("assignment_id")): assignment
+            for assignment in assignments
+            if _string(assignment.get("assignment_id"))
+        }
+        current_assignment_id = _string(current_task_payload.get("assignment_id"))
+        current_assignment = (
+            assignments_by_id.get(selected_assignment_id)
+            if selected_assignment_id is not None
+            else None
+        )
+        if (
+            current_assignment is None
+            and selected_backlog_item_id is not None
+        ):
+            current_assignment = next(
+                (
+                    item
+                    for item in assignments
+                    if _string(item.get("backlog_item_id")) == selected_backlog_item_id
+                ),
+                None,
+            )
+        if current_assignment is None:
+            current_assignment = (
+                assignments_by_id.get(current_assignment_id)
+                if current_assignment_id is not None
+                else None
+            )
+        if current_assignment is None and current_task_id is not None:
+            current_assignment = next(
+                (
+                    item
+                    for item in assignments
+                    if _string(item.get("task_id")) == current_task_id
+                ),
+                None,
+            )
+        if current_assignment is None and assignments:
+            current_assignment = assignments[0]
+        current_assignment_id = (
+            _string(current_assignment.get("assignment_id"))
+            if isinstance(current_assignment, dict)
+            else None
+        )
+        chat_writeback_items = [
+            item
+            for item in backlog
+            if str(item.get("source_ref") or "").startswith("chat-writeback:")
+            or _string(_mapping(item.get("metadata")).get("source")) == "chat-writeback"
+        ]
+        latest_writeback = (
+            max(
+                chat_writeback_items,
+                key=lambda item: _sort_timestamp(
+                    item.get("updated_at") or item.get("created_at"),
+                ),
+            )
+            if chat_writeback_items
+            else None
+        )
+        live_backlog_items = [
+            item
+            for item in backlog
+            if _string(item.get("status")) in {"open", "selected", "materialized"}
+        ]
+        open_backlog_items = [
+            item
+            for item in backlog
+            if _string(item.get("status")) in {"open", "selected"}
+        ]
+        live_backlog_items = self._rank_materializable_backlog_items(live_backlog_items)
+        open_backlog_items = self._rank_materializable_backlog_items(open_backlog_items)
+        report_followup_backlog = next(
+            (
+                item
+                for item in live_backlog_items
+                if self._backlog_item_is_report_followup(item)
+            ),
+            None,
+        )
+        current_backlog = None
+        if selected_backlog_item_id is not None:
+            current_backlog = next(
+                (
+                    item
+                    for item in backlog
+                    if _string(item.get("backlog_item_id")) == selected_backlog_item_id
+                ),
+                None,
+            )
+        if (
+            current_backlog is None
+            and selected_assignment_id is not None
+            and selected_assignment_id == current_assignment_id
+            and isinstance(current_assignment, dict)
+        ):
+            current_backlog = next(
+                (
+                    item
+                    for item in backlog
+                    if _string(item.get("backlog_item_id"))
+                    == _string(current_assignment.get("backlog_item_id"))
+                ),
+                None,
+            )
+        if current_backlog is None:
+            current_backlog = (
+                next(
+                    (
+                        item
+                        for item in backlog
+                        if _string(item.get("backlog_item_id"))
+                        == (
+                            _string(current_assignment.get("backlog_item_id"))
+                            if isinstance(current_assignment, dict)
+                            else None
+                        )
+                    ),
+                    None,
+                )
+                if backlog
+                else None
+            )
+        if current_backlog is None:
+            current_backlog = latest_writeback or (
+                open_backlog_items[0] if open_backlog_items else None
+            )
+        current_backlog_id = (
+            _string(current_backlog.get("backlog_item_id"))
+            if isinstance(current_backlog, dict)
+            else None
+        )
+        current_focus_title = (
+            _string(execution.current_focus)
+            if execution is not None
+            else None
+        )
+        if (
+            selected_assignment_id is None
+            and selected_backlog_item_id is None
+            and isinstance(report_followup_backlog, dict)
+            and _string(report_followup_backlog.get("backlog_item_id")) != current_backlog_id
+        ):
+            current_backlog = report_followup_backlog
+            current_backlog_id = _string(current_backlog.get("backlog_item_id"))
+            current_focus_title = (
+                _string(current_backlog.get("title"))
+                or _string(current_backlog.get("summary"))
+                or current_focus_title
+            )
+        current_backlog_status = (
+            _string(current_backlog.get("status"))
+            if isinstance(current_backlog, dict)
+            else None
+        )
+        current_backlog_is_report_followup = (
+            isinstance(current_backlog, dict)
+            and (
+                _string(_mapping(current_backlog.get("metadata")).get("source_report_id"))
+                is not None
+                or _string(_mapping(current_backlog.get("metadata")).get("synthesis_kind"))
+                == "followup-needed"
+            )
+        )
+        current_assignment_status = (
+            _string(current_assignment.get("status"))
+            if isinstance(current_assignment, dict)
+            else None
+        )
+        assignment_backlog_attached = (
+            isinstance(current_assignment, dict)
+            and _string(current_assignment.get("backlog_item_id")) == current_backlog_id
+            and current_assignment_status not in {"blocked", "cancelled", "completed", "failed"}
+        )
+        assignment_backlog_live = (
+            assignment_backlog_attached
+            and current_backlog_status in {"open", "selected", "materialized"}
+        )
+        current_focus_title = (
+            (
+                _string(current_assignment.get("title"))
+                or _string(current_assignment.get("summary"))
+                if assignment_backlog_live
+                else None
+            )
+            or (
+                _string(current_backlog.get("title"))
+                or _string(current_backlog.get("summary"))
+                if isinstance(current_backlog, dict)
+                else None
+            )
+            or (
+                _string(execution.current_focus)
+                if execution is not None
+                else None
+            )
+        )
+        current_focus_id = (
+            current_backlog_id
+            or (current_assignment_id if assignment_backlog_live else None)
+            or (
+                _string(execution.current_focus_id)
+                if execution is not None
+                else None
+            )
+        )
+        selection_assignment_live = (
+            selected_assignment_id is not None
+            and current_assignment_id == selected_assignment_id
+            and isinstance(current_assignment, dict)
+        )
+        selection_backlog_live = (
+            selected_backlog_item_id is not None
+            and current_backlog_id == selected_backlog_item_id
+            and isinstance(current_backlog, dict)
+        )
+        if selection_assignment_live:
+            current_focus_title = (
+                _string(current_assignment.get("title"))
+                or _string(current_assignment.get("summary"))
+                or current_focus_title
+            )
+            current_focus_id = current_assignment_id or current_focus_id
+        elif selection_backlog_live:
+            current_focus_title = (
+                _string(current_backlog.get("title"))
+                or _string(current_backlog.get("summary"))
+                or current_focus_title
+            )
+            current_focus_id = current_backlog_id or current_focus_id
+        if (
+            selected_assignment_id is None
+            and selected_backlog_item_id is None
+            and
+            isinstance(current_backlog, dict)
+            and current_backlog_status not in {"open", "selected"}
+            and open_backlog_items
+            and not assignment_backlog_attached
+            and not current_backlog_is_report_followup
+        ):
+            current_backlog = open_backlog_items[0]
+            current_backlog_id = _string(current_backlog.get("backlog_item_id"))
+            current_focus_title = (
+                _string(current_backlog.get("title"))
+                or _string(current_backlog.get("summary"))
+                or current_focus_title
+            )
+            current_focus_id = current_backlog_id or current_focus_id
+        return {
+            "current_assignment": current_assignment,
+            "current_assignment_id": current_assignment_id,
+            "current_backlog": current_backlog,
+            "current_backlog_id": current_backlog_id,
+            "current_focus_id": current_focus_id,
+            "current_focus_title": current_focus_title,
+        }
+
     def _build_instance_main_chain(
         self,
         *,
@@ -23,6 +306,8 @@ class _IndustryRuntimeViewsMixin:
         evidence: list[dict[str, Any]],
         execution: IndustryExecutionSummary | None,
         strategy_memory: StrategyMemoryRecord | None,
+        selected_assignment_id: str | None = None,
+        selected_backlog_item_id: str | None = None,
     ) -> IndustryMainChainGraph:
         focus_task = self._pick_execution_focus_task(tasks)
         if focus_task is None and execution is not None and execution.current_task_id:
@@ -54,20 +339,15 @@ class _IndustryRuntimeViewsMixin:
             for agent in agents
             if _string(agent.get("agent_id"))
         }
-        lanes_by_id = {
-            _string(lane.get("lane_id")): lane
-            for lane in lanes
-            if _string(lane.get("lane_id"))
-        }
-        assignments_by_id = {
-            _string(assignment.get("assignment_id")): assignment
-            for assignment in assignments
-            if _string(assignment.get("assignment_id"))
-        }
         tasks_by_id = {
             _string(_mapping(item.get("task")).get("id")): item
             for item in tasks
             if _string(_mapping(item.get("task")).get("id"))
+        }
+        assignments_by_id = {
+            _string(item.get("assignment_id")): item
+            for item in assignments
+            if _string(item.get("assignment_id"))
         }
         current_task_payload = (
             _mapping(focus_task.get("task")) if isinstance(focus_task, dict) else {}
@@ -87,26 +367,16 @@ class _IndustryRuntimeViewsMixin:
             if isinstance(current_child_task, dict)
             else None
         )
-        current_assignment_id = (
-            _string(current_task_payload.get("assignment_id"))
-            or (
-                _string(execution.current_task_id)
-                if execution is not None
-                else None
-            )
+        focus_payload = self._resolve_live_focus_payload(
+            execution=execution,
+            assignments=assignments,
+            backlog=backlog,
+            tasks=tasks,
+            selected_assignment_id=selected_assignment_id,
+            selected_backlog_item_id=selected_backlog_item_id,
         )
-        current_assignment = (
-            assignments_by_id.get(current_assignment_id)
-            if current_assignment_id is not None
-            else None
-        )
-        if current_assignment is None and assignments:
-            current_assignment = assignments[0]
-        current_assignment_id = (
-            _string(current_assignment.get("assignment_id"))
-            if isinstance(current_assignment, dict)
-            else None
-        )
+        current_assignment = focus_payload["current_assignment"]
+        current_assignment_id = focus_payload["current_assignment_id"]
         current_assignment_meta = (
             _mapping(current_assignment.get("metadata"))
             if isinstance(current_assignment, dict)
@@ -142,6 +412,14 @@ class _IndustryRuntimeViewsMixin:
             if isinstance(current_cycle_entry, dict)
             else None
         )
+        replan_cycle_entry = (
+            current_cycle if isinstance(current_cycle, dict) else current_cycle_entry
+        )
+        replan_cycle_id = (
+            _string(replan_cycle_entry.get("cycle_id"))
+            if isinstance(replan_cycle_entry, dict)
+            else current_cycle_id
+        )
         current_lane_id = (
             _string(current_task_payload.get("lane_id"))
             or (
@@ -156,6 +434,11 @@ class _IndustryRuntimeViewsMixin:
                 else None
             )
         )
+        lanes_by_id = {
+            _string(lane.get("lane_id")): lane
+            for lane in lanes
+            if _string(lane.get("lane_id"))
+        }
         current_lane = (
             lanes_by_id.get(current_lane_id)
             if current_lane_id is not None
@@ -199,6 +482,17 @@ class _IndustryRuntimeViewsMixin:
             if isinstance(current_report, dict)
             else None
         )
+        open_backlog_items = [
+            item
+            for item in backlog
+            if _string(item.get("status")) in {"open", "selected"}
+        ]
+        live_backlog_items = [
+            item
+            for item in backlog
+            if _string(item.get("status")) in {"open", "selected", "materialized"}
+        ]
+        live_backlog_items = self._rank_materializable_backlog_items(live_backlog_items)
         if focus_task is None and isinstance(current_report, dict):
             report_task_id = _string(current_report.get("task_id"))
             report_assignment_id = _string(current_report.get("assignment_id"))
@@ -410,56 +704,26 @@ class _IndustryRuntimeViewsMixin:
             if isinstance(latest_writeback, dict)
             else None
         )
-        current_backlog = (
-            next(
-                (
-                    item
-                    for item in backlog
-                    if _string(item.get("backlog_item_id"))
-                    == (
-                        _string(current_assignment.get("backlog_item_id"))
-                        if isinstance(current_assignment, dict)
-                        else None
-                    )
-                ),
-                None,
-            )
-            if backlog
-            else None
-        )
-        if current_backlog is None:
-            current_backlog = latest_writeback or (backlog[0] if backlog else None)
-        current_backlog_id = (
-            _string(current_backlog.get("backlog_item_id"))
-            if isinstance(current_backlog, dict)
-            else None
-        )
-        current_focus_title = (
-            _string(execution.current_goal)
-            if execution is not None and _string(execution.current_goal)
-            else (
-                _string(current_assignment.get("title"))
-                if isinstance(current_assignment, dict)
-                else None
-            )
-            or (
-                _string(current_backlog.get("title"))
-                if isinstance(current_backlog, dict)
-                else None
-            )
-        )
+        current_backlog = focus_payload["current_backlog"]
+        current_backlog_id = focus_payload["current_backlog_id"]
+        current_focus_title = focus_payload["current_focus_title"]
         current_backlog_route = (
             _string(current_backlog.get("route"))
             if isinstance(current_backlog, dict)
             else None
         )
-        current_cycle_synthesis = _mapping(_mapping(current_cycle_entry).get("synthesis"))
+        current_cycle_synthesis = _mapping(_mapping(replan_cycle_entry).get("synthesis"))
         if not current_cycle_synthesis:
             current_cycle_synthesis = _mapping(
-                _mapping(_mapping(current_cycle_entry).get("metadata")).get("report_synthesis"),
+                _mapping(_mapping(replan_cycle_entry).get("metadata")).get("report_synthesis"),
             )
         synthesis_conflicts = list(current_cycle_synthesis.get("conflicts") or [])
         synthesis_holes = list(current_cycle_synthesis.get("holes") or [])
+        synthesis_replan_reasons = [
+            _string(item)
+            for item in list(current_cycle_synthesis.get("replan_reasons") or [])
+            if _string(item) is not None
+        ]
         replan_needed = bool(current_cycle_synthesis.get("needs_replan")) or bool(
             synthesis_conflicts or synthesis_holes
         )
@@ -740,10 +1004,10 @@ class _IndustryRuntimeViewsMixin:
                 label="Replan",
                 status="active" if replan_needed else "idle",
                 truth_source="OperatingCycle.synthesis + AgentReportRecord",
-                current_ref=current_cycle_id,
+                current_ref=replan_cycle_id,
                 route=(
-                    _string(current_cycle_entry.get("route"))
-                    if isinstance(current_cycle_entry, dict)
+                    _string(replan_cycle_entry.get("route"))
+                    if isinstance(replan_cycle_entry, dict)
                     else f"/api/runtime-center/industry/{quote(record.instance_id)}"
                 ),
                 summary=replan_summary,
@@ -752,6 +1016,8 @@ class _IndustryRuntimeViewsMixin:
                     "conflict_count": len(synthesis_conflicts),
                     "hole_count": len(synthesis_holes),
                     "needs_replan": replan_needed,
+                    "replan_reason_count": len(synthesis_replan_reasons),
+                    "replan_reasons": synthesis_replan_reasons,
                 },
             ),
             IndustryMainChainNode(
@@ -774,12 +1040,15 @@ class _IndustryRuntimeViewsMixin:
         ]
         return IndustryMainChainGraph(
             loop_state=loop_state or "idle",
-            current_goal_id=(
-                _string(execution.current_goal_id)
-                if execution is not None
-                else None
+            current_focus_id=(
+                _string(focus_payload.get("current_focus_id"))
+                or (
+                    _string(execution.current_focus_id)
+                    if execution is not None
+                    else None
+                )
             ),
-            current_goal=current_focus_title,
+            current_focus=current_focus_title,
             current_owner_agent_id=current_owner_agent_id,
             current_owner=current_owner,
             current_risk=current_risk,
@@ -1019,12 +1288,12 @@ class _IndustryRuntimeViewsMixin:
                 )
                 return IndustryExecutionSummary(
                     status="learning",
-                    current_goal_id=(
+                    current_focus_id=(
                         _string(pending_goal.get("goal_id"))
                         if isinstance(pending_goal, dict)
                         else None
                     ),
-                    current_goal=(
+                    current_focus=(
                         _string(pending_goal.get("title"))
                         if isinstance(pending_goal, dict)
                         else None
@@ -1071,12 +1340,12 @@ class _IndustryRuntimeViewsMixin:
                 )
                 return IndustryExecutionSummary(
                     status="coordinating",
-                    current_goal_id=(
+                    current_focus_id=(
                         _string(pending_goal.get("goal_id"))
                         if isinstance(pending_goal, dict)
                         else None
                     ),
-                    current_goal=(
+                    current_focus=(
                         _string(pending_goal.get("title"))
                         if isinstance(pending_goal, dict)
                         else None
@@ -1127,12 +1396,12 @@ class _IndustryRuntimeViewsMixin:
                 )
                 return IndustryExecutionSummary(
                     status="waiting-confirm",
-                    current_goal_id=(
+                    current_focus_id=(
                         _string(pending_goal.get("goal_id"))
                         if isinstance(pending_goal, dict)
                         else None
                     ),
-                    current_goal=(
+                    current_focus=(
                         _string(pending_goal.get("title"))
                         if isinstance(pending_goal, dict)
                         else None
@@ -1176,8 +1445,8 @@ class _IndustryRuntimeViewsMixin:
             )
             return IndustryExecutionSummary(
                 status="idle",
-                current_goal_id=_string(fallback_goal.get("goal_id")) if isinstance(fallback_goal, dict) else None,
-                current_goal=_string(fallback_goal.get("title")) if isinstance(fallback_goal, dict) else None,
+                current_focus_id=_string(fallback_goal.get("goal_id")) if isinstance(fallback_goal, dict) else None,
+                current_focus=_string(fallback_goal.get("title")) if isinstance(fallback_goal, dict) else None,
                 current_owner_agent_id=fallback_owner_agent_id,
                 current_owner=(
                     _string(fallback_owner.get("role_name"))
@@ -1242,12 +1511,12 @@ class _IndustryRuntimeViewsMixin:
             )
             return IndustryExecutionSummary(
                 status=autonomy_status,
-                current_goal_id=(
+                current_focus_id=(
                     _string(current_goal.get("goal_id"))
                     if isinstance(current_goal, dict)
                     else task_goal_id
                 ),
-                current_goal=(
+                current_focus=(
                     _string(current_goal.get("title"))
                     if isinstance(current_goal, dict)
                     else None
@@ -1281,8 +1550,8 @@ class _IndustryRuntimeViewsMixin:
             )
         return IndustryExecutionSummary(
             status=focus_status,
-            current_goal_id=_string(current_goal.get("goal_id")) if isinstance(current_goal, dict) else task_goal_id,
-            current_goal=_string(current_goal.get("title")) if isinstance(current_goal, dict) else None,
+            current_focus_id=_string(current_goal.get("goal_id")) if isinstance(current_goal, dict) else task_goal_id,
+            current_focus=_string(current_goal.get("title")) if isinstance(current_goal, dict) else None,
             current_owner_agent_id=owner_agent_id,
             current_owner=(
                 _string(owner_payload.get("role_name"))
@@ -1325,6 +1594,1218 @@ class _IndustryRuntimeViewsMixin:
                 else None
             ),
             updated_at=updated_at,
+        )
+
+    def _build_instance_detail(
+
+        self,
+
+        record: IndustryInstanceRecord,
+
+        *,
+        assignment_id: str | None = None,
+        backlog_item_id: str | None = None,
+
+    ) -> IndustryInstanceDetail:
+
+        profile = IndustryProfile.model_validate(
+
+            record.profile_payload or {"industry": record.label},
+
+        )
+
+        team = self._materialize_team_blueprint(record)
+
+        status = self._derive_instance_status(record)
+        selected_assignment_id = _string(assignment_id)
+        selected_backlog_item_id = _string(backlog_item_id)
+
+        team = team.model_copy(
+
+            update={
+
+                "status": (
+
+                    _string(record.autonomy_status)
+
+                    or _string(record.lifecycle_status)
+
+                    or status
+
+                ),
+
+                "autonomy_status": _string(record.autonomy_status),
+
+                "lifecycle_status": _string(record.lifecycle_status),
+
+            },
+
+        )
+
+        execution_core_identity = self._materialize_execution_core_identity(
+
+            record,
+
+            profile=profile,
+
+            team=team,
+
+        )
+
+        strategy_memory = self._load_strategy_memory(
+
+            record,
+
+            profile=profile,
+
+            team=team,
+
+            execution_core_identity=execution_core_identity,
+
+        )
+
+        lane_records = self._list_operating_lanes(record.instance_id)
+
+        current_cycle_record = self._current_operating_cycle_record(record.instance_id)
+
+        cycle_records = self._list_operating_cycles(record.instance_id, limit=None)
+
+        assignment_records = self._list_assignment_records(record.instance_id)
+
+        agent_report_records = self._list_agent_report_records(
+
+            record.instance_id,
+
+            limit=None,
+
+        )
+
+        backlog_records = self._list_backlog_items(record.instance_id, limit=None)
+
+        lanes = [
+
+            {
+
+                "lane_id": lane.id,
+
+                "lane_key": lane.lane_key,
+
+                "title": lane.title,
+
+                "summary": lane.summary,
+
+                "status": lane.status,
+
+                "owner_agent_id": lane.owner_agent_id,
+
+                "owner_role_id": lane.owner_role_id,
+
+                "priority": lane.priority,
+
+                "health_status": lane.health_status,
+
+                "source_ref": lane.source_ref,
+
+                "metadata": dict(lane.metadata or {}),
+
+                "created_at": lane.created_at,
+
+                "updated_at": lane.updated_at,
+
+                "route": (
+
+                    f"/api/runtime-center/agents/{quote(lane.owner_agent_id)}"
+
+                    if lane.owner_agent_id
+
+                    else None
+
+                ),
+
+            }
+
+            for lane in sorted(
+
+                lane_records,
+
+                key=lambda item: (-int(item.priority), _sort_timestamp(item.updated_at)),
+
+            )
+
+        ]
+
+        lane_route_by_id = {
+
+            _string(item.get("lane_id")): _string(item.get("route"))
+
+            for item in lanes
+
+            if _string(item.get("lane_id"))
+
+        }
+
+        current_cycle_synthesis = self._resolve_report_synthesis_payload(
+
+            cycle_record=current_cycle_record,
+
+            agent_report_records=agent_report_records,
+
+        )
+
+        current_cycle = (
+
+            {
+
+                "cycle_id": current_cycle_record.id,
+
+                "cycle_kind": current_cycle_record.cycle_kind,
+
+                "title": current_cycle_record.title,
+
+                "summary": current_cycle_record.summary,
+
+                "status": current_cycle_record.status,
+
+                "source_ref": current_cycle_record.source_ref,
+
+                "started_at": current_cycle_record.started_at,
+
+                "due_at": current_cycle_record.due_at,
+
+                "completed_at": current_cycle_record.completed_at,
+
+                "focus_lane_ids": list(current_cycle_record.focus_lane_ids or []),
+
+                "backlog_item_ids": list(current_cycle_record.backlog_item_ids or []),
+
+                "goal_ids": list(current_cycle_record.goal_ids or []),
+
+                "assignment_ids": list(current_cycle_record.assignment_ids or []),
+
+                "report_ids": list(current_cycle_record.report_ids or []),
+
+                "metadata": dict(current_cycle_record.metadata or {}),
+
+                "synthesis": current_cycle_synthesis,
+
+                "route": f"/api/runtime-center/industry/{quote(record.instance_id)}",
+
+            }
+
+            if current_cycle_record is not None
+
+            else None
+
+        )
+
+        cycles = [
+
+            {
+
+                "cycle_id": cycle.id,
+
+                "cycle_kind": cycle.cycle_kind,
+
+                "title": cycle.title,
+
+                "summary": cycle.summary,
+
+                "status": cycle.status,
+
+                "source_ref": cycle.source_ref,
+
+                "started_at": cycle.started_at,
+
+                "due_at": cycle.due_at,
+
+                "completed_at": cycle.completed_at,
+
+                "focus_lane_ids": list(cycle.focus_lane_ids or []),
+
+                "backlog_item_ids": list(cycle.backlog_item_ids or []),
+
+                "goal_ids": list(cycle.goal_ids or []),
+
+                "assignment_ids": list(cycle.assignment_ids or []),
+
+                "report_ids": list(cycle.report_ids or []),
+
+                "metadata": dict(cycle.metadata or {}),
+
+                "synthesis": self._resolve_report_synthesis_payload(
+
+                    cycle_record=cycle,
+
+                    agent_report_records=agent_report_records,
+
+                ),
+
+                "is_current": current_cycle_record is not None and cycle.id == current_cycle_record.id,
+
+                "route": f"/api/runtime-center/industry/{quote(record.instance_id)}",
+
+            }
+
+            for cycle in cycle_records
+
+        ]
+
+        assignments = [
+
+            {
+
+                "assignment_id": assignment.id,
+
+                "cycle_id": assignment.cycle_id,
+
+                "lane_id": assignment.lane_id,
+
+                "backlog_item_id": assignment.backlog_item_id,
+
+                "goal_id": assignment.goal_id,
+
+                "task_id": assignment.task_id,
+
+                "owner_agent_id": assignment.owner_agent_id,
+
+                "owner_role_id": assignment.owner_role_id,
+
+                "title": assignment.title,
+
+                "summary": assignment.summary,
+
+                "status": assignment.status,
+
+                "report_back_mode": assignment.report_back_mode,
+
+                "evidence_ids": list(assignment.evidence_ids or []),
+
+                "last_report_id": assignment.last_report_id,
+
+                "metadata": dict(assignment.metadata or {}),
+
+                "created_at": assignment.created_at,
+
+                "updated_at": assignment.updated_at,
+
+                "selected": bool(selected_assignment_id and assignment.id == selected_assignment_id),
+
+                "route": (
+                    f"/api/runtime-center/industry/{quote(record.instance_id)}"
+                    f"?assignment_id={quote(assignment.id)}"
+                ),
+
+            }
+
+            for assignment in sorted(
+
+                assignment_records,
+
+                key=lambda item: _sort_timestamp(item.updated_at),
+
+                reverse=True,
+
+            )
+
+        ]
+
+        agent_reports = [
+
+            {
+
+                "report_id": report.id,
+
+                "cycle_id": report.cycle_id,
+
+                "assignment_id": report.assignment_id,
+
+                "goal_id": report.goal_id,
+
+                "task_id": report.task_id,
+
+                "lane_id": report.lane_id,
+
+                "owner_agent_id": report.owner_agent_id,
+
+                "owner_role_id": report.owner_role_id,
+
+                "report_kind": report.report_kind,
+
+                "headline": report.headline,
+
+                "summary": report.summary,
+
+                "status": report.status,
+
+                "result": report.result,
+
+                "risk_level": report.risk_level,
+
+                "evidence_ids": list(report.evidence_ids or []),
+
+                "decision_ids": list(report.decision_ids or []),
+
+                "processed": report.processed,
+
+                "processed_at": report.processed_at,
+
+                "metadata": dict(report.metadata or {}),
+
+                "created_at": report.created_at,
+
+                "updated_at": report.updated_at,
+
+                "route": (
+
+                    f"/api/runtime-center/tasks/{quote(report.task_id)}"
+
+                    if report.task_id
+
+                    else (
+
+                        f"/api/goals/{quote(report.goal_id)}/detail"
+
+                        if report.goal_id
+
+                        else lane_route_by_id.get(report.lane_id)
+
+                    )
+
+                ),
+
+            }
+
+            for report in sorted(
+
+                agent_report_records,
+
+                key=lambda item: _sort_timestamp(item.updated_at),
+
+                reverse=True,
+
+            )
+
+        ]
+
+        backlog = [
+
+            {
+
+                "backlog_item_id": item.id,
+
+                "lane_id": item.lane_id,
+
+                "cycle_id": item.cycle_id,
+
+                "assignment_id": item.assignment_id,
+
+                "goal_id": item.goal_id,
+
+                "title": item.title,
+
+                "summary": item.summary,
+
+                "status": item.status,
+
+                "priority": item.priority,
+
+                "source_kind": item.source_kind,
+
+                "source_ref": item.source_ref,
+
+                "evidence_ids": list(item.evidence_ids or []),
+
+                "metadata": dict(item.metadata or {}),
+
+                "created_at": item.created_at,
+
+                "updated_at": item.updated_at,
+
+                "selected": bool(selected_backlog_item_id and item.id == selected_backlog_item_id),
+
+                "route": (
+                    f"/api/runtime-center/industry/{quote(record.instance_id)}"
+                    f"?backlog_item_id={quote(item.id)}"
+                ),
+
+            }
+
+            for item in sorted(
+
+                backlog_records,
+
+                key=lambda candidate: (
+
+                    0 if candidate.status in {"open", "selected"} else 1,
+
+                    -int(candidate.priority),
+
+                    _sort_timestamp(candidate.updated_at),
+
+                ),
+
+            )
+
+        ]
+
+        goals: list[dict[str, Any]] = []
+
+        tasks_by_id: dict[str, dict[str, Any]] = {}
+
+        decisions_by_id: dict[str, dict[str, Any]] = {}
+
+        evidence_by_id: dict[str, dict[str, Any]] = {}
+
+        patches_by_id: dict[str, dict[str, Any]] = {}
+
+        growth_by_id: dict[str, dict[str, Any]] = {}
+
+        task_ids: set[str] = set()
+
+        agent_ids = set(record.agent_ids or [])
+
+        updated_candidates: list[datetime] = [
+
+            candidate
+
+            for candidate in (record.updated_at, record.created_at)
+
+            if candidate is not None
+
+        ]
+
+
+
+        for goal_id in record.goal_ids:
+
+            goal = self._goal_service.get_goal(goal_id)
+
+            if goal is None:
+
+                continue
+
+            override = self._goal_override_repository.get_override(goal.id)
+
+            if not self._goal_belongs_to_instance(
+
+                goal,
+
+                record=record,
+
+                override=override,
+
+            ):
+
+                continue
+
+            goal_detail = self._goal_service.get_goal_detail(goal.id) or {}
+
+            goal_context = self._resolve_goal_runtime_context(
+
+                goal,
+
+                override=override,
+
+                record=record,
+
+                team=team,
+
+            )
+
+            role = self._resolve_role_blueprint_by_agent(
+
+                team,
+
+                _string(goal_context.get("owner_agent_id")),
+
+            ) or self._resolve_role_blueprint(
+
+                team,
+
+                _string(goal_context.get("industry_role_id")),
+
+            )
+
+            goal_entry = {
+
+                "goal_id": goal.id,
+
+                "kind": _string(goal_context.get("goal_kind")) or "industry",
+
+                "title": goal.title,
+
+                "summary": goal.summary,
+
+                "status": goal.status,
+
+                "priority": goal.priority,
+
+                "owner_scope": goal.owner_scope,
+
+                "industry_instance_id": _string(goal_context.get("industry_instance_id")) or goal.industry_instance_id,
+
+                "lane_id": _string(goal_context.get("lane_id")) or goal.lane_id,
+
+                "cycle_id": _string(goal_context.get("cycle_id")) or goal.cycle_id,
+
+                "goal_class": goal.goal_class,
+
+                "plan_steps": list(override.plan_steps or []) if override is not None else [],
+
+                "owner_agent_id": _string(goal_context.get("owner_agent_id")),
+
+                "role_id": role.role_id if role is not None else _string(goal_context.get("industry_role_id")),
+
+                "role_name": (
+
+                    role.role_name
+
+                    if role is not None
+
+                    else _string(goal_context.get("industry_role_name"))
+
+                    or _string(goal_context.get("role_name"))
+
+                ),
+
+                "agent_class": role.agent_class if role is not None else _string(goal_context.get("agent_class")),
+
+                "route": f"/api/goals/{goal.id}/detail",
+
+            }
+
+            updated_candidates.extend(
+
+                candidate
+
+                for candidate in (goal.updated_at, goal.created_at)
+
+                if candidate is not None
+
+            )
+
+            goal_tasks = goal_detail.get("tasks")
+
+            if isinstance(goal_tasks, list):
+
+                goal_entry["task_count"] = len(goal_tasks)
+
+                for item in goal_tasks:
+
+                    if not isinstance(item, dict):
+
+                        continue
+
+                    task = item.get("task")
+
+                    if not isinstance(task, dict):
+
+                        continue
+
+                    task_id = _string(task.get("id"))
+
+                    if not task_id:
+
+                        continue
+
+                    task_ids.add(task_id)
+
+                    task_payload = dict(item)
+
+                    task_payload["route"] = f"/api/runtime-center/tasks/{task_id}"
+
+                    tasks_by_id[task_id] = task_payload
+
+            else:
+
+                goal_entry["task_count"] = 0
+
+            goal_decisions = goal_detail.get("decisions")
+
+            if isinstance(goal_decisions, list):
+
+                goal_entry["decision_count"] = len(goal_decisions)
+
+                for item in goal_decisions:
+
+                    if isinstance(item, dict) and _string(item.get("id")):
+
+                        decisions_by_id[str(item["id"])] = dict(item)
+
+            else:
+
+                goal_entry["decision_count"] = 0
+
+            goal_evidence = goal_detail.get("evidence")
+
+            if isinstance(goal_evidence, list):
+
+                goal_entry["evidence_count"] = len(goal_evidence)
+
+                for item in goal_evidence:
+
+                    if isinstance(item, dict) and _string(item.get("id")):
+
+                        evidence_by_id[str(item["id"])] = dict(item)
+
+            else:
+
+                goal_entry["evidence_count"] = 0
+
+            goal_patches = goal_detail.get("patches")
+
+            if isinstance(goal_patches, list):
+
+                for item in goal_patches:
+
+                    if isinstance(item, dict) and _string(item.get("id")):
+
+                        patches_by_id[str(item["id"])] = dict(item)
+
+            goal_growth = goal_detail.get("growth")
+
+            if isinstance(goal_growth, list):
+
+                for item in goal_growth:
+
+                    if isinstance(item, dict) and _string(item.get("id")):
+
+                        growth_by_id[str(item["id"])] = dict(item)
+
+            goal_agents = goal_detail.get("agents")
+
+            if isinstance(goal_agents, list):
+
+                for item in goal_agents:
+
+                    if isinstance(item, dict):
+
+                        agent_id = _string(item.get("agent_id"))
+
+                        if agent_id:
+
+                            agent_ids.add(agent_id)
+
+            goals.append(goal_entry)
+
+
+
+        additional_evidence_ids = {
+
+            evidence_id
+
+            for collection in (
+
+                [item.get("evidence_ids") for item in assignments],
+
+                [item.get("evidence_ids") for item in agent_reports],
+
+                [item.get("evidence_ids") for item in backlog],
+
+            )
+
+            for value in collection
+
+            if isinstance(value, list)
+
+            for evidence_id in value
+
+            if _string(evidence_id)
+
+        }
+
+        if self._evidence_ledger is not None:
+
+            for evidence_id in additional_evidence_ids:
+
+                normalized_id = _string(evidence_id)
+
+                if normalized_id is None or normalized_id in evidence_by_id:
+
+                    continue
+
+                evidence_record = self._evidence_ledger.get_record(normalized_id)
+
+                if evidence_record is None:
+
+                    continue
+
+                evidence_by_id[normalized_id] = {
+
+                    "id": evidence_record.id,
+
+                    "task_id": evidence_record.task_id,
+
+                    "actor_ref": evidence_record.actor_ref,
+
+                    "environment_ref": evidence_record.environment_ref,
+
+                    "capability_ref": evidence_record.capability_ref,
+
+                    "risk_level": evidence_record.risk_level,
+
+                    "action_summary": evidence_record.action_summary,
+
+                    "result_summary": evidence_record.result_summary,
+
+                    "status": evidence_record.status,
+
+                    "metadata": dict(evidence_record.metadata or {}),
+
+                    "artifact_refs": list(evidence_record.artifact_refs or []),
+
+                    "replay_refs": list(evidence_record.replay_refs or []),
+
+                    "created_at": evidence_record.created_at,
+
+                }
+
+
+
+        schedules = self._list_instance_schedules(
+
+            record.instance_id,
+
+            schedule_ids=record.schedule_ids,
+
+        )
+
+        agents = self._list_instance_agents(agent_ids)
+
+        agents = self._apply_execution_core_identity_to_agents(
+
+            agents=agents,
+
+            execution_core_identity=execution_core_identity,
+
+            goals=goals,
+
+        )
+
+        proposals = self._list_instance_proposals(
+
+            goal_ids=set(record.goal_ids),
+
+            task_ids=task_ids,
+
+            agent_ids=agent_ids,
+
+        )
+
+        acquisition_proposals = self._list_instance_acquisition_proposals(
+
+            record.instance_id,
+
+        )
+
+        install_binding_plans = self._list_instance_install_binding_plans(
+
+            record.instance_id,
+
+        )
+
+        onboarding_runs = self._list_instance_onboarding_runs(record.instance_id)
+
+        reports = self._build_reports(
+
+            evidence=list(evidence_by_id.values()),
+
+            proposals=proposals,
+
+            patches=list(patches_by_id.values()),
+
+            growth=list(growth_by_id.values()),
+
+            decisions=list(decisions_by_id.values()),
+
+        )
+
+        staffing = self._build_instance_staffing(
+
+            team=team,
+
+            agents=agents,
+
+            backlog=backlog,
+
+            assignments=assignments,
+
+            agent_reports=agent_reports,
+
+        )
+
+        execution = self._build_instance_execution_summary(
+
+            record=record,
+
+            goals=goals,
+
+            agents=agents,
+
+            tasks=list(tasks_by_id.values()),
+
+            evidence=list(evidence_by_id.values()),
+
+        )
+        live_focus = self._resolve_live_focus_payload(
+            execution=execution,
+            assignments=assignments,
+            backlog=backlog,
+            tasks=list(tasks_by_id.values()),
+            selected_assignment_id=selected_assignment_id,
+            selected_backlog_item_id=selected_backlog_item_id,
+        )
+        live_focus_title = _string(live_focus.get("current_focus_title"))
+        live_focus_id = _string(live_focus.get("current_focus_id"))
+        if execution is not None and live_focus_title:
+            execution = execution.model_copy(
+                update={
+                    "current_focus": live_focus_title,
+                    "current_focus_id": live_focus_id or execution.current_focus_id,
+                },
+            )
+
+        focused_assignment = (
+            next(
+                (
+                    item
+                    for item in assignments
+                    if _string(item.get("assignment_id")) == selected_assignment_id
+                ),
+                None,
+            )
+            if selected_assignment_id is not None
+            else None
+        )
+        focused_backlog = (
+            next(
+                (
+                    item
+                    for item in backlog
+                    if _string(item.get("backlog_item_id")) == selected_backlog_item_id
+                ),
+                None,
+            )
+            if selected_backlog_item_id is not None
+            else None
+        )
+        focus_selection = None
+        if isinstance(focused_assignment, dict):
+            focus_selection = {
+                "selection_kind": "assignment",
+                "assignment_id": _string(focused_assignment.get("assignment_id")),
+                "backlog_item_id": _string(focused_assignment.get("backlog_item_id")),
+                "title": _string(focused_assignment.get("title")),
+                "summary": _string(focused_assignment.get("summary")),
+                "status": _string(focused_assignment.get("status")),
+                "route": _string(focused_assignment.get("route")),
+            }
+        elif isinstance(focused_backlog, dict):
+            focus_selection = {
+                "selection_kind": "backlog",
+                "assignment_id": _string(focused_backlog.get("assignment_id")),
+                "backlog_item_id": _string(focused_backlog.get("backlog_item_id")),
+                "title": _string(focused_backlog.get("title")),
+                "summary": _string(focused_backlog.get("summary")),
+                "status": _string(focused_backlog.get("status")),
+                "route": _string(focused_backlog.get("route")),
+            }
+
+        main_chain = self._build_instance_main_chain(
+
+            record=record,
+
+            lanes=lanes,
+
+            backlog=backlog,
+
+            current_cycle=current_cycle,
+
+            cycles=cycles,
+
+            assignments=assignments,
+
+            agent_reports=agent_reports,
+
+            goals=goals,
+
+            agents=agents,
+
+            tasks=list(tasks_by_id.values()),
+
+            evidence=list(evidence_by_id.values()),
+
+            execution=execution,
+
+            strategy_memory=strategy_memory,
+
+            selected_assignment_id=selected_assignment_id,
+
+            selected_backlog_item_id=selected_backlog_item_id,
+
+        )
+
+        updated_candidates.extend(
+
+            candidate
+
+            for candidate in (
+
+                *(lane.updated_at for lane in lane_records),
+
+                *(backlog_item.updated_at for backlog_item in backlog_records),
+
+                *(cycle.updated_at for cycle in cycle_records),
+
+                *(assignment.updated_at for assignment in assignment_records),
+
+                *(report.updated_at for report in agent_report_records),
+
+                *(_parse_datetime(schedule.get("updated_at")) for schedule in schedules),
+
+                *(_parse_datetime(agent.get("updated_at")) for agent in agents),
+
+            )
+
+            if candidate is not None
+
+        )
+
+        media_service = getattr(self, "_media_service", None)
+
+        media_analyses = (
+
+            media_service.list_analyses(
+
+                industry_instance_id=record.instance_id,
+
+                limit=50,
+
+            )
+
+            if media_service is not None
+
+            else []
+
+        )
+
+        return IndustryInstanceDetail(
+
+            instance_id=record.instance_id,
+
+            bootstrap_kind="industry-v1",
+
+            label=record.label,
+
+            summary=record.summary,
+
+            owner_scope=record.owner_scope,
+
+            profile=profile,
+
+            team=team,
+
+            execution_core_identity=execution_core_identity,
+
+            strategy_memory=strategy_memory,
+
+            status=status,
+
+            autonomy_status=_string(record.autonomy_status),
+
+            lifecycle_status=_string(record.lifecycle_status),
+
+            updated_at=max(updated_candidates) if updated_candidates else None,
+
+            stats={
+                "agent_count": len(agents),
+
+                "lane_count": len(lanes),
+
+                "backlog_count": len(backlog),
+
+                "open_backlog_count": sum(
+
+                    1 for item in backlog if _string(item.get("status")) in {"open", "selected"}
+
+                ),
+
+                "cycle_count": len(cycles),
+
+                "assignment_count": len(assignments),
+
+                "agent_report_count": len(agent_reports),
+
+                "task_count": len(tasks_by_id),
+
+                "schedule_count": len(schedules),
+
+                "decision_count": len(decisions_by_id),
+
+                "evidence_count": len(evidence_by_id),
+
+                "patch_count": len(patches_by_id),
+
+                "growth_count": len(growth_by_id),
+
+                "proposal_count": len(proposals),
+
+                "acquisition_proposal_count": len(acquisition_proposals),
+
+                "install_binding_plan_count": len(install_binding_plans),
+
+                "onboarding_run_count": len(onboarding_runs),
+
+            },
+
+            routes={
+
+                "detail": f"/api/industry/v1/instances/{record.instance_id}",
+
+                "runtime_detail": f"/api/runtime-center/industry/{record.instance_id}",
+
+                "runtime_center": "/api/runtime-center",
+
+                "strategy_memory": (
+
+                    f"/api/runtime-center/strategy-memory?industry_instance_id={quote(record.instance_id)}"
+
+                ),
+
+                "goals": [goal["route"] for goal in goals if isinstance(goal.get("route"), str)],
+
+                "agents": [agent["route"] for agent in agents if isinstance(agent.get("route"), str)],
+
+                "schedules": [
+
+                    schedule["route"]
+
+                    for schedule in schedules
+
+                    if isinstance(schedule.get("route"), str)
+
+                ],
+
+                "acquisition_proposals": [
+
+                    item["route"]
+
+                    for item in acquisition_proposals
+
+                    if isinstance(item.get("route"), str)
+
+                ],
+
+                "install_binding_plans": [
+
+                    item["route"]
+
+                    for item in install_binding_plans
+
+                    if isinstance(item.get("route"), str)
+
+                ],
+
+                "onboarding_runs": [
+
+                    item["route"]
+
+                    for item in onboarding_runs
+
+                    if isinstance(item.get("route"), str)
+
+                ],
+
+            },
+
+            goals=goals,
+
+            agents=agents,
+
+            schedules=schedules,
+
+            lanes=lanes,
+
+            backlog=backlog,
+
+            staffing=staffing,
+
+            current_cycle=current_cycle,
+
+            cycles=cycles,
+
+            assignments=assignments,
+
+            agent_reports=agent_reports,
+
+            tasks=sorted(
+
+                tasks_by_id.values(),
+
+                key=lambda item: _sort_timestamp(item.get("task", {}).get("updated_at")),
+
+                reverse=True,
+
+            ),
+
+            decisions=sorted(
+
+                decisions_by_id.values(),
+
+                key=lambda item: _sort_timestamp(item.get("created_at")),
+
+                reverse=True,
+
+            ),
+
+            evidence=sorted(
+
+                evidence_by_id.values(),
+
+                key=lambda item: _sort_timestamp(item.get("created_at")),
+
+                reverse=True,
+
+            ),
+
+            patches=sorted(
+
+                patches_by_id.values(),
+
+                key=lambda item: _sort_timestamp(item.get("created_at")),
+
+                reverse=True,
+
+            ),
+
+            growth=sorted(
+
+                growth_by_id.values(),
+
+                key=lambda item: _sort_timestamp(item.get("created_at")),
+
+                reverse=True,
+
+            ),
+
+            proposals=proposals,
+
+            acquisition_proposals=acquisition_proposals,
+
+            install_binding_plans=install_binding_plans,
+
+            onboarding_runs=onboarding_runs,
+
+            execution=execution,
+
+            main_chain=main_chain,
+
+            focus_selection=focus_selection,
+
+            reports=reports,
+
+            media_analyses=media_analyses,
+
         )
 
     def _pick_execution_focus_task(

@@ -1,17 +1,26 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
+
 from .shared import *  # noqa: F401,F403
 
 from agentscope.message import Msg
 
+from copaw.capabilities import CapabilityService
 from copaw.environments.models import SessionMount
 from copaw.evidence import EvidenceLedger
-from copaw.kernel import KernelTurnExecutor
+from copaw.kernel import KernelDispatcher, KernelTaskStore, KernelTurnExecutor
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.main_brain_orchestrator import MainBrainOrchestrator
 from copaw.media import MediaService
+from copaw.state import SQLiteStateStore
 from copaw.state import MediaAnalysisRecord
+from copaw.state.repositories import (
+    SqliteDecisionRequestRepository,
+    SqliteTaskRepository,
+    SqliteTaskRuntimeRepository,
+)
 from copaw.state.repositories.base import BaseMediaAnalysisRepository
 
 
@@ -64,6 +73,31 @@ def _build_media_service() -> MediaService:
     )
 
 
+def _wire_governed_schedule_runtime(app: FastAPI, manager: FakeCronManager, tmp_path: Path) -> None:
+    state_store = SQLiteStateStore(tmp_path / "schedule-governance.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    evidence_ledger = EvidenceLedger(tmp_path / "schedule-governance.evidence.sqlite3")
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+    )
+    capability_service.set_cron_manager(manager)
+    kernel_dispatcher = KernelDispatcher(
+        task_store=KernelTaskStore(
+            task_repository=task_repository,
+            task_runtime_repository=task_runtime_repository,
+            decision_request_repository=decision_request_repository,
+            evidence_ledger=evidence_ledger,
+        ),
+        capability_service=capability_service,
+    )
+    app.state.capability_service = capability_service
+    app.state.kernel_dispatcher = kernel_dispatcher
+    app.state.decision_request_repository = decision_request_repository
+    app.state.evidence_ledger = evidence_ledger
+
+
 class _CapturingRouteQueryExecutionService:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -114,6 +148,7 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
     app.state.industry_service = FakeIndustryService()
     app.state.governance_service = FakeGovernanceService()
     app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
 
     client = TestClient(app)
     response = client.get("/runtime-center/overview")
@@ -153,10 +188,28 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
     assert "active_goal_count" not in industry_meta
     assert cards["agents"]["source"] == "agent_profile_service"
     assert cards["agents"]["count"] == 4
+    assert cards["agents"]["entries"][0]["meta"]["current_focus_kind"] == "goal"
+    assert cards["agents"]["entries"][0]["meta"]["current_focus_id"] == "goal-1"
+    assert cards["agents"]["entries"][0]["meta"]["current_focus"] == "Launch runtime center"
+    assert "current_goal_id" not in cards["agents"]["entries"][0]["meta"]
+    assert "current_goal" not in cards["agents"]["entries"][0]["meta"]
     assert cards["capabilities"]["source"] == "capability_service"
     assert cards["capabilities"]["meta"]["total"] == 1
     assert cards["evidence"]["source"] == "evidence_query_service"
     assert cards["evidence"]["count"] == 1
+    assert cards["governance"]["source"] == "governance_service"
+    assert cards["governance"]["count"] == 1
+    assert cards["governance"]["meta"]["host_twin_summary"]["blocked_surface_count"] == 0
+    assert cards["governance"]["meta"]["host_twin_summary"]["active_app_family_count"] == 0
+    assert cards["main-brain"]["source"] == "strategy_memory_service"
+    assert cards["main-brain"]["count"] == 1
+    main_brain_entry = cards["main-brain"]["entries"][0]
+    assert main_brain_entry["meta"]["lane_count"] == 2
+    assert main_brain_entry["meta"]["assignment_count"] == 2
+    assert main_brain_entry["meta"]["report_count"] == 1
+    assert main_brain_entry["meta"]["decision_count"] == 1
+    assert main_brain_entry["meta"]["patch_count"] == 1
+    assert main_brain_entry["meta"]["strategy_id"] == "strategy:industry:industry-v1-ops:copaw-agent-runner"
     assert cards["decisions"]["entries"][0]["status"] == "open"
     assert cards["decisions"]["entries"][0]["actions"]["approve"] == "/api/runtime-center/decisions/decision-1/approve"
     assert cards["patches"]["source"] == "learning_service"
@@ -164,6 +217,156 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
     assert (
         cards["patches"]["entries"][0]["actions"]["apply"]
         == "/api/runtime-center/learning/patches/patch-1/apply"
+    )
+
+
+def test_runtime_center_overview_governance_uses_canonical_host_twin_summary_for_ready_runtime():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    governance_service = FakeGovernanceService()
+    governance_service.status["host_twin"] = {
+        "projection_kind": "host_twin_projection",
+        "is_projection": True,
+        "is_truth_store": False,
+        "ownership": {
+            "seat_owner_agent_id": "ops-agent",
+            "workspace_owner_ref": "ops-agent",
+            "writer_owner_ref": "ops-agent",
+        },
+        "app_family_twins": {
+            "browser_backoffice": {
+                "active": True,
+                "family_kind": "browser_backoffice",
+                "surface_ref": "browser:web:main",
+                "contract_status": "verified-writer",
+                "family_scope_ref": "site:jd:seller-center",
+            },
+            "office_document": {
+                "active": True,
+                "family_kind": "office_document",
+                "surface_ref": "window:excel:orders",
+                "contract_status": "verified-writer",
+                "family_scope_ref": "app:excel",
+                "writer_lock_scope": "workbook:orders",
+            },
+        },
+        "host_companion_session": {
+            "session_mount_id": "session:desktop:main",
+            "environment_id": "env:desktop:seat-a",
+            "continuity_status": "attached",
+            "continuity_source": "live-handle",
+            "locality": {
+                "same_host": True,
+                "same_process": False,
+                "startup_recovery_required": False,
+            },
+        },
+        "blocked_surfaces": [],
+        "coordination": {
+            "seat_owner_ref": "ops-agent",
+            "workspace_owner_ref": "ops-agent",
+            "writer_owner_ref": "ops-agent",
+            "candidate_seat_refs": [
+                "env:desktop:seat-a",
+                "env:desktop:seat-b",
+            ],
+            "selected_seat_ref": "env:desktop:seat-a",
+            "seat_selection_policy": "sticky-active-seat",
+            "contention_forecast": {
+                "severity": "clear",
+                "reason": "steady-state",
+            },
+            "recommended_scheduler_action": "proceed",
+        },
+        "multi_seat_coordination": {
+            "seat_count": 2,
+            "candidate_seat_refs": [
+                "env:desktop:seat-a",
+                "env:desktop:seat-b",
+            ],
+            "selected_seat_ref": "env:desktop:seat-a",
+            "seat_selection_policy": "sticky-active-seat",
+            "occupancy_state": "occupied",
+            "status": "active",
+            "host_companion_status": "attached",
+            "active_surface_mix": ["browser", "desktop-app"],
+        },
+        "legal_recovery": {
+            "path": "resume-environment",
+            "resume_kind": "resume-environment",
+            "checkpoint_ref": "checkpoint:orders",
+        },
+        "writable_surface_summary": "browser, desktop_app",
+        "app_family_readiness": {
+            "active_family_keys": [
+                "browser_backoffice",
+                "office_document",
+            ],
+            "active_family_count": 2,
+            "ready_family_keys": [
+                "browser_backoffice",
+                "office_document",
+            ],
+            "ready_family_count": 2,
+            "blocked_family_keys": [],
+            "blocked_family_count": 0,
+        },
+        "trusted_anchors": [
+            {
+                "anchor_ref": "excel://Orders!A1",
+            },
+        ],
+    }
+    governance_service.status["handoff"] = {
+        "active": False,
+        "session_ids": [],
+        "owner_refs": [],
+        "blocking_families": [],
+    }
+    governance_service.status["staffing"] = {
+        "active_gap_count": 0,
+        "pending_confirmation_count": 0,
+        "instance_ids": [],
+        "decision_request_ids": [],
+    }
+    governance_service.status["human_assist"] = {
+        "open_count": 0,
+        "blocked_count": 0,
+        "need_more_evidence_count": 0,
+        "task_ids": [],
+        "chat_thread_ids": [],
+    }
+    app.state.governance_service = governance_service
+    app.state.routine_service = FakeRoutineService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/overview")
+
+    assert response.status_code == 200
+    cards = {card["key"]: card for card in response.json()["cards"]}
+    governance = cards["governance"]
+    assert governance["entries"][0]["status"] == "idle"
+    assert governance["meta"]["host_twin_summary"]["recommended_scheduler_action"] == (
+        "proceed"
+    )
+    assert governance["meta"]["host_twin_summary"]["active_app_family_keys"] == [
+        "browser_backoffice",
+        "office_document",
+    ]
+    assert governance["meta"]["host_twin_summary"]["host_companion_status"] == "attached"
+    assert governance["meta"]["host_twin_summary"]["seat_count"] == 2
+    assert governance["meta"]["host_twin_summary"]["ready_app_family_keys"] == [
+        "browser_backoffice",
+        "office_document",
+    ]
+    assert governance["summary"] == (
+        "Host twin ready on env:desktop:seat-a via sticky-active-seat; "
+        "active app families: browser_backoffice, office_document."
     )
     assert cards["growth"]["source"] == "learning_service"
     assert cards["growth"]["count"] == 1
@@ -756,11 +959,12 @@ def test_cron_exposes_runtime_center_surface_headers():
     assert cron_response.headers["x-copaw-runtime-overview"] == "/api/runtime-center/overview"
 
 
-def test_runtime_center_schedule_control_endpoints() -> None:
+def test_runtime_center_schedule_control_endpoints(tmp_path) -> None:
     app = build_runtime_center_app()
     manager = FakeCronManager([make_job("sched-1")])
     app.state.cron_manager = manager
     app.state.state_query_service = FakeScheduleStateQueryService(manager)
+    _wire_governed_schedule_runtime(app, manager, tmp_path)
 
     client = TestClient(app)
 
@@ -791,19 +995,38 @@ def test_runtime_center_schedule_control_endpoints() -> None:
     assert run_response.json()["schedule"]["runtime"]["status"] == "running"
 
 
-def test_runtime_center_schedule_write_endpoints() -> None:
+def test_runtime_center_schedule_write_endpoints_enter_governed_confirm_flow(
+    tmp_path,
+) -> None:
     app = build_runtime_center_app()
     manager = FakeCronManager([make_job("sched-1")])
     app.state.cron_manager = manager
     app.state.state_query_service = FakeScheduleStateQueryService(manager)
+    _wire_governed_schedule_runtime(app, manager, tmp_path)
 
     client = TestClient(app)
 
     create_payload = make_job("sched-2").model_dump(mode="json")
     create_response = client.post("/runtime-center/schedules", json=create_payload)
     assert create_response.status_code == 200
-    assert create_response.json()["created"] is True
-    assert create_response.json()["schedule"]["schedule"]["id"] == "sched-2"
+    create_result = create_response.json()
+    assert create_result["created"] is False
+    assert create_result["result"]["phase"] == "waiting-confirm"
+    create_decision_id = create_result["result"]["decision_request_id"]
+    assert create_decision_id
+    assert asyncio.run(manager.get_job("sched-2")) is None
+
+    create_approval = client.post(
+        f"/runtime-center/decisions/{create_decision_id}/approve",
+        json={"resolution": "Approve schedule creation.", "execute": True},
+    )
+    assert create_approval.status_code == 200
+    assert create_approval.json()["phase"] == "completed"
+    assert create_approval.json()["decision_request_id"] == create_decision_id
+
+    created_detail = client.get("/runtime-center/schedules/sched-2")
+    assert created_detail.status_code == 200
+    assert created_detail.json()["schedule"]["id"] == "sched-2"
 
     duplicate_response = client.post("/runtime-center/schedules", json=create_payload)
     assert duplicate_response.status_code == 409
@@ -812,9 +1035,24 @@ def test_runtime_center_schedule_write_endpoints() -> None:
     update_payload["name"] = "Updated schedule"
     update_response = client.put("/runtime-center/schedules/sched-2", json=update_payload)
     assert update_response.status_code == 200
-    assert update_response.json()["updated"] is True
-    assert update_response.json()["schedule"]["schedule"]["title"] == "Updated schedule"
-    assert update_response.json()["schedule"]["schedule"]["enabled"] is False
+    update_result = update_response.json()
+    assert update_result["updated"] is False
+    assert update_result["result"]["phase"] == "waiting-confirm"
+    update_decision_id = update_result["result"]["decision_request_id"]
+    assert update_decision_id
+
+    update_approval = client.post(
+        f"/runtime-center/decisions/{update_decision_id}/approve",
+        json={"resolution": "Approve schedule update.", "execute": True},
+    )
+    assert update_approval.status_code == 200
+    assert update_approval.json()["phase"] == "completed"
+    assert update_approval.json()["decision_request_id"] == update_decision_id
+
+    updated_detail = client.get("/runtime-center/schedules/sched-2")
+    assert updated_detail.status_code == 200
+    assert updated_detail.json()["schedule"]["title"] == "Updated schedule"
+    assert updated_detail.json()["schedule"]["enabled"] is False
 
     mismatch_payload = make_job("sched-3").model_dump(mode="json")
     mismatch_response = client.put("/runtime-center/schedules/sched-2", json=mismatch_payload)
@@ -822,10 +1060,75 @@ def test_runtime_center_schedule_write_endpoints() -> None:
 
     delete_response = client.delete("/runtime-center/schedules/sched-2")
     assert delete_response.status_code == 200
-    assert delete_response.json()["deleted"] is True
+    delete_result = delete_response.json()
+    assert delete_result["deleted"] is False
+    assert delete_result["result"]["phase"] == "waiting-confirm"
+    delete_decision_id = delete_result["result"]["decision_request_id"]
+    assert delete_decision_id
+
+    delete_rejection = client.post(
+        f"/runtime-center/decisions/{delete_decision_id}/reject",
+        json={"resolution": "Keep this schedule active."},
+    )
+    assert delete_rejection.status_code == 200
+    assert delete_rejection.json()["phase"] == "cancelled"
+    assert delete_rejection.json()["decision_request_id"] == delete_decision_id
+
+    rejected_delete_detail = client.get("/runtime-center/schedules/sched-2")
+    assert rejected_delete_detail.status_code == 200
+
+    delete_retry = client.delete("/runtime-center/schedules/sched-2")
+    assert delete_retry.status_code == 200
+    delete_retry_result = delete_retry.json()
+    assert delete_retry_result["deleted"] is False
+    assert delete_retry_result["result"]["phase"] == "waiting-confirm"
+    delete_retry_decision_id = delete_retry_result["result"]["decision_request_id"]
+    assert delete_retry_decision_id
+
+    delete_approval = client.post(
+        f"/runtime-center/decisions/{delete_retry_decision_id}/approve",
+        json={"resolution": "Delete the schedule.", "execute": True},
+    )
+    assert delete_approval.status_code == 200
+    assert delete_approval.json()["phase"] == "completed"
+    assert delete_approval.json()["decision_request_id"] == delete_retry_decision_id
 
     missing_response = client.get("/runtime-center/schedules/sched-2")
     assert missing_response.status_code == 404
+
+
+def test_cron_job_write_frontdoor_uses_governed_mutation(tmp_path) -> None:
+    app = FastAPI()
+    app.include_router(cron_router)
+    app.include_router(runtime_center_router)
+    manager = FakeCronManager([])
+    app.state.cron_manager = manager
+    _wire_governed_schedule_runtime(app, manager, tmp_path)
+
+    client = TestClient(app)
+
+    create_response = client.post("/cron/jobs", json=make_job("ignored").model_dump(mode="json"))
+    assert create_response.status_code == 200
+    payload = create_response.json()
+    assert payload["created"] is False
+    assert payload["result"]["phase"] == "waiting-confirm"
+    decision_id = payload["result"]["decision_request_id"]
+    created_job = payload["job"]
+    created_job_id = created_job["id"]
+    assert decision_id
+    assert created_job_id
+    assert asyncio.run(manager.get_job(created_job_id)) is None
+
+    approval = client.post(
+        f"/runtime-center/decisions/{decision_id}/approve",
+        json={"resolution": "Approve cron frontdoor schedule.", "execute": True},
+    )
+    assert approval.status_code == 200
+    assert approval.json()["phase"] == "completed"
+
+    detail_response = client.get(f"/cron/jobs/{created_job_id}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["spec"]["id"] == created_job_id
 
 
 def test_runtime_center_heartbeat_endpoints() -> None:
