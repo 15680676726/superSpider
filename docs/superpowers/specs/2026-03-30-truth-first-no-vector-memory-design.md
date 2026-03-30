@@ -33,6 +33,23 @@ Why this is better than keeping the current hybrid path:
 - The current vector-related surfaces mostly add operational noise without being the canonical execution truth path.
 - Removing vector assumptions simplifies local setup, startup health, and operator understanding.
 
+## Supermemory Inspiration Boundary
+This design does borrow from `supermemory`, but only at the memory-organization level.
+
+Borrow:
+- `profile` as a compact first read
+- explicit memory evolution (`updates / supersedes / derives`)
+- `latest` versus `history`
+- forgetting / expiry for temporary memory
+
+Do not borrow:
+- `supermemory` as an external product dependency
+- `supermemory` as a runtime truth source
+- cloud-first or API-first memory ownership
+- generic container/tag memory scope in place of CoPaw's canonical runtime scopes
+
+The intended result is: learn from `supermemory`'s memory-shaping ideas, but keep CoPaw's truth inside canonical `state / evidence / runtime` objects.
+
 ## Target Architecture
 
 ### 1. Truth Layer
@@ -142,6 +159,61 @@ Retention must be explicit:
 - `temporary`: must expire automatically
 - `inference`: never treated as runtime truth by default
 
+## Precedence Rules
+Truth-first memory needs explicit conflict rules so implementers do not invent local heuristics.
+
+Precedence order:
+1. canonical state objects with explicit current ownership or active status
+2. evidence-backed facts derived from canonical objects
+3. applied decision/patch outcomes that explicitly mutate the state interpretation
+4. durable summaries or profiles derived from the above
+5. temporary memory
+6. inference
+
+Specific rules:
+- `fact` beats `inference`
+- evidence-backed `fact` beats non-evidence-backed `fact`
+- `temporary` never supersedes a durable `fact`; it can only narrow current handling while it is active
+- `preference` can supersede an older `preference`, but cannot override a hard runtime constraint
+- `patch` and `decision` outcomes may invalidate or supersede older facts when their state/application status says so
+- `is_latest=true` may only exist on one active record per `(scope_type, scope_id, memory_type, subject-key)` family
+- `expires_at` removes a record from default recall/profile injection, but does not delete history
+- if `StrategyMemory` and `AgentReport` disagree, the default interpretation is:
+  - `StrategyMemory` remains the durable operating intent
+  - `AgentReport` may supersede current runtime facts only when backed by fresher evidence or explicit processed synthesis
+- if `EvidenceRecord` and derived `inference` disagree, `EvidenceRecord` wins
+
+These rules must be enforced in one shared resolver, not copied into multiple consumers.
+
+## Shared vs Private Memory Topology
+Main-brain memory and working-agent memory should be partly shared and partly separated.
+
+Shared memory:
+- canonical truth-derived memory (`MemoryProfile`, latest facts, episodes, history)
+- scope-bound runtime memory keyed by `industry / work_context / task / agent / global`
+- any memory used for planning, governance, runtime continuity, report synthesis, and operator-visible audit
+
+Private memory:
+- per-agent conversation compaction state
+- per-session scratch summaries
+- non-canonical prompt-compression artifacts
+
+Rule:
+- shared memory is product memory and must be visible, rebuildable, and auditable
+- private memory is prompt/runtime plumbing and must never become a second truth source
+
+Implication:
+- the main-brain and execution agents should read from the same shared truth-derived memory surface,
+- but they should not share the same private scratchpad/compaction state.
+
+This means the current direction is only partially reasonable:
+- it is correct to keep the main-brain and working agents from sharing one opaque private memory blob,
+- it is not correct to keep overlapping memory semantics split across unrelated systems.
+
+The target architecture is:
+- one shared formal memory system for truth-derived recall,
+- separate lightweight private compaction state per runtime actor/session.
+
 ## Main-Brain Consumption Model
 The main-brain should no longer start from "search memory hits".
 
@@ -200,7 +272,7 @@ Changes:
 4. Delete local vector scoring and `hashed_vector()`.
 5. Remove `local-vector`, `qmd`, and `lancedb` from formal backend semantics.
 6. Remove QMD implementation files and related runtime wiring.
-7. Shrink or retire legacy `MemoryManager` responsibilities until only non-vector conversation compaction remains, or split compaction out of it completely.
+7. Split conversation compaction out of legacy `MemoryManager` into a dedicated `ConversationCompactionService`, then retire `MemoryManager` as a formal runtime dependency.
 
 Acceptance:
 - the formal runtime memory chain contains no vector backend or sidecar,
@@ -217,6 +289,7 @@ End-state deletions should include:
 - `local-vector` and hashed-vector scoring paths in `src/copaw/memory/recall_service.py`
 - `hashed_vector()` in `src/copaw/memory/derived_index_service.py`
 - embedding/vector runtime warning logic in `src/copaw/agents/memory/memory_manager.py`
+- `MemoryManager` as a runtime host dependency once compaction has been split into a dedicated service
 
 These deletions are part of the delivery, not optional cleanup.
 
