@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
+from ...config import get_heartbeat_config
 from ...utils.runtime_action_links import build_decision_actions, build_patch_actions
 from .overview_helpers import build_runtime_surface
 from .task_review_projection import build_host_twin_summary
@@ -1046,6 +1047,57 @@ class _RuntimeCenterOverviewCardsSupport:
         decisions_card = await self._build_decisions_card(app_state)
         patches_card = await self._build_patches_card(app_state)
         governance_card = await self._build_governance_card(app_state)
+        governance = self._build_main_brain_governance_payload(governance_card)
+        recovery = self._build_main_brain_recovery_payload(app_state)
+        automation = await self._build_main_brain_automation_payload(app_state)
+        signals = dict(main_brain_card.meta.get("signals") or {})
+        signals.update(
+            {
+                "governance": self._build_main_brain_operator_signal(
+                    "governance",
+                    governance,
+                    count=self._int(governance.get("pending_patches"), 0)
+                    + self._int(governance.get("pending_decisions"), 0)
+                    + (1 if governance.get("handoff_active") else 0),
+                ),
+                "automation": self._build_main_brain_operator_signal(
+                    "automation",
+                    automation,
+                    count=self._int(automation.get("schedule_count"), 0),
+                ),
+                "recovery": self._build_main_brain_operator_signal(
+                    "recovery",
+                    recovery,
+                    count=1 if recovery.get("available") else 0,
+                ),
+            },
+        )
+        signal_map = {
+            self._string(value.get("key")) or key: value
+            for key, value in signals.items()
+            if isinstance(value, dict)
+        }
+        control_chain_order = [
+            "carrier",
+            "strategy",
+            "lanes",
+            "backlog",
+            "current_cycle",
+            "assignments",
+            "agent_reports",
+            "environment",
+            "governance",
+            "automation",
+            "recovery",
+            "evidence",
+            "decisions",
+            "patches",
+        ]
+        control_chain = [
+            signal_map[key]
+            for key in control_chain_order
+            if isinstance(signal_map.get(key), dict)
+        ]
         cards = [
             main_brain_card,
             evidence_card,
@@ -1080,13 +1132,16 @@ class _RuntimeCenterOverviewCardsSupport:
             assignments=self._normalize_list(industry_detail.get("assignments")),
             reports=self._normalize_list(industry_detail.get("agent_reports")),
             environment=self._build_main_brain_environment_payload(governance_card),
+            governance=governance,
+            recovery=recovery,
+            automation=automation,
             evidence=self._build_main_brain_section(evidence_card),
             decisions=self._build_main_brain_section(decisions_card),
             patches=self._build_main_brain_section(patches_card),
-            signals=dict(main_brain_card.meta.get("signals") or {}),
+            signals=signals,
             meta={
                 **dict(main_brain_card.meta or {}),
-                "control_chain": list(main_brain_card.meta.get("control_chain") or []),
+                "control_chain": control_chain,
                 "overview_entry_count": main_brain_card.count,
                 "lane_count": self._int(entry_meta.get("lane_count"), 0),
                 "backlog_count": self._int(entry_meta.get("backlog_count"), 0),
@@ -1096,8 +1151,152 @@ class _RuntimeCenterOverviewCardsSupport:
                 "decision_count": self._int(entry_meta.get("decision_count"), 0),
                 "patch_count": self._int(entry_meta.get("patch_count"), 0),
                 "evidence_count": self._int(entry_meta.get("evidence_count"), 0),
+                "governance_summary": governance,
+                "recovery_summary": recovery,
+                "automation_summary": automation,
             },
         )
+
+    def _build_main_brain_operator_signal(
+        self,
+        key: str,
+        payload: Mapping[str, Any],
+        *,
+        count: int,
+    ) -> dict[str, Any]:
+        return {
+            "key": key,
+            "count": count,
+            "value": self._string(payload.get("status"))
+            or self._string(payload.get("summary"))
+            or key,
+            "detail": self._string(payload.get("summary")),
+            "route": self._string(payload.get("route")),
+            "status": self._string(payload.get("status")) or "idle",
+        }
+
+    def _build_main_brain_governance_payload(
+        self,
+        governance_card: RuntimeOverviewCard,
+    ) -> dict[str, Any]:
+        entry = governance_card.entries[0] if governance_card.entries else None
+        meta = dict(governance_card.meta or {})
+        handoff = self._mapping(meta.get("handoff")) or {}
+        staffing = self._mapping(meta.get("staffing")) or {}
+        human_assist = self._mapping(meta.get("human_assist")) or {}
+        return {
+            "status": entry.status if entry is not None else governance_card.status,
+            "summary": governance_card.summary,
+            "route": (entry.route if entry is not None else None)
+            or "/api/runtime-center/governance/status",
+            "pending_decisions": self._int(meta.get("pending_decisions"), 0),
+            "pending_patches": self._int(meta.get("pending_patches"), 0),
+            "proposed_patches": self._int(meta.get("proposed_patches"), 0),
+            "paused_schedule_count": len(list(meta.get("paused_schedule_ids") or [])),
+            "emergency_stop_active": bool(meta.get("emergency_stop_active")),
+            "handoff_active": bool(handoff.get("active")),
+            "staffing_pending_count": self._int(
+                staffing.get("pending_confirmation_count"),
+                0,
+            ),
+            "human_assist_blocked_count": self._int(
+                human_assist.get("blocked_count"),
+                0,
+            ),
+            "host_twin_summary": self._mapping(meta.get("host_twin_summary")) or {},
+        }
+
+    def _build_main_brain_recovery_payload(self, app_state: Any) -> dict[str, Any]:
+        summary = getattr(app_state, "startup_recovery_summary", None)
+        route = "/api/runtime-center/recovery/latest"
+        if summary is None:
+            return {
+                "available": False,
+                "status": "unavailable",
+                "summary": "Startup recovery summary is not available.",
+                "route": route,
+                "notes": [],
+            }
+        payload = self._model_dump(summary)
+        return {
+            "available": True,
+            "status": "ready",
+            "summary": self._string(payload.get("reason"))
+            or "Startup recovery summary is available.",
+            "route": route,
+            "reason": self._string(payload.get("reason")),
+            "recovered_at": self._string(payload.get("recovered_at")),
+            "active_schedules": self._int(payload.get("active_schedules"), 0),
+            "expired_decisions": self._int(payload.get("expired_decisions"), 0),
+            "pending_decisions": self._int(payload.get("pending_decisions"), 0),
+            "notes": list(payload.get("notes") or []),
+        }
+
+    async def _build_main_brain_automation_payload(
+        self,
+        app_state: Any,
+    ) -> dict[str, Any]:
+        schedules = await self._call_list_method(
+            getattr(app_state, "state_query_service", None),
+            "list_schedules",
+        )
+        schedule_entries = [] if schedules is _MISSING else list(schedules)
+        schedule_count = len(schedule_entries)
+        active_schedule_count = sum(
+            1
+            for schedule in schedule_entries
+            if (self._string(schedule.get("status")) or "").lower() not in {"paused", "deleted"}
+        )
+        paused_schedule_count = sum(
+            1
+            for schedule in schedule_entries
+            if (self._string(schedule.get("status")) or "").lower() == "paused"
+        )
+        heartbeat_config = get_heartbeat_config()
+        heartbeat_payload = heartbeat_config.model_dump(mode="json", by_alias=True)
+        manager = getattr(app_state, "cron_manager", None)
+        state_getter = getattr(manager, "get_heartbeat_state", None)
+        heartbeat_state = state_getter() if callable(state_getter) else None
+        last_status = self._string(getattr(heartbeat_state, "last_status", None))
+        heartbeat_status = (
+            "paused"
+            if not getattr(heartbeat_config, "enabled", False)
+            else (last_status or "scheduled")
+        )
+        return {
+            "status": "active" if schedule_count > 0 else "idle",
+            "summary": (
+                f"{schedule_count} schedule(s) visible; heartbeat {heartbeat_status} every "
+                f"{heartbeat_config.every}."
+            ),
+            "route": "/api/runtime-center/schedules",
+            "schedule_count": schedule_count,
+            "active_schedule_count": active_schedule_count,
+            "paused_schedule_count": paused_schedule_count,
+            "schedules": schedule_entries,
+            "heartbeat": {
+                "route": "/api/runtime-center/heartbeat",
+                "status": heartbeat_status,
+                "enabled": bool(getattr(heartbeat_config, "enabled", False)),
+                "every": getattr(heartbeat_config, "every", None),
+                "target": getattr(heartbeat_config, "target", None),
+                "activeHours": heartbeat_payload.get("activeHours"),
+                "last_run_at": self._serialize_timestamp(
+                    getattr(heartbeat_state, "last_run_at", None),
+                ),
+                "next_run_at": self._serialize_timestamp(
+                    getattr(heartbeat_state, "next_run_at", None),
+                ),
+                "last_error": getattr(heartbeat_state, "last_error", None),
+                "query_path": "system:run_operating_cycle",
+            },
+        }
+
+    def _serialize_timestamp(self, value: object) -> str | None:
+        isoformat = getattr(value, "isoformat", None)
+        if callable(isoformat):
+            return isoformat()
+        return None
 
     async def _load_industry_detail_payload(
         self,

@@ -220,6 +220,9 @@ export interface RuntimeMainBrainResponse {
   assignments: Record<string, unknown>[];
   reports: Record<string, unknown>[];
   environment: Record<string, unknown>;
+  governance: Record<string, unknown>;
+  recovery: Record<string, unknown>;
+  automation: Record<string, unknown>;
   evidence: RuntimeMainBrainSection;
   decisions: RuntimeMainBrainSection;
   patches: RuntimeMainBrainSection;

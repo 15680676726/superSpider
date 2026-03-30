@@ -2,16 +2,22 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from copaw.app.crons.models import CronJobState
+from copaw.app.startup_recovery import StartupRecoverySummary
+from copaw.config.config import HeartbeatConfig
 from copaw.kernel import GovernanceService, KernelTask
 from copaw.industry import IndustryPreviewRequest, normalize_industry_profile
 from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.state import (
     AgentReportRecord,
     HumanAssistTaskService,
+    ScheduleRecord,
     SQLiteStateStore,
     WorkflowTemplateRecord,
 )
@@ -28,6 +34,7 @@ from .industry_api_parts.shared import (
 from .runtime_center_api_parts.shared import (
     FakeAgentProfileService,
     FakeCapabilityService,
+    FakeCronManager,
     FakeEnvironmentService,
     FakeEvidenceQueryService,
     FakeGovernanceService,
@@ -37,6 +44,7 @@ from .runtime_center_api_parts.shared import (
     FakeStateQueryService,
     FakeStrategyMemoryService,
     build_runtime_center_app,
+    make_job,
 )
 from .test_fixed_sop_kernel_api import _FakeEnvironmentService as _FakeFixedSopEnvironmentService
 from .test_fixed_sop_kernel_api import _build_app as _build_fixed_sop_app
@@ -921,3 +929,495 @@ def test_phase_next_document_host_switch_smoke_keeps_document_execution_on_canon
     assert fixed_sop_detail.json()["session_mount_id"] == "session-desktop-2"
     assert fixed_sop_detail.json()["host_requirement"]["surface_kind"] == "document"
     assert fixed_sop_detail.json()["host_requirement"]["app_family"] == "office_document"
+
+
+def test_phase_next_long_run_live_smoke_closes_unified_runtime_chain_and_multi_surface_continuity(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path / "industry-long-run")
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["keep the long-run staffed handoff loop stable across recovery"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+    environment_ref = f"session:console:industry:{instance_id}"
+    work_context_id = "ctx-phase-next-long-run"
+
+    app.state.startup_recovery_summary = StartupRecoverySummary(
+        reason="Recovered the long-run runtime and scheduler state during startup.",
+        expired_decisions=1,
+        pending_decisions=1,
+        active_schedules=1,
+        notes=["Recovered the canonical host continuity checkpoint."],
+    )
+    app.state.schedule_repository.upsert_schedule(
+        ScheduleRecord(
+            id="sched-phase-next-long-run",
+            title="Phase Next Long Run",
+            cron="0 9 * * *",
+            timezone="UTC",
+            status="scheduled",
+            enabled=True,
+            task_type="agent",
+            target_channel="console",
+            target_user_id="runtime-center",
+            target_session_id=control_thread_id,
+            last_run_at=datetime(2026, 3, 30, 7, 30, tzinfo=timezone.utc),
+            next_run_at=datetime(2026, 3, 30, 9, 0, tzinfo=timezone.utc),
+            source_ref=f"industry:{instance_id}",
+            trigger_target="operating-cycle",
+        ),
+    )
+    app.state.cron_manager = FakeCronManager(
+        [make_job("sched-phase-next-long-run")],
+        states={
+            "sched-phase-next-long-run": CronJobState(
+                last_status="success",
+                last_run_at=datetime(2026, 3, 30, 7, 30, tzinfo=timezone.utc),
+                next_run_at=datetime(2026, 3, 30, 9, 0, tzinfo=timezone.utc),
+            ),
+        },
+        heartbeat_state=CronJobState(
+            last_status="success",
+            last_run_at=datetime(2026, 3, 30, 8, 0, tzinfo=timezone.utc),
+            next_run_at=datetime(2026, 3, 30, 14, 0, tzinfo=timezone.utc),
+        ),
+    )
+
+    writeback = asyncio.run(
+        app.state.industry_service.apply_execution_chat_writeback(
+            industry_instance_id=instance_id,
+            message_text=(
+                "Please publish the customer notice in the browser, update the desktop tracker and "
+                "document log, keep the handoff governed, and report back."
+            ),
+            owner_agent_id="copaw-agent-runner",
+            session_id=control_thread_id,
+            channel="console",
+            writeback_plan=build_chat_writeback_plan(
+                (
+                    "Please publish the customer notice in the browser, update the desktop tracker "
+                    "and document log, keep the handoff governed, and report back."
+                ),
+                approved_classifications=["backlog"],
+                goal_title="Long-run multi-surface publish handoff",
+                goal_summary="Publish through browser/desktop/document with governed handoff.",
+                goal_plan_steps=[
+                    "Define the governed multi-surface execution scope.",
+                    "Require approval before any external action.",
+                    "Write back the result and evidence.",
+                ],
+            ),
+        ),
+    )
+
+    assert writeback is not None
+    decision_id = writeback["decision_request_id"]
+    backlog_id = writeback["created_backlog_ids"][0]
+    approved = client.post(
+        f"/runtime-center/decisions/{decision_id}/approve",
+        json={"resolution": "Approve the governed staffing seat.", "execute": True},
+    )
+    assert approved.status_code == 200
+
+    first_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:phase-next-long-run-cycle-1",
+            force=True,
+            backlog_item_ids=[backlog_id],
+            auto_dispatch_materialized_goals=False,
+        ),
+    )
+    assignment_id = first_cycle["processed_instances"][0]["created_assignment_ids"][0]
+    cycle_id = first_cycle["processed_instances"][0]["started_cycle_id"]
+
+    report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=assignment_id,
+        owner_agent_id=writeback["target_owner_agent_id"],
+        owner_role_id=writeback["target_industry_role_id"],
+        headline="Long-run multi-surface handoff still blocked",
+        summary="Browser, desktop, and document work are still blocked until host handoff returns.",
+        status="recorded",
+        result="failed",
+        findings=["The host handoff checkpoint was not returned yet."],
+        recommendation="Resume the staffed seat after the host handoff closes.",
+        work_context_id=work_context_id,
+        metadata={
+            "chat_writeback_requested_surfaces": ["browser", "desktop", "document"],
+            "seat_requested_surfaces": ["browser", "desktop", "document"],
+            "control_thread_id": control_thread_id,
+            "session_id": control_thread_id,
+            "environment_ref": environment_ref,
+            "recommended_scheduler_action": "handoff",
+        },
+        processed=False,
+    )
+    app.state.agent_report_repository.upsert_report(report)
+
+    second_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:phase-next-long-run-cycle-2",
+            force=True,
+        ),
+    )
+    assert report.id in second_cycle["processed_instances"][0]["processed_report_ids"]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    followup_backlog = next(
+        item
+        for item in detail.backlog
+        if item["metadata"].get("source_report_id") == report.id
+    )
+
+    human_assist_task_service = HumanAssistTaskService(
+        repository=SqliteHumanAssistTaskRepository(app.state.state_store),
+        evidence_ledger=app.state.evidence_ledger,
+    )
+    app.state.human_assist_task_service = human_assist_task_service
+    set_human_assist = getattr(app.state.state_query_service, "set_human_assist_task_service", None)
+    if callable(set_human_assist):
+        set_human_assist(human_assist_task_service)
+    app.state.turn_executor = FakeTurnExecutor()
+    query_execution_service = _FakeQueryExecutionService()
+    app.state.query_execution_service = query_execution_service
+
+    class _MutableEnvironmentService:
+        def __init__(self) -> None:
+            self.ready = False
+
+        def list_sessions(self, limit=200):
+            del limit
+            return [SimpleNamespace(session_mount_id=environment_ref)]
+
+        def get_session_detail(self, session_id, limit=20):
+            del limit
+            assert session_id == environment_ref
+            if self.ready:
+                return {
+                    "host_twin": {
+                        "continuity": {"requires_human_return": False},
+                        "coordination": {
+                            "recommended_scheduler_action": "continue",
+                            "selected_seat_ref": "env:seat-b",
+                            "selected_session_mount_id": "session:seat-b",
+                        },
+                        "legal_recovery": {
+                            "path": "continue",
+                            "checkpoint_ref": "checkpoint:phase-next-long-run",
+                        },
+                        "host_twin_summary": {
+                            "recommended_scheduler_action": "continue",
+                            "legal_recovery_mode": "continue",
+                            "selected_seat_ref": "env:seat-b",
+                            "selected_session_mount_id": "session:seat-b",
+                            "blocked_surface_count": 0,
+                            "active_app_family_keys": ["browser_backoffice", "office_document"],
+                            "active_app_family_count": 2,
+                        },
+                    },
+                }
+            return {
+                "host_twin": {
+                    "continuity": {"requires_human_return": True},
+                    "ownership": {"handoff_owner_ref": "host-owner"},
+                    "coordination": {"recommended_scheduler_action": "handoff"},
+                    "legal_recovery": {
+                        "path": "handoff",
+                        "checkpoint_ref": "checkpoint:phase-next-long-run",
+                    },
+                    "host_twin_summary": {
+                        "recommended_scheduler_action": "handoff",
+                        "legal_recovery_mode": "handoff",
+                        "blocked_surface_count": 1,
+                    },
+                },
+            }
+
+    environment_service = _MutableEnvironmentService()
+    governance = GovernanceService(
+        control_repository=SqliteGovernanceControlRepository(
+            SQLiteStateStore(tmp_path / "governance-long-run.sqlite3"),
+        ),
+        industry_service=app.state.industry_service,
+        human_assist_task_service=human_assist_task_service,
+        environment_service=environment_service,
+    )
+
+    task_payload = {
+        "industry_instance_id": instance_id,
+        "environment_ref": environment_ref,
+        "control_thread_id": control_thread_id,
+        "session_id": control_thread_id,
+        "channel": "console",
+        "work_context_id": work_context_id,
+        "backlog_item_id": followup_backlog["backlog_item_id"],
+        "source_report_id": report.id,
+        "requested_surfaces": ["browser", "desktop", "document"],
+        "recommended_scheduler_action": "handoff",
+    }
+    reason = governance.admission_block_reason(
+        KernelTask(
+            title="Resume staffed multi-surface follow-up",
+            capability_ref="system:dispatch_command",
+            payload=task_payload,
+        ),
+    )
+    assert reason is not None
+    assert "Runtime handoff is active" in reason
+
+    current_task_response = client.get(
+        "/runtime-center/human-assist-tasks/current",
+        params={"chat_thread_id": control_thread_id},
+    )
+    assert current_task_response.status_code == 200
+    current_task_payload = current_task_response.json()
+    current_task = current_task_payload.get("task") or current_task_payload
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-phase-next-long-run-human-assist",
+            "session_id": control_thread_id,
+            "thread_id": control_thread_id,
+            "user_id": "host-user",
+            "channel": "console",
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Completed checkpoint:phase-next-long-run.",
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert query_execution_service.calls == [current_task["id"]]
+    assert human_assist_task_service.get_task(current_task["id"]).status == "closed"
+
+    environment_service.ready = True
+    cleared_reason = governance.admission_block_reason(
+        KernelTask(
+            title="Resume staffed multi-surface follow-up",
+            capability_ref="system:dispatch_command",
+            payload={**task_payload, "recommended_scheduler_action": "continue"},
+        ),
+    )
+    assert cleared_reason is None
+
+    third_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:phase-next-long-run-cycle-3",
+            force=True,
+            backlog_item_ids=[followup_backlog["backlog_item_id"]],
+            auto_dispatch_materialized_goals=False,
+        ),
+    )
+    resumed_assignment_ids = third_cycle["processed_instances"][0]["created_assignment_ids"]
+    resumed_assignment_id = resumed_assignment_ids[0] if resumed_assignment_ids else None
+
+    runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    assert runtime_payload["execution"]["current_focus_id"] in {
+        followup_backlog["backlog_item_id"],
+        resumed_assignment_id,
+    }
+    assert runtime_payload["main_chain"]["current_focus_id"] in {
+        followup_backlog["backlog_item_id"],
+        resumed_assignment_id,
+    }
+
+    with patch(
+        "copaw.app.runtime_center.overview_cards.get_heartbeat_config",
+        return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
+        create=True,
+    ):
+        cockpit_response = client.get("/runtime-center/main-brain")
+
+    assert cockpit_response.status_code == 200
+    cockpit = cockpit_response.json()
+    assert cockpit["governance"]["route"] == "/api/runtime-center/governance/status"
+    assert cockpit["recovery"]["available"] is True
+    assert cockpit["recovery"]["route"] == "/api/runtime-center/recovery/latest"
+    assert cockpit["automation"]["schedule_count"] >= 1
+    assert cockpit["automation"]["active_schedule_count"] >= 1
+    assert cockpit["automation"]["heartbeat"]["status"] == "success"
+    assert cockpit["assignments"]
+    assert cockpit["reports"]
+    assert cockpit["evidence"]["route"].startswith("/api/runtime-center/evidence")
+    assert cockpit["decisions"]["route"].startswith("/api/runtime-center/decisions")
+    control_chain_keys = [item["key"] for item in cockpit["meta"]["control_chain"]]
+    assert "governance" in control_chain_keys
+    assert "automation" in control_chain_keys
+    assert "recovery" in control_chain_keys
+
+    host_detail = _desktop_host_preflight_detail(
+        environment_id="env-desktop-1",
+        session_mount_id="session-desktop-1",
+        continuity_status="restorable",
+        continuity_source="rebound-live-handle",
+        coordination_reason="canonical runtime switched to the alternate ready office seat",
+        recommended_scheduler_action="continue",
+    )
+    host_detail["host_twin"]["coordination"].update(
+        {
+            "candidate_seat_refs": ["env-desktop-1", "env-desktop-2"],
+            "selected_seat_ref": "env-desktop-2",
+            "selected_session_mount_id": "session-desktop-2",
+            "seat_selection_policy": "prefer-ready-seat",
+        },
+    )
+    host_detail["host_twin"]["host_twin_summary"] = {
+        **dict(host_detail["host_twin"].get("host_twin_summary") or {}),
+        "seat_count": 2,
+        "candidate_seat_refs": ["env-desktop-1", "env-desktop-2"],
+        "selected_seat_ref": "env-desktop-2",
+        "selected_session_mount_id": "session-desktop-2",
+        "seat_selection_policy": "prefer-ready-seat",
+        "active_app_family_keys": ["office_document"],
+    }
+
+    workflow_environment_service = FakeWorkflowEnvironmentService(
+        session_details={str(host_detail["session_mount_id"]): host_detail},
+    )
+    workflow_client = TestClient(
+        _build_workflow_app(
+            tmp_path / "workflow-long-run-switch",
+            environment_service=workflow_environment_service,
+        ),
+    )
+    workflow_instance_id = _bootstrap_industry(workflow_client)
+    solution_lead_agent_id = _industry_role_agent_id(
+        workflow_client,
+        workflow_instance_id,
+        "solution-lead",
+    )
+    _grant_capability_to_agent(
+        workflow_client,
+        agent_id=solution_lead_agent_id,
+        capability_ids=["mcp:desktop_windows"],
+    )
+    workflow_client.app.state.workflow_template_repository.upsert_template(
+        WorkflowTemplateRecord(
+            template_id="phase-next-long-run-document-switch",
+            title="Phase Next Long Run Document Host Switch",
+            summary="Keep document execution on canonical host truth after long-run host switch.",
+            category="desktop-ops",
+            status="active",
+            version="v1",
+            owner_role_id="solution-lead",
+            suggested_role_ids=["solution-lead"],
+            dependency_capability_ids=["system:dispatch_query", "mcp:desktop_windows"],
+            step_specs=[
+                {
+                    "id": "document-switch-leaf",
+                    "kind": "goal",
+                    "execution_mode": "leaf",
+                    "owner_role_id": "solution-lead",
+                    "title": "Update workbook on canonical host",
+                    "summary": "Mutate the active office document after host switch.",
+                    "required_capability_ids": [
+                        "system:dispatch_query",
+                        "mcp:desktop_windows",
+                    ],
+                    "environment_preflight": {
+                        "surface_kind": "document",
+                        "mutating": True,
+                        "app_family": "office_document",
+                    },
+                },
+            ],
+        ),
+    )
+    launched = _launch_workflow_via_service(
+        workflow_client,
+        template_id="phase-next-long-run-document-switch",
+        industry_instance_id=workflow_instance_id,
+        environment_id="env-desktop-1",
+        session_mount_id="session-desktop-1",
+        parameters={
+            "target_application": "Excel",
+            "recipient_name": "Target contact",
+            "message_text": "Prepare the switched-seat workbook draft.",
+        },
+    )
+    assert launched.diagnosis.host_snapshot["host_twin_summary"]["selected_seat_ref"] == (
+        "env-desktop-2"
+    )
+    assert launched.diagnosis.host_snapshot["host_twin_summary"][
+        "selected_session_mount_id"
+    ] == "session-desktop-2"
+    assert launched.run["host_requirement"]["surface_kind"] == "document"
+
+    fixed_sop_client = TestClient(
+        _build_fixed_sop_app(
+            tmp_path / "fixed-sop-long-run-switch",
+            environment_service=_FakeFixedSopEnvironmentService(host_detail),
+        ),
+    )
+    binding_response = fixed_sop_client.post(
+        "/fixed-sops/bindings",
+        json={
+            "template_id": "fixed-sop-http-routine-bridge",
+            "binding_name": "Long Run Document Host Switch SOP",
+            "status": "active",
+            "metadata": {
+                "environment_id": "env-desktop-1",
+                "session_mount_id": "session-desktop-1",
+                "host_requirement": {
+                    "surface_kind": "document",
+                    "app_family": "office_document",
+                    "mutating": True,
+                },
+            },
+        },
+    )
+    assert binding_response.status_code == 201
+    binding_id = binding_response.json()["binding"]["binding_id"]
+    fixed_sop_run = fixed_sop_client.post(
+        f"/fixed-sops/bindings/{binding_id}/run",
+        json={
+            "environment_id": "env-desktop-1",
+            "session_mount_id": "session-desktop-1",
+        },
+    )
+    assert fixed_sop_run.status_code == 200
+    fixed_sop_detail = fixed_sop_client.get(
+        f"/fixed-sops/runs/{fixed_sop_run.json()['workflow_run_id']}",
+    )
+    assert fixed_sop_detail.status_code == 200
+    assert fixed_sop_detail.json()["environment_id"] == "env-desktop-2"
+    assert fixed_sop_detail.json()["session_mount_id"] == "session-desktop-2"
+    assert fixed_sop_detail.json()["host_requirement"]["surface_kind"] == "document"

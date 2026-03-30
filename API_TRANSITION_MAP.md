@@ -767,12 +767,12 @@
 
 ## 6. API 迁移优先级
 
-补充（截至 `2026-03-29` 的 phase-next 牵引项，影响 API contract 的演进顺序，但不意味着终态已交付）：
+补充（截至 `2026-03-30` 的当前收口状态，影响 API contract 的正式口径）：
 
-- `Full Host Digital Twin` 扩面（基线为 `Execution-Grade Host Twin`；后续仍会继续补 multi-seat/multi-agent coordination 与更长时间的 live smoke）
-- single-industry 真实世界扩面（更长周期、更高并发、更真实的 supervisor/handoff/staffing 组合）
-- 主脑 cockpit 扩面（当前 repo 定义内的 unified runtime chain read surface 已收口；后续继续把 `strategy / lanes / backlog / cycles / assignments / agent reports` 推进到更完整的治理写链与可见化）
-- 回归与 live smoke 扩面（优先扩 `industry/runtime/human-assist/host recovery` 聚合回归与真实宿主链）
+- `Full Host Digital Twin` 已按当前 repo 定义收口：`workflow / cron / fixed-SOP / Runtime Center / industry runtime` 统一优先消费 canonical `host_twin` 与 selected seat/session truth，多 seat host switch、document surface 与 replay continuity 已进入正式回归
+- single-industry 真实世界扩面已按当前 repo 定义收口：`staffing + handoff + human assist + report + synthesis + replan` 已形成同一行业长跑主链，并有真实长跑 smoke 锁住 continuity
+- 主脑 cockpit / `Unified Runtime Chain` 已按当前 repo 定义收口：`/runtime-center/main-brain` 已承载 `carrier / strategy / lanes / backlog / cycle / assignment / report / environment / governance / recovery / automation / evidence / decision / patch` 的统一驾驶舱 contract
+- 回归与 `live smoke` 已按当前 repo 定义收口：关键 `industry / runtime / host-aware / workflow / fixed-SOP` 主链已有聚合回归，long-run smoke 已成为正式成熟度门槛
 - 重模块拆分（Chat runtime derivation / human-assist presenter / transport request 与 industry page presenter 已完成一轮下沉；router/service/query presenter/console pages 后续仍要继续拆）
 
 ### 第一优先级（Phase 1 收口）
@@ -869,26 +869,22 @@
 
 ---
 
-## 10. Post-`V6` 主脑 cockpit（现状 + phase-next）
+## 10. Post-`V6` 主脑 cockpit（当前正式形态）
 
 下一正式阶段的迁移目标不是在 `industry` 旁边再造第二套执行器，而是在现有 `IndustryService + Runtime Center` 基线之上把主脑自治对象与 API 硬切成唯一正式主链。
 
-现状（截至 `2026-03-29`）：`Runtime Center / /industry / kickoff prompt` 已把 `strategy / lanes / current cycle / assignments / agent reports` 提升为正式 planning 读面基线；这一轮又继续补上 `Unified Runtime Chain` 聚合读面、`focus_kind + focus_id` drill-down、以及 `/runtime-center/reports` 的 `industry / assignment / lane / cycle / needs_followup / processed` 过滤面。但“更完整的 cockpit 写链、治理动作、回归与 live smoke 扩面”仍属于 phase-next。
+当前正式形态（截至 `2026-03-30`）：`Runtime Center` 不再只是 detail 拼盘。`GET /runtime-center/main-brain` 已成为 dedicated main-brain cockpit contract，正式聚合 `carrier / strategy / lanes / backlog / current_cycle / assignments / reports / environment / governance / recovery / automation / evidence / decisions / patches`；`/runtime-center/industry/{instance_id}` 继续承接 `focus_kind + focus_id` drill-down 与 unified runtime chain 明细；`/runtime-center/reports` 承接 `industry / assignment / lane / cycle / needs_followup / processed` 过滤面。前台 `Runtime Center` main-brain cockpit 已直接消费这条 contract，形成 `Execution Envelope / Operator Closure / Trace Closure` 三段闭环，而不是继续把治理、恢复、自动化、证据和 patch 分散在零碎 detail 里。
 
-phase-next 候选独立 surfaces（如后续需要把 cockpit 从 `industry detail` 投影进一步拆成专用 endpoint，再锁定最终路径命名）：
+当前 canonical cockpit surfaces：
 
-- `/api/runtime-center/main-brain/{carrier_id}`
-  - 聚合 `carrier / identity / strategy / current cycle / current focuses / next review`
-- `/api/runtime-center/lanes`
-  - 读写长期责任车道
-- `/api/runtime-center/backlog`
-  - 读写 backlog item
-- `/api/runtime-center/cycles`
-  - 读写 `daily / weekly / event` cycle 与 cycle plan
-- `/api/runtime-center/assignments`
-  - 主脑派工读面与操作面
-- `/api/runtime-center/agent-reports`
-  - 职业 agent 回流读面与主脑消费入口
+- `GET /api/runtime-center/main-brain`
+  - 聚合主脑驾驶舱所需的 planning / execution / governance / recovery / automation / trace contract
+- `GET /api/runtime-center/industry`
+  - 返回行业运行中心 overview surface
+- `GET /api/runtime-center/industry/{instance_id}`
+  - 返回行业实例的 focused runtime / planning / unified runtime chain detail
+- `GET /api/runtime-center/reports`
+  - 返回主脑综合与 follow-up 所需的正式 report filtering surface
 
 迁移原则：
 

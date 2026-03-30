@@ -8,6 +8,7 @@ from .shared import *  # noqa: F401,F403
 from agentscope.message import Msg
 
 from copaw.capabilities import CapabilityService
+from copaw.app.startup_recovery import StartupRecoverySummary
 from copaw.environments.models import SessionMount
 from copaw.evidence import EvidenceLedger
 from copaw.kernel import KernelDispatcher, KernelTaskStore, KernelTurnExecutor
@@ -257,6 +258,78 @@ def test_runtime_center_main_brain_route_exposes_industry_stats():
     assert payload["signals"]["decisions"]["count"] == 2
     assert payload["signals"]["patches"]["count"] == 3
     assert payload["signals"]["evidence"]["count"] == 4
+
+
+def test_runtime_center_main_brain_route_exposes_unified_operator_sections():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.startup_recovery_summary = StartupRecoverySummary(
+        reason="Recovered expired decisions and runtime leases during startup.",
+        expired_decisions=1,
+        pending_decisions=2,
+        active_schedules=1,
+        notes=["Recovered the canonical runtime scheduler state."],
+    )
+    app.state.cron_manager = FakeCronManager(
+        [make_job("sched-1")],
+        states={
+            "sched-1": CronJobState(
+                last_status="success",
+                last_run_at=datetime(2026, 3, 9, 8, 0, tzinfo=timezone.utc),
+                next_run_at=datetime(2026, 3, 9, 9, 0, tzinfo=timezone.utc),
+            ),
+        },
+        heartbeat_state=CronJobState(
+            last_status="success",
+            last_run_at=datetime(2026, 3, 9, 8, 30, tzinfo=timezone.utc),
+            next_run_at=datetime(2026, 3, 9, 14, 30, tzinfo=timezone.utc),
+        ),
+    )
+
+    client = TestClient(app)
+
+    with patch(
+        "copaw.app.runtime_center.overview_cards.get_heartbeat_config",
+        return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
+        create=True,
+    ):
+        response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["governance"]["route"] == "/api/runtime-center/governance/status"
+    assert payload["governance"]["pending_decisions"] == 0
+    assert payload["governance"]["pending_patches"] == 1
+    assert payload["governance"]["summary"]
+
+    assert payload["recovery"]["available"] is True
+    assert payload["recovery"]["route"] == "/api/runtime-center/recovery/latest"
+    assert payload["recovery"]["pending_decisions"] == 2
+    assert payload["recovery"]["summary"]
+
+    assert payload["automation"]["route"] == "/api/runtime-center/schedules"
+    assert payload["automation"]["schedule_count"] == 1
+    assert payload["automation"]["active_schedule_count"] == 1
+    assert payload["automation"]["heartbeat"]["route"] == "/api/runtime-center/heartbeat"
+    assert payload["automation"]["heartbeat"]["status"] == "success"
+    assert payload["automation"]["heartbeat"]["enabled"] is True
+
+    control_chain_keys = [item["key"] for item in payload["meta"]["control_chain"]]
+    assert "governance" in control_chain_keys
+    assert "automation" in control_chain_keys
+    assert "recovery" in control_chain_keys
+    assert payload["signals"]["governance"]["count"] == 1
+    assert payload["signals"]["automation"]["count"] == 1
+    assert payload["signals"]["recovery"]["count"] == 1
 
 
 def test_runtime_center_overview_governance_uses_canonical_host_twin_summary_for_ready_runtime():

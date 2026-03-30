@@ -55,6 +55,9 @@ const SIGNAL_ICONS: Record<string, ReactNode> = {
   assignments: <Bot size={18} color="#10b981" />,
   agent_reports: <Bot size={18} color="#10b981" />,
   environment: <ShieldCheck size={18} color="#10b981" />,
+  governance: <ShieldAlert size={18} color="#f43f5e" />,
+  automation: <RotateCcw size={18} color="#1B4FD8" />,
+  recovery: <RefreshCw size={18} color="#C9A84C" />,
   evidence: <Activity size={18} color="#1B4FD8" />,
   decisions: <ShieldAlert size={18} color="#f43f5e" />,
   patches: <RotateCcw size={18} color="#f97316" />,
@@ -380,6 +383,204 @@ function deriveUnconsumedReportCount(
   return unconsumed.length;
 }
 
+function statusTagColor(value: unknown): string {
+  return signalToneColor({
+    key: "status",
+    label: "status",
+    value: "",
+    tone: toneFromStatus(value),
+  });
+}
+
+function recordList(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is Record<string, unknown> => isRecord(item));
+}
+
+function recordTitle(record: Record<string, unknown>, fallback: string): string {
+  return (
+    firstString(
+      record.title,
+      record.headline,
+      record.label,
+      record.name,
+      record.id,
+      record.assignment_id,
+      record.report_id,
+    ) ?? fallback
+  );
+}
+
+function recordSummary(record: Record<string, unknown>): string | null {
+  return firstString(
+    record.summary,
+    record.description,
+    record.reason,
+    record.note,
+    record.recommendation,
+  );
+}
+
+function recordRoute(
+  record: Record<string, unknown>,
+  fallbackRoute: string | null,
+): string | null {
+  return firstString(record.route) ?? fallbackRoute;
+}
+
+function renderCompactRecordList(
+  records: Record<string, unknown>[],
+  options: {
+    emptyLabel: string;
+    fallbackRoute: string | null;
+    fallbackRouteTitle: string;
+    onOpenRoute: (route: string, title: string) => void;
+  },
+) {
+  const { emptyLabel, fallbackRoute, fallbackRouteTitle, onOpenRoute } = options;
+  if (records.length === 0) {
+    return <Text type="secondary">{emptyLabel}</Text>;
+  }
+  return (
+    <div className={styles.selectionList}>
+      {records.map((record, index) => {
+        const title = recordTitle(record, `Item ${index + 1}`);
+        const summary = recordSummary(record);
+        const status = firstString(record.status, record.runtime_status);
+        const route = recordRoute(record, fallbackRoute);
+        const needsFollowup = record.needs_followup === true;
+        const processed = record.processed === true;
+        return (
+          <div key={`${title}:${index}`} className={styles.selectionRow}>
+            <div className={styles.selectionBody}>
+              <div className={styles.entryTitleRow}>
+                {route ? (
+                  <button
+                    type="button"
+                    className={styles.entryTitleButton}
+                    onClick={() => {
+                      onOpenRoute(route, title || fallbackRouteTitle);
+                    }}
+                  >
+                    {title}
+                  </button>
+                ) : (
+                  <div className={styles.entryTitle}>{title}</div>
+                )}
+                {status ? (
+                  <Tag color={statusTagColor(status)}>{formatRuntimeStatus(status)}</Tag>
+                ) : null}
+                {needsFollowup ? <Tag color="warning">Needs follow-up</Tag> : null}
+                {processed ? <Tag color="success">Processed</Tag> : null}
+              </div>
+              {summary ? <p className={styles.selectionSummary}>{summary}</p> : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderOperatorBlock(
+  options: {
+    title: string;
+    summary: string | null;
+    status: unknown;
+    route: string | null;
+    routeTitle: string;
+    details: Array<[string, string | null]>;
+    onOpenRoute: (route: string, title: string) => void;
+  },
+) {
+  const { title, summary, status, route, routeTitle, details, onOpenRoute } = options;
+  const detailItems = details
+    .filter(([, value]) => value && value !== RUNTIME_CENTER_TEXT.emptyValue)
+    .map(([label, value]) => ({
+      key: label,
+      label,
+      children: value,
+    }));
+
+  return (
+    <div className={styles.controlCard}>
+      <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+        <div>
+          <div className={styles.cardTitleRow}>
+            <h3 className={styles.entryTitle}>{title}</h3>
+            {typeof status === "string" && status ? (
+              <Tag color={statusTagColor(status)}>{formatRuntimeStatus(status)}</Tag>
+            ) : null}
+          </div>
+          {summary ? <p className={styles.selectionSummary}>{summary}</p> : null}
+        </div>
+        {route ? (
+          <Button
+            size="small"
+            onClick={() => {
+              onOpenRoute(route, routeTitle);
+            }}
+          >
+            Open Detail
+          </Button>
+        ) : null}
+      </div>
+      {detailItems.length > 0 ? (
+        <Descriptions size="small" column={1} items={detailItems} />
+      ) : (
+        <Text type="secondary">{RUNTIME_CENTER_TEXT.emptyValue}</Text>
+      )}
+    </div>
+  );
+}
+
+function renderTraceBlock(
+  options: {
+    title: string;
+    section: Record<string, unknown> | null;
+    emptyLabel: string;
+    onOpenRoute: (route: string, title: string) => void;
+  },
+) {
+  const { title, section, emptyLabel, onOpenRoute } = options;
+  const entries = recordList(section?.entries);
+  const route = firstString(section?.route);
+  const summary = firstString(section?.summary);
+  const count = firstString(section?.count);
+
+  return (
+    <div className={styles.controlCard}>
+      <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+        <div>
+          <div className={styles.cardTitleRow}>
+            <h3 className={styles.entryTitle}>{title}</h3>
+            {count ? <Tag>{count}</Tag> : null}
+          </div>
+          {summary ? <p className={styles.selectionSummary}>{summary}</p> : null}
+        </div>
+        {route ? (
+          <Button
+            size="small"
+            onClick={() => {
+              onOpenRoute(route, title);
+            }}
+          >
+            Open Detail
+          </Button>
+        ) : null}
+      </div>
+      {renderCompactRecordList(entries, {
+        emptyLabel,
+        fallbackRoute: route,
+        fallbackRouteTitle: title,
+        onOpenRoute,
+      })}
+    </div>
+  );
+}
+
 export default function MainBrainCockpitPanel({
   data,
   loading,
@@ -439,6 +640,31 @@ export default function MainBrainCockpitPanel({
     unconsumedReportsValue === null
       ? RUNTIME_CENTER_TEXT.emptyValue
       : String(unconsumedReportsValue);
+  const governancePayload = isRecord(mainBrainData?.governance)
+    ? (mainBrainData?.governance as Record<string, unknown>)
+    : null;
+  const recoveryPayload = isRecord(mainBrainData?.recovery)
+    ? (mainBrainData?.recovery as Record<string, unknown>)
+    : null;
+  const automationPayload = isRecord(mainBrainData?.automation)
+    ? (mainBrainData?.automation as Record<string, unknown>)
+    : null;
+  const environmentPayload = isRecord(mainBrainData?.environment)
+    ? (mainBrainData?.environment as Record<string, unknown>)
+    : null;
+  const assignmentRecords = recordList(mainBrainData?.assignments);
+  const reportRecords = recordList(mainBrainData?.reports);
+  const evidenceSection = isRecord(mainBrainData?.evidence)
+    ? (mainBrainData?.evidence as Record<string, unknown>)
+    : null;
+  const decisionsSection = isRecord(mainBrainData?.decisions)
+    ? (mainBrainData?.decisions as Record<string, unknown>)
+    : null;
+  const patchesSection = isRecord(mainBrainData?.patches)
+    ? (mainBrainData?.patches as Record<string, unknown>)
+    : null;
+  const industryRoute =
+    firstString(mainBrainData?.carrier?.route) ?? firstString(mainBrainMeta.industry_route);
 
   const isInitialLoading =
     (loading && !data) ||
@@ -569,6 +795,160 @@ export default function MainBrainCockpitPanel({
             ))}
           </Space>
         </Card>
+      ) : null}
+
+      {mainBrainData ? (
+        <section className={styles.panelGrid}>
+          <Card size="small" title="Execution Envelope" style={{ marginBottom: 16 }}>
+            <div className={styles.metaGrid}>
+              <div className={styles.controlCard}>
+                <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                  <div>
+                    <h3 className={styles.entryTitle}>Assignments</h3>
+                    <p className={styles.selectionSummary}>
+                      Current execution envelopes owned by the main-brain cycle.
+                    </p>
+                  </div>
+                </div>
+                {renderCompactRecordList(assignmentRecords, {
+                  emptyLabel: "No visible assignments.",
+                  fallbackRoute: industryRoute,
+                  fallbackRouteTitle: "Assignments",
+                  onOpenRoute,
+                })}
+              </div>
+              <div className={styles.controlCard}>
+                <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                  <div>
+                    <h3 className={styles.entryTitle}>Reports</h3>
+                    <p className={styles.selectionSummary}>
+                      Structured execution reports waiting for synthesis, follow-up, or replan.
+                    </p>
+                  </div>
+                </div>
+                {renderCompactRecordList(reportRecords, {
+                  emptyLabel: "No visible reports.",
+                  fallbackRoute: industryRoute,
+                  fallbackRouteTitle: "Reports",
+                  onOpenRoute,
+                })}
+              </div>
+            </div>
+          </Card>
+
+          <Card size="small" title="Operator Closure" style={{ marginBottom: 16 }}>
+            <div className={styles.metaGrid}>
+              {renderOperatorBlock({
+                title: "Runtime Governance",
+                summary: firstString(governancePayload?.summary),
+                status: governancePayload?.status,
+                route: firstString(governancePayload?.route),
+                routeTitle: "Runtime Governance",
+                details: [
+                  ["Pending decisions", firstString(governancePayload?.pending_decisions)],
+                  ["Pending patches", firstString(governancePayload?.pending_patches)],
+                  ["Paused schedules", firstString(governancePayload?.paused_schedule_count)],
+                  ["Handoff active", firstString(governancePayload?.handoff_active)],
+                ],
+                onOpenRoute,
+              })}
+              {renderOperatorBlock({
+                title: "Recovery",
+                summary: firstString(recoveryPayload?.summary),
+                status: recoveryPayload?.status,
+                route: firstString(recoveryPayload?.route),
+                routeTitle: "Recovery",
+                details: [
+                  ["Pending decisions", firstString(recoveryPayload?.pending_decisions)],
+                  ["Active schedules", firstString(recoveryPayload?.active_schedules)],
+                  ["Recovered at", firstString(recoveryPayload?.recovered_at)],
+                  ["Reason", firstString(recoveryPayload?.reason)],
+                ],
+                onOpenRoute,
+              })}
+              {renderOperatorBlock({
+                title: "Automation",
+                summary: firstString(automationPayload?.summary),
+                status: automationPayload?.status,
+                route: firstString(automationPayload?.route),
+                routeTitle: "Automation",
+                details: [
+                  ["Schedules", firstString(automationPayload?.schedule_count)],
+                  [
+                    "Active schedules",
+                    firstString(automationPayload?.active_schedule_count),
+                  ],
+                  [
+                    "Heartbeat",
+                    firstString(
+                      isRecord(automationPayload?.heartbeat)
+                        ? automationPayload?.heartbeat.status
+                        : null,
+                    ),
+                  ],
+                  [
+                    "Heartbeat every",
+                    firstString(
+                      isRecord(automationPayload?.heartbeat)
+                        ? automationPayload?.heartbeat.every
+                        : null,
+                    ),
+                  ],
+                ],
+                onOpenRoute,
+              })}
+              {renderOperatorBlock({
+                title: "Environment",
+                summary: firstString(environmentPayload?.summary),
+                status: environmentPayload?.status,
+                route: firstString(environmentPayload?.route),
+                routeTitle: "Environment",
+                details: [
+                  [
+                    "Selected seat",
+                    firstString(
+                      isRecord(governancePayload?.host_twin_summary)
+                        ? governancePayload?.host_twin_summary.selected_seat_ref
+                        : null,
+                    ),
+                  ],
+                  [
+                    "Scheduler action",
+                    firstString(
+                      isRecord(governancePayload?.host_twin_summary)
+                        ? governancePayload?.host_twin_summary.recommended_scheduler_action
+                        : null,
+                    ),
+                  ],
+                ],
+                onOpenRoute,
+              })}
+            </div>
+          </Card>
+
+          <Card size="small" title="Trace Closure" style={{ marginBottom: 16 }}>
+            <div className={styles.metaGrid}>
+              {renderTraceBlock({
+                title: "Evidence",
+                section: evidenceSection,
+                emptyLabel: "No visible evidence entries.",
+                onOpenRoute,
+              })}
+              {renderTraceBlock({
+                title: "Decisions",
+                section: decisionsSection,
+                emptyLabel: "No visible decisions.",
+                onOpenRoute,
+              })}
+              {renderTraceBlock({
+                title: "Patches",
+                section: patchesSection,
+                emptyLabel: "No visible patches.",
+                onOpenRoute,
+              })}
+            </div>
+          </Card>
+        </section>
       ) : null}
 
       <section className={styles.metrics}>

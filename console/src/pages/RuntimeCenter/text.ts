@@ -12,10 +12,14 @@ const MAIN_BRAIN_SIGNAL_LABELS: Record<string, string> = {
   carrier: "Carrier",
   strategy: "Strategy",
   lanes: "Lanes",
+  backlog: "Backlog",
   current_cycle: "Current Cycle",
   assignments: "Assignments",
   agent_reports: "Agent Reports",
   environment: "Environment",
+  governance: "Runtime Governance",
+  automation: "Automation",
+  recovery: "Recovery",
   evidence: "Evidence",
   decisions: "Decisions",
   patches: "Patches",
@@ -881,7 +885,7 @@ export const CAPABILITY_SURFACE_TEXT = {
 export const MAIN_BRAIN_COCKPIT_TEXT = {
   title: "Main-Brain Cockpit",
   description:
-    "Carrier, strategy, lanes, cycle, assignments, reports, environment, evidence, decisions, and patches in one cockpit read surface.",
+    "Carrier, strategy, lanes, cycle, assignments, reports, governance, recovery, automation, environment, evidence, decisions, and patches in one cockpit operator surface.",
 } as const;
 
 export function humanizeToken(value: string): string {
