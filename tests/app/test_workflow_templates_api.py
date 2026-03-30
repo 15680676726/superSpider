@@ -1258,6 +1258,81 @@ def test_workflow_preview_prefers_canonical_host_twin_summary_over_stale_handoff
     assert "host-twin-active-host-blockers" not in blocker_codes
 
 
+def test_workflow_preview_accepts_explicit_document_surface_from_canonical_host_twin(
+    tmp_path,
+) -> None:
+    detail = _desktop_host_preflight_detail(
+        recommended_scheduler_action="continue",
+        continuity_status="restorable",
+        continuity_source="live-handle",
+        active_alert_families=[],
+        host_blocker_family=None,
+        host_blocker_response=None,
+    )
+    environment_service = FakeWorkflowEnvironmentService(
+        session_details={str(detail["session_mount_id"]): detail},
+    )
+    client = TestClient(
+        _build_workflow_app(tmp_path, environment_service=environment_service),
+    )
+    instance_id = _bootstrap_industry(client)
+    solution_lead_agent_id = _industry_role_agent_id(client, instance_id, "solution-lead")
+    _grant_capability_to_agent(
+        client,
+        agent_id=solution_lead_agent_id,
+        capability_ids=["mcp:desktop_windows"],
+    )
+    repository = client.app.state.workflow_template_repository
+    repository.upsert_template(
+        WorkflowTemplateRecord(
+            template_id="phase-next-document-surface-canonical",
+            title="Phase Next Document Surface Canonical",
+            summary="Explicit document host surface should stay host-aware.",
+            category="desktop-ops",
+            status="active",
+            version="v1",
+            owner_role_id="solution-lead",
+            suggested_role_ids=["solution-lead"],
+            dependency_capability_ids=["system:dispatch_query", "mcp:desktop_windows"],
+            step_specs=[
+                {
+                    "id": "document-surface-leaf",
+                    "kind": "goal",
+                    "execution_mode": "leaf",
+                    "owner_role_id": "solution-lead",
+                    "title": "Update workbook through document surface",
+                    "summary": "Mutate the active office document through document bridge semantics.",
+                    "required_capability_ids": [
+                        "system:dispatch_query",
+                        "mcp:desktop_windows",
+                    ],
+                    "environment_preflight": {
+                        "surface_kind": "document",
+                        "mutating": True,
+                        "app_family": "office_document",
+                    },
+                },
+            ],
+        ),
+    )
+
+    preview = client.post(
+        "/workflow-templates/phase-next-document-surface-canonical/preview",
+        json={
+            "industry_instance_id": instance_id,
+            "environment_id": detail["environment_id"],
+            "session_mount_id": detail["session_mount_id"],
+        },
+    )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert payload["can_launch"] is True
+    assert payload["host_requirements"][0]["step_id"] == "document-surface-leaf"
+    assert payload["host_requirements"][0]["surface_kind"] == "document"
+    assert payload["host_requirements"][0]["app_family"] == "office_document"
+
+
 def test_workflow_run_diagnosis_keeps_host_snapshot_and_resume_rechecks_live_host_truth(
     tmp_path,
 ) -> None:
@@ -1464,6 +1539,113 @@ def test_workflow_resume_refreshes_schedule_host_meta_from_live_host_twin(
         "continuity_source"
     ] == "rebound-live-handle"
     assert stored_run.metadata["host_snapshot"]["host_twin_summary"]["host_companion_source"] == "rebound-live-handle"
+
+
+def test_workflow_resume_prefers_canonical_selected_seat_from_live_host_twin_summary(
+    tmp_path,
+) -> None:
+    initial_detail = _browser_host_preflight_detail(
+        environment_id="env-browser-host-a",
+        session_mount_id="session-browser-host-a",
+        continuity_source="live-handle",
+        coordination_reason="browser writer path is clear",
+        recommended_scheduler_action="continue",
+    )
+    environment_service = FakeWorkflowEnvironmentService(
+        session_details={str(initial_detail["session_mount_id"]): initial_detail},
+    )
+    client = TestClient(
+        _build_workflow_app(tmp_path, environment_service=environment_service),
+    )
+    instance_id = _bootstrap_industry(client)
+
+    launched = _launch_workflow_via_service(
+        client,
+        template_id="industry-weekly-research-synthesis",
+        industry_instance_id=instance_id,
+        environment_id=str(initial_detail["environment_id"]),
+        session_mount_id=str(initial_detail["session_mount_id"]),
+        parameters={
+            "focus_area": "channel conversion",
+            "weekly_review_cron": "0 12 * * 2",
+            "timezone": "UTC",
+        },
+    )
+    run_id = launched.run["run_id"]
+    schedule_id = launched.schedules[0]["id"]
+    schedule_record = client.app.state.workflow_template_service._schedule_repository.get_schedule(
+        schedule_id,
+    )
+    assert schedule_record is not None
+    client.app.state.workflow_template_service._schedule_repository.upsert_schedule(
+        schedule_record.model_copy(
+            update={
+                "enabled": False,
+                "status": "paused",
+            }
+        )
+    )
+
+    switched_detail = _browser_host_preflight_detail(
+        environment_id="env-browser-host-a",
+        session_mount_id="session-browser-host-a",
+        continuity_source="rebound-live-handle",
+        coordination_reason="canonical browser seat moved to the alternate live host",
+        recommended_scheduler_action="continue",
+    )
+    switched_detail["host_twin"]["coordination"].update(
+        {
+            "candidate_seat_refs": ["env-browser-host-a", "env-browser-host-b"],
+            "selected_seat_ref": "env-browser-host-b",
+            "selected_session_mount_id": "session-browser-host-b",
+            "seat_selection_policy": "prefer-ready-seat",
+        },
+    )
+    switched_summary = {
+        "host_companion_status": "attached",
+        "host_companion_source": "rebound-live-handle",
+        "active_app_family_keys": ["browser_backoffice"],
+        "blocked_surface_count": 0,
+        "legal_recovery_mode": "resume",
+        "recommended_scheduler_action": "continue",
+        "seat_owner_ref": "ops-agent",
+        "seat_count": 2,
+        "candidate_seat_refs": ["env-browser-host-a", "env-browser-host-b"],
+        "selected_seat_ref": "env-browser-host-b",
+        "selected_session_mount_id": "session-browser-host-b",
+        "seat_selection_policy": "prefer-ready-seat",
+    }
+    switched_detail["host_twin"]["host_twin_summary"] = dict(switched_summary)
+    switched_detail["host_twin_summary"] = dict(switched_summary)
+    environment_service._session_details[str(initial_detail["session_mount_id"])] = (
+        switched_detail
+    )
+
+    resumed = asyncio.run(
+        client.app.state.workflow_template_service.resume_run(
+            run_id,
+            actor="copaw-operator",
+        ),
+    )
+
+    assert resumed.diagnosis.host_snapshot["host_twin_summary"]["selected_seat_ref"] == (
+        "env-browser-host-b"
+    )
+    assert resumed.diagnosis.host_snapshot["host_twin_summary"][
+        "selected_session_mount_id"
+    ] == "session-browser-host-b"
+    schedule_payload = client.app.state.workflow_template_service._schedule_repository.get_schedule(
+        schedule_id,
+    )
+    assert schedule_payload is not None
+    assert schedule_payload.spec_payload["meta"]["environment_ref"] == "env-browser-host-b"
+    assert schedule_payload.spec_payload["meta"]["environment_id"] == "env-browser-host-b"
+    assert schedule_payload.spec_payload["meta"]["session_mount_id"] == "session-browser-host-b"
+    stored_run = client.app.state.workflow_run_repository.get_run(run_id)
+    assert stored_run is not None
+    assert stored_run.metadata["environment_ref"] == "env-browser-host-b"
+    assert stored_run.metadata["environment_id"] == "env-browser-host-b"
+    assert stored_run.metadata["session_mount_id"] == "session-browser-host-b"
 
 
 def test_workflow_preview_uses_candidate_role_strategy_when_primary_role_is_missing(

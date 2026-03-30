@@ -111,6 +111,11 @@ class EnvironmentHealthService:
             host_event_summary=host_event_summary,
             host_contract=host_contract,
         )
+        multi_seat_context = self._build_multi_seat_context(
+            mount=mount,
+            session=primary_session,
+            host_contract=host_contract,
+        )
         host_companion_session = self.build_host_companion_projection(
             mount=mount,
             session=primary_session,
@@ -153,6 +158,7 @@ class EnvironmentHealthService:
             host_companion_session=host_companion_session,
             live_handle=live_handle,
             session_count=len(sessions),
+            multi_seat_context=multi_seat_context,
         )
         workspace_graph = self.build_workspace_graph_projection(
             mount=mount,
@@ -262,6 +268,11 @@ class EnvironmentHealthService:
             host_event_summary=host_event_summary,
             host_contract=host_contract,
         )
+        multi_seat_context = self._build_multi_seat_context(
+            mount=environment,
+            session=session,
+            host_contract=host_contract,
+        )
         host_companion_session = self.build_host_companion_projection(
             mount=environment,
             session=session,
@@ -304,6 +315,7 @@ class EnvironmentHealthService:
             host_companion_session=host_companion_session,
             live_handle=live_handle,
             session_count=1 if environment is not None else 0,
+            multi_seat_context=multi_seat_context,
         )
         workspace_graph = self.build_workspace_graph_projection(
             mount=environment,
@@ -1309,6 +1321,7 @@ class EnvironmentHealthService:
         host_companion_session: dict[str, object],
         live_handle: dict[str, object] | None,
         session_count: int,
+        multi_seat_context: dict[str, object] | None = None,
     ) -> dict[str, object]:
         mount_metadata = self._mapping(getattr(mount, "metadata", None))
         session_metadata = self._mapping(session.metadata if session is not None else None)
@@ -1325,6 +1338,30 @@ class EnvironmentHealthService:
         occupancy_state = "available"
         if session is not None or self._first_string(host_contract.get("lease_owner")) is not None:
             occupancy_state = "occupied"
+        multi_seat_context = self._mapping(multi_seat_context)
+        candidate_seat_refs = self._string_list(multi_seat_context.get("candidate_seat_refs"))
+        if not candidate_seat_refs and seat_ref is not None:
+            candidate_seat_refs = [seat_ref]
+        candidate_seats = [
+            self._mapping(item)
+            for item in list(multi_seat_context.get("candidate_seats") or [])
+            if isinstance(item, dict)
+        ]
+        selected_seat_ref = self._first_string(
+            multi_seat_context.get("selected_seat_ref"),
+            seat_ref,
+        )
+        selected_session_mount_id = self._first_string(
+            multi_seat_context.get("selected_session_mount_id"),
+            session.id if session is not None else None,
+        )
+        seat_selection_policy = self._first_string(
+            multi_seat_context.get("seat_selection_policy"),
+            "sticky-active-seat" if session is not None else "current-seat-only",
+        )
+        candidate_count = multi_seat_context.get("seat_count")
+        if not isinstance(candidate_count, int):
+            candidate_count = len(candidate_seat_refs) or max(0, int(session_count))
         return {
             "projection_kind": "seat_runtime_projection",
             "is_projection": True,
@@ -1340,19 +1377,17 @@ class EnvironmentHealthService:
             "lease_owner": host_contract.get("lease_owner"),
             "host_id": host_contract.get("host_id"),
             "process_id": host_contract.get("process_id"),
-            "session_count": max(0, int(session_count)),
+            "session_count": max(0, int(candidate_count)),
             "active_session_mount_id": session.id if session is not None else None,
             "host_companion_status": host_companion_session.get("continuity_status"),
             "active_surface_mix": active_surface_mix,
             "status": status,
             "occupancy_state": occupancy_state,
-            "candidate_seat_refs": [seat_ref] if seat_ref is not None else [],
-            "selected_seat_ref": seat_ref,
-            "seat_selection_policy": (
-                "sticky-active-seat"
-                if session is not None
-                else "current-seat-only"
-            ),
+            "candidate_seat_refs": candidate_seat_refs,
+            "candidate_seats": candidate_seats,
+            "selected_seat_ref": selected_seat_ref,
+            "selected_session_mount_id": selected_session_mount_id,
+            "seat_selection_policy": seat_selection_policy,
             "expected_release_at": (
                 session.lease_expires_at.isoformat()
                 if session is not None and session.lease_expires_at is not None
@@ -1371,6 +1406,269 @@ class EnvironmentHealthService:
                 "Seat runtime is a durable execution-seat projection, not a second "
                 "stored runtime object."
             ),
+        }
+
+    def _build_multi_seat_context(
+        self,
+        *,
+        mount,
+        session: SessionMount | None,
+        host_contract: dict[str, object],
+    ) -> dict[str, object]:
+        current_seat_ref = self._first_string(
+            getattr(mount, "id", None) if mount is not None else None,
+        )
+        current_session_mount_id = self._first_string(
+            session.id if session is not None else None,
+        )
+        mount_metadata = self._mapping(getattr(mount, "metadata", None))
+        session_metadata = self._mapping(session.metadata if session is not None else None)
+        scope = {
+            "workspace_scope": self._first_string(
+                session_metadata.get("workspace_scope"),
+                mount_metadata.get("workspace_scope"),
+            ),
+            "account_scope_ref": self._first_string(
+                session_metadata.get("account_scope_ref"),
+                mount_metadata.get("account_scope_ref"),
+                host_contract.get("account_scope_ref"),
+            ),
+            "writer_lock_scope": self._first_string(
+                session_metadata.get("writer_lock_scope"),
+                mount_metadata.get("writer_lock_scope"),
+            ),
+        }
+        current_owner_ref = self._first_string(
+            getattr(session, "lease_owner", None) if session is not None else None,
+            getattr(mount, "lease_owner", None) if mount is not None else None,
+            host_contract.get("lease_owner"),
+        )
+        raw_sessions = self._service.list_sessions(limit=None)
+        candidates: list[dict[str, object]] = []
+        seen_seat_refs: set[str] = set()
+        for candidate_session in raw_sessions:
+            candidate_mount = self._service.get_environment(candidate_session.environment_id)
+            if candidate_mount is None:
+                continue
+            if not self._matches_multi_seat_scope(
+                session=candidate_session,
+                mount=candidate_mount,
+                scope=scope,
+                current_seat_ref=current_seat_ref,
+                current_session_mount_id=current_session_mount_id,
+            ):
+                continue
+            entry = self._build_multi_seat_candidate_entry(
+                session=candidate_session,
+                mount=candidate_mount,
+            )
+            seat_ref = self._first_string(entry.get("seat_ref"))
+            if seat_ref is None or seat_ref in seen_seat_refs:
+                continue
+            seen_seat_refs.add(seat_ref)
+            candidates.append(entry)
+        if not candidates and current_seat_ref is not None:
+            candidates.append(
+                {
+                    "seat_ref": current_seat_ref,
+                    "environment_id": current_seat_ref,
+                    "environment_ref": getattr(mount, "ref", None) if mount is not None else None,
+                    "session_mount_id": current_session_mount_id,
+                    "owner_agent_id": current_owner_ref,
+                    "writer_lock_scope": scope["writer_lock_scope"],
+                    "workspace_scope": scope["workspace_scope"],
+                    "account_scope_ref": scope["account_scope_ref"],
+                    "ready": True,
+                }
+            )
+        current_candidate = next(
+            (
+                item
+                for item in candidates
+                if self._first_string(item.get("session_mount_id")) == current_session_mount_id
+            ),
+            None,
+        )
+        ready_candidates = [item for item in candidates if item.get("ready") is True]
+        same_owner_ready = [
+            item
+            for item in ready_candidates
+            if self._first_string(item.get("owner_agent_id")) == current_owner_ref
+        ]
+        selected_candidate = None
+        seat_selection_policy = "current-seat-only"
+        if current_candidate is not None and current_candidate.get("ready") is True:
+            selected_candidate = current_candidate
+            seat_selection_policy = "sticky-active-seat"
+        elif same_owner_ready:
+            selected_candidate = sorted(
+                same_owner_ready,
+                key=lambda item: (
+                    0
+                    if self._first_string(item.get("session_mount_id")) == current_session_mount_id
+                    else 1,
+                    self._first_string(item.get("seat_ref")) or "",
+                ),
+            )[0]
+            seat_selection_policy = "prefer-ready-seat"
+        elif ready_candidates:
+            selected_candidate = sorted(
+                ready_candidates,
+                key=lambda item: (
+                    self._first_string(item.get("owner_agent_id")) != current_owner_ref,
+                    self._first_string(item.get("seat_ref")) or "",
+                ),
+            )[0]
+            seat_selection_policy = "prefer-ready-seat"
+        elif current_candidate is not None:
+            selected_candidate = current_candidate
+            seat_selection_policy = "sticky-active-seat"
+        elif candidates:
+            selected_candidate = candidates[0]
+            seat_selection_policy = "candidate-seat-fallback"
+        candidate_seat_refs = [
+            self._first_string(item.get("seat_ref"))
+            for item in candidates
+            if self._first_string(item.get("seat_ref")) is not None
+        ]
+        return {
+            "seat_count": len(candidate_seat_refs),
+            "candidate_seat_refs": candidate_seat_refs,
+            "candidate_seats": candidates,
+            "selected_seat_ref": self._first_string(
+                selected_candidate.get("seat_ref") if isinstance(selected_candidate, dict) else None,
+                current_seat_ref,
+            ),
+            "selected_session_mount_id": self._first_string(
+                selected_candidate.get("session_mount_id")
+                if isinstance(selected_candidate, dict)
+                else None,
+                current_session_mount_id,
+            ),
+            "seat_selection_policy": seat_selection_policy,
+        }
+
+    def _matches_multi_seat_scope(
+        self,
+        *,
+        session: SessionMount,
+        mount,
+        scope: dict[str, object],
+        current_seat_ref: str | None,
+        current_session_mount_id: str | None,
+    ) -> bool:
+        candidate_session_mount_id = self._first_string(session.id)
+        candidate_seat_ref = self._first_string(
+            getattr(mount, "id", None) if mount is not None else None,
+        )
+        if candidate_session_mount_id == current_session_mount_id:
+            return True
+        if candidate_seat_ref == current_seat_ref:
+            return True
+        candidate_mount_metadata = self._mapping(getattr(mount, "metadata", None))
+        candidate_session_metadata = self._mapping(session.metadata)
+        candidate_workspace_scope = self._first_string(
+            candidate_session_metadata.get("workspace_scope"),
+            candidate_mount_metadata.get("workspace_scope"),
+        )
+        candidate_account_scope_ref = self._first_string(
+            candidate_session_metadata.get("account_scope_ref"),
+            candidate_mount_metadata.get("account_scope_ref"),
+        )
+        candidate_writer_lock_scope = self._first_string(
+            candidate_session_metadata.get("writer_lock_scope"),
+            candidate_mount_metadata.get("writer_lock_scope"),
+        )
+        workspace_scope = self._first_string(scope.get("workspace_scope"))
+        account_scope_ref = self._first_string(scope.get("account_scope_ref"))
+        writer_lock_scope = self._first_string(scope.get("writer_lock_scope"))
+        return bool(
+            (workspace_scope is not None and candidate_workspace_scope == workspace_scope)
+            or (
+                account_scope_ref is not None
+                and candidate_account_scope_ref == account_scope_ref
+            )
+            or (
+                writer_lock_scope is not None
+                and candidate_writer_lock_scope == writer_lock_scope
+            )
+        )
+
+    def _build_multi_seat_candidate_entry(
+        self,
+        *,
+        session: SessionMount,
+        mount,
+    ) -> dict[str, object]:
+        mount_metadata = self._mapping(getattr(mount, "metadata", None))
+        session_metadata = self._mapping(session.metadata)
+        handoff_state = self._first_string(
+            session_metadata.get("handoff_state"),
+            mount_metadata.get("handoff_state"),
+        )
+        handoff_owner_ref = self._first_string(
+            session_metadata.get("handoff_owner_ref"),
+            mount_metadata.get("handoff_owner_ref"),
+        )
+        gap = self._first_string(
+            session_metadata.get("current_gap_or_blocker"),
+            mount_metadata.get("current_gap_or_blocker"),
+            session_metadata.get("pending_handoff_summary"),
+            mount_metadata.get("pending_handoff_summary"),
+        )
+        contract_status = self._first_string(
+            session_metadata.get("app_contract_status"),
+            session_metadata.get("site_contract_status"),
+            mount_metadata.get("app_contract_status"),
+            mount_metadata.get("site_contract_status"),
+        )
+        access_mode = self._first_string(
+            session_metadata.get("access_mode"),
+            mount_metadata.get("access_mode"),
+        )
+        ready = bool(
+            (session.status == "active" or self._first_string(session.lease_status) in {"leased", "idle"})
+            and handoff_state not in {"active", "manual-only-terminal"}
+            and handoff_owner_ref is None
+            and gap is None
+            and access_mode not in {"missing", "read-only"}
+            and contract_status not in {"blocked", "handoff-required", "read-only"}
+        )
+        return {
+            "seat_ref": self._first_string(
+                getattr(mount, "id", None) if mount is not None else None,
+            ),
+            "environment_id": self._first_string(
+                getattr(mount, "id", None) if mount is not None else None,
+            ),
+            "environment_ref": self._first_string(
+                getattr(mount, "ref", None) if mount is not None else None,
+            ),
+            "session_mount_id": self._first_string(session.id),
+            "owner_agent_id": self._first_string(
+                session.lease_owner,
+                getattr(mount, "lease_owner", None) if mount is not None else None,
+            ),
+            "workspace_scope": self._first_string(
+                session_metadata.get("workspace_scope"),
+                mount_metadata.get("workspace_scope"),
+            ),
+            "account_scope_ref": self._first_string(
+                session_metadata.get("account_scope_ref"),
+                mount_metadata.get("account_scope_ref"),
+            ),
+            "writer_lock_scope": self._first_string(
+                session_metadata.get("writer_lock_scope"),
+                mount_metadata.get("writer_lock_scope"),
+            ),
+            "active_surface_mix": self._merge_string_lists(
+                session_metadata.get("active_surface_mix"),
+                mount_metadata.get("active_surface_mix"),
+            ),
+            "handoff_state": handoff_state,
+            "handoff_owner_ref": handoff_owner_ref,
+            "current_gap_or_blocker": gap,
+            "ready": ready,
         }
 
     def build_host_companion_projection(
@@ -1961,6 +2259,22 @@ class EnvironmentHealthService:
                 "recovery_family": active_recovery_family,
                 "human_handoff_active": continuity["requires_human_return"],
                 "requires_human_return": continuity["requires_human_return"],
+                "environment_ref": self._first_string(
+                    coordination.get("selected_seat_ref"),
+                    getattr(mount, "ref", None) if mount is not None else None,
+                    getattr(mount, "id", None) if mount is not None else None,
+                ),
+                "environment_id": self._first_string(
+                    coordination.get("selected_seat_ref"),
+                    getattr(mount, "id", None) if mount is not None else None,
+                ),
+                "session_mount_id": self._first_string(
+                    coordination.get("selected_session_mount_id"),
+                    session.id if session is not None else None,
+                ),
+                "recommended_scheduler_action": self._first_string(
+                    coordination.get("recommended_scheduler_action"),
+                ),
                 "recommended_runtime_response": self._first_string(
                     self._mapping(latest_blocking_event).get(
                         "recommended_runtime_response",
@@ -2040,10 +2354,43 @@ class EnvironmentHealthService:
             host_companion_session.get("continuity_source"),
         )
         host_companion_locality = self._mapping(host_companion_session.get("locality"))
+        selected_session_mount_id = self._first_string(
+            coordination.get("selected_session_mount_id"),
+            seat_runtime.get("selected_session_mount_id"),
+            seat_runtime.get("active_session_mount_id"),
+        )
+        candidate_seats = [
+            self._mapping(item)
+            for item in list(seat_runtime.get("candidate_seats") or [])
+            if isinstance(item, dict)
+        ]
+        selected_candidate = next(
+            (
+                item
+                for item in candidate_seats
+                if self._first_string(item.get("session_mount_id")) == selected_session_mount_id
+                or self._first_string(item.get("seat_ref")) == selected_seat_ref
+            ),
+            None,
+        )
+        using_alternate_ready_seat = bool(
+            isinstance(selected_candidate, dict)
+            and selected_candidate.get("ready") is True
+            and selected_seat_ref is not None
+            and selected_seat_ref != seat_runtime.get("seat_ref")
+        )
+        blocked_surface_refs = [
+            self._first_string(surface.get("surface_ref"), surface.get("surface_kind"))
+            for surface in blocked_surfaces
+            if isinstance(surface, dict)
+        ]
+        if using_alternate_ready_seat:
+            blocked_surface_refs = []
         multi_seat_coordination = {
             "seat_count": seat_count,
             "candidate_seat_refs": candidate_seat_refs,
             "selected_seat_ref": selected_seat_ref,
+            "selected_session_mount_id": selected_session_mount_id,
             "seat_selection_policy": self._first_string(
                 coordination.get("seat_selection_policy"),
             ),
@@ -2093,6 +2440,7 @@ class EnvironmentHealthService:
                 ownership.get("writer_owner_ref"),
             ),
             "selected_seat_ref": selected_seat_ref,
+            "selected_session_mount_id": selected_session_mount_id,
             "seat_selection_policy": self._first_string(
                 coordination.get("seat_selection_policy"),
             ),
@@ -2132,21 +2480,23 @@ class EnvironmentHealthService:
             },
             "active_app_family_keys": active_app_family_keys,
             "active_app_family_count": len(active_app_family_keys),
-            "blocked_surface_refs": [
-                self._first_string(surface.get("surface_ref"), surface.get("surface_kind"))
-                for surface in blocked_surfaces
-                if isinstance(surface, dict)
-            ],
-            "blocked_surface_count": len(blocked_surfaces),
+            "blocked_surface_refs": blocked_surface_refs,
+            "blocked_surface_count": len(blocked_surface_refs),
             "active_blocker_families": self._string_list(
                 latest_blocking_event.get("event_family"),
             ),
             "legal_recovery_mode": self._first_string(
+                "resume-environment" if using_alternate_ready_seat else None,
                 legal_recovery.get("resume_kind"),
                 legal_recovery.get("mode"),
                 legal_recovery.get("path"),
             ),
             "legal_recovery_summary": self._first_string(
+                (
+                    f"selected-session:{selected_session_mount_id}"
+                    if using_alternate_ready_seat
+                    else None
+                ),
                 legal_recovery.get("checkpoint_ref"),
                 legal_recovery.get("path"),
             ),
@@ -3291,10 +3641,31 @@ class EnvironmentHealthService:
             seat_owner_ref,
         )
         writer_owner_ref = self._first_string(writer_owner_ref, workspace_owner_ref)
+        candidate_seats = [
+            self._mapping(item)
+            for item in list(seat_runtime.get("candidate_seats") or [])
+            if isinstance(item, dict)
+        ]
         candidate_seat_refs = self._string_list(seat_runtime.get("candidate_seat_refs"))
         selected_seat_ref = self._first_string(
             seat_runtime.get("selected_seat_ref"),
             seat_runtime.get("seat_ref"),
+        )
+        selected_session_mount_id = self._first_string(
+            seat_runtime.get("selected_session_mount_id"),
+            seat_runtime.get("active_session_mount_id"),
+        )
+        selected_candidate = next(
+            (
+                item
+                for item in candidate_seats
+                if self._first_string(item.get("session_mount_id")) == selected_session_mount_id
+                or self._first_string(item.get("seat_ref")) == selected_seat_ref
+            ),
+            None,
+        )
+        selected_candidate_ready = bool(
+            isinstance(selected_candidate, dict) and selected_candidate.get("ready") is True
         )
         blocking_family = self._first_string(latest_blocking_event.get("event_family"))
         active_handoff_owner_ref = None
@@ -3302,17 +3673,52 @@ class EnvironmentHealthService:
             active_handoff_owner_ref = self._first_string(
                 host_contract.get("handoff_owner_ref"),
             )
+        cross_owner_conflict = next(
+            (
+                item
+                for item in candidate_seats
+                if self._first_string(item.get("owner_agent_id")) not in {None, seat_owner_ref}
+                and self._first_string(item.get("writer_lock_scope")) is not None
+            ),
+            None,
+        )
         blocking_reason = self._first_string(
             None if recovered_runtime_ready else host_contract.get("handoff_reason"),
             None
             if recovered_runtime_ready
             else host_contract.get("current_gap_or_blocker"),
+            (
+                f"writer scope is contested by "
+                f"{self._first_string(cross_owner_conflict.get('owner_agent_id'))} "
+                f"on {self._first_string(cross_owner_conflict.get('seat_ref'))}"
+                if cross_owner_conflict is not None
+                else None
+            ),
             latest_blocking_event.get("event_name"),
             workspace_graph.get("active_lock_summary"),
         )
         severity = "clear"
-        if blocking_family is not None or active_handoff_owner_ref is not None:
+        if (
+            blocking_family is not None
+            or active_handoff_owner_ref is not None
+            or cross_owner_conflict is not None
+        ):
             severity = "blocked"
+        if (
+            selected_candidate_ready
+            and selected_seat_ref is not None
+            and selected_seat_ref != seat_runtime.get("seat_ref")
+            and self._first_string(selected_candidate.get("owner_agent_id"))
+            in {None, seat_owner_ref}
+            and cross_owner_conflict is None
+        ):
+            severity = "clear"
+            active_handoff_owner_ref = None
+            blocking_family = None
+            blocking_reason = self._first_string(
+                f"canonical seat switched to {selected_seat_ref}",
+                blocking_reason,
+            )
         legal_owner_transition = {
             "allowed": severity != "blocked",
             "reason": (
@@ -3324,13 +3730,17 @@ class EnvironmentHealthService:
         recommended_scheduler_action = "proceed"
         if severity == "blocked":
             recommended_scheduler_action = "handoff"
+        elif selected_seat_ref is not None and selected_seat_ref != seat_runtime.get("seat_ref"):
+            recommended_scheduler_action = "continue"
         return {
             "seat_owner_ref": seat_owner_ref,
             "workspace_owner_ref": workspace_owner_ref,
             "writer_owner_ref": writer_owner_ref,
             "candidate_seat_refs": candidate_seat_refs
             or ([selected_seat_ref] if selected_seat_ref is not None else []),
+            "candidate_seats": candidate_seats,
             "selected_seat_ref": selected_seat_ref,
+            "selected_session_mount_id": selected_session_mount_id,
             "seat_selection_policy": self._first_string(
                 seat_runtime.get("seat_selection_policy"),
             ),

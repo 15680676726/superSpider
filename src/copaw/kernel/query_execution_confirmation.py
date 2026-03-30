@@ -94,6 +94,8 @@ def query_confirmation_request_context(request: Any) -> dict[str, object]:
         "control_thread_id",
         "user_id",
         "channel",
+        "environment_ref",
+        "work_context_id",
         "agent_id",
         "entry_source",
         "owner_scope",
@@ -182,6 +184,27 @@ def build_query_resume_request(
         value = payload.get(field)
         if value not in (None, ""):
             setattr(request, field, value)
+    environment_payload = (
+        main_brain_runtime.get("environment")
+        if isinstance(main_brain_runtime, dict)
+        else None
+    )
+    work_context_id = _first_non_empty(
+        payload.get("work_context_id"),
+        main_brain_runtime.get("work_context_id")
+        if isinstance(main_brain_runtime, dict)
+        else None,
+    )
+    environment_ref = _first_non_empty(
+        payload.get("environment_ref"),
+        environment_payload.get("ref")
+        if isinstance(environment_payload, dict)
+        else None,
+    )
+    if work_context_id is not None:
+        setattr(request, "work_context_id", work_context_id)
+    if environment_ref is not None:
+        setattr(request, "environment_ref", environment_ref)
     if main_brain_runtime is not None:
         setattr(request, "main_brain_runtime", main_brain_runtime)
         setattr(request, "_copaw_main_brain_runtime_context", main_brain_runtime)

@@ -34,6 +34,33 @@ def _mapping(value: object | None) -> dict[str, Any]:
     return {}
 
 
+def _merge_submission_payload(
+    existing: object | None,
+    incoming: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    merged = _mapping(existing)
+    payload = _mapping(incoming)
+    for key, value in payload.items():
+        if value is None:
+            continue
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized:
+                merged[key] = normalized
+            continue
+        if isinstance(value, dict):
+            nested = _merge_submission_payload(merged.get(key), value)
+            if nested:
+                merged[key] = nested
+            continue
+        if isinstance(value, (list, tuple, set)):
+            if value:
+                merged[key] = list(value)
+            continue
+        merged[key] = value
+    return merged
+
+
 def _merge_resume_state(
     verification_payload: object | None,
     *,
@@ -205,11 +232,13 @@ class HumanAssistTaskService:
         resume_checkpoint_ref: str | None = None,
         verification_anchor: str | None = None,
         block_evidence_refs: Sequence[str] | None = None,
+        continuation_context: Mapping[str, Any] | None = None,
     ) -> HumanAssistTaskRecord:
         normalized_thread_id = _string(chat_thread_id)
         if normalized_thread_id is None:
             raise ValueError("Host handoff human assist task requires a chat thread id")
         normalized_task_id = _string(task_id)
+        merged_block_evidence_refs = _string_list(block_evidence_refs)
         for existing in self._repository.list_tasks(chat_thread_id=normalized_thread_id, limit=50):
             if existing.status in self._TERMINAL_STATUSES:
                 continue
@@ -217,7 +246,19 @@ class HumanAssistTaskService:
                 continue
             if normalized_task_id is not None and existing.task_id not in {None, normalized_task_id}:
                 continue
-            return existing
+            updated = existing.model_copy(
+                update={
+                    "submission_payload": _merge_submission_payload(
+                        existing.submission_payload,
+                        continuation_context,
+                    ),
+                    "block_evidence_refs": _string_list(
+                        [*list(existing.block_evidence_refs), *merged_block_evidence_refs],
+                    ),
+                    "updated_at": _utc_now(),
+                },
+            )
+            return self._repository.upsert_task(updated)
 
         anchor = (
             _string(verification_anchor)
@@ -252,7 +293,8 @@ class HumanAssistTaskService:
                 ),
             },
             resume_checkpoint_ref=_string(resume_checkpoint_ref) or anchor,
-            block_evidence_refs=_string_list(block_evidence_refs),
+            block_evidence_refs=merged_block_evidence_refs,
+            submission_payload=_merge_submission_payload({}, continuation_context),
         )
         return self.issue_task(record)
 
@@ -271,7 +313,10 @@ class HumanAssistTaskService:
                 "status": "submitted",
                 "submission_text": _string(submission_text),
                 "submission_evidence_refs": _string_list(submission_evidence_refs),
-                "submission_payload": _mapping(submission_payload),
+                "submission_payload": _merge_submission_payload(
+                    current.submission_payload,
+                    submission_payload,
+                ),
                 "submitted_at": now,
                 "updated_at": now,
             },

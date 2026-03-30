@@ -994,3 +994,101 @@ def test_query_execution_service_resumes_approved_query_tool_confirmation(
     assert len(saved_agent.memory.deleted_ids[0]) == 1
 
 
+def test_query_execution_service_resumes_human_assist_with_seeded_work_context_and_environment(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _FakeAgent.created.clear()
+    monkeypatch.setattr(query_execution_module, "CoPawAgent", _FakeAgent)
+    monkeypatch.setattr(
+        query_execution_module,
+        "stream_printing_messages",
+        _fake_stream_printing_messages,
+    )
+    monkeypatch.setattr(
+        query_execution_module,
+        "load_config",
+        lambda: SimpleNamespace(
+            agents=SimpleNamespace(
+                running=SimpleNamespace(max_iters=1, max_input_length=512),
+            ),
+        ),
+    )
+
+    (
+        dispatcher,
+        task_repository,
+        _decision_repository,
+        _governance_control_repository,
+    ) = _build_real_kernel_dispatcher(tmp_path)
+    session_backend = _FakeSessionBackend()
+    service = KernelQueryExecutionService(
+        session_backend=session_backend,
+        capability_service=_FakeCapabilityService(),
+        kernel_dispatcher=dispatcher,
+        agent_profile_service=_FakeAgentProfileService(),
+        industry_service=_FakeIndustryService(),
+    )
+
+    resumed = asyncio.run(
+        service.resume_human_assist_task(
+            task=SimpleNamespace(
+                id="human-assist:host-handoff-1",
+                industry_instance_id="industry-v1-ops",
+                assignment_id="assignment-1",
+                task_id="task-host-handoff-1",
+                chat_thread_id="industry-chat:industry-v1-ops:execution-core",
+                title="Return host handoff",
+                required_action="Return after checkpoint:host-handoff-1 is complete.",
+                submission_text="Completed checkpoint:host-handoff-1.",
+                submission_evidence_refs=["media-analysis-1"],
+                resume_checkpoint_ref="checkpoint:host-handoff-1",
+                submission_payload={
+                    "industry_instance_id": "industry-v1-ops",
+                    "session_id": "industry-chat:industry-v1-ops:execution-core",
+                    "control_thread_id": "industry-chat:industry-v1-ops:execution-core",
+                    "channel": "console",
+                    "environment_ref": "session:console:industry:industry-v1-ops",
+                    "work_context_id": "ctx-host-handoff-1",
+                    "main_brain_runtime": {
+                        "work_context_id": "ctx-host-handoff-1",
+                        "environment_ref": "session:console:industry:industry-v1-ops",
+                        "environment_session_id": "session:console:industry:industry-v1-ops",
+                        "environment_binding_kind": "host-handoff",
+                        "environment_resume_ready": False,
+                        "recovery_mode": "handoff",
+                        "recovery_reason": "human-return",
+                        "resume_checkpoint_id": "checkpoint:host-handoff-1",
+                    },
+                },
+            ),
+        ),
+    )
+
+    assert resumed["resumed"] is True
+    assert resumed["task_id"]
+
+    resumed_task = dispatcher.lifecycle.get_task(resumed["task_id"])
+    assert resumed_task is not None
+    assert resumed_task.work_context_id == "ctx-host-handoff-1"
+    assert resumed_task.environment_ref == "session:console:industry:industry-v1-ops"
+
+    resume_task_record = task_repository.get_task(resumed["task_id"])
+    assert resume_task_record is not None
+    assert resume_task_record.work_context_id == "ctx-host-handoff-1"
+    kernel_meta = decode_kernel_task_metadata(resume_task_record.acceptance_criteria)
+    assert kernel_meta is not None
+    assert kernel_meta["payload"]["resume_kind"] == "human-assist"
+    assert kernel_meta["payload"]["request_context"]["work_context_id"] == "ctx-host-handoff-1"
+    assert (
+        kernel_meta["payload"]["request_context"]["main_brain_runtime"]["environment"]["ref"]
+        == "session:console:industry:industry-v1-ops"
+    )
+    assert (
+        kernel_meta["payload"]["request_context"]["main_brain_runtime"]["recovery"][
+            "checkpoint_id"
+        ]
+        == "checkpoint:host-handoff-1"
+    )
+
+

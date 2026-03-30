@@ -766,6 +766,17 @@ class _QueryExecutionRuntimeMixin:
             submission_payload.get("industry_instance_id"),
             task_payload.get("industry_instance_id"),
         )
+        main_brain_runtime_payload = _mapping_value(
+            submission_payload.get("main_brain_runtime"),
+        )
+        work_context_id = _first_non_empty(
+            submission_payload.get("work_context_id"),
+            main_brain_runtime_payload.get("work_context_id"),
+        )
+        environment_ref = _first_non_empty(
+            submission_payload.get("environment_ref"),
+            main_brain_runtime_payload.get("environment_ref"),
+        )
         request_context: dict[str, Any] = {
             "session_id": _first_non_empty(
                 submission_payload.get("session_id"),
@@ -801,9 +812,9 @@ class _QueryExecutionRuntimeMixin:
                 submission_payload.get("session_kind"),
                 "industry-control-thread" if chat_thread_id.startswith("industry-chat:") else None,
             ),
-            "main_brain_runtime": _mapping_value(
-                submission_payload.get("main_brain_runtime"),
-            ),
+            "work_context_id": work_context_id,
+            "environment_ref": environment_ref,
+            "main_brain_runtime": main_brain_runtime_payload,
         }
         provisional_owner_agent_id = (
             _first_non_empty(
@@ -816,6 +827,12 @@ class _QueryExecutionRuntimeMixin:
             request_context=request_context,
             owner_agent_id=provisional_owner_agent_id,
         )
+        normalized_main_brain_runtime = _mapping_value(
+            getattr(request, "_copaw_main_brain_runtime_context", None)
+            or getattr(request, "main_brain_runtime", None),
+        )
+        if normalized_main_brain_runtime:
+            request_context["main_brain_runtime"] = normalized_main_brain_runtime
         control_thread_id = _first_non_empty(request_context.get("control_thread_id"))
         if control_thread_id is not None:
             setattr(request, "control_thread_id", control_thread_id)
@@ -861,11 +878,17 @@ class _QueryExecutionRuntimeMixin:
                 KernelTask(
                     title=f"Resume human assist task {title}",
                     capability_ref="system:dispatch_query",
-                    environment_ref=f"session:{request.channel}:{request.session_id}",
+                    work_context_id=work_context_id,
+                    environment_ref=(
+                        environment_ref
+                        or f"session:{request.channel}:{request.session_id}"
+                    ),
                     owner_agent_id=owner_agent_id,
                     risk_level="auto",
                     payload={
                         "request_context": dict(request_context),
+                        "environment_ref": environment_ref,
+                        "work_context_id": work_context_id,
                         "channel": request.channel,
                         "user_id": request.user_id,
                         "session_id": request.session_id,
@@ -1085,6 +1108,9 @@ class _QueryExecutionRuntimeMixin:
             normalized = normalize_main_brain_runtime_context(value)
             if not normalized:
                 continue
+            work_context_id = _first_non_empty(normalized.get("work_context_id"))
+            if work_context_id is not None:
+                merged["work_context_id"] = work_context_id
             for section in ("intent", "environment", "recovery"):
                 payload = _mapping_value(normalized.get(section))
                 if not payload:

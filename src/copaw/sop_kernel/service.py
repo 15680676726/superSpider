@@ -277,6 +277,10 @@ class FixedSopService:
             environment_id=host_context["environment_id"],
             session_mount_id=host_context["session_mount_id"],
         )
+        host_context = self._canonicalize_host_context(
+            host_context=host_context,
+            host_preflight=host_preflight,
+        )
         host_requirement = host_context["host_requirement"]
         checks = [
             FixedSopDoctorCheck(
@@ -333,6 +337,10 @@ class FixedSopService:
         host_preflight = self._resolve_host_preflight(
             environment_id=host_context["environment_id"],
             session_mount_id=host_context["session_mount_id"],
+        )
+        host_context = self._canonicalize_host_context(
+            host_context=host_context,
+            host_preflight=host_preflight,
         )
         host_check = self._evaluate_host_preflight(
             host_preflight=host_preflight,
@@ -476,10 +484,17 @@ class FixedSopService:
                     host_companion_session = dict(detail.get("host_companion_session") or {})
                     if host_companion_session:
                         host_twin["host_companion_session"] = host_companion_session
-                    summary = dict(detail.get("host_twin_summary") or {}) or build_host_twin_summary(
+                    embedded_summary = dict(host_twin.get("host_twin_summary") or {})
+                    top_level_summary = dict(detail.get("host_twin_summary") or {})
+                    derived_summary = build_host_twin_summary(
                         host_twin,
                         host_companion_session=host_companion_session,
                     )
+                    summary = {
+                        **dict(embedded_summary or {}),
+                        **dict(derived_summary or {}),
+                        **dict(top_level_summary or {}),
+                    }
                     if summary:
                         host_twin["host_twin_summary"] = summary
                     return host_twin
@@ -492,14 +507,62 @@ class FixedSopService:
                     host_companion_session = dict(detail.get("host_companion_session") or {})
                     if host_companion_session:
                         host_twin["host_companion_session"] = host_companion_session
-                    summary = dict(detail.get("host_twin_summary") or {}) or build_host_twin_summary(
+                    embedded_summary = dict(host_twin.get("host_twin_summary") or {})
+                    top_level_summary = dict(detail.get("host_twin_summary") or {})
+                    derived_summary = build_host_twin_summary(
                         host_twin,
                         host_companion_session=host_companion_session,
                     )
+                    summary = {
+                        **dict(embedded_summary or {}),
+                        **dict(derived_summary or {}),
+                        **dict(top_level_summary or {}),
+                    }
                     if summary:
                         host_twin["host_twin_summary"] = summary
                     return host_twin
         return {}
+
+    def _canonicalize_host_context(
+        self,
+        *,
+        host_context: dict[str, Any],
+        host_preflight: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized = dict(host_context or {})
+        summary = (
+            dict(host_preflight.get("host_twin_summary"))
+            if isinstance(host_preflight.get("host_twin_summary"), dict)
+            else {}
+        )
+        coordination = (
+            dict(host_preflight.get("coordination"))
+            if isinstance(host_preflight.get("coordination"), dict)
+            else {}
+        )
+        environment_id = (
+            str(
+                summary.get("selected_seat_ref")
+                or coordination.get("selected_seat_ref")
+                or host_preflight.get("environment_id")
+                or normalized.get("environment_id")
+                or ""
+            ).strip()
+            or None
+        )
+        session_mount_id = (
+            str(
+                summary.get("selected_session_mount_id")
+                or coordination.get("selected_session_mount_id")
+                or host_preflight.get("session_mount_id")
+                or normalized.get("session_mount_id")
+                or ""
+            ).strip()
+            or None
+        )
+        normalized["environment_id"] = environment_id
+        normalized["session_mount_id"] = session_mount_id
+        return normalized
 
     def _evaluate_host_preflight(
         self,
@@ -517,7 +580,9 @@ class FixedSopService:
         scheduler_inputs = dict(host_preflight.get("scheduler_inputs") or {})
         host_twin_summary = dict(host_preflight.get("host_twin_summary") or {})
         surface_kind = str(host_requirement.get("surface_kind") or "").strip() or "desktop"
-        surface_key = "desktop_app" if surface_kind == "desktop" else "browser"
+        surface_key = (
+            "desktop_app" if surface_kind in {"desktop", "document"} else "browser"
+        )
         continuity_valid = bool(
             continuity.get("valid")
             or str(continuity.get("status") or "").strip() in {"attached", "restorable"}

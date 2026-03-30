@@ -255,17 +255,21 @@
 - workflow preview 现在已经把 host twin 作为真实 preflight consumer，而不是只看 capability/assignment 缺口：`WorkflowTemplateService` 会读取 environment detail 的 `host_twin`，对 mutating desktop/browser work 正式发出 `host-twin-continuity-invalid / host-twin-writable-surface-unavailable / host-twin-recovery-handoff-only / host-twin-active-host-blockers` 这类 launch blocker；runtime bootstrap 也已把 `environment_service` 接入 workflow service，避免只在测试 app 生效。
 - `2026-03-27` Phase 4/5 focused acceptance 已验证通过：`python -m pytest tests/environments/test_environment_registry.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py tests/app/test_runtime_center_api.py tests/app/test_workflow_templates_api.py -q` -> `95 passed`。
 - `2026-03-27` Phase 4/5 宽回归已验证通过：`python -m pytest tests/agents/test_browser_tool_evidence.py tests/routines/test_routine_service.py tests/environments/test_environment_registry.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py tests/app/test_runtime_center_api.py tests/app/test_capability_market_phase2_api.py tests/app/test_workflow_templates_api.py -q` -> `126 passed`。
-- 当前下一边界已进入成熟态深化，而不是补“让 host twin 出现”的缺口：后续重点是继续把 `Execution-Grade Host Twin` 扩到 `Full Host Digital Twin` 的 phase-next 成熟态（更广的 app-family twins、更深的 multi-seat/multi-agent coordination、更强的 live-host simulation，以及更强的 planning/launch 消费面）。
-- `2026-03-27` 补充：`Phase 6 Full Host Digital Twin` 的正式实施计划已落到 `docs/superpowers/plans/2026-03-27-phase6-full-host-digital-twin.md`（本文只引用阶段名称；不要把“计划存在”误读成“成熟态已交付”）。当前推荐执行顺序已锁定为：先补 `host_twin.app_family_twins + coordination` 派生投影，再补 Runtime Center/task-review 读面，再补 workflow preview/run/resume 与 fixed-SOP doctor/run 对同一 host truth 的消费；该计划明确保持 `Workspace Graph` 为 projection、`Host Event Bus` 为 runtime mechanism、`host twin` 为 derived projection，不新增第二真相源。
-- `2026-03-27` 补充：当前已完成的是 `Phase 6` 的“Host Twin 扩面子集”（面向 `Full Host Digital Twin` 的基线推进），并完成聚焦验收；不宣称 `Full Host Digital Twin` 成熟态已经一次性全部落地。当前正式新增/收口包括：
+- 当前 repo 定义内的 `Full Host Digital Twin` 已完成收口；本文件对它的判断统一收口到 `6.1` 的“当前已闭环 / 终态标准”，不再在历史记录里混写“下一步扩展”。
+- `2026-03-27` 补充：`Phase 6 Full Host Digital Twin` 的实施顺序与设计约束已用于本轮收口：先补 `host_twin.app_family_twins + coordination` 派生投影，再补 Runtime Center/task-review 读面，再补 workflow preview/run/resume 与 fixed-SOP doctor/run 对同一 host truth 的消费；并保持 `Workspace Graph` 为 projection、`Host Event Bus` 为 runtime mechanism、`host twin` 为 derived projection，不新增第二真相源。
+- `2026-03-27` ~ `2026-03-30` 的正式收口包括：
   - `host_twin` 已正式补齐 `app_family_twins` 与 `coordination` 派生投影，`seat_runtime` 也已带上 `status / occupancy_state / candidate_seat_refs / selected_seat_ref / seat_selection_policy / expected_release_at`。
   - `Runtime Center / task review` 不再只透传 `coordination` 原始字段，而会显式把 `recommended_scheduler_action / contention_forecast / seat_selection_policy` 进入 summary、next action 与 risk 读面。
   - workflow preview / launch / run detail / resume / cron 已统一消费 canonical host truth：`host_requirements`、`host_snapshot`、schedule `environment_ref / environment_id / session_mount_id / host_requirement` 与 cron dispatch host meta 已全部落到正式链路，不再回退成仅靠 `session:{channel}:{session_id}` 猜环境。
   - fixed SOP doctor / run / run detail 已统一消费 canonical host preflight，正式暴露并落证 `environment_id / session_mount_id / host_requirement / host_preflight`；非法 writable path 会被 doctor 阻断，并在 run 入口返回显式错误，而不是盲跑。
   - `tests/app/test_cron_executor.py` 已补入 Phase 6 验收面，用于锁住 cron 对 stored host refs / scheduler inputs 的消费契约。
-- `2026-03-29` 补充：execution-side 成熟态扩面已继续补到 canonical host truth 本身。`host_twin` 对 stale blocker / stale handoff history 的抑制现在只会在“当前 host/session 事实已恢复 clean + latest handoff event 明确进入 return-ready/return-complete”时生效，不再因为残留 recovery metadata 就把 live blocker 错误吞掉；`Runtime Center` overview/task-review 也已优先消费同一条 canonical `host_twin_summary`，不会再把 `recommended_scheduler_action=proceed` 误当阻断。
+- `2026-03-29` 补充：execution-side 的 canonical host truth 已继续补齐到正式读链。`host_twin` 对 stale blocker / stale handoff history 的抑制现在只会在“当前 host/session 事实已恢复 clean + latest handoff event 明确进入 return-ready/return-complete”时生效，不再因为残留 recovery metadata 就把 live blocker 错误吞掉；`Runtime Center` overview/task-review 也已优先消费同一条 canonical `host_twin_summary`，不会再把 `recommended_scheduler_action=proceed` 误当阻断。
 - `2026-03-29` 补充：workflow resume / cron / fixed SOP 这条 host-aware 执行链也已继续补厚。workflow run detail、resume 与 schedule meta 现在会从 live `host_twin` 回填 `host_snapshot / environment_ref / environment_id / session_mount_id / host_requirement`，fixed SOP doctor/run 也会正式阻断 `requires_human_return`、`legal_recovery.path=handoff` 及需要 `handoff/recover/retry` 的 blocker event，不再让“handoff-only 恢复路径”假装可执行。
 - `2026-03-29` 补充：workflow preview / fixed SOP doctor 对 canonical host summary 的优先级也已补齐。当 top-level 或 nested `host_twin_summary` 已明确给出 `recommended_scheduler_action=proceed|continue`、`blocked_surface_count=0` 与非 handoff 的 `legal_recovery_mode` 时，消费面会优先信任这条 canonical summary，而不是继续被 stale handoff metadata 反向卡死；workflow run/schedule 持有的 host snapshot 也会同步沿用同一条 summary 口径。
+- `2026-03-30` 补充：`Full Host Digital Twin` 在当前仓库定义内已完成最终收口。`host_twin` 现在会基于同一宿主/账号/workspace scope 派生真实 multi-seat candidate 集，统一给出 canonical `candidate_seats / selected_seat_ref / selected_session_mount_id`，并把跨 seat 的 writer contention 正式体现在 coordination / handoff 语义里；当当前 seat 已阻断但同 scope 的 alternate ready seat 可用时，canonical selected seat 会切到可继续执行的 seat，而不是继续抱着 stale seat/session 不放。
+- `2026-03-30` 补充：workflow preview / run-resume / cron / fixed-SOP 现已全部优先消费同一条 canonical selected seat/session truth。下游在 scheduler meta、run detail、host preflight 缺位或陈旧时，会统一回退到 live `host_twin_summary` 与 `multi_seat_coordination.selected_*`，不再出现 workflow、cron、fixed-SOP 各自拿不同 seat/session 的分叉。
+- `2026-03-30` 补充：phase-next smoke 已补入宿主切换闭环。`tests/app/test_phase_next_autonomy_smoke.py` 现会覆盖 host switch + reentry + replay continuity，验证 canonical host truth 切换后，workflow 与 fixed-SOP 仍沿用同一 selected seat/session，且 evidence/replay continuity 不断裂。
+- `2026-03-30` 补充：`document` 已成为一等 host-aware execution surface，而不再只是 `office_document` app-family 的隐式别名。workflow preview 现在会保留显式 `surface_kind=document` 的 host requirement；workflow run detail 会正式回传 `host_requirement / host_requirements`；fixed-SOP doctor/run 也会把 `document` 正确映射到 canonical `desktop_app` 写面，而不是误落到 browser 分支。对应 `tests/app/test_workflow_templates_api.py`、`tests/fixed_sops/test_service.py`、`tests/app/test_fixed_sop_kernel_api.py` 与 `tests/app/test_phase_next_autonomy_smoke.py` 的 document-aware 回归已通过。
 - `2026-03-29` 补充：`Runtime Center / /industry` 的 execution-side 可见化也已对齐长跑读面。`Host Twin` section 现会显式展示 `handoff owner / recovery checkpoint / verification channel / blocking-event state / mutation readiness / active app-family surfaces / trusted anchors`；`/industry` focused runtime 与 planning surface 也会带出 supervisor follow-up pressure、recommended actions、control-contract items 与 staffing pressure，不再只剩最薄摘要。
 - `2026-03-27` 补充：当前仓库在 worktree 模式下做 Phase 6 验收时，必须显式把 `PYTHONPATH` 指到 `D:\\word\\copaw\\.worktrees\\codex-phase6-host-twin\\src`；否则 `pytest` 会从主仓 `D:\\word\\copaw\\src` 导入，存在假完成/假失败风险。当前已用该导入路径复核 `copaw.__file__` 与 `FixedSopRunRequest` 字段面，确认验收到的是本 worktree 代码。
 
@@ -372,6 +376,8 @@
 - `2026-03-29` 补充：治理层对 long-run staffing truth 的拦截也已继续补严。即使最新 `active_gap` 已转成 `routing-pending`，只要仍有 pending staffing proposal 未决，dispatch admission 仍会被正式阻断；这保证了 single-industry 的“岗位补位确认”不会因为 backlog/route 重排而被静默绕过。
 - `2026-03-29` 补充：更宽的 industry 长跑回归已再次通过，当前已重新跑过 `tests/app/industry_api_parts/runtime_updates.py`、`tests/app/industry_api_parts/bootstrap_lifecycle.py`、`tests/app/industry_api_parts/retirement_chain.py` 与 `tests/industry/test_report_synthesis.py` / `tests/industry/test_seat_gap_policy.py` 的关键套件；seat staffing、report synthesis、follow-up replan 与 focused runtime 读面现阶段已形成稳定代码基线。
 - `2026-03-29` 补充：report follow-up 的 control contract 也已继续补齐。由 failed report / synthesis 生成的新 follow-up backlog 现在会保留 `control_thread_id / session_id / environment_ref / chat_writeback_channel / requested_surfaces` 等跨周期执行线索；后续即使只剩 session/control-thread 线索，governance、human-assist 与 runtime focus 仍能把 browser/desktop/document follow-up 压力接回同一条 canonical runtime chain。
+- `2026-03-30` 补充：single-industry 的 `handoff -> human_assist -> resume` 控制线程闭环已正式补齐。治理层创建的 host-handoff `HumanAssistTask` 现在会预写 `work_context_id / environment_ref / control_thread_id / requested_surfaces / recommended_scheduler_action / recovery checkpoint` 等 continuity 上下文；Runtime Center `chat/run` 提交宿主回执时会 merge 新证据而不覆盖这批隐藏上下文，resume path 也会把同一组 `work_context + environment + recovery` 继续写回 `request_context / KernelTask`，不再把恢复动作降级成脱离原链的“重新聊一次”。
+- `2026-03-30` 补充：对应真实长跑 smoke 已补齐并再次通过。当前已新跑 `tests/app/test_phase_next_autonomy_smoke.py::test_phase_next_industry_long_run_smoke_keeps_handoff_human_assist_and_replan_on_one_control_thread`，并复跑 `tests/state/test_human_assist_task_service.py tests/kernel/query_execution_environment_parts/confirmations.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_governance.py tests/app/test_runtime_human_assist_tasks_api.py tests/app/runtime_center_api_parts/overview_governance.py tests/app/industry_api_parts/runtime_updates.py tests/app/test_phase_next_autonomy_smoke.py -q` -> `111 passed`。
 - `2026-03-26` 补充：learning/runtime-center P1-P3 硬切已完成一轮正式验证，已通过
   `tests/app/test_learning_api.py`、
   `tests/app/test_runtime_center_api.py`、
@@ -472,39 +478,31 @@
 
 ---
 
-## 6. 下一步推荐施工顺序
+## 6. 当前闭环与终态标准
 
-1. 扩大 `HumanAssistTask / 共生协作任务` 回归面，补更多 state / runtime / chat / frontend smoke，确认真实宿主提交链稳定。
-2. 继续压缩残留 `GoalRecord / goal service` 叶子兼容边界，避免旧语义重新回流到主脑规划面。
-3. 深化 single-industry 真实世界覆盖，补长期自治、岗位补位与监督回流的长跑回归。
-4. 完成媒体/记忆闭环剩余接线，把 `analysis -> writeback -> strategy -> execution` 做成稳定产品主链。
-5. 拆分过重的行业层与前端运行中心页面，降低后续维护认知密度。
-6. 继续扩大 hard-cut 回归面，优先跑更大批量的 industry / runtime 聚合测试与 live smoke。
+### 6.1 四项终态硬清单（`2026-03-30`）
 
-### 6.1 长期自治成熟态硬清单（`2026-03-29`）
+1. `Full Host Digital Twin`
+   - 当前已闭环：`Seat Runtime / Workspace Graph / Host Event Bus / host_twin` 已成为正式运行边界；`runtime query / workflow preview-run-resume / cron / fixed-SOP / Runtime Center` 已统一优先消费 canonical `host_twin_summary`；`host_twin` 也已正式派生 multi-seat `candidate_seats / selected_seat_ref / selected_session_mount_id`，并在同 scope alternate ready seat 可用时切换 canonical host truth。`browser / desktop / document` 三类执行位现都已进入同一条 host-aware 消费链，workflow run detail 与 fixed-SOP run detail 也会显式带出 `host_requirement`。
+   - 终态标准：所有执行入口都只认一套 canonical `host_twin` 真相；`workflow / cron / fixed-SOP / Runtime Center / industry runtime` 对 `selected_seat_ref / selected_session_mount_id / host_requirement / legal_recovery` 使用同一宿主口径；多 seat / 多 agent 并发时系统能稳定判定 writer ownership、handoff、recovery、resume 与 host switch；browser / desktop / document / app-family twins 都纳入同一宿主真相；并有长时间 live smoke 证明切换、重入、回放和证据连续性不会断。
+2. `single-industry` 真实世界覆盖
+   - 当前已闭环：`strategy -> lane -> backlog -> cycle -> assignment -> report -> synthesis/replan` 已成正式主链；failed-report follow-up 已能继承 `source_report_ids / supervisor continuity / control_thread / session / environment / recommended_scheduler_action`，并在 focused runtime 中优先回到当前执行焦点，`replan` 也不会在 cycle rollover 后静默丢失。治理层创建的 host-handoff `HumanAssistTask` 现在也会继承同一条 `work_context / environment / recovery / requested_surfaces` continuity，上游宿主回执与下游 resume 会继续沿着同一控制线程和同一恢复上下文闭环，而不再掉出原行业主链。
+   - 终态标准：单个行业实例能稳定连续跑多个周期；`staffing + handoff + human assist + report + synthesis + replan` 能形成长期闭环；supervisor / manager / researcher / operator 的职责切换和协作关系在长跑里不掉线；browser / desktop / document 执行位能接入同一行业闭环；报告、证据、决策和重规划都能回流到同一主链，并有真实世界长跑 smoke 证明其稳定性。
+3. 主脑 cockpit / `Unified Runtime Chain`
+   - 当前已闭环：`Runtime Center / /industry` 已把 `carrier / strategy / lanes / backlog / cycle / assignment / report / environment / evidence / decision / patch` 补成同一条 `Unified Runtime Chain` 读面；`/runtime-center/industry/{instance_id}` 已支持 `focus_kind + focus_id` drill-down，`/runtime-center/reports` 也已支持按 `industry / assignment / lane / cycle / needs_followup / processed` 过滤。
+   - 终态标准：前台不是 detail 堆叠页，而是统一运行中心；上述核心对象都能在一个驾驶舱里被看见、被关联、被追踪；驾驶舱不只展示结果，还能承载治理、调度、恢复、证据追踪与 patch/decision 闭环；主脑对象、执行对象、证据对象之间的关系前台可直接看清；重要运行真相不再藏在日志、内部状态或零散 detail 里，也不再出现第二套平行执行器。
+4. 宽回归与 `live smoke`
+   - 当前已闭环：关键 `industry / runtime / workflow / fixed-SOP / host-aware` 主链已进入聚合回归；phase-next smoke 已覆盖 `host recovery reentry / schedule pause-resume / human-assist resume / shared work_context_id / evidence-decision-patch continuity`，对应 `tests/app/test_phase_next_autonomy_smoke.py`、`tests/app/test_runtime_human_assist_tasks_api.py`、`tests/app/runtime_center_api_parts/overview_governance.py` 与 `tests/app/runtime_center_api_parts/detail_environment.py` 的聚合回归已再次通过。
+   - 终态标准：关键主链都有稳定宽回归，而不是只靠局部单测；存在长时间连续 smoke，覆盖恢复点、重入、宿主切换、handoff、调度恢复、证据回放；多 agent / 多 cycle / 多 host / 多执行位组合场景能稳定通过；回归能锁住关键合同漂移；smoke 本身成为成熟度门槛，而不是开发时顺手跑一遍的附属检查。
 
-1. execution-side 宿主成熟态：`[基线已验收到 Execution-Grade Host Twin；当前 repo 定义内的 host-truth 收口已完成；phase-next=Full Host Digital Twin 继续扩面]`
-   - 现状：`Seat Runtime / Workspace Graph / Host Event Bus / host_twin` 已是正式运行边界；runtime query / workflow preview-run-resume / cron / fixed-SOP / Runtime Center 现统一优先消费显式 canonical `host_twin_summary`，只有在 summary 缺位时才回退 raw blocker/handoff metadata，不再把 stale handoff/blocker history 误判成 live 阻断。
-   - 下一阶段扩面：更多 `app_family_twins`、更深的 multi-seat/multi-agent coordination，以及更长时间的 live-host simulation / companion-session smoke。
-2. single-industry 真实世界覆盖：`[当前 repo 定义内的长跑 continuity 收口已完成；phase-next=真实世界扩面 + 更宽回归/live smoke]`
-   - 现状：`strategy -> lane -> backlog -> cycle -> assignment -> report -> synthesis/replan` 已成正式主链；failed-report follow-up 现在会累积 `source_report_ids`、在缺少原 backlog link 时继续保留 supervisor continuity、并把 `control_thread/session/environment/recommended_scheduler_action` 持续带入 runtime replan/focus 读面，`replan` 也不会在 cycle rollover 后静默丢失。
-   - 下一阶段扩面：更长周期、更高并发、更多 supervisor/handoff/staffing 组合与跨 vertical 的真实世界长跑 smoke。
-3. 媒体/记忆闭环：`[当前 repo 定义内的 continuity 收口已完成；phase-next=更宽 ingestion/retrieval/writeback 回归与并发压力]`
-   - 现状：`analysis -> memory recall -> strategy/execution` 已补上 `work_context_id` 优先读链；chat writeback retain 现使用 scope-aware chunk id，跨 `work_context` 的同一 `source_ref` 不再互相覆盖；recall 对 `work_context` scope 的优先级和 strict fallback 已补严，report/work-context 路由也会把同一 continuity key 显式回给前台。
-   - 下一阶段扩面：更大范围的 live ingestion/retrieval/writeback 组合 smoke，以及更重的多线程共享 work-context 压力回归。
-4. 主脑 cockpit / Unified Runtime Chain：`[当前 repo 定义内的统一运行中心 read surface 已收口；phase-next=治理写链与更大 live smoke]`
-   - 现状：`Runtime Center / /industry` 现已把 `carrier / strategy / lanes / backlog / cycle / assignment / report / environment / evidence / decision / patch` 补成同一条 `Unified Runtime Chain` 读面；`/runtime-center/industry/{instance_id}` 已支持 `focus_kind + focus_id` drill-down，`/runtime-center/reports` 也已支持按 `industry / assignment / lane / cycle / needs_followup / processed` 过滤，不再只剩 detail 卡堆叠。
-   - 下一阶段扩面：如后续继续把 cockpit 从聚合读面推进到更多治理写面或独立 surface，应继续经 `MainBrainOrchestrator` 收口，不另造第二执行器。
-5. Goal 叶子兼容边界：`[已清零到显式 leaf dispatch family]`
-   - 现状：公开 `/goals` frontdoor、公开 `GET /goals/{goal_id}`、retired dispatch alias 与旧公共 `dispatch_goal(...)` 名称都已退役；当前只剩显式 `compile_goal_dispatch / dispatch_goal_execute_now / dispatch_goal_background / dispatch_goal_deferred_background` 这组 leaf dispatch family，prediction 侧只保留启动期 retired recommendation 清理，已不再构成运行期 compat 分支。
-6. hard-cut 全量收口：`[合同硬切已锁住基线；phase-next=更宽回归 + live smoke]`
-   - 现状：retired frontdoor、legacy goal alias、runtime-center 写面与治理壳的关键合同已锁住，并已补到更宽的 industry/runtime/workflow/fixed-SOP 聚合回归。
-   - 下一阶段扩面：如继续补 live smoke，属于更大阶段的成熟态验证，不再是当前这张尾巴清单里的已知漏项。
-- `2026-03-29` 补充：phase-next smoke 现已继续覆盖 `host recovery reentry / schedule pause-resume / human-assist resume / shared work_context_id / evidence-decision-patch continuity`。对应 `tests/app/test_phase_next_autonomy_smoke.py`、`tests/app/test_runtime_human_assist_tasks_api.py`、`tests/app/runtime_center_api_parts/overview_governance.py` 与 `tests/app/runtime_center_api_parts/detail_environment.py` 的聚合回归已再次通过。
-7. 重模块继续拆分：`[持续工程 / 非当前尾巴清单阻断项]`
-   - 现状：`/industry` planning surface、Chat transport media、Runtime Center environment section 等已开始拆成更小读面组件；Chat runtime derivation、human-assist presentation、transport request assembly 与 industry page focus/work-context presenter 也已正式下沉到独立 helper，不再继续堆回页级组件。
-   - 下一阶段扩面：行业层超重 service、Runtime Center/Chat 仍有重文件需要继续下沉与切片；这属于持续治理，不再是当前闭环验收的挂账尾巴。
-- `2026-03-29` 补充：重模块拆分本轮又完成一轮正式下沉。`runtime_center_routes_core.py` 已抽出共享 list/detail query helper；Chat 侧现已继续拆出 `chatRuntimePresentation / chatHumanAssistPresentation / runtimeTransportRequest`，行业页也已补出共享 `industryPagePresentation`；这些派生读逻辑不再继续堆回 `Chat/index.tsx` 与页级路由主文件里。
+### 6.2 其他已收口 / 持续工程项
+
+1. Goal 叶子兼容边界：`[已清零到显式 leaf dispatch family]`
+   - 当前已闭环：公开 `/goals` frontdoor、公开 `GET /goals/{goal_id}`、retired dispatch alias 与旧公共 `dispatch_goal(...)` 名称都已退役；当前只剩显式 `compile_goal_dispatch / dispatch_goal_execute_now / dispatch_goal_background / dispatch_goal_deferred_background` 这组 leaf dispatch family，prediction 侧只保留启动期 retired recommendation 清理，已不再构成运行期 compat 分支。
+2. hard-cut 全量收口：`[合同硬切已锁住基线]`
+   - 当前已闭环：retired frontdoor、legacy goal alias、runtime-center 写面与治理壳的关键合同已锁住，并已补到更宽的 `industry / runtime / workflow / fixed-SOP` 聚合回归。
+3. 重模块继续拆分：`[持续工程，不纳入前述四项终态判定]`
+   - 当前状态：`/industry` planning surface、Chat transport media、Runtime Center environment section 等已开始拆成更小读面组件；Chat runtime derivation、human-assist presentation、transport request assembly 与 industry page focus/work-context presenter 也已正式下沉到独立 helper；`runtime_center_routes_core.py` 已抽出共享 list/detail query helper，Chat 侧也已继续拆出 `chatRuntimePresentation / chatHumanAssistPresentation / runtimeTransportRequest`，行业页已补出共享 `industryPagePresentation`。
 
 ---
 

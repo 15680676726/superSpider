@@ -341,6 +341,12 @@ def build_host_twin_summary(
         multi_seat_coordination.get("selected_seat_ref"),
         coordination.get("selected_seat_ref"),
     )
+    selected_session_mount_id = first_non_empty(
+        embedded_summary.get("selected_session_mount_id"),
+        multi_seat_coordination.get("selected_session_mount_id"),
+        coordination.get("selected_session_mount_id"),
+        host_twin.get("session_mount_id"),
+    )
     seat_selection_policy = first_non_empty(
         multi_seat_coordination.get("seat_selection_policy"),
         coordination.get("seat_selection_policy"),
@@ -430,6 +436,7 @@ def build_host_twin_summary(
             ownership.get("seat_owner_ref"),
         ),
         "selected_seat_ref": selected_seat_ref,
+        "selected_session_mount_id": selected_session_mount_id,
         "seat_selection_policy": seat_selection_policy,
         "recommended_scheduler_action": first_non_empty(
             embedded_summary.get("recommended_scheduler_action"),
@@ -460,6 +467,7 @@ def build_host_twin_summary(
             "seat_count": seat_count_value,
             "candidate_seat_refs": candidate_seat_refs,
             "selected_seat_ref": selected_seat_ref,
+            "selected_session_mount_id": selected_session_mount_id,
             "seat_selection_policy": seat_selection_policy,
             "occupancy_state": first_non_empty(
                 multi_seat_coordination.get("occupancy_state"),

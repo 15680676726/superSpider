@@ -68,6 +68,7 @@ def normalize_main_brain_runtime_context(
         recovery_payload = value.get("recovery")
         normalized = _compact_mapping(
             {
+                "work_context_id": _first_non_empty(value.get("work_context_id")),
                 "intent": {
                     "source_kind": _first_non_empty(
                         intent_payload.get("source_kind")
@@ -154,6 +155,7 @@ def normalize_main_brain_runtime_context(
         return normalized or None
     normalized = _compact_mapping(
         {
+            "work_context_id": _first_non_empty(value.get("work_context_id")),
             "intent": {
                 "source_kind": _first_non_empty(value.get("source_intent_kind")),
                 "kind": _first_non_empty(value.get("execution_intent")),

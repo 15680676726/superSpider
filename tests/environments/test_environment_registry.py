@@ -2501,3 +2501,177 @@ def test_host_twin_summary_treats_return_ready_as_non_blocking_even_if_stale_han
     assert summary["recommended_scheduler_action"] == "proceed"
     assert summary["blocked_surface_count"] == 0
     assert summary["legal_recovery_mode"] == "resume-environment"
+
+
+def test_host_twin_multi_seat_selects_alternate_ready_seat_for_same_owner(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    blocked_seat = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-phase-next-a",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={
+            "active_window_ref": "window:excel:blocked",
+            "window_scope": "window:excel:blocked",
+            "process_id": 4242,
+        },
+        metadata={
+            "host_mode": "local-managed",
+            "lease_class": "exclusive-writer",
+            "access_mode": "desktop-app",
+            "session_scope": "desktop-user-session",
+            "workspace_id": "workspace-main",
+            "workspace_scope": "task:task-1",
+            "account_scope_ref": "windows:user:alice",
+            "app_identity": "excel",
+            "app_contract_status": "verified-writer",
+            "writer_lock_scope": "workbook:weekly-report",
+            "handoff_state": "active",
+            "handoff_reason": "captcha-required",
+            "handoff_owner_ref": "human-operator:alice",
+            "pending_handoff_summary": "operator is resolving captcha",
+            "current_gap_or_blocker": "writer path is waiting for human return",
+            "active_surface_mix": ["desktop", "document"],
+        },
+    )
+    alternate_seat = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-phase-next-b",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={
+            "active_window_ref": "window:excel:ready",
+            "window_scope": "window:excel:ready",
+            "process_id": 4343,
+        },
+        metadata={
+            "host_mode": "local-managed",
+            "lease_class": "exclusive-writer",
+            "access_mode": "desktop-app",
+            "session_scope": "desktop-user-session",
+            "workspace_id": "workspace-main",
+            "workspace_scope": "task:task-1",
+            "account_scope_ref": "windows:user:alice",
+            "app_identity": "excel",
+            "app_contract_status": "verified-writer",
+            "writer_lock_scope": "workbook:weekly-report",
+            "handoff_state": "agent-attached",
+            "active_surface_mix": ["desktop", "document"],
+        },
+    )
+
+    detail = service.get_environment_detail(blocked_seat.environment_id, limit=20)
+
+    assert detail is not None
+    assert sorted(detail["seat_runtime"]["candidate_seat_refs"]) == sorted(
+        [blocked_seat.environment_id, alternate_seat.environment_id],
+    )
+    assert detail["seat_runtime"]["selected_seat_ref"] == alternate_seat.environment_id
+    assert detail["seat_runtime"]["selected_session_mount_id"] == alternate_seat.id
+    assert detail["host_twin"]["coordination"]["selected_seat_ref"] == (
+        alternate_seat.environment_id
+    )
+    assert detail["host_twin"]["coordination"]["selected_session_mount_id"] == (
+        alternate_seat.id
+    )
+    assert detail["host_twin_summary"]["seat_count"] == 2
+    assert sorted(detail["host_twin_summary"]["candidate_seat_refs"]) == sorted(
+        [blocked_seat.environment_id, alternate_seat.environment_id],
+    )
+    assert detail["host_twin_summary"]["selected_seat_ref"] == alternate_seat.environment_id
+    assert detail["host_twin_summary"]["selected_session_mount_id"] == alternate_seat.id
+
+
+def test_host_twin_multi_agent_contention_blocks_shared_writer_scope_across_seats(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    seat_a = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-phase-next-contention-a",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={
+            "active_window_ref": "window:excel:a",
+            "window_scope": "window:excel:a",
+            "process_id": 4242,
+        },
+        metadata={
+            "host_mode": "local-managed",
+            "lease_class": "exclusive-writer",
+            "access_mode": "desktop-app",
+            "session_scope": "desktop-user-session",
+            "workspace_id": "workspace-main",
+            "workspace_scope": "task:task-1",
+            "account_scope_ref": "windows:user:alice",
+            "app_identity": "excel",
+            "app_contract_status": "verified-writer",
+            "writer_lock_scope": "workbook:weekly-report",
+            "handoff_state": "agent-attached",
+            "active_surface_mix": ["desktop", "document"],
+        },
+    )
+    seat_b = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-phase-next-contention-b",
+        user_id="alice",
+        owner="worker-2",
+        ttl_seconds=60,
+        handle={
+            "active_window_ref": "window:excel:b",
+            "window_scope": "window:excel:b",
+            "process_id": 4343,
+        },
+        metadata={
+            "host_mode": "local-managed",
+            "lease_class": "exclusive-writer",
+            "access_mode": "desktop-app",
+            "session_scope": "desktop-user-session",
+            "workspace_id": "workspace-main",
+            "workspace_scope": "task:task-1",
+            "account_scope_ref": "windows:user:alice",
+            "app_identity": "excel",
+            "app_contract_status": "verified-writer",
+            "writer_lock_scope": "workbook:weekly-report",
+            "handoff_state": "agent-attached",
+            "active_surface_mix": ["desktop", "document"],
+        },
+    )
+
+    detail = service.get_environment_detail(seat_a.environment_id, limit=20)
+
+    assert detail is not None
+    assert sorted(detail["host_twin_summary"]["candidate_seat_refs"]) == sorted(
+        [seat_a.environment_id, seat_b.environment_id],
+    )
+    assert detail["host_twin_summary"]["seat_count"] == 2
+    assert detail["host_twin"]["coordination"]["recommended_scheduler_action"] == "handoff"
+    assert detail["host_twin"]["coordination"]["contention_forecast"]["severity"] == (
+        "blocked"
+    )
+    assert "worker-2" in str(
+        detail["host_twin"]["coordination"]["contention_forecast"]["reason"],
+    )

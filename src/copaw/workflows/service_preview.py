@@ -12,6 +12,7 @@ class _WorkflowServicePreviewMixin:
     _HOST_TWIN_SURFACE_BY_CAPABILITY = {
         "mcp:desktop_windows": "desktop",
         "tool:browser_use": "browser",
+        "system:document_bridge_runtime": "document",
     }
     _HOST_TWIN_VALID_CONTINUITY_STATUSES = {
         "attached",
@@ -108,8 +109,13 @@ class _WorkflowServicePreviewMixin:
             evidence=evidence,
             host_snapshot=host_snapshot,
         )
+        run_payload = run.model_dump(mode="json")
+        host_requirements = [dict(item) for item in list(preview.host_requirements or [])]
+        if host_requirements:
+            run_payload["host_requirements"] = host_requirements
+            run_payload["host_requirement"] = dict(host_requirements[0])
         return WorkflowRunDetail(
-            run=run.model_dump(mode="json"),
+            run=run_payload,
             template=template.model_dump(mode="json"),
             preview=preview,
             diagnosis=diagnosis,
@@ -416,10 +422,17 @@ class _WorkflowServicePreviewMixin:
         snapshot = dict(host_twin) if host_twin else {}
         if host_companion_session:
             snapshot["host_companion_session"] = dict(host_companion_session)
-        summary = self._mapping(detail.get("host_twin_summary")) or build_host_twin_summary(
+        embedded_summary = self._mapping(host_twin.get("host_twin_summary"))
+        top_level_summary = self._mapping(detail.get("host_twin_summary"))
+        derived_summary = build_host_twin_summary(
             host_twin,
             host_companion_session=host_companion_session,
         )
+        summary = {
+            **dict(embedded_summary or {}),
+            **dict(derived_summary or {}),
+            **dict(top_level_summary or {}),
+        }
         if summary:
             snapshot["host_twin_summary"] = summary
         return snapshot
@@ -441,17 +454,23 @@ class _WorkflowServicePreviewMixin:
         metadata = dict(run.metadata or {})
         host_snapshot = self._mapping(metadata.get("host_snapshot"))
         scheduler_inputs = self._mapping(host_snapshot.get("scheduler_inputs"))
+        host_twin_summary = self._mapping(host_snapshot.get("host_twin_summary"))
+        coordination = self._mapping(host_snapshot.get("coordination"))
         return WorkflowPreviewRequest(
             owner_scope=preview.owner_scope or run.owner_scope,
             industry_instance_id=preview.industry_instance_id or run.industry_instance_id,
             owner_agent_id=run.owner_agent_id,
             environment_id=(
                 _string(scheduler_inputs.get("environment_id"))
+                or _string(host_twin_summary.get("selected_seat_ref"))
+                or _string(coordination.get("selected_seat_ref"))
                 or _string(host_snapshot.get("environment_id"))
                 or _string(metadata.get("environment_id"))
             ),
             session_mount_id=(
                 _string(scheduler_inputs.get("session_mount_id"))
+                or _string(host_twin_summary.get("selected_session_mount_id"))
+                or _string(coordination.get("selected_session_mount_id"))
                 or _string(host_snapshot.get("session_mount_id"))
                 or _string(metadata.get("session_mount_id"))
             ),
@@ -494,19 +513,19 @@ class _WorkflowServicePreviewMixin:
             preflight.get("surface_kind"),
             self._infer_host_twin_surface_kind(step.required_capability_ids),
         )
-        if surface_kind not in {"browser", "desktop"}:
+        if surface_kind not in {"browser", "desktop", "document"}:
             return None
         explicit_mutating = preflight.get("mutating")
         mutating = (
             bool(explicit_mutating)
             if isinstance(explicit_mutating, bool)
-            else surface_kind == "desktop"
+            else surface_kind in {"desktop", "document"}
         )
         app_family = self._first_string(preflight.get("app_family"))
         if app_family is None:
             if surface_kind == "browser":
                 app_family = "browser_backoffice"
-            elif mutating:
+            elif surface_kind == "document" or mutating:
                 app_family = "office_document"
             else:
                 app_family = "desktop_specialized"
@@ -539,8 +558,9 @@ class _WorkflowServicePreviewMixin:
         surface_kind: str,
         workspace_surfaces: dict[str, Any],
     ) -> dict[str, Any]:
-        surface = self._mapping(workspace_surfaces.get(surface_kind))
-        if surface_kind == "desktop":
+        surface_lookup = "desktop" if surface_kind == "document" else surface_kind
+        surface = self._mapping(workspace_surfaces.get(surface_lookup))
+        if surface_kind in {"desktop", "document"}:
             return self._mapping(surface.get("active_window"))
         if surface_kind == "browser":
             return self._mapping(surface.get("active_tab"))
@@ -594,18 +614,17 @@ class _WorkflowServicePreviewMixin:
         host_twin_scheduler = self._mapping(host_twin.get("scheduler_inputs"))
         host_twin_execution_ready = self._mapping(host_twin.get("execution_mutation_ready"))
         host_twin_coordination = self._mapping(host_twin.get("coordination"))
-        explicit_host_twin_summary = (
-            self._mapping(detail.get("host_twin_summary"))
-            or self._mapping(host_twin.get("host_twin_summary"))
+        embedded_host_twin_summary = self._mapping(host_twin.get("host_twin_summary"))
+        top_level_host_twin_summary = self._mapping(detail.get("host_twin_summary"))
+        derived_host_twin_summary = build_host_twin_summary(
+            host_twin,
+            host_companion_session=self._mapping(detail.get("host_companion_session")),
         )
-        host_twin_summary = (
-            explicit_host_twin_summary
-            or build_host_twin_summary(
-                host_twin,
-                host_companion_session=self._mapping(detail.get("host_companion_session")),
-            )
-            or {}
-        )
+        host_twin_summary = {
+            **dict(embedded_host_twin_summary or {}),
+            **dict(derived_host_twin_summary or {}),
+            **dict(top_level_host_twin_summary or {}),
+        }
         host_twin_blocked_surfaces = [
             self._mapping(item)
             for item in list(host_twin.get("blocked_surfaces") or [])
@@ -655,7 +674,9 @@ class _WorkflowServicePreviewMixin:
                     for item in host_twin_blocked_surfaces
                     if self._first_string(item.get("surface_kind")) in {
                         surface_kind,
-                        "desktop_app" if surface_kind == "desktop" else surface_kind,
+                        "desktop_app"
+                        if surface_kind in {"desktop", "document"}
+                        else surface_kind,
                     }
                 ),
                 {},
@@ -687,7 +708,11 @@ class _WorkflowServicePreviewMixin:
 
             if mutating_step_ids:
                 access_mode = self._first_string(host_contract.get("access_mode"))
-                execution_key = "desktop_app" if surface_kind == "desktop" else "browser"
+                execution_key = (
+                    "desktop_app"
+                    if surface_kind in {"desktop", "document"}
+                    else "browser"
+                )
                 writable_surface_available = host_twin_execution_ready.get(execution_key)
                 if not isinstance(writable_surface_available, bool):
                     active_ref = self._first_string(
@@ -700,7 +725,7 @@ class _WorkflowServicePreviewMixin:
                     writable_surface_available = (
                         access_mode == "writer" and active_ref is not None
                     )
-                    if surface_kind == "desktop":
+                    if surface_kind in {"desktop", "document"}:
                         writable_surface_available = (
                             writable_surface_available and writer_lock_scope is not None
                         )

@@ -320,6 +320,64 @@ def test_fixed_sop_run_detail_exposes_host_preflight_snapshot(tmp_path) -> None:
     ] == "continue"
 
 
+def test_fixed_sop_run_api_uses_document_surface_host_preflight(tmp_path) -> None:
+    detail = _host_detail(recommended_scheduler_action="continue")
+    detail["host_twin"]["coordination"]["recommended_scheduler_action"] = None
+    detail["host_twin"]["scheduler_inputs"]["recommended_scheduler_action"] = None
+    detail["host_twin"]["host_twin_summary"] = {}
+    client = TestClient(
+        _build_app(
+            tmp_path,
+            environment_service=_FakeEnvironmentService(
+                detail,
+            ),
+        )
+    )
+    response = client.post(
+        "/fixed-sops/bindings",
+        json={
+            "template_id": "fixed-sop-http-routine-bridge",
+            "binding_name": "Document Surface SOP",
+            "status": "active",
+            "metadata": {
+                "environment_id": "env-desktop-1",
+                "session_mount_id": "session-desktop-1",
+                "host_requirement": {
+                    "surface_kind": "document",
+                    "app_family": "office_document",
+                    "mutating": True,
+                },
+            },
+        },
+    )
+    assert response.status_code == 201
+    binding_id = response.json()["binding"]["binding_id"]
+
+    doctor = client.post(f"/fixed-sops/bindings/{binding_id}/doctor")
+
+    assert doctor.status_code == 200
+    doctor_payload = doctor.json()
+    assert doctor_payload["status"] == "ready"
+    assert doctor_payload["host_requirement"]["surface_kind"] == "document"
+
+    run = client.post(
+        f"/fixed-sops/bindings/{binding_id}/run",
+        json={
+            "environment_id": "env-desktop-1",
+            "session_mount_id": "session-desktop-1",
+        },
+    )
+
+    assert run.status_code == 200
+    workflow_run_id = run.json()["workflow_run_id"]
+    detail = client.get(f"/fixed-sops/runs/{workflow_run_id}")
+
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    assert detail_payload["host_requirement"]["surface_kind"] == "document"
+    assert detail_payload["host_requirement"]["app_family"] == "office_document"
+
+
 def test_fixed_sop_doctor_and_run_api_block_handoff_only_recovery_state(tmp_path) -> None:
     client = TestClient(
         _build_app(
@@ -408,3 +466,46 @@ def test_fixed_sop_api_ignores_stale_handoff_metadata_when_canonical_summary_is_
     )
 
     assert run.status_code == 200
+
+
+def test_fixed_sop_run_prefers_canonical_selected_seat_from_host_preflight(tmp_path) -> None:
+    detail = _host_detail(recommended_scheduler_action="continue")
+    detail["host_twin"]["coordination"].update(
+        {
+            "candidate_seat_refs": ["env-desktop-1", "env-desktop-2"],
+            "selected_seat_ref": "env-desktop-2",
+            "selected_session_mount_id": "session-desktop-2",
+            "seat_selection_policy": "prefer-ready-seat",
+        },
+    )
+    detail["host_twin"]["host_twin_summary"] = {
+        **dict(detail["host_twin"].get("host_twin_summary") or {}),
+        "seat_count": 2,
+        "candidate_seat_refs": ["env-desktop-1", "env-desktop-2"],
+        "selected_seat_ref": "env-desktop-2",
+        "selected_session_mount_id": "session-desktop-2",
+        "seat_selection_policy": "prefer-ready-seat",
+    }
+    client = TestClient(
+        _build_app(
+            tmp_path,
+            environment_service=_FakeEnvironmentService(detail),
+        )
+    )
+    binding_id = _create_host_binding(client)
+
+    run = client.post(
+        f"/fixed-sops/bindings/{binding_id}/run",
+        json={
+            "environment_id": "env-desktop-1",
+            "session_mount_id": "session-desktop-1",
+        },
+    )
+
+    assert run.status_code == 200
+    run_payload = run.json()
+    detail_response = client.get(f"/fixed-sops/runs/{run_payload['workflow_run_id']}")
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["environment_id"] == "env-desktop-2"
+    assert detail_payload["session_mount_id"] == "session-desktop-2"

@@ -354,6 +354,54 @@ def test_fixed_sop_service_records_host_snapshot_in_run_and_evidence(tmp_path) -
     ] == "continue"
 
 
+def test_fixed_sop_service_uses_document_surface_host_preflight(tmp_path) -> None:
+    detail = _host_detail(recommended_scheduler_action="continue")
+    detail["host_twin"]["coordination"]["recommended_scheduler_action"] = None
+    detail["host_twin"]["scheduler_inputs"]["recommended_scheduler_action"] = None
+    detail["host_twin"]["host_twin_summary"] = {}
+    service = _build_service(
+        tmp_path,
+        environment_service=_FakeEnvironmentService(
+            detail,
+        ),
+    )
+    binding = service.create_binding(
+        FixedSopBindingCreateRequest(
+            template_id="fixed-sop-http-routine-bridge",
+            binding_name="Document Surface SOP",
+            status="active",
+            metadata={
+                "environment_id": "env-desktop-1",
+                "session_mount_id": "session-desktop-1",
+                "host_requirement": {
+                    "surface_kind": "document",
+                    "app_family": "office_document",
+                    "mutating": True,
+                },
+            },
+        )
+    )
+
+    doctor = service.run_doctor(binding.binding.binding_id)
+
+    assert doctor.status == "ready"
+    assert doctor.host_requirement["surface_kind"] == "document"
+
+    response = asyncio.run(
+        service.run_binding(
+            binding.binding.binding_id,
+            FixedSopRunRequest(
+                environment_id="env-desktop-1",
+                session_mount_id="session-desktop-1",
+            ),
+        )
+    )
+
+    detail = service.get_run(response.workflow_run_id or "")
+    assert detail.host_requirement["surface_kind"] == "document"
+    assert detail.host_requirement["app_family"] == "office_document"
+
+
 def test_fixed_sop_service_blocks_mutating_run_when_host_recovery_requires_human_return(
     tmp_path,
 ) -> None:
@@ -463,3 +511,63 @@ def test_fixed_sop_service_ignores_stale_handoff_metadata_when_canonical_summary
         )
     )
     assert response.status == "success"
+
+
+def test_fixed_sop_service_uses_canonical_selected_seat_from_host_preflight(
+    tmp_path,
+) -> None:
+    detail = _host_detail(recommended_scheduler_action="continue")
+    detail["host_twin"]["coordination"].update(
+        {
+            "candidate_seat_refs": ["env-desktop-1", "env-desktop-2"],
+            "selected_seat_ref": "env-desktop-2",
+            "selected_session_mount_id": "session-desktop-2",
+            "seat_selection_policy": "prefer-ready-seat",
+        },
+    )
+    detail["host_twin"]["host_twin_summary"] = {
+        **dict(detail["host_twin"].get("host_twin_summary") or {}),
+        "seat_count": 2,
+        "candidate_seat_refs": ["env-desktop-1", "env-desktop-2"],
+        "selected_seat_ref": "env-desktop-2",
+        "selected_session_mount_id": "session-desktop-2",
+        "seat_selection_policy": "prefer-ready-seat",
+    }
+    service = _build_service(
+        tmp_path,
+        environment_service=_FakeEnvironmentService(detail),
+    )
+    binding = service.create_binding(
+        FixedSopBindingCreateRequest(
+            template_id="fixed-sop-http-routine-bridge",
+            binding_name="Canonical Seat SOP",
+            status="active",
+            metadata={
+                "environment_id": "env-desktop-1",
+                "session_mount_id": "session-desktop-1",
+                "host_requirement": {
+                    "surface_kind": "desktop",
+                    "app_family": "office_document",
+                    "mutating": True,
+                },
+            },
+        )
+    )
+
+    response = asyncio.run(
+        service.run_binding(
+            binding.binding.binding_id,
+            FixedSopRunRequest(
+                environment_id="env-desktop-1",
+                session_mount_id="session-desktop-1",
+            ),
+        )
+    )
+
+    run = service.get_run(response.workflow_run_id or "")
+    assert run.environment_id == "env-desktop-2"
+    assert run.session_mount_id == "session-desktop-2"
+    evidence = service._evidence_ledger.list_by_task(response.workflow_run_id or "")
+    assert len(evidence) == 1
+    assert evidence[0].environment_ref == "env-desktop-2"
+    assert evidence[0].metadata["session_mount_id"] == "session-desktop-2"

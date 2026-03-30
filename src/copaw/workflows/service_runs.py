@@ -158,6 +158,15 @@ class _WorkflowServiceRunMixin:
         )
         preview = self._build_preview(template, preview_request)
         host_snapshot = self._resolve_host_snapshot_from_request(preview_request)
+        (
+            resolved_environment_ref,
+            resolved_environment_id,
+            resolved_session_mount_id,
+        ) = self._resolve_host_identity_from_snapshot(
+            host_snapshot=host_snapshot,
+            fallback_environment_id=_string(payload.environment_id),
+            fallback_session_mount_id=_string(payload.session_mount_id),
+        )
         if not preview.can_launch:
             raise ValueError(self._summarize_launch_blockers(preview.launch_blockers))
         step_execution_seed = [
@@ -193,8 +202,9 @@ class _WorkflowServiceRunMixin:
             metadata={
                 "launch_mode": "execute" if payload.execute else "plan-only",
                 "preset_id": _string(payload.preset_id),
-                "environment_id": _string(payload.environment_id),
-                "session_mount_id": _string(payload.session_mount_id),
+                "environment_ref": resolved_environment_ref,
+                "environment_id": resolved_environment_id,
+                "session_mount_id": resolved_session_mount_id,
                 "host_snapshot": dict(host_snapshot or {}),
                 "step_execution_seed": step_execution_seed,
             },
@@ -581,29 +591,13 @@ class _WorkflowServiceRunMixin:
                                 )
                         await self._resume_schedule(schedule_id)
 
-        scheduler_inputs = (
-            dict(host_snapshot.get("scheduler_inputs"))
-            if isinstance(host_snapshot.get("scheduler_inputs"), dict)
-            else {}
-        )
-        resolved_environment_ref = (
-            _string(scheduler_inputs.get("environment_ref"))
-            or _string(host_snapshot.get("environment_ref"))
-            or _string(host_snapshot.get("environment_id"))
-            or _string(scheduler_inputs.get("environment_id"))
-            or _string(metadata.get("environment_ref"))
-            or _string(metadata.get("environment_id"))
-        )
-        resolved_environment_id = (
-            _string(scheduler_inputs.get("environment_id"))
-            or _string(host_snapshot.get("environment_id"))
-            or _string(metadata.get("environment_id"))
-            or resolved_environment_ref
-        )
-        resolved_session_mount_id = (
-            _string(scheduler_inputs.get("session_mount_id"))
-            or _string(host_snapshot.get("session_mount_id"))
-            or _string(metadata.get("session_mount_id"))
+        (
+            resolved_environment_ref,
+            resolved_environment_id,
+            resolved_session_mount_id,
+        ) = self._resolve_host_identity_from_snapshot(
+            host_snapshot=host_snapshot,
+            metadata=metadata,
         )
         persisted = run.model_copy(
             update={
@@ -626,6 +620,64 @@ class _WorkflowServiceRunMixin:
         )
         self._workflow_run_repository.upsert_run(persisted)
         return self.get_run_detail(run_id)
+
+    def _resolve_host_identity_from_snapshot(
+        self,
+        *,
+        host_snapshot: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+        fallback_environment_id: str | None = None,
+        fallback_session_mount_id: str | None = None,
+    ) -> tuple[str | None, str | None, str | None]:
+        metadata = dict(metadata or {})
+        scheduler_inputs = (
+            dict(host_snapshot.get("scheduler_inputs"))
+            if isinstance(host_snapshot.get("scheduler_inputs"), dict)
+            else {}
+        )
+        host_twin_summary = (
+            dict(host_snapshot.get("host_twin_summary"))
+            if isinstance(host_snapshot.get("host_twin_summary"), dict)
+            else {}
+        )
+        coordination = (
+            dict(host_snapshot.get("coordination"))
+            if isinstance(host_snapshot.get("coordination"), dict)
+            else {}
+        )
+        canonical_environment_ref = (
+            _string(scheduler_inputs.get("environment_ref"))
+            or _string(scheduler_inputs.get("environment_id"))
+            or _string(host_twin_summary.get("selected_seat_ref"))
+            or _string(coordination.get("selected_seat_ref"))
+            or _string(host_snapshot.get("environment_ref"))
+            or _string(host_snapshot.get("environment_id"))
+            or _string(metadata.get("environment_ref"))
+            or _string(metadata.get("environment_id"))
+            or fallback_environment_id
+        )
+        canonical_environment_id = (
+            _string(scheduler_inputs.get("environment_id"))
+            or _string(host_twin_summary.get("selected_seat_ref"))
+            or _string(coordination.get("selected_seat_ref"))
+            or _string(host_snapshot.get("environment_id"))
+            or _string(metadata.get("environment_id"))
+            or fallback_environment_id
+            or canonical_environment_ref
+        )
+        canonical_session_mount_id = (
+            _string(scheduler_inputs.get("session_mount_id"))
+            or _string(host_twin_summary.get("selected_session_mount_id"))
+            or _string(coordination.get("selected_session_mount_id"))
+            or _string(host_snapshot.get("session_mount_id"))
+            or _string(metadata.get("session_mount_id"))
+            or fallback_session_mount_id
+        )
+        return (
+            canonical_environment_ref,
+            canonical_environment_id,
+            canonical_session_mount_id,
+        )
 
     def _build_schedule_spec(
         self,
@@ -692,32 +744,11 @@ class _WorkflowServiceRunMixin:
         host_snapshot: dict[str, Any],
     ) -> dict[str, Any]:
         metadata = dict(run.metadata or {})
-        scheduler_inputs = (
-            dict(host_snapshot.get("scheduler_inputs"))
-            if isinstance(host_snapshot.get("scheduler_inputs"), dict)
-            else {}
-        )
-        environment_ref = (
-            _string(scheduler_inputs.get("environment_ref"))
-            or _string(host_snapshot.get("environment_ref"))
-            or _string(scheduler_inputs.get("environment_id"))
-            or _string(host_snapshot.get("environment_id"))
-            or _string(metadata.get("environment_ref"))
-            or _string(metadata.get("environment_id"))
-        )
-        environment_id = (
-            _string(scheduler_inputs.get("environment_id"))
-            or _string(host_snapshot.get("environment_id"))
-            or _string(metadata.get("environment_id"))
-            or _string(scheduler_inputs.get("environment_ref"))
-            or _string(host_snapshot.get("environment_ref"))
-            or _string(metadata.get("environment_ref"))
-            or environment_ref
-        )
-        session_mount_id = (
-            _string(scheduler_inputs.get("session_mount_id"))
-            or _string(host_snapshot.get("session_mount_id"))
-            or _string(metadata.get("session_mount_id"))
+        environment_ref, environment_id, session_mount_id = (
+            self._resolve_host_identity_from_snapshot(
+                host_snapshot=host_snapshot,
+                metadata=metadata,
+            )
         )
         schedule_meta = {
             "workflow_run_id": run.run_id,

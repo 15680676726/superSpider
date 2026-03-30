@@ -540,6 +540,8 @@ async def _maybe_intercept_human_assist_chat_turn(
         "request_id": getattr(request_payload, "id", None),
         "session_id": getattr(request_payload, "session_id", None),
         "control_thread_id": getattr(request_payload, "control_thread_id", None),
+        "environment_ref": getattr(request_payload, "environment_ref", None),
+        "work_context_id": getattr(request_payload, "work_context_id", None),
         "user_id": getattr(request_payload, "user_id", None),
         "channel": getattr(request_payload, "channel", None),
         "industry_instance_id": getattr(request_payload, "industry_instance_id", None),

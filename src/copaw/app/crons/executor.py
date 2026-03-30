@@ -298,6 +298,16 @@ class CronExecutor:
             if isinstance(meta.get("host_snapshot"), dict)
             else {}
         )
+        host_twin_summary = (
+            dict(host_snapshot.get("host_twin_summary"))
+            if isinstance(host_snapshot.get("host_twin_summary"), dict)
+            else {}
+        )
+        coordination = (
+            dict(host_snapshot.get("coordination"))
+            if isinstance(host_snapshot.get("coordination"), dict)
+            else {}
+        )
         scheduler_inputs = (
             dict(host_snapshot.get("scheduler_inputs"))
             if isinstance(host_snapshot.get("scheduler_inputs"), dict)
@@ -305,8 +315,10 @@ class CronExecutor:
         )
         environment_ref = (
             _string_value(scheduler_inputs.get("environment_ref"))
-            or _string_value(host_snapshot.get("environment_ref"))
             or _string_value(scheduler_inputs.get("environment_id"))
+            or _string_value(host_twin_summary.get("selected_seat_ref"))
+            or _string_value(coordination.get("selected_seat_ref"))
+            or _string_value(host_snapshot.get("environment_ref"))
             or _string_value(host_snapshot.get("environment_id"))
             or _string_value(meta.get("environment_ref"))
             or _string_value(meta.get("environment_id"))
@@ -316,6 +328,8 @@ class CronExecutor:
             host_meta["environment_ref"] = environment_ref
         session_mount_id = (
             _string_value(scheduler_inputs.get("session_mount_id"))
+            or _string_value(host_twin_summary.get("selected_session_mount_id"))
+            or _string_value(coordination.get("selected_session_mount_id"))
             or _string_value(host_snapshot.get("session_mount_id"))
             or _string_value(meta.get("session_mount_id"))
         )

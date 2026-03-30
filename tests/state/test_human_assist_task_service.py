@@ -197,6 +197,79 @@ def test_human_assist_task_service_marks_handoff_blocked_when_resume_fails(tmp_p
     assert blocked.verification_payload["resume"]["reason"] == "系统暂时没接上后续流程。"
     assert current is not None
     assert current.id == issued.id
+def test_host_handoff_task_preserves_seeded_runtime_context_across_submission(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+
+    issued = service.ensure_host_handoff_task(
+        chat_thread_id="industry-chat:industry-1:execution-core",
+        title="Return host handoff",
+        summary="Runtime handoff is active for the industry control thread.",
+        required_action="Return after checkpoint:handoff-1 is complete.",
+        industry_instance_id="industry-1",
+        assignment_id="assignment-1",
+        task_id="task-1",
+        resume_checkpoint_ref="checkpoint:handoff-1",
+        verification_anchor="checkpoint:handoff-1",
+        block_evidence_refs=[
+            "session:console:industry:industry-1",
+            "checkpoint:handoff-1",
+        ],
+        continuation_context={
+            "industry_instance_id": "industry-1",
+            "control_thread_id": "industry-chat:industry-1:execution-core",
+            "session_id": "industry-chat:industry-1:execution-core",
+            "environment_ref": "session:console:industry:industry-1",
+            "work_context_id": "ctx-handoff-1",
+            "recommended_scheduler_action": "handoff",
+            "requested_surfaces": ["browser", "desktop", "document"],
+            "main_brain_runtime": {
+                "work_context_id": "ctx-handoff-1",
+                "environment_ref": "session:console:industry:industry-1",
+                "environment_session_id": "session:console:industry:industry-1",
+                "environment_binding_kind": "host-handoff",
+                "environment_resume_ready": False,
+                "recovery_mode": "handoff",
+                "recovery_reason": "human-return",
+                "resume_checkpoint_id": "checkpoint:handoff-1",
+            },
+        },
+    )
+
+    submitted = service.submit_task(
+        issued.id,
+        submission_text="Completed checkpoint:handoff-1.",
+        submission_evidence_refs=["media-analysis-1"],
+        submission_payload={
+            "request_id": "req-handoff-1",
+            "media_analysis_ids": ["media-analysis-1"],
+        },
+    )
+
+    assert submitted.submission_payload["request_id"] == "req-handoff-1"
+    assert submitted.submission_payload["control_thread_id"] == (
+        "industry-chat:industry-1:execution-core"
+    )
+    assert submitted.submission_payload["environment_ref"] == "session:console:industry:industry-1"
+    assert submitted.submission_payload["work_context_id"] == "ctx-handoff-1"
+    assert submitted.submission_payload["recommended_scheduler_action"] == "handoff"
+    assert submitted.submission_payload["requested_surfaces"] == [
+        "browser",
+        "desktop",
+        "document",
+    ]
+    assert submitted.submission_payload["main_brain_runtime"]["work_context_id"] == (
+        "ctx-handoff-1"
+    )
+    assert submitted.submission_payload["main_brain_runtime"]["environment_ref"] == (
+        "session:console:industry:industry-1"
+    )
+    assert submitted.submission_payload["main_brain_runtime"]["resume_checkpoint_id"] == (
+        "checkpoint:handoff-1"
+    )
+
+
 def test_human_assist_task_service_rejects_submission_when_negative_anchor_matches(
     tmp_path,
 ) -> None:

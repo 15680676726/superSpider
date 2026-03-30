@@ -148,3 +148,32 @@ def test_cron_executor_prefers_scheduler_host_refs_over_stale_direct_meta_refs()
     submitted = dispatcher.tasks[0]
     assert submitted.environment_ref == "env:fresh-scheduler-inputs"
     assert submitted.payload["meta"]["session_mount_id"] == "session:fresh-scheduler-inputs"
+
+
+def test_cron_executor_prefers_canonical_selected_seat_when_scheduler_inputs_are_missing() -> None:
+    dispatcher = _FakeKernelDispatcher()
+    executor = CronExecutor(kernel_dispatcher=dispatcher)
+    job = _agent_job(
+        meta={
+            "host_snapshot": {
+                "environment_id": "env:stale-host-seat",
+                "session_mount_id": "session:stale-host-seat",
+                "host_twin_summary": {
+                    "selected_seat_ref": "env:canonical-selected-seat",
+                    "selected_session_mount_id": "session:canonical-selected-seat",
+                    "recommended_scheduler_action": "continue",
+                    "blocked_surface_count": 0,
+                    "legal_recovery_mode": "resume",
+                },
+            },
+        }
+    )
+
+    asyncio.run(executor.execute(job))
+
+    assert len(dispatcher.tasks) == 1
+    submitted = dispatcher.tasks[0]
+    assert submitted.environment_ref == "env:canonical-selected-seat"
+    assert submitted.payload["meta"]["session_mount_id"] == (
+        "session:canonical-selected-seat"
+    )

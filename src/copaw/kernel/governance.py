@@ -428,6 +428,60 @@ class GovernanceService:
         required_action = (
             f"请在宿主侧完成当前交接后，回到聊天里说明已完成，并包含“{verification_anchor}”。"
         )
+        requested_surfaces = _string_list(
+            [
+                *_string_list(payload.get("requested_surfaces")),
+                *_string_list(payload.get("seat_requested_surfaces")),
+                *_string_list(payload.get("chat_writeback_requested_surfaces")),
+            ],
+        )
+        continuation_context = {
+            "industry_instance_id": _first_non_empty(payload.get("industry_instance_id")),
+            "industry_role_id": _first_non_empty(payload.get("industry_role_id")),
+            "industry_role_name": _first_non_empty(payload.get("industry_role_name")),
+            "industry_label": _first_non_empty(payload.get("industry_label")),
+            "owner_scope": _first_non_empty(payload.get("owner_scope")),
+            "session_id": _first_non_empty(payload.get("session_id"), chat_thread_id),
+            "control_thread_id": _first_non_empty(payload.get("control_thread_id"), chat_thread_id),
+            "channel": _first_non_empty(payload.get("channel")),
+            "environment_ref": _first_non_empty(payload.get("environment_ref"), session_ref),
+            "work_context_id": _first_non_empty(payload.get("work_context_id")),
+            "recommended_scheduler_action": _first_non_empty(
+                payload.get("recommended_scheduler_action"),
+                coordination.get("recommended_scheduler_action"),
+            ),
+            "requested_surfaces": requested_surfaces,
+            "backlog_item_id": _first_non_empty(payload.get("backlog_item_id")),
+            "source_report_id": _first_non_empty(payload.get("source_report_id")),
+            "main_brain_runtime": {
+                "work_context_id": _first_non_empty(payload.get("work_context_id")),
+                "environment_ref": _first_non_empty(payload.get("environment_ref"), session_ref),
+                "environment_session_id": _first_non_empty(
+                    payload.get("environment_session_id"),
+                    session_ref,
+                ),
+                "environment_binding_kind": _first_non_empty(
+                    payload.get("environment_binding_kind"),
+                    "host-handoff",
+                ),
+                "environment_resume_ready": False,
+                "recovery_mode": _first_non_empty(
+                    payload.get("recovery_mode"),
+                    legal_recovery.get("path"),
+                    "handoff",
+                ),
+                "recovery_reason": _first_non_empty(
+                    payload.get("recovery_reason"),
+                    legal_recovery.get("summary"),
+                    coordination.get("summary"),
+                    "human-return",
+                ),
+                "resume_checkpoint_id": _first_non_empty(
+                    legal_recovery.get("checkpoint_ref"),
+                    verification_anchor,
+                ),
+            },
+        }
         try:
             ensure_task(
                 chat_thread_id=chat_thread_id,
@@ -446,6 +500,7 @@ class GovernanceService:
                     session_ref,
                     _first_non_empty(legal_recovery.get("checkpoint_ref")),
                 ],
+                continuation_context=continuation_context,
             )
         except Exception:
             logger.exception("Failed to ensure host handoff human assist task")
