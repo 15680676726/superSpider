@@ -468,6 +468,8 @@ async def test_media_analysis_followup_updates_existing_analysis_work_context(tm
 
 def test_truth_first_no_vector_memory_docs_are_explicit() -> None:
     docs = [
+        "docs/superpowers/specs/2026-03-30-truth-first-no-vector-memory-design.md",
+        "docs/superpowers/plans/2026-03-30-truth-first-no-vector-memory-implementation-plan.md",
         "TASK_STATUS.md",
         "DATA_MODEL_DRAFT.md",
         "API_TRANSITION_MAP.md",
@@ -478,3 +480,4 @@ def test_truth_first_no_vector_memory_docs_are_explicit() -> None:
         text = Path(relative_path).read_text(encoding="utf-8")
         assert "truth-first" in text
         assert "no-vector formal memory" in text
+        assert "physically removed residuals" in text

@@ -18,7 +18,6 @@ from .models import (
 )
 from .precedence import MemoryEntryPartition, MemoryPrecedenceService
 from .profile_service import MemoryProfile, MemoryProfileService, SharedMemoryViews
-from .qmd_backend import QmdBackendConfig, QmdRecallBackend
 from .recall_service import MemoryRecallService
 from .reflection_service import MemoryReflectionService
 from .retain_service import MemoryRetainService
@@ -39,8 +38,6 @@ __all__ = [
     "MemoryRetainService",
     "MemoryScopeSelector",
     "SharedMemoryViews",
-    "QmdBackendConfig",
-    "QmdRecallBackend",
     "build_scope_candidates",
     "normalize_memory_scope_type",
     "normalize_scope_id",

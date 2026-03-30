@@ -1,14 +1,14 @@
 # Truth-First No-Vector Memory Design
 
 ## Summary
-CoPaw should stop treating vector-style retrieval as part of its formal memory architecture. The current repo already has a stronger memory truth source than generic semantic search: canonical `state / evidence` objects such as `StrategyMemory`, `Assignment`, `AgentReport`, `WorkContext`, `EnvironmentMount`, `SessionMount`, `EvidenceRecord`, and `Patch`. What remains is a split memory stack: the formal runtime recall path still mixes in local hashed-vector scoring and bootstraps an optional QMD sidecar, while the older `MemoryManager` path still emits embedding/vector health warnings for resident agents. This design hard-cuts memory to a truth-first model: memory becomes a derived read layer over canonical runtime truth, and all vector/embedding/QMD dependencies leave the formal product path.
+CoPaw now treats vector-style retrieval as retired from the formal memory architecture. Canonical `state / evidence / runtime` objects such as `StrategyMemory`, `Assignment`, `AgentReport`, `WorkContext`, `EnvironmentMount`, `SessionMount`, `EvidenceRecord`, and `Patch` remain the only truth source, and formal memory is a derived read layer over that truth. QMD/vector references are now physically removed residuals, not pending runtime cleanup.
 
 ## Current Facts
-1. The formal runtime recall service defaults to `hybrid-local`, not to external embeddings or QMD.
-2. `hybrid-local` is still not truly non-vector; it mixes lexical scoring with local `hashed_vector()` scoring.
-3. QMD is not the default backend, but it is still bootstrapped, listed, warmed, and surfaced as a health concern.
-4. A separate legacy `MemoryManager` still starts in the runtime host and produces embedding/vector warnings even when the formal runtime memory chain does not rely on embeddings.
-5. The product now needs memory to serve long-running execution truth, not exploratory document similarity.
+1. The formal runtime recall chain is `truth-first` and `no-vector formal memory`.
+2. Shared formal memory is derived from canonical `state / evidence / runtime`, then consumed as `profile + latest facts + episodes + history`.
+3. QMD, embedding readiness, vector health, and hashed-vector scoring are no longer part of the formal runtime or operator contract.
+4. Private conversation compaction remains separate from shared formal memory and does not become a second truth source.
+5. Any remaining mentions of `QMD / local-vector / LanceDB / embedding health` are historical references only and must be treated as physically removed residuals.
 
 ## Design Goal
 Build a formal memory architecture where:
@@ -245,42 +245,23 @@ This makes the first prompt context "current truth" instead of "similar text".
   - no longer expose `qmd / local-vector / lancedb` as formal product choices
 - any operator/system health item that implies vector readiness is a formal runtime dependency
 
-## Hard-Cut Plan
+## Implementation Closeout
 
-### Phase 1: Remove Vector Noise and False Dependencies
-Goal: stop operator/runtime surfaces from pretending embeddings or QMD are expected.
+The hard-cut is landed.
 
-Changes:
-1. Stop default bootstrapping of `QmdRecallBackend`.
-2. Remove QMD from formal runtime/system health checks.
-3. Remove vector/embedding readiness checks from operator-facing health surfaces.
-4. Stop treating `MemoryManager` embedding gaps as runtime warnings.
-5. Keep runtime recall alive with lexical/scope/relation scoring only.
+Completed outcomes:
+1. Formal memory now exposes a `truth-first` and `no-vector formal memory` contract.
+2. QMD bootstrap, vector backend semantics, embedding/vector runtime health, and hashed-vector scoring are removed from the formal runtime path.
+3. Shared formal memory remains rebuildable from canonical truth and is consumed as `profile + latest facts + episodes + history`.
+4. Private conversation compaction stays isolated from shared formal memory and is no longer allowed to masquerade as shared runtime truth.
 
-Acceptance:
-- starting CoPaw without any embedding config produces no memory-vector warning,
-- no runtime surface reports `memory_qmd_sidecar`,
-- recall and prompt injection still work.
-
-### Phase 2: Finish Truth-First Memory
-Goal: remove all remaining vector assumptions and make profile/latest/history formal.
-
-Changes:
-1. Add `MemoryProfileService`.
-2. Extend `MemoryFactIndexRecord` with evolution fields.
-3. Add `MemoryEpisodeViewRecord`.
-4. Delete local vector scoring and `hashed_vector()`.
-5. Remove `local-vector`, `qmd`, and `lancedb` from formal backend semantics.
-6. Remove QMD implementation files and related runtime wiring.
-7. Split conversation compaction out of legacy `MemoryManager` into a dedicated `ConversationCompactionService`, then retire `MemoryManager` as a formal runtime dependency.
-
-Acceptance:
-- the formal runtime memory chain contains no vector backend or sidecar,
-- main-brain memory injection is profile-first,
-- latest/history/temporary semantics are visible and test-covered.
+Acceptance now reads as current fact:
+- starting CoPaw without embedding configuration does not produce formal memory-vector warnings,
+- no formal runtime surface reports `memory_qmd_sidecar`, vector readiness, or embedding readiness as required health,
+- main-brain and runtime recall stay on the truth-derived path without QMD/vector dependencies.
 
 ## Deletion Ledger
-End-state deletions should include:
+Completed physical cleanup includes:
 - `src/copaw/memory/qmd_backend.py`
 - `src/copaw/memory/qmd_bridge_server.mjs`
 - QMD bootstrap wiring in `src/copaw/app/runtime_bootstrap_query.py`
@@ -289,9 +270,9 @@ End-state deletions should include:
 - `local-vector` and hashed-vector scoring paths in `src/copaw/memory/recall_service.py`
 - `hashed_vector()` in `src/copaw/memory/derived_index_service.py`
 - embedding/vector runtime warning logic in `src/copaw/agents/memory/memory_manager.py`
-- `MemoryManager` as a runtime host dependency once compaction has been split into a dedicated service
+- `MemoryManager` as a runtime host dependency once compaction had been split into a dedicated service
 
-These deletions are part of the delivery, not optional cleanup.
+These are physically removed residuals, not open cleanup items.
 
 ## Testing
 Required verification groups:
@@ -307,17 +288,13 @@ Required verification groups:
    - industry/runtime/work-context/report/evidence recall remains intact without vector/QMD paths
 
 ## Documentation Sync
-Once implementation starts, update:
+The synced docs must state:
 - `TASK_STATUS.md`
 - `DATA_MODEL_DRAFT.md`
 - `API_TRANSITION_MAP.md`
 - `COPAW_CARRIER_UPGRADE_MASTERPLAN.md`
 
-The updated wording must explicitly state that formal memory no longer depends on vector backends or embedding configuration.
+The updated wording explicitly states that formal memory no longer depends on vector backends or embedding configuration and that QMD/vector references are physically removed residuals.
 
 ## Recommendation
-Proceed with a two-stage hard-cut:
-1. immediately remove QMD/vector/embedding runtime noise,
-2. then complete the truth-first memory model and delete hashed-vector scoring.
-
-This preserves stability while still ending at a fully no-vector formal memory architecture.
+Treat this design as the current canonical architecture: one shared truth-derived formal memory system plus separate private compaction state, with no vector path in the formal runtime contract.

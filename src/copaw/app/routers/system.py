@@ -5,12 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import time
-from typing import Any, get_args
+from typing import Any
 
 from fastapi import APIRouter, File, Request, UploadFile
 
 from ...constant import WORKING_DIR
-from ...memory.models import MemoryBackendKind
 from ...providers.provider_manager import ProviderManager
 from ..runtime_health_service import RuntimeHealthService
 from .workspace import _dir_stats, download_workspace, upload_workspace
@@ -21,7 +20,6 @@ _STATE_DB_PATH = WORKING_DIR / "state" / "phase1.sqlite3"
 _EVIDENCE_DB_PATH = WORKING_DIR / "evidence" / "phase1.sqlite3"
 _WORKSPACE_STATS_TTL_SECONDS = 5.0
 _workspace_stats_cache: dict[str, tuple[float, tuple[int, int]]] = {}
-_FORMAL_MEMORY_BACKEND_IDS = set(get_args(MemoryBackendKind))
 
 
 def _utc_now_iso() -> str:
@@ -30,26 +28,6 @@ def _utc_now_iso() -> str:
 
 def _service_present(app_state: Any, name: str) -> bool:
     return getattr(app_state, name, None) is not None
-
-
-def _list_memory_backends(app_state: Any) -> list[dict[str, Any]]:
-    service = getattr(app_state, "memory_recall_service", None)
-    lister = getattr(service, "list_backends", None)
-    if not callable(lister):
-        return []
-    payload: list[dict[str, Any]] = []
-    for item in lister() or []:
-        model_dump = getattr(item, "model_dump", None)
-        if callable(model_dump):
-            payload_item = model_dump(mode="json")
-        elif isinstance(item, dict):
-            payload_item = dict(item)
-        else:
-            continue
-        backend_id = str(payload_item.get("backend_id") or "").strip().lower()
-        if backend_id in _FORMAL_MEMORY_BACKEND_IDS:
-            payload.append(payload_item)
-    return payload
 
 
 def _workspace_stats(root: Path) -> tuple[int, int]:
@@ -92,7 +70,6 @@ async def get_system_overview(request: Request) -> dict[str, object]:
 
     file_count, total_size = _workspace_stats(WORKING_DIR)
     startup_recovery = getattr(app_state, "startup_recovery_summary", None)
-    memory_backends = _list_memory_backends(app_state)
     return {
         "generated_at": _utc_now_iso(),
         "backup": {
@@ -124,10 +101,6 @@ async def get_system_overview(request: Request) -> dict[str, object]:
             "recovery_route": "/api/runtime-center/recovery/latest",
             "events_route": "/api/runtime-center/events",
             "startup_recovery": startup_recovery,
-        },
-        "memory": {
-            "backends_route": "/api/runtime-center/memory/backends",
-            "backends": memory_backends,
         },
     }
 

@@ -75,6 +75,9 @@ def _build_client(tmp_path) -> TestClient:
 
 def test_runtime_center_memory_api_rebuild_recall_and_reflect(tmp_path) -> None:
     client = _build_client(tmp_path)
+    openapi_response = client.get("/openapi.json")
+    assert openapi_response.status_code == 200
+    assert "/runtime-center/memory/backends" not in openapi_response.json()["paths"]
 
     remember_response = client.post(
         "/runtime-center/knowledge/memory",

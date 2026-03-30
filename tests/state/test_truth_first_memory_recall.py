@@ -302,12 +302,17 @@ def test_truth_first_recall_contract_has_no_vector_or_sidecar_runtime_surface(tm
     assert response.hits
     assert response.hits[0].source_type == "memory_profile"
     assert not hasattr(recall, "prepare_sidecar_backends")
+    assert not (Path("src/copaw/memory/qmd_backend.py")).exists()
+    assert not (Path("src/copaw/memory/qmd_bridge_server.mjs")).exists()
     recall_source = Path("src/copaw/memory/recall_service.py").read_text(encoding="utf-8")
     derived_source = Path("src/copaw/memory/derived_index_service.py").read_text(encoding="utf-8")
+    memory_init_source = Path("src/copaw/memory/__init__.py").read_text(encoding="utf-8")
     assert "hashed_vector(" not in recall_source
     assert "hashed_vector(" not in derived_source
     assert "local-vector" not in recall_source
     assert "hybrid-local" not in recall_source
+    assert "QmdBackendConfig" not in memory_init_source
+    assert "QmdRecallBackend" not in memory_init_source
 
 
 def test_legacy_rows_rebuild_into_profile_latest_and_history_views(tmp_path) -> None:

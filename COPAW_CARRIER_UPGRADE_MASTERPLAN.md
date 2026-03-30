@@ -1089,7 +1089,7 @@ post-`V6` 的下一正式阶段已登记为 `V7_MAIN_BRAIN_AUTONOMY_PLAN.md`。
 - 职业派工
 - 结构化汇报回流
 - Runtime Center / `/industry` / `Chat` / `AgentWorkbench` 的同链路可见化
-- `2026-03-30` supplement: memory architecture should converge to `truth-first` and `no-vector formal memory`; shared formal memory must be rebuilt from canonical `state / evidence / runtime`, while private conversation compaction stays isolated and non-canonical.
+- `2026-03-30` supplement: memory architecture has converged to `truth-first` and `no-vector formal memory`; shared formal memory is rebuilt from canonical `state / evidence / runtime`, while private conversation compaction stays isolated and non-canonical. QMD/vector references are physically removed residuals, not pending runtime cleanup.
 
 当前系统已经具备“行业实例 + goals/schedules 自动驱动”的持续运行能力；
 `V7` 要解决的是让系统正式升级为：

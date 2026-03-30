@@ -761,7 +761,7 @@
   - 但不能替代统一运行真相和证据链
   - durable truth 应继续落在 `StrategyMemoryRecord / KnowledgeChunkRecord / EvidenceRecord`
   - `2026-03-30` 起 memory 终态已锁定为 `truth-first` 与 `no-vector formal memory`
-  - `QMD / LanceDB / vector` 不再作为正式 runtime/operator contract 目标保留；若后续仍存在，只能是临时 bridge 或非正式实验，不得进入 canonical memory surface
+  - `QMD / LanceDB / vector` 不再作为正式 runtime/operator contract 目标保留；当前相关提法应视为 physically removed residuals，而不是待清理产品路径
   - 不允许把 sidecar、Markdown memory 文件或 `MemoryManager` 自身重新升级为第二真相源
 
 ---

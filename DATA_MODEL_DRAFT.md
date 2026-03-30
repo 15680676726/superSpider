@@ -1894,6 +1894,7 @@ The next memory enhancement must land as a derived layer on top of unified
 - the target is `no-vector formal memory`
 - shared formal memory must be derived from canonical `state / evidence / runtime`
 - private conversation compaction may remain separate, but it must not become a second runtime memory truth
+- QMD/vector references are physically removed residuals and must not be reintroduced into the formal memory contract
 
 ### Canonical truth remains:
 
@@ -1907,13 +1908,14 @@ The next memory enhancement must land as a derived layer on top of unified
 - rebuildable `derived memory index`
 - `Retain / Recall / Reflect` services
 - `EntityMemoryView / OpinionMemoryView / MemoryRecallHit` read models
-- optional sidecar retrieval backends such as local vector stores, `QMD`, or `LanceDB`
+- rebuildable profile/latest/history projections over canonical truth
 
 ### Hard boundary:
 
 - no new canonical Markdown memory source
 - no durable dual-write between `state` and a private memory DB
 - no direct caller dependency on a concrete vector backend
+- no QMD/vector sidecar in the formal memory path
 - no silent strategic drift from reflection jobs
 
 ### Integration rule:

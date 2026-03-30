@@ -10,7 +10,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from copaw.app.routers.system import router as system_router
-from copaw.memory import MemoryBackendDescriptor
 from copaw.providers.provider_manager import ModelSlotConfig
 from copaw.state import SQLiteStateStore
 
@@ -30,38 +29,6 @@ class FakeProviderManager:
 
     def get_fallback_slots(self):
         return list(self._fallback)
-
-
-class FakeMemoryRecallService:
-    def list_backends(self):
-        return [
-            MemoryBackendDescriptor(
-                backend_id="hybrid-local",
-                label="Hybrid Local",
-                available=True,
-                is_default=True,
-            ),
-            MemoryBackendDescriptor(
-                backend_id="qmd",
-                label="QMD Sidecar",
-                available=True,
-                metadata={
-                    "install_mode": "path",
-                    "query_mode": "search",
-                    "embed_model": "hf:Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf",
-                    "ready": True,
-                    "dirty": False,
-                    "runtime_problem": None,
-                    "collection_path_matches": True,
-                    "indexed_documents": 217,
-                    "pending_embeddings": 0,
-                    "daemon_enabled": True,
-                    "daemon_state": "running",
-                    "daemon_url": "http://127.0.0.1:8765",
-                    "daemon_pid": 21648,
-                },
-            ),
-        ]
 
 
 class FakeMemoryManager:
@@ -95,7 +62,6 @@ def build_app(tmp_path: Path) -> FastAPI:
     app.state.runtime_event_bus = object()
     app.state.governance_service = object()
     app.state.cron_manager = object()
-    app.state.memory_recall_service = FakeMemoryRecallService()
     app.state.memory_manager = FakeMemoryManager()
     app.state.startup_recovery_summary = {"reason": "startup", "hydrated_tasks": 2}
     app.state.provider_manager = FakeProviderManager()
@@ -107,7 +73,7 @@ def _patch_workspace(monkeypatch, workspace_root: Path) -> None:
     monkeypatch.setattr("copaw.app.routers.system.WORKING_DIR", workspace_root)
 
 
-def test_system_overview_exposes_v3_routes(tmp_path: Path) -> None:
+def test_system_overview_hides_memory_backend_surface(tmp_path: Path) -> None:
     app = build_app(tmp_path)
     client = TestClient(app)
 
@@ -119,18 +85,7 @@ def test_system_overview_exposes_v3_routes(tmp_path: Path) -> None:
     assert payload["backup"]["restore_route"] == "/api/system/backup/restore"
     assert payload["providers"]["fallback_route"] == "/api/models/fallback"
     assert payload["runtime"]["governance_route"] == "/api/runtime-center/governance/status"
-    assert payload["memory"]["backends_route"] == "/api/runtime-center/memory/backends"
-    assert payload["memory"]["backends"] == [
-        {
-            "backend_id": "hybrid-local",
-            "label": "Hybrid Local",
-            "available": True,
-            "is_default": True,
-            "reason": None,
-            "metadata": {},
-        },
-    ]
-    assert "qmd" not in payload["memory"]
+    assert "memory" not in payload
 
 
 def test_system_overview_caches_workspace_stats(tmp_path: Path, monkeypatch) -> None:
@@ -198,34 +153,6 @@ def test_system_self_check_hides_embedding_and_vector_runtime_noise(
 
 def test_system_self_check_hides_qmd_runtime_state(tmp_path: Path) -> None:
     app = build_app(tmp_path)
-
-    class _UnreadyMemoryRecallService:
-        def list_backends(self):
-            return [
-                MemoryBackendDescriptor(
-                    backend_id="qmd",
-                    label="QMD Sidecar",
-                    available=True,
-                    reason="QMD indexed document count is behind manifest entries (0 < 217).",
-                    metadata={
-                        "install_mode": "path",
-                        "query_mode": "query",
-                        "embed_model": "hf:Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf",
-                        "ready": False,
-                        "dirty": False,
-                        "runtime_problem": "QMD indexed document count is behind manifest entries (0 < 217).",
-                        "collection_path_matches": False,
-                        "indexed_documents": 0,
-                        "pending_embeddings": 217,
-                        "daemon_enabled": True,
-                        "daemon_state": "failed",
-                        "daemon_url": "http://127.0.0.1:8765",
-                        "daemon_pid": None,
-                    },
-                ),
-            ]
-
-    app.state.memory_recall_service = _UnreadyMemoryRecallService()
     client = TestClient(app)
 
     response = client.get("/system/self-check")

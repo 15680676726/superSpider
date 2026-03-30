@@ -43,7 +43,6 @@
     - `state/phase1.sqlite3`
     - `evidence/phase1.sqlite3`
     - `learning/phase1.sqlite3`
-    - `memory/qmd`
 - 本窗口内如本文与以下文档冲突，以硬切文档为准：
   - `docs/superpowers/specs/2026-03-25-copaw-full-architecture-map-and-hard-cut-redesign.md`
   - `docs/superpowers/plans/2026-03-25-copaw-hard-cut-autonomy-rebuild.md`
@@ -137,8 +136,8 @@
 - `2026-03-24` 补充：`Assignment` 已重新收紧为执行信封；当没有真实执行位承接时，只保留主脑监督 owner，不再把 `execution-core` 默认伪装成叶子执行者。
 - `2026-03-24` 补充：写回路由已改成 `surface -> capability -> environment` 优先，app 名关键词只做 fallback；同时补了英文词边界匹配，避免 `formal -> form` 这类伪 browser 命中。
 - `2026-03-24` 补充：`/industry` 与实例 detail 的主脑监督链已显式展示 `writeback -> backlog -> cycle -> assignment -> report -> replan`，不再只返回一句“已分配”。
-- `2026-03-25` 补充：`/system/self-check` 已新增正式 runtime health 读面，显式暴露 `core_runtime_ready / memory_vector_ready / memory_embedding_config / browser_surface_ready / desktop_surface_ready`；`EMBEDDING_MODEL_NAME` 缺失导致的向量检索降级不再只写日志，而会以前台 `warn` 检查项呈现具体原因。
-- `2026-03-30` 补充：memory 正式架构已锁定为 `truth-first`。后续 memory hard-cut 必须收口到 `no-vector formal memory`：主脑与执行位共享同一套 truth-derived memory，QMD / embedding / vector health 不再属于正式 runtime/operator contract，私有 conversation compaction 也必须与共享正式记忆分离。
+- `2026-03-25` 补充：`/system/self-check` 仍保留正式 runtime health 读面，但 memory 的 canonical health contract 已不再包含 `memory_vector_ready / memory_embedding_config` 这类向量就绪字段；formal memory 不再依赖 embedding/vector readiness。
+- `2026-03-30` 补充：memory 正式架构已锁定并落地为 `truth-first` 与 `no-vector formal memory`：主脑与执行位共享同一套 truth-derived memory，私有 conversation compaction 与共享正式记忆显式分离，QMD / embedding / vector health 只可被视为 physically removed residuals，不再属于正式 runtime/operator contract。
 - `2026-03-25` 补充：前端 shared `control chain` presenter 已落地，`/industry`、`Runtime Center`、`AgentWorkbench` 统一消费同一条 `writeback -> backlog -> cycle -> assignment -> report -> replan` 呈现链，不再各自维护排序和标签逻辑。
 - `2026-03-25` 补充：`Runtime Center` 路由已继续按域拆出 `overview / memory / knowledge / reports / industry` 模块，`runtime_center_routes_core.py` 不再继续承载这些域；同时已删除 retired `TaskDelegationRequest` 与死掉的 delegation shared helper。
 - `2026-03-25` 补充：`state/models.py` 已收成兼容 re-export 面，`goals_tasks / agents_runtime / governance / workflows / prediction / reporting / industry / core` 分层模块已经落位，旧导入链继续可用但真正定义不再堆在单文件里。

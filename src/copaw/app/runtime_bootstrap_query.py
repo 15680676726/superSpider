@@ -35,7 +35,7 @@ RuntimeQueryServices: TypeAlias = tuple[
 ]
 
 
-def resolve_default_memory_recall_backend(*, qmd_backend: object | None = None) -> str:
+def resolve_default_memory_recall_backend() -> str:
     explicit_backend = str(os.environ.get("COPAW_MEMORY_RECALL_BACKEND", "") or "").strip().lower()
     if explicit_backend in {"lexical", "hybrid-local"}:
         return explicit_backend
@@ -50,9 +50,7 @@ def build_runtime_query_services(
     human_assist_task_service: object | None = None,
     environment_service: EnvironmentService | None = None,
 ) -> RuntimeQueryServices:
-    default_recall_backend = resolve_default_memory_recall_backend(
-        qmd_backend=None,
-    )
+    default_recall_backend = resolve_default_memory_recall_backend()
     state_query_service = RuntimeCenterStateQueryService(
         task_repository=repositories.task_repository,
         task_runtime_repository=repositories.task_runtime_repository,

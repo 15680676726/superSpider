@@ -142,8 +142,8 @@ async def initialize_mcp_manager(
     return mcp_manager
 
 
-def _resolve_default_memory_recall_backend(*, qmd_backend: object | None = None) -> str:
-    return resolve_default_memory_recall_backend(qmd_backend=qmd_backend)
+def _resolve_default_memory_recall_backend() -> str:
+    return resolve_default_memory_recall_backend()
 
 
 def build_runtime_repositories(state_store: SQLiteStateStore) -> RuntimeRepositories:
