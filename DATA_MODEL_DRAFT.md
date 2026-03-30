@@ -1889,6 +1889,12 @@ The child-agent outcome write-back path is now live:
 The next memory enhancement must land as a derived layer on top of unified
 `state / evidence`, not as a second durable memory source.
 
+`2026-03-30` supplement:
+- memory vNext is explicitly `truth-first`
+- the target is `no-vector formal memory`
+- shared formal memory must be derived from canonical `state / evidence / runtime`
+- private conversation compaction may remain separate, but it must not become a second runtime memory truth
+
 ### Canonical truth remains:
 
 - `StrategyMemoryRecord` for strategic memory

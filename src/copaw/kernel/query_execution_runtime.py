@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib
 
 from ..evidence import EvidenceRecord
+from ..memory.conversation_compaction_service import ConversationCompactionService
 from ..providers import ProviderManager
 from .main_brain_intake import (
     build_industry_chat_action_kwargs,
@@ -43,7 +44,8 @@ class _QueryExecutionRuntimeMixin:
         self,
         *,
         session_backend: Any,
-        memory_manager: MemoryManager | None = None,
+        conversation_compaction_service: ConversationCompactionService | None = None,
+        memory_manager: Any | None = None,
         mcp_manager: Any | None = None,
         tool_bridge: Any | None = None,
         environment_service: Any | None = None,
@@ -65,8 +67,11 @@ class _QueryExecutionRuntimeMixin:
         provider_manager: Any | None = None,
         lease_heartbeat_interval_seconds: float = 15.0,
     ) -> None:
+        resolved_compaction_service = (
+            conversation_compaction_service or memory_manager
+        )
         self._session_backend = session_backend
-        self._memory_manager = memory_manager
+        self._conversation_compaction_service = resolved_compaction_service
         self._mcp_manager = mcp_manager
         self._tool_bridge = tool_bridge
         self._environment_service = environment_service
@@ -101,8 +106,14 @@ class _QueryExecutionRuntimeMixin:
     def set_session_backend(self, session_backend: Any) -> None:
         self._session_backend = session_backend
 
-    def set_memory_manager(self, memory_manager: MemoryManager | None) -> None:
-        self._memory_manager = memory_manager
+    def set_conversation_compaction_service(
+        self,
+        conversation_compaction_service: ConversationCompactionService | None,
+    ) -> None:
+        self._conversation_compaction_service = conversation_compaction_service
+
+    def set_memory_manager(self, memory_manager: Any | None) -> None:
+        self._conversation_compaction_service = memory_manager
 
     def set_mcp_manager(self, mcp_manager: Any | None) -> None:
         self._mcp_manager = mcp_manager
@@ -443,7 +454,7 @@ class _QueryExecutionRuntimeMixin:
                     env_context=env_context,
                     prompt_appendix=prompt_appendix,
                     mcp_clients=mcp_clients,
-                    memory_manager=self._memory_manager,
+                    conversation_compaction_service=self._conversation_compaction_service,
                     max_iters=config.agents.running.max_iters,
                     max_input_length=config.agents.running.max_input_length,
                     allowed_tool_capability_ids=tool_capability_ids,

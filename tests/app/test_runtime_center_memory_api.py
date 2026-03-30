@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import subprocess
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -12,8 +10,6 @@ from copaw.memory import (
     MemoryRecallService,
     MemoryReflectionService,
     MemoryRetainService,
-    QmdBackendConfig,
-    QmdRecallBackend,
 )
 from copaw.state import SQLiteStateStore
 from copaw.state.knowledge_service import StateKnowledgeService
@@ -28,34 +24,7 @@ from copaw.state.repositories import (
 from copaw.state.strategy_memory_service import StateStrategyMemoryService
 
 
-class _FakeQmdRunner:
-    def __call__(self, args, **kwargs):
-        return subprocess.CompletedProcess(
-            args=list(args),
-            returncode=0,
-            stdout="[]",
-            stderr="",
-        )
-
-
-def _build_qmd_backend(tmp_path) -> QmdRecallBackend:
-    base_dir = tmp_path / "qmd-sidecar"
-    return QmdRecallBackend(
-        config=QmdBackendConfig(
-            enabled=True,
-            install_mode="path",
-            binary_name="qmd",
-            base_dir=base_dir,
-            corpus_dir=base_dir / "corpus",
-            manifest_path=base_dir / "manifest.json",
-            xdg_cache_home=base_dir / "xdg-cache",
-        ),
-        runner=_FakeQmdRunner(),
-        which=lambda _name: "qmd",
-    )
-
-
-def _build_client(tmp_path, *, qmd_backend: QmdRecallBackend | None = None) -> TestClient:
+def _build_client(tmp_path) -> TestClient:
     app = FastAPI()
     store = SQLiteStateStore(tmp_path / "state.db")
     knowledge_repo = SqliteKnowledgeChunkRepository(store)
@@ -71,7 +40,6 @@ def _build_client(tmp_path, *, qmd_backend: QmdRecallBackend | None = None) -> T
         reflection_run_repository=reflection_repo,
         knowledge_repository=knowledge_repo,
         strategy_repository=strategy_repo,
-        sidecar_backends=[qmd_backend] if qmd_backend is not None else None,
     )
     reflection = MemoryReflectionService(
         derived_index_service=derived,
@@ -94,7 +62,6 @@ def _build_client(tmp_path, *, qmd_backend: QmdRecallBackend | None = None) -> T
     app.state.derived_memory_index_service = derived
     app.state.memory_recall_service = MemoryRecallService(
         derived_index_service=derived,
-        sidecar_backends=[qmd_backend] if qmd_backend is not None else None,
     )
     app.state.memory_reflection_service = reflection
     app.state.memory_retain_service = MemoryRetainService(
@@ -123,9 +90,7 @@ def test_runtime_center_memory_api_rebuild_recall_and_reflect(tmp_path) -> None:
     assert remember_response.status_code == 200
 
     backends_response = client.get("/runtime-center/memory/backends")
-    assert backends_response.status_code == 200
-    backends = backends_response.json()
-    assert any(item["backend_id"] == "hybrid-local" for item in backends)
+    assert backends_response.status_code == 404
 
     rebuild_response = client.post(
         "/runtime-center/memory/rebuild",
@@ -153,7 +118,50 @@ def test_runtime_center_memory_api_rebuild_recall_and_reflect(tmp_path) -> None:
     assert recall_response.status_code == 200
     recall_payload = recall_response.json()
     assert recall_payload["hits"]
-    assert recall_payload["hits"][0]["source_type"] == "knowledge_chunk"
+    assert recall_payload["hits"][0]["source_type"] == "memory_profile"
+    assert any(item["source_type"] == "knowledge_chunk" for item in recall_payload["hits"])
+
+    profiles_response = client.get(
+        "/runtime-center/memory/profiles",
+        params={"scope_type": "industry", "scope_id": "industry-1"},
+    )
+    assert profiles_response.status_code == 200
+    profiles_payload = profiles_response.json()
+    assert profiles_payload
+    assert profiles_payload[0]["scope_type"] == "industry"
+    assert profiles_payload[0]["scope_id"] == "industry-1"
+    assert "dynamic_profile" in profiles_payload[0]
+
+    profile_detail_response = client.get(
+        "/runtime-center/memory/profiles/industry/industry-1",
+    )
+    assert profile_detail_response.status_code == 200
+    profile_detail_payload = profile_detail_response.json()
+    assert profile_detail_payload["scope_type"] == "industry"
+    assert profile_detail_payload["scope_id"] == "industry-1"
+    assert "current_operating_context" in profile_detail_payload
+
+    episodes_response = client.get(
+        "/runtime-center/memory/episodes",
+        params={"scope_type": "industry", "scope_id": "industry-1"},
+    )
+    assert episodes_response.status_code == 200
+    episodes_payload = episodes_response.json()
+    assert episodes_payload
+    assert episodes_payload[0]["scope_type"] == "industry"
+    assert episodes_payload[0]["scope_id"] == "industry-1"
+    assert episodes_payload[0]["entry_refs"]
+
+    history_response = client.get(
+        "/runtime-center/memory/history",
+        params={"scope_type": "industry", "scope_id": "industry-1"},
+    )
+    assert history_response.status_code == 200
+    history_payload = history_response.json()
+    assert history_payload
+    assert history_payload[0]["scope_type"] == "industry"
+    assert history_payload[0]["scope_id"] == "industry-1"
+    assert history_payload[0]["source_type"] == "knowledge_chunk"
 
     reflect_response = client.post(
         "/runtime-center/memory/reflect",
@@ -189,22 +197,6 @@ def test_runtime_center_memory_api_rebuild_recall_and_reflect(tmp_path) -> None:
     )
     assert runs_response.status_code == 200
     assert runs_response.json()
-
-
-def test_runtime_center_memory_backends_include_qmd_metadata(tmp_path) -> None:
-    client = _build_client(tmp_path, qmd_backend=_build_qmd_backend(tmp_path))
-
-    response = client.get("/runtime-center/memory/backends")
-    assert response.status_code == 200
-    payload = response.json()
-    qmd = next(item for item in payload if item["backend_id"] == "qmd")
-    assert qmd["available"] is True
-    assert qmd["metadata"]["install_mode"] == "path"
-    assert qmd["metadata"]["query_mode"] in {"query", "search", "vsearch"}
-    assert "Qwen3-Embedding-0.6B" in qmd["metadata"]["embed_model"]
-    assert qmd["metadata"]["ready"] is False
-    assert "runtime_problem" in qmd["metadata"]
-    assert qmd["metadata"]["daemon_state"] == "disabled"
 
 
 def test_runtime_center_memory_recall_accepts_work_context_selector(tmp_path) -> None:
@@ -250,4 +242,5 @@ def test_runtime_center_memory_recall_accepts_work_context_selector(tmp_path) ->
     assert payload["hits"]
     assert payload["hits"][0]["scope_type"] == "work_context"
     assert payload["hits"][0]["scope_id"] == "ctx-industry-control"
-    assert payload["hits"][0]["title"] == "Control-thread note"
+    assert payload["hits"][0]["title"] == "Shared Memory Profile"
+    assert any(item["title"] == "Control-thread note" for item in payload["hits"])

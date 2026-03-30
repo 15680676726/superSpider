@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from ..memory.models import MemoryRecallHit
 from .query_execution_shared import *  # noqa: F401,F403
 
 
@@ -1283,10 +1284,87 @@ class _QueryExecutionPromptMixin:
         if knowledge_chunks:
             lines.append("# Retrieved Knowledge")
             lines.extend(_knowledge_line(chunk) for chunk in knowledge_chunks[:4])
+        derived_service = getattr(recall_service, "_derived_index_service", None)
+        truth_first_entries = []
+        if derived_service is not None and callable(getattr(derived_service, "list_fact_entries", None)):
+            truth_first_entries = list(
+                derived_service.list_fact_entries(
+                    scope_type=(
+                        "work_context"
+                        if resolved_work_context_id
+                        else "task"
+                        if task_id
+                        else None
+                    ),
+                    scope_id=resolved_work_context_id or (task_id if task_id else None),
+                    owner_agent_id=owner_agent_id,
+                    industry_instance_id=industry_instance_id,
+                    limit=6,
+                )
+                or [],
+            )
+            truth_first_entries.sort(
+                key=lambda item: (
+                    getattr(item, "source_updated_at", None)
+                    or getattr(item, "updated_at", None)
+                    or getattr(item, "created_at", None)
+                    or "",
+                ),
+                reverse=True,
+            )
+        if truth_first_entries:
+            if lines:
+                lines.append("")
+            latest_entries = truth_first_entries[:1]
+            history_entries = truth_first_entries[1:3]
+            profile_entry = latest_entries[0] if latest_entries else None
+            lines.append("# Truth-First Memory Profile")
+            if profile_entry is not None:
+                lines.append(
+                    _knowledge_line(
+                        MemoryRecallHit(
+                            entry_id=f"profile:{getattr(profile_entry, 'scope_type', 'global')}:{getattr(profile_entry, 'scope_id', 'runtime')}",
+                            kind="memory_profile",
+                            title="Shared Memory Profile",
+                            summary=_first_non_empty(
+                                getattr(profile_entry, "summary", None),
+                                getattr(profile_entry, "content_excerpt", None),
+                                getattr(profile_entry, "title", None),
+                            )
+                            or "Shared truth-first profile.",
+                            content_excerpt=_first_non_empty(
+                                getattr(profile_entry, "content_excerpt", None),
+                                getattr(profile_entry, "summary", None),
+                            )
+                            or "",
+                            source_type="memory_profile",
+                            source_ref=f"profile:{getattr(profile_entry, 'scope_type', 'global')}:{getattr(profile_entry, 'scope_id', 'runtime')}",
+                            scope_type=str(getattr(profile_entry, "scope_type", "global") or "global"),
+                            scope_id=str(getattr(profile_entry, "scope_id", "runtime") or "runtime"),
+                            confidence=1.0,
+                            quality_score=1.0,
+                            score=1.0,
+                            backend="truth-first",
+                        ),
+                    ),
+                )
+            else:
+                lines.append("- Shared truth-first profile unavailable.")
+            lines.append("")
+            lines.append("# Truth-First Memory Latest Facts")
+            lines.extend(_knowledge_line(chunk) for chunk in latest_entries[:2])
+            if history_entries:
+                lines.append("")
+                lines.append("# Truth-First Memory History")
+                lines.extend(_knowledge_line(chunk) for chunk in history_entries[:2])
         if memory_chunks:
             if lines:
                 lines.append("")
-            lines.append("# Long-Term Memory")
+            lines.append(
+                "# Truth-First Lexical Recall"
+                if truth_first_entries
+                else "# Long-Term Memory"
+            )
             lines.extend(_knowledge_line(chunk) for chunk in memory_chunks[:3])
         return lines
 

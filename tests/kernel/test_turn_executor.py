@@ -32,6 +32,17 @@ class FakeQueryExecutionService:
     def set_session_backend(self, session_backend) -> None:
         self.synced["session_backend"] = session_backend
 
+    def set_conversation_compaction_service(
+        self,
+        conversation_compaction_service,
+    ) -> None:
+        self.synced["conversation_compaction_service"] = (
+            conversation_compaction_service
+        )
+
+    def set_memory_manager(self, memory_manager) -> None:
+        self.synced["memory_manager"] = memory_manager
+
     def set_kernel_dispatcher(self, kernel_dispatcher) -> None:
         self.synced["kernel_dispatcher"] = kernel_dispatcher
 
@@ -1022,6 +1033,23 @@ def test_kernel_turn_executor_syncs_shared_query_execution_service_dependencies(
     assert query_execution_service.synced["kernel_dispatcher"] is kernel_dispatcher
 
 
+def test_kernel_turn_executor_syncs_conversation_compaction_service_without_legacy_memory_manager() -> None:
+    conversation_compaction_service = object()
+    query_execution_service = FakeQueryExecutionService()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        memory_manager=conversation_compaction_service,
+    )
+
+    executor.set_query_execution_service(query_execution_service)
+
+    assert (
+        query_execution_service.synced["conversation_compaction_service"]
+        is conversation_compaction_service
+    )
+    assert "memory_manager" not in query_execution_service.synced
+
+
 def test_runtime_host_syncs_turn_executor_session_backend() -> None:
     host = RuntimeHost(session_backend=object())
     query_execution_service = FakeQueryExecutionService()
@@ -1036,6 +1064,52 @@ def test_runtime_host_syncs_turn_executor_session_backend() -> None:
 
     assert query_execution_service.synced["session_backend"] is host.session_backend
     assert main_brain_chat_service.synced["session_backend"] is host.session_backend
+
+
+@pytest.mark.asyncio
+async def test_runtime_host_starts_conversation_compaction_service_without_memory_manager(
+    monkeypatch,
+) -> None:
+    memory_manager_started: list[str] = []
+    compaction_service_started: list[object] = []
+
+    class FakeMemoryManager:
+        def __init__(self, **_kwargs) -> None:
+            memory_manager_started.append("created")
+
+        async def start(self) -> None:
+            memory_manager_started.append("started")
+
+        async def close(self) -> None:
+            memory_manager_started.append("closed")
+
+    class FakeConversationCompactionService:
+        def __init__(self, **_kwargs) -> None:
+            compaction_service_started.append(self)
+
+        async def start(self) -> None:
+            compaction_service_started.append("started")
+
+        async def close(self) -> None:
+            compaction_service_started.append("closed")
+
+    monkeypatch.setattr(
+        "copaw.app.runtime_host.MemoryManager",
+        FakeMemoryManager,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "copaw.app.runtime_host.ConversationCompactionService",
+        FakeConversationCompactionService,
+        raising=False,
+    )
+
+    host = RuntimeHost(session_backend=object())
+    await host.start()
+    await host.stop()
+
+    assert memory_manager_started == []
+    assert compaction_service_started[1:] == ["started", "closed"]
 
 
 def test_query_confirmation_policy_change_helper_removed() -> None:

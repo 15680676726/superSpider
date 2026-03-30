@@ -8,8 +8,8 @@ from typing import Any, Awaitable, Callable
 from dotenv import load_dotenv
 
 from .runtime_session import SafeJSONSession
-from ..agents.memory import MemoryManager
 from ..constant import WORKING_DIR
+from ..memory.conversation_compaction_service import ConversationCompactionService
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +23,13 @@ class RuntimeHost:
         self,
         *,
         session_backend: Any | None = None,
-        memory_manager: MemoryManager | None = None,
+        conversation_compaction_service: ConversationCompactionService | None = None,
+        memory_manager: Any | None = None,
     ) -> None:
         self._session_backend = session_backend
-        self._memory_manager = memory_manager
+        self._conversation_compaction_service = (
+            conversation_compaction_service or memory_manager
+        )
         self._restart_callback: RestartCallback | None = None
 
     @property
@@ -34,8 +37,12 @@ class RuntimeHost:
         return self._session_backend
 
     @property
-    def memory_manager(self) -> MemoryManager | None:
-        return self._memory_manager
+    def conversation_compaction_service(self) -> ConversationCompactionService | None:
+        return self._conversation_compaction_service
+
+    @property
+    def memory_manager(self) -> ConversationCompactionService | None:
+        return self._conversation_compaction_service
 
     @property
     def restart_callback(self) -> RestartCallback | None:
@@ -44,8 +51,14 @@ class RuntimeHost:
     def set_session_backend(self, session_backend: Any) -> None:
         self._session_backend = session_backend
 
-    def set_memory_manager(self, memory_manager: MemoryManager | None) -> None:
-        self._memory_manager = memory_manager
+    def set_conversation_compaction_service(
+        self,
+        conversation_compaction_service: ConversationCompactionService | None,
+    ) -> None:
+        self._conversation_compaction_service = conversation_compaction_service
+
+    def set_memory_manager(self, memory_manager: Any | None) -> None:
+        self._conversation_compaction_service = memory_manager
 
     def set_restart_callback(
         self,
@@ -60,9 +73,17 @@ class RuntimeHost:
             setter = getattr(turn_executor, "set_session_backend", None)
             if callable(setter):
                 setter(self._session_backend)
-        memory_setter = getattr(turn_executor, "set_memory_manager", None)
-        if callable(memory_setter):
-            memory_setter(self._memory_manager)
+        compaction_setter = getattr(
+            turn_executor,
+            "set_conversation_compaction_service",
+            None,
+        )
+        if callable(compaction_setter):
+            compaction_setter(self._conversation_compaction_service)
+        else:
+            memory_setter = getattr(turn_executor, "set_memory_manager", None)
+            if callable(memory_setter):
+                memory_setter(self._conversation_compaction_service)
         restart_setter = getattr(turn_executor, "set_restart_callback", None)
         if callable(restart_setter):
             restart_setter(self._restart_callback)
@@ -84,20 +105,20 @@ class RuntimeHost:
             )
 
         try:
-            if self._memory_manager is None:
-                self._memory_manager = MemoryManager(
+            if self._conversation_compaction_service is None:
+                self._conversation_compaction_service = ConversationCompactionService(
                     working_dir=str(WORKING_DIR),
                 )
-            await self._memory_manager.start()
+            await self._conversation_compaction_service.start()
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.exception("MemoryManager start failed: %s", exc)
+            logger.exception("ConversationCompactionService start failed: %s", exc)
 
     async def stop(self) -> None:
         try:
-            if self._memory_manager is not None:
-                await self._memory_manager.close()
+            if self._conversation_compaction_service is not None:
+                await self._conversation_compaction_service.close()
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning("MemoryManager stop failed: %s", exc)
+            logger.warning("ConversationCompactionService stop failed: %s", exc)
 
 
 __all__ = ["RuntimeHost", "RestartCallback"]

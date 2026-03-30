@@ -11,9 +11,6 @@ from pydantic import BaseModel, Field
 MemoryBackendKind = Literal[
     "lexical",
     "hybrid-local",
-    "local-vector",
-    "qmd",
-    "lancedb",
 ]
 
 

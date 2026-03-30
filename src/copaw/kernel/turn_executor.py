@@ -25,7 +25,6 @@ from agentscope_runtime.engine.schemas.exception import (
     UnknownAgentException,
 )
 
-from ..agents.memory import MemoryManager
 from ..app.channels.schema import DEFAULT_CHANNEL
 from ..app.runtime_commands import (
     infer_turn_capability_and_risk,
@@ -46,6 +45,7 @@ from .query_execution_shared import (
     _first_non_empty,
     _is_hypothetical_control_text,
 )
+from ..memory.conversation_compaction_service import ConversationCompactionService
 
 logger = logging.getLogger(__name__)
 
@@ -298,7 +298,8 @@ class KernelTurnExecutor:
         self,
         *,
         session_backend: Any,
-        memory_manager: MemoryManager | None = None,
+        conversation_compaction_service: ConversationCompactionService | None = None,
+        memory_manager: Any | None = None,
         mcp_manager: Any | None = None,
         kernel_dispatcher: Any | None = None,
         tool_bridge: Any | None = None,
@@ -310,15 +311,18 @@ class KernelTurnExecutor:
         in_type_converters: dict[str, Callable] | None = None,
         out_type_converters: dict[str, Callable] | None = None,
     ) -> None:
+        resolved_compaction_service = (
+            conversation_compaction_service or memory_manager
+        )
         self._session_backend = session_backend
-        self._memory_manager = memory_manager
+        self._conversation_compaction_service = resolved_compaction_service
         self._mcp_manager = mcp_manager
         self._kernel_dispatcher = kernel_dispatcher
         self._tool_bridge = tool_bridge
         self._environment_service = environment_service
         self._query_execution_service = query_execution_service or KernelQueryExecutionService(
             session_backend=session_backend,
-            memory_manager=memory_manager,
+            conversation_compaction_service=resolved_compaction_service,
             mcp_manager=mcp_manager,
             tool_bridge=tool_bridge,
             environment_service=environment_service,
@@ -333,7 +337,7 @@ class KernelTurnExecutor:
         )
         self._sync_query_execution_service(
             session_backend=session_backend,
-            memory_manager=memory_manager,
+            conversation_compaction_service=resolved_compaction_service,
             mcp_manager=mcp_manager,
             tool_bridge=tool_bridge,
             environment_service=environment_service,
@@ -354,9 +358,17 @@ class KernelTurnExecutor:
         self._maybe_call_main_brain_chat_service("set_session_backend", session_backend)
         self._maybe_call_main_brain_orchestrator("set_session_backend", session_backend)
 
-    def set_memory_manager(self, memory_manager: MemoryManager | None) -> None:
-        self._memory_manager = memory_manager
-        self._maybe_call_query_execution_service("set_memory_manager", memory_manager)
+    def set_conversation_compaction_service(
+        self,
+        conversation_compaction_service: ConversationCompactionService | None,
+    ) -> None:
+        self._conversation_compaction_service = conversation_compaction_service
+        self._sync_query_execution_compaction_service(
+            conversation_compaction_service,
+        )
+
+    def set_memory_manager(self, memory_manager: Any | None) -> None:
+        self.set_conversation_compaction_service(memory_manager)
 
     def set_mcp_manager(self, mcp_manager: Any | None) -> None:
         self._mcp_manager = mcp_manager
@@ -385,7 +397,7 @@ class KernelTurnExecutor:
         if query_execution_service is None:
             query_execution_service = KernelQueryExecutionService(
                 session_backend=self._session_backend,
-                memory_manager=self._memory_manager,
+                conversation_compaction_service=self._conversation_compaction_service,
                 mcp_manager=self._mcp_manager,
                 tool_bridge=self._tool_bridge,
                 environment_service=self._environment_service,
@@ -393,7 +405,7 @@ class KernelTurnExecutor:
         self._query_execution_service = query_execution_service
         self._sync_query_execution_service(
             session_backend=self._session_backend,
-            memory_manager=self._memory_manager,
+            conversation_compaction_service=self._conversation_compaction_service,
             mcp_manager=self._mcp_manager,
             tool_bridge=self._tool_bridge,
             environment_service=self._environment_service,
@@ -451,14 +463,16 @@ class KernelTurnExecutor:
         self,
         *,
         session_backend: Any,
-        memory_manager: MemoryManager | None,
+        conversation_compaction_service: ConversationCompactionService | None,
         mcp_manager: Any | None,
         tool_bridge: Any | None,
         environment_service: Any | None,
         kernel_dispatcher: Any | None,
     ) -> None:
         self._maybe_call_query_execution_service("set_session_backend", session_backend)
-        self._maybe_call_query_execution_service("set_memory_manager", memory_manager)
+        self._sync_query_execution_compaction_service(
+            conversation_compaction_service,
+        )
         self._maybe_call_query_execution_service("set_mcp_manager", mcp_manager)
         self._maybe_call_query_execution_service("set_tool_bridge", tool_bridge)
         self._maybe_call_query_execution_service(
@@ -469,6 +483,26 @@ class KernelTurnExecutor:
             "set_kernel_dispatcher",
             kernel_dispatcher,
         )
+
+    def _sync_query_execution_compaction_service(
+        self,
+        conversation_compaction_service: ConversationCompactionService | None,
+    ) -> None:
+        method = getattr(
+            self._query_execution_service,
+            "set_conversation_compaction_service",
+            None,
+        )
+        if callable(method):
+            method(conversation_compaction_service)
+            return
+        legacy_method = getattr(
+            self._query_execution_service,
+            "set_memory_manager",
+            None,
+        )
+        if callable(legacy_method):
+            legacy_method(conversation_compaction_service)
 
     def _sync_main_brain_orchestrator(
         self,
@@ -609,7 +643,7 @@ class KernelTurnExecutor:
                     request=request,
                     msgs=msgs,
                     session_backend=self._session_backend,
-                    memory_manager=self._memory_manager,
+                    memory_manager=self._conversation_compaction_service,
                     restart_callback=self._restart_callback,
                 ):
                     last_output_summary = summarize_stream_message(msg)

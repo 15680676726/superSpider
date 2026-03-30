@@ -48,6 +48,7 @@ from ..constant import (
     MEMORY_COMPACT_RATIO,
 )
 from ..agents.memory import MemoryManager
+from ..memory.conversation_compaction_service import ConversationCompactionService
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +252,7 @@ class CoPawAgent(ReActAgent):
         prompt_appendix: str | None = None,
         enable_memory_manager: bool = True,
         mcp_clients: Optional[List[Any]] = None,
+        conversation_compaction_service: ConversationCompactionService | None = None,
         memory_manager: MemoryManager | None = None,
         max_iters: int = 50,
         max_input_length: int = 128 * 1024,  # 128K = 131072 tokens
@@ -324,6 +326,7 @@ class CoPawAgent(ReActAgent):
         # Setup memory manager
         self._setup_memory_manager(
             enable_memory_manager,
+            conversation_compaction_service,
             memory_manager,
             namesake_strategy,
         )
@@ -425,6 +428,7 @@ class CoPawAgent(ReActAgent):
     def _setup_memory_manager(
         self,
         enable_memory_manager: bool,
+        conversation_compaction_service: ConversationCompactionService | None,
         memory_manager: MemoryManager | None,
         namesake_strategy: NamesakeStrategy,
     ) -> None:
@@ -441,17 +445,24 @@ class CoPawAgent(ReActAgent):
             enable_memory_manager = False
 
         self._enable_memory_manager: bool = enable_memory_manager
-        self.memory_manager = memory_manager
+        resolved_compaction_service = (
+            conversation_compaction_service or memory_manager
+        )
+        self.conversation_compaction_service = resolved_compaction_service
+        self.memory_manager = resolved_compaction_service
 
         # Register memory_search tool if enabled and available
-        if self._enable_memory_manager and self.memory_manager is not None:
+        if (
+            self._enable_memory_manager
+            and self.conversation_compaction_service is not None
+        ):
             # update memory manager
-            self.memory = self.memory_manager.get_in_memory_memory()
+            self.memory = self.conversation_compaction_service.get_in_memory_memory()
 
             # Register memory_search as a tool function
             self.toolkit.register_tool_function(
                 _wrap_tool_function_for_toolkit(
-                    create_memory_search_tool(self.memory_manager),
+                    create_memory_search_tool(self.conversation_compaction_service),
                 ),
                 namesake_strategy=namesake_strategy,
             )
@@ -460,9 +471,12 @@ class CoPawAgent(ReActAgent):
     def _register_hooks(self) -> None:
         """Register pre-reasoning hooks."""
         # Memory compaction hook - auto-compact when context is full
-        if self._enable_memory_manager and self.memory_manager is not None:
+        if (
+            self._enable_memory_manager
+            and self.conversation_compaction_service is not None
+        ):
             memory_compact_hook = MemoryCompactionHook(
-                memory_manager=self.memory_manager,
+                memory_manager=self.conversation_compaction_service,
             )
             self.register_instance_hook(
                 hook_type="pre_reasoning",

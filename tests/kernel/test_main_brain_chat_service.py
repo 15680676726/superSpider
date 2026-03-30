@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,8 @@ from agentscope.message import Msg, TextBlock, ThinkingBlock
 
 import copaw.kernel.main_brain_chat_service as main_brain_chat_service_module
 from copaw.kernel.main_brain_chat_service import MainBrainChatService
+from copaw.memory.models import MemoryRecallHit, MemoryRecallResponse
+from copaw.state import MemoryFactIndexRecord
 
 
 class _FakeSessionBackend:
@@ -149,6 +152,89 @@ class _FakeIndustryService:
     async def kickoff_execution_from_chat(self, **kwargs):
         self.kickoff_calls.append(kwargs)
         return {"activated": True}
+
+
+class _TruthFirstDerivedIndexService:
+    def __init__(self) -> None:
+        now = datetime.now(UTC)
+        self.calls: list[dict[str, object]] = []
+        self.entries = [
+            MemoryFactIndexRecord(
+                id="memory-fact-latest",
+                source_type="knowledge_chunk",
+                source_ref="chunk-latest",
+                scope_type="work_context",
+                scope_id="ctx-truth-first",
+                owner_agent_id="ops-agent",
+                title="Current operator preference",
+                summary="Prefer governed checklist playback before outbound execution.",
+                content_excerpt="Prefer governed checklist playback before outbound execution.",
+                content_text="Prefer governed checklist playback before outbound execution.",
+                tags=["preference", "latest"],
+                updated_at=now,
+                created_at=now - timedelta(minutes=5),
+            ),
+            MemoryFactIndexRecord(
+                id="memory-fact-history",
+                source_type="knowledge_chunk",
+                source_ref="chunk-history",
+                scope_type="work_context",
+                scope_id="ctx-truth-first",
+                owner_agent_id="ops-agent",
+                title="Older follow-up history",
+                summary="Previous cycle required evidence review before outbound release.",
+                content_excerpt="Previous cycle required evidence review before outbound release.",
+                content_text="Previous cycle required evidence review before outbound release.",
+                tags=["history"],
+                updated_at=now - timedelta(days=2),
+                created_at=now - timedelta(days=2, minutes=5),
+            ),
+        ]
+
+    def list_fact_entries(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        scope_type = kwargs.get("scope_type")
+        scope_id = kwargs.get("scope_id")
+        limit = kwargs.get("limit")
+        entries = [
+            item
+            for item in self.entries
+            if (scope_type is None or item.scope_type == scope_type)
+            and (scope_id is None or item.scope_id == scope_id)
+        ]
+        if isinstance(limit, int):
+            return entries[:limit]
+        return entries
+
+
+class _TruthFirstMemoryRecallService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+        self._derived_index_service = _TruthFirstDerivedIndexService()
+
+    def recall(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return MemoryRecallResponse(
+            query=str(kwargs.get("query") or ""),
+            backend_used="lexical",
+            hits=[
+                MemoryRecallHit(
+                    entry_id="memory-hit-lexical",
+                    kind="knowledge_chunk",
+                    title="Lexical fallback note",
+                    summary="Lexical fallback still works after truth-first memory injection.",
+                    content_excerpt="Lexical fallback still works after truth-first memory injection.",
+                    source_type="knowledge_chunk",
+                    source_ref="chunk-lexical",
+                    scope_type="work_context",
+                    scope_id="ctx-truth-first",
+                    confidence=0.8,
+                    quality_score=0.7,
+                    score=1.0,
+                    backend="lexical",
+                )
+            ],
+        )
 
 
 async def _snapshot_texts(
@@ -344,6 +430,48 @@ async def test_main_brain_chat_service_persists_latest_user_turn_when_request_is
     texts = await _snapshot_texts(service, snapshot)
     assert texts == ["这轮先记下来，我等会回来继续。"]
     assert len(backend.save_calls) == 1
+
+
+def test_main_brain_chat_service_prompt_prefers_truth_first_profile_before_lexical_recall():
+    recall_service = _TruthFirstMemoryRecallService()
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        memory_recall_service=recall_service,
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-truth-first",
+        user_id="user-truth-first",
+        industry_instance_id=None,
+        work_context_id="ctx-truth-first",
+        agent_id="ops-agent",
+    )
+
+    prompt_messages = service._build_prompt_messages(  # pylint: disable=protected-access
+        request=request,
+        query="Please use the current checklist before outbound execution",
+        prior_messages=[],
+        current_messages=[],
+    )
+
+    context_prompt = prompt_messages[1]["content"]
+    assert "## Truth-First Memory Profile" in context_prompt
+    assert "## Truth-First Memory Latest Facts" in context_prompt
+    assert "## Truth-First Memory History" in context_prompt
+    assert "## Truth-First Lexical Recall" in context_prompt
+    assert "Current operator preference" in context_prompt
+    assert "Older follow-up history" in context_prompt
+    assert "Lexical fallback note" in context_prompt
+    assert context_prompt.index("## Truth-First Memory Profile") < context_prompt.index(
+        "## Truth-First Memory Latest Facts",
+    )
+    assert context_prompt.index("## Truth-First Memory Latest Facts") < context_prompt.index(
+        "## Truth-First Lexical Recall",
+    )
+    assert recall_service._derived_index_service.calls[0]["scope_type"] == "work_context"
+    assert recall_service._derived_index_service.calls[0]["scope_id"] == "ctx-truth-first"
+    assert recall_service.calls[0]["scope_type"] == "work_context"
+    assert recall_service.calls[0]["scope_id"] == "ctx-truth-first"
 
 
 def test_main_brain_chat_service_prompt_guides_structured_goal_and_auto_progression():

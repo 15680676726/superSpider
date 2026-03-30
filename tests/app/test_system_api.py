@@ -120,8 +120,17 @@ def test_system_overview_exposes_v3_routes(tmp_path: Path) -> None:
     assert payload["providers"]["fallback_route"] == "/api/models/fallback"
     assert payload["runtime"]["governance_route"] == "/api/runtime-center/governance/status"
     assert payload["memory"]["backends_route"] == "/api/runtime-center/memory/backends"
-    assert payload["memory"]["qmd"]["available"] is True
-    assert payload["memory"]["qmd"]["metadata"]["query_mode"] == "search"
+    assert payload["memory"]["backends"] == [
+        {
+            "backend_id": "hybrid-local",
+            "label": "Hybrid Local",
+            "available": True,
+            "is_default": True,
+            "reason": None,
+            "metadata": {},
+        },
+    ]
+    assert "qmd" not in payload["memory"]
 
 
 def test_system_overview_caches_workspace_stats(tmp_path: Path, monkeypatch) -> None:
@@ -166,14 +175,14 @@ def test_system_self_check_reports_provider_fallback(tmp_path: Path) -> None:
     assert by_name["provider_active_model"]["status"] == "pass"
     assert by_name["provider_fallback"]["status"] == "pass"
     assert by_name["provider_fallback"]["meta"]["count"] == 1
-    assert by_name["memory_qmd_sidecar"]["status"] == "pass"
-    assert by_name["memory_qmd_sidecar"]["meta"]["query_mode"] == "search"
-    assert "Qwen3-Embedding-0.6B" in by_name["memory_qmd_sidecar"]["meta"]["embed_model"]
-    assert by_name["memory_qmd_sidecar"]["meta"]["daemon_state"] == "running"
-    assert by_name["memory_qmd_sidecar"]["meta"]["indexed_documents"] == 217
+    assert "memory_qmd_sidecar" not in by_name
+    assert "memory_embedding_config" not in by_name
+    assert "memory_vector_ready" not in by_name
 
 
-def test_system_self_check_surfaces_embedding_model_gap(tmp_path: Path) -> None:
+def test_system_self_check_hides_embedding_and_vector_runtime_noise(
+    tmp_path: Path,
+) -> None:
     app = build_app(tmp_path)
     client = TestClient(app)
 
@@ -182,18 +191,12 @@ def test_system_self_check_surfaces_embedding_model_gap(tmp_path: Path) -> None:
     assert response.status_code == 200
     payload = response.json()
     by_name = {item["name"]: item for item in payload["checks"]}
-    assert "memory_embedding_config" in by_name
-    assert by_name["memory_embedding_config"]["status"] == "warn"
-    assert (
-        by_name["memory_embedding_config"]["meta"]["vector_disable_reason_code"]
-        == "missing_embedding_model_name"
-    )
-    assert "EMBEDDING_MODEL_NAME" in by_name["memory_embedding_config"]["summary"]
-    assert by_name["memory_vector_ready"]["status"] == "warn"
-    assert by_name["memory_vector_ready"]["meta"]["vector_enabled"] is False
+    assert "memory_embedding_config" not in by_name
+    assert "memory_vector_ready" not in by_name
+    assert "memory_qmd_sidecar" not in by_name
 
 
-def test_system_self_check_warns_when_qmd_runtime_not_ready(tmp_path: Path) -> None:
+def test_system_self_check_hides_qmd_runtime_state(tmp_path: Path) -> None:
     app = build_app(tmp_path)
 
     class _UnreadyMemoryRecallService:
@@ -230,11 +233,7 @@ def test_system_self_check_warns_when_qmd_runtime_not_ready(tmp_path: Path) -> N
     assert response.status_code == 200
     payload = response.json()
     by_name = {item["name"]: item for item in payload["checks"]}
-    assert by_name["memory_qmd_sidecar"]["status"] == "warn"
-    assert "behind manifest entries" in by_name["memory_qmd_sidecar"]["summary"]
-    assert by_name["memory_qmd_sidecar"]["meta"]["ready"] is False
-    assert by_name["memory_qmd_sidecar"]["meta"]["pending_embeddings"] == 217
-    assert by_name["memory_qmd_sidecar"]["meta"]["daemon_state"] == "failed"
+    assert "memory_qmd_sidecar" not in by_name
 
 
 def test_system_backup_download_streams_workspace_archive(

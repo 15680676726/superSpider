@@ -4,11 +4,11 @@ from agentscope.tool import ToolResponse
 from agentscope.message import TextBlock
 
 
-def create_memory_search_tool(memory_manager):
-    """Create a memory_search tool function with bound memory_manager.
+def create_memory_search_tool(memory_runtime):
+    """Create a memory_search tool function with bound private memory runtime.
 
     Args:
-        memory_manager: MemoryManager instance to use for searching
+        memory_runtime: Private compaction/search runtime to use for searching
 
     Returns:
         An async function that can be registered as a tool
@@ -38,19 +38,18 @@ def create_memory_search_tool(memory_manager):
             `ToolResponse`:
                 Search results formatted with paths, line numbers, and content.
         """
-        if memory_manager is None:
+        if memory_runtime is None:
             return ToolResponse(
                 content=[
                     TextBlock(
                         type="text",
-                        text="Error: Memory manager is not enabled.",
+                        text="Error: Private conversation compaction is not enabled.",
                     ),
                 ],
             )
 
         try:
-            # memory_manager.memory_search already returns ToolResponse
-            return await memory_manager.memory_search(
+            return await memory_runtime.memory_search(
                 query=query,
                 max_results=max_results,
                 min_score=min_score,

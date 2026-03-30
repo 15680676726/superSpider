@@ -4,12 +4,19 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
-from .model_support import UpdatedRecord, _new_record_id, _normalize_text_list
+from .model_support import (
+    UpdatedRecord,
+    _new_record_id,
+    _normalize_datetime,
+    _normalize_text_list,
+)
 
 MemoryScopeType = Literal["global", "industry", "agent", "task", "work_context"]
 MemoryReflectionStatus = Literal["queued", "running", "completed", "failed"]
+MemoryFactType = Literal["fact", "preference", "episode", "temporary", "inference"]
+MemoryRelationKind = Literal["updates", "supersedes", "derives", "references"]
 MemoryOpinionStance = Literal[
     "supporting",
     "neutral",
@@ -42,6 +49,13 @@ class MemoryFactIndexRecord(UpdatedRecord):
     evidence_refs: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     quality_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    memory_type: MemoryFactType = "fact"
+    relation_kind: MemoryRelationKind = "references"
+    supersedes_entry_id: str | None = None
+    is_latest: bool = True
+    valid_from: datetime | None = None
+    expires_at: datetime | None = None
+    confidence_tier: str = Field(default="standard", min_length=1)
     source_updated_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -56,6 +70,82 @@ class MemoryFactIndexRecord(UpdatedRecord):
     @classmethod
     def _normalize_index_lists(cls, value: object) -> list[str]:
         return _normalize_text_list(value)
+
+    @field_validator("valid_from", mode="after")
+    @classmethod
+    def _normalize_valid_from(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        return _normalize_datetime(value)
+
+    @model_validator(mode="after")
+    def _default_valid_from(self) -> "MemoryFactIndexRecord":
+        if self.valid_from is None:
+            self.valid_from = self.created_at
+        return self
+
+
+class MemoryProfileViewRecord(UpdatedRecord):
+    """Compiled profile-first memory view derived from canonical truth."""
+
+    profile_id: str = Field(default_factory=_new_record_id, min_length=1)
+    scope_type: MemoryScopeType = "global"
+    scope_id: str = Field(default="runtime", min_length=1)
+    owner_agent_id: str | None = None
+    industry_instance_id: str | None = None
+    static_profile: str = ""
+    dynamic_profile: str = ""
+    active_preferences: list[str] = Field(default_factory=list)
+    active_constraints: list[str] = Field(default_factory=list)
+    current_focus_summary: str = ""
+    current_operating_context: str = ""
+    source_refs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator(
+        "active_preferences",
+        "active_constraints",
+        "source_refs",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_profile_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+
+class MemoryEpisodeViewRecord(UpdatedRecord):
+    """Summarized continuous execution stretch derived from canonical truth."""
+
+    episode_id: str = Field(default_factory=_new_record_id, min_length=1)
+    scope_type: MemoryScopeType = "global"
+    scope_id: str = Field(default="runtime", min_length=1)
+    owner_agent_id: str | None = None
+    industry_instance_id: str | None = None
+    headline: str = Field(..., min_length=1)
+    summary: str = ""
+    source_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    work_context_id: str | None = None
+    control_thread_id: str | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator(
+        "source_refs",
+        "evidence_refs",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_episode_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+    @field_validator("ended_at", mode="after")
+    @classmethod
+    def _normalize_ended_at(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        return _normalize_datetime(value)
 
 
 class MemoryEntityViewRecord(UpdatedRecord):

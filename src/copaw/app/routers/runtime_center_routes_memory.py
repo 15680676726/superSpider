@@ -4,14 +4,355 @@ from __future__ import annotations
 from .runtime_center_shared_core import *  # noqa: F401,F403
 
 
-@router.get("/memory/backends", response_model=list[dict[str, object]])
-async def list_memory_backends(
+def _first_non_empty(*values: object) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _memory_entry_timestamp(entry: object) -> object | None:
+    for field_name in ("source_updated_at", "updated_at", "created_at"):
+        value = getattr(entry, field_name, None)
+        if value is not None:
+            return value
+    return None
+
+
+def _memory_timestamp_json(value: object | None) -> str | None:
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        try:
+            return str(isoformat())
+        except Exception:
+            return None
+    return str(value) if value is not None else None
+
+
+def _sort_memory_entries(entries: list[object]) -> list[object]:
+    return sorted(
+        list(entries),
+        key=lambda item: (
+            _memory_entry_timestamp(item) is not None,
+            _memory_entry_timestamp(item) or "",
+        ),
+        reverse=True,
+    )
+
+
+def _resolve_memory_scope(
+    *,
+    scope_type: str | None = None,
+    scope_id: str | None = None,
+    task_id: str | None = None,
+    work_context_id: str | None = None,
+    agent_id: str | None = None,
+    industry_instance_id: str | None = None,
+    global_scope_id: str | None = None,
+) -> tuple[str | None, str | None]:
+    normalized_scope_type = str(scope_type or "").strip() or None
+    normalized_scope_id = str(scope_id or "").strip() or None
+    if normalized_scope_type and normalized_scope_id:
+        return normalized_scope_type, normalized_scope_id
+    for candidate_scope_type, candidate_scope_id in (
+        ("work_context", work_context_id),
+        ("task", task_id),
+        ("agent", agent_id),
+        ("industry", industry_instance_id),
+        ("global", global_scope_id),
+    ):
+        normalized_candidate_scope_id = str(candidate_scope_id or "").strip()
+        if normalized_candidate_scope_id:
+            return candidate_scope_type, normalized_candidate_scope_id
+    return None, None
+
+
+def _serialize_memory_entry(entry: object) -> dict[str, object]:
+    model_dump = getattr(entry, "model_dump", None)
+    if callable(model_dump):
+        payload = model_dump(mode="json")
+        if isinstance(payload, dict):
+            return dict(payload)
+    return {}
+
+
+def _list_truth_first_scope_entries(
+    *,
+    request: Request,
+    scope_type: str | None,
+    scope_id: str | None,
+    owner_agent_id: str | None = None,
+    industry_instance_id: str | None = None,
+    limit: int | None = None,
+) -> list[object]:
+    service = _get_derived_memory_index_service(request)
+    entries = service.list_fact_entries(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        owner_agent_id=owner_agent_id,
+        industry_instance_id=industry_instance_id,
+        limit=limit,
+    )
+    return _sort_memory_entries(list(entries or []))
+
+
+def _build_memory_profile_payload(
+    *,
+    scope_type: str,
+    scope_id: str,
+    entries: list[object],
+) -> dict[str, object]:
+    latest_entries = entries[:4]
+    latest_summaries = [
+        _first_non_empty(
+            getattr(entry, "summary", None),
+            getattr(entry, "content_excerpt", None),
+            getattr(entry, "title", None),
+        )
+        for entry in latest_entries
+    ]
+    normalized_summaries = [item for item in latest_summaries if item]
+    preference_lines = [
+        item
+        for item in normalized_summaries
+        if "prefer" in item.lower() or "preference" in item.lower()
+    ]
+    constraint_lines = [
+        item
+        for item in normalized_summaries
+        if "must" in item.lower() or "only" in item.lower() or "required" in item.lower()
+    ]
+    updated_at = _memory_timestamp_json(_memory_entry_timestamp(latest_entries[0])) if latest_entries else None
+    return {
+        "scope_type": scope_type,
+        "scope_id": scope_id,
+        "static_profile": {
+            "headline": _first_non_empty(
+                getattr(latest_entries[0], "title", None) if latest_entries else None,
+                scope_id,
+            ),
+            "summary": normalized_summaries[0] if normalized_summaries else "",
+        },
+        "dynamic_profile": normalized_summaries[:4],
+        "active_preferences": preference_lines[:3],
+        "active_constraints": constraint_lines[:3],
+        "current_focus_summary": _first_non_empty(
+            getattr(latest_entries[0], "title", None) if latest_entries else None,
+            normalized_summaries[0] if normalized_summaries else None,
+        ),
+        "current_operating_context": normalized_summaries[0] if normalized_summaries else "",
+        "updated_at": updated_at,
+    }
+
+
+def _build_memory_episode_payloads(
+    *,
+    scope_type: str,
+    scope_id: str,
+    entries: list[object],
+    limit: int,
+) -> list[dict[str, object]]:
+    grouped: dict[str, list[object]] = {}
+    for entry in entries:
+        source_ref = str(getattr(entry, "source_ref", "") or "").strip() or str(
+            getattr(entry, "id", "") or "memory-episode",
+        )
+        grouped.setdefault(source_ref, []).append(entry)
+    payloads: list[dict[str, object]] = []
+    for source_ref, grouped_entries in grouped.items():
+        ordered = _sort_memory_entries(grouped_entries)
+        first = ordered[0]
+        last = ordered[-1]
+        payloads.append(
+            {
+                "episode_id": f"episode:{scope_type}:{scope_id}:{source_ref}",
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "headline": _first_non_empty(
+                    getattr(first, "title", None),
+                    getattr(first, "summary", None),
+                    source_ref,
+                ),
+                "summary": " / ".join(
+                    filter(
+                        None,
+                        [
+                            _first_non_empty(getattr(item, "summary", None), getattr(item, "title", None))
+                            for item in ordered[:2]
+                        ],
+                    ),
+                ),
+                "entry_refs": [
+                    str(getattr(item, "id", "") or "").strip()
+                    for item in ordered
+                    if str(getattr(item, "id", "") or "").strip()
+                ],
+                "work_context_id": scope_id if scope_type == "work_context" else None,
+                "control_thread_id": _serialize_memory_entry(first).get("metadata", {}).get("control_thread_id"),
+                "started_at": _memory_timestamp_json(_memory_entry_timestamp(last)),
+                "ended_at": _memory_timestamp_json(_memory_entry_timestamp(first)),
+            },
+        )
+        if len(payloads) >= max(1, int(limit)):
+            break
+    return payloads
+
+
+@router.get("/memory/profiles", response_model=list[dict[str, object]])
+async def list_memory_profiles(
     request: Request,
     response: Response,
+    scope_type: Literal["global", "industry", "agent", "task", "work_context"] | None = None,
+    scope_id: str | None = None,
+    owner_agent_id: str | None = None,
+    industry_instance_id: str | None = None,
+    limit: int = 20,
 ) -> list[dict[str, object]]:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
-    service = _get_memory_recall_service(request)
-    return [item.model_dump(mode="json") for item in service.list_backends()]
+    if scope_type and scope_id:
+        entries = _list_truth_first_scope_entries(
+            request=request,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            owner_agent_id=owner_agent_id,
+            industry_instance_id=industry_instance_id,
+            limit=max(limit * 4, 12),
+        )
+        return [_build_memory_profile_payload(scope_type=scope_type, scope_id=scope_id, entries=entries)]
+
+    service = _get_derived_memory_index_service(request)
+    entries = _sort_memory_entries(
+        list(
+            service.list_fact_entries(
+                owner_agent_id=owner_agent_id,
+                industry_instance_id=industry_instance_id,
+                limit=max(limit * 8, 40),
+            )
+            or []
+        ),
+    )
+    scopes: list[tuple[str, str]] = []
+    for entry in entries:
+        key = (
+            str(getattr(entry, "scope_type", "") or "").strip() or "global",
+            str(getattr(entry, "scope_id", "") or "").strip() or "runtime",
+        )
+        if key not in scopes:
+            scopes.append(key)
+        if len(scopes) >= max(1, int(limit)):
+            break
+    return [
+        _build_memory_profile_payload(
+            scope_type=resolved_scope_type,
+            scope_id=resolved_scope_id,
+            entries=[
+                entry
+                for entry in entries
+                if getattr(entry, "scope_type", None) == resolved_scope_type
+                and getattr(entry, "scope_id", None) == resolved_scope_id
+            ],
+        )
+        for resolved_scope_type, resolved_scope_id in scopes
+    ]
+
+
+@router.get("/memory/profiles/{scope_type}/{scope_id}", response_model=dict[str, object])
+async def get_memory_profile(
+    scope_type: Literal["global", "industry", "agent", "task", "work_context"],
+    scope_id: str,
+    request: Request,
+    response: Response,
+    owner_agent_id: str | None = None,
+    industry_instance_id: str | None = None,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    entries = _list_truth_first_scope_entries(
+        request=request,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        owner_agent_id=owner_agent_id,
+        industry_instance_id=industry_instance_id,
+        limit=20,
+    )
+    return _build_memory_profile_payload(scope_type=scope_type, scope_id=scope_id, entries=entries)
+
+
+@router.get("/memory/episodes", response_model=list[dict[str, object]])
+async def list_memory_episodes(
+    request: Request,
+    response: Response,
+    scope_type: Literal["global", "industry", "agent", "task", "work_context"] | None = None,
+    scope_id: str | None = None,
+    task_id: str | None = None,
+    work_context_id: str | None = None,
+    agent_id: str | None = None,
+    industry_instance_id: str | None = None,
+    global_scope_id: str | None = None,
+    owner_agent_id: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, object]]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    resolved_scope_type, resolved_scope_id = _resolve_memory_scope(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        task_id=task_id,
+        work_context_id=work_context_id,
+        agent_id=agent_id,
+        industry_instance_id=industry_instance_id,
+        global_scope_id=global_scope_id,
+    )
+    entries = _list_truth_first_scope_entries(
+        request=request,
+        scope_type=resolved_scope_type,
+        scope_id=resolved_scope_id,
+        owner_agent_id=owner_agent_id,
+        industry_instance_id=industry_instance_id,
+        limit=max(limit * 4, 20),
+    )
+    if resolved_scope_type is None or resolved_scope_id is None:
+        return []
+    return _build_memory_episode_payloads(
+        scope_type=resolved_scope_type,
+        scope_id=resolved_scope_id,
+        entries=entries,
+        limit=limit,
+    )
+
+
+@router.get("/memory/history", response_model=list[dict[str, object]])
+async def list_memory_history(
+    request: Request,
+    response: Response,
+    scope_type: Literal["global", "industry", "agent", "task", "work_context"] | None = None,
+    scope_id: str | None = None,
+    task_id: str | None = None,
+    work_context_id: str | None = None,
+    agent_id: str | None = None,
+    industry_instance_id: str | None = None,
+    global_scope_id: str | None = None,
+    owner_agent_id: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, object]]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    resolved_scope_type, resolved_scope_id = _resolve_memory_scope(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        task_id=task_id,
+        work_context_id=work_context_id,
+        agent_id=agent_id,
+        industry_instance_id=industry_instance_id,
+        global_scope_id=global_scope_id,
+    )
+    entries = _list_truth_first_scope_entries(
+        request=request,
+        scope_type=resolved_scope_type,
+        scope_id=resolved_scope_id,
+        owner_agent_id=owner_agent_id,
+        industry_instance_id=industry_instance_id,
+        limit=limit,
+    )
+    return [_serialize_memory_entry(entry) for entry in entries[: max(1, int(limit))]]
 
 
 @router.get("/memory/recall", response_model=dict[str, object])
@@ -20,7 +361,6 @@ async def recall_memory(
     response: Response,
     query: str,
     role: str | None = None,
-    backend: str | None = None,
     scope_type: Literal["global", "industry", "agent", "task", "work_context"] | None = None,
     scope_id: str | None = None,
     task_id: str | None = None,
@@ -36,7 +376,6 @@ async def recall_memory(
     result = service.recall(
         query=query,
         role=role,
-        backend=backend,
         scope_type=scope_type,
         scope_id=scope_id,
         task_id=task_id,

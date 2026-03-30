@@ -11,8 +11,6 @@ from ..memory import (
     MemoryRecallService,
     MemoryReflectionService,
     MemoryRetainService,
-    QmdBackendConfig,
-    QmdRecallBackend,
 )
 from ..state.agent_experience_service import AgentExperienceMemoryService
 from ..state.knowledge_service import StateKnowledgeService
@@ -37,9 +35,9 @@ RuntimeQueryServices: TypeAlias = tuple[
 ]
 
 
-def resolve_default_memory_recall_backend(*, qmd_backend: QmdRecallBackend) -> str:
+def resolve_default_memory_recall_backend(*, qmd_backend: object | None = None) -> str:
     explicit_backend = str(os.environ.get("COPAW_MEMORY_RECALL_BACKEND", "") or "").strip().lower()
-    if explicit_backend:
+    if explicit_backend in {"lexical", "hybrid-local"}:
         return explicit_backend
     return "hybrid-local"
 
@@ -52,9 +50,8 @@ def build_runtime_query_services(
     human_assist_task_service: object | None = None,
     environment_service: EnvironmentService | None = None,
 ) -> RuntimeQueryServices:
-    qmd_backend = QmdRecallBackend(config=QmdBackendConfig.from_env())
     default_recall_backend = resolve_default_memory_recall_backend(
-        qmd_backend=qmd_backend,
+        qmd_backend=None,
     )
     state_query_service = RuntimeCenterStateQueryService(
         task_repository=repositories.task_repository,
@@ -84,7 +81,7 @@ def build_runtime_query_services(
         routine_run_repository=repositories.routine_run_repository,
         industry_instance_repository=repositories.industry_instance_repository,
         evidence_ledger=evidence_ledger,
-        sidecar_backends=[qmd_backend],
+        sidecar_backends=[],
     )
     memory_reflection_service = MemoryReflectionService(
         derived_index_service=derived_memory_index_service,
@@ -95,7 +92,7 @@ def build_runtime_query_services(
     memory_recall_service = MemoryRecallService(
         derived_index_service=derived_memory_index_service,
         default_backend=default_recall_backend,
-        sidecar_backends=[qmd_backend],
+        sidecar_backends=[],
     )
     strategy_memory_service = StateStrategyMemoryService(
         repository=repositories.strategy_memory_repository,

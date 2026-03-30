@@ -5,11 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import time
-from typing import Any
+from typing import Any, get_args
 
 from fastapi import APIRouter, File, Request, UploadFile
 
 from ...constant import WORKING_DIR
+from ...memory.models import MemoryBackendKind
 from ...providers.provider_manager import ProviderManager
 from ..runtime_health_service import RuntimeHealthService
 from .workspace import _dir_stats, download_workspace, upload_workspace
@@ -20,6 +21,7 @@ _STATE_DB_PATH = WORKING_DIR / "state" / "phase1.sqlite3"
 _EVIDENCE_DB_PATH = WORKING_DIR / "evidence" / "phase1.sqlite3"
 _WORKSPACE_STATS_TTL_SECONDS = 5.0
 _workspace_stats_cache: dict[str, tuple[float, tuple[int, int]]] = {}
+_FORMAL_MEMORY_BACKEND_IDS = set(get_args(MemoryBackendKind))
 
 
 def _utc_now_iso() -> str:
@@ -39,9 +41,14 @@ def _list_memory_backends(app_state: Any) -> list[dict[str, Any]]:
     for item in lister() or []:
         model_dump = getattr(item, "model_dump", None)
         if callable(model_dump):
-            payload.append(model_dump(mode="json"))
+            payload_item = model_dump(mode="json")
         elif isinstance(item, dict):
-            payload.append(dict(item))
+            payload_item = dict(item)
+        else:
+            continue
+        backend_id = str(payload_item.get("backend_id") or "").strip().lower()
+        if backend_id in _FORMAL_MEMORY_BACKEND_IDS:
+            payload.append(payload_item)
     return payload
 
 
@@ -86,10 +93,6 @@ async def get_system_overview(request: Request) -> dict[str, object]:
     file_count, total_size = _workspace_stats(WORKING_DIR)
     startup_recovery = getattr(app_state, "startup_recovery_summary", None)
     memory_backends = _list_memory_backends(app_state)
-    qmd_backend = next(
-        (item for item in memory_backends if item.get("backend_id") == "qmd"),
-        None,
-    )
     return {
         "generated_at": _utc_now_iso(),
         "backup": {
@@ -125,7 +128,6 @@ async def get_system_overview(request: Request) -> dict[str, object]:
         "memory": {
             "backends_route": "/api/runtime-center/memory/backends",
             "backends": memory_backends,
-            "qmd": qmd_backend,
         },
     }
 
@@ -189,55 +191,6 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
             "pass" if present else "warn",
             f"{service_name} {'is available' if present else 'is not available'}.",
         )
-
-    memory_backends = _list_memory_backends(app_state)
-    qmd_backend = next(
-        (item for item in memory_backends if item.get("backend_id") == "qmd"),
-        None,
-    )
-    qmd_available = bool(qmd_backend and qmd_backend.get("available"))
-    qmd_ready = False
-    qmd_metadata = dict(qmd_backend.get("metadata") or {}) if isinstance(qmd_backend, dict) else {}
-    qmd_ready = bool(qmd_metadata.get("ready"))
-    qmd_runtime_problem = str(qmd_metadata.get("runtime_problem") or "").strip()
-    qmd_reason = (
-        str(qmd_backend.get("reason") or "").strip()
-        if isinstance(qmd_backend, dict)
-        else ""
-    )
-    qmd_summary = "QMD sidecar is installed and reachable."
-    qmd_status = "pass" if qmd_available and qmd_ready else "warn"
-    if qmd_backend is None:
-        qmd_status = "warn"
-        qmd_summary = "Memory recall service does not expose a QMD backend descriptor."
-    elif not qmd_available:
-        qmd_summary = qmd_reason or "QMD sidecar is not installed or not reachable."
-    elif not qmd_ready:
-        qmd_summary = (
-            qmd_reason
-            or qmd_runtime_problem
-            or "QMD sidecar is reachable but its runtime index is not ready."
-        )
-    add_check(
-        "memory_qmd_sidecar",
-        qmd_status,
-        qmd_summary,
-        backend=qmd_backend,
-        install_mode=qmd_metadata.get("install_mode"),
-        query_mode=qmd_metadata.get("query_mode"),
-        embed_model=qmd_metadata.get("embed_model"),
-        ready=qmd_metadata.get("ready"),
-        dirty=qmd_metadata.get("dirty"),
-        runtime_problem=qmd_metadata.get("runtime_problem"),
-        collection_path_matches=qmd_metadata.get("collection_path_matches"),
-        indexed_documents=qmd_metadata.get("indexed_documents"),
-        pending_embeddings=qmd_metadata.get("pending_embeddings"),
-        daemon_enabled=qmd_metadata.get("daemon_enabled"),
-        daemon_state=qmd_metadata.get("daemon_state"),
-        daemon_url=qmd_metadata.get("daemon_url"),
-        daemon_pid=qmd_metadata.get("daemon_pid"),
-    )
-
     active_model = None
     get_active_model = getattr(provider_manager, "get_active_model", None)
     if callable(get_active_model):

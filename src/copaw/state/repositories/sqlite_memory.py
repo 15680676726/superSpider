@@ -6,9 +6,11 @@ import sqlite3
 from typing import Any
 
 from ..models_memory import (
+    MemoryEpisodeViewRecord,
     MemoryEntityViewRecord,
     MemoryFactIndexRecord,
     MemoryOpinionViewRecord,
+    MemoryProfileViewRecord,
     MemoryReflectionRunRecord,
 )
 from ..store import SQLiteStateStore
@@ -109,6 +111,7 @@ class SqliteMemoryFactIndexRepository(BaseMemoryFactIndexRepository):
             sort_keys=True,
         )
         payload["metadata_json"] = _encode_json(record.metadata)
+        payload["is_latest"] = 1 if record.is_latest else 0
         with self._store.connection() as conn:
             conn.execute(
                 """
@@ -132,6 +135,13 @@ class SqliteMemoryFactIndexRepository(BaseMemoryFactIndexRepository):
                     evidence_refs_json,
                     confidence,
                     quality_score,
+                    memory_type,
+                    relation_kind,
+                    supersedes_entry_id,
+                    is_latest,
+                    valid_from,
+                    expires_at,
+                    confidence_tier,
                     source_updated_at,
                     metadata_json,
                     created_at,
@@ -156,6 +166,13 @@ class SqliteMemoryFactIndexRepository(BaseMemoryFactIndexRepository):
                     :evidence_refs_json,
                     :confidence,
                     :quality_score,
+                    :memory_type,
+                    :relation_kind,
+                    :supersedes_entry_id,
+                    :is_latest,
+                    :valid_from,
+                    :expires_at,
+                    :confidence_tier,
                     :source_updated_at,
                     :metadata_json,
                     :created_at,
@@ -180,6 +197,13 @@ class SqliteMemoryFactIndexRepository(BaseMemoryFactIndexRepository):
                     evidence_refs_json = excluded.evidence_refs_json,
                     confidence = excluded.confidence,
                     quality_score = excluded.quality_score,
+                    memory_type = excluded.memory_type,
+                    relation_kind = excluded.relation_kind,
+                    supersedes_entry_id = excluded.supersedes_entry_id,
+                    is_latest = excluded.is_latest,
+                    valid_from = excluded.valid_from,
+                    expires_at = excluded.expires_at,
+                    confidence_tier = excluded.confidence_tier,
                     source_updated_at = excluded.source_updated_at,
                     metadata_json = excluded.metadata_json,
                     created_at = excluded.created_at,
@@ -187,6 +211,16 @@ class SqliteMemoryFactIndexRepository(BaseMemoryFactIndexRepository):
                 """,
                 payload,
             )
+            if record.is_latest and record.supersedes_entry_id:
+                conn.execute(
+                    """
+                    UPDATE memory_fact_index
+                    SET is_latest = 0,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (payload["updated_at"], record.supersedes_entry_id),
+                )
         return record
 
     def delete_entry(self, entry_id: str) -> bool:
@@ -214,6 +248,304 @@ class SqliteMemoryFactIndexRepository(BaseMemoryFactIndexRepository):
         return _delete_with_optional_scope(
             store=self._store,
             table_name="memory_fact_index",
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+
+
+class SqliteMemoryProfileViewRepository:
+    """SQLite-backed repository for compiled profile-first memory views."""
+
+    def __init__(self, store: SQLiteStateStore):
+        self._store = store
+        self._store.initialize()
+
+    def get_view(self, profile_id: str) -> MemoryProfileViewRecord | None:
+        with self._store.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM memory_profile_views WHERE profile_id = ?",
+                (profile_id,),
+            ).fetchone()
+        return _memory_profile_view_from_row(row)
+
+    def list_views(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        owner_agent_id: str | None = None,
+        industry_instance_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemoryProfileViewRecord]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if scope_type is not None:
+            clauses.append("scope_type = ?")
+            params.append(scope_type)
+        if scope_id is not None:
+            clauses.append("scope_id = ?")
+            params.append(scope_id)
+        if owner_agent_id is not None:
+            clauses.append("owner_agent_id = ?")
+            params.append(owner_agent_id)
+        if industry_instance_id is not None:
+            clauses.append("industry_instance_id = ?")
+            params.append(industry_instance_id)
+        query = "SELECT * FROM memory_profile_views"
+        if clauses:
+            query = f"{query} WHERE {' AND '.join(clauses)}"
+        query = f"{query} ORDER BY updated_at DESC, created_at DESC"
+        if isinstance(limit, int) and limit >= 0:
+            query = f"{query} LIMIT {int(limit)}"
+        with self._store.connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [
+            record
+            for record in (_memory_profile_view_from_row(row) for row in rows)
+            if record is not None
+        ]
+
+    def upsert_view(self, record: MemoryProfileViewRecord) -> MemoryProfileViewRecord:
+        payload = _payload(record)
+        payload["active_preferences_json"] = json.dumps(
+            record.active_preferences,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        payload["active_constraints_json"] = json.dumps(
+            record.active_constraints,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        payload["source_refs_json"] = json.dumps(
+            record.source_refs,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        payload["metadata_json"] = _encode_json(record.metadata)
+        with self._store.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO memory_profile_views (
+                    profile_id,
+                    scope_type,
+                    scope_id,
+                    owner_agent_id,
+                    industry_instance_id,
+                    static_profile,
+                    dynamic_profile,
+                    active_preferences_json,
+                    active_constraints_json,
+                    current_focus_summary,
+                    current_operating_context,
+                    source_refs_json,
+                    metadata_json,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    :profile_id,
+                    :scope_type,
+                    :scope_id,
+                    :owner_agent_id,
+                    :industry_instance_id,
+                    :static_profile,
+                    :dynamic_profile,
+                    :active_preferences_json,
+                    :active_constraints_json,
+                    :current_focus_summary,
+                    :current_operating_context,
+                    :source_refs_json,
+                    :metadata_json,
+                    :created_at,
+                    :updated_at
+                )
+                ON CONFLICT(profile_id) DO UPDATE SET
+                    scope_type = excluded.scope_type,
+                    scope_id = excluded.scope_id,
+                    owner_agent_id = excluded.owner_agent_id,
+                    industry_instance_id = excluded.industry_instance_id,
+                    static_profile = excluded.static_profile,
+                    dynamic_profile = excluded.dynamic_profile,
+                    active_preferences_json = excluded.active_preferences_json,
+                    active_constraints_json = excluded.active_constraints_json,
+                    current_focus_summary = excluded.current_focus_summary,
+                    current_operating_context = excluded.current_operating_context,
+                    source_refs_json = excluded.source_refs_json,
+                    metadata_json = excluded.metadata_json,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at
+                """,
+                payload,
+            )
+        return record
+
+    def delete_view(self, profile_id: str) -> bool:
+        with self._store.connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM memory_profile_views WHERE profile_id = ?",
+                (profile_id,),
+            )
+        return cursor.rowcount > 0
+
+    def clear(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+    ) -> int:
+        return _delete_with_optional_scope(
+            store=self._store,
+            table_name="memory_profile_views",
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+
+
+class SqliteMemoryEpisodeViewRepository:
+    """SQLite-backed repository for compiled memory episode views."""
+
+    def __init__(self, store: SQLiteStateStore):
+        self._store = store
+        self._store.initialize()
+
+    def get_view(self, episode_id: str) -> MemoryEpisodeViewRecord | None:
+        with self._store.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM memory_episode_views WHERE episode_id = ?",
+                (episode_id,),
+            ).fetchone()
+        return _memory_episode_view_from_row(row)
+
+    def list_views(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        owner_agent_id: str | None = None,
+        industry_instance_id: str | None = None,
+        work_context_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemoryEpisodeViewRecord]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if scope_type is not None:
+            clauses.append("scope_type = ?")
+            params.append(scope_type)
+        if scope_id is not None:
+            clauses.append("scope_id = ?")
+            params.append(scope_id)
+        if owner_agent_id is not None:
+            clauses.append("owner_agent_id = ?")
+            params.append(owner_agent_id)
+        if industry_instance_id is not None:
+            clauses.append("industry_instance_id = ?")
+            params.append(industry_instance_id)
+        if work_context_id is not None:
+            clauses.append("work_context_id = ?")
+            params.append(work_context_id)
+        query = "SELECT * FROM memory_episode_views"
+        if clauses:
+            query = f"{query} WHERE {' AND '.join(clauses)}"
+        query = f"{query} ORDER BY started_at DESC, updated_at DESC, created_at DESC"
+        if isinstance(limit, int) and limit >= 0:
+            query = f"{query} LIMIT {int(limit)}"
+        with self._store.connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [
+            record
+            for record in (_memory_episode_view_from_row(row) for row in rows)
+            if record is not None
+        ]
+
+    def upsert_view(self, record: MemoryEpisodeViewRecord) -> MemoryEpisodeViewRecord:
+        payload = _payload(record)
+        payload["source_refs_json"] = json.dumps(
+            record.source_refs,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        payload["evidence_refs_json"] = json.dumps(
+            record.evidence_refs,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        payload["metadata_json"] = _encode_json(record.metadata)
+        with self._store.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO memory_episode_views (
+                    episode_id,
+                    scope_type,
+                    scope_id,
+                    owner_agent_id,
+                    industry_instance_id,
+                    headline,
+                    summary,
+                    source_refs_json,
+                    evidence_refs_json,
+                    work_context_id,
+                    control_thread_id,
+                    started_at,
+                    ended_at,
+                    metadata_json,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    :episode_id,
+                    :scope_type,
+                    :scope_id,
+                    :owner_agent_id,
+                    :industry_instance_id,
+                    :headline,
+                    :summary,
+                    :source_refs_json,
+                    :evidence_refs_json,
+                    :work_context_id,
+                    :control_thread_id,
+                    :started_at,
+                    :ended_at,
+                    :metadata_json,
+                    :created_at,
+                    :updated_at
+                )
+                ON CONFLICT(episode_id) DO UPDATE SET
+                    scope_type = excluded.scope_type,
+                    scope_id = excluded.scope_id,
+                    owner_agent_id = excluded.owner_agent_id,
+                    industry_instance_id = excluded.industry_instance_id,
+                    headline = excluded.headline,
+                    summary = excluded.summary,
+                    source_refs_json = excluded.source_refs_json,
+                    evidence_refs_json = excluded.evidence_refs_json,
+                    work_context_id = excluded.work_context_id,
+                    control_thread_id = excluded.control_thread_id,
+                    started_at = excluded.started_at,
+                    ended_at = excluded.ended_at,
+                    metadata_json = excluded.metadata_json,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at
+                """,
+                payload,
+            )
+        return record
+
+    def delete_view(self, episode_id: str) -> bool:
+        with self._store.connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM memory_episode_views WHERE episode_id = ?",
+                (episode_id,),
+            )
+        return cursor.rowcount > 0
+
+    def clear(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+    ) -> int:
+        return _delete_with_optional_scope(
+            store=self._store,
+            table_name="memory_episode_views",
             scope_type=scope_type,
             scope_id=scope_id,
         )
@@ -724,8 +1056,43 @@ def _memory_fact_index_from_row(
     payload["tags"] = _decode_json_list(payload.pop("tags_json", None)) or []
     payload["role_bindings"] = _decode_json_list(payload.pop("role_bindings_json", None)) or []
     payload["evidence_refs"] = _decode_json_list(payload.pop("evidence_refs_json", None)) or []
+    payload["memory_type"] = payload.get("memory_type") or "fact"
+    payload["relation_kind"] = payload.get("relation_kind") or "references"
+    payload["is_latest"] = bool(payload.get("is_latest", 1))
+    payload["confidence_tier"] = payload.get("confidence_tier") or "standard"
+    if payload.get("valid_from") is None:
+        payload["valid_from"] = payload.get("created_at")
     payload["metadata"] = _decode_json_mapping(payload.pop("metadata_json", None))
     return MemoryFactIndexRecord.model_validate(payload)
+
+
+def _memory_profile_view_from_row(
+    row: sqlite3.Row | None,
+) -> MemoryProfileViewRecord | None:
+    if row is None:
+        return None
+    payload = dict(row)
+    payload["active_preferences"] = _decode_json_list(
+        payload.pop("active_preferences_json", None),
+    ) or []
+    payload["active_constraints"] = _decode_json_list(
+        payload.pop("active_constraints_json", None),
+    ) or []
+    payload["source_refs"] = _decode_json_list(payload.pop("source_refs_json", None)) or []
+    payload["metadata"] = _decode_json_mapping(payload.pop("metadata_json", None))
+    return MemoryProfileViewRecord.model_validate(payload)
+
+
+def _memory_episode_view_from_row(
+    row: sqlite3.Row | None,
+) -> MemoryEpisodeViewRecord | None:
+    if row is None:
+        return None
+    payload = dict(row)
+    payload["source_refs"] = _decode_json_list(payload.pop("source_refs_json", None)) or []
+    payload["evidence_refs"] = _decode_json_list(payload.pop("evidence_refs_json", None)) or []
+    payload["metadata"] = _decode_json_mapping(payload.pop("metadata_json", None))
+    return MemoryEpisodeViewRecord.model_validate(payload)
 
 
 def _memory_entity_view_from_row(

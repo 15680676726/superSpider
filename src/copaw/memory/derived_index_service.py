@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import math
 import re
 from collections import Counter
 from typing import Any, Iterable
@@ -182,23 +181,6 @@ def tokenize(text: str | None) -> list[str]:
     return [token.lower() for token in _TOKEN_RE.findall(text)]
 
 
-def hashed_vector(text: str | None, *, dimensions: int = 192) -> list[float]:
-    vector = [0.0] * dimensions
-    for token in tokenize(text):
-        index = hash(token) % dimensions
-        vector[index] += 1.0
-    norm = math.sqrt(sum(value * value for value in vector))
-    if norm <= 0:
-        return vector
-    return [value / norm for value in vector]
-
-
-def cosine_similarity(left: list[float], right: list[float]) -> float:
-    if not left or not right or len(left) != len(right):
-        return 0.0
-    return float(sum(lhs * rhs for lhs, rhs in zip(left, right)))
-
-
 def extract_entity_candidates(
     *,
     title: str,
@@ -288,6 +270,42 @@ def derive_confidence(
     if evidence_refs:
         base += min(len(evidence_refs), 3) * 0.02
     return max(0.05, min(0.99, base))
+
+
+def derive_memory_type(*, source_type: str, tags: Iterable[str] = (), evidence_refs: Iterable[str] = ()) -> str:
+    normalized_tags = {str(item or "").strip().lower() for item in tags if str(item or "").strip()}
+    if "temporary" in normalized_tags:
+        return "temporary"
+    if "preference" in normalized_tags:
+        return "preference"
+    if source_type == "report_snapshot":
+        return "episode"
+    if source_type == "agent_report":
+        return "fact" if list(evidence_refs) else "inference"
+    return "fact"
+
+
+def derive_confidence_tier(confidence: float) -> str:
+    if confidence >= 0.85:
+        return "high"
+    if confidence >= 0.65:
+        return "medium"
+    return "low"
+
+
+def derive_subject_key(
+    *,
+    source_type: str,
+    scope_type: str,
+    scope_id: str,
+    title: str,
+    explicit: object | None = None,
+) -> str:
+    normalized_explicit = str(explicit or "").strip()
+    if normalized_explicit:
+        return normalized_explicit
+    normalized_title = slugify(title, fallback=source_type)
+    return f"{scope_type}:{scope_id}:{normalized_title}"
 
 
 def _safe_getattr(target: object | None, name: str) -> Any:
@@ -589,6 +607,29 @@ class DerivedMemoryIndexService:
                 "source_ref": chunk.source_ref,
                 "entity_labels": entity_labels,
                 "source_route": f"/api/runtime-center/knowledge/{chunk.id}",
+                "memory_type": derive_memory_type(
+                    source_type="knowledge_chunk",
+                    tags=chunk.tags or [],
+                    evidence_refs=evidence_refs,
+                ),
+                "relation_kind": "references",
+                "subject_key": derive_subject_key(
+                    source_type="knowledge_chunk",
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                    title=title,
+                    explicit=None,
+                ),
+                "is_latest": True,
+                "valid_from": (chunk.created_at or utc_now()).isoformat(),
+                "expires_at": None,
+                "confidence_tier": derive_confidence_tier(
+                    derive_confidence(
+                        source_type="knowledge_chunk",
+                        status="active" if parsed_scope is not None else None,
+                        evidence_refs=evidence_refs,
+                    ),
+                ),
             },
             created_at=chunk.created_at,
             updated_at=utc_now(),
@@ -663,6 +704,29 @@ class DerivedMemoryIndexService:
                 "source_ref": strategy.source_ref,
                 "source_route": "/api/runtime-center/strategy-memory",
                 "status": strategy.status,
+                "memory_type": "fact",
+                "relation_kind": "derives",
+                "subject_key": derive_subject_key(
+                    source_type="strategy_memory",
+                    scope_type=normalize_memory_scope_type(strategy.scope_type),
+                    scope_id=normalize_scope_id(strategy.scope_id),
+                    title=strategy.title,
+                    explicit=strategy.strategy_id,
+                ),
+                "is_latest": strategy.status == "active",
+                "valid_from": (strategy.created_at or utc_now()).isoformat(),
+                "expires_at": None,
+                "confidence_tier": derive_confidence_tier(
+                    derive_confidence(
+                        source_type="strategy_memory",
+                        status=strategy.status,
+                        evidence_refs=evidence_refs,
+                    ),
+                ),
+                "mission": strategy.mission,
+                "execution_constraints": list(strategy.execution_constraints or []),
+                "evidence_requirements": list(strategy.evidence_requirements or []),
+                "current_focuses": list(strategy.current_focuses or []),
             },
             created_at=strategy.created_at,
             updated_at=utc_now(),
@@ -746,6 +810,29 @@ class DerivedMemoryIndexService:
                     f"/api/runtime-center/industry/{report.industry_instance_id}"
                     if report.industry_instance_id
                     else None
+                ),
+                "memory_type": derive_memory_type(
+                    source_type="agent_report",
+                    evidence_refs=evidence_refs,
+                ),
+                "relation_kind": "derives",
+                "subject_key": derive_subject_key(
+                    source_type="agent_report",
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                    title=report.headline,
+                    explicit=report.task_id or report.work_context_id or report.goal_id,
+                ),
+                "is_latest": True,
+                "valid_from": (report.created_at or utc_now()).isoformat(),
+                "expires_at": None,
+                "confidence_tier": derive_confidence_tier(
+                    derive_confidence(
+                        source_type="agent_report",
+                        status=report.result or report.status,
+                        processed=report.processed,
+                        evidence_refs=evidence_refs,
+                    ),
                 ),
             },
             created_at=report.created_at,
@@ -869,6 +956,25 @@ class DerivedMemoryIndexService:
                 "fallback_mode": run.fallback_mode,
                 "deterministic_result": run.deterministic_result,
                 "source_route": f"/api/routines/runs/{run.id}",
+                "memory_type": "episode",
+                "relation_kind": "references",
+                "subject_key": derive_subject_key(
+                    source_type="routine_run",
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                    title=title,
+                    explicit=run.routine_id or run.id,
+                ),
+                "is_latest": True,
+                "valid_from": (run.created_at or utc_now()).isoformat(),
+                "expires_at": None,
+                "confidence_tier": derive_confidence_tier(
+                    derive_confidence(
+                        source_type="routine_run",
+                        status=run.status,
+                        evidence_refs=evidence_refs,
+                    ),
+                ),
             },
             created_at=run.created_at,
             updated_at=utc_now(),
@@ -936,6 +1042,25 @@ class DerivedMemoryIndexService:
                 "source_route": (
                     f"/api/runtime-center/reports?window={report.window}"
                     f"&scope_type={report.scope_type}&scope_id={scope_id}"
+                ),
+                "memory_type": "episode",
+                "relation_kind": "derives",
+                "subject_key": derive_subject_key(
+                    source_type="report_snapshot",
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                    title=report.title,
+                    explicit=report.id,
+                ),
+                "is_latest": True,
+                "valid_from": (report.created_at or utc_now()).isoformat(),
+                "expires_at": None,
+                "confidence_tier": derive_confidence_tier(
+                    derive_confidence(
+                        source_type="report_snapshot",
+                        status=report.status,
+                        evidence_refs=evidence_refs,
+                    ),
                 ),
             },
             created_at=report.created_at,
@@ -1032,6 +1157,25 @@ class DerivedMemoryIndexService:
                     f"/api/runtime-center/evidence/{evidence_id}"
                     if evidence_id
                     else None
+                ),
+                "memory_type": "fact",
+                "relation_kind": "references",
+                "subject_key": derive_subject_key(
+                    source_type="evidence",
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                    title=title,
+                    explicit=evidence_id or task_id,
+                ),
+                "is_latest": True,
+                "valid_from": (_safe_getattr(evidence, "created_at") or utc_now()).isoformat(),
+                "expires_at": None,
+                "confidence_tier": derive_confidence_tier(
+                    derive_confidence(
+                        source_type="evidence",
+                        status=_safe_getattr(evidence, "status"),
+                        evidence_refs=evidence_refs,
+                    ),
                 ),
             },
             created_at=_safe_getattr(evidence, "created_at") or utc_now(),

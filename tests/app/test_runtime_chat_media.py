@@ -232,15 +232,19 @@ def test_enrich_agent_request_with_media_writes_back_industry_chat_attachments(
     assert retained_chunks[0].source_ref == f"media-analysis:{analysis.analysis_id}"
 
     recall = runtime.memory_recall_service.recall(
-        query="关键结论",
-        role="execution-core",
-        work_context_id="ctx-media-ops",
-        include_related_scopes=False,
-    )
+            query="关键结论",
+            role="execution-core",
+            work_context_id="ctx-media-ops",
+            include_related_scopes=False,
+        )
     assert recall.hits
     assert recall.hits[0].scope_type == "work_context"
     assert recall.hits[0].scope_id == "ctx-media-ops"
-    assert recall.hits[0].source_ref == f"media-analysis:{analysis.analysis_id}"
+    assert recall.hits[0].source_type == "memory_profile"
+    assert any(
+        item.source_ref == f"media-analysis:{analysis.analysis_id}"
+        for item in recall.hits
+    )
 
 
 def test_enrich_agent_request_with_media_adopts_existing_analysis_into_industry_state(
@@ -309,12 +313,16 @@ def test_enrich_agent_request_with_media_adopts_existing_analysis_into_industry_
     assert retained_chunks[0].source_ref == f"media-analysis:{analysis_id}"
 
     recall = runtime.memory_recall_service.recall(
-        query="库存预警",
-        role="execution-core",
-        work_context_id="ctx-media-ops",
-        include_related_scopes=False,
-    )
+            query="库存预警",
+            role="execution-core",
+            work_context_id="ctx-media-ops",
+            include_related_scopes=False,
+        )
     assert recall.hits
     assert recall.hits[0].scope_type == "work_context"
     assert recall.hits[0].scope_id == "ctx-media-ops"
-    assert recall.hits[0].source_ref == f"media-analysis:{analysis_id}"
+    assert recall.hits[0].source_type == "memory_profile"
+    assert any(
+        item.source_ref == f"media-analysis:{analysis_id}"
+        for item in recall.hits
+    )

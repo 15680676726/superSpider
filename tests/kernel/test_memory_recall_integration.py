@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import base64
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -15,7 +17,7 @@ from copaw.memory import (
     MemoryRetainService,
 )
 from copaw.memory.models import MemoryRecallHit, MemoryRecallResponse
-from copaw.state import GoalRecord, SQLiteStateStore
+from copaw.state import GoalRecord, MemoryFactIndexRecord, SQLiteStateStore
 from copaw.evidence import EvidenceLedger
 from copaw.state.knowledge_service import StateKnowledgeService
 from copaw.state.repositories import (
@@ -83,6 +85,89 @@ class _CapturingMemoryRecallService:
             query=str(kwargs.get("query") or ""),
             backend_used="hybrid-local",
             hits=hits,
+        )
+
+
+class _TruthFirstDerivedIndexService:
+    def __init__(self) -> None:
+        now = datetime.now(UTC)
+        self.calls: list[dict[str, object]] = []
+        self.entries = [
+            MemoryFactIndexRecord(
+                id="memory-profile-fact",
+                source_type="knowledge_chunk",
+                source_ref="chunk-profile",
+                scope_type="work_context",
+                scope_id="ctx-media-ops",
+                owner_agent_id="copaw-agent-runner",
+                title="Current governed checklist",
+                summary="Use the shared governed checklist before approving outbound media.",
+                content_excerpt="Use the shared governed checklist before approving outbound media.",
+                content_text="Use the shared governed checklist before approving outbound media.",
+                tags=["profile", "latest"],
+                updated_at=now,
+                created_at=now - timedelta(minutes=10),
+            ),
+            MemoryFactIndexRecord(
+                id="memory-history-fact",
+                source_type="knowledge_chunk",
+                source_ref="chunk-history",
+                scope_type="work_context",
+                scope_id="ctx-media-ops",
+                owner_agent_id="copaw-agent-runner",
+                title="Earlier evidence review",
+                summary="The previous cycle required evidence review before outbound release.",
+                content_excerpt="The previous cycle required evidence review before outbound release.",
+                content_text="The previous cycle required evidence review before outbound release.",
+                tags=["history"],
+                updated_at=now - timedelta(days=1),
+                created_at=now - timedelta(days=1, minutes=15),
+            ),
+        ]
+
+    def list_fact_entries(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        scope_type = kwargs.get("scope_type")
+        scope_id = kwargs.get("scope_id")
+        limit = kwargs.get("limit")
+        entries = [
+            item
+            for item in self.entries
+            if (scope_type is None or item.scope_type == scope_type)
+            and (scope_id is None or item.scope_id == scope_id)
+        ]
+        if isinstance(limit, int):
+            return entries[:limit]
+        return entries
+
+
+class _TruthFirstPromptRecallService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+        self._derived_index_service = _TruthFirstDerivedIndexService()
+
+    def recall(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return MemoryRecallResponse(
+            query=str(kwargs.get("query") or ""),
+            backend_used="lexical",
+            hits=[
+                MemoryRecallHit(
+                    entry_id="memory-lexical-fallback",
+                    kind="knowledge_chunk",
+                    title="Lexical fallback reminder",
+                    summary="Lexical fallback should come after profile and latest fact injection.",
+                    content_excerpt="Lexical fallback should come after profile and latest fact injection.",
+                    source_type="knowledge_chunk",
+                    source_ref="chunk-lexical-fallback",
+                    scope_type="work_context",
+                    scope_id="ctx-media-ops",
+                    confidence=0.85,
+                    quality_score=0.8,
+                    score=1.0,
+                    backend="lexical",
+                )
+            ],
         )
 
 
@@ -155,6 +240,42 @@ def test_query_execution_prompt_prefers_work_context_memory_recall_hits() -> Non
     assert any("Work context note" in line for line in lines)
 
 
+def test_query_execution_prompt_prefers_truth_first_profile_before_lexical_fallback() -> None:
+    recall_service = _TruthFirstPromptRecallService()
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        memory_recall_service=recall_service,
+    )
+
+    lines = service._build_retrieved_knowledge_lines(
+        msgs=["Use the current governed checklist before outbound media approval"],
+        owner_agent_id="copaw-agent-runner",
+        industry_instance_id="industry-1",
+        industry_role_id="execution-core",
+        owner_scope="runtime",
+        work_context_id="ctx-media-ops",
+    )
+
+    joined = "\n".join(lines)
+    assert "# Truth-First Memory Profile" in joined
+    assert "# Truth-First Memory Latest Facts" in joined
+    assert "# Truth-First Memory History" in joined
+    assert "# Truth-First Lexical Recall" in joined
+    assert "Current governed checklist" in joined
+    assert "Earlier evidence review" in joined
+    assert "Lexical fallback reminder" in joined
+    assert joined.index("# Truth-First Memory Profile") < joined.index(
+        "# Truth-First Memory Latest Facts",
+    )
+    assert joined.index("# Truth-First Memory Latest Facts") < joined.index(
+        "# Truth-First Lexical Recall",
+    )
+    assert recall_service._derived_index_service.calls[0]["scope_type"] == "work_context"
+    assert recall_service._derived_index_service.calls[0]["scope_id"] == "ctx-media-ops"
+    assert recall_service.calls[0]["scope_type"] == "work_context"
+    assert recall_service.calls[0]["scope_id"] == "ctx-media-ops"
+
+
 def test_retain_chat_writeback_creates_work_context_scoped_recall_hit(tmp_path) -> None:
     store = SQLiteStateStore(tmp_path / "memory.sqlite3")
     store.initialize()
@@ -213,8 +334,9 @@ def test_retain_chat_writeback_creates_work_context_scoped_recall_hit(tmp_path) 
     assert hits
     assert hits[0].scope_type == "work_context"
     assert hits[0].scope_id == "ctx-media-ops"
-    assert hits[0].source_ref == "media-analysis:media-1"
-    assert hits[0].metadata["source_ref"] == "media-analysis:media-1"
+    assert hits[0].source_type == "memory_profile"
+    assert any(item.source_ref == "media-analysis:media-1" for item in hits)
+    assert any(item.metadata.get("source_ref") == "media-analysis:media-1" for item in hits)
 
 
 def test_retain_chat_writeback_isolates_same_source_ref_across_work_contexts(tmp_path) -> None:
@@ -342,3 +464,17 @@ async def test_media_analysis_followup_updates_existing_analysis_work_context(tm
     assert second.analyses
     assert second.analyses[0].work_context_id == "ctx-followup-media"
     assert second.analyses[0].thread_id == "thread-followup"
+
+
+def test_truth_first_no_vector_memory_docs_are_explicit() -> None:
+    docs = [
+        "TASK_STATUS.md",
+        "DATA_MODEL_DRAFT.md",
+        "API_TRANSITION_MAP.md",
+        "COPAW_CARRIER_UPGRADE_MASTERPLAN.md",
+    ]
+
+    for relative_path in docs:
+        text = Path(relative_path).read_text(encoding="utf-8")
+        assert "truth-first" in text
+        assert "no-vector formal memory" in text

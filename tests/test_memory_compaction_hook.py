@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
 from types import SimpleNamespace
 from typing import Any
 
@@ -215,3 +216,69 @@ async def test_compaction_not_triggered_when_total_under_threshold(
     assert agent.memory.updated_summary is None
     assert agent.memory.marked_ids == []
     assert agent.formatter.calls == 1
+
+
+async def test_compaction_hook_accepts_conversation_compaction_service(
+    monkeypatch,
+) -> None:
+    service_module = import_module("copaw.memory.conversation_compaction_service")
+    monkeypatch.setattr(service_module, "_REME_AVAILABLE", True)
+
+    def fake_reme_init(self, **kwargs):
+        self._reme_kwargs = kwargs
+
+    monkeypatch.setattr(service_module.ReMeLight, "__init__", fake_reme_init)
+    monkeypatch.setattr(
+        "copaw.agents.hooks.memory_compaction.safe_count_message_tokens",
+        _fake_safe_count_message_tokens,
+    )
+    monkeypatch.setattr(
+        "copaw.agents.hooks.memory_compaction.safe_count_str_tokens",
+        _fake_safe_count_str_tokens,
+    )
+    monkeypatch.setattr(
+        "copaw.agents.hooks.memory_compaction.load_config",
+        lambda: SimpleNamespace(
+            agents=SimpleNamespace(
+                running=SimpleNamespace(memory_compact_threshold=950),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "copaw.agents.hooks.memory_compaction.MEMORY_COMPACT_KEEP_RECENT",
+        1,
+    )
+    monkeypatch.setattr(service_module, "MEMORY_COMPACT_KEEP_RECENT", 1)
+
+    service = service_module.ConversationCompactionService(working_dir=".")
+    service.compact_calls = []
+    service.summary_task_messages = []
+
+    async def fake_compact_memory(messages, previous_summary=""):
+        service.compact_calls.append(
+            {
+                "messages": list(messages),
+                "previous_summary": previous_summary,
+            },
+        )
+        return "compacted-summary"
+
+    service.compact_memory = fake_compact_memory
+    service.add_async_summary_task = lambda messages: service.summary_task_messages.append(
+        list(messages),
+    )
+
+    hook = MemoryCompactionHook(memory_manager=service)
+    messages = [
+        FakeMsg(id="sys", role="system", token_count=250),
+        FakeMsg(id="old-1", role="user", token_count=250),
+        FakeMsg(id="old-2", role="assistant", token_count=250),
+        FakeMsg(id="recent", role="user", token_count=200),
+    ]
+    agent = _make_agent(messages=messages, summary="existing-summary")
+
+    await hook(agent=agent, kwargs={})
+
+    assert service.compact_calls
+    assert agent.memory.updated_summary == "compacted-summary"
+    assert agent.memory.marked_ids == ["old-1", "old-2"]

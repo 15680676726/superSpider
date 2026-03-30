@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 21
+STATE_SCHEMA_VERSION = 22
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS goals (
@@ -1163,6 +1163,13 @@ CREATE TABLE IF NOT EXISTS memory_fact_index (
     evidence_refs_json TEXT NOT NULL DEFAULT '[]',
     confidence REAL NOT NULL DEFAULT 0.5,
     quality_score REAL NOT NULL DEFAULT 0.5,
+    memory_type TEXT NOT NULL DEFAULT 'fact',
+    relation_kind TEXT NOT NULL DEFAULT 'references',
+    supersedes_entry_id TEXT,
+    is_latest INTEGER NOT NULL DEFAULT 1,
+    valid_from TEXT,
+    expires_at TEXT,
+    confidence_tier TEXT NOT NULL DEFAULT 'standard',
     source_updated_at TEXT,
     metadata_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
@@ -1177,6 +1184,53 @@ CREATE INDEX IF NOT EXISTS idx_memory_fact_index_owner
     ON memory_fact_index(owner_agent_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_fact_index_industry
     ON memory_fact_index(industry_instance_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_profile_views (
+    profile_id TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL DEFAULT 'global',
+    scope_id TEXT NOT NULL,
+    owner_agent_id TEXT,
+    industry_instance_id TEXT,
+    static_profile TEXT NOT NULL DEFAULT '',
+    dynamic_profile TEXT NOT NULL DEFAULT '',
+    active_preferences_json TEXT NOT NULL DEFAULT '[]',
+    active_constraints_json TEXT NOT NULL DEFAULT '[]',
+    current_focus_summary TEXT NOT NULL DEFAULT '',
+    current_operating_context TEXT NOT NULL DEFAULT '',
+    source_refs_json TEXT NOT NULL DEFAULT '[]',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_profile_views_scope
+    ON memory_profile_views(scope_type, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_profile_views_owner
+    ON memory_profile_views(owner_agent_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_episode_views (
+    episode_id TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL DEFAULT 'global',
+    scope_id TEXT NOT NULL,
+    owner_agent_id TEXT,
+    industry_instance_id TEXT,
+    headline TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    source_refs_json TEXT NOT NULL DEFAULT '[]',
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    work_context_id TEXT,
+    control_thread_id TEXT,
+    started_at TEXT,
+    ended_at TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_episode_views_scope
+    ON memory_episode_views(scope_type, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_episode_views_work_context
+    ON memory_episode_views(work_context_id, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS memory_entity_views (
     entity_id TEXT PRIMARY KEY,
@@ -1255,6 +1309,18 @@ CREATE INDEX IF NOT EXISTS idx_memory_reflection_runs_status
 """
 
 _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "memory_fact_index",
+        (
+            ("memory_type", "TEXT NOT NULL DEFAULT 'fact'"),
+            ("relation_kind", "TEXT NOT NULL DEFAULT 'references'"),
+            ("supersedes_entry_id", "TEXT"),
+            ("is_latest", "INTEGER NOT NULL DEFAULT 1"),
+            ("valid_from", "TEXT"),
+            ("expires_at", "TEXT"),
+            ("confidence_tier", "TEXT NOT NULL DEFAULT 'standard'"),
+        ),
+    ),
     (
         "schedules",
         (

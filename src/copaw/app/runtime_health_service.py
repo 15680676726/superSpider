@@ -57,8 +57,6 @@ class RuntimeHealthService:
     def build_checks(self) -> list[dict[str, object]]:
         return [
             self.build_core_runtime_ready_check(),
-            self.build_memory_vector_ready_check(),
-            self.build_memory_embedding_config_check(),
             self.build_surface_ready_check(
                 name="browser_surface_ready",
                 template_id="browser-local",
@@ -101,52 +99,6 @@ class RuntimeHealthService:
             },
         }
 
-    def build_memory_vector_ready_check(self) -> dict[str, object]:
-        payload = self._memory_runtime_payload()
-        vector_enabled = bool(payload.get("vector_enabled"))
-        summary = (
-            "Memory vector search is ready."
-            if vector_enabled
-            else str(
-                payload.get("vector_disable_reason")
-                or "Memory vector search is degraded."
-            )
-        )
-        return {
-            "name": "memory_vector_ready",
-            "status": "pass" if vector_enabled else "warn",
-            "summary": summary,
-            "meta": {
-                "vector_enabled": vector_enabled,
-                "vector_disable_reason_code": payload.get(
-                    "vector_disable_reason_code",
-                ),
-                "vector_disable_reason": payload.get("vector_disable_reason"),
-                "fts_enabled": payload.get("fts_enabled"),
-                "memory_store_backend": payload.get("memory_store_backend"),
-            },
-        }
-
-    def build_memory_embedding_config_check(self) -> dict[str, object]:
-        payload = self._memory_runtime_payload()
-        vector_enabled = bool(payload.get("vector_enabled"))
-        embedding_model_name = str(payload.get("embedding_model_name") or "").strip()
-        if vector_enabled and embedding_model_name:
-            summary = f"Embedding model resolved to '{embedding_model_name}'."
-            status = "pass"
-        else:
-            summary = str(
-                payload.get("vector_disable_reason")
-                or "Embedding model configuration is incomplete."
-            )
-            status = "warn"
-        return {
-            "name": "memory_embedding_config",
-            "status": status,
-            "summary": summary,
-            "meta": dict(payload),
-        }
-
     def build_surface_ready_check(
         self,
         *,
@@ -186,41 +138,3 @@ class RuntimeHealthService:
                 **(report_payload if isinstance(report_payload, dict) else {}),
             },
         }
-
-    def _memory_runtime_payload(self) -> dict[str, object]:
-        memory_manager = self._memory_manager
-        if memory_manager is None:
-            return {
-                "vector_enabled": False,
-                "vector_disable_reason_code": "memory_manager_unavailable",
-                "vector_disable_reason": (
-                    "Memory manager is not attached to runtime state."
-                ),
-                "embedding_model_name": "",
-                "embedding_model_inferred": False,
-                "embedding_base_url": "",
-                "embedding_api_key_configured": False,
-                "embedding_follow_active_provider": False,
-                "embedding_provider_inherited": False,
-                "fts_enabled": False,
-                "memory_store_backend": None,
-            }
-        getter = getattr(memory_manager, "runtime_health_payload", None)
-        if not callable(getter):
-            return {
-                "vector_enabled": False,
-                "vector_disable_reason_code": "runtime_health_unavailable",
-                "vector_disable_reason": (
-                    "Memory manager does not expose runtime health payload."
-                ),
-                "embedding_model_name": "",
-                "embedding_model_inferred": False,
-                "embedding_base_url": "",
-                "embedding_api_key_configured": False,
-                "embedding_follow_active_provider": False,
-                "embedding_provider_inherited": False,
-                "fts_enabled": False,
-                "memory_store_backend": None,
-            }
-        payload = getter()
-        return dict(payload) if isinstance(payload, dict) else {}

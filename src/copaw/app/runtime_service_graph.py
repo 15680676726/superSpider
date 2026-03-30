@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from ..capabilities import CapabilityService
@@ -33,7 +32,6 @@ from ..memory import (
     MemoryRecallService,
     MemoryReflectionService,
     MemoryRetainService,
-    QmdRecallBackend,
 )
 from ..predictions import PredictionService
 from ..providers.provider_manager import ProviderManager
@@ -144,7 +142,7 @@ async def initialize_mcp_manager(
     return mcp_manager
 
 
-def _resolve_default_memory_recall_backend(*, qmd_backend: QmdRecallBackend) -> str:
+def _resolve_default_memory_recall_backend(*, qmd_backend: object | None = None) -> str:
     return resolve_default_memory_recall_backend(qmd_backend=qmd_backend)
 
 
@@ -251,24 +249,9 @@ def _warm_runtime_memory_services(
     memory_reflection_service: MemoryReflectionService,
 ) -> None:
     derived_memory_index_service.rebuild_all()
-    default_recall_backend = next(
-        (
-            item.backend_id
-            for item in memory_recall_service.list_backends()
-            if item.is_default
-        ),
-        "hybrid-local",
-    )
-    qmd_prewarm_enabled = (
-        str(os.environ.get("COPAW_MEMORY_QMD_PREWARM", "") or "").strip().lower()
-        in {"1", "true", "yes"}
-    )
-    prewarm_backends: list[str] = []
-    if default_recall_backend == "qmd" or qmd_prewarm_enabled:
-        prewarm_backends.append("qmd")
     try:
         memory_recall_service.prepare_sidecar_backends(
-            prewarm_backend_ids=prewarm_backends,
+            prewarm_backend_ids=[],
         )
     except Exception:
         pass

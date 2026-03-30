@@ -16,6 +16,8 @@ from .models import (
     MemoryReflectionSummary,
     MemoryScopeSelector,
 )
+from .precedence import MemoryEntryPartition, MemoryPrecedenceService
+from .profile_service import MemoryProfile, MemoryProfileService, SharedMemoryViews
 from .qmd_backend import QmdBackendConfig, QmdRecallBackend
 from .recall_service import MemoryRecallService
 from .reflection_service import MemoryReflectionService
@@ -24,6 +26,10 @@ from .retain_service import MemoryRetainService
 __all__ = [
     "DerivedMemoryIndexService",
     "MemoryBackendDescriptor",
+    "MemoryEntryPartition",
+    "MemoryPrecedenceService",
+    "MemoryProfile",
+    "MemoryProfileService",
     "MemoryRecallHit",
     "MemoryRecallResponse",
     "MemoryRecallService",
@@ -32,6 +38,7 @@ __all__ = [
     "MemoryReflectionSummary",
     "MemoryRetainService",
     "MemoryScopeSelector",
+    "SharedMemoryViews",
     "QmdBackendConfig",
     "QmdRecallBackend",
     "build_scope_candidates",

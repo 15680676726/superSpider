@@ -498,6 +498,65 @@ def _format_memory_hits(hits: list[object]) -> str:
     return "\n".join(lines) if lines else "暂无额外受控记忆命中。"
 
 
+def _truth_first_entry_timestamp(entry: object) -> object | None:
+    for field_name in ("source_updated_at", "updated_at", "created_at"):
+        value = getattr(entry, field_name, None)
+        if value is not None:
+            return value
+    return None
+
+
+def _sort_truth_first_entries(entries: list[object]) -> list[object]:
+    return sorted(
+        list(entries),
+        key=lambda item: (
+            _truth_first_entry_timestamp(item) is not None,
+            _truth_first_entry_timestamp(item) or "",
+        ),
+        reverse=True,
+    )
+
+
+def _format_truth_first_entry_lines(entries: list[object], *, limit: int) -> str:
+    lines: list[str] = []
+    for entry in entries[: max(1, limit)]:
+        title = _first_non_empty(getattr(entry, "title", None), "memory fact") or "memory fact"
+        summary = _first_non_empty(
+            getattr(entry, "summary", None),
+            getattr(entry, "content_excerpt", None),
+            getattr(entry, "content_text", None),
+        )
+        if summary:
+            lines.append(f"- {title}: {_clip_text(summary, limit=120)}")
+        else:
+            lines.append(f"- {title}")
+    return "\n".join(lines) if lines else "- No truth-first memory facts available."
+
+
+def _format_truth_first_profile(
+    *,
+    scope_type: str,
+    scope_id: str,
+    entries: list[object],
+) -> str:
+    if not entries:
+        return "- No truth-first profile available."
+    latest = entries[0]
+    headline = _first_non_empty(getattr(latest, "title", None), scope_id) or scope_id
+    current_context = _first_non_empty(
+        getattr(latest, "summary", None),
+        getattr(latest, "content_excerpt", None),
+        getattr(latest, "content_text", None),
+    ) or "No current operating context."
+    return "\n".join(
+        [
+            f"- Scope: {scope_type}/{scope_id}",
+            f"- Current focus: {headline}",
+            f"- Current operating context: {_clip_text(current_context, limit=160)}",
+        ],
+    )
+
+
 @dataclass
 class _PureChatSessionCacheEntry:
     snapshot: dict[str, Any]
@@ -906,14 +965,18 @@ class MainBrainChatService:
             industry_instance_id=str(getattr(request, "industry_instance_id", "") or "").strip() or None,
             owner_agent_id=owner_agent_id,
         )
-        memory_hits = self._recall_memory(request=request, query=query)
+        memory_context = self._resolve_truth_first_memory_context(
+            request=request,
+            query=query,
+            owner_agent_id=owner_agent_id,
+        )
         context_sections = [
             f"## 主脑身份\n- 当前身份：Spider Mesh 主脑\n- 当前会话：{_clip_text(getattr(request, 'session_id', ''), limit=80) or '未命名会话'}",
             f"## 当前运行摘要\n{_format_runtime_snapshot(detail)}",
             f"## 正式战略摘要\n{_format_strategy_summary(detail)}",
             "## 团队职业成员 roster\n"
             + ("\n".join(roster_lines) if roster_lines else "- 当前没有可用 roster，请基于已知上下文谨慎回答"),
-            f"## 受控记忆注入\n{_format_memory_hits(memory_hits)}",
+            memory_context,
         ]
         context_sections.insert(3, f"## Staffing\n{_format_staffing_summary(detail)}")
         history_messages = self._build_history_messages(
@@ -987,6 +1050,62 @@ class MainBrainChatService:
             return []
         hits = getattr(result, "hits", None)
         return list(hits or [])
+
+    def _resolve_truth_first_memory_context(
+        self,
+        *,
+        request: Any,
+        query: str | None,
+        owner_agent_id: str | None,
+    ) -> str:
+        service = self._memory_recall_service
+        if service is None:
+            return "## Truth-First Memory Profile\n- No truth-first memory service available."
+
+        industry_instance_id = str(getattr(request, "industry_instance_id", "") or "").strip() or None
+        work_context_id = str(getattr(request, "work_context_id", "") or "").strip() or None
+        agent_id = str(getattr(request, "agent_id", "") or "").strip() or None
+        if work_context_id:
+            scope_type = "work_context"
+            scope_id = work_context_id
+        elif industry_instance_id:
+            scope_type = "industry"
+            scope_id = industry_instance_id
+        elif agent_id:
+            scope_type = "agent"
+            scope_id = agent_id
+        else:
+            scope_type = "global"
+            scope_id = "runtime"
+
+        derived_service = getattr(service, "_derived_index_service", None)
+        if derived_service is not None and callable(getattr(derived_service, "list_fact_entries", None)):
+            entries = _sort_truth_first_entries(
+                list(
+                    derived_service.list_fact_entries(
+                        scope_type=scope_type,
+                        scope_id=scope_id,
+                        owner_agent_id=owner_agent_id,
+                        industry_instance_id=industry_instance_id,
+                        limit=8,
+                    )
+                    or []
+                ),
+            )
+        else:
+            entries = []
+
+        latest_entries = entries[:2]
+        history_entries = entries[2:4]
+        lexical_hits = self._recall_memory(request=request, query=query)
+        return "\n".join(
+            [
+                f"## Truth-First Memory Profile\n{_format_truth_first_profile(scope_type=scope_type, scope_id=scope_id, entries=entries)}",
+                f"## Truth-First Memory Latest Facts\n{_format_truth_first_entry_lines(latest_entries, limit=2)}",
+                f"## Truth-First Memory History\n{_format_truth_first_entry_lines(history_entries, limit=2)}",
+                f"## Truth-First Lexical Recall\n{_format_memory_hits(lexical_hits)}",
+            ],
+        )
 
     def _build_history_messages(
         self,

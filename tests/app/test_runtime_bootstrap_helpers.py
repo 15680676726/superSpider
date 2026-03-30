@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from types import SimpleNamespace
+from typing import get_args
 
 import pytest
 from fastapi import FastAPI
@@ -26,6 +27,7 @@ from copaw.app.runtime_service_graph import (
     _resolve_default_memory_recall_backend,
 )
 from copaw.memory import MemoryBackendDescriptor
+from copaw.memory.models import MemoryBackendKind
 from copaw.state import SQLiteStateStore
 
 
@@ -494,20 +496,20 @@ def test_default_memory_backend_defaults_to_hybrid_local_when_unset(
     assert _resolve_default_memory_recall_backend(qmd_backend=backend) == "hybrid-local"
 
 
-def test_default_memory_backend_honors_explicit_qmd_override(monkeypatch) -> None:
+def test_default_memory_backend_rejects_explicit_qmd_override(monkeypatch) -> None:
     monkeypatch.setenv("COPAW_MEMORY_RECALL_BACKEND", "qmd")
 
     backend = _FakeQmdBackend(available=True)
 
-    assert _resolve_default_memory_recall_backend(qmd_backend=backend) == "qmd"
+    assert _resolve_default_memory_recall_backend(qmd_backend=backend) == "hybrid-local"
 
 
-def test_default_memory_backend_honors_explicit_override(monkeypatch) -> None:
+def test_default_memory_backend_rejects_vector_override(monkeypatch) -> None:
     monkeypatch.setenv("COPAW_MEMORY_RECALL_BACKEND", "local-vector")
 
     backend = _FakeQmdBackend(available=True)
 
-    assert _resolve_default_memory_recall_backend(qmd_backend=backend) == "local-vector"
+    assert _resolve_default_memory_recall_backend(qmd_backend=backend) == "hybrid-local"
 
 
 def test_default_memory_backend_falls_back_to_hybrid_local(monkeypatch) -> None:
@@ -564,6 +566,53 @@ def test_warm_runtime_memory_services_extracts_startup_side_effects(monkeypatch)
             "create_learning_proposals": False,
         },
     ]
+
+
+def test_warm_runtime_memory_services_skips_qmd_prewarm_even_when_requested(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("COPAW_MEMORY_QMD_PREWARM", "true")
+    calls: dict[str, object] = {}
+    repositories = SimpleNamespace(
+        industry_instance_repository=SimpleNamespace(list_instances=lambda limit=None: []),
+    )
+    derived_memory_index_service = SimpleNamespace(
+        rebuild_all=lambda: calls.setdefault("rebuild_all", True),
+    )
+    memory_recall_service = SimpleNamespace(
+        list_backends=lambda: [SimpleNamespace(backend_id="hybrid-local", is_default=True)],
+        prepare_sidecar_backends=lambda prewarm_backend_ids: calls.setdefault(
+            "prewarm_backends",
+            list(prewarm_backend_ids),
+        ),
+    )
+    memory_reflection_service = SimpleNamespace(
+        reflect=lambda **kwargs: calls.setdefault("reflect_calls", []).append(kwargs),
+    )
+
+    _warm_runtime_memory_services(
+        repositories=repositories,
+        derived_memory_index_service=derived_memory_index_service,
+        memory_recall_service=memory_recall_service,
+        memory_reflection_service=memory_reflection_service,
+    )
+
+    assert calls["rebuild_all"] is True
+    assert calls["prewarm_backends"] == []
+    assert calls["reflect_calls"] == [
+        {
+            "scope_type": "global",
+            "scope_id": "runtime",
+            "trigger_kind": "startup",
+            "create_learning_proposals": False,
+        },
+    ]
+
+
+def test_formal_memory_backend_kind_excludes_vector_and_qmd_variants() -> None:
+    backend_kinds = set(get_args(MemoryBackendKind))
+
+    assert backend_kinds == {"lexical", "hybrid-local"}
 
 
 def test_resolve_provider_manager_uses_singleton_facade(monkeypatch) -> None:
