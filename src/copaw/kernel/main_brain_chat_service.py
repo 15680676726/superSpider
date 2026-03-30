@@ -16,6 +16,7 @@ from reme.memory.file_based.reme_in_memory_memory import ReMeInMemoryMemory
 from .main_brain_intake import (
     extract_main_brain_intake_text,
 )
+from .main_brain_orchestrator import build_main_brain_cognitive_surface
 from ..providers.provider_manager import ProviderManager
 from .query_execution_shared import (
     _first_non_empty,
@@ -104,6 +105,9 @@ def _safe_mapping(value: object) -> dict[str, Any]:
         payload = model_dump(mode="json")
         if isinstance(payload, dict):
             return dict(payload)
+    namespace = getattr(value, "__dict__", None)
+    if isinstance(namespace, dict):
+        return dict(namespace)
     return {}
 
 
@@ -480,6 +484,46 @@ def _format_staffing_summary(detail: object | None) -> str:
             researcher_line = f"{researcher_line} | pending signals: {pending_signal_count}"
         lines.append(researcher_line)
     return "\n".join(lines) if lines else "No active staffing state."
+
+
+def _format_cognitive_closure(
+    *,
+    detail: object | None,
+    request: Any,
+) -> str:
+    surface = build_main_brain_cognitive_surface(detail=detail, request=request)
+    if not surface:
+        return "暂无正式 cognitive closure 状态。"
+    conflicts = list(surface.get("conflicts") or [])
+    holes = list(surface.get("holes") or [])
+    latest_findings = list(surface.get("latest_findings") or [])
+    replan_reasons = [
+        str(item).strip()
+        for item in list(surface.get("replan_reasons") or [])[:3]
+        if str(item).strip()
+    ]
+    lines = [
+        f"- needs_replan={'yes' if surface.get('needs_replan') else 'no'}",
+        f"- unresolved conflicts={len(conflicts)}",
+        f"- unresolved holes={len(holes)}",
+    ]
+    for reason in replan_reasons:
+        lines.append(f"- replan reason: {_clip_text(reason, limit=120)}")
+    for finding in latest_findings[:2]:
+        headline = _first_non_empty(
+            finding.get("headline"),
+            finding.get("summary"),
+            finding.get("report_id"),
+        ) or "finding"
+        followup = " | needs_followup=yes" if finding.get("needs_followup") else ""
+        lines.append(f"- latest finding: {_clip_text(headline, limit=120)}{followup}")
+    for conflict in conflicts[:2]:
+        summary = _first_non_empty(conflict.get("summary"), conflict.get("kind")) or "conflict"
+        lines.append(f"- conflict: {_clip_text(summary, limit=120)}")
+    for hole in holes[:2]:
+        summary = _first_non_empty(hole.get("summary"), hole.get("kind")) or "gap"
+        lines.append(f"- gap: {_clip_text(summary, limit=120)}")
+    return "\n".join(lines)
 
 
 def _format_memory_hits(hits: list[object]) -> str:
@@ -973,6 +1017,7 @@ class MainBrainChatService:
         context_sections = [
             f"## 主脑身份\n- 当前身份：Spider Mesh 主脑\n- 当前会话：{_clip_text(getattr(request, 'session_id', ''), limit=80) or '未命名会话'}",
             f"## 当前运行摘要\n{_format_runtime_snapshot(detail)}",
+            f"## 主脑 cognitive closure\n{_format_cognitive_closure(detail=detail, request=request)}",
             f"## 正式战略摘要\n{_format_strategy_summary(detail)}",
             "## 团队职业成员 roster\n"
             + ("\n".join(roster_lines) if roster_lines else "- 当前没有可用 roster，请基于已知上下文谨慎回答"),

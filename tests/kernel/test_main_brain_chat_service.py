@@ -499,6 +499,34 @@ def test_main_brain_chat_service_prompt_guides_structured_goal_and_auto_progress
     assert "结构化执行目标" in system_prompt
 
 
+def test_main_brain_chat_service_prompt_does_not_expose_execution_only_tool_names():
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-prompt-no-tools",
+        user_id="user-prompt-no-tools",
+        industry_instance_id=None,
+        work_context_id=None,
+        agent_id=None,
+    )
+
+    prompt_messages = service._build_prompt_messages(  # pylint: disable=protected-access
+        request=request,
+        query="先帮我理解当前情况，再决定要不要继续执行",
+        prior_messages=[],
+        current_messages=[],
+    )
+
+    joined_prompt = "\n".join(message["content"] for message in prompt_messages)
+    assert "dispatch_query" not in joined_prompt
+    assert "delegate_task" not in joined_prompt
+    assert "dispatch_goal" not in joined_prompt
+    assert "dispatch_active_goals" not in joined_prompt
+    assert "memory_search" not in joined_prompt
+
+
 def test_main_brain_chat_service_prompt_includes_staffing_gap_and_researcher_state():
     class _StaffingIndustryService:
         def get_instance_detail(self, instance_id: str) -> object:
@@ -585,6 +613,89 @@ def test_main_brain_chat_service_prompt_includes_staffing_gap_and_researcher_sta
     assert "decision-seat-1" in context_prompt
     assert "Researcher" in context_prompt
     assert "pending signals: 2" in context_prompt
+
+
+def test_main_brain_chat_service_prompt_includes_structured_cognitive_closure_state():
+    class _CognitiveIndustryService:
+        def get_instance_detail(self, instance_id: str) -> object:
+            assert instance_id == "industry-v1-demo"
+            return SimpleNamespace(
+                instance_id=instance_id,
+                label="Northwind Robotics",
+                summary="Field operations control team",
+                execution_core_identity={"agent_id": "copaw-agent-runner"},
+                team=SimpleNamespace(agents=[]),
+                staffing={},
+                assignments=[],
+                backlog=[],
+                lanes=[],
+                agent_reports=[
+                    {
+                        "report_id": "report-weekend-1",
+                        "headline": "Weekend variance review completed",
+                        "summary": "Weekday response time stayed stable, but the weekend cause is unresolved.",
+                    },
+                ],
+                current_cycle={
+                    "title": "Weekend variance closure",
+                    "synthesis": {
+                        "latest_findings": [
+                            {
+                                "report_id": "report-weekend-1",
+                                "headline": "Weekend variance review completed",
+                                "summary": "Weekend variance still lacks a validated cause.",
+                                "needs_followup": True,
+                            },
+                        ],
+                        "conflicts": [
+                            {
+                                "kind": "result-mismatch",
+                                "summary": "Reports disagree on assignment-shared.",
+                                "report_ids": ["report-weekend-1", "report-weekend-2"],
+                            },
+                        ],
+                        "holes": [
+                            {
+                                "kind": "followup-needed",
+                                "summary": "Weekend variance still lacks a validated cause.",
+                                "report_id": "report-weekend-1",
+                            },
+                        ],
+                        "needs_replan": True,
+                        "replan_reasons": [
+                            "Reports disagree on assignment-shared.",
+                            "Weekend variance still lacks a validated cause.",
+                        ],
+                    },
+                },
+            )
+
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        industry_service=_CognitiveIndustryService(),
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-cognitive",
+        user_id="user-cognitive",
+        industry_instance_id="industry-v1-demo",
+        work_context_id=None,
+        agent_id=None,
+    )
+
+    prompt_messages = service._build_prompt_messages(  # pylint: disable=protected-access
+        request=request,
+        query="先判断这两个报告冲突还要不要重排",
+        prior_messages=[],
+        current_messages=[],
+    )
+
+    context_prompt = prompt_messages[1]["content"]
+    assert "## 主脑 cognitive closure" in context_prompt
+    assert "needs_replan=yes" in context_prompt
+    assert "Reports disagree on assignment-shared." in context_prompt
+    assert "Weekend variance still lacks a validated cause." in context_prompt
+    assert "Weekend variance review completed" in context_prompt
 
 
 @pytest.mark.asyncio

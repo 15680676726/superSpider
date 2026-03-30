@@ -1979,6 +1979,189 @@ def test_runtime_replan_node_persists_previous_cycle_synthesis_after_rollover(
     )
 
 
+def test_main_brain_cognitive_surface_persists_across_rollover_and_clears_after_resolved_followup(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["keep main-brain cognitive closure stable across rollover"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    original_cycle_id = record.current_cycle_id
+    assert original_cycle_id is not None
+
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+    environment_ref = f"session:console:industry:{instance_id}"
+    assignment = AssignmentRecord(
+        industry_instance_id=instance_id,
+        cycle_id=original_cycle_id,
+        owner_agent_id="support-specialist-agent",
+        owner_role_id="support-specialist",
+        title="Rollover cognitive continuity check",
+        summary="Create unresolved follow-up pressure before rollover.",
+        status="failed",
+        metadata={
+            "supervisor_owner_agent_id": "copaw-agent-runner",
+            "supervisor_industry_role_id": "execution-core",
+            "supervisor_role_name": "Execution Core",
+            "seat_requested_surfaces": ["browser"],
+            "chat_writeback_requested_surfaces": ["browser"],
+            "control_thread_id": control_thread_id,
+            "session_id": control_thread_id,
+            "environment_ref": environment_ref,
+            "recommended_scheduler_action": "handoff",
+        },
+    )
+    app.state.assignment_repository.upsert_assignment(assignment)
+
+    failed_report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=original_cycle_id,
+        assignment_id=assignment.id,
+        owner_agent_id="support-specialist-agent",
+        owner_role_id="support-specialist",
+        headline="Rollover cognitive continuity failed",
+        summary="The failed report should keep main-brain pressure visible after rollover.",
+        status="recorded",
+        result="failed",
+        findings=["A governed follow-up is still required."],
+        recommendation="Keep replan pressure visible until the governed follow-up closes.",
+        processed=False,
+        work_context_id="work-context:test-rollover-cognitive-surface",
+    )
+    app.state.agent_report_repository.upsert_report(failed_report)
+
+    processed = app.state.industry_service._process_pending_agent_reports(
+        record=record,
+        cycle_id=original_cycle_id,
+    )
+    assert [item.id for item in processed] == [failed_report.id]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    followup_backlog = next(
+        item
+        for item in detail.backlog
+        if item["metadata"].get("source_report_id") == failed_report.id
+    )
+
+    rollover_cycle = app.state.operating_cycle_service.start_cycle(
+        industry_instance_id=instance_id,
+        label=record.label,
+        cycle_kind="daily",
+        status="active",
+        focus_lane_ids=[],
+        backlog_item_ids=[],
+        source_ref="test:cognitive-rollover",
+        summary="Rollover cycle without direct synthesis metadata.",
+        metadata={},
+    )
+    rolled_record = app.state.industry_instance_repository.upsert_instance(
+        record.model_copy(
+            update={
+                "current_cycle_id": rollover_cycle.id,
+                "updated_at": rollover_cycle.updated_at,
+            },
+        ),
+    )
+
+    runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    cognitive_surface = runtime_payload["current_cycle"]["main_brain_cognitive_surface"]
+    assert cognitive_surface["needs_replan"] is True
+    assert cognitive_surface["latest_reports"][0]["report_id"] == failed_report.id
+    assert cognitive_surface["followup_backlog"][0]["backlog_item_id"] == followup_backlog["backlog_item_id"]
+    assert cognitive_surface["judgment"]["status"] == "replan-required"
+    assert cognitive_surface["continuity"]["work_context_ids"] == [failed_report.work_context_id]
+    assert cognitive_surface["continuity"]["control_thread_ids"] == [control_thread_id]
+    assert cognitive_surface["continuity"]["environment_refs"] == [environment_ref]
+
+    followup_assignment = AssignmentRecord(
+        industry_instance_id=instance_id,
+        cycle_id=rollover_cycle.id,
+        backlog_item_id=followup_backlog["backlog_item_id"],
+        owner_agent_id="copaw-agent-runner",
+        owner_role_id="execution-core",
+        title=followup_backlog["title"],
+        summary=followup_backlog["summary"],
+        status="completed",
+    )
+    app.state.assignment_repository.upsert_assignment(followup_assignment)
+    app.state.backlog_item_repository.upsert_item(
+        app.state.backlog_item_repository.get_item(followup_backlog["backlog_item_id"]).model_copy(
+            update={
+                "cycle_id": rollover_cycle.id,
+                "assignment_id": followup_assignment.id,
+                "status": "materialized",
+            },
+        ),
+    )
+
+    resolved_report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=rollover_cycle.id,
+        assignment_id=followup_assignment.id,
+        owner_agent_id="copaw-agent-runner",
+        owner_role_id="execution-core",
+        headline="Rollover cognitive continuity resolved",
+        summary="The follow-up closed the prior governed handoff pressure.",
+        status="recorded",
+        result="completed",
+        findings=["The governed follow-up closed the prior handoff pressure."],
+        recommendation="Resume the standard operating cycle.",
+        processed=False,
+        work_context_id=failed_report.work_context_id,
+    )
+    app.state.agent_report_repository.upsert_report(resolved_report)
+
+    resolved = app.state.industry_service._process_pending_agent_reports(
+        record=rolled_record,
+        cycle_id=rollover_cycle.id,
+    )
+    assert [item.id for item in resolved] == [resolved_report.id]
+
+    cleared_runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    cleared_surface = cleared_runtime_payload["current_cycle"]["main_brain_cognitive_surface"]
+    assert cleared_surface["needs_replan"] is False
+    assert cleared_surface["replan_reasons"] == []
+    assert cleared_surface["followup_backlog"] == []
+    assert cleared_surface["judgment"]["status"] == "stable"
+    assert cleared_surface["next_action"]["kind"] == "continue-cycle"
+
+    strategy = app.state.strategy_memory_service.get_active_strategy(
+        scope_type="industry",
+        scope_id=instance_id,
+        owner_agent_id="copaw-agent-runner",
+    )
+    assert strategy is not None
+    strategy_surface = strategy.metadata["main_brain_cognitive_surface"]
+    assert strategy_surface["needs_replan"] is False
+    assert strategy_surface["followup_backlog"] == []
+
+
 def test_industry_chat_writeback_updates_priority_without_duplicate_history(tmp_path) -> None:
     app = _build_industry_app(tmp_path)
     client = TestClient(app)

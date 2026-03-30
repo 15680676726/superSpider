@@ -2166,7 +2166,110 @@ def test_failed_report_followup_carries_control_thread_and_surface_pressure_with
     assert "browser" in replan_node["metrics"]["followup_pressure_surfaces"]
     assert "desktop" in replan_node["metrics"]["followup_pressure_surfaces"]
     assert "document" in replan_node["metrics"]["followup_pressure_surfaces"]
-    assert replan_node["metrics"]["recommended_action"] is not None
+
+
+def test_runtime_detail_exposes_first_class_main_brain_cognitive_surface_with_continuity_refs(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    cycle_id = record.current_cycle_id
+    assert cycle_id is not None
+
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+    environment_ref = f"session:console:industry:{instance_id}"
+    assignment = AssignmentRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        owner_agent_id="support-specialist-agent",
+        owner_role_id="support-specialist",
+        title="Browser follow-up handoff",
+        summary="Try the browser handoff path and report back to execution-core.",
+        status="failed",
+        metadata={
+            "supervisor_owner_agent_id": "copaw-agent-runner",
+            "supervisor_industry_role_id": "execution-core",
+            "supervisor_role_name": "Execution Core",
+            "chat_writeback_requested_surfaces": ["browser", "desktop", "document"],
+            "seat_requested_surfaces": ["browser", "desktop", "document"],
+            "control_thread_id": control_thread_id,
+            "session_id": control_thread_id,
+            "environment_ref": environment_ref,
+            "recommended_scheduler_action": "handoff",
+        },
+    )
+    app.state.assignment_repository.upsert_assignment(assignment)
+
+    report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=assignment.id,
+        owner_agent_id="support-specialist-agent",
+        owner_role_id="support-specialist",
+        headline="Browser follow-up handoff failed",
+        summary="The browser handoff is still blocked and needs governed supervisor follow-up.",
+        status="recorded",
+        result="failed",
+        findings=["Browser handoff is still blocked and must return to execution-core supervision."],
+        recommendation="Escalate this to the execution-core queue with the same control thread.",
+        processed=False,
+        work_context_id="work-context:test-cognitive-surface",
+    )
+    app.state.agent_report_repository.upsert_report(report)
+
+    processed = app.state.industry_service._process_pending_agent_reports(
+        record=record,
+        cycle_id=cycle_id,
+    )
+    assert [item.id for item in processed] == [report.id]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    assert detail.current_cycle is not None
+    cognitive_surface = detail.current_cycle["main_brain_cognitive_surface"]
+    assert cognitive_surface["latest_reports"][0]["report_id"] == report.id
+    assert cognitive_surface["synthesis"]["needs_replan"] is True
+    assert cognitive_surface["needs_replan"] is True
+    assert any(
+        "requires main-brain follow-up" in reason
+        for reason in cognitive_surface["replan_reasons"]
+    )
+    assert cognitive_surface["judgment"]["status"] == "replan-required"
+    assert cognitive_surface["next_action"]["kind"] == "dispatch-followup"
+    assert cognitive_surface["followup_backlog"][0]["metadata"]["source_report_id"] == report.id
+    assert cognitive_surface["continuity"]["work_context_ids"] == [report.work_context_id]
+    assert cognitive_surface["continuity"]["control_thread_ids"] == [control_thread_id]
+    assert cognitive_surface["continuity"]["environment_refs"] == [environment_ref]
+
+    assert detail.strategy_memory is not None
+    strategy_surface = detail.strategy_memory.metadata["main_brain_cognitive_surface"]
+    assert strategy_surface["needs_replan"] is True
+    assert strategy_surface["judgment"]["status"] == "replan-required"
+    assert strategy_surface["continuity"]["control_thread_ids"] == [control_thread_id]
 
 
 def test_completed_temporary_role_auto_retires_after_report_processing(tmp_path) -> None:

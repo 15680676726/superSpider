@@ -25,6 +25,113 @@ from .query_execution import KernelQueryExecutionService
 logger = logging.getLogger(__name__)
 
 
+def _safe_mapping(value: object) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        payload = model_dump(mode="json")
+        if isinstance(payload, dict):
+            return dict(payload)
+    namespace = getattr(value, "__dict__", None)
+    if isinstance(namespace, dict):
+        return dict(namespace)
+    return {}
+
+
+def _string_list(value: object, *, limit: int = 4) -> list[str]:
+    items: list[str] = []
+    for raw in list(value or [])[: max(1, limit)]:
+        text = str(raw or "").strip()
+        if text:
+            items.append(text)
+    return items
+
+
+def _mapping_list(value: object, *, limit: int = 4) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for raw in list(value or [])[: max(1, limit)]:
+        payload = _safe_mapping(raw)
+        if payload:
+            items.append(payload)
+    return items
+
+
+def _normalize_cognitive_surface(value: object) -> dict[str, Any] | None:
+    payload = _safe_mapping(value)
+    if not payload:
+        return None
+    synthesis = _safe_mapping(payload.get("synthesis"))
+    if not synthesis:
+        synthesis = payload
+    latest_findings = _mapping_list(synthesis.get("latest_findings"))
+    conflicts = _mapping_list(synthesis.get("conflicts"))
+    holes = _mapping_list(synthesis.get("holes"))
+    replan_reasons = _string_list(synthesis.get("replan_reasons"))
+    recommended_actions = _mapping_list(synthesis.get("recommended_actions"))
+    needs_replan = bool(
+        payload.get("needs_replan")
+        or synthesis.get("needs_replan")
+        or conflicts
+        or holes
+        or replan_reasons
+    )
+    normalized_synthesis = {
+        "latest_findings": latest_findings,
+        "conflicts": conflicts,
+        "holes": holes,
+        "recommended_actions": recommended_actions,
+        "replan_reasons": replan_reasons,
+        "needs_replan": needs_replan,
+    }
+    if not any(normalized_synthesis.values()):
+        return None
+    return {
+        "synthesis": normalized_synthesis,
+        "latest_findings": latest_findings,
+        "conflicts": conflicts,
+        "holes": holes,
+        "replan_reasons": replan_reasons,
+        "recommended_actions": recommended_actions,
+        "needs_replan": needs_replan,
+        "has_unresolved_conflicts": bool(conflicts),
+        "has_unresolved_holes": bool(holes),
+    }
+
+
+def read_attached_main_brain_cognitive_surface(
+    *,
+    request: Any,
+) -> dict[str, Any] | None:
+    direct = _normalize_cognitive_surface(
+        getattr(request, "_copaw_main_brain_cognitive_surface", None),
+    )
+    if direct is not None:
+        return direct
+    runtime_context = _safe_mapping(
+        getattr(request, "_copaw_main_brain_runtime_context", None),
+    )
+    return _normalize_cognitive_surface(runtime_context.get("cognitive"))
+
+
+def build_main_brain_cognitive_surface(
+    *,
+    detail: object | None = None,
+    request: Any | None = None,
+) -> dict[str, Any] | None:
+    if detail is not None:
+        detail_payload = _safe_mapping(detail)
+        current_cycle = _safe_mapping(getattr(detail, "current_cycle", None))
+        if not current_cycle:
+            current_cycle = _safe_mapping(detail_payload.get("current_cycle"))
+        from_cycle = _normalize_cognitive_surface(current_cycle.get("synthesis"))
+        if from_cycle is not None:
+            return from_cycle
+    if request is not None:
+        return read_attached_main_brain_cognitive_surface(request=request)
+    return None
+
+
 @dataclass(slots=True)
 class MainBrainExecutionEnvelope:
     msgs: list[Any]
@@ -95,6 +202,22 @@ class MainBrainOrchestrator:
     ) -> None:
         self._intake_contract_resolver = resolver or resolve_main_brain_intake_contract
 
+    def resolve_cognitive_surface(
+        self,
+        *,
+        request: Any,
+    ) -> dict[str, Any] | None:
+        service = getattr(self._query_execution_service, "_industry_service", None)
+        detail = None
+        instance_id = str(getattr(request, "industry_instance_id", "") or "").strip()
+        getter = getattr(service, "get_instance_detail", None)
+        if instance_id and callable(getter):
+            try:
+                detail = getter(instance_id)
+            except Exception:
+                logger.debug("Failed to load industry detail for cognitive surface", exc_info=True)
+        return build_main_brain_cognitive_surface(detail=detail, request=request)
+
     async def execute_stream(
         self,
         *,
@@ -144,6 +267,20 @@ class MainBrainOrchestrator:
             recovery_state=recovery_state,
             kernel_task_id=kernel_task_id,
         )
+        cognitive_surface = self.resolve_cognitive_surface(request=request)
+        if cognitive_surface is not None:
+            runtime_context = _safe_mapping(
+                getattr(request, "_copaw_main_brain_runtime_context", None),
+            )
+            runtime_context["cognitive"] = cognitive_surface
+            try:
+                setattr(request, "_copaw_main_brain_runtime_context", runtime_context)
+            except Exception:
+                logger.debug("Failed to attach main-brain cognitive runtime context")
+            try:
+                setattr(request, "_copaw_main_brain_cognitive_surface", cognitive_surface)
+            except Exception:
+                logger.debug("Failed to attach main-brain cognitive surface")
         return MainBrainExecutionEnvelope(
             msgs=msgs,
             request=request,
@@ -205,4 +342,9 @@ class MainBrainOrchestrator:
         async for msg, last in service.execute_stream(**envelope.execution_kwargs):
             yield msg, last
 
-__all__ = ["MainBrainExecutionEnvelope", "MainBrainOrchestrator"]
+__all__ = [
+    "MainBrainExecutionEnvelope",
+    "MainBrainOrchestrator",
+    "build_main_brain_cognitive_surface",
+    "read_attached_main_brain_cognitive_surface",
+]

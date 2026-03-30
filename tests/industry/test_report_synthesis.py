@@ -22,6 +22,7 @@ def _report(
     needs_followup: bool = False,
     followup_reason: str | None = None,
     metadata: dict[str, Any] | None = None,
+    updated_at: datetime | None = None,
 ) -> AgentReportRecord:
     return AgentReportRecord(
         industry_instance_id="industry-1",
@@ -40,6 +41,7 @@ def _report(
         needs_followup=needs_followup,
         followup_reason=followup_reason,
         metadata=metadata or {},
+        updated_at=updated_at,
     )
 
 
@@ -235,5 +237,211 @@ def test_synthesize_reports_collapses_duplicate_followups_for_the_same_claim() -
     ]
     assert synthesis["replan_reasons"] == [
         "Warehouse variance still lacks a validated cause.",
+    ]
+    assert synthesis["needs_replan"] is True
+
+
+def test_synthesize_reports_uses_latest_report_per_topic_and_clears_old_pressure() -> None:
+    now = datetime.now(UTC)
+    reports = [
+        _report(
+            headline="Warehouse variance review blocked",
+            owner_agent_id="agent-a",
+            assignment_id="assignment-warehouse",
+            lane_id="lane-ops",
+            result="failed",
+            findings=["The warehouse variance root cause is still unclear."],
+            uncertainties=["Missing weekend scanner logs kept the review incomplete."],
+            recommendation="Collect the missing logs before replanning inventory controls.",
+            metadata={"claim_key": "warehouse-variance"},
+            updated_at=now - timedelta(hours=2),
+        ),
+        _report(
+            headline="Warehouse variance review resolved",
+            owner_agent_id="agent-a",
+            assignment_id="assignment-warehouse",
+            lane_id="lane-ops",
+            result="completed",
+            findings=["Weekend scanner logs were recovered and the variance was explained."],
+            recommendation="Keep the existing inventory control policy.",
+            metadata={"claim_key": "warehouse-variance"},
+            updated_at=now,
+        ),
+    ]
+
+    synthesis = synthesize_reports(reports)
+
+    assert [entry["report_id"] for entry in synthesis["latest_findings"]] == [
+        reports[1].id,
+    ]
+    assert synthesis["latest_findings"][0]["topic_key"] == "warehouse-variance"
+    assert synthesis["conflicts"] == []
+    assert synthesis["holes"] == []
+    assert synthesis["recommended_actions"] == []
+    assert synthesis["replan_reasons"] == []
+    assert synthesis["replan_decision"] == {
+        "decision_id": "report-synthesis:clear",
+        "status": "clear",
+        "summary": "No unresolved report synthesis pressure.",
+        "reason_ids": [],
+        "source_report_ids": [],
+        "topic_keys": [],
+    }
+    assert synthesis["replan_directives"] == []
+    assert synthesis["needs_replan"] is False
+
+
+def test_synthesize_reports_surfaces_uncertainty_and_evidence_insufficiency() -> None:
+    report = _report(
+        headline="Weekend variance review completed",
+        owner_agent_id="agent-a",
+        lane_id="lane-support",
+        findings=["Weekday response time stayed inside target."],
+        uncertainties=["Weekend variance still lacks a validated cause."],
+        recommendation="Run a weekend deep-dive before changing staffing.",
+        metadata={
+            "claim_key": "weekend-variance",
+            "evidence_status": "insufficient",
+        },
+    )
+
+    synthesis = synthesize_reports([report])
+
+    assert synthesis["conflicts"] == []
+    assert synthesis["holes"] == [
+        {
+            "hole_id": f"uncertainty:{report.id}",
+            "kind": "uncertainty",
+            "report_id": report.id,
+            "topic_key": "weekend-variance",
+            "summary": "Weekend variance still lacks a validated cause.",
+        },
+        {
+            "hole_id": f"evidence-insufficient:{report.id}",
+            "kind": "evidence-insufficient",
+            "report_id": report.id,
+            "topic_key": "weekend-variance",
+            "summary": "Weekend variance review completed lacks enough evidence for a durable main-brain conclusion.",
+        },
+    ]
+    assert synthesis["recommended_actions"] == []
+    assert synthesis["replan_reasons"] == [
+        "Weekend variance still lacks a validated cause.",
+        "Weekend variance review completed lacks enough evidence for a durable main-brain conclusion.",
+    ]
+    assert synthesis["replan_decision"] == {
+        "decision_id": f"report-synthesis:needs-replan:{report.id}",
+        "status": "needs-replan",
+        "summary": "2 unresolved report synthesis signals require main-brain judgment.",
+        "reason_ids": [
+            f"uncertainty:{report.id}",
+            f"evidence-insufficient:{report.id}",
+        ],
+        "source_report_ids": [report.id],
+        "topic_keys": ["weekend-variance"],
+    }
+    assert synthesis["replan_directives"] == [
+        {
+            "directive_id": f"replan-directive:uncertainty:{report.id}",
+            "kind": "follow-up",
+            "pressure_kind": "uncertainty",
+            "topic_key": "weekend-variance",
+            "summary": "Weekend variance still lacks a validated cause.",
+            "source_report_ids": [report.id],
+            "lane_id": "lane-support",
+            "owner_agent_id": "agent-a",
+            "recommended_action_id": None,
+        },
+        {
+            "directive_id": f"replan-directive:evidence-insufficient:{report.id}",
+            "kind": "follow-up",
+            "pressure_kind": "evidence-insufficient",
+            "topic_key": "weekend-variance",
+            "summary": "Weekend variance review completed lacks enough evidence for a durable main-brain conclusion.",
+            "source_report_ids": [report.id],
+            "lane_id": "lane-support",
+            "owner_agent_id": "agent-a",
+            "recommended_action_id": None,
+        },
+    ]
+    assert synthesis["needs_replan"] is True
+
+
+def test_synthesize_reports_detects_recommendation_conflicts_and_builds_directives() -> None:
+    reports = [
+        _report(
+            headline="Warehouse variance review recommends overtime",
+            owner_agent_id="agent-a",
+            assignment_id="assignment-shared",
+            lane_id="lane-ops",
+            result="completed",
+            findings=["Weekend staffing was thin during the spike."],
+            recommendation="Add overtime coverage this weekend.",
+            metadata={"claim_key": "warehouse-variance"},
+        ),
+        _report(
+            headline="Warehouse variance review recommends no staffing change",
+            owner_agent_id="agent-b",
+            assignment_id="assignment-shared",
+            lane_id="lane-ops",
+            result="completed",
+            findings=["The spike was caused by delayed supplier postings."],
+            recommendation="Do not change staffing until supplier latency is verified.",
+            metadata={"claim_key": "warehouse-variance"},
+        ),
+    ]
+
+    synthesis = synthesize_reports(reports)
+
+    assert len(synthesis["conflicts"]) == 1
+    conflict = synthesis["conflicts"][0]
+    assert conflict == {
+        "conflict_id": conflict["conflict_id"],
+        "kind": "recommendation-mismatch",
+        "topic_key": "warehouse-variance",
+        "summary": "Reports recommend different next steps for warehouse-variance.",
+        "report_ids": [reports[0].id, reports[1].id],
+        "owner_agent_ids": ["agent-a", "agent-b"],
+    }
+    assert synthesis["holes"] == []
+    assert synthesis["recommended_actions"] == [
+        {
+            "action_id": f"resolve-conflict:{conflict['conflict_id']}",
+            "action_type": "follow-up-backlog",
+            "title": "Resolve report conflict",
+            "summary": "Reports recommend different next steps for warehouse-variance.",
+            "priority": 4,
+            "lane_id": None,
+            "source_ref": f"report-synthesis:{conflict['conflict_id']}",
+            "metadata": {
+                "source_report_ids": [reports[0].id, reports[1].id],
+                "report_back_mode": "summary",
+                "synthesis_kind": "conflict",
+            },
+        },
+    ]
+    assert synthesis["replan_reasons"] == [
+        "Reports recommend different next steps for warehouse-variance.",
+    ]
+    assert synthesis["replan_decision"] == {
+        "decision_id": f"report-synthesis:needs-replan:{conflict['conflict_id']}",
+        "status": "needs-replan",
+        "summary": "1 unresolved report synthesis signal requires main-brain judgment.",
+        "reason_ids": [conflict["conflict_id"]],
+        "source_report_ids": [reports[0].id, reports[1].id],
+        "topic_keys": ["warehouse-variance"],
+    }
+    assert synthesis["replan_directives"] == [
+        {
+            "directive_id": f"replan-directive:{conflict['conflict_id']}",
+            "kind": "resolve-conflict",
+            "pressure_kind": "recommendation-mismatch",
+            "topic_key": "warehouse-variance",
+            "summary": "Reports recommend different next steps for warehouse-variance.",
+            "source_report_ids": [reports[0].id, reports[1].id],
+            "lane_id": None,
+            "owner_agent_ids": ["agent-a", "agent-b"],
+            "recommended_action_id": f"resolve-conflict:{conflict['conflict_id']}",
+        },
     ]
     assert synthesis["needs_replan"] is True

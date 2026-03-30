@@ -37,7 +37,10 @@ from .main_brain_intake import (
     resolve_request_main_brain_intake_contract,
 )
 from .main_brain_chat_service import MainBrainChatService
-from .main_brain_orchestrator import MainBrainOrchestrator
+from .main_brain_orchestrator import (
+    MainBrainOrchestrator,
+    read_attached_main_brain_cognitive_surface,
+)
 from .query_error_dump import write_query_error_dump
 from .models import KernelTask
 from .query_execution import KernelQueryExecutionService
@@ -48,6 +51,42 @@ from .query_execution_shared import (
 from ..memory.conversation_compaction_service import ConversationCompactionService
 
 logger = logging.getLogger(__name__)
+
+_COGNITIVE_ACKNOWLEDGEMENTS = frozenset(
+    {
+        "ok",
+        "okay",
+        "yes",
+        "好",
+        "好的",
+        "可以",
+        "确认",
+        "同意",
+    }
+)
+_COGNITIVE_FOLLOWUP_TOKENS = (
+    "continue",
+    "replan",
+    "冲突",
+    "处理",
+    "推进",
+    "拍板",
+    "按这个",
+    "继续",
+    "补缺口",
+    "解决",
+    "缺口",
+    "补上",
+    "重排",
+)
+_COGNITIVE_PRESSURE_HINTS = (
+    "conflict",
+    "replan",
+    "冲突",
+    "缺口",
+    "补缺口",
+    "重排",
+)
 
 
 def summarize_stream_message(msg: Any) -> str | None:
@@ -81,6 +120,53 @@ def _set_request_runtime_value(
         setattr(request, name, value)
     except Exception:
         logger.debug("Failed to set runtime request attribute '%s'", name)
+
+
+def _request_has_unresolved_cognitive_pressure(*, request: Any) -> bool:
+    surface = read_attached_main_brain_cognitive_surface(request=request)
+    if not surface:
+        return False
+    return bool(
+        surface.get("needs_replan")
+        or surface.get("has_unresolved_conflicts")
+        or surface.get("has_unresolved_holes")
+        or list(surface.get("replan_reasons") or [])
+    )
+
+
+def _is_plain_acknowledgement(text: str) -> bool:
+    normalized = str(text or "").strip().rstrip("。.!！?")
+    return normalized.lower() in _COGNITIVE_ACKNOWLEDGEMENTS
+
+
+def _looks_like_cognitive_followup(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return False
+    if _is_plain_acknowledgement(normalized):
+        return True
+    return any(token in normalized for token in _COGNITIVE_FOLLOWUP_TOKENS)
+
+
+def _assistant_mentions_cognitive_pressure(msgs: list[Any]) -> bool:
+    for message in reversed(msgs):
+        role = str(getattr(message, "role", "") or "").strip().lower()
+        if role != "assistant":
+            continue
+        text = ""
+        getter = getattr(message, "get_text_content", None)
+        if callable(getter):
+            try:
+                text = str(getter() or "")
+            except Exception:
+                text = ""
+        if not text:
+            text = str(getattr(message, "content", "") or "")
+        normalized = text.strip().lower()
+        if normalized and any(token in normalized for token in _COGNITIVE_PRESSURE_HINTS):
+            return True
+        return False
+    return False
 
 
 def _extract_response_usage(response: AgentResponse) -> Any | None:
@@ -231,6 +317,14 @@ async def _resolve_auto_chat_mode(
         )
         if intake_contract.should_route_to_orchestrate:
             return "orchestrate"
+    if _request_has_unresolved_cognitive_pressure(request=request) and (
+        (
+            _is_plain_acknowledgement(text)
+            and _assistant_mentions_cognitive_pressure(msgs)
+        )
+        or _looks_like_cognitive_followup(text)
+    ):
+        return "orchestrate"
     return "chat"
 
 
@@ -256,6 +350,7 @@ async def _prepare_request_interaction_mode(
     msgs: list[Any],
     query: str | None,
 ) -> tuple[str, str]:
+    current_requested_interaction_mode = _resolve_interaction_mode(request)
     requested_interaction_mode = str(
         getattr(request, "_copaw_requested_interaction_mode", "") or "",
     ).strip().lower()
@@ -263,12 +358,19 @@ async def _prepare_request_interaction_mode(
         getattr(request, "_copaw_resolved_interaction_mode", "") or "",
     ).strip().lower()
     if (
-        requested_interaction_mode in {"auto", "chat", "orchestrate"}
+        requested_interaction_mode == current_requested_interaction_mode
+        and requested_interaction_mode in {"auto", "chat", "orchestrate"}
         and resolved_interaction_mode in {"chat", "orchestrate"}
     ):
         return requested_interaction_mode, resolved_interaction_mode
+    if (
+        requested_interaction_mode in {"auto", "chat", "orchestrate"}
+        and resolved_interaction_mode in {"chat", "orchestrate"}
+    ):
+        requested_interaction_mode = ""
+        resolved_interaction_mode = ""
 
-    requested_interaction_mode = _resolve_interaction_mode(request)
+    requested_interaction_mode = current_requested_interaction_mode
     resolved_interaction_mode = await _resolve_effective_interaction_mode(
         request=request,
         msgs=msgs,

@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import quote
 
 from ...config import get_heartbeat_config
 from ...utils.runtime_action_links import build_decision_actions, build_patch_actions
@@ -1123,6 +1124,24 @@ class _RuntimeCenterOverviewCardsSupport:
             entry_meta=entry_meta,
             industry_detail=industry_detail,
         )
+        normalized_reports = self._normalize_main_brain_reports(
+            self._normalize_list(industry_detail.get("agent_reports")),
+            industry_instance_id=industry_instance_id,
+        )
+        report_cognition = self._build_main_brain_report_cognition_payload(
+            industry_detail=industry_detail,
+            industry_instance_id=industry_instance_id,
+            normalized_reports=normalized_reports,
+        )
+        signals["report_cognition"] = self._build_main_brain_report_cognition_signal(
+            report_cognition,
+        )
+        signal_map["report_cognition"] = signals["report_cognition"]
+        control_chain = [
+            signal_map[key]
+            for key in control_chain_order + ["report_cognition"]
+            if isinstance(signal_map.get(key), dict)
+        ]
         return RuntimeMainBrainResponse(
             surface=build_runtime_surface(cards),
             strategy=strategy,
@@ -1130,7 +1149,7 @@ class _RuntimeCenterOverviewCardsSupport:
             lanes=self._normalize_list(industry_detail.get("lanes")),
             current_cycle=self._mapping(industry_detail.get("current_cycle")),
             assignments=self._normalize_list(industry_detail.get("assignments")),
-            reports=self._normalize_list(industry_detail.get("agent_reports")),
+            reports=normalized_reports,
             environment=self._build_main_brain_environment_payload(governance_card),
             governance=governance,
             recovery=recovery,
@@ -1151,6 +1170,8 @@ class _RuntimeCenterOverviewCardsSupport:
                 "decision_count": self._int(entry_meta.get("decision_count"), 0),
                 "patch_count": self._int(entry_meta.get("patch_count"), 0),
                 "evidence_count": self._int(entry_meta.get("evidence_count"), 0),
+                "agent_reports": signals.get("agent_reports") or {},
+                "report_cognition": report_cognition,
                 "governance_summary": governance,
                 "recovery_summary": recovery,
                 "automation_summary": automation,
@@ -1398,6 +1419,319 @@ class _RuntimeCenterOverviewCardsSupport:
             "handoff": self._mapping(meta.get("handoff")) or {},
             "staffing": self._mapping(meta.get("staffing")) or {},
             "human_assist": self._mapping(meta.get("human_assist")) or {},
+        }
+
+    def _build_main_brain_industry_route(
+        self,
+        industry_instance_id: str | None,
+    ) -> str | None:
+        normalized_instance_id = self._string(industry_instance_id)
+        if normalized_instance_id is None:
+            return None
+        return f"/api/runtime-center/industry/{quote(normalized_instance_id)}"
+
+    def _build_main_brain_report_route(
+        self,
+        *,
+        industry_instance_id: str | None,
+        report_id: str | None,
+    ) -> str | None:
+        industry_route = self._build_main_brain_industry_route(industry_instance_id)
+        normalized_report_id = self._string(report_id)
+        if industry_route is None or normalized_report_id is None:
+            return industry_route
+        return f"{industry_route}?report_id={quote(normalized_report_id)}"
+
+    def _build_main_brain_backlog_route(
+        self,
+        *,
+        industry_instance_id: str | None,
+        backlog_item_id: str | None,
+    ) -> str | None:
+        industry_route = self._build_main_brain_industry_route(industry_instance_id)
+        normalized_backlog_item_id = self._string(backlog_item_id)
+        if industry_route is None or normalized_backlog_item_id is None:
+            return industry_route
+        return f"{industry_route}?backlog_item_id={quote(normalized_backlog_item_id)}"
+
+    def _normalize_main_brain_reports(
+        self,
+        reports: Sequence[Any],
+        *,
+        industry_instance_id: str | None,
+    ) -> list[dict[str, Any]]:
+        normalized_reports: list[dict[str, Any]] = []
+        for report in reports:
+            payload = dict(self._mapping(report) or {})
+            if not payload:
+                continue
+            report_id = self._string(payload.get("report_id") or payload.get("id"))
+            metadata = self._mapping(payload.get("metadata")) or {}
+            if payload.get("route") is None:
+                payload["route"] = self._build_main_brain_report_route(
+                    industry_instance_id=industry_instance_id,
+                    report_id=report_id,
+                )
+            if "report_consumed" not in payload:
+                if isinstance(metadata.get("report_consumed"), bool):
+                    payload["report_consumed"] = bool(metadata.get("report_consumed"))
+                elif isinstance(payload.get("processed"), bool):
+                    payload["report_consumed"] = bool(payload.get("processed"))
+            normalized_reports.append(payload)
+        return normalized_reports
+
+    def _normalize_main_brain_cognition_finding(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        industry_instance_id: str | None,
+        report_lookup: Mapping[str, Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        report_id = self._string(payload.get("report_id"))
+        report_payload = report_lookup.get(report_id or "", {})
+        return {
+            **dict(payload),
+            "title": self._string(payload.get("title"))
+            or self._string(payload.get("headline"))
+            or self._string(report_payload.get("headline"))
+            or report_id,
+            "summary": self._string(payload.get("summary"))
+            or self._string(report_payload.get("summary")),
+            "route": self._string(payload.get("route"))
+            or self._string(report_payload.get("route"))
+            or self._build_main_brain_report_route(
+                industry_instance_id=industry_instance_id,
+                report_id=report_id,
+            ),
+            "needs_followup": bool(
+                payload.get("needs_followup")
+                if payload.get("needs_followup") is not None
+                else report_payload.get("needs_followup")
+            ),
+            "report_consumed": bool(report_payload.get("report_consumed"))
+            if report_payload.get("report_consumed") is not None
+            else None,
+        }
+
+    def _normalize_main_brain_cognition_conflict(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        industry_instance_id: str | None,
+    ) -> dict[str, Any]:
+        return {
+            **dict(payload),
+            "title": self._string(payload.get("title")) or "Report conflict",
+            "summary": self._string(payload.get("summary")) or "Reports conflict.",
+            "route": self._string(payload.get("route"))
+            or self._build_main_brain_industry_route(industry_instance_id),
+        }
+
+    def _normalize_main_brain_cognition_hole(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        industry_instance_id: str | None,
+    ) -> dict[str, Any]:
+        report_id = self._string(payload.get("report_id"))
+        if report_id is None:
+            report_ids = payload.get("report_ids")
+            if isinstance(report_ids, list):
+                report_id = self._string(report_ids[0] if report_ids else None)
+        kind = self._string(payload.get("kind")) or "hole"
+        return {
+            **dict(payload),
+            "title": self._string(payload.get("title"))
+            or ("Follow-up gap" if kind == "followup-needed" else "Report gap"),
+            "summary": self._string(payload.get("summary")) or "A report gap remains unresolved.",
+            "route": self._string(payload.get("route"))
+            or self._build_main_brain_report_route(
+                industry_instance_id=industry_instance_id,
+                report_id=report_id,
+            )
+            or self._build_main_brain_industry_route(industry_instance_id),
+        }
+
+    def _normalize_main_brain_cognition_backlog(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        industry_instance_id: str | None,
+    ) -> dict[str, Any]:
+        backlog_item_id = self._string(payload.get("backlog_item_id") or payload.get("id"))
+        return {
+            **dict(payload),
+            "title": self._string(payload.get("title")) or backlog_item_id,
+            "summary": self._string(payload.get("summary")),
+            "route": self._string(payload.get("route"))
+            or self._build_main_brain_backlog_route(
+                industry_instance_id=industry_instance_id,
+                backlog_item_id=backlog_item_id,
+            ),
+        }
+
+    def _build_main_brain_report_cognition_payload(
+        self,
+        *,
+        industry_detail: Mapping[str, Any],
+        industry_instance_id: str | None,
+        normalized_reports: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        report_lookup = {
+            self._string(payload.get("report_id") or payload.get("id")) or f"report:{index}": payload
+            for index, payload in enumerate(normalized_reports)
+        }
+        current_cycle = self._mapping(industry_detail.get("current_cycle")) or {}
+        current_cycle_route = self._build_main_brain_industry_route(industry_instance_id)
+        current_cycle_synthesis = (
+            self._mapping(current_cycle.get("synthesis"))
+            or self._mapping((self._mapping(current_cycle.get("metadata")) or {}).get("report_synthesis"))
+            or {}
+        )
+        latest_findings = [
+            self._normalize_main_brain_cognition_finding(
+                self._mapping(item) or {},
+                industry_instance_id=industry_instance_id,
+                report_lookup=report_lookup,
+            )
+            for item in list(current_cycle_synthesis.get("latest_findings") or [])
+            if self._mapping(item)
+        ]
+        conflicts = [
+            self._normalize_main_brain_cognition_conflict(
+                self._mapping(item) or {},
+                industry_instance_id=industry_instance_id,
+            )
+            for item in list(current_cycle_synthesis.get("conflicts") or [])
+            if self._mapping(item)
+        ]
+        holes = [
+            self._normalize_main_brain_cognition_hole(
+                self._mapping(item) or {},
+                industry_instance_id=industry_instance_id,
+            )
+            for item in list(current_cycle_synthesis.get("holes") or [])
+            if self._mapping(item)
+        ]
+        followup_backlog = [
+            self._normalize_main_brain_cognition_backlog(
+                self._mapping(item) or {},
+                industry_instance_id=industry_instance_id,
+            )
+            for item in self._normalize_list(industry_detail.get("backlog"))
+            if self._string((self._mapping(item.get("metadata")) or {}).get("source_report_id"))
+            or self._string((self._mapping(item.get("metadata")) or {}).get("synthesis_kind"))
+        ]
+        unconsumed_reports = [
+            dict(report)
+            for report in normalized_reports
+            if report.get("report_consumed") is False
+        ]
+        needs_followup_reports = [
+            dict(report)
+            for report in normalized_reports
+            if report.get("needs_followup") is True
+        ]
+        replan_reasons = [
+            reason
+            for reason in (
+                self._string(item)
+                for item in list(current_cycle_synthesis.get("replan_reasons") or [])
+            )
+            if reason is not None
+        ]
+        needs_replan = bool(current_cycle_synthesis.get("needs_replan")) or bool(
+            conflicts or holes or followup_backlog
+        )
+        unresolved_count = (
+            len(conflicts) + len(holes) + len(unconsumed_reports) + len(followup_backlog)
+        )
+        if needs_replan:
+            judgment_status = "attention"
+            judgment_summary = (
+                "Main brain must compare unresolved reports and decide whether to dispatch follow-up work."
+            )
+        elif unconsumed_reports:
+            judgment_status = "review"
+            judgment_summary = (
+                "Main brain still has unconsumed reports to synthesize before closing the cycle."
+            )
+        else:
+            judgment_status = "clear"
+            judgment_summary = "Latest reports are consumed and no explicit replan pressure remains."
+        next_action: dict[str, Any]
+        if followup_backlog:
+            next_action = {
+                "kind": "followup-backlog",
+                "title": self._string(followup_backlog[0].get("title")) or "Review follow-up backlog",
+                "summary": self._string(followup_backlog[0].get("summary"))
+                or "Dispatch the formal follow-up backlog created from the current report synthesis.",
+                "route": self._string(followup_backlog[0].get("route")) or current_cycle_route,
+            }
+        elif unconsumed_reports:
+            next_action = {
+                "kind": "consume-report",
+                "title": self._string(unconsumed_reports[0].get("headline"))
+                or self._string(unconsumed_reports[0].get("title"))
+                or "Consume report",
+                "summary": "Consume the latest unconsumed report before dispatching more work.",
+                "route": self._string(unconsumed_reports[0].get("route")) or current_cycle_route,
+            }
+        else:
+            next_action = {
+                "kind": "review-cycle-synthesis" if needs_replan else "continue-cycle",
+                "title": "Review cycle synthesis" if needs_replan else "Continue current cycle",
+                "summary": (
+                    "Review the cycle synthesis and decide the next operating step."
+                    if needs_replan
+                    else "No explicit report cognition pressure is blocking the cycle."
+                ),
+                "route": current_cycle_route,
+            }
+        return {
+            "latest_findings": latest_findings,
+            "conflicts": conflicts,
+            "holes": holes,
+            "judgment": {
+                "status": judgment_status,
+                "summary": judgment_summary,
+                "route": current_cycle_route,
+            },
+            "next_action": next_action,
+            "needs_replan": needs_replan,
+            "replan_reasons": replan_reasons,
+            "followup_backlog": followup_backlog,
+            "unconsumed_reports": unconsumed_reports,
+            "needs_followup_reports": needs_followup_reports,
+            "current_cycle_id": self._string(current_cycle.get("cycle_id")),
+            "route": current_cycle_route,
+            "count": unresolved_count,
+        }
+
+    def _build_main_brain_report_cognition_signal(
+        self,
+        cognition: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        needs_replan = bool(cognition.get("needs_replan"))
+        return {
+            "key": "report_cognition",
+            "count": self._int(cognition.get("count"), 0),
+            "value": "attention" if needs_replan else "clear",
+            "detail": self._string(
+                self._mapping(cognition.get("judgment")).get("summary"),
+            ),
+            "route": self._string(
+                self._mapping(cognition.get("next_action")).get("route"),
+            )
+            or self._string(cognition.get("route")),
+            "status": self._string(
+                self._mapping(cognition.get("judgment")).get("status"),
+            )
+            or ("attention" if needs_replan else "clear"),
+            "needs_replan": needs_replan,
+            "replan_reason_count": len(list(cognition.get("replan_reasons") or [])),
+            "unconsumed_count": len(list(cognition.get("unconsumed_reports") or [])),
+            "followup_count": len(list(cognition.get("followup_backlog") or [])),
         }
 
     def _build_main_brain_section(

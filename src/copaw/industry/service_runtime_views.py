@@ -1,9 +1,10 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from .service_context import *  # noqa: F401,F403
 from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
+from .main_brain_cognitive_surface import build_main_brain_cognitive_surface
 
 
 class _IndustryRuntimeViewsMixin:
@@ -327,6 +328,21 @@ class _IndustryRuntimeViewsMixin:
         current_cycle_entry: dict[str, Any] | None,
         cycles: Sequence[dict[str, Any]],
     ) -> dict[str, Any] | None:
+        current_surface = _mapping(_mapping(current_cycle).get("main_brain_cognitive_surface"))
+        if current_surface:
+            if not bool(current_surface.get("needs_replan")):
+                if isinstance(current_cycle, dict):
+                    return current_cycle
+                if isinstance(current_cycle_entry, dict):
+                    return current_cycle_entry
+                return cycles[0] if cycles else None
+            judgment_cycle_id = _string(
+                _mapping(current_surface.get("judgment")).get("cycle_id"),
+            )
+            if judgment_cycle_id is not None:
+                for candidate in (current_cycle, current_cycle_entry, *cycles):
+                    if _string(_mapping(candidate).get("cycle_id")) == judgment_cycle_id:
+                        return candidate
         if self._cycle_has_replan_payload(current_cycle):
             return current_cycle
         if self._cycle_has_replan_payload(current_cycle_entry):
@@ -2166,6 +2182,68 @@ class _IndustryRuntimeViewsMixin:
                 ),
 
             )
+
+        ]
+
+        main_brain_cognitive_surface = build_main_brain_cognitive_surface(
+
+            current_cycle=current_cycle,
+
+            cycles=cycles,
+
+            backlog=backlog,
+
+            agent_reports=agent_reports,
+
+        )
+
+        if current_cycle is not None:
+
+            current_cycle = {
+
+                **current_cycle,
+
+                "main_brain_cognitive_surface": main_brain_cognitive_surface,
+
+            }
+
+        judgment_cycle_id = _string(
+
+            _mapping(main_brain_cognitive_surface.get("judgment")).get("cycle_id"),
+
+        )
+
+        cycles = [
+
+            {
+
+                **cycle,
+
+                "main_brain_cognitive_surface": (
+
+                    main_brain_cognitive_surface
+
+                    if judgment_cycle_id is not None
+
+                    and _string(cycle.get("cycle_id")) == judgment_cycle_id
+
+                    else build_main_brain_cognitive_surface(
+
+                        current_cycle=cycle,
+
+                        cycles=[cycle],
+
+                        backlog=backlog,
+
+                        agent_reports=agent_reports,
+
+                    )
+
+                ),
+
+            }
+
+            for cycle in cycles
 
         ]
 

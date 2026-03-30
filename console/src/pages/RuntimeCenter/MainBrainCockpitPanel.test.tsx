@@ -96,8 +96,10 @@ const unifiedPayload = {
     {
       report_id: "report-1",
       headline: "Need supervisor decision",
+      summary: "Operator must compare the evidence gap before dispatching the next cycle.",
       status: "recorded",
       needs_followup: true,
+      report_consumed: false,
       route: "/api/runtime-center/industry/industry-v1-ops",
     },
   ],
@@ -183,11 +185,90 @@ const unifiedPayload = {
       detail: "Recovered expired decisions and runtime leases during startup.",
       route: "/api/runtime-center/recovery/latest",
     },
+    report_cognition: {
+      key: "report_cognition",
+      count: 4,
+      value: "attention",
+      detail: "Main brain must compare unresolved reports before dispatching more work.",
+      route: "/api/runtime-center/industry/industry-v1-ops",
+      status: "attention",
+    },
   },
   meta: {
+    report_cognition: {
+      needs_replan: true,
+      replan_reasons: [
+        "Reports disagree on whether the handoff is cleared.",
+        "Supervisor review is still missing for the handoff return.",
+      ],
+      judgment: {
+        status: "attention",
+        summary: "Main brain must compare unresolved reports and decide whether to dispatch follow-up work.",
+        route: "/api/runtime-center/industry/industry-v1-ops",
+      },
+      next_action: {
+        kind: "followup-backlog",
+        title: "Resolve handoff return evidence gap",
+        summary: "Dispatch a governed browser follow-up on the same control thread.",
+        route: "/api/runtime-center/industry/industry-v1-ops?backlog_item_id=backlog-followup-1",
+      },
+      latest_findings: [
+        {
+          report_id: "report-1",
+          title: "Delivery blocker needs supervisor review",
+          summary: "Operator must compare the evidence gap before dispatching the next cycle.",
+          route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-1",
+          needs_followup: true,
+          report_consumed: false,
+        },
+      ],
+      conflicts: [
+        {
+          conflict_id: "result-mismatch:report-1",
+          title: "Report conflict",
+          summary: "Reports disagree on whether the handoff is cleared.",
+          route: "/api/runtime-center/industry/industry-v1-ops",
+        },
+      ],
+      holes: [
+        {
+          hole_id: "followup-needed:report-1",
+          title: "Follow-up gap",
+          summary: "Supervisor review is still missing for the handoff return.",
+          route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-1",
+        },
+      ],
+      followup_backlog: [
+        {
+          backlog_item_id: "backlog-followup-1",
+          title: "Resolve handoff return evidence gap",
+          summary: "Dispatch a governed browser follow-up on the same control thread.",
+          route: "/api/runtime-center/industry/industry-v1-ops?backlog_item_id=backlog-followup-1",
+        },
+      ],
+      unconsumed_reports: [
+        {
+          report_id: "report-1",
+          title: "Need supervisor decision",
+          summary: "Operator must compare the evidence gap before dispatching the next cycle.",
+          route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-1",
+          report_consumed: false,
+        },
+      ],
+      needs_followup_reports: [
+        {
+          report_id: "report-1",
+          title: "Need supervisor decision",
+          summary: "Operator must compare the evidence gap before dispatching the next cycle.",
+          route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-1",
+          needs_followup: true,
+        },
+      ],
+    },
     control_chain: [
       { key: "carrier", value: "Northwind Ops" },
       { key: "strategy", value: "Northwind field operations strategy" },
+      { key: "report_cognition", value: "attention" },
       { key: "governance", value: "blocked" },
       { key: "automation", value: "active" },
       { key: "recovery", value: "ready" },
@@ -234,12 +315,46 @@ describe("MainBrainCockpitPanel", () => {
 
     expect(screen.getByText("Unified Runtime Chain")).toBeInTheDocument();
     expect(screen.getByText("Review handoff blockers")).toBeInTheDocument();
-    expect(screen.getByText("Need supervisor decision")).toBeInTheDocument();
+    expect(screen.getAllByText("Need supervisor decision").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Runtime Governance").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Recovery").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Automation").length).toBeGreaterThan(0);
     expect(screen.getByText("Checkpoint evidence")).toBeInTheDocument();
     expect(screen.getByText("Approve host return")).toBeInTheDocument();
     expect(screen.getByText("Apply continuity patch")).toBeInTheDocument();
+  });
+
+  it("renders report cognition and explicit replan visibility from the dedicated cockpit payload", () => {
+    render(
+      <MainBrainCockpitPanel
+        data={overviewPayload}
+        loading={false}
+        refreshing={false}
+        error={null}
+        mainBrainData={unifiedPayload}
+        mainBrainLoading={false}
+        mainBrainError={null}
+        mainBrainUnavailable={false}
+        onRefresh={vi.fn()}
+        onOpenRoute={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText("Report Cognition").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(
+        "Main brain must compare unresolved reports and decide whether to dispatch follow-up work.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Resolve handoff return evidence gap").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Reports disagree on whether the handoff is cleared.").length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Supervisor review is still missing for the handoff return.").length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText("Needs replan").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Needs follow-up").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Unconsumed reports").length).toBeGreaterThan(0);
   });
 });

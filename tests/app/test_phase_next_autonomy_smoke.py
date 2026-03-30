@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -557,6 +557,310 @@ def test_phase_next_industry_long_run_smoke_keeps_handoff_human_assist_and_repla
     assert "browser" in replan_node["metrics"]["followup_pressure_surfaces"]
     assert "desktop" in replan_node["metrics"]["followup_pressure_surfaces"]
     assert "document" in replan_node["metrics"]["followup_pressure_surfaces"]
+
+
+def test_phase_next_same_thread_cognitive_closure_smoke_updates_visible_judgment_after_later_resolution(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["close the same-thread report loop with visible main-brain judgment"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+    environment_ref = f"session:console:industry:{instance_id}"
+    base_time = datetime.now(timezone.utc)
+
+    writeback = asyncio.run(
+        app.state.industry_service.apply_execution_chat_writeback(
+            industry_instance_id=instance_id,
+            message_text=(
+                "Please publish the customer notice in the browser, keep the operator loop on "
+                "the same control thread, and report back."
+            ),
+            owner_agent_id="copaw-agent-runner",
+            session_id=control_thread_id,
+            channel="console",
+            writeback_plan=build_chat_writeback_plan(
+                (
+                    "Please publish the customer notice in the browser, keep the operator loop "
+                    "on the same control thread, and report back."
+                ),
+                approved_classifications=["backlog"],
+                goal_title="Same-thread publish handoff",
+                goal_summary=(
+                    "Publish the customer notice and keep the loop on the same control thread."
+                ),
+                goal_plan_steps=[
+                    "Define the browser publish scope.",
+                    "Report findings back to the same control thread.",
+                    "Resolve any remaining blocker before closing the loop.",
+                ],
+            ),
+        ),
+    )
+
+    assert writeback is not None
+    decision_id = writeback.get("decision_request_id")
+    if decision_id:
+        approved = client.post(
+            f"/runtime-center/decisions/{decision_id}/approve",
+            json={"resolution": "Approve the governed browser seat.", "execute": True},
+        )
+        assert approved.status_code == 200
+
+    backlog_id = writeback["created_backlog_ids"][0]
+    first_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:phase-next-cognitive-cycle-1",
+            force=True,
+            backlog_item_ids=[backlog_id],
+            auto_dispatch_materialized_goals=False,
+        ),
+    )
+    assignment_id = first_cycle["processed_instances"][0]["created_assignment_ids"][0]
+    cycle_id = first_cycle["processed_instances"][0]["started_cycle_id"]
+    common_metadata = {
+        "control_thread_id": control_thread_id,
+        "session_id": control_thread_id,
+        "environment_ref": environment_ref,
+        "claim_key": "same-thread-publish",
+        "chat_writeback_requested_surfaces": ["browser"],
+        "seat_requested_surfaces": ["browser"],
+    }
+
+    blocked_report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=assignment_id,
+        owner_agent_id="browser-ops-a",
+        owner_role_id="temporary-browser-ops-worker",
+        headline="Browser publish still blocked",
+        summary="The browser publish is still blocked by a missing release note confirmation.",
+        status="recorded",
+        result="failed",
+        findings=["The release note confirmation is still missing."],
+        recommendation="Ask the main brain to reconcile the release note gap before retrying.",
+        metadata=common_metadata,
+        processed=False,
+        updated_at=base_time,
+    )
+    ready_but_waiting_report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=assignment_id,
+        owner_agent_id="browser-ops-b",
+        owner_role_id="temporary-browser-ops-worker",
+        headline="Browser publish can continue after release note check",
+        summary="The browser seat is ready once the release note check is confirmed on the control thread.",
+        status="recorded",
+        result="completed",
+        findings=["The browser seat itself is ready."],
+        needs_followup=True,
+        followup_reason="Release note confirmation still needs main-brain follow-up.",
+        recommendation="Confirm the release note check on the same control thread, then resume publish.",
+        metadata=common_metadata,
+        processed=False,
+        updated_at=base_time + timedelta(microseconds=1),
+    )
+    app.state.agent_report_repository.upsert_report(blocked_report)
+    app.state.agent_report_repository.upsert_report(ready_but_waiting_report)
+
+    second_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:phase-next-cognitive-cycle-2",
+            force=True,
+        ),
+    )
+    assert set(second_cycle["processed_instances"][0]["processed_report_ids"]) == {
+        blocked_report.id,
+        ready_but_waiting_report.id,
+    }
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    assert detail.current_cycle is not None
+    synthesis = detail.current_cycle["synthesis"]
+    assert synthesis["needs_replan"] is True
+    assert "Reports disagree on same-thread-publish." in synthesis["replan_reasons"]
+    assert any(
+        reason.endswith("main-brain follow-up.")
+        for reason in synthesis["replan_reasons"]
+    )
+    assert {entry["report_id"] for entry in synthesis["latest_findings"]} == {
+        blocked_report.id,
+        ready_but_waiting_report.id,
+    }
+
+    runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    replan_node = next(
+        node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
+    )
+    assert replan_node["status"] == "active"
+    assert replan_node["metrics"]["needs_replan"] is True
+    assert replan_node["metrics"]["conflict_count"] >= 1
+    assert replan_node["metrics"]["hole_count"] >= 1
+    assert control_thread_id in replan_node["metrics"]["followup_control_thread_ids"]
+    assert environment_ref in replan_node["metrics"]["followup_environment_refs"]
+    assert replan_node["metrics"]["recommended_action"] == (
+        "dispatch-governed-followup-on-browser-surface"
+    )
+
+    snapshot = app.state.session_backend.load_session_snapshot(
+        session_id=control_thread_id,
+        user_id="copaw-agent-runner",
+        allow_not_exist=True,
+    )
+    agent_state = snapshot.get("agent") if isinstance(snapshot, dict) else {}
+    memory_state = agent_state.get("memory") if isinstance(agent_state, dict) else []
+    if isinstance(memory_state, dict):
+        control_thread_messages = list(memory_state.get("content") or [])
+    else:
+        control_thread_messages = list(memory_state or [])
+    same_thread_reports = [
+        item
+        for item in control_thread_messages
+        if isinstance(item, dict)
+        and item.get("metadata", {}).get("control_thread_id") == control_thread_id
+        and item.get("metadata", {}).get("message_kind") == "agent-report-writeback"
+    ]
+    assert {item["metadata"]["report_id"] for item in same_thread_reports} == {
+        blocked_report.id,
+        ready_but_waiting_report.id,
+    }
+
+    followup_backlog = next(
+        item
+        for item in detail.backlog
+        if item["metadata"].get("source_report_id") == blocked_report.id
+    )
+    followup_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:phase-next-cognitive-cycle-3",
+            force=True,
+            backlog_item_ids=[followup_backlog["backlog_item_id"]],
+            auto_dispatch_materialized_goals=False,
+        ),
+    )
+    followup_assignment_ids = followup_cycle["processed_instances"][0]["created_assignment_ids"]
+    detail_before_resolution = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail_before_resolution is not None
+    assert detail_before_resolution.current_cycle is not None
+    resolution_assignment_id = (
+        followup_assignment_ids[0] if followup_assignment_ids else assignment_id
+    )
+    resolution_cycle_id = (
+        followup_cycle["processed_instances"][0]["started_cycle_id"]
+        or detail_before_resolution.current_cycle["cycle_id"]
+    )
+
+    resolved_report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=resolution_cycle_id,
+        assignment_id=resolution_assignment_id,
+        owner_agent_id="browser-ops-b",
+        owner_role_id="temporary-browser-ops-worker",
+        headline="Browser publish resolved on same thread",
+        summary="The release note confirmation was resolved on the same control thread and publish completed.",
+        status="recorded",
+        result="completed",
+        findings=[
+            "The release note confirmation was recorded on the same control thread.",
+            "Browser publish completed successfully.",
+        ],
+        recommendation="Close the follow-up and keep the same-thread confirmation pattern.",
+        metadata=common_metadata,
+        processed=False,
+        updated_at=base_time + timedelta(minutes=1),
+    )
+    app.state.agent_report_repository.upsert_report(resolved_report)
+
+    final_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:phase-next-cognitive-cycle-4",
+            force=True,
+        ),
+    )
+    assert resolved_report.id in final_cycle["processed_instances"][0]["processed_report_ids"]
+
+    resolved_detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert resolved_detail is not None
+    assert resolved_detail.current_cycle is not None
+    resolved_synthesis = resolved_detail.current_cycle["synthesis"]
+    assert resolved_synthesis["needs_replan"] is False
+    assert resolved_synthesis["conflicts"] == []
+    assert resolved_synthesis["holes"] == []
+    assert resolved_synthesis["replan_reasons"] == []
+    assert [entry["report_id"] for entry in resolved_synthesis["latest_findings"]] == [
+        resolved_report.id,
+    ]
+    assert resolved_synthesis["latest_findings"][0]["headline"] == (
+        "Browser publish resolved on same thread"
+    )
+
+    resolved_snapshot = app.state.session_backend.load_session_snapshot(
+        session_id=control_thread_id,
+        user_id="copaw-agent-runner",
+        allow_not_exist=True,
+    )
+    resolved_agent_state = resolved_snapshot.get("agent") if isinstance(resolved_snapshot, dict) else {}
+    resolved_memory_state = (
+        resolved_agent_state.get("memory") if isinstance(resolved_agent_state, dict) else []
+    )
+    if isinstance(resolved_memory_state, dict):
+        resolved_messages = list(resolved_memory_state.get("content") or [])
+    else:
+        resolved_messages = list(resolved_memory_state or [])
+    resolved_same_thread_reports = [
+        item
+        for item in resolved_messages
+        if isinstance(item, dict)
+        and item.get("metadata", {}).get("control_thread_id") == control_thread_id
+        and item.get("metadata", {}).get("message_kind") == "agent-report-writeback"
+    ]
+    assert {item["metadata"]["report_id"] for item in resolved_same_thread_reports} == {
+        blocked_report.id,
+        ready_but_waiting_report.id,
+        resolved_report.id,
+    }
+
+    resolved_runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    historical_replan_node = next(
+        node
+        for node in resolved_runtime_payload["main_chain"]["nodes"]
+        if node["node_id"] == "replan"
+    )
+    assert historical_replan_node["status"] == "active"
+    assert historical_replan_node["current_ref"] != resolved_detail.current_cycle["cycle_id"]
+    assert historical_replan_node["metrics"]["needs_replan"] is True
+    assert "Reports disagree on same-thread-publish." in (
+        historical_replan_node["metrics"]["replan_reasons"]
+    )
 
 
 def test_phase_next_workflow_and_fixed_sop_share_handoff_host_truth(tmp_path) -> None:

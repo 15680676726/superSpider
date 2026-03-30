@@ -54,6 +54,7 @@ const SIGNAL_ICONS: Record<string, ReactNode> = {
   current_cycle: <RotateCcw size={18} color="#C9A84C" />,
   assignments: <Bot size={18} color="#10b981" />,
   agent_reports: <Bot size={18} color="#10b981" />,
+  report_cognition: <ShieldAlert size={18} color="#f97316" />,
   environment: <ShieldCheck size={18} color="#10b981" />,
   governance: <ShieldAlert size={18} color="#f43f5e" />,
   automation: <RotateCcw size={18} color="#1B4FD8" />,
@@ -581,6 +582,33 @@ function renderTraceBlock(
   );
 }
 
+function renderCognitionBlock(
+  options: {
+    title: string;
+    records: Record<string, unknown>[];
+    emptyLabel: string;
+    fallbackRoute: string | null;
+    onOpenRoute: (route: string, title: string) => void;
+  },
+) {
+  const { title, records, emptyLabel, fallbackRoute, onOpenRoute } = options;
+  return (
+    <div className={styles.controlCard}>
+      <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+        <div>
+          <h3 className={styles.entryTitle}>{title}</h3>
+        </div>
+      </div>
+      {renderCompactRecordList(records, {
+        emptyLabel,
+        fallbackRoute,
+        fallbackRouteTitle: title,
+        onOpenRoute,
+      })}
+    </div>
+  );
+}
+
 export default function MainBrainCockpitPanel({
   data,
   loading,
@@ -652,8 +680,29 @@ export default function MainBrainCockpitPanel({
   const environmentPayload = isRecord(mainBrainData?.environment)
     ? (mainBrainData?.environment as Record<string, unknown>)
     : null;
+  const reportCognitionPayload = isRecord(mainBrainData?.meta?.report_cognition)
+    ? (mainBrainData?.meta?.report_cognition as Record<string, unknown>)
+    : null;
   const assignmentRecords = recordList(mainBrainData?.assignments);
   const reportRecords = recordList(mainBrainData?.reports);
+  const latestFindingRecords = recordList(reportCognitionPayload?.latest_findings);
+  const conflictRecords = recordList(reportCognitionPayload?.conflicts);
+  const holeRecords = recordList(reportCognitionPayload?.holes);
+  const followupBacklogRecords = recordList(reportCognitionPayload?.followup_backlog);
+  const unconsumedReportRecords = recordList(reportCognitionPayload?.unconsumed_reports);
+  const needsFollowupReportRecords = recordList(reportCognitionPayload?.needs_followup_reports);
+  const cognitionJudgment = isRecord(reportCognitionPayload?.judgment)
+    ? (reportCognitionPayload?.judgment as Record<string, unknown>)
+    : null;
+  const cognitionNextAction = isRecord(reportCognitionPayload?.next_action)
+    ? (reportCognitionPayload?.next_action as Record<string, unknown>)
+    : null;
+  const cognitionReasons = Array.isArray(reportCognitionPayload?.replan_reasons)
+    ? (reportCognitionPayload?.replan_reasons as unknown[])
+        .map((item) => firstString(item))
+        .filter((item): item is string => item !== null)
+    : [];
+  const needsReplan = reportCognitionPayload?.needs_replan === true;
   const evidenceSection = isRecord(mainBrainData?.evidence)
     ? (mainBrainData?.evidence as Record<string, unknown>)
     : null;
@@ -799,6 +848,129 @@ export default function MainBrainCockpitPanel({
 
       {mainBrainData ? (
         <section className={styles.panelGrid}>
+          {reportCognitionPayload ? (
+            <Card size="small" title="Report Cognition" style={{ marginBottom: 16 }}>
+              <div className={styles.metaGrid}>
+                <div className={styles.controlCard}>
+                  <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                    <div>
+                      <div className={styles.cardTitleRow}>
+                        <h3 className={styles.entryTitle}>Judgment</h3>
+                        <Tag color={needsReplan ? "error" : "success"}>
+                          {needsReplan ? "Needs replan" : "Clear"}
+                        </Tag>
+                      </div>
+                      {firstString(cognitionJudgment?.summary) ? (
+                        <p className={styles.selectionSummary}>
+                          {firstString(cognitionJudgment?.summary)}
+                        </p>
+                      ) : null}
+                    </div>
+                    {firstString(cognitionJudgment?.route) ? (
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          onOpenRoute(firstString(cognitionJudgment?.route)!, "Report Cognition");
+                        }}
+                      >
+                        Open Detail
+                      </Button>
+                    ) : null}
+                  </div>
+                  <Descriptions
+                    size="small"
+                    column={1}
+                    items={[
+                      {
+                        key: "next_action",
+                        label: "Next action",
+                        children:
+                          firstString(
+                            cognitionNextAction?.title,
+                            cognitionNextAction?.kind,
+                          ) ?? RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                      {
+                        key: "unconsumed_reports",
+                        label: "Unconsumed reports",
+                        children:
+                          String(unconsumedReportRecords.length) ?? RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                      {
+                        key: "needs_followup_reports",
+                        label: "Needs follow-up",
+                        children:
+                          String(needsFollowupReportRecords.length) ?? RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                      {
+                        key: "followup_backlog",
+                        label: "Follow-up backlog",
+                        children:
+                          String(followupBacklogRecords.length) ?? RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                    ]}
+                  />
+                  {firstString(cognitionNextAction?.summary) ? (
+                    <p className={styles.selectionSummary} style={{ marginTop: 12 }}>
+                      {firstString(cognitionNextAction?.summary)}
+                    </p>
+                  ) : null}
+                  {cognitionReasons.length > 0 ? (
+                    <Space size={[8, 8]} wrap style={{ marginTop: 12 }}>
+                      {cognitionReasons.map((reason) => (
+                        <Tag key={reason} color="warning">
+                          {reason}
+                        </Tag>
+                      ))}
+                    </Space>
+                  ) : null}
+                </div>
+                {renderCognitionBlock({
+                  title: "Latest Findings",
+                  records: latestFindingRecords,
+                  emptyLabel: "No latest findings are visible.",
+                  fallbackRoute: firstString(reportCognitionPayload?.route) ?? industryRoute,
+                  onOpenRoute,
+                })}
+                {renderCognitionBlock({
+                  title: "Conflicts",
+                  records: conflictRecords,
+                  emptyLabel: "No report conflicts are visible.",
+                  fallbackRoute: firstString(reportCognitionPayload?.route) ?? industryRoute,
+                  onOpenRoute,
+                })}
+                {renderCognitionBlock({
+                  title: "Holes",
+                  records: holeRecords,
+                  emptyLabel: "No report holes are visible.",
+                  fallbackRoute: firstString(reportCognitionPayload?.route) ?? industryRoute,
+                  onOpenRoute,
+                })}
+                {renderCognitionBlock({
+                  title: "Unconsumed reports",
+                  records: unconsumedReportRecords,
+                  emptyLabel: "No unconsumed reports are visible.",
+                  fallbackRoute: firstString(reportCognitionPayload?.route) ?? industryRoute,
+                  onOpenRoute,
+                })}
+                {renderCognitionBlock({
+                  title: "Needs follow-up",
+                  records: needsFollowupReportRecords,
+                  emptyLabel: "No follow-up reports are visible.",
+                  fallbackRoute: firstString(reportCognitionPayload?.route) ?? industryRoute,
+                  onOpenRoute,
+                })}
+                {renderCognitionBlock({
+                  title: "Follow-up backlog",
+                  records: followupBacklogRecords,
+                  emptyLabel: "No follow-up backlog is visible.",
+                  fallbackRoute: firstString(reportCognitionPayload?.route) ?? industryRoute,
+                  onOpenRoute,
+                })}
+              </div>
+            </Card>
+          ) : null}
+
           <Card size="small" title="Execution Envelope" style={{ marginBottom: 16 }}>
             <div className={styles.metaGrid}>
               <div className={styles.controlCard}>

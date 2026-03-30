@@ -243,6 +243,111 @@ async def test_kernel_turn_executor_routes_chat_mode_to_main_brain_service():
 
 
 @pytest.mark.asyncio
+async def test_kernel_turn_executor_explicit_chat_mode_overrides_orchestrate_intake_hint(
+    monkeypatch,
+):
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+    )
+    request = AgentRequest(
+        id="req-chat-explicit-wins",
+        session_id="sess-chat-explicit-wins",
+        user_id="user-chat-explicit-wins",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "chat"
+    msgs = [Msg(name="user", role="user", content="这轮只聊天，不进入执行编排")]
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(
+            _make_main_brain_intake_contract(
+                message_text="这轮只聊天，不进入执行编排",
+                intent_kind="execute-task",
+                kickoff_allowed=True,
+            ),
+        ),
+    )
+
+    streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "chat done"
+    assert len(main_brain_chat_service.calls) == 1
+    assert query_execution_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_explicit_chat_mode_ignores_stale_cached_mode_metadata():
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+    )
+    request = AgentRequest(
+        id="req-chat-stale-mode-cache",
+        session_id="sess-chat-stale-mode-cache",
+        user_id="user-chat-stale-mode-cache",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "chat"
+    request._copaw_requested_interaction_mode = "auto"
+    request._copaw_resolved_interaction_mode = "orchestrate"
+    msgs = [Msg(name="user", role="user", content="这轮显式只聊天")]
+
+    streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "chat done"
+    assert len(main_brain_chat_service.calls) == 1
+    assert query_execution_service.calls == []
+    assert request._copaw_requested_interaction_mode == "chat"
+    assert request._copaw_resolved_interaction_mode == "chat"
+
+
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_explicit_orchestrate_mode_ignores_stale_cached_mode_metadata():
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    main_brain_orchestrator = FakeMainBrainOrchestrator()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+        main_brain_orchestrator=main_brain_orchestrator,
+    )
+    request = AgentRequest(
+        id="req-orchestrate-stale-mode-cache",
+        session_id="sess-orchestrate-stale-mode-cache",
+        user_id="user-orchestrate-stale-mode-cache",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "orchestrate"
+    request._copaw_requested_interaction_mode = "auto"
+    request._copaw_resolved_interaction_mode = "chat"
+    msgs = [Msg(name="user", role="user", content="这轮显式进入执行编排")]
+
+    streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "orchestrator done"
+    assert len(main_brain_orchestrator.calls) == 1
+    assert main_brain_chat_service.calls == []
+    assert query_execution_service.calls == []
+    assert request._copaw_requested_interaction_mode == "orchestrate"
+    assert request._copaw_resolved_interaction_mode == "orchestrate"
+
+
+@pytest.mark.asyncio
 async def test_kernel_turn_executor_auto_mode_routes_questions_to_chat_service():
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()
@@ -722,6 +827,97 @@ async def test_kernel_turn_executor_syncs_environment_service_into_orchestrator_
 
 
 @pytest.mark.asyncio
+async def test_main_brain_orchestrator_runtime_context_carries_cognitive_surface():
+    class _CognitiveIndustryService:
+        def get_instance_detail(self, instance_id: str) -> object:
+            assert instance_id == "industry-v1-demo"
+            return SimpleNamespace(
+                instance_id=instance_id,
+                current_cycle={
+                    "synthesis": {
+                        "latest_findings": [
+                            {
+                                "report_id": "report-weekend-1",
+                                "headline": "Weekend variance review completed",
+                                "summary": "Weekend variance still lacks a validated cause.",
+                                "needs_followup": True,
+                            },
+                        ],
+                        "conflicts": [
+                            {
+                                "kind": "result-mismatch",
+                                "summary": "Reports disagree on assignment-shared.",
+                                "report_ids": ["report-weekend-1", "report-weekend-2"],
+                            },
+                        ],
+                        "holes": [
+                            {
+                                "kind": "followup-needed",
+                                "summary": "Weekend variance still lacks a validated cause.",
+                                "report_id": "report-weekend-1",
+                            },
+                        ],
+                        "needs_replan": True,
+                        "replan_reasons": [
+                            "Reports disagree on assignment-shared.",
+                            "Weekend variance still lacks a validated cause.",
+                        ],
+                    },
+                },
+            )
+
+    query_execution_service = FakeQueryExecutionService()
+    query_execution_service._industry_service = _CognitiveIndustryService()
+
+    async def _fake_resolver(**_kwargs):
+        return MainBrainIntakeContract(
+            message_text="Continue the weekend variance closure.",
+            decision=SimpleNamespace(intent_kind="execute-task", kickoff_allowed=True),
+            intent_kind="execute-task",
+            writeback_requested=False,
+            writeback_plan=None,
+            should_kickoff=True,
+        )
+
+    main_brain_orchestrator = MainBrainOrchestrator(
+        query_execution_service=query_execution_service,
+        intake_contract_resolver=_fake_resolver,
+    )
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=FakeMainBrainChatService(),
+        main_brain_orchestrator=main_brain_orchestrator,
+    )
+    request = AgentRequest(
+        id="req-orchestrator-cognitive-runtime",
+        session_id="sess-orchestrator-cognitive-runtime",
+        user_id="user-orchestrator-cognitive-runtime",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "orchestrate"
+    request.industry_instance_id = "industry-v1-demo"
+
+    streamed = [
+        item
+        async for item in executor.handle_query(
+            msgs=[Msg(name="user", role="user", content="Continue the weekend variance closure.")],
+            request=request,
+        )
+    ]
+
+    assert len(streamed) == 1
+    runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
+    assert runtime_context["cognitive"]["needs_replan"] is True
+    assert runtime_context["cognitive"]["has_unresolved_conflicts"] is True
+    assert runtime_context["cognitive"]["replan_reasons"] == [
+        "Reports disagree on assignment-shared.",
+        "Weekend variance still lacks a validated cause.",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_kernel_turn_executor_auto_mode_routes_control_thread_execute_request_to_orchestrator(
     monkeypatch,
 ):
@@ -871,6 +1067,64 @@ async def test_kernel_turn_executor_auto_mode_keeps_plain_acknowledgement_in_cha
     assert len(streamed) == 1
     assert streamed[0][0].get_text_content() == "chat done"
     assert len(main_brain_chat_service.calls) == 1
+    assert query_execution_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_auto_mode_routes_acknowledged_replan_to_orchestrator_when_cognitive_pressure_exists(
+    monkeypatch,
+):
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    main_brain_orchestrator = FakeMainBrainOrchestrator()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+        main_brain_orchestrator=main_brain_orchestrator,
+    )
+    request = AgentRequest(
+        id="req-auto-cognitive-replan",
+        session_id="sess-auto-cognitive-replan",
+        user_id="user-auto-cognitive-replan",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "auto"
+    request._copaw_main_brain_runtime_context = {
+        "cognitive": {
+            "needs_replan": True,
+            "conflicts": [
+                {
+                    "kind": "result-mismatch",
+                    "summary": "Reports disagree on assignment-shared.",
+                    "report_ids": ["report-weekend-1", "report-weekend-2"],
+                },
+            ],
+            "holes": [],
+            "replan_reasons": ["Reports disagree on assignment-shared."],
+        },
+    }
+    msgs = [
+        Msg(
+            name="assistant",
+            role="assistant",
+            content="两个报告还没对齐，当前需要主脑直接重排并补缺口。",
+        ),
+        Msg(name="user", role="user", content="好的，按这个继续推进。"),
+    ]
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(None),
+    )
+
+    streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "orchestrator done"
+    assert len(main_brain_orchestrator.calls) == 1
+    assert main_brain_chat_service.calls == []
     assert query_execution_service.calls == []
 
 

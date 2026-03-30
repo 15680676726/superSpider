@@ -4,11 +4,13 @@ from __future__ import annotations
 
 
 
-from .service_context import *  # noqa: F401,F403
+from .service_context import *  # noqa: F401,F403
+
 from .service_recommendation_search import *  # noqa: F401,F403
 
 from .service_recommendation_pack import *  # noqa: F401,F403
 
+from .main_brain_cognitive_surface import build_main_brain_cognitive_surface
 from .report_synthesis import synthesize_reports
 
 
@@ -1677,7 +1679,35 @@ class _IndustryStrategyMixin:
 
         existing_strategy = self._peek_strategy_memory(record)
 
+        if _string(record.status) == "retired":
+
+            return existing_strategy
+
         if existing_strategy is not None:
+
+            merged_strategy = self._build_strategy_memory_record(
+
+                record,
+
+                profile=profile,
+
+                team=team,
+
+                execution_core_identity=execution_core_identity,
+
+                existing_strategy=existing_strategy,
+
+            )
+
+            if self._strategy_memory_changed(existing_strategy, merged_strategy):
+
+                upsert = getattr(self._strategy_memory_service, "upsert_strategy", None)
+
+                if callable(upsert):
+
+                    return upsert(merged_strategy)
+
+                return merged_strategy
 
             return existing_strategy
 
@@ -1899,6 +1929,8 @@ class _IndustryStrategyMixin:
 
         current_cycle = self._current_operating_cycle_record(record.instance_id)
 
+        cycle_records = self._list_operating_cycles(record.instance_id, limit=None)
+
         open_backlog = self._list_backlog_items(
 
             record.instance_id,
@@ -1916,6 +1948,36 @@ class _IndustryStrategyMixin:
             processed=False,
 
             limit=None,
+
+        )
+
+        agent_report_records = self._list_agent_report_records(
+
+            record.instance_id,
+
+            limit=None,
+
+        )
+
+        backlog_records = self._list_backlog_items(
+
+            record.instance_id,
+
+            status=None,
+
+            limit=None,
+
+        )
+
+        main_brain_cognitive_surface = build_main_brain_cognitive_surface(
+
+            current_cycle=current_cycle,
+
+            cycles=cycle_records,
+
+            backlog=backlog_records,
+
+            agent_reports=agent_report_records,
 
         )
 
@@ -2086,6 +2148,8 @@ class _IndustryStrategyMixin:
                 "open_backlog_count": len(open_backlog),
 
                 "pending_report_count": len(pending_reports),
+
+                "main_brain_cognitive_surface": main_brain_cognitive_surface,
 
             },
 

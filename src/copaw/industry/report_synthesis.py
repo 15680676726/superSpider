@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from hashlib import sha1
@@ -24,6 +24,25 @@ def _iso_datetime(value: object | None) -> str | None:
     return None
 
 
+def _unique_strings(*collections: object) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for collection in collections:
+        if isinstance(collection, str):
+            items = [collection]
+        elif isinstance(collection, Sequence):
+            items = list(collection)
+        else:
+            items = []
+        for item in items:
+            text = _string(item)
+            if text is None or text in seen:
+                continue
+            seen.add(text)
+            values.append(text)
+    return values
+
+
 def _report_topic_key(report: AgentReportRecord) -> str | None:
     metadata = report.metadata if isinstance(report.metadata, dict) else {}
     return (
@@ -43,9 +62,33 @@ def _result_bucket(report: AgentReportRecord) -> str | None:
     return result or None
 
 
+def _report_timestamp(report: AgentReportRecord) -> object:
+    return report.updated_at or report.created_at or ""
+
+
+def _owner_key(report: AgentReportRecord) -> str:
+    return _string(report.owner_agent_id) or _string(report.owner_role_id) or report.id
+
+
+def _latest_reports(reports: Sequence[AgentReportRecord]) -> list[AgentReportRecord]:
+    latest_by_topic_owner: dict[tuple[str, str], AgentReportRecord] = {}
+    passthrough_ids: set[str] = set()
+    for report in reports:
+        topic_key = _report_topic_key(report)
+        if topic_key is None:
+            passthrough_ids.add(report.id)
+            continue
+        key = (topic_key, _string(report.assignment_id) or report.id, _owner_key(report))
+        current = latest_by_topic_owner.get(key)
+        if current is None or _report_timestamp(report) >= _report_timestamp(current):
+            latest_by_topic_owner[key] = report
+    selected_ids = passthrough_ids | {report.id for report in latest_by_topic_owner.values()}
+    return [report for report in reports if report.id in selected_ids]
+
+
 def _latest_findings(reports: Sequence[AgentReportRecord]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
-    for report in reports:
+    for report in _latest_reports(reports):
         findings.append(
             {
                 "report_id": report.id,
@@ -54,6 +97,7 @@ def _latest_findings(reports: Sequence[AgentReportRecord]) -> list[dict[str, Any
                 "goal_id": report.goal_id,
                 "task_id": report.task_id,
                 "lane_id": report.lane_id,
+                "topic_key": _report_topic_key(report),
                 "owner_agent_id": report.owner_agent_id,
                 "owner_role_id": report.owner_role_id,
                 "headline": report.headline,
@@ -73,7 +117,7 @@ def _latest_findings(reports: Sequence[AgentReportRecord]) -> list[dict[str, Any
 
 def _detect_conflicts(reports: Sequence[AgentReportRecord]) -> list[dict[str, Any]]:
     grouped: dict[str, list[AgentReportRecord]] = {}
-    for report in reports:
+    for report in _latest_reports(reports):
         topic_key = _report_topic_key(report)
         if topic_key is None:
             continue
@@ -81,35 +125,42 @@ def _detect_conflicts(reports: Sequence[AgentReportRecord]) -> list[dict[str, An
     conflicts: list[dict[str, Any]] = []
     for topic_key, topic_reports in grouped.items():
         buckets = {_result_bucket(report) for report in topic_reports if _result_bucket(report)}
-        if not {"success", "failure"}.issubset(buckets):
+        report_ids = [report.id for report in topic_reports]
+        owner_agent_ids = [owner for owner in (_string(report.owner_agent_id) for report in topic_reports) if owner is not None]
+        if {"success", "failure"}.issubset(buckets):
+            digest = sha1("|".join(report_ids).encode("utf-8")).hexdigest()[:12]
+            conflicts.append(
+                {
+                    "conflict_id": f"result-mismatch:{digest}",
+                    "kind": "result-mismatch",
+                    "topic_key": topic_key,
+                    "summary": f"Reports disagree on {topic_key}.",
+                    "report_ids": report_ids,
+                    "owner_agent_ids": sorted(set(owner_agent_ids)),
+                },
+            )
             continue
-        report_ids = sorted(report.id for report in topic_reports)
-        digest = sha1("|".join(report_ids).encode("utf-8")).hexdigest()[:12]
-        conflicts.append(
-            {
-                "conflict_id": f"result-mismatch:{digest}",
-                "kind": "result-mismatch",
-                "topic_key": topic_key,
-                "summary": f"Reports disagree on {topic_key}.",
-                "report_ids": report_ids,
-                "owner_agent_ids": sorted(
-                    {
-                        owner_agent_id
-                        for report in topic_reports
-                        if (owner_agent_id := _string(report.owner_agent_id)) is not None
-                    }
-                ),
-            },
-        )
+        recommendations = {
+            recommendation
+            for report in topic_reports
+            if (recommendation := _string(report.recommendation)) is not None
+        }
+        if len(recommendations) > 1:
+            digest = sha1("|".join(report_ids).encode("utf-8")).hexdigest()[:12]
+            conflicts.append(
+                {
+                    "conflict_id": f"recommendation-mismatch:{digest}",
+                    "kind": "recommendation-mismatch",
+                    "topic_key": topic_key,
+                    "summary": f"Reports recommend different next steps for {topic_key}.",
+                    "report_ids": report_ids,
+                    "owner_agent_ids": sorted(set(owner_agent_ids)),
+                },
+            )
     return conflicts
 
 
-def _build_report_action(
-    report: AgentReportRecord,
-    *,
-    source_ref: str,
-    synthesis_kind: str,
-) -> dict[str, Any]:
+def _build_report_action(report: AgentReportRecord, *, source_ref: str, synthesis_kind: str) -> dict[str, Any]:
     return {
         "action_id": f"follow-up:{report.id}",
         "action_type": "follow-up-backlog",
@@ -129,10 +180,7 @@ def _build_report_action(
     }
 
 
-def _append_action_source_report_id(
-    action: dict[str, Any],
-    report_id: str | None,
-) -> None:
+def _append_action_source_report_id(action: dict[str, Any], report_id: str | None) -> None:
     normalized_report_id = _string(report_id)
     if normalized_report_id is None:
         return
@@ -141,14 +189,7 @@ def _append_action_source_report_id(
         return
     source_report_ids = [
         item
-        for item in [
-            _string(value)
-            for value in (
-                metadata.get("source_report_ids")
-                if isinstance(metadata.get("source_report_ids"), list)
-                else []
-            )
-        ]
+        for item in [_string(value) for value in (metadata.get("source_report_ids") if isinstance(metadata.get("source_report_ids"), list) else [])]
         if item is not None
     ]
     if normalized_report_id not in source_report_ids:
@@ -161,15 +202,17 @@ def _append_action_source_report_id(
 def _detect_holes_and_actions(
     reports: Sequence[AgentReportRecord],
     conflicts: Sequence[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     holes: list[dict[str, Any]] = []
     actions: list[dict[str, Any]] = []
+    directives: list[dict[str, Any]] = []
     seen_source_refs: set[str] = set()
     seen_issue_keys: set[str] = set()
     action_by_issue_key: dict[str, dict[str, Any]] = {}
-    for report in reports:
+    for report in _latest_reports(reports):
         result = (_string(report.result) or "").lower()
         issue_key = _report_topic_key(report) or report.id
+        topic_key = _report_topic_key(report)
         if result in _FAILED_RESULTS:
             if issue_key in seen_issue_keys:
                 existing_action = action_by_issue_key.get(issue_key)
@@ -177,24 +220,32 @@ def _detect_holes_and_actions(
                     _append_action_source_report_id(existing_action, report.id)
                 continue
             seen_issue_keys.add(issue_key)
-            holes.append(
-                {
-                    "hole_id": f"failed-report:{report.id}",
-                    "kind": "failed-report",
-                    "report_id": report.id,
-                    "summary": f"{report.headline} requires main-brain follow-up.",
-                },
-            )
-            action = _build_report_action(
-                report,
-                source_ref=f"agent-report:{report.id}",
-                synthesis_kind="failed-report",
-            )
+            hole = {
+                "hole_id": f"failed-report:{report.id}",
+                "kind": "failed-report",
+                "report_id": report.id,
+                "summary": f"{report.headline} requires main-brain follow-up.",
+            }
+            holes.append(hole)
+            action = _build_report_action(report, source_ref=f"agent-report:{report.id}", synthesis_kind="failed-report")
             _append_action_source_report_id(action, report.id)
             action_by_issue_key[issue_key] = action
             if action["source_ref"] not in seen_source_refs:
                 seen_source_refs.add(action["source_ref"])
                 actions.append(action)
+            directives.append(
+                {
+                    "directive_id": f"replan-directive:{hole['hole_id']}",
+                    "kind": "follow-up",
+                    "pressure_kind": "failed-report",
+                    "topic_key": topic_key,
+                    "summary": hole["summary"],
+                    "source_report_ids": [report.id],
+                    "lane_id": report.lane_id,
+                    "owner_agent_id": report.owner_agent_id,
+                    "recommended_action_id": action["action_id"],
+                },
+            )
             continue
         if report.needs_followup or _string(report.followup_reason):
             if issue_key in seen_issue_keys:
@@ -203,84 +254,175 @@ def _detect_holes_and_actions(
                     _append_action_source_report_id(existing_action, report.id)
                 continue
             seen_issue_keys.add(issue_key)
-            holes.append(
-                {
-                    "hole_id": f"followup-needed:{report.id}",
-                    "kind": "followup-needed",
-                    "report_id": report.id,
-                    "summary": _string(report.followup_reason)
-                    or f"{report.headline} still needs follow-up.",
-                },
-            )
-            action = _build_report_action(
-                report,
-                source_ref=f"agent-report-followup:{report.id}",
-                synthesis_kind="followup-needed",
-            )
+            summary = _string(report.followup_reason) or f"{report.headline} still needs follow-up."
+            hole = {
+                "hole_id": f"followup-needed:{report.id}",
+                "kind": "followup-needed",
+                "report_id": report.id,
+                "summary": summary,
+            }
+            holes.append(hole)
+            action = _build_report_action(report, source_ref=f"agent-report-followup:{report.id}", synthesis_kind="followup-needed")
             _append_action_source_report_id(action, report.id)
             action_by_issue_key[issue_key] = action
             if action["source_ref"] not in seen_source_refs:
                 seen_source_refs.add(action["source_ref"])
                 actions.append(action)
+            directives.append(
+                {
+                    "directive_id": f"replan-directive:{hole['hole_id']}",
+                    "kind": "follow-up",
+                    "pressure_kind": "followup-needed",
+                    "topic_key": topic_key,
+                    "summary": summary,
+                    "source_report_ids": [report.id],
+                    "lane_id": report.lane_id,
+                    "owner_agent_id": report.owner_agent_id,
+                    "recommended_action_id": action["action_id"],
+                },
+            )
+        for uncertainty in list(report.uncertainties or []):
+            summary = _string(uncertainty)
+            if summary is None:
+                continue
+            hole = {
+                "hole_id": f"uncertainty:{report.id}",
+                "kind": "uncertainty",
+                "report_id": report.id,
+                "topic_key": topic_key,
+                "summary": summary,
+            }
+            if hole not in holes:
+                holes.append(hole)
+                directives.append(
+                    {
+                        "directive_id": f"replan-directive:{hole['hole_id']}",
+                        "kind": "follow-up",
+                        "pressure_kind": "uncertainty",
+                        "topic_key": topic_key,
+                        "summary": summary,
+                        "source_report_ids": [report.id],
+                        "lane_id": report.lane_id,
+                        "owner_agent_id": report.owner_agent_id,
+                        "recommended_action_id": None,
+                    },
+                )
+        metadata = report.metadata if isinstance(report.metadata, dict) else {}
+        if _string(metadata.get('evidence_status')) == 'insufficient':
+            summary = f"{report.headline} lacks enough evidence for a durable main-brain conclusion."
+            hole = {
+                "hole_id": f"evidence-insufficient:{report.id}",
+                "kind": "evidence-insufficient",
+                "report_id": report.id,
+                "topic_key": topic_key,
+                "summary": summary,
+            }
+            holes.append(hole)
+            directives.append(
+                {
+                    "directive_id": f"replan-directive:{hole['hole_id']}",
+                    "kind": "follow-up",
+                    "pressure_kind": "evidence-insufficient",
+                    "topic_key": topic_key,
+                    "summary": summary,
+                    "source_report_ids": [report.id],
+                    "lane_id": report.lane_id,
+                    "owner_agent_id": report.owner_agent_id,
+                    "recommended_action_id": None,
+                },
+            )
     for conflict in conflicts:
         conflict_id = _string(conflict.get("conflict_id"))
         if conflict_id is None:
             continue
-        holes.append(
-            {
-                "hole_id": f"conflict:{conflict_id}",
-                "kind": "conflict",
-                "report_ids": list(conflict.get("report_ids") or []),
-                "summary": _string(conflict.get("summary")) or "Reports conflict.",
+        summary = _string(conflict.get("summary")) or "Reports conflict."
+        source_report_ids = list(conflict.get("report_ids") or [])
+        action = {
+            "action_id": f"resolve-conflict:{conflict_id}",
+            "action_type": "follow-up-backlog",
+            "title": "Resolve report conflict",
+            "summary": summary,
+            "priority": 4,
+            "lane_id": None,
+            "source_ref": f"report-synthesis:{conflict_id}",
+            "metadata": {
+                "source_report_ids": source_report_ids,
+                "report_back_mode": "summary",
+                "synthesis_kind": "conflict",
             },
-        )
-        source_ref = f"report-synthesis:{conflict_id}"
-        if source_ref in seen_source_refs:
-            continue
-        seen_source_refs.add(source_ref)
-        actions.append(
+        }
+        actions.append(action)
+        directives.append(
             {
-                "action_id": f"resolve-conflict:{conflict_id}",
-                "action_type": "follow-up-backlog",
-                "title": "Resolve report conflict",
-                "summary": _string(conflict.get("summary")) or "Reports conflict.",
-                "priority": 4,
+                "directive_id": f"replan-directive:{conflict_id}",
+                "kind": "resolve-conflict",
+                "pressure_kind": _string(conflict.get("kind")) or "conflict",
+                "topic_key": _string(conflict.get("topic_key")),
+                "summary": summary,
+                "source_report_ids": source_report_ids,
                 "lane_id": None,
-                "source_ref": source_ref,
-                "metadata": {
-                    "source_report_ids": list(conflict.get("report_ids") or []),
-                    "report_back_mode": "summary",
-                    "synthesis_kind": "conflict",
-                },
+                "owner_agent_ids": list(conflict.get("owner_agent_ids") or []),
+                "recommended_action_id": action["action_id"],
             },
         )
-    return holes, actions
+    return holes, actions, directives
+
+
+def _build_replan_decision(*, holes: list[dict[str, Any]], conflicts: list[dict[str, Any]]) -> dict[str, Any]:
+    reason_ids = [item["hole_id"] for item in holes if _string(item.get("hole_id"))] + [item["conflict_id"] for item in conflicts if _string(item.get("conflict_id"))]
+    source_report_ids = _unique_strings(
+        [item.get("report_id") for item in holes],
+        *[item.get("report_ids") for item in holes if isinstance(item.get("report_ids"), list)],
+        *[item.get("report_ids") for item in conflicts if isinstance(item.get("report_ids"), list)],
+    )
+    topic_keys = _unique_strings(
+        [item.get("topic_key") for item in holes],
+        [item.get("topic_key") for item in conflicts],
+    )
+    if not reason_ids:
+        return {
+            "decision_id": "report-synthesis:clear",
+            "status": "clear",
+            "summary": "No unresolved report synthesis pressure.",
+            "reason_ids": [],
+            "source_report_ids": [],
+            "topic_keys": [],
+        }
+    primary_ref = conflicts[0]["conflict_id"] if conflicts else source_report_ids[0]
+    signal_word = "signal" if len(reason_ids) == 1 else "signals"
+    return {
+        "decision_id": f"report-synthesis:needs-replan:{primary_ref}",
+        "status": "needs-replan",
+        "summary": f"{len(reason_ids)} unresolved report synthesis {signal_word} {('requires' if len(reason_ids) == 1 else 'require')} main-brain judgment.",
+        "reason_ids": reason_ids,
+        "source_report_ids": source_report_ids,
+        "topic_keys": topic_keys,
+    }
 
 
 def synthesize_reports(reports: Sequence[AgentReportRecord]) -> dict[str, Any]:
-    normalized_reports = [
-        report for report in reports if isinstance(report, AgentReportRecord)
-    ]
-    conflicts = _detect_conflicts(normalized_reports)
-    holes, recommended_actions = _detect_holes_and_actions(
-        normalized_reports,
-        conflicts,
-    )
+    normalized_reports = [report for report in reports if isinstance(report, AgentReportRecord)]
+    latest_reports = _latest_reports(normalized_reports)
+    conflicts = _detect_conflicts(latest_reports)
+    holes, recommended_actions, replan_directives = _detect_holes_and_actions(latest_reports, conflicts)
     replan_reasons: list[str] = []
     seen_replan_reasons: set[str] = set()
-    for summary in [
-        *(_string(conflict.get("summary")) for conflict in conflicts),
-        *(_string(hole.get("summary")) for hole in holes),
-    ]:
+    for summary in [*(_string(conflict.get("summary")) for conflict in conflicts), *(_string(hole.get("summary")) for hole in holes)]:
         if summary is None or summary in seen_replan_reasons:
             continue
         seen_replan_reasons.add(summary)
         replan_reasons.append(summary)
+    replan_decision = _build_replan_decision(holes=holes, conflicts=conflicts)
     return {
         "latest_findings": _latest_findings(normalized_reports),
         "conflicts": conflicts,
         "holes": holes,
         "recommended_actions": recommended_actions,
         "replan_reasons": replan_reasons,
+        "replan_decision": replan_decision,
+        "replan_directives": replan_directives,
         "needs_replan": bool(conflicts or holes or recommended_actions),
     }
+
+
+

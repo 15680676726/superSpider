@@ -139,6 +139,77 @@ class _CapturingRouteEnvironmentService:
         return self._sessions.get(session_mount_id)
 
 
+class _CognitiveFakeIndustryService(FakeIndustryService):
+    def get_instance_detail(self, instance_id: str):
+        detail = super().get_instance_detail(instance_id)
+        if detail is None:
+            return None
+        payload = detail.model_dump(mode="json")
+        payload["current_cycle"]["synthesis"] = {
+            "latest_findings": [
+                {
+                    "report_id": "report-1",
+                    "assignment_id": "assignment-1",
+                    "headline": "Delivery blocker needs supervisor review",
+                    "summary": "The assigned execution slot is blocked until staffing confirms who owns the browser follow-up.",
+                    "status": "recorded",
+                    "needs_followup": True,
+                    "updated_at": "2026-03-09T08:34:00+00:00",
+                }
+            ],
+            "conflicts": [
+                {
+                    "conflict_id": "result-mismatch:report-1",
+                    "kind": "result-mismatch",
+                    "summary": "Reports disagree on whether the handoff is cleared.",
+                    "report_ids": ["report-1", "report-2"],
+                }
+            ],
+            "holes": [
+                {
+                    "hole_id": "followup-needed:report-1",
+                    "kind": "followup-needed",
+                    "report_id": "report-1",
+                    "summary": "Supervisor review is still missing for the handoff return.",
+                }
+            ],
+            "replan_reasons": [
+                "Reports disagree on whether the handoff is cleared.",
+                "Supervisor review is still missing for the handoff return.",
+            ],
+            "needs_replan": True,
+        }
+        payload["backlog"] = [
+            {
+                "backlog_item_id": "backlog-followup-1",
+                "title": "Resolve handoff return evidence gap",
+                "summary": "Main brain should reopen the report and dispatch a governed browser follow-up.",
+                "status": "open",
+                "metadata": {
+                    "source_report_id": "report-1",
+                    "source_report_ids": ["report-1"],
+                    "synthesis_kind": "followup-needed",
+                    "control_thread_id": "thread-1",
+                    "environment_ref": "seat:browser-a",
+                },
+            }
+        ]
+        payload["agent_reports"][0]["summary"] = (
+            "The assigned execution slot is blocked until staffing confirms who owns the browser follow-up."
+        )
+        payload["agent_reports"][0]["route"] = (
+            "/api/runtime-center/industry/industry-v1-ops?report_id=report-1"
+        )
+        payload["agent_reports"][0]["report_consumed"] = False
+        return type(
+            "IndustryDetail",
+            (),
+            {
+                "model_dump": lambda self, mode="json": payload,
+            },
+        )()
+
+
 def test_runtime_center_overview_uses_state_and_evidence_services():
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()
@@ -258,6 +329,55 @@ def test_runtime_center_main_brain_route_exposes_industry_stats():
     assert payload["signals"]["decisions"]["count"] == 2
     assert payload["signals"]["patches"]["count"] == 3
     assert payload["signals"]["evidence"]["count"] == 4
+
+
+def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = _CognitiveFakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    cognition = payload["meta"]["report_cognition"]
+
+    assert cognition["needs_replan"] is True
+    assert cognition["replan_reasons"] == [
+        "Reports disagree on whether the handoff is cleared.",
+        "Supervisor review is still missing for the handoff return.",
+    ]
+    assert cognition["judgment"]["status"] == "attention"
+    assert "decide whether to dispatch follow-up work" in cognition["judgment"]["summary"]
+    assert cognition["next_action"]["kind"] == "followup-backlog"
+    assert cognition["next_action"]["title"] == "Resolve handoff return evidence gap"
+    assert cognition["next_action"]["route"] == (
+        "/api/runtime-center/industry/industry-v1-ops?backlog_item_id=backlog-followup-1"
+    )
+    assert cognition["latest_findings"][0]["report_id"] == "report-1"
+    assert cognition["latest_findings"][0]["route"] == (
+        "/api/runtime-center/industry/industry-v1-ops?report_id=report-1"
+    )
+    assert cognition["conflicts"][0]["conflict_id"] == "result-mismatch:report-1"
+    assert cognition["holes"][0]["hole_id"] == "followup-needed:report-1"
+    assert cognition["followup_backlog"][0]["backlog_item_id"] == "backlog-followup-1"
+    assert cognition["unconsumed_reports"][0]["report_id"] == "report-1"
+    assert cognition["needs_followup_reports"][0]["report_id"] == "report-1"
+    assert payload["reports"][0]["route"] == (
+        "/api/runtime-center/industry/industry-v1-ops?report_id=report-1"
+    )
+    assert payload["reports"][0]["report_consumed"] is False
+    assert payload["signals"]["report_cognition"]["status"] == "attention"
+    assert payload["signals"]["report_cognition"]["count"] == 4
+    assert payload["meta"]["agent_reports"]["unconsumed_count"] == 1
 
 
 def test_runtime_center_main_brain_route_exposes_unified_operator_sections():
