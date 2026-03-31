@@ -15,8 +15,6 @@ export function useProviders() {
   const loading = useModelStore((s) => s.loading);
   const error = useModelStore((s) => s.error);
   const load = useModelStore((s) => s.load);
-  const refreshActiveModels = useModelStore((s) => s.refreshActiveModels);
-
   // Initial load
   useEffect(() => {
     void load();
@@ -37,14 +35,10 @@ export function useProviders() {
   }, [load]);
 
   const fetchAll = useCallback(
-    async (showLoading = true) => {
-      if (showLoading) {
-        await load();
-      } else {
-        await refreshActiveModels();
-      }
+    async (_showLoading = true) => {
+      await load();
     },
-    [load, refreshActiveModels],
+    [load],
   );
 
   return {
