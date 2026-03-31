@@ -399,7 +399,7 @@
   `overview_groups.py` 承接 operations/control/learning 三组卡片；
   新增验证 `tests/kernel/test_learning_runtime_domains.py` 与
   `tests/app/test_runtime_center_overview_group_builders.py` 已通过。
-- 仍需继续补更大范围的真实世界覆盖与长期自治策略回归，但 `execution-core` 默认兜底成叶子执行位的已知回退已被压住。
+- `2026-03-31` 补充：真实世界覆盖/长期自治回归的当前口径已与 `6.1` 对齐，不再把这项写成开放式尾巴。`tests/app/test_phase_next_autonomy_smoke.py` 的长跑 smoke 现在除 `handoff -> human-assist -> resume -> replan` 外，也显式锁住同一条 phase-next 连续链中的 `multi-seat candidate/selected seat` 与 `multi-agent shared-writer contention`，当前 repo 定义范围内已收口；后续只保留 `6.1` 里的终态标准，不再在历史记录里重复写“仍需继续补更大范围覆盖”。
 
 
 ### 4.1 `2026-03-30` 当前推荐执行顺序（`P0-P4`）

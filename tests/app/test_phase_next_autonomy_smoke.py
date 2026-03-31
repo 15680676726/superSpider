@@ -390,12 +390,26 @@ def test_phase_next_industry_long_run_smoke_keeps_handoff_human_assist_and_repla
                 return {
                     "host_twin": {
                         "continuity": {"requires_human_return": False},
-                        "coordination": {"recommended_scheduler_action": "continue"},
+                        "coordination": {
+                            "recommended_scheduler_action": "continue",
+                            "candidate_seat_refs": ["env:seat-a", "env:seat-b"],
+                            "selected_seat_ref": "env:seat-b",
+                            "selected_session_mount_id": "session:seat-b",
+                            "seat_selection_policy": "prefer-ready-seat",
+                            "contention_forecast": {
+                                "severity": "clear",
+                                "reason": "canonical runtime switched to the alternate ready seat",
+                            },
+                        },
                         "legal_recovery": {
                             "path": "continue",
                             "checkpoint_ref": "checkpoint:phase-next-handoff",
                         },
                         "host_twin_summary": {
+                            "seat_count": 2,
+                            "candidate_seat_refs": ["env:seat-a", "env:seat-b"],
+                            "selected_seat_ref": "env:seat-b",
+                            "selected_session_mount_id": "session:seat-b",
                             "recommended_scheduler_action": "continue",
                             "legal_recovery_mode": "continue",
                             "blocked_surface_count": 0,
@@ -406,12 +420,26 @@ def test_phase_next_industry_long_run_smoke_keeps_handoff_human_assist_and_repla
                 "host_twin": {
                     "continuity": {"requires_human_return": True},
                     "ownership": {"handoff_owner_ref": "host-owner"},
-                    "coordination": {"recommended_scheduler_action": "handoff"},
+                    "coordination": {
+                        "recommended_scheduler_action": "handoff",
+                        "candidate_seat_refs": ["env:seat-a", "env:seat-b"],
+                        "selected_seat_ref": "env:seat-a",
+                        "selected_session_mount_id": "session:seat-a",
+                        "seat_selection_policy": "prefer-ready-seat",
+                        "contention_forecast": {
+                            "severity": "blocked",
+                            "reason": "shared writer scope is still owned by worker-2",
+                        },
+                    },
                     "legal_recovery": {
                         "path": "handoff",
                         "checkpoint_ref": "checkpoint:phase-next-handoff",
                     },
                     "host_twin_summary": {
+                        "seat_count": 2,
+                        "candidate_seat_refs": ["env:seat-a", "env:seat-b"],
+                        "selected_seat_ref": "env:seat-a",
+                        "selected_session_mount_id": "session:seat-a",
                         "recommended_scheduler_action": "handoff",
                         "legal_recovery_mode": "handoff",
                         "blocked_surface_count": 1,
@@ -450,6 +478,18 @@ def test_phase_next_industry_long_run_smoke_keeps_handoff_human_assist_and_repla
     )
     assert reason is not None
     assert "Runtime handoff is active" in reason
+    blocked_host_detail = environment_service.get_session_detail(environment_ref)
+    assert blocked_host_detail["host_twin"]["host_twin_summary"]["seat_count"] == 2
+    assert sorted(
+        blocked_host_detail["host_twin"]["host_twin_summary"]["candidate_seat_refs"],
+    ) == ["env:seat-a", "env:seat-b"]
+    assert (
+        blocked_host_detail["host_twin"]["coordination"]["contention_forecast"]["severity"]
+        == "blocked"
+    )
+    assert "worker-2" in str(
+        blocked_host_detail["host_twin"]["coordination"]["contention_forecast"]["reason"],
+    )
 
     current_task_response = client.get(
         "/runtime-center/human-assist-tasks/current",
@@ -545,6 +585,14 @@ def test_phase_next_industry_long_run_smoke_keeps_handoff_human_assist_and_repla
         ),
     )
     assert cleared_reason is None
+    resumed_host_detail = environment_service.get_session_detail(environment_ref)
+    assert resumed_host_detail["host_twin"]["host_twin_summary"]["seat_count"] == 2
+    assert sorted(
+        resumed_host_detail["host_twin"]["host_twin_summary"]["candidate_seat_refs"],
+    ) == ["env:seat-a", "env:seat-b"]
+    assert resumed_host_detail["host_twin"]["host_twin_summary"]["selected_seat_ref"] == (
+        "env:seat-b"
+    )
 
     resumed_cycle = asyncio.run(
         app.state.industry_service.run_operating_cycle(
