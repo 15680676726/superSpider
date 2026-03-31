@@ -441,6 +441,89 @@ def test_runtime_center_chat_run_reports_missing_human_assist_evidence(tmp_path)
     assert '"outcome":"need_more_evidence"' in response.text
 
 
+def test_runtime_center_chat_run_need_more_evidence_preserves_hidden_continuity_context(
+    tmp_path,
+) -> None:
+    app, service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
+    )
+    issued = service.issue_task(
+        _make_human_assist_task(task_id="task-need-more-evidence-context").model_copy(
+            update={
+                "submission_payload": {
+                    "work_context_id": "ctx-need-more-evidence",
+                    "control_thread_id": "industry-chat:industry-1:execution-core",
+                    "environment_ref": "desktop:session-1",
+                    "recommended_scheduler_action": "handoff",
+                    "main_brain_runtime": {
+                        "work_context_id": "ctx-need-more-evidence",
+                        "environment_ref": "desktop:session-1",
+                        "control_thread_id": "industry-chat:industry-1:execution-core",
+                        "recommended_scheduler_action": "handoff",
+                    },
+                },
+            },
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-human-assist-need-more-evidence-context",
+            "session_id": issued.chat_thread_id,
+            "thread_id": issued.chat_thread_id,
+            "user_id": "host-user",
+            "channel": "console",
+            "requested_actions": ["submit_human_assist"],
+            "main_brain_runtime": {
+                "review_note": "host replied but anchors are still missing",
+            },
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {"type": "text", "text": "I checked it."},
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(turn_executor.stream_calls) == 0
+    assert query_execution_service.calls == []
+    current = service.get_task(issued.id)
+    assert current.status == "need_more_evidence"
+    assert '"outcome":"need_more_evidence"' in response.text
+    assert current.submission_payload["work_context_id"] == "ctx-need-more-evidence"
+    assert current.submission_payload["control_thread_id"] == "industry-chat:industry-1:execution-core"
+    assert current.submission_payload["environment_ref"] == "desktop:session-1"
+    assert current.submission_payload["recommended_scheduler_action"] == "handoff"
+    assert (
+        current.submission_payload["main_brain_runtime"]["work_context_id"]
+        == "ctx-need-more-evidence"
+    )
+    assert (
+        current.submission_payload["main_brain_runtime"]["environment_ref"]
+        == "desktop:session-1"
+    )
+    assert (
+        current.submission_payload["main_brain_runtime"]["control_thread_id"]
+        == "industry-chat:industry-1:execution-core"
+    )
+    assert (
+        current.submission_payload["main_brain_runtime"]["recommended_scheduler_action"]
+        == "handoff"
+    )
+    assert (
+        current.submission_payload["main_brain_runtime"]["review_note"]
+        == "host replied but anchors are still missing"
+    )
+
+
 def test_runtime_center_chat_run_marks_handoff_blocked_when_resume_cannot_start(
     tmp_path,
 ) -> None:
@@ -737,3 +820,94 @@ def test_runtime_center_chat_run_preserves_shared_work_context_across_schedule_r
         == recommended_scheduler_action
     )
     assert submission_payload["media_analysis_ids"] == ["analysis-receipt-shared"]
+
+
+def test_runtime_center_chat_run_closed_human_assist_keeps_hidden_continuity_context(
+    tmp_path,
+) -> None:
+    app, service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
+    )
+    issued = service.issue_task(
+        _make_human_assist_task(task_id="task-closed-context").model_copy(
+            update={
+                "submission_payload": {
+                    "work_context_id": "ctx-closed-context",
+                    "control_thread_id": "industry-chat:industry-1:execution-core",
+                    "environment_ref": "desktop:session-closed",
+                    "recommended_scheduler_action": "resume",
+                    "main_brain_runtime": {
+                        "work_context_id": "ctx-closed-context",
+                        "control_thread_id": "industry-chat:industry-1:execution-core",
+                        "environment_ref": "desktop:session-closed",
+                        "recommended_scheduler_action": "resume",
+                    },
+                },
+                "acceptance_spec": {
+                    "version": "v1",
+                    "hard_anchors": ["receipt"],
+                    "result_anchors": ["uploaded"],
+                    "failure_hint": "Provide receipt proof before acceptance.",
+                },
+            },
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-human-assist-closed-context",
+            "session_id": issued.chat_thread_id,
+            "thread_id": issued.chat_thread_id,
+            "user_id": "host-user",
+            "channel": "console",
+            "requested_actions": ["submit_human_assist"],
+            "main_brain_runtime": {
+                "review_note": "host confirmed the final receipt upload",
+            },
+            "media_analysis_ids": ["receipt", "uploaded"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {"type": "text", "text": "Receipt uploaded."},
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(turn_executor.stream_calls) == 0
+    assert query_execution_service.calls == [issued.id]
+    assert service.get_task(issued.id).status == "closed"
+    assert '"outcome":"accepted"' in response.text
+
+    task_detail = client.get(f"/runtime-center/human-assist-tasks/{issued.id}")
+    assert task_detail.status_code == 200
+    submission_payload = task_detail.json()["task"]["submission_payload"]
+    assert submission_payload["work_context_id"] == "ctx-closed-context"
+    assert submission_payload["control_thread_id"] == "industry-chat:industry-1:execution-core"
+    assert submission_payload["environment_ref"] == "desktop:session-closed"
+    assert submission_payload["recommended_scheduler_action"] == "resume"
+    assert submission_payload["media_analysis_ids"] == ["receipt", "uploaded"]
+    assert (
+        submission_payload["main_brain_runtime"]["work_context_id"] == "ctx-closed-context"
+    )
+    assert (
+        submission_payload["main_brain_runtime"]["control_thread_id"]
+        == "industry-chat:industry-1:execution-core"
+    )
+    assert (
+        submission_payload["main_brain_runtime"]["environment_ref"] == "desktop:session-closed"
+    )
+    assert (
+        submission_payload["main_brain_runtime"]["recommended_scheduler_action"] == "resume"
+    )
+    assert (
+        submission_payload["main_brain_runtime"]["review_note"]
+        == "host confirmed the final receipt upload"
+    )

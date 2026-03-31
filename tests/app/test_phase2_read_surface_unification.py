@@ -110,3 +110,18 @@ def test_retired_runtime_and_goal_frontdoors_return_404() -> None:
     assert client.post("/learning/patches/patch-1/reject", json={"actor": "ops"}).status_code == 404
     assert client.post("/learning/patches/patch-1/apply", json={"actor": "ops"}).status_code == 404
     assert client.post("/learning/patches/patch-1/rollback", json={"actor": "ops"}).status_code == 404
+
+
+def test_goal_detail_stays_the_only_public_goals_frontdoor_method() -> None:
+    client = TestClient(build_app())
+
+    openapi_response = client.get("/openapi.json")
+
+    assert openapi_response.status_code == 200
+    detail_methods = openapi_response.json()["paths"]["/goals/{goal_id}/detail"].keys()
+    assert set(detail_methods) == {"get"}
+
+    assert client.get("/goals/goal-1/detail").status_code == 503
+    assert client.post("/goals/goal-1/detail", json={"title": "forbidden"}).status_code == 405
+    assert client.patch("/goals/goal-1/detail", json={"title": "forbidden"}).status_code == 405
+    assert client.delete("/goals/goal-1/detail").status_code == 405

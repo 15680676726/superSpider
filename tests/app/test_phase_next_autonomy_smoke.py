@@ -511,11 +511,27 @@ def test_phase_next_industry_long_run_smoke_keeps_handoff_human_assist_and_repla
     closed_task = closed_task_payload.get("task") or closed_task_payload
     assert closed_task["submission_payload"]["environment_ref"] == environment_ref
     assert closed_task["submission_payload"]["work_context_id"] == work_context_id
+    assert closed_task["submission_payload"]["control_thread_id"] == control_thread_id
+    assert closed_task["submission_payload"]["recommended_scheduler_action"] == "handoff"
     assert closed_task["submission_payload"]["requested_surfaces"] == [
         "browser",
         "desktop",
         "document",
     ]
+    assert closed_task["submission_payload"]["main_brain_runtime"]["work_context_id"] == (
+        work_context_id
+    )
+    assert closed_task["submission_payload"]["main_brain_runtime"]["environment_ref"] == (
+        environment_ref
+    )
+    assert (
+        closed_task["submission_payload"]["main_brain_runtime"]["control_thread_id"]
+        == control_thread_id
+    )
+    assert (
+        closed_task["submission_payload"]["main_brain_runtime"]["recommended_scheduler_action"]
+        == "handoff"
+    )
 
     environment_service.ready = True
     cleared_reason = governance.admission_block_reason(
@@ -1530,6 +1546,31 @@ def test_phase_next_long_run_live_smoke_closes_unified_runtime_chain_and_multi_s
     assert response.headers["content-type"].startswith("text/event-stream")
     assert query_execution_service.calls == [current_task["id"]]
     assert human_assist_task_service.get_task(current_task["id"]).status == "closed"
+
+    closed_task_response = client.get(f"/runtime-center/human-assist-tasks/{current_task['id']}")
+    assert closed_task_response.status_code == 200
+    closed_task_payload = closed_task_response.json()
+    closed_task = closed_task_payload.get("task") or closed_task_payload
+    assert closed_task["submission_payload"]["environment_ref"] == environment_ref
+    assert closed_task["submission_payload"]["work_context_id"] == work_context_id
+    assert closed_task["submission_payload"]["control_thread_id"] == control_thread_id
+    assert closed_task["submission_payload"]["recommended_scheduler_action"] == "handoff"
+    assert (
+        closed_task["submission_payload"]["main_brain_runtime"]["work_context_id"]
+        == work_context_id
+    )
+    assert (
+        closed_task["submission_payload"]["main_brain_runtime"]["environment_ref"]
+        == environment_ref
+    )
+    assert (
+        closed_task["submission_payload"]["main_brain_runtime"]["control_thread_id"]
+        == control_thread_id
+    )
+    assert (
+        closed_task["submission_payload"]["main_brain_runtime"]["recommended_scheduler_action"]
+        == "handoff"
+    )
 
     environment_service.ready = True
     cleared_reason = governance.admission_block_reason(

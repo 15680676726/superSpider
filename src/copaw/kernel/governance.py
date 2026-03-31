@@ -455,6 +455,10 @@ class GovernanceService:
             "source_report_id": _first_non_empty(payload.get("source_report_id")),
             "main_brain_runtime": {
                 "work_context_id": _first_non_empty(payload.get("work_context_id")),
+                "control_thread_id": _first_non_empty(
+                    payload.get("control_thread_id"),
+                    chat_thread_id,
+                ),
                 "environment_ref": _first_non_empty(payload.get("environment_ref"), session_ref),
                 "environment_session_id": _first_non_empty(
                     payload.get("environment_session_id"),
@@ -479,6 +483,10 @@ class GovernanceService:
                 "resume_checkpoint_id": _first_non_empty(
                     legal_recovery.get("checkpoint_ref"),
                     verification_anchor,
+                ),
+                "recommended_scheduler_action": _first_non_empty(
+                    payload.get("recommended_scheduler_action"),
+                    coordination.get("recommended_scheduler_action"),
                 ),
             },
         }

@@ -562,6 +562,31 @@ def test_goal_detail_does_not_reconcile_goal_status(tmp_path) -> None:
     assert app.state.goal_service.get_goal(goal_id).status == "completed"
 
 
+def test_goal_detail_endpoint_remains_read_only(tmp_path) -> None:
+    app = _build_goal_app(tmp_path)
+    client = TestClient(app)
+
+    created = client.post(
+        "/goals",
+        json={
+            "title": "Goal detail stays read-only",
+            "summary": "The detail endpoint must not become a write surface.",
+            "status": "active",
+            "priority": 1,
+        },
+    )
+    assert created.status_code == 200
+    goal_id = created.json()["id"]
+
+    detail = client.get(f"/goals/{goal_id}/detail")
+    assert detail.status_code == 200
+    assert detail.json()["goal"]["id"] == goal_id
+
+    assert client.post(f"/goals/{goal_id}/detail", json={"title": "forbidden"}).status_code == 405
+    assert client.patch(f"/goals/{goal_id}/detail", json={"title": "forbidden"}).status_code == 405
+    assert client.delete(f"/goals/{goal_id}/detail").status_code == 405
+
+
 def test_goal_detail_links_tasks_agents_patches_and_growth(tmp_path) -> None:
     app = _build_goal_app(tmp_path)
     client = TestClient(app)

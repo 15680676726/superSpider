@@ -400,6 +400,87 @@
 - 仍需继续补更大范围的真实世界覆盖与长期自治策略回归，但 `execution-core` 默认兜底成叶子执行位的已知回退已被压住。
 
 
+### 4.1 `2026-03-30` 当前推荐执行顺序（`P0-P4`）
+
+正式执行顺序文档：
+
+- `docs/superpowers/plans/2026-03-30-main-brain-hardening-priority-sequence.md`
+
+当前建议按以下顺序推进，不要跳步骤抢跑：
+
+- `P0 truth-chain / write-boundary guardrails`
+  - 先锁唯一写链、retired frontdoor、detail-only 读面与“读面无副作用”
+- `P1 chat/orchestrate mode isolation`
+  - 再锁纯聊天链和执行编排链的物理边界，避免默认聊天回潮成重执行 runtime
+- `P2 canonical continuity contract`
+  - 再统一 `work_context / environment / control_thread / recovery / host summary` 的连续性合同
+- `P3 projection discipline`
+  - 再清理 synthesis / cockpit / presenter 等派生层，确保 projection 不反向变成 truth
+- `P4 long-run smoke maturity gate`
+  - 最后把多周期、handoff、human-assist、resume、host switch 收成正式长跑验收门槛
+
+当前已开始执行：
+
+- `P0` 的第一刀优先落在 hard-cut regression 上：
+  - assembled root app 的 `/goals` frontdoor 必须继续保持 `detail-only`
+  - retired write frontdoors 必须继续 `404`
+  - goal detail / runtime detail 这类读面不得重新承担隐式 reconcile 或 mutation
+- `2026-03-30` 补充：已先补一条公开 `goals` frontdoor 的 root-router 回归。
+  `tests/app/test_phase2_read_surface_unification.py`
+  现已显式锁住：
+  - `/goals/{goal_id}/detail` 在公开 frontdoor 上只允许 `GET`
+  - `POST/PATCH/DELETE /goals/{goal_id}/detail` 必须保持 `405`
+  - 现已执行 `python -m pytest tests/app/test_phase2_read_surface_unification.py -q` -> `5 passed`
+- `2026-03-30` 补充：`P0` focused suite 已复跑通过。
+  - `tests/app/test_goals_api.py` 已新增 leaf `goal detail` 读面只读回归：
+    - `POST/PATCH/DELETE /goals/{goal_id}/detail` 在专用 `goals` router 上必须保持 `405`
+  - 已执行
+    `python -m pytest tests/app/test_goals_api.py -q -k "goal_detail"` -> `5 passed`
+  - 已执行
+    `python -m pytest tests/state/test_main_brain_hard_cut.py tests/app/test_goals_api.py -q` -> `24 passed`
+- `2026-03-30` 补充：`P1` 的 mode-isolation 护栏已开始补回归。
+  - `tests/kernel/test_main_brain_chat_service.py`
+    已新增纯聊天 prompt 不得泄露
+    `dispatch_query / delegate_task / dispatch_goal / dispatch_active_goals / memory_search`
+    的回归
+  - `tests/kernel/test_turn_executor.py`
+    已新增“显式 `interaction_mode=chat` 必须压过 intake contract 的 orchestrate hint”
+    的回归
+  - 已执行
+    `python -m pytest tests/kernel/test_turn_executor.py tests/kernel/test_main_brain_chat_service.py -q`
+    -> `60 passed`
+- `2026-03-30` 补充：`P1` 已补到显式 mode 覆盖旧缓存这层。
+  - `tests/kernel/test_turn_executor.py`
+    已新增：
+    - 显式 `chat` 必须忽略旧 `_copaw_requested/_copaw_resolved_interaction_mode`
+    - 显式 `orchestrate` 必须忽略旧 `_copaw_requested/_copaw_resolved_interaction_mode`
+  - `src/copaw/kernel/turn_executor.py`
+    已做最小修复：只有当当前请求的 requested mode 与缓存 requested mode 一致时，才允许复用 interaction-mode 缓存
+  - 已执行
+    `python -m pytest tests/kernel/test_turn_executor.py -q` -> `46 passed`
+  - 已执行
+    `python -m pytest tests/kernel/test_turn_executor.py tests/kernel/test_main_brain_chat_service.py -q`
+    -> `61 passed`
+- `2026-03-30` 补充：`P2` 已先补一条 continuity merge 护栏。
+  - `tests/app/test_runtime_human_assist_tasks_api.py`
+    已新增：
+    - 当 `chat/run` 提交落到 `need_more_evidence` 时，
+      已存在的隐藏 continuity 上下文
+      `work_context_id / control_thread_id / environment_ref / recommended_scheduler_action`
+      以及嵌套 `main_brain_runtime.*`
+      不得被本轮半截 payload 覆盖或丢失
+  - 已执行
+    `python -m pytest tests/app/test_runtime_human_assist_tasks_api.py -q`
+    -> `12 passed`
+- `2026-03-30` 补充：`P3` 已先补一条 presenter 只读护栏。
+  - `console/src/runtime/controlChainPresentation.test.ts`
+    已新增：
+    - `presentControlChain()` 不得就地改写输入 `main_chain.nodes`
+  - 已执行
+    `cmd /c npm --prefix console exec vitest run src/runtime/controlChainPresentation.test.ts`
+    -> `5 passed`
+
+
 ### 4.2 第一优先级并行：主脑 cognitive closure
 
 目标：
@@ -450,6 +531,7 @@
   `console/src/runtime/staffingGapPresentation.test.ts`
   与 `console tsc --noEmit` 验证。
 - 高阶遗留已明显下降；`Chat/index.tsx` 的 runtime derivation、human-assist presentation 与 transport request 组装已继续下沉。当前若再压缩，优先应继续拆 sidebar / media shell，而不是回头堆平行 surface。
+- `2026-03-31` 补充：轻量聊天链回归护栏已锁定（runtime conversations / bootstrap wiring），会持续阻断 runtime conversations 回流超重/重复 chat state，并要求 bootstrap wiring 保持 chat/orchestrate 轻量分链。
 - 仍需持续做性能和交互回归
 
 ### 4.4 第三优先级：媒体与记忆闭环继续接线

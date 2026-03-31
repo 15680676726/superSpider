@@ -259,6 +259,18 @@ describe("controlChainPresentation", () => {
     });
   });
 
+  it("does not mutate the input main chain when presenting", () => {
+    const payload = structuredClone(detailFixture);
+    const originalNodeIds = payload.main_chain?.nodes.map((node) => node.node_id);
+
+    void presentControlChain(payload);
+
+    expect(payload.main_chain?.nodes.map((node) => node.node_id)).toEqual(
+      originalNodeIds,
+    );
+    expect(payload.main_chain?.nodes[0]?.node_id).toBe("report");
+  });
+
   it("returns an empty presentation when no runtime chain is available", () => {
     const model = presentControlChain(null);
 
