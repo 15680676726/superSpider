@@ -137,6 +137,33 @@ class _StreamingThinkingResponseModel:
         return _stream()
 
 
+class _KeyErroringChunk:
+    def __init__(self, *, content: str) -> None:
+        self.content = content
+
+    def __getattr__(self, name: str):
+        if name == "reasoning_content":
+            raise KeyError(name)
+        raise AttributeError(name)
+
+
+class _StreamingKeyErroringReasoningResponseModel:
+    def __init__(self, *parts: str) -> None:
+        self.parts = list(parts)
+        self.stream = True
+
+    async def __call__(self, *, messages, **kwargs):
+        _ = (messages, kwargs)
+
+        async def _stream():
+            accumulated = ""
+            for part in self.parts:
+                accumulated += part
+                yield _KeyErroringChunk(content=accumulated)
+
+        return _stream()
+
+
 class _CancelledResponseModel:
     def __init__(self) -> None:
         self.stream = True
@@ -496,6 +523,28 @@ async def test_main_brain_chat_service_preserves_thinking_blocks_in_streamed_rep
     assert blocks[0]["thinking"] == "先整理约束，再确认下一步"
     assert blocks[1]["type"] == "text"
     assert blocks[1]["text"] == "先看目标，再给你下一步"
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_tolerates_stream_chunks_without_reasoning_content_attr():
+    backend = _FakeSessionBackend()
+    service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: _StreamingKeyErroringReasoningResponseModel("hello", " world"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-keyerror-reasoning",
+        user_id="user-keyerror-reasoning",
+        industry_instance_id=None,
+        work_context_id=None,
+        agent_id=None,
+    )
+    msgs = [Msg(name="user", role="user", content="stream to me")]
+
+    streamed = [item async for item in service.execute_stream(msgs=msgs, request=request)]
+
+    assert len(streamed) == 2
+    assert streamed[-1][0].get_text_content() == "hello world"
 
 
 @pytest.mark.asyncio

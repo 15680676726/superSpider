@@ -129,6 +129,13 @@ def _merge_stream_text(current_text: str, new_text: str) -> str:
     return f"{current_text}{normalized}"
 
 
+def _safe_response_attr(response: object, name: str) -> object | None:
+    try:
+        return getattr(response, name, None)
+    except (AttributeError, KeyError):
+        return None
+
+
 def _build_assistant_message(
     *,
     text: str,
@@ -164,8 +171,8 @@ def _build_assistant_message(
 
 
 def _response_to_text_and_thinking(response: object) -> tuple[str, str]:
-    content = getattr(response, "content", None)
-    direct_thinking = getattr(response, "reasoning_content", None)
+    content = _safe_response_attr(response, "content")
+    direct_thinking = _safe_response_attr(response, "reasoning_content")
     text_parts: list[str] = []
     thinking_parts: list[str] = []
     if isinstance(direct_thinking, str) and direct_thinking.strip():
