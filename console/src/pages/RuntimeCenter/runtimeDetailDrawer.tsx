@@ -37,6 +37,7 @@ import {
   renderOperatorAgentReportsSection,
   renderOperatorBacklogSection,
   renderOperatorAssignmentsSection,
+  renderOperatorMediaAnalysesSection,
   renderTaskReviewSection,
 } from "./runtimeIndustrySections";
 import { renderHostTwinSection } from "./runtimeEnvironmentSections";
@@ -236,6 +237,17 @@ export function renderDetailSection(
 
   if (sectionKey === "agent_reports") {
     const rendered = renderOperatorAgentReportsSection(
+      sectionKey,
+      sectionValue,
+      openRoute,
+    );
+    if (rendered) {
+      return rendered;
+    }
+  }
+
+  if (sectionKey === "media_analyses") {
+    const rendered = renderOperatorMediaAnalysesSection(
       sectionKey,
       sectionValue,
       openRoute,

@@ -315,6 +315,35 @@ def test_truth_first_recall_contract_has_no_vector_or_sidecar_runtime_surface(tm
     assert "QmdRecallBackend" not in memory_init_source
 
 
+def test_truth_first_recall_routes_media_backed_hits_to_original_media_analysis(tmp_path) -> None:
+    services = _build_services(tmp_path)
+    knowledge = services["knowledge"]
+    recall = services["recall"]
+
+    knowledge.remember_fact(
+        title="Media follow-up",
+        content="Use the analyzed media follow-up before continuing the resumed execution chain.",
+        scope_type="work_context",
+        scope_id="ctx-media",
+        source_ref="media-analysis:media-analysis:media-src:shared",
+        role_bindings=["execution-core"],
+        tags=["retain", "chat-writeback", "media-analysis"],
+    )
+
+    hits = recall.recall(
+        query="resumed execution chain",
+        scope_type="work_context",
+        scope_id="ctx-media",
+        role="execution-core",
+        limit=5,
+    ).hits
+
+    media_hit = next(
+        item for item in hits if item.source_type == "knowledge_chunk" and "media-analysis" in item.source_ref
+    )
+    assert media_hit.source_route == "/api/media/analyses/media-analysis:media-src:shared"
+
+
 def test_legacy_rows_rebuild_into_profile_latest_and_history_views(tmp_path) -> None:
     services = _build_services(tmp_path)
     strategy = services["strategy"]

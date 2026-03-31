@@ -780,6 +780,36 @@ def test_main_brain_chat_service_prompt_prefers_truth_first_profile_before_lexic
     assert recall_service.calls[0]["scope_id"] == "ctx-truth-first"
 
 
+def test_main_brain_chat_service_prefers_work_context_recall_over_industry_scope_when_both_exist():
+    recall_service = _TruthFirstMemoryRecallService()
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        memory_recall_service=recall_service,
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-truth-first-both",
+        user_id="user-truth-first-both",
+        industry_instance_id="industry-v1-demo",
+        work_context_id="ctx-truth-first",
+        agent_id="ops-agent",
+    )
+
+    prompt_messages = service._build_prompt_messages(  # pylint: disable=protected-access
+        request=request,
+        query="Use the resumed work context before broad industry memory",
+        prior_messages=[],
+        current_messages=[],
+    )
+
+    context_prompt = prompt_messages[1]["content"]
+    assert "Current operator preference" in context_prompt
+    assert recall_service._derived_index_service.calls[0]["scope_type"] == "work_context"
+    assert recall_service._derived_index_service.calls[0]["scope_id"] == "ctx-truth-first"
+    assert recall_service.calls[0]["scope_type"] == "work_context"
+    assert recall_service.calls[0]["scope_id"] == "ctx-truth-first"
+
+
 def test_main_brain_chat_service_prompt_guides_structured_goal_and_auto_progression():
     service = MainBrainChatService(
         session_backend=_FakeSessionBackend(),

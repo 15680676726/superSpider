@@ -315,6 +315,10 @@ export default function ChatPage() {
   const activeModels = useModelStore((s) => s.activeModels);
   const refreshActiveModels = useModelStore((s) => s.refreshActiveModels);
 
+  const activeWorkContextId =
+    typeof threadMeta.work_context_id === "string" && threadMeta.work_context_id.trim()
+      ? threadMeta.work_context_id.trim()
+      : null;
   const {
     clearMediaError,
     clearPendingMediaDraftsRef,
@@ -333,7 +337,7 @@ export default function ChatPage() {
     setMediaLinkValue,
     toggleMediaAnalysis,
     uploadMediaInputRef,
-  } = useChatMedia({ activeChatThreadId });
+  } = useChatMedia({ activeChatThreadId, activeWorkContextId });
 
   const loadGovernanceStatus = useCallback(async () => {
     try { setGovernanceStatus(await api.getGovernanceStatus()); }

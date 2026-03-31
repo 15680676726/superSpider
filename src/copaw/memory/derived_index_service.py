@@ -140,6 +140,11 @@ def selector_matches_scope(
 
 def source_route_for_entry(entry: MemoryFactIndexRecord) -> str | None:
     metadata = dict(entry.metadata or {})
+    media_analysis_ref = _normalize_media_analysis_ref(
+        metadata.get("source_ref"),
+    ) or _normalize_media_analysis_ref(entry.source_ref)
+    if media_analysis_ref:
+        return f"/api/media/analyses/{media_analysis_ref}"
     route = metadata.get("source_route")
     if isinstance(route, str) and route.strip():
         return route.strip()
@@ -158,6 +163,18 @@ def source_route_for_entry(entry: MemoryFactIndexRecord) -> str | None:
     if entry.source_type == "agent_report" and entry.industry_instance_id:
         return f"/api/runtime-center/industry/{entry.industry_instance_id}"
     return None
+
+
+def _normalize_media_analysis_ref(value: object | None) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    prefix = "media-analysis:"
+    if prefix not in text:
+        return None
+    while text.startswith(f"{prefix}{prefix}"):
+        text = text[len(prefix) :]
+    return text if text.startswith(prefix) else None
 
 
 def slugify(value: object, *, fallback: str = "memory") -> str:

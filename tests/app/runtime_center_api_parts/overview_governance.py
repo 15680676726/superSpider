@@ -37,6 +37,7 @@ class _InMemoryMediaAnalysisRepository(BaseMediaAnalysisRepository):
         *,
         industry_instance_id: str | None = None,
         thread_id: str | None = None,
+        work_context_id: str | None = None,
         entry_point: str | None = None,
         status: str | None = None,
         limit: int | None = None,
@@ -47,6 +48,8 @@ class _InMemoryMediaAnalysisRepository(BaseMediaAnalysisRepository):
             if industry_instance_id is not None and record.industry_instance_id != industry_instance_id:
                 continue
             if thread_id is not None and record.thread_id != thread_id:
+                continue
+            if work_context_id is not None and record.work_context_id != work_context_id:
                 continue
             if entry_point is not None and record.entry_point != entry_point:
                 continue

@@ -4,6 +4,15 @@ import type {
   IndustryInstanceDetail,
   IndustryMainChainGraph,
 } from "../../api/modules/industry";
+import {
+  analysisStatusColor,
+  formatAnalysisMode,
+  formatAnalysisStatus,
+  formatAnalysisWritebackStatus,
+  formatMediaType,
+  mediaTypeColor,
+  resolveMediaTitle,
+} from "../../utils/mediaPresentation";
 import { presentControlChain } from "../../runtime/controlChainPresentation";
 import { buildStaffingPresentation } from "../../runtime/staffingGapPresentation";
 import {
@@ -103,10 +112,10 @@ function renderMainBrainPlanningSection({
     <Card size="small" title="Main-Brain Planning" style={{ marginTop: 16 }}>
       <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
         <Tag>{`Lanes ${lanes.length}`}</Tag>
-        <Tag>{`Assignments ${payload.assignments.length}`}</Tag>
-        <Tag>{`Reports ${payload.agent_reports.length}`}</Tag>
+        <Tag>{`派工 ${payload.assignments.length}`}</Tag>
+        <Tag>{`汇报 ${payload.agent_reports.length}`}</Tag>
         {followupReports.length > 0 ? (
-          <Tag color="warning">{`Follow-ups ${followupReports.length}`}</Tag>
+          <Tag color="warning">{`跟进 ${followupReports.length}`}</Tag>
         ) : null}
         {payload.staffing?.pending_proposals.length ? (
           <Tag>{`Staffing proposals ${payload.staffing.pending_proposals.length}`}</Tag>
@@ -124,7 +133,7 @@ function renderMainBrainPlanningSection({
         ) : null}
       </Space>
       <Text type="secondary">
-        {strategySummary || "No strategy summary is available yet."}
+        {strategySummary || "当前还没有策略摘要。"}
       </Text>
       {payload.current_cycle ? (
         <div style={{ marginTop: 10 }}>
@@ -201,12 +210,12 @@ function renderMainBrainSynthesisSection({
       <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
         <Tag>{`Findings ${synthesisFindings.length}`}</Tag>
         <Tag color={synthesisConflicts.length > 0 ? "error" : "default"}>
-          {`Conflicts ${synthesisConflicts.length}`}
+          {`冲突 ${synthesisConflicts.length}`}
         </Tag>
         <Tag color={synthesisHoles.length > 0 ? "warning" : "default"}>
-          {`Holes ${synthesisHoles.length}`}
+          {`缺口 ${synthesisHoles.length}`}
         </Tag>
-        {cycleSynthesis?.needs_replan ? <Tag color="error">Replan needed</Tag> : null}
+        {cycleSynthesis?.needs_replan ? <Tag color="error">需要重规划</Tag> : null}
       </Space>
       <Text type="secondary">{synthesisSummary}</Text>
       {synthesisConflicts.length > 0 ? (
@@ -234,7 +243,7 @@ function renderMainBrainSynthesisSection({
       {synthesisHoles.length > 0 ? (
         <>
           <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
-            Holes / Follow-ups
+            缺口 / 跟进
           </div>
           <Space direction="vertical" size={4} style={{ width: "100%" }}>
             {synthesisHoles.slice(0, 3).map((hole) => (
@@ -469,7 +478,7 @@ export function buildRuntimeIndustryCockpitSignals(
       detailText(strategySource) || firstTextValue(mainBrainEntry?.summary, industryEntry?.summary),
       routeText(strategySource) || industryRoute,
       "success",
-      "Strategy detail",
+      "策略详情",
     ),
     buildSignal(
       "lanes",
@@ -483,7 +492,7 @@ export function buildRuntimeIndustryCockpitSignals(
         ),
       industryRoute,
       "default",
-      "Lane detail",
+      "泳道详情",
     ),
     buildSignal(
       "backlog",
@@ -491,16 +500,16 @@ export function buildRuntimeIndustryCockpitSignals(
       detailText(backlogSource) || firstTextValue(industryMeta.backlog_count),
       routeText(backlogSource) || industryRoute,
       "default",
-      "Backlog detail",
+      "待办详情",
     ),
     buildSignal(
       "current_cycle",
-      firstTextValue(cycleSource) || "No active cycle",
+      firstTextValue(cycleSource) || "暂无活动周期",
       detailText(cycleSource) ||
         firstTextValue(recordValue(cycleSource)?.status),
       routeText(cycleSource) || industryRoute,
       "default",
-      "Cycle detail",
+      "周期详情",
     ),
     buildSignal(
       "assignments",
@@ -508,18 +517,18 @@ export function buildRuntimeIndustryCockpitSignals(
       detailText(assignmentsSource) || firstTextValue(industryMeta.assignment_count),
       assignmentsRoute,
       "default",
-      "Assignments detail",
+      "派工详情",
     ),
     buildSignal(
       "agent_reports",
       countText(agentReportsSource, textValue(industryMeta.report_count) || "0"),
       detailText(agentReportsSource) ||
         (unconsumedReports > 0
-          ? `Unconsumed ${unconsumedReports}`
+          ? `未消费 ${unconsumedReports}`
           : firstTextValue(industryMeta.report_count)),
       reportsRoute,
       unconsumedReports > 0 ? "warning" : "default",
-      "Reports detail",
+      "汇报详情",
     ),
     buildSignal(
       "evidence",
@@ -527,7 +536,7 @@ export function buildRuntimeIndustryCockpitSignals(
       detailText(evidenceSource) || textValue(evidenceCard?.summary),
       textValue(evidenceCard?.entries?.[0]?.route) || null,
       "default",
-      "Evidence detail",
+      "证据详情",
     ),
     buildSignal(
       "decisions",
@@ -535,7 +544,7 @@ export function buildRuntimeIndustryCockpitSignals(
       detailText(decisionsSource) || textValue(decisionsCard?.summary),
       textValue(decisionsCard?.entries?.[0]?.route) || null,
       "warning",
-      "Decision detail",
+      "决策详情",
     ),
     buildSignal(
       "patches",
@@ -543,7 +552,7 @@ export function buildRuntimeIndustryCockpitSignals(
       detailText(patchesSource) || textValue(patchesCard?.summary),
       textValue(patchesCard?.entries?.[0]?.route) || null,
       "warning",
-      "Patch detail",
+      "补丁详情",
     ),
   ];
 }
@@ -631,14 +640,14 @@ export function renderOperatorBacklogSection(
                 <Space wrap size={[6, 6]} style={{ marginBottom: summary ? 6 : 0 }}>
                   <Text strong>{title}</Text>
                   <Tag color={runtimeStatusColor(status)}>{translateRuntimeStatus(status)}</Tag>
-                  {selected ? <Tag color="blue">Focused</Tag> : null}
+                  {selected ? <Tag color="blue">已聚焦</Tag> : null}
                   {sourceKind ? <Tag>{sourceKind}</Tag> : null}
-                  {evidenceCount > 0 ? <Tag>{`Evidence ${evidenceCount}`}</Tag> : null}
+                  {evidenceCount > 0 ? <Tag>{`证据 ${evidenceCount}`}</Tag> : null}
                 </Space>
                 {summary ? <Text type="secondary">{summary}</Text> : null}
                 <Space wrap size={[8, 6]} className={styles.selectionMeta}>
-                  {laneId ? <span>{`Lane ${laneId}`}</span> : null}
-                  {cycleId ? <span>{`Cycle ${cycleId}`}</span> : null}
+                  {laneId ? <span>{`泳道 ${laneId}`}</span> : null}
+                  {cycleId ? <span>{`周期 ${cycleId}`}</span> : null}
                   {assignmentId ? <span>{`Assignment ${assignmentId}`}</span> : null}
                 </Space>
                 {route ? (
@@ -649,7 +658,7 @@ export function renderOperatorBacklogSection(
                         openRoute(route, title);
                       }}
                     >
-                      Open Backlog
+                      打开待办
                     </Button>
                   </div>
                 ) : null}
@@ -698,7 +707,7 @@ function renderAssignmentSummaryTags(assignments: Record<string, unknown>[]) {
       {activeCount > 0 ? <Tag color="blue">{`Active ${activeCount}`}</Tag> : null}
       {readyCount > 0 ? <Tag>{`Ready ${readyCount}`}</Tag> : null}
       {completedCount > 0 ? <Tag color="success">{`Completed ${completedCount}`}</Tag> : null}
-      {maxEvidence > 0 ? <Tag>{`Max evidence ${maxEvidence}`}</Tag> : null}
+      {maxEvidence > 0 ? <Tag>{`最大证据 ${maxEvidence}`}</Tag> : null}
     </Space>
   );
 }
@@ -778,14 +787,14 @@ export function renderOperatorAssignmentsSection(
                 <Space wrap size={[6, 6]} style={{ marginBottom: summary ? 6 : 0 }}>
                   <Text strong>{title}</Text>
                   <Tag color={runtimeStatusColor(status)}>{translateRuntimeStatus(status)}</Tag>
-                  {focused ? <Tag color="blue">Focused</Tag> : null}
-                  {evidenceCount > 0 ? <Tag>{`Evidence ${evidenceCount}`}</Tag> : null}
+                  {focused ? <Tag color="blue">已聚焦</Tag> : null}
+                  {evidenceCount > 0 ? <Tag>{`证据 ${evidenceCount}`}</Tag> : null}
                 </Space>
                 {summary ? <Text type="secondary">{summary}</Text> : null}
                 <Space wrap size={[8, 6]} className={styles.selectionMeta}>
                   {ownerAgentId ? <span>{`Owner ${ownerAgentId}`}</span> : null}
-                  {laneId ? <span>{`Lane ${laneId}`}</span> : null}
-                  {cycleId ? <span>{`Cycle ${cycleId}`}</span> : null}
+                  {laneId ? <span>{`泳道 ${laneId}`}</span> : null}
+                  {cycleId ? <span>{`周期 ${cycleId}`}</span> : null}
                   {lastReportId ? <span>{`Last report ${lastReportId}`}</span> : null}
                 </Space>
                 {route ? (
@@ -796,7 +805,7 @@ export function renderOperatorAssignmentsSection(
                         openRoute(route, title);
                       }}
                     >
-                      Open Assignment
+                      打开派工
                     </Button>
                   </div>
                 ) : null}
@@ -832,8 +841,8 @@ export function renderOperatorAgentReportsSection(
 
       {reports.length > 0 ? (
         <Space wrap size={[6, 6]} style={{ marginTop: 8 }}>
-          {unconsumedCount > 0 ? <Tag color="warning">{`Unconsumed ${unconsumedCount}`}</Tag> : <Tag color="success">All consumed</Tag>}
-          {followupCount > 0 ? <Tag color="warning">{`Follow-ups ${followupCount}`}</Tag> : null}
+          {unconsumedCount > 0 ? <Tag color="warning">{`未消费 ${unconsumedCount}`}</Tag> : <Tag color="success">已全部消费</Tag>}
+          {followupCount > 0 ? <Tag color="warning">{`跟进 ${followupCount}`}</Tag> : null}
         </Space>
       ) : null}
 
@@ -893,17 +902,17 @@ export function renderOperatorAgentReportsSection(
                 <Space wrap size={[6, 6]} style={{ marginBottom: summary ? 6 : 0 }}>
                   <Text strong>{headline}</Text>
                   <Tag color={runtimeStatusColor(status)}>{translateRuntimeStatus(status)}</Tag>
-                  {focused ? <Tag color="blue">Focused</Tag> : null}
+                  {focused ? <Tag color="blue">已聚焦</Tag> : null}
                   {processed ? <Tag color="success">Consumed</Tag> : <Tag color="warning">Unconsumed</Tag>}
                   {needsFollowup ? <Tag color="warning">Needs follow-up</Tag> : null}
-                  {evidenceCount > 0 ? <Tag>{`Evidence ${evidenceCount}`}</Tag> : null}
+                  {evidenceCount > 0 ? <Tag>{`证据 ${evidenceCount}`}</Tag> : null}
                   {riskLevel ? <Tag color={runtimeRiskColor(riskLevel)}>{riskLevel}</Tag> : null}
                   {reportKind ? <Tag>{reportKind}</Tag> : null}
                 </Space>
                 {summary ? <Text type="secondary">{summary}</Text> : null}
                 <Space wrap size={[8, 6]} className={styles.selectionMeta}>
                   {ownerAgentId ? <span>{`Owner ${ownerAgentId}`}</span> : null}
-                  {laneId ? <span>{`Lane ${laneId}`}</span> : null}
+                  {laneId ? <span>{`泳道 ${laneId}`}</span> : null}
                   {assignmentId ? <span>{`Assignment ${assignmentId}`}</span> : null}
                 </Space>
                 {route ? (
@@ -914,10 +923,102 @@ export function renderOperatorAgentReportsSection(
                         openRoute(route, headline);
                       }}
                     >
-                      Open Report
+                      打开汇报
                     </Button>
                   </div>
                 ) : null}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function renderOperatorMediaAnalysesSection(
+  sectionKey: string,
+  sectionValue: unknown,
+  openRoute: (route: string, title: string) => void,
+) {
+  if (!Array.isArray(sectionValue)) {
+    return null;
+  }
+
+  const analyses = sectionValue.filter(isRecord);
+  return (
+    <section key={sectionKey} className={styles.detailSection}>
+      <div className={styles.detailSectionTitle}>
+        Media Analyses <Tag>{sectionValue.length}</Tag>
+      </div>
+
+      {sectionValue.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无内容" />
+      ) : (
+        <div className={styles.detailArray}>
+          {analyses.map((analysis, index) => {
+            const analysisId =
+              typeof analysis.analysis_id === "string" && analysis.analysis_id
+                ? analysis.analysis_id
+                : `analysis-${index + 1}`;
+            const title = resolveMediaTitle(analysis);
+            const summary =
+              (typeof analysis.summary === "string" && analysis.summary) ||
+              (Array.isArray(analysis.key_points)
+                ? analysis.key_points
+                    .filter((item) => typeof item === "string" && item.trim())
+                    .slice(0, 3)
+                    .join(" / ")
+                : "") ||
+              "暂无摘要";
+            const mediaType =
+              typeof analysis.detected_media_type === "string" && analysis.detected_media_type
+                ? analysis.detected_media_type
+                : "unknown";
+            const status =
+              typeof analysis.status === "string" && analysis.status ? analysis.status : "unknown";
+            const analysisMode =
+              typeof analysis.analysis_mode === "string" && analysis.analysis_mode
+                ? analysis.analysis_mode
+                : "standard";
+            const workContextId =
+              typeof analysis.work_context_id === "string" && analysis.work_context_id
+                ? analysis.work_context_id
+                : null;
+            const route = `/api/media/analyses/${analysisId}`;
+            return (
+              <Card key={analysisId} size="small">
+                <Space wrap size={[6, 6]} style={{ marginBottom: 6 }}>
+                  <Text strong>{title}</Text>
+                  <Tag color={mediaTypeColor(mediaType)}>{formatMediaType(mediaType)}</Tag>
+                  <Tag>{formatAnalysisMode(analysisMode)}</Tag>
+                  <Tag color={analysisStatusColor(status)}>{formatAnalysisStatus(status)}</Tag>
+                  {typeof analysis.strategy_writeback_status === "string" &&
+                  analysis.strategy_writeback_status ? (
+                    <Tag>{`策略 ${formatAnalysisWritebackStatus(analysis.strategy_writeback_status)}`}</Tag>
+                  ) : null}
+                  {typeof analysis.backlog_writeback_status === "string" &&
+                  analysis.backlog_writeback_status ? (
+                    <Tag>{`待办 ${formatAnalysisWritebackStatus(analysis.backlog_writeback_status)}`}</Tag>
+                  ) : null}
+                </Space>
+                <Text type="secondary">{summary}</Text>
+                <Space wrap size={[8, 6]} className={styles.selectionMeta}>
+                  {workContextId ? <span>{`Work context ${workContextId}`}</span> : null}
+                  {typeof analysis.thread_id === "string" && analysis.thread_id ? (
+                    <span>{`Thread ${analysis.thread_id}`}</span>
+                  ) : null}
+                </Space>
+                <div className={styles.routeActions}>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      openRoute(route, title);
+                    }}
+                  >
+                    Open Analysis
+                  </Button>
+                </div>
               </Card>
             );
           })}
@@ -953,7 +1054,7 @@ export function renderIndustryExecutionFocusSection(
     liveFocusSummary ||
     execution?.current_focus ||
     mainChain?.current_focus ||
-    "No active focus";
+    "暂无活动焦点";
   const currentOwner =
     execution?.current_owner ||
     mainChain?.current_owner ||
@@ -996,8 +1097,8 @@ export function renderIndustryExecutionFocusSection(
   const synthesisSummary = cycleSynthesis
     ? [
         `Findings ${synthesisFindings.length}`,
-        `Conflicts ${synthesisConflicts.length}`,
-        `Holes ${synthesisHoles.length}`,
+        `冲突 ${synthesisConflicts.length}`,
+        `缺口 ${synthesisHoles.length}`,
         `Actions ${recommendedActions.length}`,
       ].join(" / ")
     : "No cycle synthesis yet.";
@@ -1005,7 +1106,7 @@ export function renderIndustryExecutionFocusSection(
   const items = [
     {
       key: "goal",
-      label: "Current Focus",
+      label: "当前焦点",
       value: currentFocus,
       note:
         execution?.current_stage ||
@@ -1019,7 +1120,7 @@ export function renderIndustryExecutionFocusSection(
     },
     {
       key: "owner",
-      label: "Current Owner",
+      label: "当前负责人",
       value: currentOwner,
       note: currentOwnerAgentId,
       status:
@@ -1030,21 +1131,21 @@ export function renderIndustryExecutionFocusSection(
     },
     {
       key: "risk",
-      label: "Current Risk",
+      label: "当前风险",
       value: runtimeRiskLabel(currentRisk),
       note: execution?.blocked_reason || execution?.stuck_reason || null,
       status: currentRisk,
       route: null,
-      routeTitle: "Current Risk",
+      routeTitle: "当前风险",
     },
     {
       key: "evidence",
-      label: "Current Evidence",
+      label: "当前证据",
       value: latestEvidence,
       note: `${evidenceCount} evidence record(s)`,
       status: evidenceCount > 0 ? "active" : "idle",
       route: latestEvidenceRoute,
-      routeTitle: "Latest Evidence",
+      routeTitle: "最新证据",
     },
     {
       key: "team-status",
@@ -1059,18 +1160,18 @@ export function renderIndustryExecutionFocusSection(
 
   return (
     <section key="industry-focus" className={styles.detailSection}>
-      <div className={styles.detailSectionTitle}>Runtime Focus</div>
+      <div className={styles.detailSectionTitle}>运行焦点</div>
       {focusSelection ? (
         <Alert
           showIcon
           type="info"
           message={
             focusSelection.selection_kind === "assignment"
-              ? "Focused Assignment"
-              : "Focused Backlog"
+              ? "已聚焦派工"
+              : "已聚焦待办"
           }
           description={
-            focusSelection.summary || focusSelection.title || "Focused runtime subview"
+            focusSelection.summary || focusSelection.title || "已聚焦的运行时子视图"
           }
           style={{ marginBottom: 16 }}
         />
@@ -1103,7 +1204,7 @@ export function renderIndustryExecutionFocusSection(
                   openRoute(item.route!, item.routeTitle);
                 }}
               >
-                Open Detail
+                打开详情
               </Button>
             ) : null}
           </div>
@@ -1202,7 +1303,7 @@ export function renderIndustryMainChainSection(
         </Tag>
         {controlChain.currentFocus ? (
           <span className={styles.mainChainHeaderText}>
-            Focus: {controlChain.currentFocus}
+            焦点：{controlChain.currentFocus}
           </span>
         ) : null}
         {controlChain.currentOwner ? (
@@ -1420,7 +1521,7 @@ export function renderTaskReviewSection(
             ) : null}
             {phase ? <Tag>{`Phase ${phase}`}</Tag> : null}
             {currentStage && currentStage !== phase ? (
-              <Tag>{`Resume ${currentStage}`}</Tag>
+              <Tag>{`恢复 ${currentStage}`}</Tag>
             ) : null}
           </Space>
         </div>
@@ -1455,13 +1556,13 @@ export function renderTaskReviewSection(
       </div>
 
       <div className={styles.reviewPanels}>
-        {renderReviewListCard("Summary", summaryLines)}
+        {renderReviewListCard("摘要", summaryLines)}
         {renderReviewListCard("Next actions", nextActions)}
         {renderReviewListCard("Recent failures", recentFailures)}
         {renderReviewListCard("Effective moves", effectiveActions)}
         {renderReviewListCard("Avoid repeats", avoidRepeats)}
         {renderReviewListCard("Risks", risks)}
-        {renderReviewListCard("Evidence refs", feedbackEvidenceRefs, true)}
+        {renderReviewListCard("证据引用", feedbackEvidenceRefs, true)}
       </div>
     </section>
   );

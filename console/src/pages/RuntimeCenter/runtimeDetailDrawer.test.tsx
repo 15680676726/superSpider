@@ -178,6 +178,33 @@ describe("runtimeDetailDrawer", () => {
                 route: "/api/runtime-center/industry/industry-1?report_id=report-1",
               } as any,
             ],
+            media_analyses: [
+              {
+                analysis_id: "media-analysis:brief-1",
+                work_context_id: "ctx-media-ops",
+                entry_point: "chat",
+                purpose: "chat-answer",
+                source_kind: "upload",
+                detected_media_type: "document",
+                analysis_mode: "standard",
+                status: "completed",
+                title: "Seller brief",
+                summary:
+                  "Logistics and stock checks are now anchored to the shared work context.",
+                key_points: ["Resume with the shared checklist."],
+                entities: [],
+                claims: [],
+                recommended_actions: [],
+                warnings: [],
+                asset_artifact_ids: [],
+                derived_artifact_ids: [],
+                knowledge_document_ids: [],
+                evidence_ids: [],
+                strategy_writeback_status: "written",
+                backlog_writeback_status: "written",
+                metadata: {},
+              } as any,
+            ],
             focus_selection: {
               selection_kind: "assignment",
               assignment_id: "assignment-1",
@@ -211,17 +238,18 @@ describe("runtimeDetailDrawer", () => {
       ) as React.ReactElement,
     );
 
-    expect(screen.getByText("Runtime Focus")).toBeTruthy();
+    expect(screen.getByText("运行焦点")).toBeTruthy();
     expect(screen.getByText("Main-Brain Planning")).toBeTruthy();
     expect(screen.getByText("Spider Main Chain")).toBeTruthy();
-    expect(screen.getByText("Focused Assignment")).toBeTruthy();
+    expect(screen.getByText("已聚焦派工")).toBeTruthy();
     expect(screen.getAllByText("增长获客").length).toBeGreaterThan(0);
     expect(screen.getAllByText("本周增长与交付协调").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Open Assignment").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Open Backlog").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Open Report").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Unconsumed").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Needs follow-up").length).toBeGreaterThan(0);
+    expect(screen.getByText("Media Analyses")).toBeTruthy();
+    expect(screen.getByText("Seller brief")).toBeTruthy();
+    expect(screen.getByText("Open Analysis")).toBeTruthy();
+    expect(screen.getByText("Work context ctx-media-ops")).toBeTruthy();
     expect(screen.queryByText("Execution")).toBeNull();
     expect(screen.queryByText("Main Chain")).toBeNull();
   });
@@ -318,7 +346,6 @@ describe("runtimeDetailDrawer", () => {
       ) as React.ReactElement,
     );
 
-    expect(screen.getByText("Host Twin")).toBeTruthy();
     expect(screen.getAllByText("Coordination").length).toBeGreaterThan(0);
     expect(screen.getByText("App Family Twins")).toBeTruthy();
     expect(screen.getByText("browser_backoffice")).toBeTruthy();

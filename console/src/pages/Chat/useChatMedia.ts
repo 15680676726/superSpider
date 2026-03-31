@@ -30,8 +30,10 @@ const CHAT_MEDIA_PURPOSE: MediaPurpose = "chat-answer";
 
 export function useChatMedia({
   activeChatThreadId,
+  activeWorkContextId,
 }: {
   activeChatThreadId: string | null;
+  activeWorkContextId: string | null;
 }) {
   const [mediaLinkValue, setMediaLinkValue] = useState("");
   const [mediaPendingItems, setMediaPendingItems] = useState<ChatMediaDraftItem[]>(
@@ -177,6 +179,7 @@ export function useChatMedia({
       setMediaError(null);
       const items = await api.listMediaAnalyses({
         thread_id: resolvedThreadId,
+        work_context_id: activeWorkContextId || undefined,
         entry_point: CHAT_MEDIA_ENTRY_POINT,
         status: "completed",
         limit: 60,
@@ -194,7 +197,7 @@ export function useChatMedia({
         return nextSelected;
       });
     },
-    [activeChatThreadId],
+    [activeChatThreadId, activeWorkContextId],
   );
 
   useEffect(() => {

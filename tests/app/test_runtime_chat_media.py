@@ -326,3 +326,63 @@ def test_enrich_agent_request_with_media_adopts_existing_analysis_into_industry_
         item.source_ref == f"media-analysis:{analysis_id}"
         for item in recall.hits
     )
+
+
+def test_media_service_lists_shared_media_analyses_by_work_context_continuity(
+    tmp_path: Path,
+) -> None:
+    runtime = _build_media_runtime(tmp_path)
+    attachment_path = tmp_path / "continuity-brief.md"
+    attachment_path.write_text(
+        "# 连续执行说明\n恢复后仍需沿同一 work context 继续处理物流与库存。",
+        encoding="utf-8",
+    )
+
+    first_request = _build_industry_request(
+        media_inputs=[
+            {
+                "source_kind": "upload",
+                "filename": attachment_path.name,
+                "storage_uri": str(attachment_path),
+                "entry_point": "chat",
+                "purpose": "chat-answer",
+            }
+        ],
+        work_context_id="ctx-media-shared",
+    )
+    asyncio.run(
+        enrich_agent_request_with_media(
+            first_request,
+            app_state=runtime,
+        )
+    )
+
+    resumed_request = _build_industry_request(
+        media_analysis_ids=[
+            runtime.media_service.list_analyses(
+                thread_id="industry-chat:industry-v1-media:execution-core",
+                entry_point="chat",
+                status="completed",
+                limit=10,
+            )[0].analysis_id
+        ],
+        work_context_id="ctx-media-shared",
+    )
+    asyncio.run(
+        enrich_agent_request_with_media(
+            resumed_request,
+            app_state=runtime,
+            thread_id="industry-chat:industry-v1-media:resumed-execution",
+        )
+    )
+
+    by_work_context = runtime.media_service.list_analyses(
+        work_context_id="ctx-media-shared",
+        entry_point="chat",
+        status="completed",
+        limit=10,
+    )
+
+    assert len(by_work_context) == 1
+    assert by_work_context[0].work_context_id == "ctx-media-shared"
+    assert by_work_context[0].thread_id == "industry-chat:industry-v1-media:resumed-execution"

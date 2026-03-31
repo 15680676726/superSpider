@@ -100,6 +100,7 @@ async def list_media_analyses(
     request: Request,
     industry_instance_id: str | None = None,
     thread_id: str | None = None,
+    work_context_id: str | None = None,
     entry_point: str | None = None,
     status: str | None = None,
     limit: int = 50,
@@ -107,6 +108,7 @@ async def list_media_analyses(
     return _get_media_service(request).list_analyses(
         industry_instance_id=industry_instance_id,
         thread_id=thread_id,
+        work_context_id=work_context_id,
         entry_point=entry_point,
         status=status,
         limit=limit,

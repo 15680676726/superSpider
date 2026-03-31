@@ -1179,12 +1179,12 @@ class MainBrainChatService:
         agent_id = str(getattr(request, "agent_id", "") or "").strip() or None
         scope_type: str | None = None
         scope_id: str | None = None
-        if industry_instance_id:
-            scope_type = "industry"
-            scope_id = industry_instance_id
-        elif work_context_id:
+        if work_context_id:
             scope_type = "work_context"
             scope_id = work_context_id
+        elif industry_instance_id:
+            scope_type = "industry"
+            scope_id = industry_instance_id
         elif agent_id:
             scope_type = "agent"
             scope_id = agent_id

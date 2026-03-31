@@ -76,6 +76,7 @@ export interface MediaAnalysisSummary {
   analysis_id: string;
   industry_instance_id?: string | null;
   thread_id?: string | null;
+  work_context_id?: string | null;
   entry_point: string;
   purpose: string;
   source_kind: string;
@@ -111,6 +112,7 @@ export interface MediaAnalysisPayload {
   sources: MediaSourceSpec[];
   industry_instance_id?: string | null;
   thread_id?: string | null;
+  work_context_id?: string | null;
   entry_point?: MediaEntryPoint;
   purpose?: MediaPurpose;
   writeback?: boolean;
@@ -173,6 +175,7 @@ export const mediaApi = {
   listMediaAnalyses(params?: {
     industry_instance_id?: string;
     thread_id?: string;
+    work_context_id?: string;
     entry_point?: string;
     status?: string;
     limit?: number;
@@ -183,6 +186,9 @@ export const mediaApi = {
     }
     if (params?.thread_id) {
       query.set("thread_id", params.thread_id);
+    }
+    if (params?.work_context_id) {
+      query.set("work_context_id", params.work_context_id);
     }
     if (params?.entry_point) {
       query.set("entry_point", params.entry_point);

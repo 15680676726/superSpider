@@ -40,6 +40,7 @@ describe("useChatMedia", () => {
     const { result } = renderHook(() =>
       useChatMedia({
         activeChatThreadId: "thread-1",
+        activeWorkContextId: null,
       }),
     );
 
@@ -51,5 +52,41 @@ describe("useChatMedia", () => {
     expect(result.current.selectedMediaAnalysisIdsRef.current).toEqual([
       "analysis-1",
     ]);
+    expect(mockedListMediaAnalyses).toHaveBeenCalledWith({
+      entry_point: "chat",
+      limit: 60,
+      status: "completed",
+      thread_id: "thread-1",
+      work_context_id: undefined,
+    });
+  });
+
+  it("keeps media continuity by querying the shared work context when available", async () => {
+    mockedListMediaAnalyses.mockResolvedValue([
+      {
+        analysis_id: "analysis-ctx-1",
+        status: "completed",
+        summary: "Resumed work-context material",
+      },
+    ] as never);
+
+    const { result } = renderHook(() =>
+      useChatMedia({
+        activeChatThreadId: "thread-resumed",
+        activeWorkContextId: "ctx-media-ops",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.mediaAnalyses).toHaveLength(1);
+    });
+
+    expect(mockedListMediaAnalyses).toHaveBeenCalledWith({
+      entry_point: "chat",
+      limit: 60,
+      status: "completed",
+      thread_id: "thread-resumed",
+      work_context_id: "ctx-media-ops",
+    });
   });
 });

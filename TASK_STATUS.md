@@ -203,6 +203,8 @@
 - `2026-03-25` 补充：runtime chat media 前门已补齐正式写回；行业 control thread 上的新附件与既有 `media_analysis_ids` 现在都会在进入 turn executor 前完成 `analysis -> prompt context -> backlog/strategy writeback`，不再只停留在“回答时参考附件”的半闭环。
 - `2026-03-29` 补充：记忆 recall 对 `work_context_id` 的正式优先级也已补上。`KernelQueryExecutionService` / prompt recall 现在在存在 `work_context_id` 时会优先按共享工作上下文读取媒体/记忆命中，而不是只按 `task_id` 兜底；这使得同一 work context 下的素材分析与长期记忆在后续 follow-up turn 里不再容易漏召回。
 - `2026-03-29` 补充：runtime chat media 这条链也已继续补厚成正式 `work_context` 闭环。行业 control thread 的 `media analyze / adopt existing analysis / memory retain / memory recall` 现在都会显式透传 `work_context_id`，媒体 writeback 会进入 `memory:work_context:*` scope，recall consumer 也会优先回显原始 `source_ref`，不再只看到 retain chunk 的内部 id。
+- `2026-03-31` 补充：媒体闭环最后一段也已收口。`/media/analyses` 与 console chat 现在都会显式消费 `work_context_id`，恢复/换线程后的同一连续工作上下文仍能重新拉回既有 media analyses；主脑聊天侧在同时存在 `industry_instance_id + work_context_id` 时也会优先按 `work_context` 做 truth-first recall，不再把更细的媒体连续记忆让位给行业级粗粒度召回。
+- `2026-03-31` 补充：media-backed memory trace 与 operator surface 也已补齐。truth-first recall 命中的 `media-analysis:*` 来源现在会直接回路由到原始 `/api/media/analyses/{analysis_id}`，`Runtime Center` 行业 detail 也已新增正式 `Media Analyses` section，不再只把媒体分析记录当 generic array 混在 detail drawer 里。
 - `2026-03-25` 补充：`run_operating_cycle()` 已切掉 `goal` 物化中转；backlog 现在直接生成 `Assignment` 并编译成 assignment-backed `TaskRecord`，`AgentReport` 也优先按 `assignment_id` 回收，不再走旧 goal-phase 假链。
 - `2026-03-25` 补充：`main_chain.routine` 在没有 live task 时，会回锚到最新 `AgentReport` 对应的 assignment/task 元数据；已完成的固定 SOP / routine 执行不会再在主链上丢失执行面信息。
 
@@ -544,9 +546,10 @@
 
 当前状态：
 
-- 规划文档已齐
-- 后端基础承接能力已有一部分
-- 但完整的聊天附件闭环还没完全收干净
+- 聊天前门、media analyze、industry writeback、truth-first memory retain/recall 已全部接到同一正式链
+- `/media/analyses`、console chat、主脑 recall 与 Runtime Center detail 现已共享 `work_context` continuity contract
+- media-backed memory hit 现已可直接追回原始 `MediaAnalysisRecord`
+- `Runtime Center` 已有正式 `Media Analyses` operator section
 
 ---
 
