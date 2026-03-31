@@ -9,20 +9,20 @@ const DEFAULT_RUNTIME_GOVERNANCE_TITLE = "运行治理";
 const DEFAULT_RUNTIME_ACCEPTING_SUMMARY = "运行时正在接收新工作。";
 
 const MAIN_BRAIN_SIGNAL_LABELS: Record<string, string> = {
-  carrier: "Carrier",
-  strategy: "Strategy",
-  lanes: "Lanes",
-  backlog: "Backlog",
-  current_cycle: "Current Cycle",
-  assignments: "Assignments",
-  agent_reports: "Agent Reports",
-  environment: "Environment",
-  governance: "Runtime Governance",
-  automation: "Automation",
-  recovery: "Recovery",
-  evidence: "Evidence",
-  decisions: "Decisions",
-  patches: "Patches",
+  carrier: "载体",
+  strategy: "策略",
+  lanes: "泳道",
+  backlog: "待办",
+  current_cycle: "当前周期",
+  assignments: "派工",
+  agent_reports: "智能体汇报",
+  environment: "环境",
+  governance: "运行治理",
+  automation: "自动化",
+  recovery: "恢复",
+  evidence: "证据",
+  decisions: "决策",
+  patches: "补丁",
 };
 
 const ACTION_LABELS: Record<string, string> = {
@@ -230,7 +230,7 @@ const SECTION_LABELS: Record<string, string> = {
   desktop_app_contract: "桌面应用合同",
   cooperative_adapter_availability: "协作适配器可用性",
   workspace_graph: "工作区图谱",
-  host_twin: "Host Twin",
+  host_twin: "宿主孪生",
   host_event_summary: "主机事件摘要",
   host_events: "主机事件",
   goal: "目标",
@@ -259,10 +259,10 @@ const SECTION_LABELS: Record<string, string> = {
   detail: "详情",
   diagnosis: "诊断",
   capability_surface: "能力面",
-  review: "Execution review",
-  focus: "Current focus",
-  knowledge: "Knowledge",
-  delegation: "Delegation",
+  review: "执行审查",
+  focus: "当前焦点",
+  knowledge: "知识",
+  delegation: "委派",
   routine: "例行",
   routines: "例行列表",
 };
@@ -883,16 +883,18 @@ export const CAPABILITY_SURFACE_TEXT = {
 } as const;
 
 export const MAIN_BRAIN_COCKPIT_TEXT = {
-  title: "Main-Brain Cockpit",
+  title: "主脑驾驶舱",
   description:
-    "Carrier, strategy, lanes, cycle, assignments, reports, governance, recovery, automation, environment, evidence, decisions, and patches in one cockpit operator surface.",
+    "在同一个驾驶舱操作面里统一查看载体、策略、泳道、周期、派工、汇报、治理、恢复、自动化、环境、证据、决策与补丁。",
 } as const;
 
 export function humanizeToken(value: string): string {
-  return value
-    .replace(/[_-]/g, " ")
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/\b\w/g, (chunk) => chunk.toUpperCase());
+  return normalizeDisplayChinese(
+    value
+      .replace(/[_-]/g, " ")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/\b\w/g, (chunk) => chunk.toUpperCase()),
+  );
 }
 
 export function formatRuntimeActionLabel(action: string): string {

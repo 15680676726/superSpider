@@ -151,13 +151,13 @@ export function buildRuntimeEnvironmentCockpitSignals(
         firstTextValue(surface?.source, surface?.note, surface?.services?.join(" / ")),
       carrierRoute || governanceEntry?.route || null,
       carrierTone,
-      "Carrier detail",
+      "载体详情",
     ),
     buildSignal(
       "environment",
       firstTextValue(environmentSource) ||
         firstTextValue(governanceCard?.summary) ||
-        "Environment ready",
+        "环境已就绪",
       detailText(environmentSource) ||
         summarizeHostTwin(governanceMeta.host_twin_summary) ||
         firstTextValue(surface?.note),
@@ -167,7 +167,7 @@ export function buildRuntimeEnvironmentCockpitSignals(
         : governanceCard?.status === "degraded"
           ? "warning"
           : "default",
-      "Environment detail",
+      "环境详情",
     ),
   ];
 }
@@ -217,20 +217,20 @@ export function renderHostTwinSection(
     ([, value]) => typeof value === "boolean",
   ) as Array<[string, boolean]>;
   const summaryRows = [
-    ["Handoff owner", stringValue(ownership.handoff_owner_ref)],
-    ["Account scope", stringValue(ownership.account_scope_ref)],
-    ["Workspace scope", stringValue(ownership.workspace_scope)],
-    ["Owner mode", stringValue(ownership.active_owner_kind)],
-    ["Seat owner", stringValue(coordination.seat_owner_ref)],
-    ["Workspace owner", stringValue(coordination.workspace_owner_ref)],
-    ["Writer owner", stringValue(coordination.writer_owner_ref)],
-    ["Selected seat", stringValue(coordination.selected_seat_ref)],
-    ["Seat policy", stringValue(coordination.seat_selection_policy)],
-    ["Scheduler action", stringValue(coordination.recommended_scheduler_action)],
-    ["Recovery path", stringValue(legalRecovery.path)],
-    ["Resume kind", stringValue(continuity.resume_kind)],
-    ["Recovery checkpoint", stringValue(legalRecovery.checkpoint_ref)],
-    ["Verification", stringValue(legalRecovery.verification_channel)],
+    ["交接负责人", stringValue(ownership.handoff_owner_ref)],
+    ["账号范围", stringValue(ownership.account_scope_ref)],
+    ["工作区范围", stringValue(ownership.workspace_scope)],
+    ["负责人模式", stringValue(ownership.active_owner_kind)],
+    ["席位负责人", stringValue(coordination.seat_owner_ref)],
+    ["工作区负责人", stringValue(coordination.workspace_owner_ref)],
+    ["写入负责人", stringValue(coordination.writer_owner_ref)],
+    ["已选席位", stringValue(coordination.selected_seat_ref)],
+    ["席位策略", stringValue(coordination.seat_selection_policy)],
+    ["调度动作", stringValue(coordination.recommended_scheduler_action)],
+    ["恢复路径", stringValue(legalRecovery.path)],
+    ["恢复类型", stringValue(continuity.resume_kind)],
+    ["恢复检查点", stringValue(legalRecovery.checkpoint_ref)],
+    ["校验通道", stringValue(legalRecovery.verification_channel)],
   ].filter(([, value]) => value) as Array<[string, string]>;
   const contentionForecast = recordValue(coordination.contention_forecast);
 
@@ -241,19 +241,19 @@ export function renderHostTwinSection(
         <Space wrap size={[6, 6]} style={{ marginBottom: 12 }}>
           {stringValue(continuity.status) ? (
             <Tag color={runtimeStatusColor(stringValue(continuity.status) || "unknown")}>
-              {`Continuity ${formatRuntimeStatus(stringValue(continuity.status) || "unknown")}`}
+              {`连续性 ${formatRuntimeStatus(stringValue(continuity.status) || "unknown")}`}
             </Tag>
           ) : null}
           {stringValue(coordination.recommended_scheduler_action) ? (
             <Tag color="warning">
-              {`Scheduler ${stringValue(coordination.recommended_scheduler_action)}`}
+              {`调度 ${stringValue(coordination.recommended_scheduler_action)}`}
             </Tag>
           ) : null}
           {activeFamilies.length > 0 ? (
-            <Tag color="blue">{`Active families ${activeFamilies.length}`}</Tag>
+            <Tag color="blue">{`活动族群 ${activeFamilies.length}`}</Tag>
           ) : null}
           {blockedSurfaces.length > 0 ? (
-            <Tag color="error">{`Blocked surfaces ${blockedSurfaces.length}`}</Tag>
+            <Tag color="error">{`阻塞界面 ${blockedSurfaces.length}`}</Tag>
           ) : null}
           {blockerFamilies.map((family) => (
             <Tag key={family} color="error">

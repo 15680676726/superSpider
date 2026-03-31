@@ -21,6 +21,7 @@ import {
   formatRuntimeSourceList,
   formatRuntimeStatus,
   formatRuntimeSurfaceNote,
+  localizeRuntimeText,
 } from "./text";
 import type { RuntimeCenterOverviewPayload } from "./useRuntimeCenter";
 import { isRecord } from "./runtimeDetailPrimitives";
@@ -106,7 +107,7 @@ function toneFromStatus(value: unknown): RuntimeCockpitSignal["tone"] {
 }
 
 function detailFromSignal(record: Record<string, unknown>): string | null {
-  return firstString(
+  const value = firstString(
     record.detail,
     record.note,
     record.summary,
@@ -114,6 +115,7 @@ function detailFromSignal(record: Record<string, unknown>): string | null {
     record.reason,
     record.status,
   );
+  return value ? localizeRuntimeText(value) : null;
 }
 
 function routeFromSignal(record: Record<string, unknown>): string | null {
@@ -129,7 +131,7 @@ function routeTitleFromSignal(record: Record<string, unknown>): string | null {
 }
 
 function valueFromSignal(record: Record<string, unknown>): string {
-  return (
+  const value =
     firstString(
       record.value,
       record.count,
@@ -138,8 +140,10 @@ function valueFromSignal(record: Record<string, unknown>): string {
       record.label,
       record.status,
       record.total,
-    ) ?? RUNTIME_CENTER_TEXT.emptyValue
-  );
+    ) ?? RUNTIME_CENTER_TEXT.emptyValue;
+  return value === RUNTIME_CENTER_TEXT.emptyValue
+    ? value
+    : localizeRuntimeText(value);
 }
 
 function convertDedicatedSignal(
@@ -228,12 +232,12 @@ function renderSignalCard(
         {signal.route ? (
           <Button
             size="small"
-            aria-label={`Open ${signal.label} detail`}
+            aria-label={`打开${signal.label}详情`}
             onClick={() => {
               onOpenRoute(signal.route!, signal.routeTitle || signal.label);
             }}
           >
-            Open Detail
+            打开详情
           </Button>
         ) : null}
       </Space>
@@ -401,7 +405,7 @@ function recordList(value: unknown): Record<string, unknown>[] {
 }
 
 function recordTitle(record: Record<string, unknown>, fallback: string): string {
-  return (
+  const value =
     firstString(
       record.title,
       record.headline,
@@ -410,18 +414,19 @@ function recordTitle(record: Record<string, unknown>, fallback: string): string 
       record.id,
       record.assignment_id,
       record.report_id,
-    ) ?? fallback
-  );
+    ) ?? fallback;
+  return localizeRuntimeText(value);
 }
 
 function recordSummary(record: Record<string, unknown>): string | null {
-  return firstString(
+  const value = firstString(
     record.summary,
     record.description,
     record.reason,
     record.note,
     record.recommendation,
   );
+  return value ? localizeRuntimeText(value) : null;
 }
 
 function recordRoute(
@@ -473,8 +478,8 @@ function renderCompactRecordList(
                 {status ? (
                   <Tag color={statusTagColor(status)}>{formatRuntimeStatus(status)}</Tag>
                 ) : null}
-                {needsFollowup ? <Tag color="warning">Needs follow-up</Tag> : null}
-                {processed ? <Tag color="success">Processed</Tag> : null}
+                {needsFollowup ? <Tag color="warning">待跟进</Tag> : null}
+                {processed ? <Tag color="success">已处理</Tag> : null}
               </div>
               {summary ? <p className={styles.selectionSummary}>{summary}</p> : null}
             </div>
@@ -524,7 +529,7 @@ function renderOperatorBlock(
               onOpenRoute(route, routeTitle);
             }}
           >
-            Open Detail
+            打开详情
           </Button>
         ) : null}
       </div>
@@ -568,7 +573,7 @@ function renderTraceBlock(
               onOpenRoute(route, title);
             }}
           >
-            Open Detail
+            打开详情
           </Button>
         ) : null}
       </div>
@@ -811,7 +816,7 @@ export default function MainBrainCockpitPanel({
       />
 
       {chainSignals.length > 0 ? (
-        <Card size="small" title="Unified Runtime Chain" style={{ marginBottom: 16 }}>
+        <Card size="small" title="统一运行链" style={{ marginBottom: 16 }}>
           <Space direction="vertical" size={10} style={{ width: "100%" }}>
             {chainSignals.map((signal) => (
               <div
@@ -832,12 +837,12 @@ export default function MainBrainCockpitPanel({
                 {signal.route ? (
                   <Button
                     size="small"
-                    aria-label={`Open ${signal.label} chain detail`}
+                    aria-label={`打开${signal.label}链路详情`}
                     onClick={() => {
                       onOpenRoute(signal.route!, signal.routeTitle || signal.label);
                     }}
                   >
-                    Open Detail
+                    打开详情
                   </Button>
                 ) : null}
               </div>
@@ -849,15 +854,15 @@ export default function MainBrainCockpitPanel({
       {mainBrainData ? (
         <section className={styles.panelGrid}>
           {reportCognitionPayload ? (
-            <Card size="small" title="Report Cognition" style={{ marginBottom: 16 }}>
+            <Card size="small" title="汇报认知" style={{ marginBottom: 16 }}>
               <div className={styles.metaGrid}>
                 <div className={styles.controlCard}>
                   <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
                     <div>
                       <div className={styles.cardTitleRow}>
-                        <h3 className={styles.entryTitle}>Judgment</h3>
+                        <h3 className={styles.entryTitle}>判断</h3>
                         <Tag color={needsReplan ? "error" : "success"}>
-                          {needsReplan ? "Needs replan" : "Clear"}
+                          {needsReplan ? "需要重规划" : "已清晰"}
                         </Tag>
                       </div>
                       {firstString(cognitionJudgment?.summary) ? (
@@ -870,10 +875,10 @@ export default function MainBrainCockpitPanel({
                       <Button
                         size="small"
                         onClick={() => {
-                          onOpenRoute(firstString(cognitionJudgment?.route)!, "Report Cognition");
+                          onOpenRoute(firstString(cognitionJudgment?.route)!, "汇报认知");
                         }}
                       >
-                        Open Detail
+                        打开详情
                       </Button>
                     ) : null}
                   </div>
@@ -892,19 +897,19 @@ export default function MainBrainCockpitPanel({
                       },
                       {
                         key: "unconsumed_reports",
-                        label: "Unconsumed reports",
+                        label: "未消费汇报",
                         children:
                           String(unconsumedReportRecords.length) ?? RUNTIME_CENTER_TEXT.emptyValue,
                       },
                       {
                         key: "needs_followup_reports",
-                        label: "Needs follow-up",
+                        label: "待跟进汇报",
                         children:
                           String(needsFollowupReportRecords.length) ?? RUNTIME_CENTER_TEXT.emptyValue,
                       },
                       {
                         key: "followup_backlog",
-                        label: "Follow-up backlog",
+                        label: "跟进待办",
                         children:
                           String(followupBacklogRecords.length) ?? RUNTIME_CENTER_TEXT.emptyValue,
                       },
@@ -926,44 +931,44 @@ export default function MainBrainCockpitPanel({
                   ) : null}
                 </div>
                 {renderCognitionBlock({
-                  title: "Latest Findings",
+                  title: "最新发现",
                   records: latestFindingRecords,
-                  emptyLabel: "No latest findings are visible.",
+                  emptyLabel: "当前没有可见的最新发现。",
                   fallbackRoute: firstString(reportCognitionPayload?.route) ?? industryRoute,
                   onOpenRoute,
                 })}
                 {renderCognitionBlock({
-                  title: "Conflicts",
+                  title: "冲突",
                   records: conflictRecords,
-                  emptyLabel: "No report conflicts are visible.",
+                  emptyLabel: "当前没有可见的汇报冲突。",
                   fallbackRoute: firstString(reportCognitionPayload?.route) ?? industryRoute,
                   onOpenRoute,
                 })}
                 {renderCognitionBlock({
-                  title: "Holes",
+                  title: "缺口",
                   records: holeRecords,
-                  emptyLabel: "No report holes are visible.",
+                  emptyLabel: "当前没有可见的汇报缺口。",
                   fallbackRoute: firstString(reportCognitionPayload?.route) ?? industryRoute,
                   onOpenRoute,
                 })}
                 {renderCognitionBlock({
-                  title: "Unconsumed reports",
+                  title: "未消费汇报",
                   records: unconsumedReportRecords,
-                  emptyLabel: "No unconsumed reports are visible.",
+                  emptyLabel: "当前没有可见的未消费汇报。",
                   fallbackRoute: firstString(reportCognitionPayload?.route) ?? industryRoute,
                   onOpenRoute,
                 })}
                 {renderCognitionBlock({
-                  title: "Needs follow-up",
+                  title: "待跟进汇报",
                   records: needsFollowupReportRecords,
-                  emptyLabel: "No follow-up reports are visible.",
+                  emptyLabel: "当前没有可见的待跟进汇报。",
                   fallbackRoute: firstString(reportCognitionPayload?.route) ?? industryRoute,
                   onOpenRoute,
                 })}
                 {renderCognitionBlock({
-                  title: "Follow-up backlog",
+                  title: "跟进待办",
                   records: followupBacklogRecords,
-                  emptyLabel: "No follow-up backlog is visible.",
+                  emptyLabel: "当前没有可见的跟进待办。",
                   fallbackRoute: firstString(reportCognitionPayload?.route) ?? industryRoute,
                   onOpenRoute,
                 })}
@@ -971,87 +976,87 @@ export default function MainBrainCockpitPanel({
             </Card>
           ) : null}
 
-          <Card size="small" title="Execution Envelope" style={{ marginBottom: 16 }}>
+          <Card size="small" title="执行信封" style={{ marginBottom: 16 }}>
             <div className={styles.metaGrid}>
               <div className={styles.controlCard}>
                 <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
                   <div>
-                    <h3 className={styles.entryTitle}>Assignments</h3>
+                    <h3 className={styles.entryTitle}>派工</h3>
                     <p className={styles.selectionSummary}>
-                      Current execution envelopes owned by the main-brain cycle.
+                      展示当前由主脑周期持有的执行信封。
                     </p>
                   </div>
                 </div>
                 {renderCompactRecordList(assignmentRecords, {
-                  emptyLabel: "No visible assignments.",
+                  emptyLabel: "当前没有可见派工。",
                   fallbackRoute: industryRoute,
-                  fallbackRouteTitle: "Assignments",
+                  fallbackRouteTitle: "派工",
                   onOpenRoute,
                 })}
               </div>
               <div className={styles.controlCard}>
                 <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
                   <div>
-                    <h3 className={styles.entryTitle}>Reports</h3>
+                    <h3 className={styles.entryTitle}>汇报</h3>
                     <p className={styles.selectionSummary}>
-                      Structured execution reports waiting for synthesis, follow-up, or replan.
+                      展示等待综合、跟进或重规划的结构化执行汇报。
                     </p>
                   </div>
                 </div>
                 {renderCompactRecordList(reportRecords, {
-                  emptyLabel: "No visible reports.",
+                  emptyLabel: "当前没有可见汇报。",
                   fallbackRoute: industryRoute,
-                  fallbackRouteTitle: "Reports",
+                  fallbackRouteTitle: "汇报",
                   onOpenRoute,
                 })}
               </div>
             </div>
           </Card>
 
-          <Card size="small" title="Operator Closure" style={{ marginBottom: 16 }}>
+          <Card size="small" title="操作员闭环" style={{ marginBottom: 16 }}>
             <div className={styles.metaGrid}>
               {renderOperatorBlock({
-                title: "Runtime Governance",
+                title: "运行治理",
                 summary: firstString(governancePayload?.summary),
                 status: governancePayload?.status,
                 route: firstString(governancePayload?.route),
-                routeTitle: "Runtime Governance",
+                routeTitle: "运行治理",
                 details: [
-                  ["Pending decisions", firstString(governancePayload?.pending_decisions)],
-                  ["Pending patches", firstString(governancePayload?.pending_patches)],
-                  ["Paused schedules", firstString(governancePayload?.paused_schedule_count)],
-                  ["Handoff active", firstString(governancePayload?.handoff_active)],
+                  ["待处理决策", firstString(governancePayload?.pending_decisions)],
+                  ["待处理补丁", firstString(governancePayload?.pending_patches)],
+                  ["已暂停计划", firstString(governancePayload?.paused_schedule_count)],
+                  ["交接是否激活", firstString(governancePayload?.handoff_active)],
                 ],
                 onOpenRoute,
               })}
               {renderOperatorBlock({
-                title: "Recovery",
+                title: "恢复",
                 summary: firstString(recoveryPayload?.summary),
                 status: recoveryPayload?.status,
                 route: firstString(recoveryPayload?.route),
-                routeTitle: "Recovery",
+                routeTitle: "恢复",
                 details: [
-                  ["Pending decisions", firstString(recoveryPayload?.pending_decisions)],
-                  ["Active schedules", firstString(recoveryPayload?.active_schedules)],
-                  ["Recovered at", firstString(recoveryPayload?.recovered_at)],
-                  ["Reason", firstString(recoveryPayload?.reason)],
+                  ["待处理决策", firstString(recoveryPayload?.pending_decisions)],
+                  ["活动计划", firstString(recoveryPayload?.active_schedules)],
+                  ["恢复时间", firstString(recoveryPayload?.recovered_at)],
+                  ["原因", firstString(recoveryPayload?.reason)],
                 ],
                 onOpenRoute,
               })}
               {renderOperatorBlock({
-                title: "Automation",
+                title: "自动化",
                 summary: firstString(automationPayload?.summary),
                 status: automationPayload?.status,
                 route: firstString(automationPayload?.route),
-                routeTitle: "Automation",
+                routeTitle: "自动化",
                 details: [
-                  ["Schedules", firstString(automationPayload?.schedule_count)],
+                  ["计划数", firstString(automationPayload?.schedule_count)],
                   [
-                    "Active schedules",
+                    "活动计划",
                     firstString(automationPayload?.active_schedule_count),
                   ],
                   [
-                    "Heartbeat",
+                    "心跳",
                     firstString(
                       isRecord(automationPayload?.heartbeat)
                         ? automationPayload?.heartbeat.status
@@ -1059,7 +1064,7 @@ export default function MainBrainCockpitPanel({
                     ),
                   ],
                   [
-                    "Heartbeat every",
+                    "心跳间隔",
                     firstString(
                       isRecord(automationPayload?.heartbeat)
                         ? automationPayload?.heartbeat.every
@@ -1070,14 +1075,14 @@ export default function MainBrainCockpitPanel({
                 onOpenRoute,
               })}
               {renderOperatorBlock({
-                title: "Environment",
+                title: "环境",
                 summary: firstString(environmentPayload?.summary),
                 status: environmentPayload?.status,
                 route: firstString(environmentPayload?.route),
-                routeTitle: "Environment",
+                routeTitle: "环境",
                 details: [
                   [
-                    "Selected seat",
+                    "已选席位",
                     firstString(
                       isRecord(governancePayload?.host_twin_summary)
                         ? governancePayload?.host_twin_summary.selected_seat_ref
@@ -1085,7 +1090,7 @@ export default function MainBrainCockpitPanel({
                     ),
                   ],
                   [
-                    "Scheduler action",
+                    "调度动作",
                     firstString(
                       isRecord(governancePayload?.host_twin_summary)
                         ? governancePayload?.host_twin_summary.recommended_scheduler_action
@@ -1098,24 +1103,24 @@ export default function MainBrainCockpitPanel({
             </div>
           </Card>
 
-          <Card size="small" title="Trace Closure" style={{ marginBottom: 16 }}>
+          <Card size="small" title="追踪闭环" style={{ marginBottom: 16 }}>
             <div className={styles.metaGrid}>
               {renderTraceBlock({
-                title: "Evidence",
+                title: "证据",
                 section: evidenceSection,
-                emptyLabel: "No visible evidence entries.",
+                emptyLabel: "当前没有可见证据。",
                 onOpenRoute,
               })}
               {renderTraceBlock({
-                title: "Decisions",
+                title: "决策",
                 section: decisionsSection,
-                emptyLabel: "No visible decisions.",
+                emptyLabel: "当前没有可见决策。",
                 onOpenRoute,
               })}
               {renderTraceBlock({
-                title: "Patches",
+                title: "补丁",
                 section: patchesSection,
-                emptyLabel: "No visible patches.",
+                emptyLabel: "当前没有可见补丁。",
                 onOpenRoute,
               })}
             </div>

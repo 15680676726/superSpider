@@ -239,15 +239,15 @@ describe("controlChainPresentation", () => {
       "replan",
     ]);
     expect(model.nodes.map((node) => node.label)).toEqual([
-      "Writeback",
-      "Backlog",
-      "Cycle",
-      "Assignment",
-      "Report",
-      "Replan",
+      "写回",
+      "待办",
+      "周期",
+      "派工",
+      "汇报",
+      "重规划",
     ]);
     expect(model.currentFocus).toBe("Recover the live operating chain");
-    expect(model.currentOwner).toBe("Main Brain");
+    expect(model.currentOwner).toBe("主脑");
     expect(model.currentRisk).toBe("guarded");
     expect(model.synthesis).toMatchObject({
       findingCount: 2,
@@ -255,7 +255,7 @@ describe("controlChainPresentation", () => {
       holeCount: 1,
       actionCount: 2,
       needsReplan: true,
-      summary: "Findings 2 / Conflicts 1 / Holes 1 / Actions 2",
+      summary: "发现 2 / 冲突 1 / 缺口 1 / 动作 2",
     });
   });
 

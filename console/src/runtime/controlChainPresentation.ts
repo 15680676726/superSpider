@@ -17,12 +17,12 @@ export const CONTROL_CHAIN_NODE_ORDER = [
 ] as const;
 
 const CONTROL_CHAIN_LABELS: Record<string, string> = {
-  writeback: "Writeback",
-  backlog: "Backlog",
-  cycle: "Cycle",
-  assignment: "Assignment",
-  report: "Report",
-  replan: "Replan",
+  writeback: "写回",
+  backlog: "待办",
+  cycle: "周期",
+  assignment: "派工",
+  report: "汇报",
+  replan: "重规划",
 };
 
 export type ControlChainNodeId = (typeof CONTROL_CHAIN_NODE_ORDER)[number];
@@ -166,7 +166,9 @@ function presentNode(node: IndustryMainChainNode): ControlChainNodePresentation 
     truthSource: node.truth_source,
     currentRef: normalizeNonEmpty(node.current_ref || undefined),
     route: normalizeNonEmpty(node.route || undefined),
-    summary: normalizeNonEmpty(node.summary || undefined),
+    summary: normalizeNonEmpty(
+      node.summary ? normalizeDisplayChinese(node.summary) : undefined,
+    ),
     backflowPort: normalizeNonEmpty(node.backflow_port || undefined),
     metrics: presentNodeMetrics(node.metrics || {}),
   };
@@ -189,10 +191,10 @@ function presentSynthesis(
     actionCount,
     needsReplan: Boolean(synthesis.needs_replan),
     summary: [
-      `Findings ${findingCount}`,
-      `Conflicts ${conflictCount}`,
-      `Holes ${holeCount}`,
-      `Actions ${actionCount}`,
+      `发现 ${findingCount}`,
+      `冲突 ${conflictCount}`,
+      `缺口 ${holeCount}`,
+      `动作 ${actionCount}`,
     ].join(" / "),
     controlCoreContract: [...(synthesis.control_core_contract || [])],
   };
@@ -217,10 +219,18 @@ export function presentControlChain(
   return {
     loopState: normalizeNonEmpty(graph?.loop_state || undefined),
     loopStateLabel: presentRuntimeStatusLabel(graph?.loop_state || null),
-    currentFocus: normalizeNonEmpty(graph?.current_focus || undefined),
-    currentOwner: normalizeNonEmpty(graph?.current_owner || undefined),
+    currentFocus: normalizeNonEmpty(
+      graph?.current_focus ? normalizeDisplayChinese(graph.current_focus) : undefined,
+    ),
+    currentOwner: normalizeNonEmpty(
+      graph?.current_owner ? normalizeDisplayChinese(graph.current_owner) : undefined,
+    ),
     currentRisk: normalizeNonEmpty(graph?.current_risk || undefined),
-    latestEvidenceSummary: normalizeNonEmpty(graph?.latest_evidence_summary || undefined),
+    latestEvidenceSummary: normalizeNonEmpty(
+      graph?.latest_evidence_summary
+        ? normalizeDisplayChinese(graph.latest_evidence_summary)
+        : undefined,
+    ),
     nodes,
     synthesis,
     hasAnyState: Boolean(graph || synthesis),

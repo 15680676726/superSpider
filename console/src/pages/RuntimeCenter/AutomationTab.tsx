@@ -757,7 +757,7 @@ export default function AutomationTab({
         ),
       },
       {
-        title: "Host Binding",
+        title: "宿主绑定",
         key: "hostBinding",
         width: 320,
         render: (_, record) => {

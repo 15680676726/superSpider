@@ -69,7 +69,7 @@ function resolveEvidenceLabel(record: Record<string, unknown>): string {
     stringValue(record.headline) ||
     stringValue(record.evidence_id) ||
     stringValue(record.id) ||
-    "Evidence record"
+    "证据记录"
   );
 }
 
@@ -222,39 +222,39 @@ export default function IndustryRuntimeCockpitPanel({
   const runtimeChainNodes: RuntimeChainNode[] = [
     {
       key: "carrier",
-      label: "Carrier",
+      label: "载体",
       value: detail.execution_core_identity?.role_name
         ? normalizeSpiderMeshBrand(detail.execution_core_identity.role_name)
-        : "Execution core",
+        : "执行中枢",
       note: detail.execution_core_identity?.mission || null,
       status: detail.status,
     },
     {
       key: "strategy",
-      label: "Strategy",
+      label: "策略",
       value:
         detail.strategy_memory?.north_star ||
         detail.strategy_memory?.summary ||
-        "No strategy memory yet.",
+        "暂无策略记忆。",
       note: presentList(detail.strategy_memory?.current_focuses as string[] | undefined),
       status: String(detail.strategy_memory?.status || detail.status),
     },
     {
       key: "lane",
-      label: "Lane",
-      value: `${lanes.length} lanes`,
+      label: "泳道",
+      value: `${lanes.length} 条`,
       note: lanes[0]?.title || null,
       status: detail.status,
     },
     {
       key: "backlog",
-      label: "Backlog",
-      value: `${detail.backlog.length} live`,
+      label: "待办",
+      value: `${detail.backlog.length} 项`,
       note: focusedBacklog?.title || detail.backlog[0]?.title || null,
       status: focusedBacklog?.status || detail.backlog[0]?.status || detail.status,
       actionLabel:
         focusedBacklog?.backlog_item_id || detail.backlog[0]?.backlog_item_id
-          ? "Focus backlog"
+          ? "聚焦待办"
           : null,
       onAction:
         focusedBacklog?.backlog_item_id
@@ -265,22 +265,22 @@ export default function IndustryRuntimeCockpitPanel({
     },
     {
       key: "cycle",
-      label: "Cycle",
+      label: "周期",
       value: detail.current_cycle
         ? detail.current_cycle.title || detail.current_cycle.cycle_id
-        : "No active cycle",
+        : "暂无活动周期",
       note: detail.current_cycle?.summary || null,
       status: detail.current_cycle?.status || detail.status,
     },
     {
       key: "assignment",
-      label: "Assignment",
-      value: `${runtimeSignalCounts.assignment} live`,
+      label: "派工",
+      value: `${runtimeSignalCounts.assignment} 项`,
       note: focusedAssignment?.title || detail.assignments[0]?.title || null,
       status: focusedAssignment?.status || detail.assignments[0]?.status || detail.status,
       actionLabel:
         focusedAssignment?.assignment_id || detail.assignments[0]?.assignment_id
-          ? "Focus assignment"
+          ? "聚焦派工"
           : null,
       onAction:
         focusedAssignment?.assignment_id
@@ -291,43 +291,43 @@ export default function IndustryRuntimeCockpitPanel({
     },
     {
       key: "report",
-      label: "Report",
-      value: `${runtimeSignalCounts.report} live`,
+      label: "汇报",
+      value: `${runtimeSignalCounts.report} 项`,
       note:
         followupReports[0]?.headline ||
         detail.agent_reports[0]?.headline ||
         detail.agent_reports[0]?.report_id ||
         null,
       status: followupReports[0]?.status || detail.agent_reports[0]?.status || detail.status,
-      actionLabel: detail.agent_reports[0] ? "Open report chat" : null,
+      actionLabel: detail.agent_reports[0] ? "打开汇报对话" : null,
       onAction: detail.agent_reports[0] ? () => onOpenAgentReportChat(detail.agent_reports[0]) : null,
     },
     {
       key: "environment",
-      label: "Environment",
-      value: environmentVisibility.environment || "Not exposed",
+      label: "环境",
+      value: environmentVisibility.environment || "未暴露",
       note: environmentVisibility.hostTwinSummary || null,
       status: detail.status,
     },
     {
       key: "evidence",
-      label: "Evidence",
-      value: `${runtimeSignalCounts.evidence} records`,
+      label: "证据",
+      value: `${runtimeSignalCounts.evidence} 条`,
       note: detail.execution?.latest_evidence_summary || null,
       status: detail.status,
     },
     {
       key: "decision",
-      label: "Decision",
-      value: `${runtimeSignalCounts.decision} records`,
-      note: runtimeSignalCounts.decision > 0 ? "Awaiting governance consumption." : null,
+      label: "决策",
+      value: `${runtimeSignalCounts.decision} 条`,
+      note: runtimeSignalCounts.decision > 0 ? "等待治理链消费。" : null,
       status: runtimeSignalCounts.decision > 0 ? "guarded" : detail.status,
     },
     {
       key: "patch",
-      label: "Patch",
-      value: `${runtimeSignalCounts.patch} records`,
-      note: runtimeSignalCounts.patch > 0 ? "Pending learning patch review." : null,
+      label: "补丁",
+      value: `${runtimeSignalCounts.patch} 条`,
+      note: runtimeSignalCounts.patch > 0 ? "等待学习补丁审查。" : null,
       status: runtimeSignalCounts.patch > 0 ? "guarded" : detail.status,
     },
   ];
@@ -336,15 +336,15 @@ export default function IndustryRuntimeCockpitPanel({
     focusSelection?.summary ||
     focusSelection?.title ||
     (focusedAssignment
-      ? `Assignment: ${focusedAssignment.title || focusedAssignment.assignment_id}`
+      ? `派工：${focusedAssignment.title || focusedAssignment.assignment_id}`
       : null) ||
-    (focusedBacklog ? `Backlog: ${focusedBacklog.title || focusedBacklog.backlog_item_id}` : null) ||
+    (focusedBacklog ? `待办：${focusedBacklog.title || focusedBacklog.backlog_item_id}` : null) ||
     (followupReports[0]
-      ? `Follow-up: ${followupReports[0].headline || followupReports[0].report_id}`
+      ? `跟进：${followupReports[0].headline || followupReports[0].report_id}`
       : null) ||
     detail.execution?.current_focus ||
     detail.main_chain?.current_focus ||
-    "No focused subview yet.";
+    "当前还没有聚焦子视图。";
 
   const renderMediaAnalysisList = useCallback(
     (
@@ -440,17 +440,17 @@ export default function IndustryRuntimeCockpitPanel({
               size="small"
               column={2}
               items={[
-                { key: "evidence", label: "Evidence", children: String(snapshot.evidence_count) },
-                { key: "decision", label: "Decision", children: String(snapshot.decision_count) },
-                { key: "proposal", label: "Proposal", children: String(snapshot.proposal_count) },
-                { key: "patch", label: "Patch", children: String(snapshot.patch_count) },
-                { key: "applied", label: "Applied", children: String(snapshot.applied_patch_count) },
-                { key: "growth", label: "Growth", children: String(snapshot.growth_count) },
+                { key: "evidence", label: "证据", children: String(snapshot.evidence_count) },
+                { key: "decision", label: "决策", children: String(snapshot.decision_count) },
+                { key: "proposal", label: "提案", children: String(snapshot.proposal_count) },
+                { key: "patch", label: "补丁", children: String(snapshot.patch_count) },
+                { key: "applied", label: "已应用", children: String(snapshot.applied_patch_count) },
+                { key: "growth", label: "成长", children: String(snapshot.growth_count) },
                 { key: "highlights", label: "Highlights", children: presentList(snapshot.highlights) },
               ]}
             />
             {snapshot.recent_evidence.length ? (
-              <Card size="small" title={`Recent Evidence (${snapshot.recent_evidence.length})`}>
+              <Card size="small" title={`最近证据（${snapshot.recent_evidence.length}）`}>
                 <Space direction="vertical" size={6} style={{ width: "100%" }}>
                   {snapshot.recent_evidence.slice(0, 5).map((record, index) => {
                     const rec = isRecord(record) ? record : {};
@@ -463,7 +463,7 @@ export default function IndustryRuntimeCockpitPanel({
                 </Space>
               </Card>
             ) : (
-              <Empty description="No recent evidence captured yet." style={{ margin: "4px 0" }} />
+              <Empty description="当前还没有采集到最近证据。" style={{ margin: "4px 0" }} />
             )}
           </Space>
         </Card>
@@ -486,7 +486,7 @@ export default function IndustryRuntimeCockpitPanel({
                 letterSpacing: "0.08em",
               }}
             >
-              Runtime Cockpit
+              运行驾驶舱
             </Text>
             <Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
               把 carrier / strategy / lane / cycle / assignment / report / evidence / decision / patch 放到同一条运行面上。
@@ -499,59 +499,59 @@ export default function IndustryRuntimeCockpitPanel({
             items={[
               {
                 key: "carrier",
-                label: "Carrier",
+                label: "载体",
                 children: detail.execution_core_identity?.role_name
                   ? normalizeSpiderMeshBrand(detail.execution_core_identity.role_name)
-                  : "Execution core",
+                  : "执行中枢",
               },
               {
                 key: "strategy",
-                label: "Strategy",
+                label: "策略",
                 children:
                   detail.strategy_memory?.north_star ||
                   detail.strategy_memory?.summary ||
-                  "No strategy memory yet.",
+                  "暂无策略记忆。",
               },
               {
                 key: "lane",
-                label: "Lane",
-                children: `${lanes.length} lanes`,
+                label: "泳道",
+                children: `${lanes.length} 条`,
               },
               {
                 key: "cycle",
-                label: "Cycle",
+                label: "周期",
                 children: detail.current_cycle
                   ? `${detail.current_cycle.title || detail.current_cycle.cycle_id} · ${presentIndustryRuntimeStatus(detail.current_cycle.status)}`
-                  : "No active cycle",
+                  : "暂无活动周期",
               },
               {
                 key: "assignment",
-                label: "Assignment",
-                children: `${runtimeSignalCounts.assignment} live`,
+                label: "派工",
+                children: `${runtimeSignalCounts.assignment} 项`,
               },
               {
                 key: "report",
-                label: "Report",
-                children: `${runtimeSignalCounts.report} live`,
+                label: "汇报",
+                children: `${runtimeSignalCounts.report} 项`,
               },
               {
                 key: "evidence",
-                label: "Evidence",
-                children: `${runtimeSignalCounts.evidence} records`,
+                label: "证据",
+                children: `${runtimeSignalCounts.evidence} 条`,
               },
               {
                 key: "decision",
-                label: "Decision",
-                children: `${runtimeSignalCounts.decision} records`,
+                label: "决策",
+                children: `${runtimeSignalCounts.decision} 条`,
               },
               {
                 key: "patch",
-                label: "Patch",
-                children: `${runtimeSignalCounts.patch} records`,
+                label: "补丁",
+                children: `${runtimeSignalCounts.patch} 条`,
               },
               {
                 key: "runtime-focus",
-                label: "Runtime Focus",
+                label: "运行焦点",
                 children: runtimeFocusSummary,
               },
             ]}
@@ -559,7 +559,7 @@ export default function IndustryRuntimeCockpitPanel({
         </Space>
       </Card>
 
-      <Card className="baize-card" size="small" title="Unified Runtime Chain">
+      <Card className="baize-card" size="small" title="统一运行链">
         <Space direction="vertical" size={8} style={{ width: "100%" }}>
           {runtimeChainNodes.map((node) => (
             <Card
@@ -601,34 +601,34 @@ export default function IndustryRuntimeCockpitPanel({
           type="info"
           message={
             focusSelection.selection_kind === "assignment"
-              ? "Focused Assignment"
-              : "Focused Backlog"
+              ? "已聚焦派工"
+              : "已聚焦待办"
           }
           description={[
-            focusSelection.summary || focusSelection.title || "Runtime detail is scoped to a selected subview.",
+            focusSelection.summary || focusSelection.title || "运行详情当前已收束到选中的子视图。",
             focusSelection.status
-              ? `Status ${presentIndustryRuntimeStatus(focusSelection.status)}`
+              ? `状态 ${presentIndustryRuntimeStatus(focusSelection.status)}`
               : null,
           ]
             .filter(Boolean)
             .join(" | ")}
           action={
             <Button size="small" onClick={() => onClearRuntimeFocus()}>
-              Show full surface
+              查看完整面板
             </Button>
           }
         />
       ) : null}
 
-      <Card className="baize-card" size="small" title="Runtime Focus">
+      <Card className="baize-card" size="small" title="运行焦点">
         <Space direction="vertical" size={12} style={{ width: "100%" }}>
           {focusedAssignment || focusedBacklog || followupReports.length ? (
-            <Card size="small" title="Focus Surfaces" style={runtimeSurfaceCardStyle(true)}>
+            <Card size="small" title="聚焦视图" style={runtimeSurfaceCardStyle(true)}>
               <Space direction="vertical" size={10} style={{ width: "100%" }}>
                 {followupReports.length ? (
                   <Card
                     size="small"
-                    title={`Follow-up (${followupReports.length})`}
+                    title={`跟进（${followupReports.length}）`}
                     style={{
                       borderRadius: 12,
                       border: "1px solid rgba(250,173,20,0.55)",
@@ -640,7 +640,7 @@ export default function IndustryRuntimeCockpitPanel({
                         type="primary"
                         onClick={() => onOpenAgentReportChat(followupReports[0])}
                       >
-                        Open follow-up chat
+                        打开跟进对话
                       </Button>
                     }
                   >
@@ -649,7 +649,7 @@ export default function IndustryRuntimeCockpitPanel({
                         <Text strong style={{ color: "var(--baize-text-main)" }}>
                           {followupReports[0].headline || followupReports[0].report_id}
                         </Text>
-                        <Tag color="orange">Follow-up</Tag>
+                        <Tag color="orange">待跟进</Tag>
                         {followupReports[0].followup_reason ? (
                           <Tag>{followupReports[0].followup_reason}</Tag>
                         ) : null}
@@ -661,7 +661,7 @@ export default function IndustryRuntimeCockpitPanel({
                         {followupReports[0].summary ||
                           followupReports[0].recommendation ||
                           followupReports[0].findings[0] ||
-                          "Follow-up report recorded."}
+                          "已记录跟进汇报。"}
                       </Text>
                       <Space wrap>
                         {followupReports[0].assignment_id ? (
@@ -669,10 +669,10 @@ export default function IndustryRuntimeCockpitPanel({
                             size="small"
                             onClick={() => onSelectAssignmentFocus(followupReports[0].assignment_id!)}
                           >
-                            Focus linked assignment
+                            聚焦关联派工
                           </Button>
                         ) : null}
-                        <Tag>{`Evidence ${followupReports[0].evidence_ids.length}`}</Tag>
+                        <Tag>{`证据 ${followupReports[0].evidence_ids.length}`}</Tag>
                       </Space>
                     </Space>
                   </Card>
@@ -681,7 +681,7 @@ export default function IndustryRuntimeCockpitPanel({
                 {focusedBacklog ? (
                   <Card
                     size="small"
-                    title="Focused Backlog"
+                    title="已聚焦待办"
                     style={runtimeSurfaceCardStyle(true)}
                     extra={
                       <Button
@@ -689,7 +689,7 @@ export default function IndustryRuntimeCockpitPanel({
                         type="primary"
                         onClick={() => onSelectBacklogFocus(focusedBacklog.backlog_item_id)}
                       >
-                        Focus backlog
+                        聚焦待办
                       </Button>
                     }
                   >
@@ -710,7 +710,7 @@ export default function IndustryRuntimeCockpitPanel({
                           "No backlog summary captured yet."}
                       </Text>
                       <Space wrap>
-                        <Tag>{`Evidence ${focusedBacklog.evidence_ids.length}`}</Tag>
+                        <Tag>{`证据 ${focusedBacklog.evidence_ids.length}`}</Tag>
                         {focusedBacklog.updated_at ? (
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             {formatTimestamp(focusedBacklog.updated_at, locale)}
@@ -724,7 +724,7 @@ export default function IndustryRuntimeCockpitPanel({
                 {focusedAssignment ? (
                   <Card
                     size="small"
-                    title="Focused Assignment"
+                    title="已聚焦派工"
                     style={runtimeSurfaceCardStyle(true)}
                     extra={
                       <Button
@@ -732,7 +732,7 @@ export default function IndustryRuntimeCockpitPanel({
                         type="primary"
                         onClick={() => onSelectAssignmentFocus(focusedAssignment.assignment_id)}
                       >
-                        Focus assignment
+                        聚焦派工
                       </Button>
                     }
                   >
@@ -752,7 +752,7 @@ export default function IndustryRuntimeCockpitPanel({
                         {focusedAssignment.summary || "No assignment summary captured yet."}
                       </Text>
                       <Space wrap>
-                        <Tag>{`Evidence ${focusedAssignment.evidence_ids.length}`}</Tag>
+                        <Tag>{`证据 ${focusedAssignment.evidence_ids.length}`}</Tag>
                         {focusedAssignment.updated_at ? (
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             {formatTimestamp(focusedAssignment.updated_at, locale)}
@@ -838,7 +838,7 @@ export default function IndustryRuntimeCockpitPanel({
                   }}
                   disabled={!focusSelection.assignment_id}
                 >
-                  Focus assignment
+                  聚焦派工
                 </Button>
               ) : null}
               {focusSelection.selection_kind === "backlog" ? (
@@ -852,7 +852,7 @@ export default function IndustryRuntimeCockpitPanel({
                   }}
                   disabled={!focusSelection.backlog_item_id}
                 >
-                  Focus backlog
+                  聚焦待办
                 </Button>
               ) : null}
             </Space>
@@ -863,10 +863,10 @@ export default function IndustryRuntimeCockpitPanel({
       {environmentVisibility.environment ||
       environmentVisibility.hostTwinSummary ||
       environmentVisibility.constraints.length ? (
-        <Card className="baize-card" size="small" title="Execution Environment">
+        <Card className="baize-card" size="small" title="执行环境">
           <Space direction="vertical" size={10} style={{ width: "100%" }}>
             <Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
-              Environment and host-twin hints are surfaced when the runtime payload already provides them.
+              只有当运行时载荷已经提供环境与宿主孪生线索时，这里才会显式展示。
             </Paragraph>
             <Descriptions
               size="small"
@@ -874,17 +874,17 @@ export default function IndustryRuntimeCockpitPanel({
               items={[
                 {
                   key: "environment",
-                  label: "Environment",
+                  label: "环境",
                   children: environmentVisibility.environment || "-",
                 },
                 {
                   key: "host-twin",
-                  label: "Host Twin",
+                  label: "宿主孪生",
                   children: environmentVisibility.hostTwinSummary || "-",
                 },
                 {
                   key: "constraints",
-                  label: "Constraints",
+                  label: "约束",
                   children: environmentVisibility.constraints.length ? (
                     <Space wrap>
                       {environmentVisibility.constraints.slice(0, 8).map((constraint) => (
@@ -902,7 +902,7 @@ export default function IndustryRuntimeCockpitPanel({
       ) : null}
 
       {detail.execution_core_identity || detail.strategy_memory ? (
-        <Card className="baize-card" size="small" title="Strategy">
+        <Card className="baize-card" size="small" title="策略">
           <Space direction="vertical" size={12} style={{ width: "100%" }}>
             <Space wrap>
               {detail.strategy_memory?.status ? (
@@ -977,14 +977,14 @@ export default function IndustryRuntimeCockpitPanel({
         })}
       </Card>
 
-      <Card className="baize-card" size="small" title="Report Snapshot">
+      <Card className="baize-card" size="small" title="汇报快照">
         <Space direction="vertical" size={12} style={{ width: "100%" }}>
           <Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
-            Evidence-driven snapshots for quick review without opening the full evidence stream.
+            用证据驱动的快照做快速复核，不必每次都打开完整证据流。
           </Paragraph>
           <Space direction="vertical" size={12} style={{ width: "100%" }}>
-            {renderReportSnapshot(detail.reports.daily, "Daily")}
-            {renderReportSnapshot(detail.reports.weekly, "Weekly")}
+            {renderReportSnapshot(detail.reports.daily, "日报")}
+            {renderReportSnapshot(detail.reports.weekly, "周报")}
           </Space>
         </Space>
       </Card>
@@ -992,7 +992,7 @@ export default function IndustryRuntimeCockpitPanel({
       <IndustryPlanningSurface detail={detail} locale={locale} />
 
       {staffingPresentation.hasAnyState ? (
-        <Card className="baize-card" size="small" title="Staffing Closure">
+        <Card className="baize-card" size="small" title="补位闭环">
           <Space direction="vertical" size={10} style={{ width: "100%" }}>
             {staffingPresentation.activeGap ? (
               <Alert
@@ -1012,7 +1012,7 @@ export default function IndustryRuntimeCockpitPanel({
               />
             ) : null}
             {staffingPresentation.pendingProposals.length ? (
-              <Card size="small" title="Pending Proposals">
+              <Card size="small" title="待处理提案">
                 <Space direction="vertical" size={6} style={{ width: "100%" }}>
                   {staffingPresentation.pendingProposals.map((item) => (
                     <Text key={item}>{item}</Text>
@@ -1021,7 +1021,7 @@ export default function IndustryRuntimeCockpitPanel({
               </Card>
             ) : null}
             {staffingPresentation.temporarySeats.length ? (
-              <Card size="small" title="Temporary Seats">
+              <Card size="small" title="临时席位">
                 <Space direction="vertical" size={6} style={{ width: "100%" }}>
                   {staffingPresentation.temporarySeats.map((item) => (
                     <Text key={item}>{item}</Text>
@@ -1030,7 +1030,7 @@ export default function IndustryRuntimeCockpitPanel({
               </Card>
             ) : null}
             {staffingPresentation.researcher ? (
-              <Card size="small" title="Researcher">
+              <Card size="small" title="研究位">
                 <Space direction="vertical" size={6} style={{ width: "100%" }}>
                   <Text strong>{staffingPresentation.researcher.headline}</Text>
                   <Text type="secondary">{staffingPresentation.researcher.detail}</Text>
@@ -1046,9 +1046,9 @@ export default function IndustryRuntimeCockpitPanel({
         </Card>
       ) : null}
 
-      <Card className="baize-card" size="small" title="Backlog">
+      <Card className="baize-card" size="small" title="待办">
         {detail.backlog.length === 0 ? (
-          <Empty description="No backlog is active yet." style={{ margin: "8px 0" }} />
+          <Empty description="当前还没有活动待办。" style={{ margin: "8px 0" }} />
         ) : (
           <List
             size="small"
@@ -1067,7 +1067,7 @@ export default function IndustryRuntimeCockpitPanel({
                         type={selected ? "primary" : "default"}
                         onClick={() => onSelectBacklogFocus(backlogItem.backlog_item_id)}
                       >
-                        {selected ? "Focused" : "Focus backlog"}
+                        {selected ? "已聚焦" : "聚焦待办"}
                       </Button>
                     }
                   >
@@ -1081,16 +1081,16 @@ export default function IndustryRuntimeCockpitPanel({
                         </Tag>
                         <Tag>{`P${backlogItem.priority}`}</Tag>
                         <Tag>{backlogItem.source_kind}</Tag>
-                        {selected ? <Tag color="blue">Selected</Tag> : null}
+                        {selected ? <Tag color="blue">已选中</Tag> : null}
                       </Space>
                       <Text type="secondary">
-                        {backlogItem.summary || backlogItem.source_ref || "No summary captured yet."}
+                        {backlogItem.summary || backlogItem.source_ref || "还没有记录摘要。"}
                       </Text>
                       <Space wrap>
                         {backlogItem.assignment_id ? (
-                          <Tag>{`Assignment ${backlogItem.assignment_id}`}</Tag>
+                          <Tag>{`派工 ${backlogItem.assignment_id}`}</Tag>
                         ) : null}
-                        <Tag>{`Evidence ${backlogItem.evidence_ids.length}`}</Tag>
+                        <Tag>{`证据 ${backlogItem.evidence_ids.length}`}</Tag>
                         {backlogItem.updated_at ? (
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             {formatTimestamp(backlogItem.updated_at, locale)}
@@ -1106,9 +1106,9 @@ export default function IndustryRuntimeCockpitPanel({
         )}
       </Card>
 
-      <Card className="baize-card" size="small" title="Assignments">
+      <Card className="baize-card" size="small" title="派工">
         {detail.assignments.length === 0 ? (
-          <Empty description="No live assignments yet." style={{ margin: "8px 0" }} />
+          <Empty description="当前还没有活动派工。" style={{ margin: "8px 0" }} />
         ) : (
           <List
             size="small"
@@ -1127,7 +1127,7 @@ export default function IndustryRuntimeCockpitPanel({
                         type={selected ? "primary" : "default"}
                         onClick={() => onSelectAssignmentFocus(assignment.assignment_id)}
                       >
-                        {selected ? "Focused" : "Focus assignment"}
+                        {selected ? "已聚焦" : "聚焦派工"}
                       </Button>
                     }
                   >
@@ -1142,17 +1142,17 @@ export default function IndustryRuntimeCockpitPanel({
                         {assignment.report_back_mode ? (
                           <Tag>{assignment.report_back_mode}</Tag>
                         ) : null}
-                        {selected ? <Tag color="blue">Selected</Tag> : null}
+                        {selected ? <Tag color="blue">已选中</Tag> : null}
                       </Space>
                       <Text type="secondary">
-                        {assignment.summary || "No assignment summary captured yet."}
+                        {assignment.summary || "还没有记录派工摘要。"}
                       </Text>
                       <Space wrap>
                         {assignment.backlog_item_id ? (
-                          <Tag>{`Backlog ${assignment.backlog_item_id}`}</Tag>
+                          <Tag>{`待办 ${assignment.backlog_item_id}`}</Tag>
                         ) : null}
-                        {assignment.goal_id ? <Tag>{`Goal ${assignment.goal_id}`}</Tag> : null}
-                        <Tag>{`Evidence ${assignment.evidence_ids.length}`}</Tag>
+                        {assignment.goal_id ? <Tag>{`目标 ${assignment.goal_id}`}</Tag> : null}
+                        <Tag>{`证据 ${assignment.evidence_ids.length}`}</Tag>
                         {assignment.updated_at ? (
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             {formatTimestamp(assignment.updated_at, locale)}
@@ -1168,9 +1168,9 @@ export default function IndustryRuntimeCockpitPanel({
         )}
       </Card>
 
-      <Card className="baize-card" size="small" title="Agent Reports">
+      <Card className="baize-card" size="small" title="智能体汇报">
         {detail.agent_reports.length === 0 ? (
-          <Empty description="No agent reports yet." style={{ margin: "8px 0" }} />
+          <Empty description="当前还没有智能体汇报。" style={{ margin: "8px 0" }} />
         ) : (
           <List
             size="small"
@@ -1182,7 +1182,7 @@ export default function IndustryRuntimeCockpitPanel({
                 report.summary ||
                 report.recommendation ||
                 report.findings[0] ||
-                "No report summary captured yet.";
+                "还没有记录汇报摘要。";
               return (
                 <List.Item style={{ padding: "8px 0" }}>
                   <Card
@@ -1195,7 +1195,7 @@ export default function IndustryRuntimeCockpitPanel({
                             size="small"
                             onClick={() => onSelectAssignmentFocus(report.assignment_id!)}
                           >
-                            Focus linked assignment
+                            聚焦关联派工
                           </Button>
                         ) : null}
                         <Button
@@ -1203,7 +1203,7 @@ export default function IndustryRuntimeCockpitPanel({
                           type="primary"
                           onClick={() => onOpenAgentReportChat(report)}
                         >
-                          Open report chat
+                          打开汇报对话
                         </Button>
                       </Space>
                     }
@@ -1218,15 +1218,15 @@ export default function IndustryRuntimeCockpitPanel({
                         </Tag>
                         <Tag>{report.report_kind}</Tag>
                         {report.result ? <Tag>{report.result}</Tag> : null}
-                        {report.processed ? <Tag color="green">Processed</Tag> : null}
-                        {report.needs_followup ? <Tag color="orange">Follow-up</Tag> : null}
+                        {report.processed ? <Tag color="green">已处理</Tag> : null}
+                        {report.needs_followup ? <Tag color="orange">待跟进</Tag> : null}
                         {workContextId ? <Tag color="blue">{workContextId}</Tag> : null}
                       </Space>
                       <Text type="secondary">{summary}</Text>
                       <Space wrap>
                         {report.followup_reason ? <Tag>{report.followup_reason}</Tag> : null}
-                        <Tag>{`Findings ${report.findings.length}`}</Tag>
-                        <Tag>{`Evidence ${report.evidence_ids.length}`}</Tag>
+                        <Tag>{`发现 ${report.findings.length}`}</Tag>
+                        <Tag>{`证据 ${report.evidence_ids.length}`}</Tag>
                         {report.updated_at ? (
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             {formatTimestamp(report.updated_at, locale)}

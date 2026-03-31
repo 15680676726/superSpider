@@ -169,21 +169,21 @@ function renderHostSummaryLines(
   if (environmentId) {
     items.push(
       <Text key="environment" type="secondary">
-        Environment: {environmentId}
+        环境：{environmentId}
       </Text>,
     );
   }
   if (sessionMountId) {
     items.push(
       <Text key="session" type="secondary">
-        Session: {sessionMountId}
+        会话：{sessionMountId}
       </Text>,
     );
   }
   if (hostRequirement && Object.keys(hostRequirement).length > 0) {
     items.push(
       <Text key="requirement" type="secondary">
-        Requirement: {summarizeHostRequirement(hostRequirement)}
+        要求：{summarizeHostRequirement(hostRequirement)}
       </Text>,
     );
   }
@@ -191,7 +191,7 @@ function renderHostSummaryLines(
   if (schedulerAction !== "-") {
     items.push(
       <Text key="snapshot" type="secondary">
-        Host snapshot: {schedulerAction}
+        宿主快照：{schedulerAction}
       </Text>,
     );
   }
@@ -207,11 +207,11 @@ function describeBindingContext(
       detail.binding.industry_instance_id
     : null;
   const parts = [
-    industryLabel ? `Industry: ${industryLabel}` : null,
-    detail.binding.owner_scope ? `Scope: ${detail.binding.owner_scope}` : null,
-    detail.binding.owner_agent_id ? `Owner: ${detail.binding.owner_agent_id}` : null,
+    industryLabel ? `行业：${industryLabel}` : null,
+    detail.binding.owner_scope ? `范围：${detail.binding.owner_scope}` : null,
+    detail.binding.owner_agent_id ? `负责人：${detail.binding.owner_agent_id}` : null,
   ].filter((item): item is string => Boolean(item));
-  return parts.join(" | ") || "Unscoped";
+  return parts.join(" | ") || "未设范围";
 }
 
 export default function FixedSopPanel({
@@ -378,7 +378,7 @@ export default function FixedSopPanel({
     setActionKey("create");
     try {
       await api.createFixedSopBinding(payload);
-      message.success("Binding created");
+      message.success("绑定已创建");
       setCreateOpen(false);
       createForm.resetFields();
       await loadPanel();
@@ -406,7 +406,7 @@ export default function FixedSopPanel({
           source: "runtime-center",
         },
       });
-      message.success(localizeRuntimeText(result.summary || "Run finished"));
+      message.success(localizeRuntimeText(result.summary || "运行完成"));
       await loadPanel();
       await onRuntimeChanged?.();
     } catch (runError) {
@@ -443,7 +443,7 @@ export default function FixedSopPanel({
 
   const bindingColumns: ColumnsType<FixedSopBindingDetail> = [
     {
-      title: "Binding",
+      title: "绑定",
       key: "binding",
       render: (_, detail) => (
         <Space direction="vertical" size={2}>
@@ -453,7 +453,7 @@ export default function FixedSopPanel({
       ),
     },
     {
-      title: "Template",
+      title: "模板",
       key: "template",
       render: (_, detail) => (
         <Space direction="vertical" size={2}>
@@ -463,7 +463,7 @@ export default function FixedSopPanel({
       ),
     },
     {
-      title: "Status",
+      title: "状态",
       key: "status",
       render: (_, detail) => (
         <Space wrap size={8}>
@@ -477,7 +477,7 @@ export default function FixedSopPanel({
       ),
     },
     {
-      title: "Latest Run",
+      title: "最近运行",
       key: "latest-run",
       render: (_, detail) => {
         const runId = detail.binding.last_run_id || undefined;
@@ -499,13 +499,13 @@ export default function FixedSopPanel({
                 <Tag color={runtimeStatusColor(run.run.status)}>
                   {formatRuntimeStatus(run.run.status)}
                 </Tag>
-                <Text type="secondary">Evidence: {run.run.evidence_ids.length}</Text>
+                <Text type="secondary">证据：{run.run.evidence_ids.length}</Text>
                 {hostSummaryLines}
               </>
             ) : (
               <>
                 <Text type="secondary">
-                  Verified: {formatTimestamp(detail.binding.last_verified_at)}
+                  最近校验：{formatTimestamp(detail.binding.last_verified_at)}
                 </Text>
                 {hostSummaryLines}
               </>
@@ -515,7 +515,7 @@ export default function FixedSopPanel({
       },
     },
     {
-      title: "Actions",
+      title: "操作",
       key: "actions",
       render: (_, detail) => {
         const detailRoute =
@@ -532,7 +532,7 @@ export default function FixedSopPanel({
                 void openDetail(detailRoute, detail.binding.binding_name);
               }}
             >
-              Detail
+              详情
             </Button>
             <Button
               size="small"
@@ -541,7 +541,7 @@ export default function FixedSopPanel({
                 void handleDoctor(detail);
               }}
             >
-              Doctor
+              诊断
             </Button>
             <Button
               size="small"
@@ -551,16 +551,16 @@ export default function FixedSopPanel({
                 void handleRunBinding(detail);
               }}
             >
-              Run
+              运行
             </Button>
             {runRoute ? (
               <Button
                 size="small"
                 onClick={() => {
-                  void openDetail(runRoute, `Run ${detail.binding.last_run_id}`);
+                  void openDetail(runRoute, `运行 ${detail.binding.last_run_id}`);
                 }}
               >
-                Latest run
+                查看最近运行
               </Button>
             ) : null}
           </Space>
@@ -573,7 +573,7 @@ export default function FixedSopPanel({
     <>
       <Card
         className={styles.card}
-        title={<span className={styles.cardTitle}>Fixed SOP</span>}
+        title={<span className={styles.cardTitle}>固定 SOP</span>}
         extra={
           <Space>
             <Button
@@ -582,10 +582,10 @@ export default function FixedSopPanel({
                 void handleRefresh();
               }}
             >
-              Refresh
+              刷新
             </Button>
             <Button type="primary" onClick={handleCreateOpen}>
-              New binding
+              新建绑定
             </Button>
           </Space>
         }
@@ -594,7 +594,7 @@ export default function FixedSopPanel({
           <Alert
             showIcon
             type="info"
-            message={`Current focus scope: ${focusScope}`}
+            message={`当前焦点范围：${focusScope}`}
             style={{ marginBottom: 16 }}
           />
         ) : null}
@@ -602,7 +602,7 @@ export default function FixedSopPanel({
           <Alert
             showIcon
             type="error"
-            message="Failed to load fixed SOP data"
+            message="加载固定 SOP 数据失败"
             description={error}
             style={{ marginBottom: 16 }}
           />
@@ -611,11 +611,11 @@ export default function FixedSopPanel({
           <Col xs={24} xl={9}>
             <Card
               type="inner"
-              title="Builtin templates"
+              title="内置模板"
               loading={loading && templateCatalog.length === 0}
             >
               {templateCatalog.length === 0 ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No templates" />
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无模板" />
               ) : (
                 <Space direction="vertical" size={12} style={{ width: "100%" }}>
                   {templateCatalog.map((item) => (
@@ -644,7 +644,7 @@ export default function FixedSopPanel({
                           <Paragraph style={{ marginBottom: 4, marginTop: 8 }}>
                             {item.template.summary}
                           </Paragraph>
-                          <Text type="secondary">Bindings: {item.binding_count}</Text>
+                          <Text type="secondary">绑定数：{item.binding_count}</Text>
                         </div>
                         <Button
                           size="small"
@@ -658,7 +658,7 @@ export default function FixedSopPanel({
                             );
                           }}
                         >
-                          Detail
+                          详情
                         </Button>
                       </Space>
                     </div>
@@ -668,7 +668,7 @@ export default function FixedSopPanel({
             </Card>
           </Col>
           <Col xs={24} xl={15}>
-            <Card type="inner" title="Bindings" loading={loading && bindings.length === 0}>
+            <Card type="inner" title="绑定列表" loading={loading && bindings.length === 0}>
               <Table
                 rowKey={(detail) => detail.binding.binding_id}
                 columns={bindingColumns}
@@ -676,7 +676,7 @@ export default function FixedSopPanel({
                 pagination={false}
                 locale={{
                   emptyText: (
-                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No bindings" />
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无绑定" />
                   ),
                 }}
                 scroll={{ x: 920 }}
@@ -689,10 +689,10 @@ export default function FixedSopPanel({
       <Modal
         destroyOnHidden
         open={doctorBindingId !== null}
-        title="Doctor report"
+        title="诊断报告"
         footer={[
           <Button key="close" onClick={() => setDoctorBindingId(null)}>
-            Close
+            关闭
           </Button>,
         ]}
         onCancel={() => setDoctorBindingId(null)}
@@ -702,10 +702,10 @@ export default function FixedSopPanel({
             <Alert
               showIcon
               type={doctorReport.status === "blocked" ? "error" : "info"}
-              message={doctorReport.summary || "Doctor completed"}
+              message={doctorReport.summary || "诊断已完成"}
               description={
                 getHostBlockerReason(doctorReport.host_preflight) ? (
-                  <span>Blocker: {getHostBlockerReason(doctorReport.host_preflight)}</span>
+                  <span>阻塞项：{getHostBlockerReason(doctorReport.host_preflight)}</span>
                 ) : undefined
               }
             />
@@ -718,12 +718,12 @@ export default function FixedSopPanel({
               )}
               {getHostSchedulerAction(doctorReport.host_preflight) !== "-" ? (
                 <Text type="secondary">
-                  Scheduler action: {getHostSchedulerAction(doctorReport.host_preflight)}
+                  调度动作：{getHostSchedulerAction(doctorReport.host_preflight)}
                 </Text>
               ) : null}
               {getHostBlockerReason(doctorReport.host_preflight) ? (
                 <Text type="secondary">
-                  Blocker: {getHostBlockerReason(doctorReport.host_preflight)}
+                  阻塞项：{getHostBlockerReason(doctorReport.host_preflight)}
                 </Text>
               ) : null}
             </Space>
@@ -734,39 +734,39 @@ export default function FixedSopPanel({
               items={[
                 {
                   key: "binding",
-                  label: "Binding",
+                  label: "绑定",
                   children: doctorTarget.binding.binding_name,
                 },
                 {
                   key: "environment",
-                  label: "Environment",
+                  label: "环境",
                   children: doctorReport.environment_id || "-",
                 },
                 {
                   key: "session",
-                  label: "Session",
+                  label: "会话",
                   children: doctorReport.session_mount_id || "-",
                 },
                 {
                   key: "requirement",
-                  label: "Requirement",
+                  label: "要求",
                   children: summarizeHostRequirement(doctorReport.host_requirement),
                 },
                 {
                   key: "scheduler-action",
-                  label: "Scheduler action",
+                  label: "调度动作",
                   children: getHostSchedulerAction(doctorReport.host_preflight),
                 },
                 {
                   key: "continuity",
-                  label: "Continuity",
+                  label: "连续性",
                   children: getHostContinuityStatus(doctorReport.host_preflight) || "-",
                 },
               ]}
             />
             {summarizeHostRequirementDetails(doctorReport.host_requirement).length > 0 ? (
               <Text type="secondary">
-                Requirement details:{" "}
+                要求详情：
                 {summarizeHostRequirementDetails(doctorReport.host_requirement).join(" / ")}
               </Text>
             ) : null}
@@ -789,16 +789,16 @@ export default function FixedSopPanel({
             </Space>
           </Space>
         ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No doctor report" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无诊断报告" />
         )}
       </Modal>
 
       <Modal
         destroyOnHidden
         open={createOpen}
-        title="Create fixed SOP binding"
-        okText="Create"
-        cancelText="Cancel"
+        title="创建固定 SOP 绑定"
+        okText="创建"
+        cancelText="取消"
         confirmLoading={actionKey === "create"}
         onCancel={() => setCreateOpen(false)}
         onOk={() => {
@@ -808,8 +808,8 @@ export default function FixedSopPanel({
         <Form form={createForm} layout="vertical">
           <Form.Item
             name="template_id"
-            label="Template"
-            rules={[{ required: true, message: "Select a fixed SOP template" }]}
+            label="模板"
+            rules={[{ required: true, message: "请选择固定 SOP 模板" }]}
           >
             <Select
               options={templateCatalog.map((item) => ({
@@ -818,13 +818,13 @@ export default function FixedSopPanel({
               }))}
             />
           </Form.Item>
-          <Form.Item name="binding_name" label="Binding name">
-            <Input placeholder="Retail follow-up" />
+          <Form.Item name="binding_name" label="绑定名称">
+            <Input placeholder="零售跟进" />
           </Form.Item>
-          <Form.Item name="owner_scope" label="Owner scope">
+          <Form.Item name="owner_scope" label="归属范围">
             <Input placeholder="industry-demo" />
           </Form.Item>
-          <Form.Item name="industry_instance_id" label="Industry instance">
+          <Form.Item name="industry_instance_id" label="行业实例">
             <Select
               allowClear
               options={instances.map((item) => ({
@@ -833,10 +833,10 @@ export default function FixedSopPanel({
               }))}
             />
           </Form.Item>
-          <Form.Item name="owner_agent_id" label="Owner agent">
+          <Form.Item name="owner_agent_id" label="负责人智能体">
             <Select allowClear options={ownerAgentOptions} />
           </Form.Item>
-          <Form.Item name="trigger_mode" label="Trigger mode">
+          <Form.Item name="trigger_mode" label="触发模式">
             <Select
               options={[
                 { label: "manual", value: "manual" },
@@ -845,7 +845,7 @@ export default function FixedSopPanel({
               ]}
             />
           </Form.Item>
-          <Form.Item name="risk_baseline" label="Risk baseline">
+          <Form.Item name="risk_baseline" label="风险基线">
             <Select
               options={[
                 { label: "auto", value: "auto" },

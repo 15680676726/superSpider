@@ -43,15 +43,15 @@ describe("RuntimeCenter text", () => {
   });
 
   it("keeps explicit labels for execution-side host surfaces", () => {
-    expect(formatRuntimeSectionLabel("host_twin")).toBe("Host Twin");
+    expect(formatRuntimeSectionLabel("host_twin")).toBe("宿主孪生");
     expect(formatRuntimeSectionLabel("workspace_graph")).toBe("工作区图谱");
   });
 
   it("labels the main-brain cockpit signals explicitly", () => {
-    expect(MAIN_BRAIN_COCKPIT_TEXT.title).toBe("Main-Brain Cockpit");
-    expect(formatMainBrainSignalLabel("carrier")).toBe("Carrier");
-    expect(formatMainBrainSignalLabel("current_cycle")).toBe("Current Cycle");
-    expect(formatMainBrainSignalLabel("agent_reports")).toBe("Agent Reports");
-    expect(formatMainBrainSignalLabel("patches")).toBe("Patches");
+    expect(MAIN_BRAIN_COCKPIT_TEXT.title).toBe("主脑驾驶舱");
+    expect(formatMainBrainSignalLabel("carrier")).toBe("载体");
+    expect(formatMainBrainSignalLabel("current_cycle")).toBe("当前周期");
+    expect(formatMainBrainSignalLabel("agent_reports")).toBe("智能体汇报");
+    expect(formatMainBrainSignalLabel("patches")).toBe("补丁");
   });
 });

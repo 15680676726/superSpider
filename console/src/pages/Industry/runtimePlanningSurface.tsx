@@ -42,11 +42,11 @@ export default function IndustryPlanningSurface({
   const hasCurrentCycle = Boolean(detail.current_cycle);
   const lanes = detail.lanes || [];
   const runtimeSignals = [
-    { label: "Assignments", value: detail.assignments.length },
-    { label: "Reports", value: detail.agent_reports.length },
-    { label: "Evidence", value: detail.evidence.length },
-    { label: "Decisions", value: detail.decisions.length },
-    { label: "Patches", value: detail.patches.length },
+    { label: "派工", value: detail.assignments.length },
+    { label: "汇报", value: detail.agent_reports.length },
+    { label: "证据", value: detail.evidence.length },
+    { label: "决策", value: detail.decisions.length },
+    { label: "补丁", value: detail.patches.length },
   ];
   const synthesis = detail.current_cycle?.synthesis;
   const synthesisFindings = synthesis?.latest_findings || [];
@@ -78,7 +78,7 @@ export default function IndustryPlanningSurface({
             letterSpacing: "0.08em",
           }}
         >
-          Runtime Signals
+          运行信号
         </Text>
         <Space wrap style={{ marginTop: 8 }}>
           {detail.current_cycle ? (

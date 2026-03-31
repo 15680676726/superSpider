@@ -457,8 +457,8 @@ describe("IndustryPage", () => {
 
     render(<IndustryPage />);
 
-    expect(screen.getAllByText("Focused Assignment").length).toBeGreaterThan(0);
-    const cockpitCard = screen.getByText("Runtime Cockpit")
+    expect(screen.getAllByText("已聚焦派工").length).toBeGreaterThan(0);
+    const cockpitCard = screen.getByText("运行驾驶舱")
       .closest(".ant-card") as HTMLElement | null;
     expect(cockpitCard).toBeTruthy();
     expect(
@@ -467,20 +467,20 @@ describe("IndustryPage", () => {
     expect(
       within(cockpitCard as HTMLElement).queryByText("generic-focus"),
     ).toBeNull();
-    expect(screen.getByText("Staffing Closure")).toBeTruthy();
-    expect(screen.getByText("Unified Runtime Chain")).toBeTruthy();
+    expect(screen.getByText("补位闭环")).toBeTruthy();
+    expect(screen.getByText("统一运行链")).toBeTruthy();
     expect(screen.getByText("工作泳道")).toBeTruthy();
     expect(screen.getAllByText("增长获客").length).toBeGreaterThan(0);
     expect(screen.getByText("交付履约")).toBeTruthy();
-    expect(screen.getByText("Pending Proposals")).toBeTruthy();
-    expect(screen.getByText("Temporary Seats")).toBeTruthy();
-    expect(screen.getByText("Researcher")).toBeTruthy();
+    expect(screen.getByText("待处理提案")).toBeTruthy();
+    expect(screen.getByText("临时席位")).toBeTruthy();
+    expect(screen.getByText("研究位")).toBeTruthy();
     expect(screen.getByText("Approve closer staffing")).toBeTruthy();
     expect(screen.getByText("synthesize-before-reassign")).toBeTruthy();
-    expect(screen.getAllByText("Selected").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("已选中").length).toBeGreaterThan(0);
     expect(screen.getAllByText("ctx-report-1").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Show full surface" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看完整面板" }));
     expect(handleClearRuntimeFocus).toHaveBeenCalledTimes(1);
 
     const backlogItemCard = screen.getByText("Backlog 2")
@@ -488,7 +488,7 @@ describe("IndustryPage", () => {
     expect(backlogItemCard).toBeTruthy();
     fireEvent.click(
       within(backlogItemCard as HTMLElement).getByRole("button", {
-        name: "Focus backlog",
+        name: "聚焦待办",
       }),
     );
     expect(handleSelectBacklogFocus).toHaveBeenCalledWith("backlog-2");
@@ -498,17 +498,17 @@ describe("IndustryPage", () => {
     expect(assignmentItemCard).toBeTruthy();
     fireEvent.click(
       within(assignmentItemCard as HTMLElement).getByRole("button", {
-        name: "Focus assignment",
+        name: "聚焦派工",
       }),
     );
     expect(handleSelectAssignmentFocus).toHaveBeenCalledWith("assignment-2");
 
-    const reportsCard = screen.getByText("Agent Reports")
+    const reportsCard = screen.getByText("智能体汇报")
       .closest(".ant-card") as HTMLElement | null;
     expect(reportsCard).toBeTruthy();
     fireEvent.click(
       within(reportsCard as HTMLElement).getByRole("button", {
-        name: "Open report chat",
+        name: "打开汇报对话",
       }),
     );
     expect(handleOpenAgentReportChat).toHaveBeenCalledWith(
@@ -650,22 +650,21 @@ describe("IndustryPage", () => {
 
     render(<IndustryPage />);
 
-    expect(screen.getByText("Runtime Cockpit")).toBeTruthy();
-    expect(screen.getAllByText("Runtime Focus").length).toBeGreaterThan(0);
-    expect(screen.getByText("Unified Runtime Chain")).toBeTruthy();
-    expect(screen.getAllByText("Strategy").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Runtime Signals").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Lane").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Cycle").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Assignment").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Report").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Evidence").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Decision").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Patch").length).toBeGreaterThan(0);
-    expect(screen.getByText("Execution Environment")).toBeTruthy();
+    expect(screen.getByText("运行驾驶舱")).toBeTruthy();
+    expect(screen.getAllByText("运行焦点").length).toBeGreaterThan(0);
+    expect(screen.getByText("统一运行链")).toBeTruthy();
+    expect(screen.getAllByText("策略").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("泳道").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("周期").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("派工").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("汇报").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("证据").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("决策").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("补丁").length).toBeGreaterThan(0);
+    expect(screen.getByText("执行环境")).toBeTruthy();
     expect(screen.getAllByText("Seat policy sticky").length).toBeGreaterThan(0);
     expect(screen.getByText("desktop")).toBeTruthy();
-    expect(screen.getByText("Report Snapshot")).toBeTruthy();
+    expect(screen.getByText("汇报快照")).toBeTruthy();
     expect(screen.getByText("Evidence snapshot entry")).toBeTruthy();
   });
 });

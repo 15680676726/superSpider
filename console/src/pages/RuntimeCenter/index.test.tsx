@@ -228,32 +228,28 @@ describe("RuntimeCenterPage", () => {
 
     render(<RuntimeCenterPage />);
 
-    expect(screen.getByText("Main-Brain Cockpit")).toBeTruthy();
-    expect(screen.getAllByText("Carrier").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Strategy").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Current Cycle").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Agent Reports").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Backlog").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Cycle Deadline").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Focus Count").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Unconsumed Reports").length).toBeGreaterThan(0);
+    expect(screen.getByText("主脑驾驶舱")).toBeTruthy();
+    expect(screen.getAllByText("载体").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("策略").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("当前周期").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("智能体汇报").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("待办").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("周期截止时间").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("焦点数量").length).toBeGreaterThan(0);
     expect(screen.getAllByText("2026-03-31 23:59Z").length).toBeGreaterThan(0);
     expect(screen.getAllByText("9").length).toBeGreaterThan(0);
     expect(screen.getAllByText("6").length).toBeGreaterThan(0);
     expect(screen.getAllByText("5").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("North star: weekly alignment").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Cycle 12").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Workspace bound").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Current Goal")).toBeNull();
+    expect(screen.queryByText("当前目标")).toBeNull();
 
-    fireEvent.click(screen.getByLabelText("Open Current Cycle detail"));
+    fireEvent.click(screen.getByLabelText("打开当前周期详情"));
 
     expect(mockOpenDetail).toHaveBeenCalledWith(
       "/api/runtime-center/industry/industry-1?cycle_id=cycle-12",
       expect.any(String),
     );
 
-    fireEvent.click(screen.getByLabelText("Open Backlog detail"));
+    fireEvent.click(screen.getByLabelText("打开待办详情"));
     expect(mockOpenDetail).toHaveBeenCalledWith(
       "/api/runtime-center/industry/industry-1?backlog_item_id=backlog-1",
       expect.any(String),
@@ -290,7 +286,7 @@ describe("RuntimeCenterPage", () => {
 
     render(<RuntimeCenterPage />);
 
-    expect(screen.getAllByText("Carrier healthy").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Workspace drift detected").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("载体健康").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("检测到工作区漂移").length).toBeGreaterThan(0);
   });
 });

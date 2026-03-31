@@ -147,7 +147,7 @@ function renderMainBrainPlanningSection({
       ) : null}
       {visibleLanes.length > 0 ? (
         <div style={{ marginTop: 10 }}>
-          <div className={styles.detailSectionTitle}>Operating Lanes</div>
+          <div className={styles.detailSectionTitle}>运行泳道</div>
           <Space wrap size={[6, 6]}>
             {visibleLanes.map((lane) => (
               <Tag
@@ -166,7 +166,7 @@ function renderMainBrainPlanningSection({
       ) : null}
       {followupReports.length > 0 ? (
         <div style={{ marginTop: 10 }}>
-          <div className={styles.detailSectionTitle}>Pending Report Follow-ups</div>
+          <div className={styles.detailSectionTitle}>待处理汇报跟进</div>
           <Space direction="vertical" size={4} style={{ width: "100%" }}>
             {followupReports.slice(0, 3).map((report) => (
               <Text key={report.report_id} type="secondary">
@@ -178,7 +178,7 @@ function renderMainBrainPlanningSection({
       ) : null}
       {synthesisFollowups.length > 0 ? (
         <div style={{ marginTop: 10 }}>
-          <div className={styles.detailSectionTitle}>Supervisor Follow-ups</div>
+          <div className={styles.detailSectionTitle}>主管跟进</div>
           {renderSynthesisFollowupList(synthesisFollowups, "planning")}
         </div>
       ) : null}
@@ -206,9 +206,9 @@ function renderMainBrainSynthesisSection({
   synthesisSummary: string;
 }) {
   return (
-    <Card size="small" title="Main-Brain Synthesis" style={{ marginTop: 16 }}>
+    <Card size="small" title="主脑综合" style={{ marginTop: 16 }}>
       <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
-        <Tag>{`Findings ${synthesisFindings.length}`}</Tag>
+        <Tag>{`发现 ${synthesisFindings.length}`}</Tag>
         <Tag color={synthesisConflicts.length > 0 ? "error" : "default"}>
           {`冲突 ${synthesisConflicts.length}`}
         </Tag>
@@ -221,7 +221,7 @@ function renderMainBrainSynthesisSection({
       {synthesisConflicts.length > 0 ? (
         <>
           <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
-            Conflicts
+            冲突
           </div>
           <Space direction="vertical" size={4} style={{ width: "100%" }}>
             {synthesisConflicts.slice(0, 3).map((conflict) => (
@@ -235,7 +235,7 @@ function renderMainBrainSynthesisSection({
       {synthesisFollowups.length > 0 ? (
         <>
           <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
-            Supervisor Follow-ups
+            主管跟进
           </div>
           {renderSynthesisFollowupList(synthesisFollowups, "synthesis")}
         </>
@@ -257,7 +257,7 @@ function renderMainBrainSynthesisSection({
       {recommendedActions.length > 0 ? (
         <>
           <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
-            Recommended Actions
+            建议动作
           </div>
           <Space direction="vertical" size={4} style={{ width: "100%" }}>
             {recommendedActions.slice(0, 3).map((action) => (
@@ -1096,12 +1096,12 @@ export function renderIndustryExecutionFocusSection(
   const controlCoreContract = cycleSynthesis?.control_core_contract || [];
   const synthesisSummary = cycleSynthesis
     ? [
-        `Findings ${synthesisFindings.length}`,
+        `发现 ${synthesisFindings.length}`,
         `冲突 ${synthesisConflicts.length}`,
         `缺口 ${synthesisHoles.length}`,
-        `Actions ${recommendedActions.length}`,
+        `动作 ${recommendedActions.length}`,
       ].join(" / ")
-    : "No cycle synthesis yet.";
+    : "当前还没有周期综合结果。";
 
   const items = [
     {
@@ -1142,16 +1142,16 @@ export function renderIndustryExecutionFocusSection(
       key: "evidence",
       label: "当前证据",
       value: latestEvidence,
-      note: `${evidenceCount} evidence record(s)`,
+      note: `${evidenceCount} 条证据记录`,
       status: evidenceCount > 0 ? "active" : "idle",
       route: latestEvidenceRoute,
       routeTitle: "最新证据",
     },
     {
       key: "team-status",
-      label: "Current Team Status",
+      label: "当前团队状态",
       value: translateRuntimeStatus(payload.status),
-      note: `Loop ${translateRuntimeStatus(loopState)} · Scope ${payload.owner_scope}`,
+      note: `循环 ${translateRuntimeStatus(loopState)} · 范围 ${payload.owner_scope}`,
       status: payload.status,
       route: null,
       routeTitle: payload.label,
@@ -1252,7 +1252,7 @@ export function renderIndustryExecutionFocusSection(
               />
             ) : null}
             {staffingPresentation.pendingProposals.length ? (
-              <Card size="small" title="Pending Proposals">
+              <Card size="small" title="待处理提案">
                 <Space direction="vertical" size={6}>
                   {staffingPresentation.pendingProposals.map((item) => (
                     <Text key={item}>{item}</Text>
@@ -1261,7 +1261,7 @@ export function renderIndustryExecutionFocusSection(
               </Card>
             ) : null}
             {staffingPresentation.temporarySeats.length ? (
-              <Card size="small" title="Temporary Seats">
+              <Card size="small" title="临时席位">
                 <Space direction="vertical" size={6}>
                   {staffingPresentation.temporarySeats.map((item) => (
                     <Text key={item}>{item}</Text>
@@ -1270,7 +1270,7 @@ export function renderIndustryExecutionFocusSection(
               </Card>
             ) : null}
             {staffingPresentation.researcher ? (
-              <Card size="small" title="Researcher">
+              <Card size="small" title="研究位">
                 <Space direction="vertical" size={6}>
                   <Text strong>{staffingPresentation.researcher.headline}</Text>
                   <Text type="secondary">{staffingPresentation.researcher.detail}</Text>
@@ -1547,8 +1547,8 @@ export function renderTaskReviewSection(
               </Button>
             ) : null}
             {reviewRoute ? (
-              <Button size="small" onClick={() => openRoute(reviewRoute, "Execution review")}>
-                Review route
+              <Button size="small" onClick={() => openRoute(reviewRoute, "执行审查")}>
+                查看审查路由
               </Button>
             ) : null}
           </div>
@@ -1557,11 +1557,11 @@ export function renderTaskReviewSection(
 
       <div className={styles.reviewPanels}>
         {renderReviewListCard("摘要", summaryLines)}
-        {renderReviewListCard("Next actions", nextActions)}
-        {renderReviewListCard("Recent failures", recentFailures)}
-        {renderReviewListCard("Effective moves", effectiveActions)}
-        {renderReviewListCard("Avoid repeats", avoidRepeats)}
-        {renderReviewListCard("Risks", risks)}
+        {renderReviewListCard("下一动作", nextActions)}
+        {renderReviewListCard("最近失败", recentFailures)}
+        {renderReviewListCard("有效动作", effectiveActions)}
+        {renderReviewListCard("避免重复", avoidRepeats)}
+        {renderReviewListCard("风险", risks)}
         {renderReviewListCard("证据引用", feedbackEvidenceRefs, true)}
       </div>
     </section>

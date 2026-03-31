@@ -313,15 +313,15 @@ describe("MainBrainCockpitPanel", () => {
       />,
     );
 
-    expect(screen.getByText("Unified Runtime Chain")).toBeInTheDocument();
-    expect(screen.getByText("Review handoff blockers")).toBeInTheDocument();
-    expect(screen.getAllByText("Need supervisor decision").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Runtime Governance").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Recovery").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Automation").length).toBeGreaterThan(0);
-    expect(screen.getByText("Checkpoint evidence")).toBeInTheDocument();
-    expect(screen.getByText("Approve host return")).toBeInTheDocument();
-    expect(screen.getByText("Apply continuity patch")).toBeInTheDocument();
+    expect(screen.getByText("统一运行链")).toBeInTheDocument();
+    expect(screen.getByText("复核交接阻塞项")).toBeInTheDocument();
+    expect(screen.getAllByText("需要主管决策").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("运行治理").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("恢复").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("自动化").length).toBeGreaterThan(0);
+    expect(screen.getByText("检查点证据")).toBeInTheDocument();
+    expect(screen.getByText("批准宿主返回")).toBeInTheDocument();
+    expect(screen.getByText("应用连续性补丁")).toBeInTheDocument();
   });
 
   it("renders report cognition and explicit replan visibility from the dedicated cockpit payload", () => {
@@ -340,7 +340,7 @@ describe("MainBrainCockpitPanel", () => {
       />,
     );
 
-    expect(screen.getAllByText("Report Cognition").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("汇报认知").length).toBeGreaterThan(0);
     expect(
       screen.getByText(
         "Main brain must compare unresolved reports and decide whether to dispatch follow-up work.",
@@ -353,8 +353,8 @@ describe("MainBrainCockpitPanel", () => {
     expect(
       screen.getAllByText("Supervisor review is still missing for the handoff return.").length,
     ).toBeGreaterThan(0);
-    expect(screen.getAllByText("Needs replan").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Needs follow-up").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Unconsumed reports").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("需要重规划").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("待跟进").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("未消费汇报").length).toBeGreaterThan(0);
   });
 });

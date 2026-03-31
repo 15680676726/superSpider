@@ -17,6 +17,7 @@ describe("runtimePresentation", () => {
         section_kind: "execution-core",
         section_id: "s-1",
         title: "Execution Core",
+        summary: "",
         items: [],
       } as IndustryCapabilityRecommendationSection),
     ).toBe("编排能力");
@@ -25,6 +26,7 @@ describe("runtimePresentation", () => {
         section_kind: "system-baseline",
         section_id: "s-2",
         title: "System Baseline",
+        summary: "",
         items: [],
       } as IndustryCapabilityRecommendationSection),
     ).toBe("基础运行");
@@ -33,6 +35,7 @@ describe("runtimePresentation", () => {
         section_kind: "shared",
         section_id: "s-3",
         title: "Shared",
+        summary: "",
         items: [],
       } as IndustryCapabilityRecommendationSection),
     ).toBe("多人共用");
