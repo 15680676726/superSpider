@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Tighten CoPaw's lower execution contract without breaking the current live main chain by introducing an internal execution context, unifying file/shell execution behavior, strengthening evidence/result coupling, and tightening request normalization so complete tasks are more likely to run through.
+**Goal:** Tighten CoPaw's lower execution contract without breaking the current live main chain by introducing an internal execution context, unifying execution outcome/failure semantics, tightening interrupt/cancel/timeout/cleanup behavior, hardening file/shell execution behavior, and strengthening evidence/result coupling so complete tasks are more likely to run through.
 
 **Architecture:** This plan treats the current main chain as alive. `P0` starts under `src/copaw/capabilities/execution.py`, not at the main-brain front door. `/runtime-center/chat/run` stays as the unified ingress and current SSE relay over `turn_executor.stream_request()`. `task_state_machine.py` and `turn_loop.py` are not `P0` requirements; they should only be extracted later if green implementation work proves they remove real complexity. `P0` standardizes and tightens the contracts that already exist in `CapabilityExecutionFacade`, `KernelToolBridge`, and `query_execution_runtime._resolve_execution_task_context(...)`.
 
@@ -17,7 +17,10 @@ This plan covers only:
 - `src/copaw/capabilities/execution.py`
 - `src/copaw/capabilities/execution_context.py`
 - `src/copaw/kernel/tool_bridge.py`
+- `src/copaw/kernel/runtime_outcome.py`
 - file/shell execution through one hardened front-door
+- execution outcome / failure taxonomy hardening
+- interrupt / cancel / timeout / cleanup hardening
 - evidence coupling for file/shell execution
 - execution result contract hardening
 - request normalization hardening
@@ -79,7 +82,11 @@ pip install -e .
 - `src/copaw/kernel/query_execution_runtime.py`
   - Tighten execution-side request normalization by clarifying the existing `_resolve_execution_task_context(...)` path.
 - `src/copaw/kernel/runtime_outcome.py`
-  - Normalize the lower execution result envelope only if existing execution return fields need a shared helper.
+  - Normalize lower execution outcome/failure semantics and shared runtime error classification helpers.
+- `src/copaw/kernel/actor_worker.py`
+  - Align mailbox-worker terminal handling with the unified runtime outcome taxonomy where needed.
+- `src/copaw/kernel/delegation_service.py`
+  - Align delegated child-task terminal handling with the unified runtime outcome taxonomy where needed.
 - `tests/app/test_capabilities_execution.py`
   - Lock file/shell execution to the unified contract.
 - `tests/agents/test_file_tool_evidence.py`
@@ -88,6 +95,8 @@ pip install -e .
   - Lock shell-tool evidence coupling.
 - `tests/kernel/test_query_execution_runtime.py`
   - Verify normalized runtime payloads.
+- `tests/kernel/test_actor_worker.py`
+  - Verify mailbox-worker terminal handling stays aligned.
 - `tests/app/test_operator_runtime_e2e.py`
   - Verify the live route still completes through the hardened path.
 - `TASK_STATUS.md`
@@ -178,7 +187,126 @@ git add tests/capabilities/test_execution_context.py src/copaw/capabilities/exec
 git commit -m "test: add internal execution context contract"
 ```
 
-## Task 2: Tighten the File/Shell Front-Door and Evidence Coupling
+## Task 2: Tighten Execution Outcome / Failure Taxonomy
+
+**Files:**
+- Modify: `src/copaw/kernel/runtime_outcome.py`
+- Modify: `src/copaw/capabilities/execution.py`
+- Test: `tests/app/test_capabilities_execution.py`
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+def test_execution_failure_contract_classifies_cancellation_separately():
+    ...
+    assert result["success"] is False
+    assert result["error_kind"] == "cancelled"
+
+
+def test_execution_failure_contract_classifies_tool_error_as_failed():
+    ...
+    assert result["success"] is False
+    assert result["error_kind"] == "failed"
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run:
+
+```powershell
+python -m pytest tests/app/test_capabilities_execution.py -k "classifies_cancellation or classifies_tool_error" -v
+```
+
+Expected: FAIL because failure taxonomy is not yet explicit enough.
+
+- [ ] **Step 3: Write minimal implementation**
+
+```python
+# runtime_outcome.py
+def classify_runtime_outcome(error: str | None, *, success: bool) -> str:
+    if success:
+        return "completed"
+    if is_cancellation_runtime_error(error):
+        return "cancelled"
+    return "failed"
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run:
+
+```powershell
+python -m pytest tests/app/test_capabilities_execution.py -k "classifies_cancellation or classifies_tool_error" -v
+```
+
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```powershell
+git add src/copaw/kernel/runtime_outcome.py src/copaw/capabilities/execution.py tests/app/test_capabilities_execution.py
+git commit -m "feat: harden execution outcome taxonomy"
+```
+
+## Task 3: Tighten Interrupt / Cancel / Timeout / Cleanup Semantics
+
+**Files:**
+- Modify: `src/copaw/kernel/runtime_outcome.py`
+- Modify: `src/copaw/kernel/actor_worker.py`
+- Modify: `src/copaw/kernel/delegation_service.py`
+- Test: `tests/kernel/test_actor_worker.py`
+- Test: `tests/app/test_capabilities_execution.py`
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+def test_actor_worker_maps_cancelled_result_to_cancelled_mailbox_status():
+    ...
+    assert mailbox_item.status == "cancelled"
+
+
+def test_timeout_result_uses_shared_failure_family():
+    ...
+    assert result["error_kind"] in {"timeout", "failed"}
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run:
+
+```powershell
+python -m pytest tests/kernel/test_actor_worker.py -k cancelled -v
+python -m pytest tests/app/test_capabilities_execution.py -k timeout -v
+```
+
+Expected: FAIL because cancel/timeout/cleanup semantics are not yet fully aligned.
+
+- [ ] **Step 3: Write minimal implementation**
+
+```python
+# actor_worker.py / delegation_service.py
+# Reuse shared runtime_outcome helpers before deciding complete/block/cancel/fail cleanup.
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run:
+
+```powershell
+python -m pytest tests/kernel/test_actor_worker.py -k cancelled -v
+python -m pytest tests/app/test_capabilities_execution.py -k timeout -v
+```
+
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```powershell
+git add src/copaw/kernel/runtime_outcome.py src/copaw/kernel/actor_worker.py src/copaw/kernel/delegation_service.py tests/kernel/test_actor_worker.py tests/app/test_capabilities_execution.py
+git commit -m "feat: align cancel timeout and cleanup semantics"
+```
+
+## Task 4: Tighten the File/Shell Front-Door and Evidence Coupling
 
 **Files:**
 - Modify: `src/copaw/capabilities/execution.py`
@@ -250,7 +378,7 @@ git add src/copaw/capabilities/execution.py src/copaw/kernel/tool_bridge.py test
 git commit -m "feat: harden file and shell execution contract"
 ```
 
-## Task 3: Tighten Evidence and Execution Result Contract
+## Task 5: Tighten Evidence and Execution Result Contract
 
 **Files:**
 - Modify: `src/copaw/capabilities/execution.py`
@@ -315,7 +443,7 @@ git add src/copaw/capabilities/execution.py src/copaw/kernel/runtime_outcome.py 
 git commit -m "feat: normalize execution result contract"
 ```
 
-## Task 4: Tighten Request Normalization Without Rewriting the Front Door
+## Task 6: Tighten Request Normalization Without Rewriting the Front Door
 
 **Files:**
 - Modify: `src/copaw/kernel/query_execution_runtime.py`
@@ -345,7 +473,7 @@ Run:
 
 ```powershell
 python -m pytest tests/kernel/test_query_execution_runtime.py -k normalize -v
-python -m pytest tests/app/test_operator_runtime_e2e.py -k existing_main_chain -v
+python -m pytest tests/app/test_operator_runtime_e2e.py -k sse_main_chain -v
 ```
 
 Expected: FAIL because request normalization is still too implicit or inconsistent with the current execution-context merge path.
@@ -380,7 +508,7 @@ git add src/copaw/kernel/query_execution_runtime.py src/copaw/kernel/turn_execut
 git commit -m "feat: tighten request normalization for execution runtime"
 ```
 
-## Task 5: Run Regression and Update Live Docs
+## Task 7: Run Regression and Update Live Docs
 
 **Files:**
 - Modify: `TASK_STATUS.md`
@@ -392,7 +520,7 @@ git commit -m "feat: tighten request normalization for execution runtime"
 Run:
 
 ```powershell
-python -m pytest tests/capabilities/test_execution_context.py tests/kernel/test_query_execution_runtime.py tests/app/test_capabilities_execution.py tests/agents/test_file_tool_evidence.py tests/agents/test_shell_tool_evidence.py tests/app/test_operator_runtime_e2e.py -v
+python -m pytest tests/capabilities/test_execution_context.py tests/kernel/test_query_execution_runtime.py tests/kernel/test_actor_worker.py tests/app/test_capabilities_execution.py tests/agents/test_file_tool_evidence.py tests/agents/test_shell_tool_evidence.py tests/app/test_operator_runtime_e2e.py -v
 ```
 
 Expected: PASS
@@ -401,6 +529,8 @@ Expected: PASS
 
 ```markdown
 - `P0` now hardens the lower execution contract instead of rebuilding the main chain.
+- execution outcome / failure taxonomy is more uniform.
+- cancel / timeout / cleanup semantics are tighter.
 - file/shell execution is standardized around the existing capability front-door.
 - evidence/result shaping and execution-context normalization are tighter without changing the live vocabulary or route model.
 ```
@@ -418,10 +548,12 @@ git commit -m "docs: record p0 runtime contract hardening"
 
 - file/shell execution runs through one hardened front-door
 - evidence is coupled to that front-door
+- execution outcome / failure taxonomy is more uniform
+- interrupt / cancel / timeout / cleanup semantics are more consistent
 - the existing execution result contract is more uniform
 - the existing execution-context normalization path is more uniform
 - the current live route still works
-- the regression suite in Task 5 is green
+- the regression suite in Task 7 is green
 
 ## Follow-Up Planning Gate
 

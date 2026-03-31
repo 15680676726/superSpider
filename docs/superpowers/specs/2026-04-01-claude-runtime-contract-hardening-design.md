@@ -26,6 +26,8 @@ What is currently weak:
 
 - file/shell execution contract
 - result normalization
+- outcome / failure taxonomy
+- interrupt / cancel / timeout / cleanup semantics
 - evidence coupling
 - request normalization at execution edges
 - lower-layer execution reliability for full-task completion
@@ -81,10 +83,11 @@ So:
 The lower execution contract should be tightened in this order:
 
 1. internal execution context
-2. unified file/shell front-door
-3. evidence coupling
-4. execution result contract
-5. request normalization
+2. execution outcome / failure taxonomy
+3. interrupt / cancel / timeout / cleanup semantics
+4. unified file/shell front-door
+5. evidence coupling
+6. request normalization
 
 Later phases can harden:
 
@@ -106,6 +109,7 @@ What can be borrowed later:
 5. background execution shell
 6. child task / subagent result envelope
 7. stage-aware failure handling
+8. interrupt / cleanup discipline
 
 What should not be copied wholesale:
 
@@ -162,6 +166,29 @@ It should be treated as a typed/clean internal wrapper around context that is cu
 - `CapabilityExecutionFacade.execute_task()`
 - `query_execution_runtime._resolve_execution_task_context(...)`
 - file/shell tool invocation payload shaping
+
+### 1a. Unified execution outcome / failure taxonomy is a first-class `P0` target
+
+CoPaw already has partial pieces of this across:
+
+- `CapabilityExecutionFacade`
+- `KernelToolBridge`
+- `runtime_outcome.py`
+- `ActorWorker`
+- `TaskLifecycleManager`
+- `TaskDelegationService`
+
+The `P0` goal is not to invent a new top-level object model.
+
+The goal is to make the lower-layer execution contract consistently answer:
+
+1. did execution succeed, fail, cancel, block, or wait for confirmation
+2. what summary should downstream layers display
+3. what error class / failure family is this
+4. what evidence should be emitted
+5. what cleanup action should follow
+
+This is one of the highest-value `P0` cuts.
 
 ### 2. `task_state_machine.py` is conditional, not mandatory `P0`
 
@@ -327,11 +354,12 @@ Not in `P0`.
 `P0` is intentionally narrow. It covers only:
 
 1. introduce `CapabilityExecutionContext` as a typed internal execution-layer context over existing lower-layer fields
-2. standardize file/shell front-door behavior around the already-existing `CapabilityExecutionFacade` contract
-3. tighten evidence coupling where the file/shell path still differs between direct evidence append and tool-bridge-mediated evidence
-4. standardize the existing execution result envelope instead of inventing a new route/result schema
-5. tighten request normalization by reusing and clarifying the existing `_resolve_execution_task_context(...)` path
-6. make all of this work without breaking the current live route
+2. standardize execution outcome / failure taxonomy around the already-existing lower runtime pieces
+3. standardize interrupt / cancel / timeout / cleanup semantics where they currently differ across execution paths
+4. standardize file/shell front-door behavior around the already-existing `CapabilityExecutionFacade` contract
+5. tighten evidence coupling where the file/shell path still differs between direct evidence append and tool-bridge-mediated evidence
+6. tighten request normalization by reusing and clarifying the existing `_resolve_execution_task_context(...)` path
+7. make all of this work without breaking the current live route
 
 `P0` explicitly does not include:
 
@@ -381,16 +409,19 @@ Main risks:
 
 1. file/shell execution goes through one hardened front-door
 2. evidence is coupled to that front-door
-3. the existing execution result contract is clearer and more uniform
-4. the existing execution-context normalization path is clearer and more uniform
-5. the current live route still works
-6. complete-task execution becomes materially more reliable without changing upper truth layers
+3. the existing execution outcome / failure taxonomy is clearer and more uniform
+4. interrupt / cancel / timeout / cleanup semantics are more consistent across execution paths
+5. the existing execution-context normalization path is clearer and more uniform
+6. the current live route still works
+7. complete-task execution becomes materially more reliable without changing upper truth layers
 
 ## Immediate Next Step
 
 Write and execute a narrow `P0` plan in this order:
 
 1. `execution_context.py`
-2. file/shell front-door hardening
-3. evidence/result contract hardening
-4. request normalization hardening
+2. outcome / failure taxonomy hardening
+3. interrupt / cancel / timeout / cleanup hardening
+4. file/shell front-door hardening
+5. evidence/result contract hardening
+6. request normalization hardening
