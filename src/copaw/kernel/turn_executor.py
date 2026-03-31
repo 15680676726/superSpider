@@ -87,6 +87,13 @@ _COGNITIVE_PRESSURE_HINTS = (
     "补缺口",
     "重排",
 )
+_SHORT_CHAT_INSPECTION_TOKENS = (
+    "帮我看一下",
+    "帮我看下",
+    "看一下",
+    "看下",
+    "看看",
+)
 
 
 def summarize_stream_message(msg: Any) -> str | None:
@@ -146,6 +153,13 @@ def _looks_like_cognitive_followup(text: str) -> bool:
     if _is_plain_acknowledgement(normalized):
         return True
     return any(token in normalized for token in _COGNITIVE_FOLLOWUP_TOKENS)
+
+
+def _is_short_chat_inspection(text: str) -> bool:
+    normalized = str(text or "").strip().lower().rstrip("。.!！?")
+    if not normalized or len(normalized) > 12:
+        return False
+    return any(token in normalized for token in _SHORT_CHAT_INSPECTION_TOKENS)
 
 
 def _assistant_mentions_cognitive_pressure(msgs: list[Any]) -> bool:
@@ -332,6 +346,8 @@ async def _resolve_auto_chat_mode(
         return "chat"
     has_cognitive_pressure = _request_has_unresolved_cognitive_pressure(request=request)
     if not has_cognitive_pressure and _is_plain_acknowledgement(text):
+        return "chat"
+    if not has_cognitive_pressure and _is_short_chat_inspection(text):
         return "chat"
     try:
         intake_contract = await resolve_request_main_brain_intake_contract(

@@ -534,7 +534,7 @@
   与 `console tsc --noEmit` 验证。
 - 高阶遗留已明显下降；`Chat/index.tsx` 的 runtime derivation、human-assist presentation 与 transport request 组装已继续下沉。当前若再压缩，优先应继续拆 sidebar / media shell，而不是回头堆平行 surface。
 - `2026-03-31` 补充：轻量聊天链回归护栏已锁定（runtime conversations / bootstrap wiring），会持续阻断 runtime conversations 回流超重/重复 chat state，并要求 bootstrap wiring 保持 chat/orchestrate 轻量分链。
-- 仍需持续做性能和交互回归
+- `2026-03-31` 补充：主脑聊天性能/交互这项在当前仓库定义范围内已收口，不再保留开放式尾巴。`turn_executor` 现在对短 inspection 聊天请求也会直接走 chat fast-path，不再无脑触发 main-brain intake classifier；同时 `main_brain_chat_service / turn_executor / runtime conversations / runtime bootstrap split` 与 chat 前台 `runtimeTransport / useRuntimeBinding / ChatRuntimeSidebar / ChatComposerAdapter` 已通过 `python -m pytest tests/kernel/test_main_brain_chat_service.py tests/kernel/test_turn_executor.py tests/app/test_runtime_conversations_api.py tests/app/test_runtime_bootstrap_split.py -q` -> `95 passed`、`npm --prefix console test -- runtimeTransport.test.ts useRuntimeBinding.test.ts ChatRuntimeSidebar.test.tsx ChatComposerAdapter.test.tsx` -> `14 passed` 与 `npm --prefix console run build` 验证。后续如再做聊天层变更，视为新一轮增强，而不是本项未闭环。
 
 ### 4.4 第三优先级：媒体与记忆闭环继续接线
 

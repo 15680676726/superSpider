@@ -1277,10 +1277,16 @@ async def test_kernel_turn_executor_auto_mode_keeps_short_inspection_request_in_
     )
     request.interaction_mode = "auto"
     msgs = [Msg(name="user", role="user", content="帮我看一下")]
+    calls = 0
+
+    async def _counting_resolver(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return None
 
     monkeypatch.setattr(
         "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
-        _async_intake_resolver(None),
+        _counting_resolver,
     )
 
     streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
@@ -1291,6 +1297,7 @@ async def test_kernel_turn_executor_auto_mode_keeps_short_inspection_request_in_
     assert query_execution_service.calls == []
     assert len(main_brain_chat_service.calls) == 1
     assert kernel_dispatcher.submitted == []
+    assert calls == 0
 
 
 @pytest.mark.asyncio
