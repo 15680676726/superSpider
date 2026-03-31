@@ -4,7 +4,7 @@
 
 **Goal:** Tighten CoPaw's lower execution contract without breaking the current live main chain by introducing an internal execution context, a phase-aware state-machine wrapper over existing kernel vocabulary, a unified file/shell front-door with evidence coupling, and finally a thin turn loop attached to `KernelTurnExecutor`.
 
-**Architecture:** This plan assumes the current main chain is alive and should not be rebuilt in `P0`. The work starts under `capabilities/execution.py`, not in the main-brain front door. `P0` is contract hardening: first normalize the lower execution contract, then add a thin `turn_loop.py` over existing components. No `P0` step should invent a second execution vocabulary or rewrite `MainBrainOrchestrator` and `/runtime-center/chat/run`.
+**Architecture:** This plan assumes the current main chain is alive and should not be rebuilt in `P0`. The work starts under `capabilities/execution.py`, not in the main-brain front door. `P0` is contract hardening: first normalize the lower execution contract, then add a thin `turn_loop.py` over existing components. `/runtime-center/chat/run` remains the unified ingress, not a second chat system. No `P0` step should invent a second execution vocabulary or rewrite `MainBrainOrchestrator` and `/runtime-center/chat/run`.
 
 **Tech Stack:** Python 3.11, FastAPI, Pydantic, SQLite, Pytest, existing CoPaw kernel/evidence/runtime services.
 
@@ -31,6 +31,22 @@ This plan does **not** cover:
 - `MainBrainOrchestrator` redesign
 - router/front-door redesign
 - Runtime Center read-surface redesign
+
+## Ingress Constraint
+
+`/runtime-center/chat/run` stays in place during `P0`.
+
+In this plan it is treated only as:
+
+- unified ingress
+- request relay
+- live route to validate that the hardened lower contract still completes
+
+It is not treated as:
+
+- a standalone chat system
+- a second semantic center
+- a redesign target in `P0`
 
 ## Execution Environment
 
@@ -473,5 +489,6 @@ Do not start `P1` from this branch until this plan is green.
 Write separate follow-up plans for:
 
 1. MCP runtime hardening
-2. worker/subagent shell hardening
-3. skill/package formalization
+2. task interpretation and assignment hardening
+3. worker/subagent shell hardening
+4. skill/package formalization

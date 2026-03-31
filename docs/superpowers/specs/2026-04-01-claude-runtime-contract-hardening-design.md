@@ -28,6 +28,36 @@
 - 第二套执行中心
 - 主脑/真相层重建
 
+## Unified Ingress Boundary
+
+CoPaw 需要保留聊天前门，但要明确它的边界。
+
+`/runtime-center/chat/run` 的正确定位是：
+
+- 统一入口
+- transport ingress
+- payload normalization boundary
+- stream relay / request relay surface
+
+它不应被理解为：
+
+- 聊天系统本身
+- 第二条主链
+- 与主脑并列的语义中心
+
+正确形态应为：
+
+`front door -> intake -> main brain classify -> chat or execute branch -> unified runtime contract`
+
+这意味着：
+
+1. `chat/run` 继续存在
+2. 主脑继续判断本轮是聊天还是执行
+3. `KernelTurnExecutor` 继续承担 runtime branch selection
+4. 前门不再各自长出一套聊天逻辑和一套执行逻辑
+
+后续如需继续硬化，正确方向是引入更正式的 operator ingress service，让 `chat/run` 成为该 ingress 的一个 HTTP surface，而不是继续让前门承载更多业务语义。
+
 ## What Must Not Be Replaced
 
 以下内容继续保留为 CoPaw 正式核心：
@@ -49,6 +79,41 @@
 4. 统一 phase/status projection
 5. 更薄、更清晰的 canonical turn loop
 6. 后续再补 MCP runtime、subagent shell、skill/package contract
+
+## Claude Autonomy Extraction Boundary
+
+Claude Code 在“自治执行壳”上有很多成熟做法，这部分值得吸收，但不能整套复制。
+
+可以借的内容：
+
+1. request normalization
+2. single-turn intake discipline
+3. task envelope
+4. worker lifecycle
+5. background execution shell
+6. child task / subagent result envelope
+7. stage-aware failure model
+
+不能整套复制的内容：
+
+1. Claude 的 session-first 中心
+2. Claude 的 task/app-state 产品心智
+3. Claude 顶层的 agent/task/product model
+4. Claude 作为 CoPaw 的新调度中心
+
+CoPaw 的正式上层对象仍然是：
+
+- `BacklogItem`
+- `OperatingCycle`
+- `Assignment`
+- `Task`
+- `AgentReport`
+
+因此后续正确做法是：
+
+- 借 Claude 的 execution shell
+- 不替换 CoPaw 的正式任务与调度对象
+- 把成熟自治能力落成 CoPaw 现有对象体系下的 execution hardening
 
 ## Core Design Decisions
 
@@ -300,9 +365,12 @@ P0 明确不做：
 P0 绿灯后，P1 再做：
 
 1. MCP runtime hardened
-2. 更正式的 execution diagnostics
-3. 更清晰的 turn-loop stage failure surface
-4. 必要时再扩到 `QueryExecutionRuntime`
+2. request normalization hardening
+3. task envelope hardening
+4. assignment execution / worker lifecycle hardening
+5. 更正式的 execution diagnostics
+6. 更清晰的 turn-loop stage failure surface
+7. 必要时再扩到 `QueryExecutionRuntime`
 
 ## P2 Scope
 
@@ -312,6 +380,7 @@ P1 之后，再做：
 2. skill metadata formalization
 3. package binding
 4. sidecar memory
+5. 更强的自治执行策略与降级策略
 
 ## Risks
 
@@ -321,6 +390,7 @@ P1 之后，再做：
 2. 过早切入主脑和前门
 3. 把 donor reference 写成 donor transplant
 4. 把活着的主链当成重建对象
+5. 把 Claude 的自治壳误当成 CoPaw 的上层调度模型
 
 ## Success Standard
 
