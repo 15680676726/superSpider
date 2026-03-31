@@ -15,13 +15,20 @@ import type {
   IndustryInstanceDetail,
   IndustryReportSnapshot,
   IndustryRuntimeAgentReport,
-  IndustryRuntimeAssignment,
-  IndustryRuntimeBacklogItem,
 } from "../../api/modules/industry";
-import type { MediaAnalysisSummary } from "../../api/modules/media";
 import { buildStaffingPresentation } from "../../runtime/staffingGapPresentation";
 import { normalizeSpiderMeshBrand } from "../../utils/brand";
+import {
+  buildIndustryRuntimeFocusSummary,
+  isFocusedAssignment,
+  isFocusedBacklog,
+  resolveEvidenceLabel,
+  resolveExecutionEnvironmentVisibility,
+  resolveReportWorkContextId,
+  runtimeSurfaceCardStyle,
+} from "./industryPagePresentation";
 import IndustryPlanningSurface from "./runtimePlanningSurface";
+import { renderMediaAnalysisList } from "./runtimePresentation";
 import {
   formatIndustryDisplayToken,
   formatTimestamp,
@@ -36,143 +43,6 @@ const { Paragraph, Text } = Typography;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function stringValue(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function summarizeHostTwin(value: unknown): string | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const coordination = isRecord(value.coordination) ? value.coordination : value;
-  return (
-    stringValue(coordination.recommended_scheduler_action) ||
-    stringValue(coordination.selected_seat_ref) ||
-    stringValue(coordination.seat_selection_policy) ||
-    stringValue(coordination.active_app_family_count) ||
-    stringValue(coordination.contention_severity) ||
-    stringValue(coordination.blocked_surface_count) ||
-    null
-  );
-}
-
-function resolveEvidenceLabel(record: Record<string, unknown>): string {
-  return (
-    stringValue(record.summary) ||
-    stringValue(record.title) ||
-    stringValue(record.headline) ||
-    stringValue(record.evidence_id) ||
-    stringValue(record.id) ||
-    "证据记录"
-  );
-}
-
-function resolveExecutionEnvironmentVisibility(detail: IndustryInstanceDetail): {
-  environment: string | null;
-  hostTwinSummary: string | null;
-  constraints: string[];
-} {
-  const anyDetail = detail as unknown as Record<string, unknown>;
-  const identity = (detail.execution_core_identity || null) as unknown as Record<string, unknown> | null;
-
-  const directEnv =
-    anyDetail.execution_environment ||
-    anyDetail.executionEnvironment ||
-    anyDetail.environment ||
-    null;
-  const envRecord = isRecord(directEnv) ? directEnv : null;
-
-  const hostTwin =
-    (envRecord && isRecord(envRecord.host_twin) ? envRecord.host_twin : null) ||
-    (envRecord && isRecord(envRecord.hostTwin) ? envRecord.hostTwin : null) ||
-    (identity && isRecord(identity.host_twin) ? identity.host_twin : null) ||
-    (identity && isRecord(identity.hostTwin) ? identity.hostTwin : null) ||
-    (isRecord(anyDetail.host_twin) ? anyDetail.host_twin : null) ||
-    (isRecord(anyDetail.hostTwin) ? anyDetail.hostTwin : null) ||
-    null;
-
-  const constraintsFromIdentity = Array.isArray(detail.execution_core_identity?.environment_constraints)
-    ? detail.execution_core_identity!.environment_constraints.filter(
-        (item): item is string =>
-          typeof item === "string" && item.trim().length > 0,
-      )
-    : [];
-  const constraintsFromEnv =
-    envRecord && Array.isArray(envRecord.environment_constraints)
-      ? envRecord.environment_constraints.filter(
-          (item): item is string =>
-            typeof item === "string" && item.trim().length > 0,
-        )
-      : [];
-
-  return {
-    environment:
-      stringValue(envRecord?.environment_summary) ||
-      stringValue(envRecord?.environment) ||
-      stringValue(identity?.environment_summary) ||
-      stringValue(identity?.environment) ||
-      null,
-    hostTwinSummary:
-      stringValue(envRecord?.host_twin_summary) ||
-      stringValue(identity?.host_twin_summary) ||
-      summarizeHostTwin(hostTwin) ||
-      null,
-    constraints: Array.from(new Set([...constraintsFromIdentity, ...constraintsFromEnv])),
-  };
-}
-
-function isFocusedAssignment(
-  assignment: IndustryRuntimeAssignment,
-  selection: { selection_kind: "assignment" | "backlog"; assignment_id?: string | null } | null | undefined,
-): boolean {
-  return Boolean(
-    assignment.selected ||
-      (selection?.selection_kind === "assignment" &&
-        selection.assignment_id === assignment.assignment_id),
-  );
-}
-
-function isFocusedBacklog(
-  backlogItem: IndustryRuntimeBacklogItem,
-  selection: { selection_kind: "assignment" | "backlog"; backlog_item_id?: string | null } | null | undefined,
-): boolean {
-  return Boolean(
-    backlogItem.selected ||
-      (selection?.selection_kind === "backlog" &&
-        selection.backlog_item_id === backlogItem.backlog_item_id),
-  );
-}
-
-function resolveReportWorkContextId(report: IndustryRuntimeAgentReport): string | null {
-  const workContextId = report.work_context_id?.trim();
-  if (workContextId) {
-    return workContextId;
-  }
-  const metadata = report.metadata;
-  if (
-    metadata &&
-    typeof metadata === "object" &&
-    typeof metadata.work_context_id === "string" &&
-    metadata.work_context_id.trim()
-  ) {
-    return metadata.work_context_id.trim();
-  }
-  return null;
-}
-
-function runtimeSurfaceCardStyle(selected: boolean) {
-  return {
-    borderRadius: 12,
-    border: `1px solid ${selected ? "var(--ant-primary-color, #1677ff)" : "var(--baize-border-color)"}`,
-    background: selected ? "rgba(22,119,255,0.08)" : "rgba(255,255,255,0.02)",
-    boxShadow: selected ? "0 0 0 1px rgba(22,119,255,0.12)" : "none",
-  } as const;
 }
 
 interface IndustryRuntimeCockpitPanelProps {
@@ -332,98 +202,14 @@ export default function IndustryRuntimeCockpitPanel({
     },
   ];
 
-  const runtimeFocusSummary =
-    focusSelection?.summary ||
-    focusSelection?.title ||
-    (focusedAssignment
-      ? `派工：${focusedAssignment.title || focusedAssignment.assignment_id}`
-      : null) ||
-    (focusedBacklog ? `待办：${focusedBacklog.title || focusedBacklog.backlog_item_id}` : null) ||
-    (followupReports[0]
-      ? `跟进：${followupReports[0].headline || followupReports[0].report_id}`
-      : null) ||
-    detail.execution?.current_focus ||
-    detail.main_chain?.current_focus ||
-    "当前还没有聚焦子视图。";
-
-  const renderMediaAnalysisList = useCallback(
-    (
-      analyses: MediaAnalysisSummary[],
-      options?: {
-        emptyText?: string;
-        adoptedTag?: string;
-        showWriteback?: boolean;
-      },
-    ) => {
-      if (!analyses.length) {
-        return (
-          <Empty
-            description={options?.emptyText || "暂无素材分析结果"}
-            style={{ margin: "8px 0" }}
-          />
-        );
-      }
-      return (
-        <List
-          size="small"
-          style={{ marginTop: 8 }}
-          dataSource={analyses}
-          renderItem={(analysis) => {
-            const summary =
-              analysis.summary ||
-              analysis.key_points?.slice(0, 2).join(" / ") ||
-              "暂无摘要";
-            return (
-              <List.Item style={{ padding: "10px 0" }}>
-                <div style={{ width: "100%" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      alignItems: "flex-start",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <Space wrap>
-                        <Text strong style={{ color: "var(--baize-text-main)" }}>
-                          {analysis.title || analysis.filename || analysis.source_ref || analysis.url || "素材分析"}
-                        </Text>
-                        {options?.adoptedTag ? <Tag color="green">{options.adoptedTag}</Tag> : null}
-                        {options?.showWriteback && analysis.strategy_writeback_status ? (
-                          <Tag>{`策略 ${analysis.strategy_writeback_status}`}</Tag>
-                        ) : null}
-                        {options?.showWriteback && analysis.backlog_writeback_status ? (
-                          <Tag>{`待办 ${analysis.backlog_writeback_status}`}</Tag>
-                        ) : null}
-                      </Space>
-                      <Paragraph style={{ margin: "8px 0 0" }}>{summary}</Paragraph>
-                      {analysis.key_points?.length ? (
-                        <Text type="secondary" style={{ display: "block" }}>
-                          {analysis.key_points.slice(0, 3).join(" / ")}
-                        </Text>
-                      ) : null}
-                      {(analysis.warnings || []).map((warning) => (
-                        <Alert
-                          key={`${analysis.analysis_id}:${warning}`}
-                          type="warning"
-                          showIcon
-                          message={warning}
-                          style={{ marginTop: 8 }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </List.Item>
-            );
-          }}
-        />
-      );
-    },
-    [],
-  );
+  const runtimeFocusSummary = buildIndustryRuntimeFocusSummary({
+    focusSelection,
+    focusedAssignment,
+    focusedBacklog,
+    followupReport: followupReports[0] || null,
+    executionCurrentFocus: detail.execution?.current_focus || null,
+    mainChainCurrentFocus: detail.main_chain?.current_focus || null,
+  });
 
   const renderReportSnapshot = useCallback(
     (snapshot: IndustryReportSnapshot, title: string) => {

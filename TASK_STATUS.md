@@ -586,8 +586,8 @@
    - 当前已闭环：公开 `/goals` frontdoor、公开 `GET /goals/{goal_id}`、retired dispatch alias 与旧公共 `dispatch_goal(...)` 名称都已退役；当前只剩显式 `compile_goal_dispatch / dispatch_goal_execute_now / dispatch_goal_background / dispatch_goal_deferred_background` 这组 leaf dispatch family，prediction 侧只保留启动期 retired recommendation 清理，已不再构成运行期 compat 分支。
 2. hard-cut 全量收口：`[合同硬切已锁住基线]`
    - 当前已闭环：retired frontdoor、legacy goal alias、runtime-center 写面与治理壳的关键合同已锁住，并已补到更宽的 `industry / runtime / workflow / fixed-SOP` 聚合回归。
-3. 重模块继续拆分：`[持续工程，不纳入前述四项终态判定]`
-   - 当前状态：`/industry` planning surface、Chat transport media、Runtime Center environment section 等已开始拆成更小读面组件；Chat runtime derivation、human-assist presentation、transport request assembly 与 industry page focus/work-context presenter 也已正式下沉到独立 helper；`runtime_center_routes_core.py` 已抽出共享 list/detail query helper，Chat 侧也已继续拆出 `chatRuntimePresentation / chatHumanAssistPresentation / runtimeTransportRequest`，行业页已补出共享 `industryPagePresentation`。
+3. 重模块继续拆分：`[当前已闭环，后续如再拆视为新一轮增强]`
+   - 当前已闭环：本轮超重前台模块已完成正式 split wave。`IndustryRuntimeCockpitPanel.tsx` 已继续把环境可见化、focus/work-context 与媒体/推荐展示收回共享 `industryPagePresentation / runtimePresentation`；`MainBrainCockpitPanel.tsx` 已把 compact-record / operator / trace / cognition 渲染块抽到 `mainBrainCockpitSections.tsx`；`runtimeIndustrySections.tsx` 已把 operator/media sections 抽到 `runtimeIndustryOperatorSections.tsx`；`controlChainPresentation.ts` 已把 graph/synthesis/metrics 归一化 helper 下沉到 `controlChainPresentationHelpers.ts`。本轮已执行 `npm --prefix console run build` -> 通过，`npm --prefix console test -- runtimePresentation.test.tsx MainBrainCockpitPanel.test.tsx runtimeDetailDrawer.test.tsx controlChainPresentation.test.ts index.test.tsx` -> `18 passed`。后续若继续拆 `FixedSopPanel`、Automation surface 或更深 backend 模块，按新增增强任务单独登记，不再把当前项保留为未闭环。
 
 ---
 

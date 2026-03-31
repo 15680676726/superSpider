@@ -1,8 +1,7 @@
 import { Alert, Empty, List, Space, Tag, Typography } from "antd";
 
-import type { IndustryCapabilityRecommendationSection } from "../../api/modules/industry";
 import type { MediaAnalysisSummary } from "../../api/modules/media";
-import { normalizeSpiderMeshBrand } from "../../utils/brand";
+import { presentRecommendationSubsectionTitle } from "./industryPagePresentation";
 import {
   analysisStatusColor,
   formatAnalysisMode,
@@ -15,20 +14,7 @@ import {
 
 const { Paragraph, Text } = Typography;
 
-export function presentRecommendationSubsectionTitle(
-  section: IndustryCapabilityRecommendationSection,
-): string {
-  if (section.section_kind === "execution-core") {
-    return "编排能力";
-  }
-  if (section.section_kind === "system-baseline") {
-    return "基础运行";
-  }
-  if (section.section_kind === "shared") {
-    return "多人共用";
-  }
-  return normalizeSpiderMeshBrand(section.role_name || section.title) || section.title;
-}
+export { presentRecommendationSubsectionTitle };
 
 export function renderMediaAnalysisList(
   analyses: MediaAnalysisSummary[],
