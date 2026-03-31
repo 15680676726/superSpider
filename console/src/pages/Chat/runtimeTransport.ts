@@ -63,6 +63,71 @@ interface ParseRuntimeResponseChunkArgs {
 
 const ACTIVE_MODELS_CACHE_TTL_MS = 30_000;
 
+const RUNTIME_BIZ_PARAM_ALLOWLIST = new Set<string>([
+  "requested_actions",
+  "media_inputs",
+  "media_analysis_ids",
+  "control_thread_id",
+  "work_context_id",
+  "context_key",
+  "industry_instance_id",
+  "industry_label",
+  "industry_role_id",
+  "industry_role_name",
+  "entry_source",
+  "owner_scope",
+  "session_kind",
+  "agent_id",
+  "agent_name",
+  "interaction_mode",
+  "environment_ref",
+  "thread_id",
+  "session_id",
+  "user_id",
+  "channel",
+]);
+
+function sanitizeRuntimeBizParams(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (!RUNTIME_BIZ_PARAM_ALLOWLIST.has(key)) {
+      continue;
+    }
+    sanitized[key] = item;
+  }
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
+
+function trimRuntimeRequestBody(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const trimmed: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (item === undefined || item === null) {
+      continue;
+    }
+    if (typeof item === "string" && item.trim().length === 0) {
+      continue;
+    }
+    if (
+      Array.isArray(item) &&
+      item.length === 0 &&
+      (key === "requested_actions" ||
+        key === "media_analysis_ids" ||
+        key === "media_inputs")
+    ) {
+      continue;
+    }
+    trimmed[key] = item;
+  }
+  return trimmed;
+}
+
 function resolveRuntimeChatUrl(baseUrl: string | undefined): string {
   const trimmed = typeof baseUrl === "string" ? baseUrl.trim() : "";
   if (!trimmed) {
@@ -193,14 +258,19 @@ export function createRuntimeTransport({
       return handleModelError(setRuntimeWaitState, setShowModelPrompt);
     }
 
-    const requestBody = buildRuntimeChatRequest({
-      data,
-      runtimeWindow,
-      requestedThreadId,
-      threadMeta: getThreadMeta(),
-      pendingMediaSources: getPendingMediaSources(),
-      selectedMediaAnalysisIds: getSelectedMediaAnalysisIds(),
-    });
+    const requestBody = trimRuntimeRequestBody(
+      buildRuntimeChatRequest({
+        data: {
+          ...data,
+          biz_params: sanitizeRuntimeBizParams(data.biz_params),
+        },
+        runtimeWindow,
+        requestedThreadId,
+        threadMeta: getThreadMeta(),
+        pendingMediaSources: getPendingMediaSources(),
+        selectedMediaAnalysisIds: getSelectedMediaAnalysisIds(),
+      }),
+    );
 
     const headers: HeadersInit = {
       "Content-Type": "application/json",

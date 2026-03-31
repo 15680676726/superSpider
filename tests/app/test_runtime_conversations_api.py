@@ -434,6 +434,40 @@ def test_runtime_conversation_detail_exposes_current_human_assist_task_meta() ->
     )
 
 
+def test_runtime_conversation_detail_keeps_meta_surface_lightweight() -> None:
+    app, _history_reader = _build_app(
+        human_assist_task_service=_FakeHumanAssistTaskService(),
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/runtime-center/conversations/industry-chat:industry-v1-acme:execution-core",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    meta = payload["meta"]
+    disallowed_meta_keys = {
+        "main_brain_chat_state",
+        "main_brain_chat_snapshot",
+        "chat_session_state",
+        "conversation_history",
+        "history_messages",
+        "prompt_context",
+        "prompt_cache",
+    }
+    assert disallowed_meta_keys.isdisjoint(meta.keys())
+    # Guardrail: keep conversation metadata compact to avoid chat-chain bloat.
+    assert len(meta) <= 24
+
+    human_assist_task_meta = meta["human_assist_task"]
+    assert human_assist_task_meta["chat_thread_id"] == payload["id"]
+    assert "main_brain_runtime" not in human_assist_task_meta
+    assert "conversation_history" not in human_assist_task_meta
+    # Guardrail: task summary payload should stay bounded.
+    assert len(human_assist_task_meta) <= 36
+
+
 def test_runtime_conversation_detail_omits_human_assist_meta_when_current_task_is_resume_queued() -> None:
     class _ResumeQueuedHumanAssistTaskService:
         def get_current_task(self, *, chat_thread_id: str):

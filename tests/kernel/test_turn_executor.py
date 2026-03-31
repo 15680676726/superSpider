@@ -1071,6 +1071,133 @@ async def test_kernel_turn_executor_auto_mode_keeps_plain_acknowledgement_in_cha
 
 
 @pytest.mark.asyncio
+async def test_kernel_turn_executor_auto_mode_skips_intake_resolution_for_plain_ack_without_cognitive_pressure(
+    monkeypatch,
+):
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+    )
+    request = AgentRequest(
+        id="req-auto-ack-no-intake",
+        session_id="sess-auto-ack-no-intake",
+        user_id="user-auto-ack-no-intake",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "auto"
+    calls = 0
+
+    async def _counting_resolver(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return _make_main_brain_intake_contract(
+            intent_kind="execute-task",
+            kickoff_allowed=True,
+        )
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _counting_resolver,
+    )
+    msgs = [Msg(name="user", role="user", content="ok")]
+
+    streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "chat done"
+    assert len(main_brain_chat_service.calls) == 1
+    assert query_execution_service.calls == []
+    assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_auto_mode_ignores_stale_cached_auto_orchestrate_for_new_plain_ack_turn():
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    main_brain_orchestrator = FakeMainBrainOrchestrator()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+        main_brain_orchestrator=main_brain_orchestrator,
+    )
+    request = AgentRequest(
+        id="req-auto-stale-cache-ack",
+        session_id="sess-auto-stale-cache-ack",
+        user_id="user-auto-stale-cache-ack",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "auto"
+    request._copaw_requested_interaction_mode = "auto"
+    request._copaw_resolved_interaction_mode = "orchestrate"
+    request._copaw_interaction_mode_cache_key = "previous:execute-turn"
+    msgs = [Msg(name="user", role="user", content="ok")]
+
+    streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "chat done"
+    assert len(main_brain_chat_service.calls) == 1
+    assert len(main_brain_orchestrator.calls) == 0
+    assert query_execution_service.calls == []
+    assert request._copaw_requested_interaction_mode == "auto"
+    assert request._copaw_resolved_interaction_mode == "chat"
+
+
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_stream_request_reuses_auto_mode_resolution_for_same_turn(
+    monkeypatch,
+):
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+    )
+    request = AgentRequest(
+        id="req-stream-cache-reuse",
+        session_id="sess-stream-cache-reuse",
+        user_id="user-stream-cache-reuse",
+        channel="console",
+        input=[
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "Generate a report draft."}],
+            },
+        ],
+    )
+    request.interaction_mode = "auto"
+    calls = 0
+
+    async def _counting_resolver(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return _make_main_brain_intake_contract(intent_kind="chat")
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _counting_resolver,
+    )
+
+    message_events = []
+    async for event in executor.stream_request(request):
+        if getattr(event, "object", None) == "message":
+            message_events.append(event)
+
+    assert message_events
+    assert message_events[-1].get_text_content() == "chat done"
+    assert calls == 1
+    assert len(main_brain_chat_service.calls) == 1
+    assert query_execution_service.calls == []
+
+
+@pytest.mark.asyncio
 async def test_kernel_turn_executor_auto_mode_routes_acknowledged_replan_to_orchestrator_when_cognitive_pressure_exists(
     monkeypatch,
 ):

@@ -68,7 +68,46 @@ describe("chatBindingRecovery", () => {
 
     expect(action).toEqual({
       type: "reset-chat",
-      recoveryToken: "rebind:industry-chat:industry-missing:execution-core:missing-owner",
+      recoveryToken:
+        "rebind:industry-chat:industry-missing:execution-core:missing-owner",
+    });
+  });
+
+  it("does not repeat reset recovery when bootstrap error details change for the same thread", () => {
+    const action = resolveChatBindingRecoveryAction({
+      requestedThreadId: "industry-chat:industry-missing:execution-core",
+      requestedThreadLooksBound: true,
+      threadBootstrapError: "bootstrap timed out after 8s",
+      threadBootstrapPending: false,
+      autoBindingPending: false,
+      hasBoundAgentContext: false,
+      defaultAutoBindAttempted: true,
+      recoveryAttempts: new Set<string>([
+        "rebind:industry-chat:industry-missing:execution-core:bootstrap-error",
+      ]),
+      executionCoreSuggestions: [executionCoreInstance],
+    });
+
+    expect(action).toBeNull();
+  });
+
+  it("emits a stable bootstrap-error recovery token independent of raw error text", () => {
+    const action = resolveChatBindingRecoveryAction({
+      requestedThreadId: "industry-chat:industry-missing:execution-core",
+      requestedThreadLooksBound: true,
+      threadBootstrapError: "rpc failed: timeout",
+      threadBootstrapPending: false,
+      autoBindingPending: false,
+      hasBoundAgentContext: false,
+      defaultAutoBindAttempted: true,
+      recoveryAttempts: new Set<string>(),
+      executionCoreSuggestions: [executionCoreInstance],
+    });
+
+    expect(action).toEqual({
+      type: "reset-chat",
+      recoveryToken:
+        "rebind:industry-chat:industry-missing:execution-core:bootstrap-error",
     });
   });
 });

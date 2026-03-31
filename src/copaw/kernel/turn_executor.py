@@ -169,6 +169,35 @@ def _assistant_mentions_cognitive_pressure(msgs: list[Any]) -> bool:
     return False
 
 
+def _normalized_requested_actions(request: AgentRequest) -> tuple[str, ...]:
+    requested_actions = getattr(request, "requested_actions", None)
+    if not isinstance(requested_actions, list):
+        return ()
+    values = {
+        str(item or "").strip().lower()
+        for item in requested_actions
+        if str(item or "").strip()
+    }
+    return tuple(sorted(values))
+
+
+def _interaction_mode_cache_key(
+    *,
+    request: AgentRequest,
+    msgs: list[Any],
+    query: str | None,
+) -> str:
+    text = str(extract_main_brain_intake_text(msgs) or query or "").strip().lower()
+    requested_actions = ",".join(_normalized_requested_actions(request))
+    has_cognitive_pressure = _request_has_unresolved_cognitive_pressure(
+        request=request,
+    )
+    return (
+        f"text:{text}|actions:{requested_actions}|"
+        f"pressure:{'1' if has_cognitive_pressure else '0'}"
+    )
+
+
 def _extract_response_usage(response: AgentResponse) -> Any | None:
     for message in reversed(list(getattr(response, "output", []) or [])):
         usage = getattr(message, "usage", None)
@@ -285,8 +314,8 @@ async def _resolve_auto_chat_mode(
     msgs: list[Any],
 ) -> str:
     """Return the effective interaction mode for chat surface."""
-    requested_actions = getattr(request, "requested_actions", None)
-    if isinstance(requested_actions, list):
+    requested_actions = _normalized_requested_actions(request)
+    if requested_actions:
         orchestrate_actions = {
             str(item or "").strip()
             for item in requested_actions
@@ -300,6 +329,9 @@ async def _resolve_auto_chat_mode(
     if not text:
         return "chat"
     if _is_hypothetical_control_text(text):
+        return "chat"
+    has_cognitive_pressure = _request_has_unresolved_cognitive_pressure(request=request)
+    if not has_cognitive_pressure and _is_plain_acknowledgement(text):
         return "chat"
     try:
         intake_contract = await resolve_request_main_brain_intake_contract(
@@ -317,7 +349,7 @@ async def _resolve_auto_chat_mode(
         )
         if intake_contract.should_route_to_orchestrate:
             return "orchestrate"
-    if _request_has_unresolved_cognitive_pressure(request=request) and (
+    if has_cognitive_pressure and (
         (
             _is_plain_acknowledgement(text)
             and _assistant_mentions_cognitive_pressure(msgs)
@@ -351,16 +383,25 @@ async def _prepare_request_interaction_mode(
     query: str | None,
 ) -> tuple[str, str]:
     current_requested_interaction_mode = _resolve_interaction_mode(request)
+    current_cache_key = _interaction_mode_cache_key(
+        request=request,
+        msgs=msgs,
+        query=query,
+    )
     requested_interaction_mode = str(
         getattr(request, "_copaw_requested_interaction_mode", "") or "",
     ).strip().lower()
     resolved_interaction_mode = str(
         getattr(request, "_copaw_resolved_interaction_mode", "") or "",
     ).strip().lower()
+    cached_mode_key = str(
+        getattr(request, "_copaw_interaction_mode_cache_key", "") or "",
+    ).strip()
     if (
         requested_interaction_mode == current_requested_interaction_mode
         and requested_interaction_mode in {"auto", "chat", "orchestrate"}
         and resolved_interaction_mode in {"chat", "orchestrate"}
+        and cached_mode_key == current_cache_key
     ):
         return requested_interaction_mode, resolved_interaction_mode
     if (
@@ -385,6 +426,11 @@ async def _prepare_request_interaction_mode(
         request,
         "_copaw_resolved_interaction_mode",
         resolved_interaction_mode,
+    )
+    _set_request_runtime_value(
+        request,
+        "_copaw_interaction_mode_cache_key",
+        current_cache_key,
     )
     if resolved_interaction_mode == "orchestrate":
         _set_request_runtime_value(request, "interaction_mode", "orchestrate")

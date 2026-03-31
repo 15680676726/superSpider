@@ -18,6 +18,7 @@ class _FakeSessionBackend:
     def __init__(self) -> None:
         self.snapshots: dict[tuple[str, str], dict] = {}
         self.save_calls: list[tuple[str, str, dict]] = []
+        self.load_calls: list[tuple[str, str]] = []
 
     def load_session_snapshot(
         self,
@@ -27,6 +28,7 @@ class _FakeSessionBackend:
         allow_not_exist: bool = False,
     ) -> dict:
         _ = allow_not_exist
+        self.load_calls.append((session_id, user_id))
         return dict(self.snapshots.get((session_id, user_id), {}))
 
     def save_session_snapshot(
@@ -79,6 +81,18 @@ class _StaticResponseModel:
 
     async def __call__(self, *, messages, **kwargs):
         _ = (messages, kwargs)
+        return SimpleNamespace(content=self.text)
+
+
+class _PromptCapturingResponseModel:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.stream = True
+        self.calls: list[list[dict[str, str]]] = []
+
+    async def __call__(self, *, messages, **kwargs):
+        _ = kwargs
+        self.calls.append([dict(item) for item in messages])
         return SimpleNamespace(content=self.text)
 
 
@@ -152,6 +166,26 @@ class _FakeIndustryService:
     async def kickoff_execution_from_chat(self, **kwargs):
         self.kickoff_calls.append(kwargs)
         return {"activated": True}
+
+
+class _VersionedIndustryService:
+    def __init__(self) -> None:
+        self.version = 1
+
+    def get_instance_detail(self, instance_id: str) -> object:
+        return SimpleNamespace(
+            instance_id=instance_id,
+            label=f"Industry v{self.version}",
+            summary=f"Runtime summary v{self.version}",
+            execution_core_identity={"agent_id": "copaw-agent-runner"},
+            team=SimpleNamespace(agents=[]),
+            staffing={},
+            assignments=[],
+            backlog=[{"title": f"Backlog v{self.version}"}],
+            lanes=[],
+            agent_reports=[],
+            current_cycle={"title": f"Cycle v{self.version}"},
+        )
 
 
 class _TruthFirstDerivedIndexService:
@@ -313,6 +347,67 @@ async def test_main_brain_chat_service_throttles_snapshot_persistence_between_tu
 
 
 @pytest.mark.asyncio
+async def test_main_brain_chat_service_reuses_cached_snapshot_for_pure_chat_turns():
+    backend = _FakeSessionBackend()
+    service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: _StaticResponseModel("cached reply"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-cache-reuse",
+        user_id="user-cache-reuse",
+        industry_instance_id=None,
+        work_context_id=None,
+        agent_id=None,
+    )
+
+    for turn in range(2):
+        msgs = [Msg(name="user", role="user", content=f"cache turn {turn + 1}")]
+        streamed = [item async for item in service.execute_stream(msgs=msgs, request=request)]
+        assert streamed[0][0].get_text_content() == "cached reply"
+
+    assert len(backend.load_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_does_not_duplicate_save_on_clean_ttl_eviction(monkeypatch):
+    backend = _FakeSessionBackend()
+    service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: _StaticResponseModel("ttl reply"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-ttl",
+        user_id="user-ttl",
+        industry_instance_id=None,
+        work_context_id=None,
+        agent_id=None,
+    )
+    now = {"value": 1000.0}
+    monkeypatch.setattr(
+        main_brain_chat_service_module.time,
+        "time",
+        lambda: now["value"],
+    )
+
+    first_turn = [Msg(name="user", role="user", content="turn one")]
+    _ = [item async for item in service.execute_stream(msgs=first_turn, request=request)]
+    assert len(backend.save_calls) == 1
+
+    cache_key = ("sess-ttl", "user-ttl")
+    cache_entry = service._session_cache[cache_key]  # pylint: disable=protected-access
+    cache_entry.last_used_at = (
+        now["value"] - main_brain_chat_service_module._PURE_CHAT_SESSION_CACHE_TTL_SECONDS - 1
+    )
+
+    now["value"] += 1
+    second_turn = [Msg(name="user", role="user", content="turn two")]
+    _ = [item async for item in service.execute_stream(msgs=second_turn, request=request)]
+
+    assert len(backend.save_calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_main_brain_chat_service_uses_fallback_text_for_empty_model_response():
     backend = _FakeSessionBackend()
     model = _EmptyResponseModel()
@@ -430,6 +525,217 @@ async def test_main_brain_chat_service_persists_latest_user_turn_when_request_is
     texts = await _snapshot_texts(service, snapshot)
     assert texts == ["这轮先记下来，我等会回来继续。"]
     assert len(backend.save_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_interruption_forces_single_continuity_save_after_throttled_turns():
+    backend = _FakeSessionBackend()
+    models = [
+        _StaticResponseModel("reply one"),
+        _StaticResponseModel("reply two"),
+        _CancelledResponseModel(),
+    ]
+    service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: models.pop(0),
+    )
+    request = SimpleNamespace(
+        session_id="sess-cancelled-throttle",
+        user_id="user-cancelled-throttle",
+        industry_instance_id=None,
+        work_context_id=None,
+        agent_id=None,
+    )
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn one")],
+            request=request,
+        )
+    ]
+    assert len(backend.save_calls) == 1
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn two")],
+            request=request,
+        )
+    ]
+    assert len(backend.save_calls) == 1
+
+    with pytest.raises(asyncio.CancelledError):
+        _ = [
+            item
+            async for item in service.execute_stream(
+                msgs=[Msg(name="user", role="user", content="turn three")],
+                request=request,
+            )
+        ]
+
+    assert len(backend.save_calls) == 2
+    snapshot = backend.load_session_snapshot(
+        session_id="sess-cancelled-throttle",
+        user_id="user-cancelled-throttle",
+        allow_not_exist=True,
+    )
+    texts = await _snapshot_texts(service, snapshot)
+    assert texts == [
+        "turn one",
+        "reply one",
+        "turn two",
+        "reply two",
+        "turn three",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_reuses_heavy_prompt_context_when_runtime_truth_is_stable(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    backend = _FakeSessionBackend()
+    industry_service = _FakeIndustryService()
+    model = _PromptCapturingResponseModel("ok")
+    service = MainBrainChatService(
+        session_backend=backend,
+        industry_service=industry_service,
+        model_factory=lambda: model,
+    )
+    request = SimpleNamespace(
+        session_id="sess-cache-context",
+        user_id="user-cache-context",
+        industry_instance_id="industry-v1-demo",
+        work_context_id=None,
+        agent_id=None,
+    )
+    call_counts = {"runtime": 0, "cognitive": 0, "roster": 0}
+
+    original_runtime_snapshot = main_brain_chat_service_module._format_runtime_snapshot
+    original_cognitive_closure = main_brain_chat_service_module._format_cognitive_closure
+    original_team_roster = main_brain_chat_service_module._format_team_roster
+
+    def _count_runtime(detail: object | None) -> str:
+        call_counts["runtime"] += 1
+        return original_runtime_snapshot(detail)
+
+    def _count_cognitive(*, detail: object | None, request: object) -> str:
+        call_counts["cognitive"] += 1
+        return original_cognitive_closure(detail=detail, request=request)
+
+    def _count_roster(
+        *,
+        detail: object | None,
+        agent_profile_service: object | None,
+        industry_instance_id: str | None,
+        owner_agent_id: str | None,
+    ) -> list[str]:
+        call_counts["roster"] += 1
+        return original_team_roster(
+            detail=detail,
+            agent_profile_service=agent_profile_service,
+            industry_instance_id=industry_instance_id,
+            owner_agent_id=owner_agent_id,
+        )
+
+    monkeypatch.setattr(main_brain_chat_service_module, "_format_runtime_snapshot", _count_runtime)
+    monkeypatch.setattr(main_brain_chat_service_module, "_format_cognitive_closure", _count_cognitive)
+    monkeypatch.setattr(main_brain_chat_service_module, "_format_team_roster", _count_roster)
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn one")],
+            request=request,
+        )
+    ]
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn two")],
+            request=request,
+        )
+    ]
+
+    assert call_counts["runtime"] == 1
+    assert call_counts["cognitive"] == 1
+    assert call_counts["roster"] == 1
+    assert len(model.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_rebuilds_heavy_prompt_context_when_runtime_truth_changes(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    backend = _FakeSessionBackend()
+    industry_service = _VersionedIndustryService()
+    model = _PromptCapturingResponseModel("ok")
+    service = MainBrainChatService(
+        session_backend=backend,
+        industry_service=industry_service,
+        model_factory=lambda: model,
+    )
+    request = SimpleNamespace(
+        session_id="sess-context-refresh",
+        user_id="user-context-refresh",
+        industry_instance_id="industry-v1-demo",
+        work_context_id=None,
+        agent_id=None,
+    )
+    call_counts = {"runtime": 0}
+    original_runtime_snapshot = main_brain_chat_service_module._format_runtime_snapshot
+
+    def _count_runtime(detail: object | None) -> str:
+        call_counts["runtime"] += 1
+        return original_runtime_snapshot(detail)
+
+    monkeypatch.setattr(main_brain_chat_service_module, "_format_runtime_snapshot", _count_runtime)
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn one")],
+            request=request,
+        )
+    ]
+
+    industry_service.version = 2
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn two")],
+            request=request,
+        )
+    ]
+
+    assert call_counts["runtime"] == 2
+    assert len(model.calls) == 2
+
+
+def test_main_brain_chat_service_history_context_shaping_stays_bounded():
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+    prior_messages = [
+        Msg(name="user", role="user", content=f"prior-{idx}-" + ("x" * 1200))
+        for idx in range(12)
+    ]
+    current_messages = [
+        Msg(name="assistant", role="assistant", content=f"current-{idx}-" + ("y" * 1200))
+        for idx in range(4)
+    ]
+
+    history_messages = service._build_history_messages(  # pylint: disable=protected-access
+        prior_messages=prior_messages,
+        current_messages=current_messages,
+    )
+
+    assert len(history_messages) <= 8
+    assert sum(len(item["content"]) for item in history_messages) <= 4200
+    assert history_messages[-1]["role"] == "assistant"
+    assert "current-3-" in history_messages[-1]["content"]
 
 
 def test_main_brain_chat_service_prompt_prefers_truth_first_profile_before_lexical_recall():

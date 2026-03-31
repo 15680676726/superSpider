@@ -75,21 +75,40 @@ export function useRuntimeBinding({
     () => parseIndustryThreadId(requestedThreadId),
     [requestedThreadId],
   );
+  const metaIndustryId =
+    typeof threadMeta?.industry_instance_id === "string"
+      ? threadMeta.industry_instance_id
+      : null;
+  const metaIndustryRoleId =
+    typeof threadMeta?.industry_role_id === "string"
+      ? threadMeta.industry_role_id
+      : null;
+  const metaAgentId =
+    typeof threadMeta?.agent_id === "string" ? threadMeta.agent_id : null;
   const binding = useMemo(
     () =>
       resolveRuntimeBindingContext({
-        threadMeta,
+        threadMeta: {
+          industry_instance_id: metaIndustryId,
+          industry_role_id: metaIndustryRoleId,
+          agent_id: metaAgentId,
+        },
         requestedIndustryThread,
       }),
-    [requestedIndustryThread, threadMeta],
+    [metaAgentId, metaIndustryId, metaIndustryRoleId, requestedIndustryThread],
   );
   const activeChatThreadId = useMemo(
     () => normalizeThreadId(requestedThreadId || windowThreadId || null),
     [requestedThreadId, windowThreadId],
   );
   const openWorkbench = useCallback(() => {
-    navigate(buildWorkbenchPath(binding));
-  }, [binding, navigate]);
+    navigate(
+      buildWorkbenchPath({
+        activeIndustryId: binding.activeIndustryId,
+        activeAgentId: binding.activeAgentId,
+      }),
+    );
+  }, [binding.activeAgentId, binding.activeIndustryId, navigate]);
 
   return {
     ...binding,
@@ -99,4 +118,3 @@ export function useRuntimeBinding({
     requestedThreadLooksBound,
   };
 }
-

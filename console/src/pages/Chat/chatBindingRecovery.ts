@@ -38,6 +38,12 @@ export type ChatBindingRecoveryAction =
   | ResetChatRecoveryAction
   | null;
 
+function resolveChatBindingRecoveryReason(
+  threadBootstrapError: string | null,
+): "bootstrap-error" | "missing-owner" {
+  return threadBootstrapError ? "bootstrap-error" : "missing-owner";
+}
+
 function resolveMatchedExecutionCoreInstance(
   requestedThreadId: string | null,
   executionCoreSuggestions: readonly IndustryInstanceSummary[],
@@ -107,7 +113,9 @@ export function resolveChatBindingRecoveryAction({
     return null;
   }
 
-  const recoveryToken = `rebind:${requestedThreadId}:${threadBootstrapError || "missing-owner"}`;
+  const recoveryToken = `rebind:${requestedThreadId}:${resolveChatBindingRecoveryReason(
+    threadBootstrapError,
+  )}`;
   if (recoveryAttempts.has(recoveryToken)) {
     return null;
   }

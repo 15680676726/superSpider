@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+
+import { renderHook } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildWorkbenchPath,
   resolveRuntimeBindingContext,
+  useRuntimeBinding,
 } from "./useRuntimeBinding";
 
 describe("useRuntimeBinding", () => {
@@ -32,5 +36,40 @@ describe("useRuntimeBinding", () => {
       "/agents?industry=industry-1",
     );
     expect(buildWorkbenchPath({ activeIndustryId: null, activeAgentId: null })).toBe("/agents");
+  });
+
+  it("keeps the workbench callback stable across unrelated thread-meta updates", () => {
+    const navigate = vi.fn();
+    const { result, rerender } = renderHook(
+      (props: { threadMeta: Record<string, unknown> }) =>
+        useRuntimeBinding({
+          navigate,
+          requestedThreadId: "industry-chat:industry-1:execution-core",
+          threadMeta: props.threadMeta,
+          windowThreadId: null,
+        }),
+      {
+        initialProps: {
+          threadMeta: {
+            industry_instance_id: "industry-1",
+            industry_role_id: "execution-core",
+            agent_id: "agent-1",
+            ui_updated_at: 1,
+          },
+        },
+      },
+    );
+    const firstOpenWorkbench = result.current.openWorkbench;
+
+    rerender({
+      threadMeta: {
+        industry_instance_id: "industry-1",
+        industry_role_id: "execution-core",
+        agent_id: "agent-1",
+        ui_updated_at: 2,
+      },
+    });
+
+    expect(result.current.openWorkbench).toBe(firstOpenWorkbench);
   });
 });

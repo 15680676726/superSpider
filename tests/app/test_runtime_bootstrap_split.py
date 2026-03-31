@@ -39,6 +39,12 @@ def test_documentation_runtime_first_alignment_docs_do_not_define_a_second_main_
     assert "runtime-first 补充视角" in api_map_text
 
 
+def test_task_status_locks_main_brain_chat_performance_regression_guards() -> None:
+    status_text = _read("TASK_STATUS.md")
+
+    assert "轻量聊天链回归护栏已锁定（runtime conversations / bootstrap wiring）" in status_text
+
+
 def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     monkeypatch,
     tmp_path,
@@ -150,11 +156,11 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
         "get_instance",
         staticmethod(lambda: "provider-manager"),
     )
-    monkeypatch.setattr(
-        runtime_service_graph_module,
-        "KernelTurnExecutor",
-        lambda **kwargs: "turn-executor",
-    )
+    def _fake_turn_executor(**kwargs):
+        calls["turn_executor_kwargs"] = kwargs
+        return "turn-executor"
+
+    monkeypatch.setattr(runtime_service_graph_module, "KernelTurnExecutor", _fake_turn_executor)
     monkeypatch.setattr(
         runtime_service_graph_module,
         "RuntimeHealthService",
@@ -171,6 +177,9 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     assert calls["domain_builder_kwargs"]["capability_service"] is capability_service
     assert calls["governance_environment_service"] == "environment-service"
     assert calls["governance_industry_service"] == "industry-service"
+    assert calls["turn_executor_kwargs"]["main_brain_chat_service"] == "main-brain-chat-service"
+    assert calls["turn_executor_kwargs"]["main_brain_orchestrator"] == "main-brain-orchestrator"
+    assert calls["turn_executor_kwargs"]["query_execution_service"] == "query-execution-service"
     assert bootstrap.goal_service == "goal-service"
     assert bootstrap.main_brain_orchestrator == "main-brain-orchestrator"
     assert bootstrap.turn_executor == "turn-executor"

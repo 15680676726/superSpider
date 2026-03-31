@@ -286,6 +286,81 @@ describe("runtimeTransport", () => {
     expect(dispatchHumanAssistDirty).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps runtime transport payload minimal by dropping unrecognized heavy biz params and empty media arrays", async () => {
+    vi.stubGlobal("BASE_URL", "http://testserver");
+    vi.spyOn(providerApi, "getActiveModels").mockResolvedValue({
+      resolved_llm: {
+        provider_id: "test-provider",
+        model: "test-model",
+      },
+    } as never);
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            object: "response",
+            status: "completed",
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      );
+
+    const transport = createRuntimeTransport({
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      optionsBaseUrl: undefined,
+      getThreadMeta: () => ({
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      }),
+      getPendingMediaSources: () => [],
+      clearPendingMediaDrafts: vi.fn(),
+      refreshThreadMediaAnalyses: vi.fn(),
+      getSelectedMediaAnalysisIds: () => [],
+      setRuntimeHealthNotice: vi.fn(),
+      setRuntimeWaitState: vi.fn(),
+      setShowModelPrompt: vi.fn(),
+    });
+
+    await transport.fetch({
+      input: [
+        {
+          session: {
+            session_id: "session-thread",
+            user_id: "session-user",
+            channel: "session-channel",
+          },
+        },
+      ],
+      biz_params: {
+        control_thread_id: "industry-chat:industry-1:execution-core",
+        requested_actions: [],
+        media_analysis_ids: [],
+        media_inputs: [],
+        heavy_debug_dump: {
+          huge: "payload",
+        },
+      },
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, fetchInit] = fetchSpy.mock.calls[0];
+    const requestBody = JSON.parse(String(fetchInit?.body || "{}"));
+    expect(requestBody.heavy_debug_dump).toBeUndefined();
+    expect(requestBody.media_analysis_ids).toBeUndefined();
+    expect(requestBody.media_inputs).toBeUndefined();
+    expect(requestBody.requested_actions).toBeUndefined();
+  });
+
   it("clears wait state and broadcasts governance refresh when a streamed response finishes", () => {
     const setRuntimeHealthNotice = vi.fn();
     const setRuntimeWaitState = vi.fn();

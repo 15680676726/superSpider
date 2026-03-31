@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -35,6 +37,9 @@ _PURE_CHAT_MEMORY_MAX_ITEMS = 24
 _PURE_CHAT_SESSION_CACHE_TTL_SECONDS = 20 * 60
 _PURE_CHAT_PERSIST_INTERVAL_SECONDS = 45
 _PURE_CHAT_PERSIST_TURNS = 2
+_PURE_CHAT_HISTORY_MAX_MESSAGES = 8
+_PURE_CHAT_HISTORY_MAX_CHARS = 4200
+_PURE_CHAT_HISTORY_MESSAGE_CHAR_LIMIT = 960
 _PURE_CHAT_MODEL_KWARGS: dict[str, object] = {
     "temperature": 0.15,
     "max_tokens": 520,
@@ -608,6 +613,9 @@ class _PureChatSessionCacheEntry:
     last_used_at: float
     last_persisted_at: float
     turns_since_persist: int
+    prompt_context_signature: str | None = None
+    prompt_context_body: str | None = None
+    dirty: bool = False
 
 
 class MainBrainChatService:
@@ -692,6 +700,7 @@ class MainBrainChatService:
                     last_used_at=now,
                     last_persisted_at=0.0,
                     turns_since_persist=0,
+                    dirty=False,
                 )
                 self._session_cache[cache_key] = cache_entry
         else:
@@ -705,6 +714,7 @@ class MainBrainChatService:
             query=query,
             prior_messages=prior_messages,
             current_messages=msgs,
+            cache_entry=cache_entry,
         )
         assistant_message_id = uuid.uuid4().hex
         assistant_message: Msg | None = None
@@ -721,6 +731,7 @@ class MainBrainChatService:
                     cache_entry.snapshot = snapshot
                     cache_entry.memory = memory
                     cache_entry.last_used_at = now
+                    cache_entry.dirty = True
         except Exception:
             logger.exception("Failed to persist incoming main-brain chat messages")
         try:
@@ -836,6 +847,7 @@ class MainBrainChatService:
                 cache_entry.snapshot = updated_snapshot
                 cache_entry.memory = memory
                 cache_entry.last_used_at = now
+                cache_entry.dirty = True
             self._persist_cache_entry_if_needed(
                 session_id=session_id,
                 user_id=user_id,
@@ -906,6 +918,8 @@ class MainBrainChatService:
     ) -> None:
         if cache_entry is None:
             return
+        if not cache_entry.dirty:
+            return
         if not force:
             cache_entry.turns_since_persist += 1
         due_to_turns = cache_entry.turns_since_persist >= _PURE_CHAT_PERSIST_TURNS
@@ -922,6 +936,7 @@ class MainBrainChatService:
         )
         cache_entry.last_persisted_at = now
         cache_entry.turns_since_persist = 0
+        cache_entry.dirty = False
 
     async def _invoke_model_response(
         self,
@@ -1000,18 +1015,80 @@ class MainBrainChatService:
         query: str | None,
         prior_messages: list[Any],
         current_messages: list[Any],
+        cache_entry: _PureChatSessionCacheEntry | None = None,
     ) -> list[dict[str, str]]:
         detail = self._load_industry_detail(request)
         owner_agent_id = self._resolve_owner_agent_id(request, detail=detail)
+        context_body = self._build_or_reuse_prompt_context_body(
+            request=request,
+            query=query,
+            detail=detail,
+            owner_agent_id=owner_agent_id,
+            cache_entry=cache_entry,
+        )
+        history_messages = self._build_history_messages(
+            prior_messages=prior_messages,
+            current_messages=current_messages,
+        )
+        return [
+            {"role": "system", "content": _PURE_CHAT_SYSTEM_PROMPT},
+            {"role": "system", "content": context_body},
+            *history_messages,
+        ]
+
+    def _build_or_reuse_prompt_context_body(
+        self,
+        *,
+        request: Any,
+        query: str | None,
+        detail: object | None,
+        owner_agent_id: str | None,
+        cache_entry: _PureChatSessionCacheEntry | None,
+    ) -> str:
+        context_signature = self._build_prompt_context_signature(
+            request=request,
+            detail=detail,
+            owner_agent_id=owner_agent_id,
+        )
+        cached_static_context = (
+            cache_entry.prompt_context_body
+            if (
+                cache_entry is not None
+                and cache_entry.prompt_context_signature == context_signature
+                and isinstance(cache_entry.prompt_context_body, str)
+                and cache_entry.prompt_context_body.strip()
+            )
+            else None
+        )
+        if cached_static_context is None:
+            static_context = self._build_static_prompt_context_body(
+                request=request,
+                detail=detail,
+                owner_agent_id=owner_agent_id,
+            )
+            if cache_entry is not None:
+                cache_entry.prompt_context_signature = context_signature
+                cache_entry.prompt_context_body = static_context
+        else:
+            static_context = cached_static_context
+        memory_context = self._resolve_truth_first_memory_context(
+            request=request,
+            query=query,
+            owner_agent_id=owner_agent_id,
+        )
+        return "\n\n".join([static_context, memory_context])
+
+    def _build_static_prompt_context_body(
+        self,
+        *,
+        request: Any,
+        detail: object | None,
+        owner_agent_id: str | None,
+    ) -> str:
         roster_lines = _format_team_roster(
             detail=detail,
             agent_profile_service=self._agent_profile_service,
             industry_instance_id=str(getattr(request, "industry_instance_id", "") or "").strip() or None,
-            owner_agent_id=owner_agent_id,
-        )
-        memory_context = self._resolve_truth_first_memory_context(
-            request=request,
-            query=query,
             owner_agent_id=owner_agent_id,
         )
         context_sections = [
@@ -1021,18 +1098,50 @@ class MainBrainChatService:
             f"## 正式战略摘要\n{_format_strategy_summary(detail)}",
             "## 团队职业成员 roster\n"
             + ("\n".join(roster_lines) if roster_lines else "- 当前没有可用 roster，请基于已知上下文谨慎回答"),
-            memory_context,
         ]
         context_sections.insert(3, f"## Staffing\n{_format_staffing_summary(detail)}")
-        history_messages = self._build_history_messages(
-            prior_messages=prior_messages,
-            current_messages=current_messages,
+        context_body = "\n\n".join(context_sections)
+        return re.sub(
+            r"## [^\n]*cognitive closure",
+            "## 主脑 cognitive closure",
+            context_body,
+            count=1,
         )
-        return [
-            {"role": "system", "content": _PURE_CHAT_SYSTEM_PROMPT},
-            {"role": "system", "content": "\n\n".join(context_sections)},
-            *history_messages,
-        ]
+
+    def _build_prompt_context_signature(
+        self,
+        *,
+        request: Any,
+        detail: object | None,
+        owner_agent_id: str | None,
+    ) -> str:
+        payload = _safe_mapping(detail)
+        team_payload = _safe_mapping(payload.get("team"))
+        signature_payload: dict[str, Any] = {
+            "industry_instance_id": str(getattr(request, "industry_instance_id", "") or "").strip() or None,
+            "work_context_id": str(getattr(request, "work_context_id", "") or "").strip() or None,
+            "agent_id": str(getattr(request, "agent_id", "") or "").strip() or None,
+            "owner_agent_id": owner_agent_id,
+            "execution_core_identity": _safe_mapping(payload.get("execution_core_identity")),
+            "execution": _safe_mapping(payload.get("execution")),
+            "current_cycle": _safe_mapping(payload.get("current_cycle")),
+            "strategy_memory": _safe_mapping(payload.get("strategy_memory")),
+            "staffing": _safe_mapping(payload.get("staffing")),
+            "team_agents": list(team_payload.get("agents") or [])[:12],
+            "assignments": list(payload.get("assignments") or [])[:12],
+            "backlog": list(payload.get("backlog") or [])[:8],
+            "lanes": list(payload.get("lanes") or [])[:6],
+            "agent_reports": list(payload.get("agent_reports") or [])[:6],
+        }
+        try:
+            return json.dumps(
+                signature_payload,
+                sort_keys=True,
+                ensure_ascii=False,
+                default=str,
+            )
+        except Exception:
+            return repr(signature_payload)
 
     def _load_industry_detail(self, request: Any) -> object | None:
         service = self._industry_service
@@ -1166,10 +1275,42 @@ class MainBrainChatService:
             text = _message_text(message)
             if not text:
                 continue
-            normalized.append({"role": role, "content": _clip_text(text, limit=1800)})
+            normalized.append(
+                {
+                    "role": role,
+                    "content": _clip_text(
+                        text,
+                        limit=_PURE_CHAT_HISTORY_MESSAGE_CHAR_LIMIT,
+                    ),
+                },
+            )
         if not normalized:
             return [{"role": "user", "content": "请先根据上面的上下文回答当前问题。"}]
-        return normalized[-10:]
+        bounded_reversed: list[dict[str, str]] = []
+        total_chars = 0
+        for message in reversed(normalized):
+            if len(bounded_reversed) >= _PURE_CHAT_HISTORY_MAX_MESSAGES:
+                break
+            content = str(message.get("content") or "")
+            if not content:
+                continue
+            remaining = _PURE_CHAT_HISTORY_MAX_CHARS - total_chars
+            if remaining <= 0:
+                break
+            if len(content) > remaining:
+                if bounded_reversed:
+                    break
+                content = _clip_text(content, limit=max(80, remaining))
+            bounded_reversed.append(
+                {
+                    "role": str(message.get("role") or "user"),
+                    "content": content,
+                },
+            )
+            total_chars += len(content)
+        if not bounded_reversed:
+            return [{"role": "user", "content": normalized[-1]["content"]}]
+        return list(reversed(bounded_reversed))
 
 
 __all__ = ["MainBrainChatService"]
