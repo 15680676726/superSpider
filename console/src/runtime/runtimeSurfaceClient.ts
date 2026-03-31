@@ -1,20 +1,5 @@
 import { request } from "../api";
 
-type RuntimeQueryValue = string | number | boolean | null | undefined;
-
-function buildRuntimeQuery(
-  params: Record<string, RuntimeQueryValue>,
-): string {
-  const search = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value === null || value === undefined || value === "") {
-      return;
-    }
-    search.set(key, String(value));
-  });
-  return search.toString();
-}
-
 export function normalizeRuntimePath(path: string): string {
   if (path.startsWith("/api/")) {
     return path.slice(4);
@@ -33,19 +18,6 @@ export function buildRuntimeBusinessAgentsPath(
     params.set("industry_instance_id", industryInstanceId);
   }
   return `/runtime-center/agents?${params.toString()}`;
-}
-
-export function buildRuntimeGoalsPath(options?: {
-  industryInstanceId?: string | null;
-  status?: string | null;
-  limit?: number | null;
-}): string {
-  const query = buildRuntimeQuery({
-    status: options?.status,
-    limit: options?.limit ?? undefined,
-    industry_instance_id: options?.industryInstanceId,
-  });
-  return query ? `/goals?${query}` : "/goals";
 }
 
 export function buildRuntimeConversationsPath(threadId: string): string {
@@ -94,12 +66,4 @@ export async function requestRuntimeConversation<T>(
   threadId: string,
 ): Promise<T> {
   return request<T>(buildRuntimeConversationsPath(threadId));
-}
-
-export async function requestRuntimeGoals<T>(options?: {
-  industryInstanceId?: string | null;
-  status?: string | null;
-  limit?: number | null;
-}): Promise<T> {
-  return request<T>(buildRuntimeGoalsPath(options));
 }

@@ -56,9 +56,9 @@ function renderAssignmentSummaryTags(assignments: Record<string, unknown>[]) {
 
   return (
     <Space wrap size={[6, 6]} style={{ marginTop: 8 }}>
-      {activeCount > 0 ? <Tag color="blue">{`Active ${activeCount}`}</Tag> : null}
-      {readyCount > 0 ? <Tag>{`Ready ${readyCount}`}</Tag> : null}
-      {completedCount > 0 ? <Tag color="success">{`Completed ${completedCount}`}</Tag> : null}
+      {activeCount > 0 ? <Tag color="blue">{`进行中 ${activeCount}`}</Tag> : null}
+      {readyCount > 0 ? <Tag>{`就绪 ${readyCount}`}</Tag> : null}
+      {completedCount > 0 ? <Tag color="success">{`已完成 ${completedCount}`}</Tag> : null}
       {maxEvidence > 0 ? <Tag>{`最大证据 ${maxEvidence}`}</Tag> : null}
     </Space>
   );
@@ -90,8 +90,8 @@ export function renderOperatorBacklogSection(
 
       {backlogItems.length > 0 ? (
         <Space wrap size={[6, 6]} style={{ marginTop: 8 }}>
-          {openCount > 0 ? <Tag color="blue">{`Open ${openCount}`}</Tag> : null}
-          {queuedCount > 0 ? <Tag>{`Queued ${queuedCount}`}</Tag> : null}
+          {openCount > 0 ? <Tag color="blue">{`开放 ${openCount}`}</Tag> : null}
+          {queuedCount > 0 ? <Tag>{`排队 ${queuedCount}`}</Tag> : null}
         </Space>
       ) : null}
 
@@ -115,7 +115,7 @@ export function renderOperatorBacklogSection(
               (typeof item.title === "string" && item.title) ||
               (typeof item.summary === "string" && item.summary) ||
               backlogId ||
-              `Backlog ${index + 1}`;
+              `待办 ${index + 1}`;
             const summary = typeof item.summary === "string" ? item.summary : null;
             const status = typeof item.status === "string" && item.status ? item.status : "unknown";
             const sourceKind =
@@ -155,7 +155,7 @@ export function renderOperatorBacklogSection(
                 <Space wrap size={[8, 6]} className={styles.selectionMeta}>
                   {laneId ? <span>{`泳道 ${laneId}`}</span> : null}
                   {cycleId ? <span>{`周期 ${cycleId}`}</span> : null}
-                  {assignmentId ? <span>{`Assignment ${assignmentId}`}</span> : null}
+                  {assignmentId ? <span>{`派单 ${assignmentId}`}</span> : null}
                 </Space>
                 {route ? (
                   <div className={styles.routeActions}>

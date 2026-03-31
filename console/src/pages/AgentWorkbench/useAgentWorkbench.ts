@@ -7,12 +7,10 @@ import {
   requestRuntimeBusinessAgents,
   requestRuntimeEnvironmentList,
   requestRuntimeEvidenceList,
-  requestRuntimeGoals,
 } from "../../runtime/runtimeSurfaceClient";
 
 const DASHBOARD_ENV_LIMIT = 20;
 const DASHBOARD_EVIDENCE_LIMIT = 20;
-const DASHBOARD_GOAL_LIMIT = 20;
 
 export interface ActorRuntimeDetail {
   agent_id: string;
@@ -750,7 +748,6 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
   const [capabilityCatalog, setCapabilityCatalog] = useState<CapabilityMount[]>([]);
   const [environments, setEnvironments] = useState<EnvironmentItem[]>([]);
   const [evidence, setEvidence] = useState<EvidenceListItem[]>([]);
-  const [goals, setGoals] = useState<GoalItem[]>([]);
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   const [goalDetail, setGoalDetail] = useState<GoalDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -771,7 +768,7 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
     setLoading(true);
     try {
       setDashboardError(null);
-      const [agentList, envList, evidenceList, goalList] = await Promise.all([
+      const [agentList, envList, evidenceList] = await Promise.all([
         requestRuntimeBusinessAgents<AgentProfile[]>(industryInstanceId),
         requestRuntimeEnvironmentList<EnvironmentItem[]>(
           DASHBOARD_ENV_LIMIT,
@@ -779,20 +776,13 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
         requestRuntimeEvidenceList<EvidenceListItem[]>(
           DASHBOARD_EVIDENCE_LIMIT,
         ),
-        requestRuntimeGoals<GoalItem[]>({
-          industryInstanceId,
-          status: "active",
-          limit: DASHBOARD_GOAL_LIMIT,
-        }),
       ]);
 
       const normalizedAgents = Array.isArray(agentList) ? agentList : [];
-      const normalizedGoals = Array.isArray(goalList) ? goalList : [];
 
       setAgents(normalizedAgents);
       setEnvironments(Array.isArray(envList) ? envList : []);
       setEvidence(Array.isArray(evidenceList) ? evidenceList : []);
-      setGoals(normalizedGoals);
 
       setSelectedAgent((current) => {
         if (current) {
@@ -804,13 +794,6 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
           }
         }
         return pickPreferredAgent(normalizedAgents);
-      });
-
-      setSelectedGoalId((current) => {
-        if (current && normalizedGoals.some((goal) => goal.id === current)) {
-          return current;
-        }
-        return null;
       });
     } catch (error) {
       console.error("Failed to load agent workbench data:", error);
@@ -1140,7 +1123,6 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
     capabilityCatalog,
     environments,
     evidence,
-    goals,
     selectedGoalId,
     setSelectedGoalId,
     goalDetail,

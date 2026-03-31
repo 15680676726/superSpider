@@ -100,9 +100,9 @@ describe("AutomationTab", () => {
     expect(await screen.findByText("env:office-doc")).toBeTruthy();
     expect(screen.getByText("session-office-current")).toBeTruthy();
     expect(screen.getByText("office_document")).toBeTruthy();
-    expect(screen.getByText("Host coordination: handoff")).toBeTruthy();
-    expect(screen.getByText("Host binding warning")).toBeTruthy();
-    expect(screen.getByText("environment_ref mismatch")).toBeTruthy();
-    expect(screen.getByText("session_mount_id mismatch")).toBeTruthy();
+    expect(screen.getByText("宿主协同：handoff")).toBeTruthy();
+    expect(screen.getByText("宿主绑定警告")).toBeTruthy();
+    expect(screen.getByText("环境引用不一致")).toBeTruthy();
+    expect(screen.getByText("会话挂载不一致")).toBeTruthy();
   });
 });

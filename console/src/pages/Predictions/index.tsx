@@ -633,19 +633,19 @@ export default function PredictionsPage() {
                     {cycleId ? <Tag>当前周期 {cycleId}</Tag> : null}
                     {triggerSource ? <Tag>来源 {triggerSource}</Tag> : null}
                     {meetingWindow ? <Tag>{meetingWindow}</Tag> : null}
-                    <Tag>待处理 report {pendingReportCount}</Tag>
-                    <Tag>未消化 backlog {openBacklogCount}</Tag>
+                    <Tag>待处理汇报 {pendingReportCount}</Tag>
+                    <Tag>未消化待办 {openBacklogCount}</Tag>
                     <Tag>目标状态面 {goalStatusCount}</Tag>
                     <Tag>参与输入 {participantInputCount}</Tag>
-                    <Tag>assignment 摘要 {assignmentSummaryCount}</Tag>
-                    <Tag>lane 摘要 {laneSummaryCount}</Tag>
+                    <Tag>派单摘要 {assignmentSummaryCount}</Tag>
+                    <Tag>泳道摘要 {laneSummaryCount}</Tag>
                   </Space>
                   <Paragraph
                     type="secondary"
                     style={{ marginTop: 12, marginBottom: 0 }}
                   >
-                    operating cycle 会把当前周期、回流、assignment、lane 与
-                    backlog 快照固化成正式晨会 / 晚会复盘案例，供主脑统一决策。
+                    运营周期会把当前周期、回流、派单、泳道与待办快照固化成正式晨会 /
+                    晚会复盘案例，供主脑统一决策。
                   </Paragraph>
                 </Card>
 

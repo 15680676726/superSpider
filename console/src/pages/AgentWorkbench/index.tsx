@@ -72,7 +72,6 @@ export default function AgentWorkbenchPage() {
     industryDetail,
     capabilityCatalog,
     evidence,
-    goals,
     selectedGoalId,
     setSelectedGoalId,
     goalDetail,
@@ -121,7 +120,7 @@ export default function AgentWorkbenchPage() {
     [agents, executionCoreAgent, executionSeatAgents],
   );
   const displayedAgent = agentDetail?.agent ?? selectedAgent ?? defaultFocusedAgent;
-  const displayedGoals = agentDetail ? agentDetail.goals : goals;
+  const displayedGoals = agentDetail?.goals ?? [];
   const displayedEvidence = agentDetail ? agentDetail.evidence : evidence;
 
   React.useEffect(() => {

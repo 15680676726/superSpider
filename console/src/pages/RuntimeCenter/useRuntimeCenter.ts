@@ -84,6 +84,9 @@ function normalizeCardStatus(status: string | undefined): RuntimeCardStatus {
 function normalizeOverview(
   payload: RuntimeCenterOverviewPayload,
 ): RuntimeCenterOverviewPayload {
+  const visibleCards = (payload.cards ?? []).filter(
+    (card) => card.key !== "goals" && card.key !== "schedules",
+  );
   return {
     ...payload,
     surface: payload.surface
@@ -92,7 +95,7 @@ function normalizeOverview(
           status: normalizeCardStatus(payload.surface.status),
         }
       : payload.surface,
-    cards: payload.cards.map((card) => ({
+    cards: visibleCards.map((card) => ({
       ...card,
       status: normalizeCardStatus(card.status),
       meta: card.meta ?? {},
@@ -111,17 +114,6 @@ function buildActionBody(
 ): Record<string, unknown> | undefined {
   if (actionKey === "delete") {
     return undefined;
-  }
-  if (cardKey === "goals") {
-    if (actionKey === "compile") {
-      return {
-        context: {
-          trigger_source: "manual:runtime-center",
-          trigger_actor: "runtime-center",
-          trigger_reason: "Operator compiled goal from Runtime Center.",
-        },
-      };
-    }
   }
   if (cardKey === "decisions") {
     if (actionKey === "approve") {

@@ -1,4 +1,5 @@
 import {
+  type ChatWritebackTarget,
   inferWritebackTargetsFromFocus,
   normalizeWritebackTargetsFromThreadMeta,
   presentSessionKindLabel,
@@ -10,6 +11,37 @@ function readMetaString(
 ): string {
   const value = threadMeta[key];
   return typeof value === "string" ? value.trim() : "";
+}
+
+function presentFocusLabel(currentGoal: string | null): string | null {
+  return currentGoal?.trim() ? `焦点：${currentGoal.trim()}` : null;
+}
+
+function presentThreadKindChipLabel(sessionKind: string): string | null {
+  const normalizedSessionKind = sessionKind.trim();
+  if (!normalizedSessionKind) {
+    return null;
+  }
+  const threadKindLabel = presentSessionKindLabel(normalizedSessionKind);
+  if (threadKindLabel === "control-thread") return "线程：控制线程";
+  if (threadKindLabel === "execution-thread") return "线程：执行线程";
+  if (threadKindLabel === "agent-thread") return "线程：智能体线程";
+  return `线程：${threadKindLabel}`;
+}
+
+function presentWritebackTarget(target: ChatWritebackTarget): string {
+  switch (target) {
+    case "strategy":
+      return "战略";
+    case "lane":
+      return "泳道";
+    case "backlog":
+      return "待办";
+    case "immediate-goal":
+      return "当前目标";
+    default:
+      return target;
+  }
 }
 
 export function resolveThreadRuntimePresentation({
@@ -30,7 +62,7 @@ export function resolveThreadRuntimePresentation({
 } {
   const focusKind = readMetaString(threadMeta, "current_focus_kind");
   const focusId = readMetaString(threadMeta, "current_focus_id");
-  const focusLabel = currentGoal?.trim() ? `Focus: ${currentGoal.trim()}` : null;
+  const focusLabel = presentFocusLabel(currentGoal);
   const focusHintParts = [
     focusKind ? `kind=${focusKind}` : "",
     focusId ? `id=${focusId}` : "",
@@ -38,9 +70,7 @@ export function resolveThreadRuntimePresentation({
   const focusHint = focusHintParts.length > 0 ? focusHintParts.join(" | ") : null;
 
   const normalizedSessionKind = sessionKind.trim();
-  const threadKindLabel = normalizedSessionKind
-    ? `Thread: ${presentSessionKindLabel(normalizedSessionKind)}`
-    : null;
+  const threadKindLabel = presentThreadKindChipLabel(normalizedSessionKind);
   const threadBindingKind = readMetaString(threadMeta, "thread_binding_kind");
   const ownerScope = readMetaString(threadMeta, "owner_scope");
   const threadKindHintParts = [
@@ -61,7 +91,7 @@ export function resolveThreadRuntimePresentation({
         });
   const writebackLabel =
     inferredWritebackTargets.length > 0
-      ? `Writeback: ${inferredWritebackTargets.join("/")}`
+      ? `写回：${inferredWritebackTargets.map(presentWritebackTarget).join("/")}`
       : null;
   const writebackRoleName = readMetaString(
     threadMeta,

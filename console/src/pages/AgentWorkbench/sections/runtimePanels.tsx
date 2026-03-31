@@ -203,35 +203,35 @@ export function ActorRuntimePanel({
         <Card
           className="baize-card"
           size="small"
-          title="Host coordination"
+          title="宿主协同"
           style={{ marginBottom: 32 }}
         >
           <Space wrap style={{ marginBottom: 16 }}>
-            {selectedSeatRef ? <Tag>{`Seat ${selectedSeatRef}`}</Tag> : null}
+            {selectedSeatRef ? <Tag>{`工位 ${selectedSeatRef}`}</Tag> : null}
             {seatSelectionPolicy ? <Tag>{seatSelectionPolicy}</Tag> : null}
             {handoffState ? <Tag color="orange">{handoffState}</Tag> : null}
             {contentionSeverity ? (
               <Tag color={contentionSeverity === "blocked" ? "red" : "gold"}>
-                {`Contention ${contentionSeverity}`}
+                {`争用 ${contentionSeverity}`}
               </Tag>
             ) : null}
-            {schedulerAction ? <Tag color="blue">{`Action ${schedulerAction}`}</Tag> : null}
+            {schedulerAction ? <Tag color="blue">{`动作 ${schedulerAction}`}</Tag> : null}
           </Space>
           <Space direction="vertical" size={4}>
-            {seatOwner ? <Text>{`Seat owner: ${seatOwner}`}</Text> : null}
-            {workspaceOwner ? <Text>{`Workspace owner: ${workspaceOwner}`}</Text> : null}
-            {writerOwner ? <Text>{`Writer owner: ${writerOwner}`}</Text> : null}
-            {handoffState ? <Text>{`Handoff: ${handoffState}`}</Text> : null}
-            {handoffOwner ? <Text>{`Handoff owner: ${handoffOwner}`}</Text> : null}
+            {seatOwner ? <Text>{`工位归属：${seatOwner}`}</Text> : null}
+            {workspaceOwner ? <Text>{`工作区归属：${workspaceOwner}`}</Text> : null}
+            {writerOwner ? <Text>{`写入归属：${writerOwner}`}</Text> : null}
+            {handoffState ? <Text>{`接管状态：${handoffState}`}</Text> : null}
+            {handoffOwner ? <Text>{`接管归属：${handoffOwner}`}</Text> : null}
             {contentionSeverity ? (
               <Text>
-                {`Contention: ${contentionSeverity}${
+                {`争用：${contentionSeverity}${
                   contentionReason ? ` (${contentionReason})` : ""
                 }`}
               </Text>
             ) : null}
-            {schedulerAction ? <Text>{`Scheduler action: ${schedulerAction}`}</Text> : null}
-            {writerLockScope ? <Text>{`Writer lock: ${writerLockScope}`}</Text> : null}
+            {schedulerAction ? <Text>{`调度动作：${schedulerAction}`}</Text> : null}
+            {writerLockScope ? <Text>{`写锁范围：${writerLockScope}`}</Text> : null}
           </Space>
         </Card>
       ) : null}

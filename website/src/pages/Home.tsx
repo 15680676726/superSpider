@@ -21,22 +21,22 @@ function buildCards(lang: Lang): StoryCard[] {
       {
         title: "以目标驱动持续执行",
         body:
-          "Spider Mesh 不是一次性对话壳，而是围绕 Goal 与 Task 持续推进的执行系统。计划、执行、观察与反馈属于同一条运行主链。",
+          "Spider Mesh 不是一次性对话壳，而是围绕目标与任务持续推进的执行系统。计划、执行、观察与反馈属于同一条运行主链。",
       },
       {
         title: "环境不会每轮重建",
         body:
-          "浏览器、文件、渠道、工作目录与会话不该靠 prompt 临时恢复。Spider Mesh 把 Environment 挂在运行现场里，让长期任务真正连起来。",
+          "浏览器、文件、渠道、工作目录与会话不该靠提示词临时恢复。Spider Mesh 把环境挂在运行现场里，让长期任务真正连起来。",
       },
       {
         title: "证据先于结论",
         body:
-          "重要动作应该留下 Evidence、Replay 与 Artifact。Spider Mesh 强调可归因、可回放、可审计，而不是把关键事实埋进零散日志。",
+          "重要动作应该留下证据、回放与产物。Spider Mesh 强调可归因、可回放、可审计，而不是把关键事实埋进零散日志。",
       },
       {
-        title: "Runtime Center 统一可见",
+        title: "运行中心统一可见",
         body:
-          "Goal、Agent、Task、Environment、Evidence、Decision 与 Patch 应该在同一个运行中心里被看见、被治理、被推进。",
+          "目标、智能体、任务、环境、证据、决策与补丁应该在同一个运行中心里被看见、被治理、被推进。",
       },
     ];
   }
@@ -89,7 +89,7 @@ export function Home({ config, lang, onLangClick }: HomeProps) {
           {
             label: "运行中心 UI 规范",
             href: repoFile("RUNTIME_CENTER_UI_SPEC.md"),
-            desc: "Goal、Agent、Task、Environment 与 Evidence 的可见化边界",
+            desc: "目标、智能体、任务、环境与证据的可见化边界",
           },
         ]
       : [
@@ -213,7 +213,7 @@ export function Home({ config, lang, onLangClick }: HomeProps) {
               </h3>
               <p style={{ margin: 0, color: "var(--text-muted)" }}>
                 {lang === "zh"
-                  ? `本地 Runtime Center 默认地址：${config.consoleUrl}`
+                  ? `本地运行中心默认地址：${config.consoleUrl}`
                   : `Default local Runtime Center address: ${config.consoleUrl}`}
               </p>
             </div>

@@ -82,7 +82,7 @@ function buildDocs(config: SiteConfig): Record<DocKey, DocDefinition> {
     intro: {
       title: { zh: "Spider Mesh 是什么", en: "What Spider Mesh is" },
       summary: {
-        zh: "Spider Mesh 是一个面向长期任务的本地执行系统，把目标、环境、证据与持续执行收敛到同一个 Runtime Center。",
+        zh: "Spider Mesh 是一个面向长期任务的本地执行系统，把目标、环境、证据与持续执行收敛到同一个运行中心。",
         en: "Spider Mesh is a local execution system that brings goals, environments, evidence, and long-running work into one Runtime Center.",
       },
       sections: [
@@ -90,11 +90,11 @@ function buildDocs(config: SiteConfig): Record<DocKey, DocDefinition> {
           title: { zh: "系统定位", en: "System positioning" },
           paragraphs: [
             {
-              zh: "Spider Mesh 不是零散功能页的集合，也不是一次性对话壳。它围绕 Goal、Agent、Task、Environment、Evidence 与 Patch 建立同一运行现场。",
+              zh: "Spider Mesh 不是零散功能页的集合，也不是一次性对话壳。它围绕目标、智能体、任务、环境、证据与补丁建立同一运行现场。",
               en: "Spider Mesh is not a loose bundle of feature pages and not a disposable chat wrapper. It builds one runtime surface around goals, agents, tasks, environments, evidence, and patches.",
             },
             {
-              zh: "它面向的是长期执行、持续环境和可回放结果。真正的日常操作在 Runtime Center 完成，website/ 负责对 Spider Mesh 本身做清晰介绍与入口说明。",
+              zh: "它面向的是长期执行、持续环境和可回放结果。真正的日常操作在运行中心完成，website/ 负责对 Spider Mesh 本身做清晰介绍与入口说明。",
               en: "It is built for long-running execution, persistent environments, and replayable outcomes. Daily operation happens in the Runtime Center, while website/ explains the system and its entry points.",
             },
           ],
@@ -107,7 +107,7 @@ function buildDocs(config: SiteConfig): Record<DocKey, DocDefinition> {
               en: "Spider Mesh describes a runtime structure where one control core coordinates multiple agents and weaves memory, evidence, and workflows into a durable operating mesh. The name reflects the system shape, not mascot copy.",
             },
             {
-              zh: "Spider Mesh 的设计原则是：一个中枢、多条专业协作链路、环境持续挂载、证据优先、结果可回放，以及所有关键对象都能在 Runtime Center 里被看见。",
+              zh: "Spider Mesh 的设计原则是：一个中枢、多条专业协作链路、环境持续挂载、证据优先、结果可回放，以及所有关键对象都能在运行中心里被看见。",
               en: "Its design principles are one control core, multiple specialist lanes, mounted environments, evidence-first execution, replayable outcomes, and one Runtime Center where important objects stay visible.",
             },
           ],
@@ -117,7 +117,7 @@ function buildDocs(config: SiteConfig): Record<DocKey, DocDefinition> {
     quickstart: {
       title: { zh: "快速开始", en: "Quick start" },
       summary: {
-        zh: "用最短路径启动 Spider Mesh，并进入 Runtime Center 开始使用。",
+        zh: "用最短路径启动 Spider Mesh，并进入运行中心开始使用。",
         en: "Use the shortest path to start Spider Mesh and enter the Runtime Center.",
       },
       sections: [
@@ -125,7 +125,7 @@ function buildDocs(config: SiteConfig): Record<DocKey, DocDefinition> {
           title: { zh: "启动服务", en: "Start the service" },
           paragraphs: [
             {
-              zh: `启动后在浏览器打开 ${config.consoleUrl}，进入 Runtime Center。`,
+              zh: `启动后在浏览器打开 ${config.consoleUrl}，进入运行中心。`,
               en: `After startup, open ${config.consoleUrl} in the browser to enter the Runtime Center.`,
             },
           ],
@@ -156,7 +156,7 @@ function buildDocs(config: SiteConfig): Record<DocKey, DocDefinition> {
     console: {
       title: { zh: "运行中心", en: "Runtime Center" },
       summary: {
-        zh: "Runtime Center 是 Spider Mesh 的指挥、运行与观测界面。",
+        zh: "运行中心是 Spider Mesh 的指挥、运行与观测界面。",
         en: "The Runtime Center is Spider Mesh's command, execution, and observability surface.",
       },
       sections: [
@@ -164,7 +164,7 @@ function buildDocs(config: SiteConfig): Record<DocKey, DocDefinition> {
           title: { zh: "一等对象", en: "First-class objects" },
           paragraphs: [
             {
-              zh: "Spider Mesh 的一等对象是 Goal、Agent、Task、Environment、Evidence、Decision 和 Patch。它们决定了系统如何看见任务、推进任务、记录任务，以及让系统继续演进。",
+              zh: "Spider Mesh 的一等对象是目标、智能体、任务、环境、证据、决策和补丁。它们决定了系统如何看见任务、推进任务、记录任务，以及让系统继续演进。",
               en: "Spider Mesh's first-class objects are goals, agents, tasks, environments, evidence, decisions, and patches. They define how work is seen, executed, recorded, and improved.",
             },
           ],
@@ -173,11 +173,11 @@ function buildDocs(config: SiteConfig): Record<DocKey, DocDefinition> {
           title: { zh: "在运行中心里做什么", en: "What happens in the Runtime Center" },
           paragraphs: [
             {
-              zh: "在这里配置模型和渠道、查看 Agent 与任务、观察环境与证据、处理决策与补丁，并让长期任务在同一界面中持续推进。",
+              zh: "在这里配置模型和渠道、查看智能体与任务、观察环境与证据、处理决策与补丁，并让长期任务在同一界面中持续推进。",
               en: "This is where models and channels are configured, agents and tasks are inspected, environments and evidence are observed, and decisions and patches are handled on one surface.",
             },
             {
-              zh: "如果一个能力无法在 Runtime Center 被看见、被归因、被追踪，它就不算真正落地。",
+              zh: "如果一个能力无法在运行中心被看见、被归因、被追踪，它就不算真正落地。",
               en: "If a capability cannot be seen, attributed, and tracked in the Runtime Center, it is not fully landed yet.",
             },
           ],
@@ -195,7 +195,7 @@ function buildDocs(config: SiteConfig): Record<DocKey, DocDefinition> {
           title: { zh: "在哪里配置", en: "Where to configure them" },
           paragraphs: [
             {
-              zh: "频道配置在 Runtime Center 的 Settings > Channels 中完成。每个频道都应该作为统一运行主链的入口，而不是各自维护一套独立状态。",
+              zh: "频道配置在运行中心的 Settings > Channels 中完成。每个频道都应该作为统一运行主链的入口，而不是各自维护一套独立状态。",
               en: "Channels are configured in Settings > Channels inside the Runtime Center. Each one should enter the same runtime chain rather than inventing its own state model.",
             },
           ],
@@ -222,11 +222,11 @@ function buildDocs(config: SiteConfig): Record<DocKey, DocDefinition> {
           title: { zh: "模型入口", en: "Model entry point" },
           paragraphs: [
             {
-              zh: "模型配置入口在 Runtime Center 的 Settings > Models。云模型、本地模型与自定义 provider 都应从这里进入统一运行面。",
+              zh: "模型配置入口在运行中心的 Settings > Models。云模型、本地模型与自定义 provider 都应从这里进入统一运行面。",
               en: "Model configuration lives under Settings > Models in the Runtime Center. Cloud, local, and custom providers should enter the same runtime surface from here.",
             },
             {
-              zh: "在 Spider Mesh 里，模型负责理解与决策建议，Capability 负责外部动作，Evidence 负责留下事实。三者需要清晰分工。",
+              zh: "在 Spider Mesh 里，模型负责理解与决策建议，能力负责外部动作，证据负责留下事实。三者需要清晰分工。",
               en: "In Spider Mesh, models reason and propose, capabilities perform external actions, and evidence keeps the record. Those responsibilities need to stay distinct.",
             },
           ],
@@ -280,7 +280,7 @@ function buildDocs(config: SiteConfig): Record<DocKey, DocDefinition> {
           title: { zh: "哪个前端才是现在要看的？", en: "Which frontend matters right now?" },
           paragraphs: [
             {
-              zh: "日常使用看 console/ 对应的 Runtime Center。website/ 负责介绍 Spider Mesh、解释系统边界，并提供公开入口。",
+              zh: "日常使用看 console/ 对应的运行中心。website/ 负责介绍 Spider Mesh、解释系统边界，并提供公开入口。",
               en: "For daily use, go to console/ and its Runtime Center. website/ introduces Spider Mesh, explains the system, and provides public-facing entry points.",
             },
           ],

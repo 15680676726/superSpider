@@ -38,7 +38,7 @@ export function Hero({
     projectEnglishName.trim().length > 0 && projectEnglishName.trim() !== projectName.trim();
   const summary =
     lang === "zh"
-      ? "把目标、环境、证据与长期执行收敛到同一个本地 Runtime Center，让执行、观察与演进在一处闭环。"
+      ? "把目标、环境、证据与长期执行收敛到同一个本地运行中心，让执行、观察与演进在一处闭环。"
       : "A local execution system that brings goals, environments, evidence, and long-running work into one Runtime Center.";
 
   return (

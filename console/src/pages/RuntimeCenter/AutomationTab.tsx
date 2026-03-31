@@ -179,7 +179,7 @@ function getScheduleHostWarnings(hostMeta?: RuntimeScheduleHostBindingMeta | nul
     ((snapshotEnvironmentRef && snapshotEnvironmentRef !== environmentRef) ||
       (schedulerEnvironmentRef && schedulerEnvironmentRef !== environmentRef))
   ) {
-    warnings.add("environment_ref mismatch");
+    warnings.add("环境引用不一致");
   }
 
   if (
@@ -187,7 +187,7 @@ function getScheduleHostWarnings(hostMeta?: RuntimeScheduleHostBindingMeta | nul
     ((snapshotSessionMountId && snapshotSessionMountId !== sessionMountId) ||
       (schedulerSessionMountId && schedulerSessionMountId !== sessionMountId))
   ) {
-    warnings.add("session_mount_id mismatch");
+    warnings.add("会话挂载不一致");
   }
 
   return [...warnings];
@@ -763,7 +763,7 @@ export default function AutomationTab({
         render: (_, record) => {
           const hostMeta = readScheduleHostMeta(record);
           if (!hostMeta) {
-            return <Text type="secondary">No host binding</Text>;
+            return <Text type="secondary">暂无宿主绑定</Text>;
           }
 
           const warnings = getScheduleHostWarnings(hostMeta);
@@ -783,11 +783,11 @@ export default function AutomationTab({
               <Text type="secondary">{sessionMountId || "-"}</Text>
               {appFamily ? <Text type="secondary">{appFamily}</Text> : null}
               {schedulerAction ? (
-                <Text type="secondary">{`Host coordination: ${schedulerAction}`}</Text>
+                <Text type="secondary">{`宿主协同：${schedulerAction}`}</Text>
               ) : null}
               {warnings.length > 0 ? (
                 <div className={styles.automationCell}>
-                  <Tag color="gold">Host binding warning</Tag>
+                  <Tag color="gold">宿主绑定警告</Tag>
                   {warnings.map((warning) => (
                     <Text key={warning} type="warning">
                       {warning}
@@ -805,7 +805,7 @@ export default function AutomationTab({
         width: 180,
         render: (_, record) => (
           <div className={styles.automationCell}>
-            <Text strong>{record.owner || "System"}</Text>
+            <Text strong>{record.owner || "系统"}</Text>
             <Text type="secondary" style={{ fontSize: '12px' }}>ID: {record.id}</Text>
           </div>
         ),
@@ -918,7 +918,7 @@ export default function AutomationTab({
           showIcon
           type="info"
           className={styles.automationAlert}
-          message="心跳现在是主脑监督脉冲，会定期触发 operating cycle 检查与正式回流。"
+          message="心跳现在是主脑监督脉冲，会定期触发运营周期检查与正式回流。"
           style={{ marginBottom: 24 }}
         />
 

@@ -558,10 +558,10 @@ export default function V7ExecutionSeatPanel({
                 {normalizeSpiderMeshBrand(currentAssignment.summary || "") || "暂无摘要"}
               </Paragraph>
               <Paragraph>
-                <Text strong>Backlog：</Text> {currentAssignment.backlog_item_id || "-"}
+                <Text strong>待办：</Text> {currentAssignment.backlog_item_id || "-"}
               </Paragraph>
               <Paragraph>
-                <Text strong>Goal：</Text> {currentAssignment.goal_id || "-"}
+                <Text strong>目标：</Text> {currentAssignment.goal_id || "-"}
               </Paragraph>
               <Paragraph style={{ marginBottom: 0 }}>
                 <Text strong>最近更新：</Text>{" "}

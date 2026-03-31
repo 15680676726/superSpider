@@ -19,12 +19,12 @@ describe("pagePresentation", () => {
       }),
     ).toEqual({
       focusHint: "kind=backlog-item | id=backlog-42",
-      focusLabel: "Focus: Ship phase split",
+      focusLabel: "焦点：Ship phase split",
       threadKindHint:
         "session_kind=industry-control-thread | thread_binding_kind=control | owner_scope=industry",
-      threadKindLabel: "Thread: control-thread",
+      threadKindLabel: "线程：控制线程",
       writebackHint: "inferred=strategy,backlog | role=execution-core | match_signals=2",
-      writebackLabel: "Writeback: strategy/backlog",
+      writebackLabel: "写回：战略/待办",
     });
   });
 

@@ -9,7 +9,7 @@ export const i18n: Record<Lang, Record<string, string>> = {
     "nav.lang": "EN",
     "nav.github": "源码",
     "footer.note":
-      "Spider Mesh 把目标、环境、证据与持续执行收敛到同一个本地 Runtime Center。",
+      "Spider Mesh 把目标、环境、证据与持续执行收敛到同一个本地运行中心。",
     "footer.builtOn": "底层能力栈由",
   },
   en: {

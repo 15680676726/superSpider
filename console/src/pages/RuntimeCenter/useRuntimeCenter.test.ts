@@ -95,4 +95,49 @@ describe("useRuntimeCenter", () => {
     expect(result.current.mainBrainUnavailable).toBe(true);
     expect(result.current.mainBrainError).toBeNull();
   });
+
+  it("filters retired goals and schedules overview cards", async () => {
+    requestRuntimeOverviewMock.mockResolvedValue({
+      ...mockOverview,
+      cards: [
+        {
+          key: "goals",
+          title: "Goals",
+          source: "goal-service",
+          status: "state-service",
+          count: 1,
+          summary: "legacy goals",
+          entries: [],
+          meta: {},
+        },
+        {
+          key: "schedules",
+          title: "Schedules",
+          source: "schedule-service",
+          status: "state-service",
+          count: 1,
+          summary: "legacy schedules",
+          entries: [],
+          meta: {},
+        },
+        {
+          key: "tasks",
+          title: "Tasks",
+          source: "task-service",
+          status: "state-service",
+          count: 1,
+          summary: "active tasks",
+          entries: [],
+          meta: {},
+        },
+      ],
+    });
+    requestRuntimeMainBrainMock.mockResolvedValue(mockMainBrain);
+
+    const { result } = renderHook(() => useRuntimeCenter());
+
+    await waitFor(() => !result.current.loading && !result.current.mainBrainLoading);
+
+    expect(result.current.data?.cards.map((card) => card.key)).toEqual(["tasks"]);
+  });
 });
