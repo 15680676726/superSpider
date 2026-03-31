@@ -497,7 +497,7 @@
 - UI 可见化已补出第一轮
 - `2026-03-24` 补充：主脑监督链节点已进入正式 detail/UI 读面，writeback/backlog/cycle/assignment/report/replan 的可见链路与回归测试已补齐。
 - `2026-03-26` 补充：`tests/kernel/test_main_brain_chat_service.py`、`tests/kernel/test_turn_executor.py`、`tests/kernel/test_query_execution_runtime.py`、`tests/app/test_runtime_center_api.py`、`tests/app/test_runtime_conversations_api.py`、`tests/app/test_agent_runtime_ingress.py`、`tests/app/runtime_center_api_parts/overview_governance.py`、`tests/app/test_system_api.py` 与 `console/src/runtime/controlChainPresentation.test.ts` 已通过更大回归，`report_synthesis`、`main_brain_intake`、control-chain presenter 与 runtime/system 读面当前已形成可验证基线。
-- 仍需继续加强“主脑唯一认知中心”的更大范围工程事实
+- `2026-03-31` 补充：主脑作为唯一认知中心的当前定义范围已收口，不再把这项写成开放式尾巴。`Runtime Center / Industry cockpit / control-chain presenter` 与 `main_brain_chat_service / turn_executor / runtime center overview` 当前已共享同一条主脑认知链，并通过 `python -m pytest tests/kernel/test_main_brain_chat_service.py tests/kernel/test_turn_executor.py tests/app/runtime_center_api_parts/overview_governance.py tests/app/test_runtime_center_api.py tests/app/test_runtime_conversations_api.py tests/app/test_agent_runtime_ingress.py tests/app/test_system_api.py -q` -> `176 passed`，以及 `npm --prefix console test -- MainBrainCockpitPanel.test.tsx index.test.tsx runtimePresentation.test.tsx text.test.ts controlChainPresentation.test.ts` -> `23 passed` 验证。后续不再把这项单独登记为未闭环任务。
 
 ### 4.3 第二优先级：主脑聊天链瘦身与性能硬化
 
