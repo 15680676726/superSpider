@@ -4,7 +4,7 @@
 
 **Goal:** Tighten CoPaw's lower execution contract without breaking the current live main chain by introducing an internal execution context, unifying file/shell execution behavior, strengthening evidence/result coupling, and tightening request normalization so complete tasks are more likely to run through.
 
-**Architecture:** This plan treats the current main chain as alive. `P0` starts under `src/copaw/capabilities/execution.py`, not at the main-brain front door. `/runtime-center/chat/run` stays as the unified ingress. `task_state_machine.py` and `turn_loop.py` are not `P0` requirements; they should only be extracted later if green implementation work proves they remove real complexity.
+**Architecture:** This plan treats the current main chain as alive. `P0` starts under `src/copaw/capabilities/execution.py`, not at the main-brain front door. `/runtime-center/chat/run` stays as the unified ingress and current SSE relay over `turn_executor.stream_request()`. `task_state_machine.py` and `turn_loop.py` are not `P0` requirements; they should only be extracted later if green implementation work proves they remove real complexity. `P0` standardizes and tightens the contracts that already exist in `CapabilityExecutionFacade`, `KernelToolBridge`, and `query_execution_runtime._resolve_execution_task_context(...)`.
 
 **Tech Stack:** Python 3.11, FastAPI, Pydantic, SQLite, Pytest, existing CoPaw kernel/evidence/runtime services.
 
@@ -73,13 +73,13 @@ pip install -e .
 ### Existing files to modify
 
 - `src/copaw/capabilities/execution.py`
-  - First landing point for the new execution context and unified file/shell contract.
+  - First landing point for the typed execution context and existing unified file/shell contract.
 - `src/copaw/kernel/tool_bridge.py`
-  - Route file/shell execution through the hardened execution contract.
+  - Align tool-bridge-mediated file/shell evidence with the hardened execution contract.
 - `src/copaw/kernel/query_execution_runtime.py`
-  - Tighten execution-side request normalization where needed.
+  - Tighten execution-side request normalization by clarifying the existing `_resolve_execution_task_context(...)` path.
 - `src/copaw/kernel/runtime_outcome.py`
-  - Normalize the lower execution result envelope if needed.
+  - Normalize the lower execution result envelope only if existing execution return fields need a shared helper.
 - `tests/app/test_capabilities_execution.py`
   - Lock file/shell execution to the unified contract.
 - `tests/agents/test_file_tool_evidence.py`
@@ -270,8 +270,7 @@ def test_execution_result_contract_exposes_normalized_success_payload():
 
 def test_chat_run_e2e_returns_runtime_result_without_route_redesign():
     ...
-    assert "runtime" in payload
-    assert "result" in payload["runtime"]
+    assert response.status_code == 200
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -283,7 +282,7 @@ python -m pytest tests/app/test_capabilities_execution.py -k normalized_success_
 python -m pytest tests/app/test_operator_runtime_e2e.py -k runtime_result -v
 ```
 
-Expected: FAIL because the lower result contract is not yet explicit enough.
+Expected: FAIL because the lower result contract is not yet explicit enough or is inconsistent across capability paths.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -335,7 +334,7 @@ def test_query_execution_runtime_normalizes_file_shell_request_payloads():
     }
 
 
-def test_live_route_still_runs_through_existing_main_chain_with_normalized_payload():
+def test_live_route_still_runs_through_existing_sse_main_chain():
     ...
     assert response.status_code == 200
 ```
@@ -349,17 +348,18 @@ python -m pytest tests/kernel/test_query_execution_runtime.py -k normalize -v
 python -m pytest tests/app/test_operator_runtime_e2e.py -k existing_main_chain -v
 ```
 
-Expected: FAIL because request normalization is still too implicit.
+Expected: FAIL because request normalization is still too implicit or inconsistent with the current execution-context merge path.
 
 - [ ] **Step 3: Write minimal implementation**
 
 ```python
 # query_execution_runtime.py
-runtime_payload["execution_context"] = {
-    "capability_ref": kernel_task.capability_ref,
-    "environment_ref": kernel_task.environment_ref,
-    "owner_agent_id": kernel_task.owner_agent_id,
-}
+execution_context = self._resolve_execution_task_context(
+    request=request,
+    agent_id=owner_agent_id,
+    kernel_task_id=kernel_task_id,
+    conversation_thread_id=session_id,
+)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -368,7 +368,7 @@ Run:
 
 ```powershell
 python -m pytest tests/kernel/test_query_execution_runtime.py -k normalize -v
-python -m pytest tests/app/test_operator_runtime_e2e.py -k existing_main_chain -v
+python -m pytest tests/app/test_operator_runtime_e2e.py -k sse_main_chain -v
 ```
 
 Expected: PASS while the current live route still works.
@@ -401,8 +401,8 @@ Expected: PASS
 
 ```markdown
 - `P0` now hardens the lower execution contract instead of rebuilding the main chain.
-- file/shell execution now flows through a unified internal execution context.
-- execution result and request normalization are tighter without changing the live vocabulary.
+- file/shell execution is standardized around the existing capability front-door.
+- evidence/result shaping and execution-context normalization are tighter without changing the live vocabulary or route model.
 ```
 
 - [ ] **Step 3: Commit**
@@ -418,8 +418,8 @@ git commit -m "docs: record p0 runtime contract hardening"
 
 - file/shell execution runs through one hardened front-door
 - evidence is coupled to that front-door
-- execution result contract is normalized
-- request normalization is tighter
+- the existing execution result contract is more uniform
+- the existing execution-context normalization path is more uniform
 - the current live route still works
 - the regression suite in Task 5 is green
 

@@ -30,6 +30,13 @@ What is currently weak:
 - request normalization at execution edges
 - lower-layer execution reliability for full-task completion
 
+What already exists and should be tightened rather than reinvented:
+
+- `CapabilityExecutionFacade.execute_task()` already acts like a unified execution front-door
+- `KernelToolBridge` already records file/shell/browser evidence against kernel tasks
+- `query_execution_runtime._resolve_execution_task_context(...)` already merges execution-side runtime context
+- `/runtime-center/chat/run` already behaves like a thin SSE ingress over `turn_executor.stream_request()`
+
 ## What Must Not Be Replaced
 
 These remain CoPaw's formal core:
@@ -149,6 +156,12 @@ It must not become:
 - a new runtime truth source
 - a new environment truth source
 - a new owner/risk center
+
+It should be treated as a typed/clean internal wrapper around context that is currently assembled ad hoc across:
+
+- `CapabilityExecutionFacade.execute_task()`
+- `query_execution_runtime._resolve_execution_task_context(...)`
+- file/shell tool invocation payload shaping
 
 ### 2. `task_state_machine.py` is conditional, not mandatory `P0`
 
@@ -313,11 +326,11 @@ Not in `P0`.
 
 `P0` is intentionally narrow. It covers only:
 
-1. introduce `CapabilityExecutionContext` as an internal execution-layer context
-2. unify file/shell front-door behavior
-3. strengthen evidence coupling
-4. normalize execution result contract
-5. tighten request normalization
+1. introduce `CapabilityExecutionContext` as a typed internal execution-layer context over existing lower-layer fields
+2. standardize file/shell front-door behavior around the already-existing `CapabilityExecutionFacade` contract
+3. tighten evidence coupling where the file/shell path still differs between direct evidence append and tool-bridge-mediated evidence
+4. standardize the existing execution result envelope instead of inventing a new route/result schema
+5. tighten request normalization by reusing and clarifying the existing `_resolve_execution_task_context(...)` path
 6. make all of this work without breaking the current live route
 
 `P0` explicitly does not include:
@@ -368,8 +381,8 @@ Main risks:
 
 1. file/shell execution goes through one hardened front-door
 2. evidence is coupled to that front-door
-3. execution result contract is clearer and more uniform
-4. request normalization is clearer and more uniform
+3. the existing execution result contract is clearer and more uniform
+4. the existing execution-context normalization path is clearer and more uniform
 5. the current live route still works
 6. complete-task execution becomes materially more reliable without changing upper truth layers
 
