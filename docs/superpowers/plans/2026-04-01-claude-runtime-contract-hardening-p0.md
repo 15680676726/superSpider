@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Tighten CoPaw's lower execution contract without breaking the current live main chain by introducing an internal execution context, a phase-aware state-machine wrapper over existing kernel vocabulary, a unified file/shell front-door with evidence coupling, and finally a thin turn loop attached to `KernelTurnExecutor`.
+**Goal:** Tighten CoPaw's lower execution contract without breaking the current live main chain by introducing an internal execution context, unifying file/shell execution behavior, strengthening evidence/result coupling, and tightening request normalization so complete tasks are more likely to run through.
 
-**Architecture:** This plan assumes the current main chain is alive and should not be rebuilt in `P0`. The work starts under `capabilities/execution.py`, not in the main-brain front door. `P0` is contract hardening: first normalize the lower execution contract, then add a thin `turn_loop.py` over existing components. `/runtime-center/chat/run` remains the unified ingress, not a second chat system. No `P0` step should invent a second execution vocabulary or rewrite `MainBrainOrchestrator` and `/runtime-center/chat/run`.
+**Architecture:** This plan treats the current main chain as alive. `P0` starts under `src/copaw/capabilities/execution.py`, not at the main-brain front door. `/runtime-center/chat/run` stays as the unified ingress. `task_state_machine.py` and `turn_loop.py` are not `P0` requirements; they should only be extracted later if green implementation work proves they remove real complexity.
 
 **Tech Stack:** Python 3.11, FastAPI, Pydantic, SQLite, Pytest, existing CoPaw kernel/evidence/runtime services.
 
@@ -16,37 +16,38 @@ This plan covers only:
 
 - `src/copaw/capabilities/execution.py`
 - `src/copaw/capabilities/execution_context.py`
-- `src/copaw/kernel/task_state_machine.py`
-- file/shell execution through a unified front-door
+- `src/copaw/kernel/tool_bridge.py`
+- file/shell execution through one hardened front-door
 - evidence coupling for file/shell execution
-- a thin `src/copaw/kernel/turn_loop.py`
-- minimal `src/copaw/kernel/turn_executor.py` integration
+- execution result contract hardening
+- request normalization hardening
 
 This plan does **not** cover:
 
-- MCP runtime hardening
-- subagent/worker hardening
-- skill/package formalization
-- sidecar memory
 - `MainBrainOrchestrator` redesign
-- router/front-door redesign
+- `/runtime-center/chat/run` redesign
 - Runtime Center read-surface redesign
+- preemptive `task_state_machine.py` extraction
+- preemptive `turn_loop.py` extraction
+- MCP runtime hardening
+- worker/subagent shell hardening
+- skill/package formalization
 
 ## Ingress Constraint
 
 `/runtime-center/chat/run` stays in place during `P0`.
 
-In this plan it is treated only as:
+In this plan it is only:
 
 - unified ingress
 - request relay
-- live route to validate that the hardened lower contract still completes
+- live route used to validate the hardened lower contract
 
-It is not treated as:
+It is not:
 
 - a standalone chat system
 - a second semantic center
-- a redesign target in `P0`
+- a redesign target
 
 ## Execution Environment
 
@@ -66,16 +67,8 @@ pip install -e .
 
 - `src/copaw/capabilities/execution_context.py`
   - Internal standard execution context for one capability invocation.
-- `src/copaw/kernel/task_state_machine.py`
-  - Wrapper around existing `KernelTask.phase` and phase/status projection.
-- `src/copaw/kernel/turn_loop.py`
-  - Thin orchestration layer over existing components.
 - `tests/capabilities/test_execution_context.py`
   - Unit tests for execution context shape and helpers.
-- `tests/kernel/test_task_state_machine.py`
-  - Unit tests for current phase transitions and projections.
-- `tests/kernel/test_turn_loop.py`
-  - Unit tests for thin turn-loop ordering and failure reporting.
 
 ### Existing files to modify
 
@@ -83,22 +76,18 @@ pip install -e .
   - First landing point for the new execution context and unified file/shell contract.
 - `src/copaw/kernel/tool_bridge.py`
   - Route file/shell execution through the hardened execution contract.
-- `src/copaw/kernel/persistence.py`
-  - Export or safely reuse existing phase/status projection helpers if needed.
-- `src/copaw/kernel/lifecycle.py`
-  - Reuse existing legal phase progression where helpful; do not replace it.
-- `src/copaw/kernel/turn_executor.py`
-  - Attach the thin `turn_loop.py` with minimal intrusion.
+- `src/copaw/kernel/query_execution_runtime.py`
+  - Tighten execution-side request normalization where needed.
+- `src/copaw/kernel/runtime_outcome.py`
+  - Normalize the lower execution result envelope if needed.
 - `tests/app/test_capabilities_execution.py`
   - Lock file/shell execution to the unified contract.
 - `tests/agents/test_file_tool_evidence.py`
   - Lock file-tool evidence coupling.
 - `tests/agents/test_shell_tool_evidence.py`
   - Lock shell-tool evidence coupling.
-- `tests/kernel/test_kernel.py`
-  - Keep current lifecycle behavior aligned with the new wrapper.
-- `tests/kernel/test_turn_executor.py`
-  - Verify thin turn-loop integration.
+- `tests/kernel/test_query_execution_runtime.py`
+  - Verify normalized runtime payloads.
 - `tests/app/test_operator_runtime_e2e.py`
   - Verify the live route still completes through the hardened path.
 - `TASK_STATUS.md`
@@ -189,93 +178,7 @@ git add tests/capabilities/test_execution_context.py src/copaw/capabilities/exec
 git commit -m "test: add internal execution context contract"
 ```
 
-## Task 2: Add Failing Tests for `task_state_machine` Using Existing Kernel Vocabulary
-
-**Files:**
-- Create: `tests/kernel/test_task_state_machine.py`
-- Test: `tests/kernel/test_task_state_machine.py`
-- Test: `tests/kernel/test_kernel.py`
-
-- [ ] **Step 1: Write the failing tests**
-
-```python
-from copaw.kernel.task_state_machine import (
-    ensure_legal_phase_transition,
-    project_runtime_status,
-    project_task_status,
-)
-
-
-def test_phase_projection_reuses_existing_persistence_contract():
-    assert project_task_status("executing") == "running"
-    assert project_runtime_status("executing") == "active"
-
-
-def test_illegal_transition_is_checked_against_existing_task_phase_contract():
-    assert ensure_legal_phase_transition("pending", "risk-check") == "risk-check"
-    try:
-        ensure_legal_phase_transition("completed", "executing")
-    except ValueError as exc:
-        assert "illegal transition" in str(exc)
-    else:
-        raise AssertionError("expected ValueError")
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run:
-
-```powershell
-python -m pytest tests/kernel/test_task_state_machine.py -v
-```
-
-Expected: FAIL with missing module/function.
-
-- [ ] **Step 3: Write minimal implementation**
-
-```python
-from .persistence import _runtime_status_for_phase, _task_status_for_phase
-
-_ALLOWED_PHASE_TRANSITIONS = {
-    "pending": {"risk-check", "cancelled"},
-    "risk-check": {"executing", "waiting-confirm", "cancelled"},
-    "waiting-confirm": {"executing", "cancelled"},
-    "executing": {"completed", "failed", "cancelled"},
-}
-
-
-def ensure_legal_phase_transition(current: str, target: str) -> str:
-    if target not in _ALLOWED_PHASE_TRANSITIONS.get(current, set()):
-        raise ValueError(f"illegal transition: {current} -> {target}")
-    return target
-
-
-def project_task_status(phase: str) -> str:
-    return _task_status_for_phase(phase)
-
-
-def project_runtime_status(phase: str) -> str:
-    return _runtime_status_for_phase(phase)
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run:
-
-```powershell
-python -m pytest tests/kernel/test_task_state_machine.py -v
-```
-
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```powershell
-git add tests/kernel/test_task_state_machine.py src/copaw/kernel/task_state_machine.py
-git commit -m "test: wrap existing kernel phase contract"
-```
-
-## Task 3: Tighten the File/Shell Execution Front-Door and Evidence Coupling
+## Task 2: Tighten the File/Shell Front-Door and Evidence Coupling
 
 **Files:**
 - Modify: `src/copaw/capabilities/execution.py`
@@ -347,47 +250,28 @@ git add src/copaw/capabilities/execution.py src/copaw/kernel/tool_bridge.py test
 git commit -m "feat: harden file and shell execution contract"
 ```
 
-## Task 4: Add a Thin `turn_loop.py` and Attach It Minimally to `KernelTurnExecutor`
+## Task 3: Tighten Evidence and Execution Result Contract
 
 **Files:**
-- Create: `src/copaw/kernel/turn_loop.py`
-- Create: `tests/kernel/test_turn_loop.py`
-- Modify: `src/copaw/kernel/turn_executor.py`
-- Test: `tests/kernel/test_turn_executor.py`
+- Modify: `src/copaw/capabilities/execution.py`
+- Modify: `src/copaw/kernel/runtime_outcome.py`
+- Test: `tests/app/test_capabilities_execution.py`
 - Test: `tests/app/test_operator_runtime_e2e.py`
 
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-from copaw.kernel.turn_loop import run_turn_loop
-
-
-def test_turn_loop_orders_existing_stages_without_redefining_them():
-    calls = []
-
-    def stage(name):
-        def _inner(payload):
-            calls.append(name)
-            return payload
-        return _inner
-
-    run_turn_loop(
-        payload={"task_id": "ktask:test"},
-        stages=[
-            stage("bind"),
-            stage("governance"),
-            stage("execute"),
-            stage("evidence"),
-        ],
-    )
-
-    assert calls == ["bind", "governance", "execute", "evidence"]
-```
-
-```python
-def test_turn_executor_uses_thin_turn_loop_without_rewriting_main_brain(monkeypatch):
+def test_execution_result_contract_exposes_normalized_success_payload():
     ...
-    assert result.success is True
+    assert result["success"] is True
+    assert result["capability_id"] == "tool:read_file"
+    assert "summary" in result
+
+
+def test_chat_run_e2e_returns_runtime_result_without_route_redesign():
+    ...
+    assert "runtime" in payload
+    assert "result" in payload["runtime"]
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -395,28 +279,23 @@ def test_turn_executor_uses_thin_turn_loop_without_rewriting_main_brain(monkeypa
 Run:
 
 ```powershell
-python -m pytest tests/kernel/test_turn_loop.py -v
-python -m pytest tests/kernel/test_turn_executor.py -k turn_loop -v
+python -m pytest tests/app/test_capabilities_execution.py -k normalized_success_payload -v
+python -m pytest tests/app/test_operator_runtime_e2e.py -k runtime_result -v
 ```
 
-Expected: FAIL because `turn_loop.py` does not exist and `KernelTurnExecutor` is not using it.
+Expected: FAIL because the lower result contract is not yet explicit enough.
 
 - [ ] **Step 3: Write minimal implementation**
 
 ```python
-def run_turn_loop(*, payload, stages):
-    current = payload
-    for stage in stages:
-        current = stage(current)
-    return current
-```
-
-```python
-# turn_executor.py
-result = run_turn_loop(
-    payload=runtime_payload,
-    stages=[bind_stage, governance_stage, execute_stage, evidence_stage],
-)
+# execution.py
+return {
+    "success": success,
+    "capability_id": capability_id,
+    "environment_ref": task.environment_ref,
+    "summary": summary,
+    "evidence_id": evidence_id,
+}
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -424,18 +303,81 @@ result = run_turn_loop(
 Run:
 
 ```powershell
-python -m pytest tests/kernel/test_turn_loop.py -v
-python -m pytest tests/kernel/test_turn_executor.py -k turn_loop -v
-python -m pytest tests/app/test_operator_runtime_e2e.py -k "chat_run" -v
+python -m pytest tests/app/test_capabilities_execution.py -k normalized_success_payload -v
+python -m pytest tests/app/test_operator_runtime_e2e.py -k runtime_result -v
 ```
 
-Expected: PASS while the existing live route still works.
+Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add src/copaw/kernel/turn_loop.py src/copaw/kernel/turn_executor.py tests/kernel/test_turn_loop.py tests/kernel/test_turn_executor.py tests/app/test_operator_runtime_e2e.py
-git commit -m "feat: add thin turn loop over existing execution path"
+git add src/copaw/capabilities/execution.py src/copaw/kernel/runtime_outcome.py tests/app/test_capabilities_execution.py tests/app/test_operator_runtime_e2e.py
+git commit -m "feat: normalize execution result contract"
+```
+
+## Task 4: Tighten Request Normalization Without Rewriting the Front Door
+
+**Files:**
+- Modify: `src/copaw/kernel/query_execution_runtime.py`
+- Modify: `src/copaw/kernel/turn_executor.py`
+- Test: `tests/kernel/test_query_execution_runtime.py`
+- Test: `tests/app/test_operator_runtime_e2e.py`
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+def test_query_execution_runtime_normalizes_file_shell_request_payloads():
+    ...
+    assert normalized["execution_context"]["capability_ref"] in {
+        "tool:read_file",
+        "tool:execute_shell_command",
+    }
+
+
+def test_live_route_still_runs_through_existing_main_chain_with_normalized_payload():
+    ...
+    assert response.status_code == 200
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run:
+
+```powershell
+python -m pytest tests/kernel/test_query_execution_runtime.py -k normalize -v
+python -m pytest tests/app/test_operator_runtime_e2e.py -k existing_main_chain -v
+```
+
+Expected: FAIL because request normalization is still too implicit.
+
+- [ ] **Step 3: Write minimal implementation**
+
+```python
+# query_execution_runtime.py
+runtime_payload["execution_context"] = {
+    "capability_ref": kernel_task.capability_ref,
+    "environment_ref": kernel_task.environment_ref,
+    "owner_agent_id": kernel_task.owner_agent_id,
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run:
+
+```powershell
+python -m pytest tests/kernel/test_query_execution_runtime.py -k normalize -v
+python -m pytest tests/app/test_operator_runtime_e2e.py -k existing_main_chain -v
+```
+
+Expected: PASS while the current live route still works.
+
+- [ ] **Step 5: Commit**
+
+```powershell
+git add src/copaw/kernel/query_execution_runtime.py src/copaw/kernel/turn_executor.py tests/kernel/test_query_execution_runtime.py tests/app/test_operator_runtime_e2e.py
+git commit -m "feat: tighten request normalization for execution runtime"
 ```
 
 ## Task 5: Run Regression and Update Live Docs
@@ -450,7 +392,7 @@ git commit -m "feat: add thin turn loop over existing execution path"
 Run:
 
 ```powershell
-python -m pytest tests/capabilities/test_execution_context.py tests/kernel/test_task_state_machine.py tests/kernel/test_turn_loop.py tests/kernel/test_kernel.py tests/kernel/test_turn_executor.py tests/app/test_capabilities_execution.py tests/agents/test_file_tool_evidence.py tests/agents/test_shell_tool_evidence.py tests/app/test_operator_runtime_e2e.py -v
+python -m pytest tests/capabilities/test_execution_context.py tests/kernel/test_query_execution_runtime.py tests/app/test_capabilities_execution.py tests/agents/test_file_tool_evidence.py tests/agents/test_shell_tool_evidence.py tests/app/test_operator_runtime_e2e.py -v
 ```
 
 Expected: PASS
@@ -460,7 +402,7 @@ Expected: PASS
 ```markdown
 - `P0` now hardens the lower execution contract instead of rebuilding the main chain.
 - file/shell execution now flows through a unified internal execution context.
-- thin turn loop has been added without changing the live vocabulary.
+- execution result and request normalization are tighter without changing the live vocabulary.
 ```
 
 - [ ] **Step 3: Commit**
@@ -476,10 +418,9 @@ git commit -m "docs: record p0 runtime contract hardening"
 
 - file/shell execution runs through one hardened front-door
 - evidence is coupled to that front-door
-- `KernelTask.phase` remains the canonical kernel vocabulary
-- no second execution vocabulary is introduced
+- execution result contract is normalized
+- request normalization is tighter
 - the current live route still works
-- the thin turn loop is attached with minimal intrusion
 - the regression suite in Task 5 is green
 
 ## Follow-Up Planning Gate
@@ -492,3 +433,4 @@ Write separate follow-up plans for:
 2. task interpretation and assignment hardening
 3. worker/subagent shell hardening
 4. skill/package formalization
+5. conditional extraction of `task_state_machine.py` and/or `turn_loop.py` only if the green `P0` implementation proves they remove real complexity
