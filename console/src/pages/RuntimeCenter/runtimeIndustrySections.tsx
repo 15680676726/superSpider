@@ -39,6 +39,244 @@ function nonEmpty(value: string | null | undefined): string | null {
   return normalized ? normalized : null;
 }
 
+type IndustryCycleSynthesis = NonNullable<
+  NonNullable<IndustryInstanceDetail["current_cycle"]>["synthesis"]
+>;
+type IndustrySynthesisFinding = IndustryCycleSynthesis["latest_findings"][number];
+type IndustrySynthesisConflict = IndustryCycleSynthesis["conflicts"][number];
+type IndustrySynthesisHole = IndustryCycleSynthesis["holes"][number];
+type IndustrySynthesisAction = IndustryCycleSynthesis["recommended_actions"][number];
+
+function renderSynthesisFollowupList(
+  findings: IndustrySynthesisFinding[],
+  keySuffix: string,
+) {
+  if (findings.length === 0) {
+    return null;
+  }
+  return (
+    <Space direction="vertical" size={4} style={{ width: "100%" }}>
+      {findings.slice(0, 3).map((finding, index) => {
+        const findingKey = finding.report_id
+          ? `${finding.report_id}:${keySuffix}`
+          : `${keySuffix}:${index}`;
+        return (
+          <Space
+            key={findingKey}
+            direction="vertical"
+            size={0}
+            style={{ width: "100%" }}
+          >
+            <Text type="secondary">
+              {String(finding.headline || finding.summary || finding.report_id)}
+            </Text>
+            {nonEmpty(finding.followup_reason) ? (
+              <Text type="secondary">{nonEmpty(finding.followup_reason)}</Text>
+            ) : null}
+          </Space>
+        );
+      })}
+    </Space>
+  );
+}
+
+function renderMainBrainPlanningSection({
+  payload,
+  lanes,
+  visibleLanes,
+  focusedLaneIds,
+  followupReports,
+  pendingSignalCount,
+  strategySummary,
+  synthesisFollowups,
+}: {
+  payload: IndustryInstanceDetail;
+  lanes: IndustryInstanceDetail["lanes"];
+  visibleLanes: IndustryInstanceDetail["lanes"];
+  focusedLaneIds: Set<string>;
+  followupReports: IndustryInstanceDetail["agent_reports"];
+  pendingSignalCount: number;
+  strategySummary: string | null;
+  synthesisFollowups: IndustrySynthesisFinding[];
+}) {
+  return (
+    <Card size="small" title="Main-Brain Planning" style={{ marginTop: 16 }}>
+      <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
+        <Tag>{`Lanes ${lanes.length}`}</Tag>
+        <Tag>{`Assignments ${payload.assignments.length}`}</Tag>
+        <Tag>{`Reports ${payload.agent_reports.length}`}</Tag>
+        {followupReports.length > 0 ? (
+          <Tag color="warning">{`Follow-ups ${followupReports.length}`}</Tag>
+        ) : null}
+        {payload.staffing?.pending_proposals.length ? (
+          <Tag>{`Staffing proposals ${payload.staffing.pending_proposals.length}`}</Tag>
+        ) : null}
+        {payload.staffing?.temporary_seats.length ? (
+          <Tag>{`Temporary seats ${payload.staffing.temporary_seats.length}`}</Tag>
+        ) : null}
+        {pendingSignalCount > 0 ? (
+          <Tag color="warning">{`Pending signals ${pendingSignalCount}`}</Tag>
+        ) : null}
+        {payload.current_cycle?.status ? (
+          <Tag color={runtimeStatusColor(payload.current_cycle.status)}>
+            {translateRuntimeStatus(payload.current_cycle.status)}
+          </Tag>
+        ) : null}
+      </Space>
+      <Text type="secondary">
+        {strategySummary || "No strategy summary is available yet."}
+      </Text>
+      {payload.current_cycle ? (
+        <div style={{ marginTop: 10 }}>
+          <Text strong>{payload.current_cycle.title || "Current cycle"}</Text>
+          {payload.current_cycle.summary ? (
+            <div style={{ marginTop: 4 }}>
+              <Text type="secondary">{payload.current_cycle.summary}</Text>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {visibleLanes.length > 0 ? (
+        <div style={{ marginTop: 10 }}>
+          <div className={styles.detailSectionTitle}>Operating Lanes</div>
+          <Space wrap size={[6, 6]}>
+            {visibleLanes.map((lane) => (
+              <Tag
+                key={lane.lane_id}
+                color={
+                  focusedLaneIds.has(lane.lane_id)
+                    ? "blue"
+                    : runtimeStatusColor(lane.status || "unknown")
+                }
+              >
+                {lane.title || lane.lane_id}
+              </Tag>
+            ))}
+          </Space>
+        </div>
+      ) : null}
+      {followupReports.length > 0 ? (
+        <div style={{ marginTop: 10 }}>
+          <div className={styles.detailSectionTitle}>Pending Report Follow-ups</div>
+          <Space direction="vertical" size={4} style={{ width: "100%" }}>
+            {followupReports.slice(0, 3).map((report) => (
+              <Text key={report.report_id} type="secondary">
+                {String(report.headline || report.summary || report.report_id)}
+              </Text>
+            ))}
+          </Space>
+        </div>
+      ) : null}
+      {synthesisFollowups.length > 0 ? (
+        <div style={{ marginTop: 10 }}>
+          <div className={styles.detailSectionTitle}>Supervisor Follow-ups</div>
+          {renderSynthesisFollowupList(synthesisFollowups, "planning")}
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+function renderMainBrainSynthesisSection({
+  cycleSynthesis,
+  synthesisFindings,
+  synthesisConflicts,
+  synthesisHoles,
+  synthesisFollowups,
+  recommendedActions,
+  controlCoreContract,
+  synthesisSummary,
+}: {
+  cycleSynthesis: IndustryCycleSynthesis | null | undefined;
+  synthesisFindings: IndustrySynthesisFinding[];
+  synthesisConflicts: IndustrySynthesisConflict[];
+  synthesisHoles: IndustrySynthesisHole[];
+  synthesisFollowups: IndustrySynthesisFinding[];
+  recommendedActions: IndustrySynthesisAction[];
+  controlCoreContract: string[];
+  synthesisSummary: string;
+}) {
+  return (
+    <Card size="small" title="Main-Brain Synthesis" style={{ marginTop: 16 }}>
+      <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
+        <Tag>{`Findings ${synthesisFindings.length}`}</Tag>
+        <Tag color={synthesisConflicts.length > 0 ? "error" : "default"}>
+          {`Conflicts ${synthesisConflicts.length}`}
+        </Tag>
+        <Tag color={synthesisHoles.length > 0 ? "warning" : "default"}>
+          {`Holes ${synthesisHoles.length}`}
+        </Tag>
+        {cycleSynthesis?.needs_replan ? <Tag color="error">Replan needed</Tag> : null}
+      </Space>
+      <Text type="secondary">{synthesisSummary}</Text>
+      {synthesisConflicts.length > 0 ? (
+        <>
+          <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
+            Conflicts
+          </div>
+          <Space direction="vertical" size={4} style={{ width: "100%" }}>
+            {synthesisConflicts.slice(0, 3).map((conflict) => (
+              <Text key={conflict.conflict_id} type="secondary">
+                {String(conflict.summary || conflict.conflict_id)}
+              </Text>
+            ))}
+          </Space>
+        </>
+      ) : null}
+      {synthesisFollowups.length > 0 ? (
+        <>
+          <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
+            Supervisor Follow-ups
+          </div>
+          {renderSynthesisFollowupList(synthesisFollowups, "synthesis")}
+        </>
+      ) : null}
+      {synthesisHoles.length > 0 ? (
+        <>
+          <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
+            Holes / Follow-ups
+          </div>
+          <Space direction="vertical" size={4} style={{ width: "100%" }}>
+            {synthesisHoles.slice(0, 3).map((hole) => (
+              <Text key={hole.hole_id} type="secondary">
+                {String(hole.summary || hole.hole_id)}
+              </Text>
+            ))}
+          </Space>
+        </>
+      ) : null}
+      {recommendedActions.length > 0 ? (
+        <>
+          <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
+            Recommended Actions
+          </div>
+          <Space direction="vertical" size={4} style={{ width: "100%" }}>
+            {recommendedActions.slice(0, 3).map((action) => (
+              <Text key={action.action_id} type="secondary">
+                {String(action.title || action.summary || action.action_id)}
+              </Text>
+            ))}
+          </Space>
+        </>
+      ) : null}
+      {controlCoreContract.length > 0 ? (
+        <>
+          <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
+            Control Contract
+          </div>
+          <Space direction="vertical" size={4} style={{ width: "100%" }}>
+            {controlCoreContract.map((item) => (
+              <Text key={item} type="secondary">
+                {item}
+              </Text>
+            ))}
+          </Space>
+        </>
+      ) : null}
+    </Card>
+  );
+}
+
 export interface RuntimeCockpitSignal {
   key: string;
   label: string;
@@ -486,7 +724,7 @@ export function renderOperatorAssignmentsSection(
       {assignments.length > 0 ? renderAssignmentSummaryTags(assignments) : null}
 
       {sectionValue.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="鏆傛棤鍐呭" />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无内容" />
       ) : (
         <div className={styles.detailArray}>
           {sectionValue.map((item, index) => {
@@ -600,7 +838,7 @@ export function renderOperatorAgentReportsSection(
       ) : null}
 
       {sectionValue.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="鏆傛棤鍐呭" />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无内容" />
       ) : (
         <div className={styles.detailArray}>
           {sectionValue.map((item, index) => {
@@ -871,189 +1109,26 @@ export function renderIndustryExecutionFocusSection(
           </div>
         ))}
       </div>
-      <Card size="small" title="Main-Brain Planning" style={{ marginTop: 16 }}>
-        <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
-          <Tag>{`Lanes ${lanes.length}`}</Tag>
-          <Tag>{`Assignments ${payload.assignments.length}`}</Tag>
-          <Tag>{`Reports ${payload.agent_reports.length}`}</Tag>
-          {followupReports.length > 0 ? (
-            <Tag color="warning">{`Follow-ups ${followupReports.length}`}</Tag>
-          ) : null}
-          {payload.staffing?.pending_proposals.length ? (
-            <Tag>{`Staffing proposals ${payload.staffing.pending_proposals.length}`}</Tag>
-          ) : null}
-          {payload.staffing?.temporary_seats.length ? (
-            <Tag>{`Temporary seats ${payload.staffing.temporary_seats.length}`}</Tag>
-          ) : null}
-          {pendingSignalCount > 0 ? (
-            <Tag color="warning">{`Pending signals ${pendingSignalCount}`}</Tag>
-          ) : null}
-          {payload.current_cycle?.status ? (
-            <Tag color={runtimeStatusColor(payload.current_cycle.status)}>
-              {translateRuntimeStatus(payload.current_cycle.status)}
-            </Tag>
-          ) : null}
-        </Space>
-        <Text type="secondary">
-          {strategySummary || "No strategy summary is available yet."}
-        </Text>
-        {payload.current_cycle ? (
-          <div style={{ marginTop: 10 }}>
-            <Text strong>{payload.current_cycle.title || "Current cycle"}</Text>
-            {payload.current_cycle.summary ? (
-              <div style={{ marginTop: 4 }}>
-                <Text type="secondary">{payload.current_cycle.summary}</Text>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-        {visibleLanes.length > 0 ? (
-          <div style={{ marginTop: 10 }}>
-            <div className={styles.detailSectionTitle}>Operating Lanes</div>
-            <Space wrap size={[6, 6]}>
-              {visibleLanes.map((lane) => (
-                <Tag
-                  key={lane.lane_id}
-                  color={
-                    focusedLaneIds.has(lane.lane_id)
-                      ? "blue"
-                      : runtimeStatusColor(lane.status || "unknown")
-                  }
-                >
-                  {lane.title || lane.lane_id}
-                </Tag>
-              ))}
-            </Space>
-          </div>
-        ) : null}
-        {followupReports.length > 0 ? (
-          <div style={{ marginTop: 10 }}>
-            <div className={styles.detailSectionTitle}>Pending Report Follow-ups</div>
-            <Space direction="vertical" size={4} style={{ width: "100%" }}>
-              {followupReports.slice(0, 3).map((report) => (
-                <Text key={report.report_id} type="secondary">
-                  {String(report.headline || report.summary || report.report_id)}
-                </Text>
-              ))}
-            </Space>
-          </div>
-        ) : null}
-        {synthesisFollowups.length > 0 ? (
-          <div style={{ marginTop: 10 }}>
-            <div className={styles.detailSectionTitle}>Supervisor Follow-ups</div>
-            <Space direction="vertical" size={4} style={{ width: "100%" }}>
-              {synthesisFollowups.slice(0, 3).map((finding) => (
-                <Space
-                  key={finding.report_id}
-                  direction="vertical"
-                  size={0}
-                  style={{ width: "100%" }}
-                >
-                  <Text type="secondary">
-                    {String(finding.headline || finding.summary || finding.report_id)}
-                  </Text>
-                  {nonEmpty(finding.followup_reason) ? (
-                    <Text type="secondary">{nonEmpty(finding.followup_reason)}</Text>
-                  ) : null}
-                </Space>
-              ))}
-            </Space>
-          </div>
-        ) : null}
-      </Card>
-      <Card size="small" title="Main-Brain Synthesis" style={{ marginTop: 16 }}>
-        <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
-          <Tag>{`Findings ${synthesisFindings.length}`}</Tag>
-          <Tag color={synthesisConflicts.length > 0 ? "error" : "default"}>
-            {`Conflicts ${synthesisConflicts.length}`}
-          </Tag>
-          <Tag color={synthesisHoles.length > 0 ? "warning" : "default"}>
-            {`Holes ${synthesisHoles.length}`}
-          </Tag>
-          {cycleSynthesis?.needs_replan ? <Tag color="error">Replan needed</Tag> : null}
-        </Space>
-        <Text type="secondary">{synthesisSummary}</Text>
-        {synthesisConflicts.length > 0 ? (
-          <>
-            <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
-              Conflicts
-            </div>
-            <Space direction="vertical" size={4} style={{ width: "100%" }}>
-              {synthesisConflicts.slice(0, 3).map((conflict) => (
-                <Text key={conflict.conflict_id} type="secondary">
-                  {String(conflict.summary || conflict.conflict_id)}
-                </Text>
-              ))}
-            </Space>
-          </>
-        ) : null}
-        {synthesisFollowups.length > 0 ? (
-          <>
-            <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
-              Supervisor Follow-ups
-            </div>
-            <Space direction="vertical" size={4} style={{ width: "100%" }}>
-              {synthesisFollowups.slice(0, 3).map((finding) => (
-                <Space
-                  key={`${finding.report_id}:synthesis`}
-                  direction="vertical"
-                  size={0}
-                  style={{ width: "100%" }}
-                >
-                  <Text type="secondary">
-                    {String(finding.headline || finding.summary || finding.report_id)}
-                  </Text>
-                  {nonEmpty(finding.followup_reason) ? (
-                    <Text type="secondary">{nonEmpty(finding.followup_reason)}</Text>
-                  ) : null}
-                </Space>
-              ))}
-            </Space>
-          </>
-        ) : null}
-        {synthesisHoles.length > 0 ? (
-          <>
-            <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
-              Holes / Follow-ups
-            </div>
-            <Space direction="vertical" size={4} style={{ width: "100%" }}>
-              {synthesisHoles.slice(0, 3).map((hole) => (
-                <Text key={hole.hole_id} type="secondary">
-                  {String(hole.summary || hole.hole_id)}
-                </Text>
-              ))}
-            </Space>
-          </>
-        ) : null}
-        {recommendedActions.length > 0 ? (
-          <>
-            <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
-              Recommended Actions
-            </div>
-            <Space direction="vertical" size={4} style={{ width: "100%" }}>
-              {recommendedActions.slice(0, 3).map((action) => (
-                <Text key={action.action_id} type="secondary">
-                  {String(action.title || action.summary || action.action_id)}
-                </Text>
-              ))}
-            </Space>
-          </>
-        ) : null}
-        {controlCoreContract.length > 0 ? (
-          <>
-            <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
-              Control Contract
-            </div>
-            <Space direction="vertical" size={4} style={{ width: "100%" }}>
-              {controlCoreContract.map((item) => (
-                <Text key={item} type="secondary">
-                  {item}
-                </Text>
-              ))}
-            </Space>
-          </>
-        ) : null}
-      </Card>
+      {renderMainBrainPlanningSection({
+        payload,
+        lanes,
+        visibleLanes,
+        focusedLaneIds,
+        followupReports,
+        pendingSignalCount,
+        strategySummary,
+        synthesisFollowups,
+      })}
+      {renderMainBrainSynthesisSection({
+        cycleSynthesis,
+        synthesisFindings,
+        synthesisConflicts,
+        synthesisHoles,
+        synthesisFollowups,
+        recommendedActions,
+        controlCoreContract,
+        synthesisSummary,
+      })}
       {staffingPresentation.hasAnyState ? (
         <div style={{ marginTop: 16 }}>
           <div className={styles.detailSectionTitle}>Staffing Closure</div>

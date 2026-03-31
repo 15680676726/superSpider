@@ -21,6 +21,32 @@ def test_industry_service_facade_reads_runtime_detail_from_view_service() -> Non
     assert service.get_instance_detail("industry-1") is detail
 
 
+def test_report_closure_helper_merge_keeps_surface_and_source_report_continuity() -> None:
+    from copaw.industry.service_report_closure import merge_report_followup_metadata
+
+    merged = merge_report_followup_metadata(
+        base={
+            "owner_agent_id": "",
+            "seat_requested_surfaces": ["browser"],
+            "chat_writeback_requested_surfaces": ["browser"],
+            "source_report_ids": ["report-1"],
+            "source_report_id": "report-1",
+        },
+        extra={
+            "owner_agent_id": "copaw-agent-runner",
+            "seat_requested_surfaces": ["desktop", "document", "browser"],
+            "chat_writeback_requested_surfaces": ["desktop"],
+            "source_report_ids": ["report-2", "report-1"],
+        },
+    )
+
+    assert merged["owner_agent_id"] == "copaw-agent-runner"
+    assert merged["seat_requested_surfaces"] == ["browser", "desktop", "document"]
+    assert merged["chat_writeback_requested_surfaces"] == ["browser", "desktop", "document"]
+    assert merged["source_report_ids"] == ["report-1", "report-2"]
+    assert merged["source_report_id"] == "report-1"
+
+
 def _build_test_chat_writeback_plan(message_text: str):
     lowered = message_text.lower()
     if "must include" in lowered and "weekly" in lowered:

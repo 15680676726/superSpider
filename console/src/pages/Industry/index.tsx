@@ -1,4 +1,3 @@
-import { useCallback } from "react";
 import {
   Alert,
   Button,
@@ -23,10 +22,8 @@ import {
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import type {
-  IndustryCapabilityRecommendationSection,
   IndustryDraftPlan,
 } from "../../api/modules/industry";
-import type { MediaAnalysisSummary } from "../../api/modules/media";
 import {
   localizeRemoteSkillText,
   presentRecommendationCapabilityFamily,
@@ -39,11 +36,8 @@ import {
 import { normalizeSpiderMeshBrand } from "../../utils/brand";
 import { employmentModeColor } from "../../runtime/executionPresentation";
 import {
-  analysisStatusColor,
   buildAnalysisModeOptions,
   formatAnalysisMode,
-  formatAnalysisStatus,
-  formatAnalysisWritebackStatus,
   formatMediaType,
   mediaTypeColor,
   resolveMediaTitle,
@@ -73,25 +67,14 @@ import {
   runtimeStatusColor,
 } from "./pageHelpers";
 import IndustryRuntimeCockpitPanel from "./IndustryRuntimeCockpitPanel";
+import {
+  presentRecommendationSubsectionTitle,
+  renderMediaAnalysisList,
+} from "./runtimePresentation";
 import { useIndustryPageState } from "./useIndustryPageState";
 
 const { Paragraph, Text } = Typography;
 const { TextArea } = Input;
-
-function presentRecommendationSubsectionTitle(
-  section: IndustryCapabilityRecommendationSection,
-): string {
-  if (section.section_kind === "execution-core") {
-    return "编排能力";
-  }
-  if (section.section_kind === "system-baseline") {
-    return "基础运行";
-  }
-  if (section.section_kind === "shared") {
-    return "多人共用";
-  }
-  return normalizeSpiderMeshBrand(section.role_name || section.title) || section.title;
-}
 
 export default function IndustryPage() {
   const navigate = useNavigate();
@@ -165,93 +148,6 @@ export default function IndustryPage() {
     draftForm,
     navigate,
   });
-  const renderMediaAnalysisList = useCallback(
-    (
-      analyses: MediaAnalysisSummary[],
-      options?: {
-        emptyText?: string;
-        adoptedTag?: string;
-        showWriteback?: boolean;
-      },
-    ) => {
-      if (!analyses.length) {
-        return (
-          <Empty
-            description={options?.emptyText || "暂无素材分析结果"}
-            style={{ margin: "8px 0" }}
-          />
-        );
-      }
-      return (
-        <List
-          size="small"
-          style={{ marginTop: 8 }}
-          dataSource={analyses}
-          renderItem={(analysis) => {
-            const mediaType =
-              analysis.detected_media_type || "unknown";
-            const summary =
-              analysis.summary ||
-              analysis.key_points?.slice(0, 2).join(" / ") ||
-              "暂无摘要";
-            return (
-              <List.Item style={{ padding: "10px 0" }}>
-                <div style={{ width: "100%" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      alignItems: "flex-start",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <Space wrap>
-                        <Text strong style={{ color: "var(--baize-text-main)" }}>
-                          {resolveMediaTitle(analysis)}
-                        </Text>
-                        <Tag color={mediaTypeColor(mediaType)}>
-                          {formatMediaType(mediaType)}
-                        </Tag>
-                        <Tag>{formatAnalysisMode(analysis.analysis_mode)}</Tag>
-                        <Tag color={analysisStatusColor(analysis.status)}>
-                          {formatAnalysisStatus(analysis.status)}
-                        </Tag>
-                        {options?.adoptedTag ? <Tag color="green">{options.adoptedTag}</Tag> : null}
-                        {options?.showWriteback && analysis.strategy_writeback_status ? (
-                          <Tag>{`策略 ${formatAnalysisWritebackStatus(analysis.strategy_writeback_status)}`}</Tag>
-                        ) : null}
-                        {options?.showWriteback && analysis.backlog_writeback_status ? (
-                          <Tag>{`待办 ${formatAnalysisWritebackStatus(analysis.backlog_writeback_status)}`}</Tag>
-                        ) : null}
-                      </Space>
-                      <Paragraph style={{ margin: "8px 0 0" }}>{summary}</Paragraph>
-                      {analysis.key_points?.length ? (
-                        <Text type="secondary" style={{ display: "block" }}>
-                          {analysis.key_points.slice(0, 3).join(" / ")}
-                        </Text>
-                      ) : null}
-                      {(analysis.warnings || []).map((warning) => (
-                        <Alert
-                          key={`${analysis.analysis_id}:${warning}`}
-                          type="warning"
-                          showIcon
-                          message={warning}
-                          style={{ marginTop: 8 }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </List.Item>
-            );
-          }}
-        />
-      );
-    },
-    [],
-  );
 
   return (
     <div className="page-container" style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 24 }}>
@@ -549,7 +445,7 @@ export default function IndustryPage() {
 
                 <div>
                   <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                    ????
+                    素材分析
                   </Text>
                   <Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
                     Preview-stage media analyses appear here and will remain available as shared context after the identity is created.                  </Paragraph>
@@ -644,7 +540,7 @@ export default function IndustryPage() {
                                               </Space>
                                               {(rec.discovery_queries || []).length ? (
                                                 <div style={{ marginTop: 8 }}>
-                                                  <Text type="secondary" style={{ fontSize: 12 }}>妫€绱㈣瘝</Text>
+                                                  <Text type="secondary" style={{ fontSize: 12 }}>检索词</Text>
                                                   <Space wrap style={{ marginTop: 4 }}>
                                                     {(rec.discovery_queries || []).map((query) => (
                                                       <Tag key={`query-${rec.recommendation_id}-${query}`} color="blue">{query}</Tag>
@@ -986,5 +882,3 @@ export default function IndustryPage() {
     </div>
   );
 }
-
-

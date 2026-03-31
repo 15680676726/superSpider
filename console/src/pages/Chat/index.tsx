@@ -41,14 +41,12 @@ import {
   normalizeThreadMeta,
 } from "./chatPageHelpers";
 import {
-  inferWritebackTargetsFromFocus,
-  normalizeWritebackTargetsFromThreadMeta,
-  presentSessionKindLabel,
   resolveChatUiKey,
   resolveChatUiVisibility,
 } from "./chatRuntimePresentation";
 import defaultConfig, { type DefaultConfig } from "./OptionsPanel/defaultConfig";
 import { resolveChatNoticeVariant } from "./noticeState";
+import { resolveThreadRuntimePresentation } from "./pagePresentation";
 import {
   formatRuntimeWaitDescription,
   type RuntimeHealthNotice,
@@ -479,68 +477,18 @@ export default function ChatPage() {
     sessionKind,
   } = runtimeState;
 
-  const focusKind =
-    typeof threadMeta.current_focus_kind === "string" ? threadMeta.current_focus_kind : "";
-  const focusId =
-    typeof threadMeta.current_focus_id === "string" ? threadMeta.current_focus_id : "";
-  const focusLabel = currentGoal?.trim() ? `Focus: ${currentGoal.trim()}` : null;
-  const focusHintParts = [
-    focusKind.trim() ? `kind=${focusKind.trim()}` : "",
-    focusId.trim() ? `id=${focusId.trim()}` : "",
-  ].filter(Boolean);
-  const focusHint = focusHintParts.length > 0 ? focusHintParts.join(" | ") : null;
-
-  const threadKindLabel = sessionKind?.trim()
-    ? `Thread: ${presentSessionKindLabel(sessionKind.trim())}`
-    : null;
-  const threadBindingKind =
-    typeof threadMeta.thread_binding_kind === "string"
-      ? threadMeta.thread_binding_kind
-      : "";
-  const ownerScope =
-    typeof threadMeta.owner_scope === "string" ? threadMeta.owner_scope : "";
-  const threadKindHintParts = [
-    sessionKind?.trim() ? `session_kind=${sessionKind.trim()}` : "",
-    threadBindingKind.trim() ? `thread_binding_kind=${threadBindingKind.trim()}` : "",
-    ownerScope.trim() ? `owner_scope=${ownerScope.trim()}` : "",
-  ].filter(Boolean);
-  const threadKindHint =
-    threadKindHintParts.length > 0 ? threadKindHintParts.join(" | ") : null;
-
-  const metaWritebackTargets = normalizeWritebackTargetsFromThreadMeta(threadMeta);
-  const inferredWritebackTargets =
-    metaWritebackTargets.length > 0
-      ? metaWritebackTargets
-      : inferWritebackTargetsFromFocus({
-          sessionKind: sessionKind || "",
-          focusKind,
-        });
-  const writebackLabel =
-    inferredWritebackTargets.length > 0
-      ? `Writeback: ${inferredWritebackTargets.join("/")}`
-      : null;
-  const writebackRoleName =
-    typeof threadMeta.chat_writeback_target_role_name === "string"
-      ? threadMeta.chat_writeback_target_role_name
-      : "";
-  const writebackMatchSignalsCount = Array.isArray(
-    threadMeta.chat_writeback_target_match_signals,
-  )
-    ? threadMeta.chat_writeback_target_match_signals.length
-    : 0;
-  const writebackHintParts = [
-    metaWritebackTargets.length > 0
-      ? `targets=${metaWritebackTargets.join(",")}`
-      : inferredWritebackTargets.length > 0
-        ? `inferred=${inferredWritebackTargets.join(",")}`
-        : "",
-    writebackRoleName.trim() ? `role=${writebackRoleName.trim()}` : "",
-    writebackMatchSignalsCount > 0
-      ? `match_signals=${writebackMatchSignalsCount}`
-      : "",
-  ].filter(Boolean);
-  const writebackHint =
-    writebackHintParts.length > 0 ? writebackHintParts.join(" | ") : null;
+  const {
+    focusLabel,
+    focusHint,
+    threadKindLabel,
+    threadKindHint,
+    writebackLabel,
+    writebackHint,
+  } = resolveThreadRuntimePresentation({
+    currentGoal,
+    sessionKind: sessionKind || "",
+    threadMeta,
+  });
 
   const effectiveThreadPending = threadBootstrapPending || autoBindingPending;
   const activeWindowThreadId = normalizeThreadId(window.currentThreadId);

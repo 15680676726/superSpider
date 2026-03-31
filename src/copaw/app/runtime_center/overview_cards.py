@@ -8,11 +8,11 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import quote
 
 from ...config import get_heartbeat_config
 from ...utils.runtime_action_links import build_decision_actions, build_patch_actions
 from .overview_helpers import build_runtime_surface
+from .overview_main_brain import RuntimeCenterMainBrainAssembly
 from .task_review_projection import build_host_twin_summary
 from .models import (
     RuntimeMainBrainResponse,
@@ -31,6 +31,8 @@ class _RuntimeCenterOverviewCardsSupport:
 
     def __init__(self, *, item_limit: int = 5) -> None:
         self._item_limit = item_limit
+        self._missing_sentinel = _MISSING
+        self._main_brain_assembly = RuntimeCenterMainBrainAssembly(self)
 
     async def build_cards(self, app_state: Any) -> list[RuntimeOverviewCard]:
         return [
@@ -174,52 +176,7 @@ class _RuntimeCenterOverviewCardsSupport:
         )
 
     async def _build_main_brain_card(self, app_state: Any) -> RuntimeOverviewCard:
-        strategy_items = await self._call_list_method(
-            getattr(app_state, "strategy_memory_service", None),
-            "list_strategies",
-        )
-        strategies = [] if strategy_items is _MISSING else list(strategy_items)
-        strategies = [
-            item
-            for item in strategies
-            if (self._string(self._get_field(item, "status")) or "active") in {"active", "reviewing"}
-        ] or strategies
-
-        industry_items = await self._call_list_method(
-            getattr(app_state, "industry_service", None),
-            "list_instances",
-        )
-        industries = [] if industry_items is _MISSING else list(industry_items)
-        industry_by_instance_id = self._index_industry_by_instance_id(industries)
-
-        entries = self._map_main_brain_entries(
-            strategies=strategies,
-            industries=industries,
-            industry_by_instance_id=industry_by_instance_id,
-        )
-        if not entries:
-            return self._unavailable_card(
-                "main-brain",
-                "Main Brain",
-                "Main-brain cockpit is not connected yet.",
-            )
-        total = len(entries)
-        source_values: list[str] = []
-        if strategy_items is not _MISSING:
-            source_values.append("strategy_memory_service")
-        if industry_items is not _MISSING:
-            source_values.append("industry_service")
-        combined_source = ",".join(dict.fromkeys(source_values)) or "unavailable"
-        return RuntimeOverviewCard(
-            key="main-brain",
-            title="Main Brain",
-            source=combined_source,
-            status="state-service",
-            count=total,
-            summary=self._summarize_main_brain_card(entries[0]),
-            entries=entries,
-            meta=self._main_brain_card_meta(entries[0], total=total),
-        )
+        return await self._main_brain_assembly.build_main_brain_card(app_state)
 
     async def _build_capabilities_card(self, app_state: Any) -> RuntimeOverviewCard:
         capability_service = getattr(app_state, "capability_service", None)
@@ -750,25 +707,10 @@ class _RuntimeCenterOverviewCardsSupport:
         industries: list[Any],
         industry_by_instance_id: Mapping[str, Any],
     ) -> list[RuntimeOverviewEntry]:
-        if strategies:
-            return self._build_mapped_entries(
-                strategies,
-                "updated_at",
-                "created_at",
-                builder=lambda item: self._build_main_brain_entry_from_strategy(
-                    item,
-                    industry_by_instance_id=industry_by_instance_id,
-                ),
-            )
-        if not industries:
-            return []
-        return self._build_mapped_entries(
-            industries,
-            "updated_at",
-            "created_at",
-            builder=lambda item: self._build_main_brain_entry_from_industry(
-                item,
-            ),
+        return self._main_brain_assembly.map_main_brain_entries(
+            strategies=strategies,
+            industries=industries,
+            industry_by_instance_id=industry_by_instance_id,
         )
 
     def _build_main_brain_entry_from_strategy(
@@ -777,56 +719,16 @@ class _RuntimeCenterOverviewCardsSupport:
         *,
         industry_by_instance_id: Mapping[str, Any],
     ) -> RuntimeOverviewEntry:
-        strategy_id = self._string(self._get_field(strategy, "strategy_id", "id")) or "main-brain"
-        industry_instance_id = self._string(
-            self._get_field(strategy, "industry_instance_id", "scope_id"),
-        )
-        industry = industry_by_instance_id.get(industry_instance_id or "")
-        stats = self._mapping(self._get_field(industry, "stats")) or {}
-        route = "/api/runtime-center/strategy-memory"
-        if industry_instance_id:
-            route += f"?industry_instance_id={industry_instance_id}"
-        return RuntimeOverviewEntry(
-            id=strategy_id,
-            title=self._string(self._get_field(strategy, "title")) or strategy_id,
-            kind="main-brain",
-            status=self._string(self._get_field(strategy, "status")) or "active",
-            owner=self._string(self._get_field(strategy, "owner_agent_id", "owner_scope")),
-            summary=self._string(self._get_field(strategy, "summary", "mission")),
-            updated_at=self._dt(self._get_field(strategy, "updated_at", "created_at")),
-            route=route,
-            meta=self._main_brain_entry_meta(
-                strategy_id=strategy_id,
-                industry_instance_id=industry_instance_id,
-                stats=stats,
-                carrier=self._mapping(industry) or {},
-            ),
+        return self._main_brain_assembly.build_main_brain_entry_from_strategy(
+            strategy,
+            industry_by_instance_id=industry_by_instance_id,
         )
 
     def _build_main_brain_entry_from_industry(
         self,
         industry: Any,
     ) -> RuntimeOverviewEntry:
-        instance_id = self._string(self._get_field(industry, "instance_id", "id")) or "unknown-industry"
-        stats = self._mapping(self._get_field(industry, "stats")) or {}
-        routes = self._mapping(self._get_field(industry, "routes")) or {}
-        route = self._string(routes.get("runtime_detail")) or f"/api/runtime-center/industry/{instance_id}"
-        return RuntimeOverviewEntry(
-            id=f"main-brain:{instance_id}",
-            title=self._string(self._get_field(industry, "label", "title")) or instance_id,
-            kind="main-brain",
-            status=self._string(self._get_field(industry, "status")) or "active",
-            owner=self._string(self._get_field(industry, "owner_scope")),
-            summary=self._string(self._get_field(industry, "summary")),
-            updated_at=self._dt(self._get_field(industry, "updated_at", "created_at")),
-            route=route,
-            meta=self._main_brain_entry_meta(
-                strategy_id=None,
-                industry_instance_id=instance_id,
-                stats=stats,
-                carrier=self._mapping(industry) or {},
-            ),
-        )
+        return self._main_brain_assembly.build_main_brain_entry_from_industry(industry)
 
     def _main_brain_entry_meta(
         self,
@@ -836,52 +738,12 @@ class _RuntimeCenterOverviewCardsSupport:
         stats: Mapping[str, Any],
         carrier: Mapping[str, Any],
     ) -> dict[str, Any]:
-        lane_count = self._int(stats.get("lane_count"), 0)
-        backlog_count = self._int(stats.get("backlog_count"), 0)
-        cycle_count = self._int(stats.get("cycle_count"), 0)
-        assignment_count = self._int(stats.get("assignment_count"), 0)
-        report_count = self._int(stats.get("report_count"), 0)
-        decision_count = self._int(stats.get("decision_count"), 0)
-        patch_count = self._int(stats.get("patch_count"), 0)
-        evidence_count = self._int(stats.get("evidence_count"), 0)
-        carrier_route = self._string(
-            (self._mapping(carrier.get("routes")) or {}).get("runtime_detail"),
+        return self._main_brain_assembly.main_brain_entry_meta(
+            strategy_id=strategy_id,
+            industry_instance_id=industry_instance_id,
+            stats=stats,
+            carrier=carrier,
         )
-        unconsumed_report_count = self._int(
-            stats.get("unconsumed_report_count")
-            or stats.get("pending_report_count")
-            or stats.get("report_unconsumed_count"),
-            0,
-        )
-        return {
-            "strategy_id": strategy_id,
-            "industry_instance_id": industry_instance_id,
-            "industry_route": carrier_route
-            or (
-                f"/api/runtime-center/industry/{industry_instance_id}"
-                if industry_instance_id
-                else None
-            ),
-            "carrier_label": self._string(
-                carrier.get("label")
-                or carrier.get("title")
-                or industry_instance_id,
-            ),
-            "carrier_status": self._string(carrier.get("status")),
-            "lane_count": lane_count,
-            "backlog_count": backlog_count,
-            "cycle_count": cycle_count,
-            "assignment_count": assignment_count,
-            "report_count": report_count,
-            "unconsumed_report_count": unconsumed_report_count,
-            "decision_count": decision_count,
-            "patch_count": patch_count,
-            "evidence_count": evidence_count,
-            "current_cycle_title": self._string(stats.get("current_cycle_title")),
-            "current_cycle_status": self._string(stats.get("current_cycle_status")),
-            "current_focus_count": self._int(stats.get("current_focus_count"), 0),
-            "next_cycle_due_at": self._string(stats.get("next_cycle_due_at")),
-        }
 
     def _main_brain_card_meta(
         self,
@@ -889,158 +751,10 @@ class _RuntimeCenterOverviewCardsSupport:
         *,
         total: int,
     ) -> dict[str, Any]:
-        entry_meta = dict(first_entry.meta or {})
-        industry_route = self._string(entry_meta.get("industry_route"))
-        lane_count = self._int(entry_meta.get("lane_count"), 0)
-        backlog_count = self._int(entry_meta.get("backlog_count"), 0)
-        cycle_count = self._int(entry_meta.get("cycle_count"), 0)
-        assignment_count = self._int(entry_meta.get("assignment_count"), 0)
-        report_count = self._int(entry_meta.get("report_count"), 0)
-        unconsumed_report_count = self._int(entry_meta.get("unconsumed_report_count"), 0)
-        evidence_count = self._int(entry_meta.get("evidence_count"), 0)
-        decision_count = self._int(entry_meta.get("decision_count"), 0)
-        patch_count = self._int(entry_meta.get("patch_count"), 0)
-        cycle_title = self._string(entry_meta.get("current_cycle_title"))
-        cycle_status = self._string(entry_meta.get("current_cycle_status")) or "active"
-        cycle_focus_count = self._int(entry_meta.get("current_focus_count"), 0)
-        next_cycle_due_at = self._string(entry_meta.get("next_cycle_due_at"))
-        strategy_signal = {
-            "value": first_entry.title,
-            "detail": first_entry.summary,
-            "route": first_entry.route,
-            "status": first_entry.status,
-        }
-        signals = {
-            "carrier": {
-                "key": "carrier",
-                "value": self._string(entry_meta.get("carrier_label"))
-                or self._string(first_entry.owner)
-                or "Main Brain Carrier",
-                "detail": self._string(first_entry.owner) or first_entry.summary,
-                "route": industry_route or first_entry.route,
-                "status": self._string(entry_meta.get("carrier_status")) or first_entry.status,
-            },
-            "strategy": {"key": "strategy", **strategy_signal},
-            "lanes": {
-                "key": "lanes",
-                "count": lane_count,
-                "detail": f"{lane_count} lane(s) currently visible in the operating cockpit.",
-                "route": industry_route,
-            },
-            "backlog": {
-                "key": "backlog",
-                "count": backlog_count,
-                "detail": f"{backlog_count} backlog item(s) pending cycle scheduling.",
-                "route": industry_route,
-            },
-            "current_cycle": {
-                "key": "current_cycle",
-                "count": cycle_count,
-                "title": cycle_title,
-                "status": cycle_status,
-                "focus_count": cycle_focus_count if cycle_focus_count > 0 else None,
-                "next_cycle_due_at": next_cycle_due_at,
-                "detail": (
-                    f"{cycle_count} cycle(s) linked."
-                    + (
-                        f" Current cycle: {cycle_title}."
-                        if cycle_title
-                        else ""
-                    )
-                ),
-                "route": industry_route,
-            },
-            "assignments": {
-                "key": "assignments",
-                "count": assignment_count,
-                "detail": f"{assignment_count} assignment(s) currently in the runtime envelope.",
-                "route": industry_route,
-            },
-            "agent_reports": {
-                "key": "agent_reports",
-                "count": report_count,
-                "unconsumed_count": unconsumed_report_count,
-                "detail": (
-                    f"{report_count} report(s) available."
-                    + (
-                        f" {unconsumed_report_count} report(s) still unconsumed."
-                        if unconsumed_report_count > 0
-                        else ""
-                    )
-                ),
-                "route": industry_route,
-            },
-            "environment": {
-                "key": "environment",
-                "summary": "Open governance host-twin and environment continuity surface.",
-                "route": "/api/runtime-center/governance/status",
-            },
-            "evidence": {
-                "key": "evidence",
-                "count": evidence_count,
-                "detail": f"{evidence_count} evidence record(s) available for runtime replay.",
-                "route": "/api/runtime-center/evidence",
-            },
-            "decisions": {
-                "key": "decisions",
-                "count": decision_count,
-                "detail": f"{decision_count} governance decision(s) pending or recorded.",
-                "route": "/api/runtime-center/decisions",
-            },
-            "patches": {
-                "key": "patches",
-                "count": patch_count,
-                "detail": f"{patch_count} learning patch(es) tracked in runtime center.",
-                "route": "/api/runtime-center/learning/patches",
-            },
-        }
-        return {
-            "carrier": signals["carrier"],
-            "strategy": signals["strategy"],
-            "signals": signals,
-            "control_chain": [
-                signals["carrier"],
-                signals["strategy"],
-                signals["lanes"],
-                signals["backlog"],
-                signals["current_cycle"],
-                signals["assignments"],
-                signals["agent_reports"],
-                signals["environment"],
-                signals["evidence"],
-                signals["decisions"],
-                signals["patches"],
-            ],
-            "lanes": lane_count,
-            "backlog": backlog_count,
-            "current_cycle": cycle_count,
-            "assignments": assignment_count,
-            "agent_reports": report_count,
-            "evidence": evidence_count,
-            "decisions": decision_count,
-            "patches": patch_count,
-            "strategy_id": entry_meta.get("strategy_id"),
-            "industry_instance_id": entry_meta.get("industry_instance_id"),
-            "industry_route": industry_route,
-            "visible_count": 1 if total > 0 else 0,
-            "truncated": total > 1,
-        }
+        return self._main_brain_assembly.main_brain_card_meta(first_entry, total=total)
 
     def _summarize_main_brain_card(self, first_entry: RuntimeOverviewEntry) -> str:
-        meta = dict(first_entry.meta or {})
-        lane_count = self._int(meta.get("lane_count"), 0)
-        backlog_count = self._int(meta.get("backlog_count"), 0)
-        assignment_count = self._int(meta.get("assignment_count"), 0)
-        report_count = self._int(meta.get("report_count"), 0)
-        evidence_count = self._int(meta.get("evidence_count"), 0)
-        decision_count = self._int(meta.get("decision_count"), 0)
-        patch_count = self._int(meta.get("patch_count"), 0)
-        return (
-            "Main-brain cockpit tracks "
-            f"{lane_count} lane(s), {backlog_count} backlog item(s), {assignment_count} assignment(s), "
-            f"{report_count} report(s), {evidence_count} evidence record(s), "
-            f"{decision_count} decision(s), and {patch_count} patch(es)."
-        )
+        return self._main_brain_assembly.summarize_main_brain_card(first_entry)
 
     async def build_main_brain_payload(self, app_state: Any) -> RuntimeMainBrainResponse:
         main_brain_card = await self._build_main_brain_card(app_state)
@@ -1262,16 +976,20 @@ class _RuntimeCenterOverviewCardsSupport:
             "list_schedules",
         )
         schedule_entries = [] if schedules is _MISSING else list(schedules)
+        normalized_schedule_entries = [
+            dict(self._mapping(schedule) or {})
+            for schedule in schedule_entries
+        ]
         schedule_count = len(schedule_entries)
         active_schedule_count = sum(
             1
             for schedule in schedule_entries
-            if (self._string(schedule.get("status")) or "").lower() not in {"paused", "deleted"}
+            if (self._string(self._get_field(schedule, "status")) or "").lower() not in {"paused", "deleted"}
         )
         paused_schedule_count = sum(
             1
             for schedule in schedule_entries
-            if (self._string(schedule.get("status")) or "").lower() == "paused"
+            if (self._string(self._get_field(schedule, "status")) or "").lower() == "paused"
         )
         heartbeat_config = get_heartbeat_config()
         heartbeat_payload = heartbeat_config.model_dump(mode="json", by_alias=True)
@@ -1294,7 +1012,7 @@ class _RuntimeCenterOverviewCardsSupport:
             "schedule_count": schedule_count,
             "active_schedule_count": active_schedule_count,
             "paused_schedule_count": paused_schedule_count,
-            "schedules": schedule_entries,
+            "schedules": normalized_schedule_entries,
             "heartbeat": {
                 "route": "/api/runtime-center/heartbeat",
                 "status": heartbeat_status,
@@ -1425,10 +1143,7 @@ class _RuntimeCenterOverviewCardsSupport:
         self,
         industry_instance_id: str | None,
     ) -> str | None:
-        normalized_instance_id = self._string(industry_instance_id)
-        if normalized_instance_id is None:
-            return None
-        return f"/api/runtime-center/industry/{quote(normalized_instance_id)}"
+        return self._main_brain_assembly.build_main_brain_industry_route(industry_instance_id)
 
     def _build_main_brain_report_route(
         self,
@@ -1436,11 +1151,10 @@ class _RuntimeCenterOverviewCardsSupport:
         industry_instance_id: str | None,
         report_id: str | None,
     ) -> str | None:
-        industry_route = self._build_main_brain_industry_route(industry_instance_id)
-        normalized_report_id = self._string(report_id)
-        if industry_route is None or normalized_report_id is None:
-            return industry_route
-        return f"{industry_route}?report_id={quote(normalized_report_id)}"
+        return self._main_brain_assembly.build_main_brain_report_route(
+            industry_instance_id=industry_instance_id,
+            report_id=report_id,
+        )
 
     def _build_main_brain_backlog_route(
         self,
@@ -1448,11 +1162,10 @@ class _RuntimeCenterOverviewCardsSupport:
         industry_instance_id: str | None,
         backlog_item_id: str | None,
     ) -> str | None:
-        industry_route = self._build_main_brain_industry_route(industry_instance_id)
-        normalized_backlog_item_id = self._string(backlog_item_id)
-        if industry_route is None or normalized_backlog_item_id is None:
-            return industry_route
-        return f"{industry_route}?backlog_item_id={quote(normalized_backlog_item_id)}"
+        return self._main_brain_assembly.build_main_brain_backlog_route(
+            industry_instance_id=industry_instance_id,
+            backlog_item_id=backlog_item_id,
+        )
 
     def _normalize_main_brain_reports(
         self,
@@ -1460,25 +1173,10 @@ class _RuntimeCenterOverviewCardsSupport:
         *,
         industry_instance_id: str | None,
     ) -> list[dict[str, Any]]:
-        normalized_reports: list[dict[str, Any]] = []
-        for report in reports:
-            payload = dict(self._mapping(report) or {})
-            if not payload:
-                continue
-            report_id = self._string(payload.get("report_id") or payload.get("id"))
-            metadata = self._mapping(payload.get("metadata")) or {}
-            if payload.get("route") is None:
-                payload["route"] = self._build_main_brain_report_route(
-                    industry_instance_id=industry_instance_id,
-                    report_id=report_id,
-                )
-            if "report_consumed" not in payload:
-                if isinstance(metadata.get("report_consumed"), bool):
-                    payload["report_consumed"] = bool(metadata.get("report_consumed"))
-                elif isinstance(payload.get("processed"), bool):
-                    payload["report_consumed"] = bool(payload.get("processed"))
-            normalized_reports.append(payload)
-        return normalized_reports
+        return self._main_brain_assembly.normalize_main_brain_reports(
+            reports,
+            industry_instance_id=industry_instance_id,
+        )
 
     def _normalize_main_brain_cognition_finding(
         self,
@@ -1487,31 +1185,11 @@ class _RuntimeCenterOverviewCardsSupport:
         industry_instance_id: str | None,
         report_lookup: Mapping[str, Mapping[str, Any]],
     ) -> dict[str, Any]:
-        report_id = self._string(payload.get("report_id"))
-        report_payload = report_lookup.get(report_id or "", {})
-        return {
-            **dict(payload),
-            "title": self._string(payload.get("title"))
-            or self._string(payload.get("headline"))
-            or self._string(report_payload.get("headline"))
-            or report_id,
-            "summary": self._string(payload.get("summary"))
-            or self._string(report_payload.get("summary")),
-            "route": self._string(payload.get("route"))
-            or self._string(report_payload.get("route"))
-            or self._build_main_brain_report_route(
-                industry_instance_id=industry_instance_id,
-                report_id=report_id,
-            ),
-            "needs_followup": bool(
-                payload.get("needs_followup")
-                if payload.get("needs_followup") is not None
-                else report_payload.get("needs_followup")
-            ),
-            "report_consumed": bool(report_payload.get("report_consumed"))
-            if report_payload.get("report_consumed") is not None
-            else None,
-        }
+        return self._main_brain_assembly.normalize_main_brain_cognition_finding(
+            payload,
+            industry_instance_id=industry_instance_id,
+            report_lookup=report_lookup,
+        )
 
     def _normalize_main_brain_cognition_conflict(
         self,
@@ -1519,13 +1197,10 @@ class _RuntimeCenterOverviewCardsSupport:
         *,
         industry_instance_id: str | None,
     ) -> dict[str, Any]:
-        return {
-            **dict(payload),
-            "title": self._string(payload.get("title")) or "Report conflict",
-            "summary": self._string(payload.get("summary")) or "Reports conflict.",
-            "route": self._string(payload.get("route"))
-            or self._build_main_brain_industry_route(industry_instance_id),
-        }
+        return self._main_brain_assembly.normalize_main_brain_cognition_conflict(
+            payload,
+            industry_instance_id=industry_instance_id,
+        )
 
     def _normalize_main_brain_cognition_hole(
         self,
@@ -1533,24 +1208,10 @@ class _RuntimeCenterOverviewCardsSupport:
         *,
         industry_instance_id: str | None,
     ) -> dict[str, Any]:
-        report_id = self._string(payload.get("report_id"))
-        if report_id is None:
-            report_ids = payload.get("report_ids")
-            if isinstance(report_ids, list):
-                report_id = self._string(report_ids[0] if report_ids else None)
-        kind = self._string(payload.get("kind")) or "hole"
-        return {
-            **dict(payload),
-            "title": self._string(payload.get("title"))
-            or ("Follow-up gap" if kind == "followup-needed" else "Report gap"),
-            "summary": self._string(payload.get("summary")) or "A report gap remains unresolved.",
-            "route": self._string(payload.get("route"))
-            or self._build_main_brain_report_route(
-                industry_instance_id=industry_instance_id,
-                report_id=report_id,
-            )
-            or self._build_main_brain_industry_route(industry_instance_id),
-        }
+        return self._main_brain_assembly.normalize_main_brain_cognition_hole(
+            payload,
+            industry_instance_id=industry_instance_id,
+        )
 
     def _normalize_main_brain_cognition_backlog(
         self,
@@ -1558,17 +1219,10 @@ class _RuntimeCenterOverviewCardsSupport:
         *,
         industry_instance_id: str | None,
     ) -> dict[str, Any]:
-        backlog_item_id = self._string(payload.get("backlog_item_id") or payload.get("id"))
-        return {
-            **dict(payload),
-            "title": self._string(payload.get("title")) or backlog_item_id,
-            "summary": self._string(payload.get("summary")),
-            "route": self._string(payload.get("route"))
-            or self._build_main_brain_backlog_route(
-                industry_instance_id=industry_instance_id,
-                backlog_item_id=backlog_item_id,
-            ),
-        }
+        return self._main_brain_assembly.normalize_main_brain_cognition_backlog(
+            payload,
+            industry_instance_id=industry_instance_id,
+        )
 
     def _build_main_brain_report_cognition_payload(
         self,
@@ -1577,162 +1231,17 @@ class _RuntimeCenterOverviewCardsSupport:
         industry_instance_id: str | None,
         normalized_reports: Sequence[Mapping[str, Any]],
     ) -> dict[str, Any]:
-        report_lookup = {
-            self._string(payload.get("report_id") or payload.get("id")) or f"report:{index}": payload
-            for index, payload in enumerate(normalized_reports)
-        }
-        current_cycle = self._mapping(industry_detail.get("current_cycle")) or {}
-        current_cycle_route = self._build_main_brain_industry_route(industry_instance_id)
-        current_cycle_synthesis = (
-            self._mapping(current_cycle.get("synthesis"))
-            or self._mapping((self._mapping(current_cycle.get("metadata")) or {}).get("report_synthesis"))
-            or {}
+        return self._main_brain_assembly.build_main_brain_report_cognition_payload(
+            industry_detail=industry_detail,
+            industry_instance_id=industry_instance_id,
+            normalized_reports=normalized_reports,
         )
-        latest_findings = [
-            self._normalize_main_brain_cognition_finding(
-                self._mapping(item) or {},
-                industry_instance_id=industry_instance_id,
-                report_lookup=report_lookup,
-            )
-            for item in list(current_cycle_synthesis.get("latest_findings") or [])
-            if self._mapping(item)
-        ]
-        conflicts = [
-            self._normalize_main_brain_cognition_conflict(
-                self._mapping(item) or {},
-                industry_instance_id=industry_instance_id,
-            )
-            for item in list(current_cycle_synthesis.get("conflicts") or [])
-            if self._mapping(item)
-        ]
-        holes = [
-            self._normalize_main_brain_cognition_hole(
-                self._mapping(item) or {},
-                industry_instance_id=industry_instance_id,
-            )
-            for item in list(current_cycle_synthesis.get("holes") or [])
-            if self._mapping(item)
-        ]
-        followup_backlog = [
-            self._normalize_main_brain_cognition_backlog(
-                self._mapping(item) or {},
-                industry_instance_id=industry_instance_id,
-            )
-            for item in self._normalize_list(industry_detail.get("backlog"))
-            if self._string((self._mapping(item.get("metadata")) or {}).get("source_report_id"))
-            or self._string((self._mapping(item.get("metadata")) or {}).get("synthesis_kind"))
-        ]
-        unconsumed_reports = [
-            dict(report)
-            for report in normalized_reports
-            if report.get("report_consumed") is False
-        ]
-        needs_followup_reports = [
-            dict(report)
-            for report in normalized_reports
-            if report.get("needs_followup") is True
-        ]
-        replan_reasons = [
-            reason
-            for reason in (
-                self._string(item)
-                for item in list(current_cycle_synthesis.get("replan_reasons") or [])
-            )
-            if reason is not None
-        ]
-        needs_replan = bool(current_cycle_synthesis.get("needs_replan")) or bool(
-            conflicts or holes or followup_backlog
-        )
-        unresolved_count = (
-            len(conflicts) + len(holes) + len(unconsumed_reports) + len(followup_backlog)
-        )
-        if needs_replan:
-            judgment_status = "attention"
-            judgment_summary = (
-                "Main brain must compare unresolved reports and decide whether to dispatch follow-up work."
-            )
-        elif unconsumed_reports:
-            judgment_status = "review"
-            judgment_summary = (
-                "Main brain still has unconsumed reports to synthesize before closing the cycle."
-            )
-        else:
-            judgment_status = "clear"
-            judgment_summary = "Latest reports are consumed and no explicit replan pressure remains."
-        next_action: dict[str, Any]
-        if followup_backlog:
-            next_action = {
-                "kind": "followup-backlog",
-                "title": self._string(followup_backlog[0].get("title")) or "Review follow-up backlog",
-                "summary": self._string(followup_backlog[0].get("summary"))
-                or "Dispatch the formal follow-up backlog created from the current report synthesis.",
-                "route": self._string(followup_backlog[0].get("route")) or current_cycle_route,
-            }
-        elif unconsumed_reports:
-            next_action = {
-                "kind": "consume-report",
-                "title": self._string(unconsumed_reports[0].get("headline"))
-                or self._string(unconsumed_reports[0].get("title"))
-                or "Consume report",
-                "summary": "Consume the latest unconsumed report before dispatching more work.",
-                "route": self._string(unconsumed_reports[0].get("route")) or current_cycle_route,
-            }
-        else:
-            next_action = {
-                "kind": "review-cycle-synthesis" if needs_replan else "continue-cycle",
-                "title": "Review cycle synthesis" if needs_replan else "Continue current cycle",
-                "summary": (
-                    "Review the cycle synthesis and decide the next operating step."
-                    if needs_replan
-                    else "No explicit report cognition pressure is blocking the cycle."
-                ),
-                "route": current_cycle_route,
-            }
-        return {
-            "latest_findings": latest_findings,
-            "conflicts": conflicts,
-            "holes": holes,
-            "judgment": {
-                "status": judgment_status,
-                "summary": judgment_summary,
-                "route": current_cycle_route,
-            },
-            "next_action": next_action,
-            "needs_replan": needs_replan,
-            "replan_reasons": replan_reasons,
-            "followup_backlog": followup_backlog,
-            "unconsumed_reports": unconsumed_reports,
-            "needs_followup_reports": needs_followup_reports,
-            "current_cycle_id": self._string(current_cycle.get("cycle_id")),
-            "route": current_cycle_route,
-            "count": unresolved_count,
-        }
 
     def _build_main_brain_report_cognition_signal(
         self,
         cognition: Mapping[str, Any],
     ) -> dict[str, Any]:
-        needs_replan = bool(cognition.get("needs_replan"))
-        return {
-            "key": "report_cognition",
-            "count": self._int(cognition.get("count"), 0),
-            "value": "attention" if needs_replan else "clear",
-            "detail": self._string(
-                self._mapping(cognition.get("judgment")).get("summary"),
-            ),
-            "route": self._string(
-                self._mapping(cognition.get("next_action")).get("route"),
-            )
-            or self._string(cognition.get("route")),
-            "status": self._string(
-                self._mapping(cognition.get("judgment")).get("status"),
-            )
-            or ("attention" if needs_replan else "clear"),
-            "needs_replan": needs_replan,
-            "replan_reason_count": len(list(cognition.get("replan_reasons") or [])),
-            "unconsumed_count": len(list(cognition.get("unconsumed_reports") or [])),
-            "followup_count": len(list(cognition.get("followup_backlog") or [])),
-        }
+        return self._main_brain_assembly.build_main_brain_report_cognition_signal(cognition)
 
     def _build_main_brain_section(
         self,
@@ -1753,12 +1262,7 @@ class _RuntimeCenterOverviewCardsSupport:
         )
 
     def _index_industry_by_instance_id(self, items: list[Any]) -> dict[str, Any]:
-        indexed: dict[str, Any] = {}
-        for item in items:
-            instance_id = self._string(self._get_field(item, "instance_id", "id"))
-            if instance_id:
-                indexed[instance_id] = item
-        return indexed
+        return self._main_brain_assembly.index_industry_by_instance_id(items)
 
     def _build_industry_entry(self, item: Any) -> RuntimeOverviewEntry:
         instance_id = (

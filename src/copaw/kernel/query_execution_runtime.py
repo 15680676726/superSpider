@@ -3,16 +3,17 @@ from __future__ import annotations
 
 import importlib
 
-from ..evidence import EvidenceRecord
 from ..memory.conversation_compaction_service import ConversationCompactionService
-from ..providers import ProviderManager
+from ..providers import ProviderManager  # noqa: F401
 from .main_brain_intake import (
     build_industry_chat_action_kwargs,
     normalize_main_brain_runtime_context,
     read_attached_main_brain_intake_contract,
     resolve_execution_core_industry_instance_id,
 )
+from .query_execution_resident_runtime import _QueryExecutionResidentRuntimeMixin
 from .query_execution_shared import *  # noqa: F401,F403
+from .query_execution_usage_runtime import _QueryExecutionUsageRuntimeMixin
 
 
 def CoPawAgent(*args, **kwargs):
@@ -39,7 +40,10 @@ _EXECUTION_CORE_ALLOWED_LOCAL_TOOL_CAPABILITY_IDS = {
 }
 
 
-class _QueryExecutionRuntimeMixin:
+class _QueryExecutionRuntimeMixin(
+    _QueryExecutionResidentRuntimeMixin,
+    _QueryExecutionUsageRuntimeMixin,
+):
     def __init__(
         self,
         *,
@@ -975,49 +979,6 @@ class _QueryExecutionRuntimeMixin:
             "summary": final_summary or "human assist resumed",
         }
 
-    async def _get_or_create_resident_agent(
-        self,
-        *,
-        cache_key: str,
-        signature: str,
-        session_id: str,
-        user_id: str,
-        channel: str,
-        owner_agent_id: str,
-        create_agent,
-    ) -> _ResidentQueryAgent:
-        async with self._resident_agent_cache_lock:
-            cached = self._resident_agents.get(cache_key)
-            if cached is not None and cached.signature == signature:
-                cached.agent.rebuild_sys_prompt()
-                return cached
-            agent = create_agent()
-            await agent.register_mcp_clients()
-            agent.set_console_output_enabled(enabled=False)
-            try:
-                await self._session_backend.load_session_state(
-                    session_id=session_id,
-                    user_id=user_id,
-                    agent=agent,
-                )
-            except KeyError as exc:
-                logger.warning(
-                    "load_session_state skipped (state schema mismatch): %s; "
-                    "will save fresh state on completion to recover file",
-                    exc,
-                )
-            resident = _ResidentQueryAgent(
-                cache_key=cache_key,
-                signature=signature,
-                session_id=session_id,
-                user_id=user_id,
-                channel=channel,
-                owner_agent_id=owner_agent_id,
-                agent=agent,
-            )
-            self._resident_agents[cache_key] = resident
-            return resident
-
     async def _prune_transient_messages(
         self,
         *,
@@ -1042,49 +1003,6 @@ class _QueryExecutionRuntimeMixin:
                 for msg, marks in content
                 if getattr(msg, "id", None) not in message_ids
             ]
-
-    def _resident_agent_cache_key(
-        self,
-        *,
-        channel: str,
-        session_id: str,
-        user_id: str,
-        owner_agent_id: str,
-    ) -> str:
-        return f"{channel}:{session_id}:{user_id}:{owner_agent_id}"
-
-    def _resident_agent_signature(
-        self,
-        *,
-        owner_agent_id: str,
-        actor_key: object | None,
-        actor_fingerprint: object | None,
-        prompt_appendix: str | None,
-        tool_capability_ids: set[str] | None,
-        skill_names: set[str] | None,
-        mcp_client_keys: list[str] | None,
-        system_capability_ids: set[str] | None,
-    ) -> str:
-        try:
-            from copaw.agents.model_factory import build_runtime_model_fingerprint
-
-            runtime_model_fingerprint = build_runtime_model_fingerprint()
-        except Exception:
-            runtime_model_fingerprint = ""
-        payload = {
-            "owner_agent_id": owner_agent_id,
-            "actor_key": _first_non_empty(actor_key),
-            "actor_fingerprint": _first_non_empty(actor_fingerprint),
-            "prompt_appendix": prompt_appendix or "",
-            "tool_capability_ids": sorted(tool_capability_ids or []),
-            "skill_names": sorted(skill_names or []),
-            "mcp_client_keys": sorted(mcp_client_keys) if isinstance(mcp_client_keys, list) else None,
-            "system_capability_ids": sorted(system_capability_ids or []),
-            "runtime_model_fingerprint": runtime_model_fingerprint,
-        }
-        return hashlib.sha1(
-            json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"),
-        ).hexdigest()
 
     def _make_shell_evidence_sink(self, kernel_task_id: str | None):
         if self._tool_bridge is None or kernel_task_id is None:
@@ -1296,176 +1214,6 @@ class _QueryExecutionRuntimeMixin:
             ),
         )
 
-    def record_turn_usage(
-        self,
-        *,
-        request: Any,
-        kernel_task_id: str | None,
-        usage: Any,
-    ) -> None:
-        usage_payload = _normalize_usage_payload(usage)
-        if not usage_payload:
-            return
-        now = _utc_now()
-        owner_agent_id = self.resolve_request_owner_agent_id(request=request)
-        cost_estimate = _extract_usage_cost_estimate(usage_payload)
-        model_context = self._resolve_query_model_usage_context(
-            request=request,
-            owner_agent_id=owner_agent_id,
-        )
-        self._record_agent_runtime_usage(
-            owner_agent_id=owner_agent_id,
-            usage_payload=usage_payload,
-            cost_estimate=cost_estimate,
-            model_context=model_context,
-            recorded_at=now,
-        )
-        self._record_query_usage_evidence(
-            request=request,
-            kernel_task_id=kernel_task_id,
-            owner_agent_id=owner_agent_id,
-            usage_payload=usage_payload,
-            cost_estimate=cost_estimate,
-            model_context=model_context,
-            recorded_at=now,
-        )
-
-    def _record_agent_runtime_usage(
-        self,
-        *,
-        owner_agent_id: str | None,
-        usage_payload: dict[str, Any],
-        cost_estimate: float | None,
-        model_context: dict[str, Any],
-        recorded_at: datetime,
-    ) -> None:
-        if self._agent_runtime_repository is None or not owner_agent_id:
-            return
-        runtime = self._agent_runtime_repository.get_runtime(owner_agent_id)
-        if runtime is None:
-            return
-        metadata = dict(runtime.metadata or {})
-        metadata["last_query_usage"] = usage_payload
-        metadata["last_query_usage_at"] = recorded_at.isoformat()
-        if model_context:
-            metadata["last_query_model_context"] = model_context
-        if cost_estimate is not None:
-            metadata["last_query_cost_estimate"] = cost_estimate
-            metadata["query_cost_total_estimate"] = round(
-                _usage_float(metadata.get("query_cost_total_estimate"), 0.0)
-                + cost_estimate,
-                12,
-            )
-        metadata["query_usage_totals"] = _merge_usage_totals(
-            metadata.get("query_usage_totals"),
-            usage_payload,
-        )
-        self._agent_runtime_repository.upsert_runtime(
-            runtime.model_copy(
-                update={
-                    "metadata": metadata,
-                    "updated_at": recorded_at,
-                },
-            ),
-        )
-
-    def _record_query_usage_evidence(
-        self,
-        *,
-        request: Any,
-        kernel_task_id: str | None,
-        owner_agent_id: str | None,
-        usage_payload: dict[str, Any],
-        cost_estimate: float | None,
-        model_context: dict[str, Any],
-        recorded_at: datetime,
-    ) -> None:
-        if self._evidence_ledger is None or not kernel_task_id:
-            return
-        task_runtime = None
-        if self._task_runtime_repository is not None:
-            task_runtime = self._task_runtime_repository.get_runtime(kernel_task_id)
-        risk_level = _first_non_empty(
-            getattr(task_runtime, "risk_level", None),
-            "auto",
-        ) or "auto"
-        owner_agent_id = (
-            _first_non_empty(
-                getattr(task_runtime, "last_owner_agent_id", None),
-                owner_agent_id,
-            )
-            or owner_agent_id
-        )
-        record = self._evidence_ledger.append(
-            EvidenceRecord(
-                task_id=kernel_task_id,
-                actor_ref=(
-                    f"agent:{owner_agent_id}"
-                    if owner_agent_id
-                    else "agent:interactive-query"
-                ),
-                environment_ref=(
-                    f"session:{_first_non_empty(getattr(request, 'channel', None), DEFAULT_CHANNEL)}:"
-                    f"{_first_non_empty(getattr(request, 'session_id', None), 'unknown')}"
-                ),
-                capability_ref="system:dispatch_query",
-                risk_level=risk_level,
-                action_summary="Record interactive query token usage",
-                result_summary=_summarize_usage_payload(
-                    usage_payload,
-                    cost_estimate=cost_estimate,
-                ),
-                created_at=recorded_at,
-                metadata={
-                    "usage_kind": "interactive-query",
-                    "usage": usage_payload,
-                    "cost_estimate": cost_estimate,
-                    "owner_agent_id": owner_agent_id,
-                    "channel": _first_non_empty(getattr(request, "channel", None), DEFAULT_CHANNEL),
-                    "session_id": _first_non_empty(getattr(request, "session_id", None)),
-                    "user_id": _first_non_empty(getattr(request, "user_id", None)),
-                    "session_kind": _first_non_empty(getattr(request, "session_kind", None)),
-                    "industry_instance_id": _first_non_empty(
-                        getattr(request, "industry_instance_id", None),
-                    ),
-                    "industry_role_id": _first_non_empty(
-                        getattr(request, "industry_role_id", None),
-                    ),
-                    "model_context": model_context,
-                },
-            ),
-        )
-        if task_runtime is None or self._task_runtime_repository is None:
-            return
-        self._task_runtime_repository.upsert_runtime(
-            task_runtime.model_copy(
-                update={
-                    "last_evidence_id": record.id,
-                    "updated_at": recorded_at,
-                },
-            ),
-        )
-
-    def _resolve_query_model_usage_context(
-        self,
-        *,
-        request: Any,
-        owner_agent_id: str | None,
-    ) -> dict[str, Any]:
-        del request, owner_agent_id
-        try:
-            manager = self._provider_manager or ProviderManager()
-            slot, using_fallback, reason, unavailable = manager.resolve_model_slot()
-        except Exception:
-            return {}
-        return {
-            "provider_id": slot.provider_id,
-            "model": slot.model,
-            "slot_source": "fallback" if using_fallback else "active",
-            "selection_reason": reason,
-            "unavailable_slots": list(unavailable),
-        }
-
     def _resolve_execution_task_context(
         self,
         *,
@@ -1606,96 +1354,6 @@ class _QueryExecutionRuntimeMixin:
             },
             resume_payload=checkpoint_payload,
         )
-
-    def _acquire_actor_runtime_lease(
-        self,
-        *,
-        agent_id: str,
-        task_id: str | None,
-        conversation_thread_id: str | None,
-    ) -> Any | None:
-        if self._environment_service is None:
-            return None
-        acquire = getattr(self._environment_service, "acquire_actor_lease", None)
-        if not callable(acquire):
-            return None
-        try:
-            return acquire(
-                agent_id=agent_id,
-                owner=_first_non_empty(conversation_thread_id, task_id, agent_id) or agent_id,
-                ttl_seconds=180,
-                metadata={
-                    "task_id": task_id,
-                    "thread_id": conversation_thread_id,
-                    "lease_kind": "interactive-query",
-                },
-            )
-        except RuntimeError as exc:
-            message = str(exc).lower()
-            if "not available" in message:
-                return None
-            logger.info(
-                "Actor runtime lease acquisition blocked for '%s': %s",
-                agent_id,
-                exc,
-            )
-            raise
-        except Exception:
-            logger.exception("Actor runtime lease acquisition failed")
-            return None
-
-    def _heartbeat_actor_runtime_lease(self, lease: Any | None) -> None:
-        if lease is None or self._environment_service is None:
-            return
-        heartbeat = getattr(self._environment_service, "heartbeat_actor_lease", None)
-        if not callable(heartbeat):
-            return
-        try:
-            heartbeat(lease.id, lease_token=lease.lease_token, ttl_seconds=180)
-        except Exception:
-            logger.exception("Actor runtime lease heartbeat failed")
-
-    def _release_actor_runtime_lease(self, lease: Any | None) -> None:
-        if lease is None or self._environment_service is None:
-            return
-        release = getattr(self._environment_service, "release_actor_lease", None)
-        if not callable(release):
-            return
-        try:
-            release(lease.id, lease_token=lease.lease_token, reason="interactive query completed")
-        except Exception:
-            logger.exception("Actor runtime lease release failed")
-
-    def _build_query_lease_heartbeat(
-        self,
-        *,
-        session_lease: Any | None,
-        actor_lease: Any | None,
-    ) -> LeaseHeartbeat | None:
-        if session_lease is None and actor_lease is None:
-            return None
-        return LeaseHeartbeat(
-            label="interactive-query",
-            interval_seconds=self._lease_heartbeat_interval_seconds,
-            heartbeat=lambda: self._heartbeat_query_leases(
-                session_lease=session_lease,
-                actor_lease=actor_lease,
-            ),
-        )
-
-    def _heartbeat_query_leases(
-        self,
-        *,
-        session_lease: Any | None,
-        actor_lease: Any | None,
-    ) -> None:
-        if session_lease is not None and self._environment_service is not None:
-            self._environment_service.heartbeat_session_lease(
-                session_lease.id,
-                lease_token=session_lease.lease_token or "",
-            )
-        self._heartbeat_actor_runtime_lease(actor_lease)
-
 
     def _resolve_query_agent_profile(
         self,
@@ -2106,152 +1764,3 @@ class _QueryExecutionRuntimeMixin:
                         industry_instance_id,
                     )
         return chat_writeback_summary, industry_kickoff_summary
-
-def _usage_jsonable(value: Any) -> Any:
-    if value is None or isinstance(value, (str, bool, int, float)):
-        return value
-    if isinstance(value, dict):
-        return {
-            str(key): _usage_jsonable(item)
-            for key, item in value.items()
-            if item is not None
-        }
-    if isinstance(value, (list, tuple, set)):
-        return [_usage_jsonable(item) for item in value]
-    mapped = _mapping_value(value)
-    if mapped:
-        return _usage_jsonable(mapped)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return str(value)
-
-
-def _usage_int(*values: Any) -> int | None:
-    for value in values:
-        if value is None or isinstance(value, bool):
-            continue
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float):
-            return int(value)
-        text = str(value).strip()
-        if not text:
-            continue
-        try:
-            return int(float(text))
-        except ValueError:
-            continue
-    return None
-
-
-def _usage_float(*values: Any) -> float | None:
-    for value in values:
-        if value is None or isinstance(value, bool):
-            continue
-        if isinstance(value, (int, float)):
-            return float(value)
-        text = str(value).strip()
-        if not text:
-            continue
-        try:
-            return float(text)
-        except ValueError:
-            continue
-    return None
-
-
-def _normalize_usage_payload(value: Any) -> dict[str, Any]:
-    payload = _mapping_value(value)
-    if not payload:
-        return {}
-    normalized = _usage_jsonable(payload)
-    if not isinstance(normalized, dict):
-        return {}
-    prompt_tokens = _usage_int(
-        normalized.get("prompt_tokens"),
-        normalized.get("input_tokens"),
-    )
-    completion_tokens = _usage_int(
-        normalized.get("completion_tokens"),
-        normalized.get("output_tokens"),
-    )
-    total_tokens = _usage_int(normalized.get("total_tokens"))
-    cached_tokens = _usage_int(
-        normalized.get("cached_tokens"),
-        normalized.get("cached_input_tokens"),
-    )
-    reasoning_tokens = _usage_int(normalized.get("reasoning_tokens"))
-    if prompt_tokens is not None:
-        normalized.setdefault("prompt_tokens", prompt_tokens)
-    if completion_tokens is not None:
-        normalized.setdefault("completion_tokens", completion_tokens)
-    if total_tokens is None and (
-        prompt_tokens is not None or completion_tokens is not None
-    ):
-        total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
-    if total_tokens is not None:
-        normalized["total_tokens"] = total_tokens
-    if cached_tokens is not None:
-        normalized["cached_tokens"] = cached_tokens
-    if reasoning_tokens is not None:
-        normalized["reasoning_tokens"] = reasoning_tokens
-    cost_estimate = _extract_usage_cost_estimate(normalized)
-    if cost_estimate is not None:
-        normalized["cost_estimate"] = cost_estimate
-    return normalized
-
-
-def _extract_usage_cost_estimate(usage_payload: dict[str, Any]) -> float | None:
-    return _usage_float(
-        usage_payload.get("cost_estimate"),
-        usage_payload.get("estimated_cost"),
-        usage_payload.get("cost"),
-        usage_payload.get("total_cost"),
-    )
-
-
-def _merge_usage_totals(
-    existing: Any,
-    usage_payload: dict[str, Any],
-) -> dict[str, Any]:
-    totals = _mapping_value(existing)
-    for key in (
-        "prompt_tokens",
-        "completion_tokens",
-        "total_tokens",
-        "cached_tokens",
-        "reasoning_tokens",
-    ):
-        amount = _usage_int(usage_payload.get(key))
-        if amount is None:
-            continue
-        totals[key] = _usage_int(totals.get(key), 0) + amount
-    return totals
-
-
-def _summarize_usage_payload(
-    usage_payload: dict[str, Any],
-    *,
-    cost_estimate: float | None,
-) -> str:
-    parts: list[str] = []
-    prompt_tokens = _usage_int(usage_payload.get("prompt_tokens"))
-    completion_tokens = _usage_int(usage_payload.get("completion_tokens"))
-    total_tokens = _usage_int(usage_payload.get("total_tokens"))
-    cached_tokens = _usage_int(usage_payload.get("cached_tokens"))
-    reasoning_tokens = _usage_int(usage_payload.get("reasoning_tokens"))
-    if prompt_tokens is not None:
-        parts.append(f"prompt={prompt_tokens}")
-    if completion_tokens is not None:
-        parts.append(f"completion={completion_tokens}")
-    if total_tokens is not None:
-        parts.append(f"total={total_tokens}")
-    if cached_tokens is not None:
-        parts.append(f"cached={cached_tokens}")
-    if reasoning_tokens is not None:
-        parts.append(f"reasoning={reasoning_tokens}")
-    if cost_estimate is not None:
-        parts.append(f"cost={cost_estimate:g}")
-    if not parts:
-        return "Recorded interactive query usage."
-    return f"Recorded interactive query usage ({', '.join(parts)})."

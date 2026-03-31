@@ -210,6 +210,12 @@ class _CognitiveFakeIndustryService(FakeIndustryService):
         )()
 
 
+class _ObjectScheduleStateQueryService(FakeStateQueryService):
+    async def list_schedules(self, limit: int | None = 5):
+        schedules = await super().list_schedules(limit=limit)
+        return [SimpleNamespace(**item) for item in schedules]
+
+
 def test_runtime_center_overview_uses_state_and_evidence_services():
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()
@@ -450,6 +456,33 @@ def test_runtime_center_main_brain_route_exposes_unified_operator_sections():
     assert payload["signals"]["governance"]["count"] == 1
     assert payload["signals"]["automation"]["count"] == 1
     assert payload["signals"]["recovery"]["count"] == 1
+
+
+def test_runtime_center_main_brain_route_handles_object_schedule_summaries():
+    app = build_runtime_center_app()
+    app.state.state_query_service = _ObjectScheduleStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    with patch(
+        "copaw.app.runtime_center.overview_cards.get_heartbeat_config",
+        return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
+        create=True,
+    ):
+        response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["automation"]["schedule_count"] == 1
+    assert payload["automation"]["active_schedule_count"] == 1
+    assert payload["automation"]["paused_schedule_count"] == 0
 
 
 def test_runtime_center_overview_governance_uses_canonical_host_twin_summary_for_ready_runtime():

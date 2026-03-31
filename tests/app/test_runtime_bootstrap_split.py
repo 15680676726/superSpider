@@ -14,6 +14,7 @@ from copaw.environments import (
     EnvironmentService,
     SessionMountRepository,
 )
+from copaw.kernel.query_execution_runtime import _QueryExecutionRuntimeMixin
 from copaw.state import SQLiteStateStore
 
 
@@ -43,6 +44,12 @@ def test_task_status_locks_main_brain_chat_performance_regression_guards() -> No
     status_text = _read("TASK_STATUS.md")
 
     assert "轻量聊天链回归护栏已锁定（runtime conversations / bootstrap wiring）" in status_text
+
+
+def test_query_execution_runtime_mixin_inherits_split_runtime_seams() -> None:
+    base_modules = {base.__module__ for base in _QueryExecutionRuntimeMixin.__bases__}
+    assert "copaw.kernel.query_execution_resident_runtime" in base_modules
+    assert "copaw.kernel.query_execution_usage_runtime" in base_modules
 
 
 def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
