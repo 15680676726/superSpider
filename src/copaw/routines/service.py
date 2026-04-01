@@ -49,10 +49,6 @@ from .models import (
 
 SUPPORTED_ROUTINE_ENGINE_KINDS = ("browser", "desktop")
 SUPPORTED_ROUTINE_ENVIRONMENT_KINDS = ("browser", "desktop")
-RETIRED_SOP_ENGINE_KIND = "n8n-sop"
-RETIRED_SOP_MIGRATION_MESSAGE = (
-    "Legacy routine engine 'n8n-sop' has been retired; migrate this flow to /api/fixed-sops bindings instead."
-)
 _DESKTOP_DOCUMENT_FAMILY_BY_SUFFIX = {
     ".csv": "spreadsheets",
     ".doc": "documents",
@@ -675,11 +671,6 @@ class RoutineService:
         while True:
             attempt += 1
             try:
-                if routine.engine_kind == RETIRED_SOP_ENGINE_KIND:
-                    raise _RoutineFailure(
-                        "executor-unavailable",
-                        RETIRED_SOP_MIGRATION_MESSAGE,
-                    )
                 if routine.engine_kind == "browser":
                     outcome = await self._replay_browser_routine(
                         routine=routine,
@@ -2536,11 +2527,6 @@ class RoutineService:
     ) -> None:
         normalized_engine_kind = _string(engine_kind)
         normalized_environment_kind = _string(environment_kind)
-        if (
-            normalized_engine_kind == RETIRED_SOP_ENGINE_KIND
-            or normalized_environment_kind == RETIRED_SOP_ENGINE_KIND
-        ):
-            raise ValueError(RETIRED_SOP_MIGRATION_MESSAGE)
         if (
             normalized_engine_kind is not None
             and normalized_engine_kind not in SUPPORTED_ROUTINE_ENGINE_KINDS

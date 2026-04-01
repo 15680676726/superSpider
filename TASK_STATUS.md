@@ -323,7 +323,7 @@
 - `/runtime-center/chat/intake` 已退役。
 - `task-chat:*` / `actor-chat:*` 前台聊天心智已退役。
 - `query_confirmation_policy` 已删除。
-- 人类直连底层执行入口继续退役中：
+- 人类直连底层执行入口已退役：
   - capability direct execute
   - replay direct execute
   - prediction recommendation direct execute
@@ -332,11 +332,11 @@
 
 ---
 
-## 4. 当前重点
+## 4. 当前收口判断
 
-截至 `2026-03-25`，最值得继续推进的不是新功能扩张，而是以下 5 条硬切施工线。
+截至 `2026-04-01`，本仓库应按“核心闭环是否已经完成、哪些只是仓库门槛、哪些仍是真未完成项”来判断状态，不应再把所有 guardrail / 接线 / 展示加厚都写成开放式长期任务。
 
-### 4.0 零号优先级：hard-cut autonomy rebuild
+### 4.0 已完成：hard-cut autonomy rebuild
 
 目标：
 
@@ -354,7 +354,12 @@
 - Task 9 已完成产品面删旧：runtime-center direct delegate route 已物理删除，console 侧旧 goal-dispatch 文案已下线
 - `2026-03-25` 补充：Task 10/11 已完成收口，formal operating-cycle 已完全切成 `assignment -> task -> report`，历史 retirement 回归已更新到 live contract，不再拿 `waiting-confirm` / `goal` 节点当当前主链。
 
-### 4.1 第一优先级：single-industry autonomy closure
+结论：
+
+- 本项已完成，不再作为开放任务继续挂起。
+- 后续若发现主链回退、旧入口复活或 reset 失效，按回归缺陷单独登记。
+
+### 4.1 已完成：single-industry autonomy closure
 
 目标：
 
@@ -401,14 +406,24 @@
   `tests/app/test_runtime_center_overview_group_builders.py` 已通过。
 - `2026-03-31` 补充：真实世界覆盖/长期自治回归的当前口径已与 `6.1` 对齐，不再把这项写成开放式尾巴。`tests/app/test_phase_next_autonomy_smoke.py` 的长跑 smoke 现在除 `handoff -> human-assist -> resume -> replan` 外，也显式锁住同一条 phase-next 连续链中的 `multi-seat candidate/selected seat` 与 `multi-agent shared-writer contention`，当前 repo 定义范围内已收口；后续只保留 `6.1` 里的终态标准，不再在历史记录里重复写“仍需继续补更大范围覆盖”。
 
+结论：
 
-### 4.1 `2026-03-30` 当前推荐执行顺序（`P0-P4`）
+- 本项已完成，不再作为开放任务继续挂起。
+- 后续如新增行业执行位、真实世界新场景或新治理对象，按新增功能单独立项。
+
+
+### 4.1.1 `2026-03-30` 仓库门槛与护栏（`P0-P4`）
 
 正式执行顺序文档：
 
 - `docs/superpowers/plans/2026-03-30-main-brain-hardening-priority-sequence.md`
 
-当前建议按以下顺序推进，不要跳步骤抢跑：
+说明：
+
+- `P0-P4` 在当前仓库应被视为仓库级 gate / regression guardrails，不应再被理解为开放式长期 backlog。
+- 新任务如果触碰这些边界，必须通过相应护栏；未触碰则不应反向把它们重新解释成“系统仍未完成”。
+
+当前护栏分层如下：
 
 - `P0 truth-chain / write-boundary guardrails`
   - 先锁唯一写链、retired frontdoor、detail-only 读面与“读面无副作用”
@@ -482,8 +497,12 @@
     `cmd /c npm --prefix console exec vitest run src/runtime/controlChainPresentation.test.ts`
     -> `5 passed`
 
+结论：
 
-### 4.2 第一优先级并行：主脑 cognitive closure
+- `P0-P4` 保留为门槛，不再登记为开放任务。
+- 后续只有在护栏失效、回归失守或新增功能跨越边界时，才重新立单。
+
+### 4.2 已完成：主脑 cognitive closure
 
 目标：
 
@@ -499,7 +518,11 @@
 - `2026-03-26` 补充：`tests/kernel/test_main_brain_chat_service.py`、`tests/kernel/test_turn_executor.py`、`tests/kernel/test_query_execution_runtime.py`、`tests/app/test_runtime_center_api.py`、`tests/app/test_runtime_conversations_api.py`、`tests/app/test_agent_runtime_ingress.py`、`tests/app/runtime_center_api_parts/overview_governance.py`、`tests/app/test_system_api.py` 与 `console/src/runtime/controlChainPresentation.test.ts` 已通过更大回归，`report_synthesis`、`main_brain_intake`、control-chain presenter 与 runtime/system 读面当前已形成可验证基线。
 - `2026-03-31` 补充：主脑作为唯一认知中心的当前定义范围已收口，不再把这项写成开放式尾巴。`Runtime Center / Industry cockpit / control-chain presenter` 与 `main_brain_chat_service / turn_executor / runtime center overview` 当前已共享同一条主脑认知链，并通过 `python -m pytest tests/kernel/test_main_brain_chat_service.py tests/kernel/test_turn_executor.py tests/app/runtime_center_api_parts/overview_governance.py tests/app/test_runtime_center_api.py tests/app/test_runtime_conversations_api.py tests/app/test_agent_runtime_ingress.py tests/app/test_system_api.py -q` -> `176 passed`，以及 `npm --prefix console test -- MainBrainCockpitPanel.test.tsx index.test.tsx runtimePresentation.test.tsx text.test.ts controlChainPresentation.test.ts` -> `23 passed` 验证。后续不再把这项单独登记为未闭环任务。
 
-### 4.3 第二优先级：主脑聊天链瘦身与性能硬化
+结论：
+
+- 本项已完成，不再作为开放任务继续挂起。
+
+### 4.3 已完成：主脑聊天链瘦身与性能硬化
 
 目标：
 
@@ -536,7 +559,12 @@
 - `2026-03-31` 补充：轻量聊天链回归护栏已锁定（runtime conversations / bootstrap wiring），会持续阻断 runtime conversations 回流超重/重复 chat state，并要求 bootstrap wiring 保持 chat/orchestrate 轻量分链。
 - `2026-03-31` 补充：主脑聊天性能/交互这项在当前仓库定义范围内已收口，不再保留开放式尾巴。`turn_executor` 现在对短 inspection 聊天请求也会直接走 chat fast-path，不再无脑触发 main-brain intake classifier；同时 `main_brain_chat_service / turn_executor / runtime conversations / runtime bootstrap split` 与 chat 前台 `runtimeTransport / useRuntimeBinding / ChatRuntimeSidebar / ChatComposerAdapter` 已通过 `python -m pytest tests/kernel/test_main_brain_chat_service.py tests/kernel/test_turn_executor.py tests/app/test_runtime_conversations_api.py tests/app/test_runtime_bootstrap_split.py -q` -> `95 passed`、`npm --prefix console test -- runtimeTransport.test.ts useRuntimeBinding.test.ts ChatRuntimeSidebar.test.tsx ChatComposerAdapter.test.tsx` -> `14 passed` 与 `npm --prefix console run build` 验证。后续如再做聊天层变更，视为新一轮增强，而不是本项未闭环。
 
-### 4.4 第三优先级：媒体与记忆闭环继续接线
+结论：
+
+- 本项已完成，不再作为开放任务继续挂起。
+- 后续如再做聊天层变更，视为新增增强，不回写成本项未闭环。
+
+### 4.4 已完成：媒体与记忆闭环首轮收口
 
 目标：
 
@@ -554,6 +582,24 @@
 - `2026-04-01` 补充：`researcher` 的 schedule-originated continuity 已继续补厚到“follow-up backlog 物化 assignment 后仍保住 execution-core continuity 合同”。`service_lifecycle` 现会把 `control_thread_id / session_id / environment_ref / work_context_id / supervisor_* / requested_surfaces / recommended_scheduler_action` 从 follow-up backlog 正式持久化进 assignment metadata；`service_report_closure` 也会优先使用最新 report 的 `work_context_id`，不再让旧 assignment metadata 把新工作上下文盖掉。
 - `2026-04-01` 补充：`AgentWorkbench` 前台已停止展示 `GoalSelector / GoalDetailPanel`，也不再主动请求 `/goals/{goal_id}/detail`；执行条文案已把 `目标` 收成 `焦点`，`Predictions` 里的 `目标状态面 / 目标 delta` 也已改成 `焦点` 口径，避免继续把 operator 拉回旧 `goal-era` 心智。
 - `2026-04-01` 补充：`P0-4` 已新增正式 gate 入口 `scripts/run_p0_runtime_terminal_gate.py`，把后端主链回归、长跑与删旧回归、控制台定向回归和控制台构建收口成一个仓库级可执行门槛；`scripts/README.md` 已同步写明用法。
+
+结论：
+
+- 当前首轮闭环已成，不再用“继续接线”口径长期挂起。
+- 只有在新增正式 `Memory VNext` 功能、知识激活层新对象或新的 operator 能力时，才单独立项。
+
+### 4.5 `2026-04-01` `n8n / sop-adapters` 退役收口：`[已完成]`
+
+本轮只做硬删除旧残留，不重做 fixed SOP 内核。当前收口结果：
+
+- `tests/app/test_fixed_sop_kernel_api.py` 已删除 `/sop-adapters/templates` 与旧 router module removal 断言；fixed SOP API 回归现在只保留 native fixed SOP kernel 正式合同。
+- `src/copaw/routines/service.py` 已删除 `RETIRED_SOP_ENGINE_KIND = "n8n-sop"`、对应 migration message 与专门 compatibility 分支；`n8n-sop` 现在只会被当成普通非法 `engine/environment kind` 输入，而不是 runtime 内建兼容语义。
+- `docs/superpowers/plans/2026-03-26-native-fixed-sop-kernel-and-n8n-retirement.md` 继续保留为历史实施计划，但不再代表当前状态板上的活跃未完成项。
+
+当前结论：
+
+- 状态板不再保留“唯一未完成硬项”；
+- 后续如再动 automation / fixed SOP，只按新增增强任务登记，不再以 `n8n / sop-adapters` 退役名义继续挂账。
 
 ---
 

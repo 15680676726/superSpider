@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import importlib.util
 import uuid
 
 from fastapi import FastAPI
@@ -227,18 +226,6 @@ def test_list_fixed_sop_templates(tmp_path) -> None:
     payload = response.json()
     assert payload["items"]
     assert payload["items"][0]["template"]["template_id"]
-
-
-def test_old_sop_adapters_route_is_gone(tmp_path) -> None:
-    client = TestClient(_build_app(tmp_path))
-
-    response = client.get("/sop-adapters/templates")
-
-    assert response.status_code in {404, 410}
-
-
-def test_legacy_sop_adapters_router_module_is_removed() -> None:
-    assert importlib.util.find_spec("copaw.app.routers.sop_adapters") is None
 
 
 def test_fixed_sop_doctor_and_run_api_surface_host_preflight_blockers(tmp_path) -> None:

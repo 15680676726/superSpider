@@ -99,6 +99,29 @@ def make_browser_tool_response(payload: dict[str, object]):
     return SimpleNamespace(content=[{"text": json.dumps(payload)}])
 
 
+@pytest.mark.parametrize(
+    ("engine_kind", "environment_kind", "expected_message"),
+    [
+        ("n8n-sop", "browser", "Routine engine_kind must be one of: browser, desktop"),
+        ("browser", "n8n-sop", "Routine environment_kind must be one of: browser, desktop"),
+    ],
+)
+def test_routine_service_rejects_retired_n8n_sop_values_as_unsupported_input(
+    engine_kind: str,
+    environment_kind: str,
+    expected_message: str,
+) -> None:
+    service = RoutineService.__new__(RoutineService)
+
+    with pytest.raises(ValueError, match=expected_message) as exc_info:
+        service._validate_routine_definition(
+            engine_kind=engine_kind,
+            environment_kind=environment_kind,
+        )
+
+    assert "migrate this flow" not in str(exc_info.value)
+
+
 @pytest.mark.asyncio
 async def test_routine_service_replay_success_captures_evidence(tmp_path, monkeypatch) -> None:
     harness = build_routine_service(tmp_path)
