@@ -138,6 +138,7 @@
 - `2026-03-24` 补充：`/industry` 与实例 detail 的主脑监督链已显式展示 `writeback -> backlog -> cycle -> assignment -> report -> replan`，不再只返回一句“已分配”。
 - `2026-03-25` 补充：`/system/self-check` 仍保留正式 runtime health 读面，但 memory 的 canonical health contract 已不再包含 `memory_vector_ready / memory_embedding_config` 这类向量就绪字段；formal memory 不再依赖 embedding/vector readiness。
 - `2026-03-30` 补充：memory 正式架构已锁定并落地为 `truth-first` 与 `no-vector formal memory`：主脑与执行位共享同一套 truth-derived memory，私有 conversation compaction 与共享正式记忆显式分离，QMD / embedding / vector health 只可被视为 physically removed residuals，不再属于正式 runtime/operator contract。
+- `2026-04-01` 补充：knowledge activation layer 的第一批代码基线已落地。runtime query bootstrap 现在会实例化 `memory_activation_service`，并把它绑定到 `app.state`；`KernelQueryExecutionService` 的 prompt retrieval 与 `GoalService` compiler context 现已可消费 activation-derived memory items/refs。当前落地边界仍然是派生激活层，不是新的 memory truth，也不包含 graph persistence / report synthesis / Runtime Center activation UI。
 - `2026-03-25` 补充：前端 shared `control chain` presenter 已落地，`/industry`、`Runtime Center`、`AgentWorkbench` 统一消费同一条 `writeback -> backlog -> cycle -> assignment -> report -> replan` 呈现链，不再各自维护排序和标签逻辑。
 - `2026-03-25` 补充：`Runtime Center` 路由已继续按域拆出 `overview / memory / knowledge / reports / industry` 模块，`runtime_center_routes_core.py` 不再继续承载这些域；同时已删除 retired `TaskDelegationRequest` 与死掉的 delegation shared helper。
 - `2026-03-25` 补充：`state/models.py` 已收成兼容 re-export 面，`goals_tasks / agents_runtime / governance / workflows / prediction / reporting / industry / core` 分层模块已经落位，旧导入链继续可用但真正定义不再堆在单文件里。

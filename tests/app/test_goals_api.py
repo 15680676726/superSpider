@@ -63,7 +63,68 @@ class SlowTurnExecutor:
         }
 
 
-def _build_goal_app(tmp_path, *, turn_executor=None) -> FastAPI:
+class _FakeMemoryActivationService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def activate_for_query(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return type(
+            "ActivationResult",
+            (),
+            {
+                "activated_neurons": [
+                    type(
+                        "KnowledgeNeuron",
+                        (),
+                        {
+                            "title": "Activation memory",
+                            "summary": "Escalate the evidence review checklist before outbound approval.",
+                            "content_excerpt": "Escalate the evidence review checklist before outbound approval.",
+                            "source_refs": ["activation:outbound-checklist"],
+                            "evidence_refs": ["evidence:activation-1"],
+                        },
+                    )()
+                ],
+                "support_refs": ["activation:support:outbound-checklist"],
+                "evidence_refs": ["evidence:activation-1"],
+                "strategy_refs": [],
+            },
+        )()
+
+
+class _FakeGoalMemoryRecallService:
+    def recall(self, **kwargs):
+        _ = kwargs
+        return type(
+            "MemoryRecallResponse",
+            (),
+            {
+                "hits": [
+                    type(
+                        "MemoryRecallHit",
+                        (),
+                        {
+                            "title": "Customer rule",
+                            "summary": "ACME requires evidence review before outbound execution.",
+                            "content_excerpt": "ACME requires evidence review before outbound execution.",
+                            "source_ref": "memory:customer-rule",
+                            "document_id": "",
+                            "source_type": "knowledge_chunk",
+                        },
+                    )()
+                ]
+            },
+        )()
+
+
+def _build_goal_app(
+    tmp_path,
+    *,
+    turn_executor=None,
+    memory_activation_service=None,
+    memory_recall_service=None,
+) -> FastAPI:
     app = FastAPI()
     app.include_router(goals_router)
 
@@ -115,7 +176,9 @@ def _build_goal_app(tmp_path, *, turn_executor=None) -> FastAPI:
         learning_service=learning_service,
         strategy_memory_service=strategy_memory_service,
         knowledge_service=knowledge_service,
+        memory_recall_service=memory_recall_service,
         industry_instance_repository=industry_instance_repository,
+        memory_activation_service=memory_activation_service,
     )
     agent_profile_service = AgentProfileService(
         task_repository=task_repository,
@@ -930,6 +993,50 @@ def test_compile_goal_injects_knowledge_and_memory_context(tmp_path) -> None:
     payload = _compile_goal(app, goal_id)[0]["payload"]["compiler"]
     assert payload["knowledge_refs"]
     assert payload["memory_refs"]
+
+
+def test_compile_goal_augments_memory_context_with_activation_items(tmp_path) -> None:
+    activation_service = _FakeMemoryActivationService()
+    app = _build_goal_app(
+        tmp_path,
+        memory_activation_service=activation_service,
+        memory_recall_service=_FakeGoalMemoryRecallService(),
+    )
+
+    goal = _create_goal(
+        app,
+        title="Prepare outbound brief",
+        summary="Review the outbound evidence checklist and prepare the next step.",
+        status="active",
+        priority=1,
+    )
+    goal_id = goal.id
+    app.state.goal_override_repository.upsert_override(
+        GoalOverrideRecord(
+            goal_id=goal_id,
+            compiler_context={
+                "owner_agent_id": "ops-agent",
+                "industry_instance_id": "industry-v1-acme",
+                "industry_role_id": "execution-core",
+                "work_context_id": "ctx-outbound-1",
+            },
+        ),
+    )
+
+    compiler_context = app.state.goal_service._build_compilation_unit(
+        app.state.goal_service.get_goal(goal_id),
+        context={},
+    ).context
+    payload = _compile_goal(app, goal_id)[0]["payload"]["compiler"]
+
+    assert activation_service.calls
+    assert activation_service.calls[0]["work_context_id"] == "ctx-outbound-1"
+    assert compiler_context["activation_items"]
+    assert compiler_context["activation_refs"]
+    assert payload["memory_items"]
+    assert any("Customer rule" in item for item in payload["memory_items"])
+    assert any("Activation memory" in item for item in payload["memory_items"])
+    assert "activation:outbound-checklist" in payload["memory_refs"]
 
 
 def test_compile_goal_propagates_runtime_request_context_and_role_brief(tmp_path) -> None:

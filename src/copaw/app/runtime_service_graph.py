@@ -185,6 +185,7 @@ def _build_query_services(
     MemoryReflectionService,
     MemoryRecallService,
     MemoryRetainService,
+    Any | None,
     AgentExperienceMemoryService,
 ]:
     return build_runtime_query_services_components(
@@ -310,6 +311,7 @@ def build_runtime_bootstrap(
         memory_reflection_service,
         memory_recall_service,
         memory_retain_service,
+        memory_activation_service,
         agent_experience_service,
     ) = _build_query_services(
         repositories=repositories,
@@ -360,6 +362,7 @@ def build_runtime_bootstrap(
         memory_reflection_service=memory_reflection_service,
         memory_recall_service=memory_recall_service,
         memory_retain_service=memory_retain_service,
+        memory_activation_service=memory_activation_service,
         agent_experience_service=agent_experience_service,
         work_context_service=work_context_service,
         learning_service=learning_service,
@@ -442,6 +445,7 @@ def build_runtime_bootstrap(
         memory_recall_service=memory_recall_service,
         memory_reflection_service=memory_reflection_service,
         memory_retain_service=memory_retain_service,
+        memory_activation_service=memory_activation_service,
         agent_experience_service=agent_experience_service,
         reporting_service=reporting_service,
         operating_lane_service=operating_lane_service,

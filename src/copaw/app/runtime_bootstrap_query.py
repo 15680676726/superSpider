@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from importlib import import_module
 import os
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 from ..evidence import EvidenceLedger
 from ..environments import EnvironmentService
@@ -31,8 +32,20 @@ RuntimeQueryServices: TypeAlias = tuple[
     MemoryReflectionService,
     MemoryRecallService,
     MemoryRetainService,
+    Any | None,
     AgentExperienceMemoryService,
 ]
+
+
+def _resolve_memory_activation_service_cls() -> type[Any] | None:
+    try:
+        module = import_module("copaw.memory.activation_service")
+    except ImportError:
+        return None
+    activation_service_cls = getattr(module, "MemoryActivationService", None)
+    if not callable(activation_service_cls):
+        return None
+    return activation_service_cls
 
 
 def resolve_default_memory_recall_backend() -> str:
@@ -107,6 +120,13 @@ def build_runtime_query_services(
         derived_index_service=derived_memory_index_service,
         reflection_service=memory_reflection_service,
     )
+    memory_activation_service = None
+    memory_activation_service_cls = _resolve_memory_activation_service_cls()
+    if memory_activation_service_cls is not None:
+        memory_activation_service = memory_activation_service_cls(
+            derived_index_service=derived_memory_index_service,
+            strategy_memory_service=strategy_memory_service,
+        )
     experience_memory_service = AgentExperienceMemoryService(
         knowledge_service=knowledge_service,
     )
@@ -119,5 +139,6 @@ def build_runtime_query_services(
         memory_reflection_service,
         memory_recall_service,
         memory_retain_service,
+        memory_activation_service,
         experience_memory_service,
     )

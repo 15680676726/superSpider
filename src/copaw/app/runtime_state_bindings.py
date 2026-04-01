@@ -90,6 +90,7 @@ def build_runtime_state_bindings(
         "memory_recall_service": bootstrap.memory_recall_service,
         "memory_reflection_service": bootstrap.memory_reflection_service,
         "memory_retain_service": bootstrap.memory_retain_service,
+        "memory_activation_service": bootstrap.memory_activation_service,
         "agent_experience_service": bootstrap.agent_experience_service,
         "reporting_service": bootstrap.reporting_service,
         "operating_lane_service": bootstrap.operating_lane_service,

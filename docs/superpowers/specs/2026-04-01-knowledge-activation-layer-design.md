@@ -499,6 +499,26 @@ class ActivationResult(BaseModel):
 - `KnowledgeChunkRecord`
 - `ReportRecord`
 
+## Phase 1 Landed Boundary
+
+`2026-04-01` phase 1 landed scope:
+
+- `src/copaw/memory/activation_models.py` defines:
+  - `KnowledgeNeuron`
+  - `ActivationInput`
+  - `ActivationResult`
+- `src/copaw/memory/activation_service.py` provides the first derived activation service
+- runtime bootstrap now instantiates and binds `memory_activation_service`
+- `KernelQueryExecutionService` prompt retrieval can consume activation results
+- `GoalService` compiler context can consume activation-derived memory items/refs
+
+Current hard boundary:
+
+- activation remains derived from existing truth sources
+- no graph persistence table was introduced
+- no new canonical memory source was introduced
+- report synthesis / backlog replan / Runtime Center activation visualization remain follow-up phases
+
 ## Integration Points
 
 第一版建议接入这些消费面：

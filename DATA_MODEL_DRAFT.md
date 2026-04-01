@@ -1909,6 +1909,8 @@ The next memory enhancement must land as a derived layer on top of unified
 - `Retain / Recall / Reflect` services
 - `EntityMemoryView / OpinionMemoryView / MemoryRecallHit` read models
 - rebuildable profile/latest/history projections over canonical truth
+- `Knowledge Activation Layer` derived from `StrategyMemoryRecord + KnowledgeChunkRecord + MemoryFactIndexRecord + Entity/Opinion/Profile/Episode views`
+- `KnowledgeNeuron / ActivationInput / ActivationResult` as derived activation-layer objects for scope-first neuron activation and evidence/strategy rehydration
 
 ### Hard boundary:
 
@@ -1925,6 +1927,28 @@ The next memory enhancement must land as a derived layer on top of unified
 - `Recall` is exposed through a unified recall facade, not through backend-specific callers
 - `Reflect` produces read models, compiled summaries, or reviewable patch/proposal inputs
 - all derived indexes must be fully rebuildable from canonical `state / evidence`
+
+### `2026-04-01` activation-layer supplement
+
+The next memory-layer enhancement has now started landing as a derived activation layer instead of a new memory truth source.
+
+Current landed objects and service surface:
+
+- `KnowledgeNeuron`
+- `ActivationInput`
+- `ActivationResult`
+- `MemoryActivationService`
+
+Current landed consumer surfaces:
+
+- query prompt retrieval
+- goal compiler memory context
+
+Hard boundary:
+
+- activation remains derived from existing `StrategyMemory / KnowledgeChunk / FactIndex / reflection views`
+- no graph database or separate durable activation store has been introduced
+- report synthesis / backlog replan / Runtime Center activation visualization remain follow-up integration phases
 ---
 
 ## 12.7 2026-03-19 media analysis ingest boundary

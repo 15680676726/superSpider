@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from .activation_models import ActivationInput, ActivationResult, KnowledgeNeuron
+from .activation_service import MemoryActivationService
 from .derived_index_service import (
     DerivedMemoryIndexService,
     build_scope_candidates,
@@ -23,8 +25,12 @@ from .reflection_service import MemoryReflectionService
 from .retain_service import MemoryRetainService
 
 __all__ = [
+    "ActivationInput",
+    "ActivationResult",
     "DerivedMemoryIndexService",
+    "KnowledgeNeuron",
     "MemoryBackendDescriptor",
+    "MemoryActivationService",
     "MemoryEntryPartition",
     "MemoryPrecedenceService",
     "MemoryProfile",

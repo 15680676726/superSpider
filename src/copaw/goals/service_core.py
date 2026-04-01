@@ -21,6 +21,7 @@ class _GoalServiceCoreMixin:
         strategy_memory_service: object | None = None,
         knowledge_service: object | None = None,
         memory_recall_service: object | None = None,
+        memory_activation_service: object | None = None,
         agent_profile_service: object | None = None,
         industry_instance_repository: SqliteIndustryInstanceRepository | None = None,
         runtime_event_bus: object | None = None,
@@ -38,6 +39,7 @@ class _GoalServiceCoreMixin:
         self._strategy_memory_service = strategy_memory_service
         self._knowledge_service = knowledge_service
         self._memory_recall_service = memory_recall_service
+        self._memory_activation_service = memory_activation_service
         self._agent_profile_service = agent_profile_service
         self._industry_instance_repository = industry_instance_repository
         self._runtime_event_bus = runtime_event_bus
