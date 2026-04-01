@@ -361,6 +361,69 @@ describe("runtimeTransport", () => {
     expect(requestBody.requested_actions).toBeUndefined();
   });
 
+  it("does not check active models before sending a runtime chat request", async () => {
+    vi.stubGlobal("BASE_URL", "http://testserver");
+    const getActiveModelsSpy = vi
+      .spyOn(providerApi, "getActiveModels")
+      .mockResolvedValue({
+        resolved_llm: {
+          provider_id: "test-provider",
+          model: "test-model",
+        },
+      } as never);
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            object: "response",
+            status: "completed",
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      );
+
+    const transport = createRuntimeTransport({
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      optionsBaseUrl: undefined,
+      getThreadMeta: () => ({
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      }),
+      getPendingMediaSources: () => [],
+      clearPendingMediaDrafts: vi.fn(),
+      refreshThreadMediaAnalyses: vi.fn(),
+      getSelectedMediaAnalysisIds: () => [],
+      setRuntimeHealthNotice: vi.fn(),
+      setRuntimeWaitState: vi.fn(),
+      setShowModelPrompt: vi.fn(),
+    });
+
+    await transport.fetch({
+      input: [
+        {
+          session: {
+            session_id: "session-thread",
+            user_id: "session-user",
+            channel: "session-channel",
+          },
+        },
+      ],
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(getActiveModelsSpy).not.toHaveBeenCalled();
+  });
+
   it("does not surface a connection error when the runtime request is aborted by the client", async () => {
     vi.stubGlobal("BASE_URL", "http://testserver");
     vi.spyOn(providerApi, "getActiveModels").mockResolvedValue({
