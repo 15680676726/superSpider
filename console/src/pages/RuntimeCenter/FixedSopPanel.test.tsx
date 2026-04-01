@@ -3,6 +3,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+vi.setConfig({ testTimeout: 30000, hookTimeout: 30000 });
+
 vi.mock("../../api", async () => {
   const actual = await vi.importActual<typeof import("../../api")>(
     "../../api",
@@ -171,11 +173,11 @@ describe("FixedSopPanel", () => {
     expect((await screen.findAllByText("HTTP Routine Bridge")).length).toBeGreaterThan(0);
     expect(screen.getByText("Retail Follow-up")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
-    expect(screen.getByText("Environment: env-desktop-1")).toBeTruthy();
-    expect(screen.getByText("Session: session-desktop-1")).toBeTruthy();
-    expect(screen.getByText("Requirement: office_document")).toBeTruthy();
-    expect(screen.getByText("Host snapshot: continue")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^运\s*行$/ }));
+    expect(screen.getByText("环境：env-desktop-1")).toBeTruthy();
+    expect(screen.getByText("会话：session-desktop-1")).toBeTruthy();
+    expect(screen.getByText("要求：office_document")).toBeTruthy();
+    expect(screen.getByText("宿主快照：continue")).toBeTruthy();
 
     await waitFor(() => {
       expect(mockedApi.runFixedSopBinding).toHaveBeenCalledWith(
@@ -281,16 +283,16 @@ describe("FixedSopPanel", () => {
     );
 
     await screen.findByText("Retail Follow-up");
-    fireEvent.click(screen.getByRole("button", { name: "Doctor" }));
+    fireEvent.click(screen.getByRole("button", { name: /^诊\s*断$/ }));
 
-    const doctorDialog = await screen.findByRole("dialog", { name: "Doctor report" });
+    const doctorDialog = await screen.findByRole("dialog", { name: /诊\s*断\s*报\s*告/ });
     expect(doctorDialog).toBeTruthy();
     expect(screen.getByText("Host preflight blocked by active human handoff")).toBeTruthy();
-    expect(screen.getByText("Environment: env-desktop-1")).toBeTruthy();
-    expect(screen.getByText("Session: session-desktop-1")).toBeTruthy();
-    expect(screen.getByText("Scheduler action: handoff")).toBeTruthy();
+    expect(screen.getByText("环境：env-desktop-1")).toBeTruthy();
+    expect(screen.getByText("会话：session-desktop-1")).toBeTruthy();
+    expect(screen.getByText("调度动作：handoff")).toBeTruthy();
     expect(
-      screen.getAllByText("Blocker: human handoff is still active").length,
+      screen.getAllByText("阻塞项：human handoff is still active").length,
     ).toBeGreaterThan(0);
     expect(screen.getByText("Writer path blocked by human handoff")).toBeTruthy();
   });

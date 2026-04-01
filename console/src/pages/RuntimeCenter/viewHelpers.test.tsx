@@ -114,8 +114,8 @@ describe("runtimeCenter viewHelpers", () => {
       ) as React.ReactElement,
     );
 
-    expect(screen.getByText("Current Focus")).toBeTruthy();
-    expect(screen.queryByText("Current Goal")).toBeNull();
+    expect(screen.getByText("当前焦点")).toBeTruthy();
+    expect(screen.queryByText("当前目标")).toBeNull();
   });
 
   it("uses no active focus as the empty-state copy", () => {
@@ -136,8 +136,8 @@ describe("runtimeCenter viewHelpers", () => {
       ) as React.ReactElement,
     );
 
-    expect(screen.getByText("No active focus")).toBeTruthy();
-    expect(screen.queryByText("No active goal")).toBeNull();
+    expect(screen.getByText("暂无活动焦点")).toBeTruthy();
+    expect(screen.queryByText("暂无活动目标")).toBeNull();
   });
 
   it("renders shared risk labels instead of raw runtime risk tokens", () => {
@@ -259,7 +259,7 @@ describe("runtimeCenter viewHelpers", () => {
       ) as React.ReactElement,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Detail" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开详情" }));
 
     expect(openRoute).toHaveBeenCalledWith(
       "/api/runtime-center/industry/industry-1?assignment_id=assignment-1",
@@ -373,8 +373,8 @@ describe("runtimeCenter viewHelpers", () => {
     expect(screen.getByText("增长获客")).toBeTruthy();
     expect(screen.getByText("交付履约")).toBeTruthy();
     expect(screen.getByText("本周增长与交付协调")).toBeTruthy();
-    expect(screen.getByText("Assignments 1")).toBeTruthy();
-    expect(screen.getByText("Reports 1")).toBeTruthy();
+    expect(screen.getByText("派工 1")).toBeTruthy();
+    expect(screen.getByText("汇报 1")).toBeTruthy();
     expect(screen.getAllByText("Awaiting explicit approval").length).toBeGreaterThan(0);
     expect(screen.getByText("Approve closer staffing")).toBeTruthy();
     expect(screen.getByText("synthesize-before-reassign")).toBeTruthy();
@@ -461,12 +461,12 @@ describe("runtimeCenter viewHelpers", () => {
     const environmentSignals = buildRuntimeEnvironmentCockpitSignals(payload);
 
     expect(industrySignals.find((signal) => signal.key === "strategy")?.value).toBe(
-      "North star: weekly alignment",
+      "北极星：周节奏对齐",
     );
     expect(industrySignals.find((signal) => signal.key === "lanes")?.value).toBe("4");
     expect(industrySignals.find((signal) => signal.key === "backlog")?.value).toBe("7");
     expect(industrySignals.find((signal) => signal.key === "current_cycle")?.value).toBe(
-      "Cycle 12",
+      "周期 12",
     );
     expect(industrySignals.find((signal) => signal.key === "assignments")?.value).toBe("3");
     expect(industrySignals.find((signal) => signal.key === "assignments")?.route).toBe(
@@ -486,7 +486,7 @@ describe("runtimeCenter viewHelpers", () => {
       "/api/runtime-center/governance/status",
     );
     expect(environmentSignals.find((signal) => signal.key === "environment")?.detail).toBe(
-      "Workspace bound",
+      "工作区已绑定",
     );
   });
 });

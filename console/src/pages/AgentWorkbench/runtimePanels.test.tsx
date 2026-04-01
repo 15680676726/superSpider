@@ -168,14 +168,14 @@ describe("runtimePanels", () => {
       />,
     );
 
-    expect(screen.getByText("Host coordination")).toBeTruthy();
-    expect(screen.getByText("Seat owner: ops-agent")).toBeTruthy();
-    expect(screen.getByText("Workspace owner: ops-agent")).toBeTruthy();
-    expect(screen.getByText("Writer owner: ops-agent")).toBeTruthy();
-    expect(screen.getByText("Handoff: agent-attached")).toBeTruthy();
-    expect(screen.getByText("Handoff owner: human-operator:alice")).toBeTruthy();
-    expect(screen.getByText("Contention: blocked (captcha-required)")).toBeTruthy();
-    expect(screen.getByText("Scheduler action: handoff")).toBeTruthy();
-    expect(screen.getByText("Writer lock: workbook:weekly-report")).toBeTruthy();
+    expect(screen.getByText("宿主协同")).toBeTruthy();
+    expect(screen.getByText("工位归属：ops-agent")).toBeTruthy();
+    expect(screen.getByText("工作区归属：ops-agent")).toBeTruthy();
+    expect(screen.getByText("写入归属：ops-agent")).toBeTruthy();
+    expect(screen.getByText("接管状态：agent-attached")).toBeTruthy();
+    expect(screen.getByText("接管归属：human-operator:alice")).toBeTruthy();
+    expect(screen.getByText("争用：blocked (captcha-required)")).toBeTruthy();
+    expect(screen.getByText("调度动作：handoff")).toBeTruthy();
+    expect(screen.getByText("写锁范围：workbook:weekly-report")).toBeTruthy();
   });
 });

@@ -14,7 +14,9 @@ def test_runtime_center_overview_routes_live_in_overview_module() -> None:
 def test_runtime_center_memory_routes_live_in_memory_module() -> None:
     module = importlib.import_module("copaw.app.routers.runtime_center_routes_memory")
 
-    assert hasattr(module, "list_memory_backends")
+    assert hasattr(module, "list_memory_profiles")
+    assert hasattr(module, "list_memory_episodes")
+    assert hasattr(module, "list_memory_history")
     assert hasattr(module, "recall_memory")
     assert hasattr(module, "reflect_memory_scope")
 
