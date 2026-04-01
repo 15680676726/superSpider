@@ -557,6 +557,8 @@
 - `2026-04-01` 补充：`researcher` 的 schedule-originated continuity 已继续补厚到“follow-up backlog 物化 assignment 后仍保住 execution-core continuity 合同”。`service_lifecycle` 现会把 `control_thread_id / session_id / environment_ref / work_context_id / supervisor_* / requested_surfaces / recommended_scheduler_action` 从 follow-up backlog 正式持久化进 assignment metadata；`service_report_closure` 也会优先使用最新 report 的 `work_context_id`，不再让旧 assignment metadata 把新工作上下文盖掉。
 - `2026-04-01` 补充：`AgentWorkbench` 前台已停止展示 `GoalSelector / GoalDetailPanel`，也不再主动请求 `/goals/{goal_id}/detail`；执行条文案已把 `目标` 收成 `焦点`，`Predictions` 里的 `目标状态面 / 目标 delta` 也已改成 `焦点` 口径，避免继续把 operator 拉回旧 `goal-era` 心智。
 - `2026-04-01` 补充：`P0-4` 已新增正式 gate 入口 `scripts/run_p0_runtime_terminal_gate.py`，把后端主链回归、长跑与删旧回归、控制台定向回归和控制台构建收口成一个仓库级可执行门槛；`scripts/README.md` 已同步写明用法。
+- `2026-04-01` 补充：`Knowledge Activation Layer Phase 4` 已补上最小 persisted relation-view 边界。`MemoryRelationViewRecord`、SQLite-backed `memory_relation_views`、`SqliteMemoryRelationViewRepository` 与 runtime bootstrap wiring 已落地；`DerivedMemoryIndexService` 已具备显式 `list_relation_views(...) / rebuild_relation_views(...)`；`Runtime Center` 也已新增 `GET /runtime-center/memory/relations` 读面，并支持按 `scope / relation_kind / source_node_id / target_node_id` 过滤。
+- 硬边界：persisted relation view 仍然只是 derived-only read model，来源仍是 `MemoryFactIndexRecord + MemoryEntityViewRecord + MemoryOpinionViewRecord` 的派生组合，不是第二真相源，也不是 graph-native 写入主链。当前通用 `POST /runtime-center/memory/rebuild` 仍只负责 fact-index rebuild；relation rebuild 目前仍是显式 `DerivedMemoryIndexService.rebuild_relation_views(...)` 能力，而不是自动接入所有 memory rebuild 路径。
 
 ---
 

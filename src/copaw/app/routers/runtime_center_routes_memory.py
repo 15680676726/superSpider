@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .runtime_center_shared_core import *  # noqa: F401,F403
-from .runtime_center_shared import _get_memory_activation_service
+from .runtime_center_shared import _get_memory_activation_service, _list_memory_relation_views
 
 
 def _first_non_empty(*values: object) -> str | None:
@@ -507,6 +507,48 @@ async def list_memory_history(
         limit=limit,
     )
     return [_serialize_memory_entry(entry) for entry in entries[: max(1, int(limit))]]
+
+
+@router.get("/memory/relations", response_model=list[dict[str, object]])
+async def list_memory_relations(
+    request: Request,
+    response: Response,
+    scope_type: Literal["global", "industry", "agent", "task", "work_context"] | None = None,
+    scope_id: str | None = None,
+    task_id: str | None = None,
+    work_context_id: str | None = None,
+    agent_id: str | None = None,
+    global_scope_id: str | None = None,
+    owner_agent_id: str | None = None,
+    industry_instance_id: str | None = None,
+    relation_kind: str | None = None,
+    source_node_id: str | None = None,
+    target_node_id: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    resolved_scope_type, resolved_scope_id = _resolve_memory_scope(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        task_id=task_id,
+        work_context_id=work_context_id,
+        agent_id=agent_id,
+        global_scope_id=global_scope_id,
+    )
+    return [
+        view.model_dump(mode="json")
+        for view in _list_memory_relation_views(
+            request,
+            scope_type=resolved_scope_type,
+            scope_id=resolved_scope_id,
+            owner_agent_id=owner_agent_id,
+            industry_instance_id=industry_instance_id,
+            relation_kind=relation_kind,
+            source_node_id=source_node_id,
+            target_node_id=target_node_id,
+            limit=max(0, int(limit)),
+        )
+    ]
 
 
 @router.get("/memory/recall", response_model=dict[str, object])

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from copaw.memory import DerivedMemoryIndexService
 from copaw.memory.activation_models import ActivationInput
 from copaw.memory.activation_service import MemoryActivationService
 
@@ -104,6 +105,56 @@ def _opinion_view(
         source_refs=list(supporting_refs or []),
         metadata={},
     )
+
+
+class _RelationViewRepository:
+    def __init__(self) -> None:
+        self.records: list[object] = []
+        self.clear_calls: list[tuple[str | None, str | None]] = []
+
+    def clear(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+    ) -> int:
+        self.clear_calls.append((scope_type, scope_id))
+        self.records = []
+        return 0
+
+    def upsert_view(self, record: object) -> object:
+        relation_id = str(getattr(record, "relation_id"))
+        self.records = [
+            existing
+            for existing in self.records
+            if str(getattr(existing, "relation_id")) != relation_id
+        ]
+        self.records.append(record)
+        return record
+
+    def list_views(self, **kwargs: object) -> list[object]:
+        records = list(self.records)
+        for field in (
+            "scope_type",
+            "scope_id",
+            "owner_agent_id",
+            "industry_instance_id",
+            "relation_kind",
+            "source_node_id",
+            "target_node_id",
+        ):
+            value = kwargs.get(field)
+            if value is None:
+                continue
+            records = [
+                record
+                for record in records
+                if getattr(record, field, None) == value
+            ]
+        limit = kwargs.get("limit")
+        if isinstance(limit, int):
+            return records[:limit]
+        return records
 
 
 def test_activation_service_materializes_entity_and_opinion_neurons() -> None:
@@ -306,3 +357,317 @@ def test_activation_service_collects_support_and_contradiction_refs() -> None:
     assert "evidence-1" in result.evidence_refs
     assert "fact-1" in result.support_refs
     assert result.contradictions
+
+
+def test_derived_index_service_persists_relation_views_from_fact_entity_links() -> None:
+    fact_entries = [
+        _fact_entry(
+            "fact-1",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            title="Approval remains blocked",
+            summary="Approval remains blocked pending evidence review by finance.",
+            entity_keys=["approval", "finance"],
+            opinion_keys=["approval:caution:evidence-review"],
+            source_ref="chunk-1",
+        )
+    ]
+    entity_views = [
+        _entity_view(
+            "entity-approval",
+            entity_key="approval",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval is the constrained decision point.",
+            supporting_refs=["fact-1", "chunk-1"],
+            related_entities=["finance"],
+        ),
+        _entity_view(
+            "entity-finance",
+            entity_key="finance",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Finance owns the evidence review queue.",
+            supporting_refs=["fact-1", "chunk-1"],
+        ),
+    ]
+    opinion_views = [
+        _opinion_view(
+            "opinion-1",
+            subject_key="approval",
+            opinion_key="approval:caution:evidence-review",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval should wait for evidence review.",
+            supporting_refs=["fact-1", "chunk-1"],
+            entity_keys=["approval", "finance"],
+        )
+    ]
+    relation_repository = _RelationViewRepository()
+    service = DerivedMemoryIndexService(
+        fact_index_repository=SimpleNamespace(
+            list_entries=lambda **_: fact_entries,
+        ),
+        entity_view_repository=SimpleNamespace(
+            list_views=lambda **_: entity_views,
+        ),
+        opinion_view_repository=SimpleNamespace(
+            list_views=lambda **_: opinion_views,
+        ),
+        relation_view_repository=relation_repository,
+    )
+
+    relation_views = service.rebuild_relation_views(
+        scope_type="work_context",
+        scope_id="ctx-1",
+    )
+
+    assert relation_repository.clear_calls == [("work_context", "ctx-1")]
+    assert relation_views
+    assert any(
+        view.source_node_id == "fact-1"
+        and view.target_node_id == "entity-approval"
+        and view.relation_kind == "mentions"
+        for view in relation_views
+    )
+    assert any(
+        view.source_node_id == "fact-1"
+        and view.target_node_id == "opinion-1"
+        and view.relation_kind == "supports"
+        for view in relation_views
+    )
+    assert any(
+        view.source_node_id == "opinion-1"
+        and view.target_node_id == "entity-approval"
+        and view.relation_kind in {"mentions", "supports"}
+        for view in relation_views
+    )
+    assert service.list_relation_views(
+        scope_type="work_context",
+        scope_id="ctx-1",
+    ) == relation_views
+
+
+def test_derived_index_service_list_relation_views_normalizes_scope_filters() -> None:
+    fact_entries = [
+        _fact_entry(
+            "fact-1",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            title="Approval remains blocked",
+            summary="Approval remains blocked pending evidence review.",
+            entity_keys=["approval"],
+            opinion_keys=["approval:caution:evidence-review"],
+            source_ref="chunk-1",
+        )
+    ]
+    entity_views = [
+        _entity_view(
+            "entity-approval",
+            entity_key="approval",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval is the constrained decision point.",
+            supporting_refs=["fact-1", "chunk-1"],
+        )
+    ]
+    opinion_views = [
+        _opinion_view(
+            "opinion-1",
+            subject_key="approval",
+            opinion_key="approval:caution:evidence-review",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval should wait for evidence review.",
+            supporting_refs=["fact-1", "chunk-1"],
+            entity_keys=["approval"],
+        )
+    ]
+    relation_repository = _RelationViewRepository()
+    service = DerivedMemoryIndexService(
+        fact_index_repository=SimpleNamespace(
+            list_entries=lambda **_: fact_entries,
+        ),
+        entity_view_repository=SimpleNamespace(
+            list_views=lambda **_: entity_views,
+        ),
+        opinion_view_repository=SimpleNamespace(
+            list_views=lambda **_: opinion_views,
+        ),
+        relation_view_repository=relation_repository,
+    )
+
+    service.rebuild_relation_views(
+        scope_type="work_context",
+        scope_id="ctx-1",
+    )
+
+    filtered = service.list_relation_views(
+        scope_type=" Work_Context ",
+        scope_id=" ctx-1 ",
+        relation_kind="supports",
+        target_node_id="opinion-1",
+    )
+
+    assert len(filtered) == 1
+    assert filtered[0].relation_kind == "supports"
+    assert filtered[0].scope_type == "work_context"
+    assert filtered[0].scope_id == "ctx-1"
+
+
+def test_derived_index_service_relation_views_do_not_cross_scope_boundaries() -> None:
+    fact_entries = [
+        _fact_entry(
+            "fact-ctx-1",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            title="Approval remains blocked",
+            summary="Approval remains blocked pending evidence review.",
+            entity_keys=["approval"],
+            opinion_keys=["approval:caution:evidence-review"],
+            source_ref="chunk-ctx-1",
+        ),
+        _fact_entry(
+            "fact-ctx-2",
+            scope_type="work_context",
+            scope_id="ctx-2",
+            title="Approval is clear",
+            summary="Approval is clear in the second context.",
+            entity_keys=["approval"],
+            opinion_keys=["approval:caution:evidence-review"],
+            source_ref="chunk-ctx-2",
+        ),
+    ]
+    entity_views = [
+        _entity_view(
+            "entity-approval-ctx-1",
+            entity_key="approval",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval in ctx-1.",
+            supporting_refs=["fact-ctx-1", "chunk-ctx-1"],
+        ),
+        _entity_view(
+            "entity-approval-ctx-2",
+            entity_key="approval",
+            scope_type="work_context",
+            scope_id="ctx-2",
+            summary="Approval in ctx-2.",
+            supporting_refs=["fact-ctx-2", "chunk-ctx-2"],
+        ),
+    ]
+    opinion_views = [
+        _opinion_view(
+            "opinion-ctx-1",
+            subject_key="approval",
+            opinion_key="approval:caution:evidence-review",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval in ctx-1 should wait for evidence review.",
+            supporting_refs=["fact-ctx-1", "chunk-ctx-1"],
+            entity_keys=["approval"],
+        ),
+        _opinion_view(
+            "opinion-ctx-2",
+            subject_key="approval",
+            opinion_key="approval:caution:evidence-review",
+            scope_type="work_context",
+            scope_id="ctx-2",
+            summary="Approval in ctx-2 is already clear.",
+            supporting_refs=["fact-ctx-2", "chunk-ctx-2"],
+            entity_keys=["approval"],
+        ),
+    ]
+    relation_repository = _RelationViewRepository()
+    service = DerivedMemoryIndexService(
+        fact_index_repository=SimpleNamespace(
+            list_entries=lambda **_: fact_entries,
+        ),
+        entity_view_repository=SimpleNamespace(
+            list_views=lambda **_: entity_views,
+        ),
+        opinion_view_repository=SimpleNamespace(
+            list_views=lambda **_: opinion_views,
+        ),
+        relation_view_repository=relation_repository,
+    )
+
+    relation_views = service.rebuild_relation_views()
+
+    relation_pairs = {
+        (view.source_node_id, view.target_node_id)
+        for view in relation_views
+    }
+    assert relation_pairs == {
+        ("fact-ctx-1", "entity-approval-ctx-1"),
+        ("fact-ctx-1", "opinion-ctx-1"),
+        ("opinion-ctx-1", "entity-approval-ctx-1"),
+        ("fact-ctx-2", "entity-approval-ctx-2"),
+        ("fact-ctx-2", "opinion-ctx-2"),
+        ("opinion-ctx-2", "entity-approval-ctx-2"),
+    }
+
+
+def test_derived_index_service_relation_views_use_evidence_refs_for_support_trace() -> None:
+    fact_entries = [
+        _fact_entry(
+            "fact-1",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            title="Approval remains blocked",
+            summary="Approval remains blocked pending evidence review.",
+            entity_keys=["approval"],
+            opinion_keys=["approval:caution:evidence-review"],
+            evidence_refs=["evidence-1"],
+            source_ref="chunk-1",
+        )
+    ]
+    entity_views = [
+        _entity_view(
+            "entity-approval",
+            entity_key="approval",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval is the constrained decision point.",
+            supporting_refs=["evidence-1"],
+        )
+    ]
+    opinion_views = [
+        _opinion_view(
+            "opinion-1",
+            subject_key="approval",
+            opinion_key="approval:caution:evidence-review",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval should wait for evidence review.",
+            supporting_refs=["evidence-1"],
+            entity_keys=["approval"],
+        )
+    ]
+    relation_repository = _RelationViewRepository()
+    service = DerivedMemoryIndexService(
+        fact_index_repository=SimpleNamespace(
+            list_entries=lambda **_: fact_entries,
+        ),
+        entity_view_repository=SimpleNamespace(
+            list_views=lambda **_: entity_views,
+        ),
+        opinion_view_repository=SimpleNamespace(
+            list_views=lambda **_: opinion_views,
+        ),
+        relation_view_repository=relation_repository,
+    )
+
+    relation_views = service.rebuild_relation_views(
+        scope_type="work_context",
+        scope_id="ctx-1",
+    )
+
+    fact_to_opinion = next(
+        view
+        for view in relation_views
+        if view.source_node_id == "fact-1" and view.target_node_id == "opinion-1"
+    )
+    assert fact_to_opinion.relation_kind == "supports"
+    assert "chunk-1" in fact_to_opinion.source_refs
+    assert "evidence-1" in fact_to_opinion.source_refs

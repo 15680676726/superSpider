@@ -14,12 +14,14 @@ from copaw.memory import (
 )
 from copaw.state import SQLiteStateStore, StrategyMemoryRecord
 from copaw.state.knowledge_service import StateKnowledgeService
+from copaw.state.models_memory import MemoryRelationViewRecord
 from copaw.state.repositories import (
     SqliteKnowledgeChunkRepository,
     SqliteMemoryEntityViewRepository,
     SqliteMemoryFactIndexRepository,
     SqliteMemoryOpinionViewRepository,
     SqliteMemoryReflectionRunRepository,
+    SqliteMemoryRelationViewRepository,
     SqliteStrategyMemoryRepository,
 )
 from copaw.state.strategy_memory_service import StateStrategyMemoryService
@@ -33,11 +35,13 @@ def _build_client(tmp_path) -> TestClient:
     fact_repo = SqliteMemoryFactIndexRepository(store)
     entity_repo = SqliteMemoryEntityViewRepository(store)
     opinion_repo = SqliteMemoryOpinionViewRepository(store)
+    relation_repo = SqliteMemoryRelationViewRepository(store)
     reflection_repo = SqliteMemoryReflectionRunRepository(store)
     derived = DerivedMemoryIndexService(
         fact_index_repository=fact_repo,
         entity_view_repository=entity_repo,
         opinion_view_repository=opinion_repo,
+        relation_view_repository=relation_repo,
         reflection_run_repository=reflection_repo,
         knowledge_repository=knowledge_repo,
         strategy_repository=strategy_repo,
@@ -68,6 +72,7 @@ def _build_client(tmp_path) -> TestClient:
         derived_index_service=derived,
         strategy_memory_service=strategy,
     )
+    app.state.memory_relation_view_repository = relation_repo
     app.state.memory_reflection_service = reflection
     app.state.memory_retain_service = MemoryRetainService(
         knowledge_service=knowledge,
@@ -348,6 +353,143 @@ def test_runtime_center_memory_activation_route_preserves_scope_priority(tmp_pat
     payload = response.json()
     assert payload["scope_type"] == "work_context"
     assert payload["scope_id"] == "ctx-1"
+
+
+def test_runtime_center_memory_relations_route_lists_relation_views(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    client.app.state.memory_relation_view_repository.upsert_view(
+        MemoryRelationViewRecord(
+            relation_id="rel:ctx-1:approval->finance",
+            source_node_id="fact:approval",
+            target_node_id="entity:finance-queue",
+            relation_kind="supports",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            owner_agent_id="execution-core",
+            industry_instance_id="industry-1",
+            summary="Outbound approval supports finance queue review.",
+            confidence=0.91,
+            source_refs=["fact:approval"],
+            metadata={"reason": "queue ownership"},
+        ),
+    )
+
+    response = client.get(
+        "/runtime-center/memory/relations",
+        params={"scope_type": "work_context", "scope_id": "ctx-1"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload
+    assert payload[0]["relation_id"] == "rel:ctx-1:approval->finance"
+    assert payload[0]["relation_kind"] == "supports"
+    assert payload[0]["metadata"] == {"reason": "queue ownership"}
+
+
+def test_runtime_center_memory_relations_route_filters_by_relation_fields(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    repository = client.app.state.memory_relation_view_repository
+    repository.upsert_view(
+        MemoryRelationViewRecord(
+            relation_id="rel:ctx-1:approval->finance",
+            source_node_id="fact:approval",
+            target_node_id="entity:finance-queue",
+            relation_kind="supports",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval supports finance queue review.",
+            source_refs=["fact:approval"],
+        ),
+    )
+    repository.upsert_view(
+        MemoryRelationViewRecord(
+            relation_id="rel:ctx-1:approval->legal",
+            source_node_id="fact:approval",
+            target_node_id="entity:legal-queue",
+            relation_kind="mentions",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval mentions legal queue review.",
+            source_refs=["fact:approval"],
+        ),
+    )
+
+    response = client.get(
+        "/runtime-center/memory/relations",
+        params={
+            "scope_type": "work_context",
+            "scope_id": "ctx-1",
+            "relation_kind": "supports",
+            "target_node_id": "entity:finance-queue",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["relation_id"] == "rel:ctx-1:approval->finance"
+    assert payload[0]["relation_kind"] == "supports"
+    assert payload[0]["target_node_id"] == "entity:finance-queue"
+
+
+def test_runtime_center_memory_relations_route_accepts_scope_selectors(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    repository = client.app.state.memory_relation_view_repository
+    repository.upsert_view(
+        MemoryRelationViewRecord(
+            relation_id="rel:ctx-1:approval->finance",
+            source_node_id="fact:approval",
+            target_node_id="entity:finance-queue",
+            relation_kind="supports",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval supports finance queue review.",
+            source_refs=["fact:approval"],
+        ),
+    )
+    repository.upsert_view(
+        MemoryRelationViewRecord(
+            relation_id="rel:ctx-2:approval->legal",
+            source_node_id="fact:approval",
+            target_node_id="entity:legal-queue",
+            relation_kind="supports",
+            scope_type="work_context",
+            scope_id="ctx-2",
+            summary="Approval supports legal queue review.",
+            source_refs=["fact:approval"],
+        ),
+    )
+
+    response = client.get(
+        "/runtime-center/memory/relations",
+        params={"work_context_id": "ctx-1"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["relation_id"] == "rel:ctx-1:approval->finance"
+    assert payload[0]["scope_type"] == "work_context"
+    assert payload[0]["scope_id"] == "ctx-1"
+
+
+def test_runtime_center_memory_relations_route_degrades_when_repository_missing(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    client.app.state.memory_relation_view_repository = None
+    client.app.state.derived_memory_index_service._relation_view_repository = None
+
+    response = client.get(
+        "/runtime-center/memory/relations",
+        params={"scope_type": "work_context", "scope_id": "ctx-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 def test_runtime_center_memory_profile_includes_activation_summary_when_requested(tmp_path) -> None:

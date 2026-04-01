@@ -59,6 +59,7 @@ def build_runtime_state_bindings(
         "memory_fact_index_repository": repositories.memory_fact_index_repository,
         "memory_entity_view_repository": repositories.memory_entity_view_repository,
         "memory_opinion_view_repository": repositories.memory_opinion_view_repository,
+        "memory_relation_view_repository": repositories.memory_relation_view_repository,
         "memory_reflection_run_repository": repositories.memory_reflection_run_repository,
         "workflow_template_repository": repositories.workflow_template_repository,
         "workflow_preset_repository": repositories.workflow_preset_repository,

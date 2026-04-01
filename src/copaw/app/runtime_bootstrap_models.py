@@ -75,6 +75,7 @@ if TYPE_CHECKING:
         SqliteMemoryEntityViewRepository,
         SqliteMemoryFactIndexRepository,
         SqliteMemoryOpinionViewRepository,
+        SqliteMemoryRelationViewRepository,
         SqliteMemoryReflectionRunRepository,
         SqliteOperatingCycleRepository,
         SqliteOperatingLaneRepository,
@@ -141,6 +142,7 @@ class RuntimeRepositories:
     memory_fact_index_repository: SqliteMemoryFactIndexRepository
     memory_entity_view_repository: SqliteMemoryEntityViewRepository
     memory_opinion_view_repository: SqliteMemoryOpinionViewRepository
+    memory_relation_view_repository: SqliteMemoryRelationViewRepository
     memory_reflection_run_repository: SqliteMemoryReflectionRunRepository
     workflow_template_repository: SqliteWorkflowTemplateRepository
     workflow_preset_repository: SqliteWorkflowPresetRepository
