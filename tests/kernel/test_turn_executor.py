@@ -98,6 +98,7 @@ class FakeKernelDispatcher:
         self.submitted = []
         self.completed = []
         self.failed = []
+        self.cancelled = []
 
     def submit(self, task):
         self.submitted.append(task)
@@ -109,11 +110,21 @@ class FakeKernelDispatcher:
     def fail_task(self, task_id: str, *, error: str) -> None:
         self.failed.append((task_id, error))
 
+    def cancel_task(self, task_id: str, *, resolution: str) -> None:
+        self.cancelled.append((task_id, resolution))
+
 
 class FailingQueryExecutionService(FakeQueryExecutionService):
     async def execute_stream(self, **kwargs):
         self.calls.append(kwargs)
         raise RuntimeError("Connection error.")
+        yield
+
+
+class CancelledQueryExecutionService(FakeQueryExecutionService):
+    async def execute_stream(self, **kwargs):
+        self.calls.append(kwargs)
+        raise asyncio.CancelledError()
         yield
 
 
@@ -1881,6 +1892,31 @@ async def test_kernel_turn_executor_stream_request_localizes_model_upstream_erro
     assert final_response.error is not None
     assert final_response.error.code == "模型连接失败"
     assert "模型上游连接异常" in final_response.error.message
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_stream_request_marks_cancellation_as_canceled():
+    kernel_dispatcher = FakeKernelDispatcher()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=CancelledQueryExecutionService(),
+        kernel_dispatcher=kernel_dispatcher,
+    )
+    request = AgentRequest(
+        id="req-cancelled",
+        session_id="sess-cancelled",
+        user_id="user-cancelled",
+        channel="console",
+        input=[],
+    )
+
+    events = [event async for event in executor.stream_request(request)]
+
+    final_response = events[-1]
+    assert final_response.status == RunStatus.Canceled
+    assert kernel_dispatcher.failed == []
+    assert len(kernel_dispatcher.cancelled) == 1
+    assert kernel_dispatcher.cancelled[0][1] == "查询在完成前已被取消。"
+
+
 @pytest.mark.asyncio
 async def test_kernel_turn_executor_persists_response_usage(monkeypatch):
     query_execution_service = FakeQueryExecutionService()

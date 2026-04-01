@@ -32,7 +32,10 @@ from ..app.runtime_commands import (
     run_command_path,
 )
 from ..providers.model_diagnostics import normalize_runtime_exception
-from .runtime_outcome import build_execution_diagnostics
+from .runtime_outcome import (
+    build_execution_diagnostics,
+    is_cancellation_runtime_error,
+)
 from .main_brain_intake import (
     extract_main_brain_intake_text,
     resolve_request_main_brain_intake_contract,
@@ -899,10 +902,17 @@ class KernelTurnExecutor:
             logger.info("query_handler: %s cancelled!", session_id)
             if managed_by_kernel_dispatcher and kernel_task_id is not None:
                 try:
-                    self._kernel_dispatcher.fail_task(
-                        kernel_task_id,
-                        error="查询在完成前已被取消。",
-                    )
+                    cancel_task = getattr(self._kernel_dispatcher, "cancel_task", None)
+                    if callable(cancel_task):
+                        cancel_task(
+                            kernel_task_id,
+                            resolution="查询在完成前已被取消。",
+                        )
+                    else:
+                        self._kernel_dispatcher.fail_task(
+                            kernel_task_id,
+                            error="查询在完成前已被取消。",
+                        )
                 except Exception:
                     logger.exception("Kernel dispatcher failed to record cancellation")
             raise RuntimeError("任务已取消。") from exc
@@ -1014,6 +1024,7 @@ class KernelTurnExecutor:
         yield seq_gen.yield_with_sequence(response.in_progress())
 
         error = None
+        canceled = False
         resolved_mode_message_id = None
         try:
             async for event in adapt_agentscope_message_stream(
@@ -1057,9 +1068,13 @@ class KernelTurnExecutor:
             exc = normalize_runtime_exception(exc)  # type: ignore[assignment]
             if not isinstance(exc, AppBaseException):
                 exc = UnknownAgentException(original_exception=exc)
-            error_code = getattr(exc, "ui_title", exc.code)
-            error = Error(code=error_code, message=exc.message)
-            logger.error("%s: %s", error.model_dump(), traceback.format_exc())
+            if is_cancellation_runtime_error(getattr(exc, "message", str(exc))):
+                canceled = True
+                logger.info("stream_request: %s cancelled", request.session_id)
+            else:
+                error_code = getattr(exc, "ui_title", exc.code)
+                error = Error(code=error_code, message=exc.message)
+                logger.error("%s: %s", error.model_dump(), traceback.format_exc())
 
         usage = _extract_response_usage(response)
         if usage is not None:
@@ -1094,6 +1109,8 @@ class KernelTurnExecutor:
 
         if error:
             yield seq_gen.yield_with_sequence(response.failed(error))
+        elif canceled:
+            yield seq_gen.yield_with_sequence(response.canceled())
         else:
             yield seq_gen.yield_with_sequence(response.completed())
 

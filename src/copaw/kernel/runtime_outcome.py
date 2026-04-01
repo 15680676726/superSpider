@@ -12,6 +12,8 @@ _CANCELLATION_MARKERS = (
     "query was canceled before completion",
     "cancelled by actor control",
     "canceled by actor control",
+    "任务已取消",
+    "查询在完成前已被取消",
 )
 _TIMEOUT_MARKERS = (
     "timeout",
