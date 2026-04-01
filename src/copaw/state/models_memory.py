@@ -16,7 +16,15 @@ from .model_support import (
 MemoryScopeType = Literal["global", "industry", "agent", "task", "work_context"]
 MemoryReflectionStatus = Literal["queued", "running", "completed", "failed"]
 MemoryFactType = Literal["fact", "preference", "episode", "temporary", "inference"]
-MemoryRelationKind = Literal["updates", "supersedes", "derives", "references"]
+MemoryRelationKind = Literal[
+    "updates",
+    "supersedes",
+    "derives",
+    "references",
+    "supports",
+    "contradicts",
+    "mentions",
+]
 MemoryOpinionStance = Literal[
     "supporting",
     "neutral",
@@ -176,6 +184,28 @@ class MemoryEntityViewRecord(UpdatedRecord):
     )
     @classmethod
     def _normalize_entity_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+
+class MemoryRelationViewRecord(UpdatedRecord):
+    """Derived relation edge persisted for activation/read-model queries."""
+
+    relation_id: str = Field(default_factory=_new_record_id, min_length=1)
+    source_node_id: str = Field(..., min_length=1)
+    target_node_id: str = Field(..., min_length=1)
+    relation_kind: MemoryRelationKind = "references"
+    scope_type: MemoryScopeType = "global"
+    scope_id: str = Field(default="runtime", min_length=1)
+    owner_agent_id: str | None = None
+    industry_instance_id: str | None = None
+    summary: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    source_refs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("source_refs", mode="before")
+    @classmethod
+    def _normalize_relation_lists(cls, value: object) -> list[str]:
         return _normalize_text_list(value)
 
 

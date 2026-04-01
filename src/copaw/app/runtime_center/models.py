@@ -31,6 +31,21 @@ class RuntimeCenterSurfaceInfo(BaseModel):
     )
 
 
+class RuntimeActivationSummary(BaseModel):
+    """Conservative activation-layer projection for Runtime Center read payloads."""
+
+    scope_type: str
+    scope_id: str
+    activated_count: int = 0
+    contradiction_count: int = 0
+    top_entities: list[str] = Field(default_factory=list)
+    top_constraints: list[str] = Field(default_factory=list)
+    top_next_actions: list[str] = Field(default_factory=list)
+    support_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    strategy_refs: list[str] = Field(default_factory=list)
+
+
 class RuntimeOverviewEntry(BaseModel):
     """One overview row rendered inside a runtime-center card."""
 

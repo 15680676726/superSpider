@@ -2168,6 +2168,175 @@ def test_failed_report_followup_carries_control_thread_and_surface_pressure_with
     assert "document" in replan_node["metrics"]["followup_pressure_surfaces"]
 
 
+def test_activation_followup_backlog_carries_activation_metadata(tmp_path) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    execution_core_agent_id = preview_payload["draft"]["team"]["agents"][0]["agent_id"]
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+
+    app.state.industry_service._record_report_synthesis_backlog(
+        record=record,
+        synthesis={
+            "activation": {
+                "top_constraints": [
+                    "Weekend escalation root cause is still unvalidated.",
+                ],
+                "top_next_actions": [
+                    "Pull the weekend audit trail before changing staffing.",
+                ],
+                "support_refs": [
+                    "memory:weekend-audit-gap",
+                    "report:weekend-variance-review",
+                ],
+            },
+            "recommended_actions": [
+                {
+                    "action_id": "follow-up:activation-weekend-gap",
+                    "action_type": "follow-up-backlog",
+                    "title": "Activation follow-up: weekend variance",
+                    "summary": "Carry activation-derived pressure into main-brain follow-up.",
+                    "priority": 4,
+                    "source_ref": "report-synthesis:activation-weekend-gap",
+                    "metadata": {
+                        "source_report_id": "report-activation-weekend-gap",
+                        "source_report_ids": ["report-activation-weekend-gap"],
+                        "owner_agent_id": execution_core_agent_id,
+                        "industry_role_id": "execution-core",
+                        "synthesis_kind": "followup-needed",
+                    },
+                },
+            ],
+        },
+    )
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    activation_followup = next(
+        item
+        for item in detail.backlog
+        if item["title"] == "Activation follow-up: weekend variance"
+    )
+    assert activation_followup["metadata"]["activation_top_constraints"] == [
+        "Weekend escalation root cause is still unvalidated.",
+    ]
+    assert activation_followup["metadata"]["activation_top_next_actions"] == [
+        "Pull the weekend audit trail before changing staffing.",
+    ]
+    assert activation_followup["metadata"]["activation_support_refs"] == [
+        "memory:weekend-audit-gap",
+        "report:weekend-variance-review",
+    ]
+
+
+def test_activation_followup_materialized_assignment_keeps_activation_metadata(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    execution_core_agent_id = preview_payload["draft"]["team"]["agents"][0]["agent_id"]
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    app.state.industry_service._record_report_synthesis_backlog(
+        record=record,
+        synthesis={
+            "activation": {
+                "top_constraints": [
+                    "Weekend escalation root cause is still unvalidated.",
+                ],
+                "top_next_actions": [
+                    "Pull the weekend audit trail before changing staffing.",
+                ],
+                "support_refs": [
+                    "memory:weekend-audit-gap",
+                ],
+            },
+            "recommended_actions": [
+                {
+                    "action_id": "follow-up:activation-weekend-gap",
+                    "action_type": "follow-up-backlog",
+                    "title": "Activation follow-up: weekend variance",
+                    "summary": "Carry activation-derived pressure into main-brain follow-up.",
+                    "priority": 4,
+                    "source_ref": "report-synthesis:activation-weekend-gap",
+                    "metadata": {
+                        "source_report_id": "report-activation-weekend-gap",
+                        "source_report_ids": ["report-activation-weekend-gap"],
+                        "owner_agent_id": execution_core_agent_id,
+                        "industry_role_id": "execution-core",
+                        "synthesis_kind": "followup-needed",
+                    },
+                },
+            ],
+        },
+    )
+
+    cycle_result = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:activation-followup-materialization",
+            force=True,
+        ),
+    )
+    assert cycle_result["count"] == 1
+    assignment_id = cycle_result["processed_instances"][0]["created_assignment_ids"][0]
+    assignment = app.state.assignment_repository.get_assignment(assignment_id)
+    assert assignment is not None
+    assert assignment.metadata["activation_top_constraints"] == [
+        "Weekend escalation root cause is still unvalidated.",
+    ]
+    assert assignment.metadata["activation_top_next_actions"] == [
+        "Pull the weekend audit trail before changing staffing.",
+    ]
+    assert assignment.metadata["activation_support_refs"] == [
+        "memory:weekend-audit-gap",
+    ]
+
+
 def test_runtime_detail_exposes_first_class_main_brain_cognitive_surface_with_continuity_refs(
     tmp_path,
 ) -> None:

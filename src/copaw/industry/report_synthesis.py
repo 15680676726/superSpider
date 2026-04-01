@@ -369,7 +369,57 @@ def _detect_holes_and_actions(
 
 
 def _build_replan_decision(*, holes: list[dict[str, Any]], conflicts: list[dict[str, Any]]) -> dict[str, Any]:
-    reason_ids = [item["hole_id"] for item in holes if _string(item.get("hole_id"))] + [item["conflict_id"] for item in conflicts if _string(item.get("conflict_id"))]
+    return _build_replan_decision_with_activation(
+        holes=holes,
+        conflicts=conflicts,
+        activation_reason_ids=[],
+    )
+
+
+def _build_activation_summary(
+    activation_result: object | None,
+) -> tuple[dict[str, Any] | None, list[str], list[str]]:
+    if activation_result is None:
+        return None, [], []
+    top_constraints = _unique_strings(getattr(activation_result, "top_constraints", None))
+    top_next_actions = _unique_strings(getattr(activation_result, "top_next_actions", None))
+    support_refs = _unique_strings(getattr(activation_result, "support_refs", None))
+    contradictions = list(getattr(activation_result, "contradictions", []) or [])
+    contradiction_count = len(contradictions)
+    reasons: list[str] = []
+    reason_ids: list[str] = []
+    if contradiction_count:
+        label = "contradiction" if contradiction_count == 1 else "contradictions"
+        reasons.append(
+            f"Activation recall surfaced {contradiction_count} {label} that require main-brain review.",
+        )
+        reason_ids.append("activation:contradictions")
+    for index, constraint in enumerate(top_constraints):
+        reasons.append(constraint)
+        reason_ids.append(f"activation:constraint:{index}")
+    return (
+        {
+            "top_constraints": top_constraints,
+            "top_next_actions": top_next_actions,
+            "support_refs": support_refs,
+            "contradiction_count": contradiction_count,
+        },
+        reasons,
+        reason_ids,
+    )
+
+
+def _build_replan_decision_with_activation(
+    *,
+    holes: list[dict[str, Any]],
+    conflicts: list[dict[str, Any]],
+    activation_reason_ids: list[str],
+) -> dict[str, Any]:
+    reason_ids = (
+        [item["hole_id"] for item in holes if _string(item.get("hole_id"))]
+        + [item["conflict_id"] for item in conflicts if _string(item.get("conflict_id"))]
+        + activation_reason_ids
+    )
     source_report_ids = _unique_strings(
         [item.get("report_id") for item in holes],
         *[item.get("report_ids") for item in holes if isinstance(item.get("report_ids"), list)],
@@ -388,7 +438,11 @@ def _build_replan_decision(*, holes: list[dict[str, Any]], conflicts: list[dict[
             "source_report_ids": [],
             "topic_keys": [],
         }
-    primary_ref = conflicts[0]["conflict_id"] if conflicts else source_report_ids[0]
+    primary_ref = (
+        conflicts[0]["conflict_id"]
+        if conflicts
+        else (source_report_ids[0] if source_report_ids else activation_reason_ids[0])
+    )
     signal_word = "signal" if len(reason_ids) == 1 else "signals"
     return {
         "decision_id": f"report-synthesis:needs-replan:{primary_ref}",
@@ -400,20 +454,37 @@ def _build_replan_decision(*, holes: list[dict[str, Any]], conflicts: list[dict[
     }
 
 
-def synthesize_reports(reports: Sequence[AgentReportRecord]) -> dict[str, Any]:
+def synthesize_reports(
+    reports: Sequence[AgentReportRecord],
+    *,
+    activation_result: object | None = None,
+) -> dict[str, Any]:
     normalized_reports = [report for report in reports if isinstance(report, AgentReportRecord)]
     latest_reports = _latest_reports(normalized_reports)
     conflicts = _detect_conflicts(latest_reports)
     holes, recommended_actions, replan_directives = _detect_holes_and_actions(latest_reports, conflicts)
+    (
+        activation_payload,
+        activation_reasons,
+        activation_reason_ids,
+    ) = _build_activation_summary(activation_result)
     replan_reasons: list[str] = []
     seen_replan_reasons: set[str] = set()
-    for summary in [*(_string(conflict.get("summary")) for conflict in conflicts), *(_string(hole.get("summary")) for hole in holes)]:
+    for summary in [
+        *(_string(conflict.get("summary")) for conflict in conflicts),
+        *(_string(hole.get("summary")) for hole in holes),
+        *activation_reasons,
+    ]:
         if summary is None or summary in seen_replan_reasons:
             continue
         seen_replan_reasons.add(summary)
         replan_reasons.append(summary)
-    replan_decision = _build_replan_decision(holes=holes, conflicts=conflicts)
-    return {
+    replan_decision = _build_replan_decision_with_activation(
+        holes=holes,
+        conflicts=conflicts,
+        activation_reason_ids=activation_reason_ids,
+    )
+    payload = {
         "latest_findings": _latest_findings(normalized_reports),
         "conflicts": conflicts,
         "holes": holes,
@@ -421,8 +492,16 @@ def synthesize_reports(reports: Sequence[AgentReportRecord]) -> dict[str, Any]:
         "replan_reasons": replan_reasons,
         "replan_decision": replan_decision,
         "replan_directives": replan_directives,
-        "needs_replan": bool(conflicts or holes or recommended_actions),
+        "needs_replan": bool(
+            conflicts
+            or holes
+            or recommended_actions
+            or activation_reason_ids
+        ),
     }
+    if activation_payload is not None:
+        payload["activation"] = activation_payload
+    return payload
 
 
 

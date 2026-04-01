@@ -32,7 +32,16 @@ class IndustryService(
     _IndustryCleanupMixin,
 ):
     def __init__(self, *args, **kwargs) -> None:
+        runtime_bindings = kwargs.get("runtime_bindings")
+        memory_activation_service = kwargs.pop("memory_activation_service", None)
         super().__init__(*args, **kwargs)
+        if memory_activation_service is None and runtime_bindings is not None:
+            memory_activation_service = getattr(
+                runtime_bindings,
+                "memory_activation_service",
+                None,
+            )
+        self._memory_activation_service = memory_activation_service
         self._bootstrap_service = IndustryBootstrapService(self)
         self._team_service = IndustryTeamService(self)
         self._view_service = IndustryViewService(self)

@@ -5,6 +5,83 @@ from .service_shared import *  # noqa: F401,F403
 
 
 class _GoalServiceCompilerMixin:
+    def _activation_neuron_brief(self, neuron: object) -> str | None:
+        title = str(getattr(neuron, "title", "") or "").strip()
+        summary = str(getattr(neuron, "summary", "") or "").strip()
+        body = (
+            summary
+            or str(getattr(neuron, "content_excerpt", "") or "").strip()
+            or str(getattr(neuron, "content", "") or "").strip()
+        )
+        body = body.replace("\n", " ").strip()
+        if len(body) > 180:
+            body = f"{body[:177].rstrip()}..."
+        if not title and not body:
+            return None
+        if title and body:
+            return f"{title}: {body}"
+        return title or body
+
+    def _build_activation_context(
+        self,
+        *,
+        query: str,
+        role: str | None,
+        owner_agent_id: str | None,
+        industry_instance_id: str | None,
+        owner_scope: str | None,
+        current_task_id: str | None,
+        work_context_id: str | None,
+    ) -> dict[str, object]:
+        activation_service = getattr(self, "_memory_activation_service", None)
+        if activation_service is None:
+            return {}
+        activator = getattr(activation_service, "activate_for_query", None)
+        if not callable(activator):
+            activator = getattr(activation_service, "activate", None)
+        if not callable(activator):
+            return {}
+        try:
+            activation = activator(
+                query=query,
+                role=role,
+                task_id=current_task_id,
+                work_context_id=work_context_id,
+                agent_id=owner_agent_id,
+                owner_agent_id=owner_agent_id,
+                industry_instance_id=industry_instance_id,
+                owner_scope=owner_scope,
+                global_scope_id=owner_scope,
+                limit=5,
+            )
+        except TypeError:
+            return {}
+        neurons = list(getattr(activation, "activated_neurons", []) or [])
+        activation_items = [
+            brief
+            for neuron in neurons
+            if (brief := self._activation_neuron_brief(neuron))
+        ]
+        neuron_refs = [
+            ref
+            for neuron in neurons
+            for ref in _string_list(getattr(neuron, "source_refs", None))
+        ]
+        activation_refs = _merge_string_lists(
+            neuron_refs,
+            getattr(activation, "support_refs", None),
+            getattr(activation, "evidence_refs", None),
+            getattr(activation, "strategy_refs", None),
+        )
+        if not activation_items and not activation_refs:
+            return {}
+        return {
+            "activation_items": activation_items,
+            "activation_refs": activation_refs,
+            "memory_items": activation_items,
+            "memory_refs": activation_refs,
+        }
+
     def _goal_step_index_from_meta(self, value: object) -> int | None:
         if isinstance(value, bool) or value is None:
             return None
@@ -403,6 +480,8 @@ class _GoalServiceCompilerMixin:
                 "memory_items",
                 "memory_refs",
                 "memory_documents",
+                "activation_items",
+                "activation_refs",
             ):
                 merged_context[key] = _merge_string_lists(
                     merged_context.get(key),
@@ -576,9 +655,18 @@ class _GoalServiceCompilerMixin:
                 )
         else:
             memory_chunks = []
+        activation_context = self._build_activation_context(
+            query=query,
+            role=role,
+            owner_agent_id=owner_agent_id,
+            industry_instance_id=industry_instance_id,
+            owner_scope=owner_scope,
+            current_task_id=current_task_id,
+            work_context_id=work_context_id,
+        )
         if not knowledge_chunks and not memory_chunks:
-            return {}
-        return {
+            return activation_context
+        payload = {
             "knowledge_items": [_knowledge_chunk_brief(chunk) for chunk in knowledge_chunks],
             "knowledge_refs": [
                 str(getattr(chunk, "id", "")).strip()
@@ -606,6 +694,13 @@ class _GoalServiceCompilerMixin:
                 )
             ],
         }
+        if activation_context:
+            for key in ("activation_items", "activation_refs", "memory_items", "memory_refs"):
+                payload[key] = _merge_string_lists(
+                    payload.get(key),
+                    activation_context.get(key),
+                )
+        return payload
 
     def _resolve_strategy_memory_payload(
         self,

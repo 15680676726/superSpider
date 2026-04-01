@@ -62,5 +62,6 @@ from .sqlite_memory import (
     SqliteMemoryEntityViewRepository,
     SqliteMemoryFactIndexRepository,
     SqliteMemoryOpinionViewRepository,
+    SqliteMemoryRelationViewRepository,
     SqliteMemoryReflectionRunRepository,
 )

@@ -2262,6 +2262,227 @@ def test_runtime_replan_node_persists_previous_cycle_synthesis_after_rollover(
     )
 
 
+def test_runtime_updates_expose_activation_summary_on_current_cycle_surface(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["keep activation summary visible after cycle rollover"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    original_cycle_id = record.current_cycle_id
+    assert original_cycle_id is not None
+
+    original_cycle = app.state.operating_cycle_repository.get_cycle(original_cycle_id)
+    assert original_cycle is not None
+    activation_summary = {
+        "top_constraints": [
+            "Keep the failed staffing contradiction visible until the next governed follow-up.",
+        ],
+        "top_next_actions": [
+            "Validate the contradiction before expanding the specialist seat.",
+        ],
+        "support_refs": ["activation:support:staffing-contradiction"],
+        "contradiction_count": 1,
+    }
+    app.state.operating_cycle_repository.upsert_cycle(
+        original_cycle.model_copy(
+            update={
+                "metadata": {
+                    **dict(original_cycle.metadata or {}),
+                    "report_synthesis": {
+                        "needs_replan": True,
+                        "replan_reasons": [
+                            "Activation contradiction still requires main-brain follow-up.",
+                        ],
+                        "activation": activation_summary,
+                    },
+                },
+            },
+        ),
+    )
+
+    rollover_cycle = app.state.operating_cycle_service.start_cycle(
+        industry_instance_id=instance_id,
+        label=record.label,
+        cycle_kind="daily",
+        status="active",
+        focus_lane_ids=[],
+        backlog_item_ids=[],
+        source_ref="test:activation-cycle-rollover",
+        summary="Rollover cycle without direct activation summary.",
+        metadata={},
+    )
+    app.state.industry_instance_repository.upsert_instance(
+        record.model_copy(
+            update={
+                "current_cycle_id": rollover_cycle.id,
+                "updated_at": rollover_cycle.updated_at,
+            },
+        ),
+    )
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+
+    assert detail is not None
+    assert detail.current_cycle is not None
+    assert detail.current_cycle["cycle_id"] == rollover_cycle.id
+    assert detail.current_cycle["synthesis"]["activation"] == activation_summary
+
+
+def test_runtime_updates_keep_replan_focus_and_activation_summary_together(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["keep replan focus and activation summary aligned"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    original_cycle_id = record.current_cycle_id
+    assert original_cycle_id is not None
+
+    assignment = AssignmentRecord(
+        industry_instance_id=instance_id,
+        cycle_id=original_cycle_id,
+        owner_agent_id="support-specialist-agent",
+        owner_role_id="support-specialist",
+        title="Activation runtime continuity check",
+        summary="Create a failed report to keep replan focused on the prior cycle.",
+        status="failed",
+    )
+    app.state.assignment_repository.upsert_assignment(assignment)
+
+    report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=original_cycle_id,
+        assignment_id=assignment.id,
+        owner_agent_id="support-specialist-agent",
+        owner_role_id="support-specialist",
+        headline="Activation runtime continuity failed",
+        summary="The failed report should keep replan focused on the prior cycle.",
+        status="recorded",
+        result="failed",
+        findings=["A governed follow-up is still required."],
+        recommendation="Keep replan pressure visible until follow-up is dispatched.",
+        processed=False,
+    )
+    app.state.agent_report_repository.upsert_report(report)
+
+    processed = app.state.industry_service._process_pending_agent_reports(
+        record=record,
+        cycle_id=original_cycle_id,
+    )
+    assert [item.id for item in processed] == [report.id]
+
+    original_cycle = app.state.operating_cycle_repository.get_cycle(original_cycle_id)
+    assert original_cycle is not None
+    original_synthesis = dict((original_cycle.metadata or {}).get("report_synthesis") or {})
+    app.state.operating_cycle_repository.upsert_cycle(
+        original_cycle.model_copy(
+            update={
+                "metadata": {
+                    **dict(original_cycle.metadata or {}),
+                    "report_synthesis": {
+                        **original_synthesis,
+                        "activation": {
+                            "top_constraints": [
+                                "Do not clear the contradiction until the supervised retry runs.",
+                            ],
+                            "top_next_actions": [
+                                "Run the supervised retry before dispatching another seat.",
+                            ],
+                            "support_refs": [
+                                "activation:support:supervised-retry",
+                            ],
+                            "contradiction_count": 1,
+                        },
+                    },
+                },
+            },
+        ),
+    )
+
+    rollover_cycle = app.state.operating_cycle_service.start_cycle(
+        industry_instance_id=instance_id,
+        label=record.label,
+        cycle_kind="daily",
+        status="active",
+        focus_lane_ids=[],
+        backlog_item_ids=[],
+        source_ref="test:activation-runtime-rollover",
+        summary="Rollover cycle without direct activation summary.",
+        metadata={},
+    )
+    app.state.industry_instance_repository.upsert_instance(
+        record.model_copy(
+            update={
+                "current_cycle_id": rollover_cycle.id,
+                "updated_at": rollover_cycle.updated_at,
+            },
+        ),
+    )
+
+    payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    replan_node = next(
+        node for node in payload["main_chain"]["nodes"] if node["node_id"] == "replan"
+    )
+
+    assert replan_node["current_ref"] == original_cycle_id
+    assert payload["main_chain"]["nodes"]
+    assert payload["current_cycle"]["synthesis"]["activation"]["contradiction_count"] >= 0
+    assert payload["current_cycle"]["synthesis"]["activation"]["top_constraints"] == [
+        "Do not clear the contradiction until the supervised retry runs.",
+    ]
+
+
 def test_main_brain_cognitive_surface_persists_across_rollover_and_clears_after_resolved_followup(
     tmp_path,
 ) -> None:

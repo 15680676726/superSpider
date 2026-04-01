@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -171,6 +172,27 @@ class _TruthFirstPromptRecallService:
         )
 
 
+class _FakeMemoryActivationService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def activate_for_query(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return SimpleNamespace(
+            activated_neurons=[
+                SimpleNamespace(
+                    title="Activation: evidence review sequence",
+                    summary="Activation emphasizes the shared evidence review sequence before outbound approval.",
+                    source_ref="activation:ctx-media-ops:evidence-review",
+                )
+            ],
+            support_refs=["chunk-profile"],
+            evidence_refs=["evidence-1"],
+            top_constraints=["Evidence review stays mandatory before outbound approval."],
+            top_next_actions=["Review the shared checklist before approving outbound media."],
+        )
+
+
 def test_goal_service_compiler_uses_memory_recall_hits() -> None:
     store = SQLiteStateStore(":memory:")
     service = GoalService(
@@ -274,6 +296,65 @@ def test_query_execution_prompt_prefers_truth_first_profile_before_lexical_fallb
     assert recall_service._derived_index_service.calls[0]["scope_id"] == "ctx-media-ops"
     assert recall_service.calls[0]["scope_type"] == "work_context"
     assert recall_service.calls[0]["scope_id"] == "ctx-media-ops"
+
+
+def test_query_execution_prompt_uses_activation_result_before_recall_hits() -> None:
+    recall_service = _TruthFirstPromptRecallService()
+    activation_service = _FakeMemoryActivationService()
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        memory_recall_service=recall_service,
+    )
+    service._memory_activation_service = activation_service
+
+    lines = service._build_retrieved_knowledge_lines(
+        msgs=["Use the current governed checklist before outbound media approval"],
+        owner_agent_id="copaw-agent-runner",
+        industry_instance_id="industry-1",
+        industry_role_id="execution-core",
+        owner_scope="runtime",
+        work_context_id="ctx-media-ops",
+    )
+
+    joined = "\n".join(lines)
+    assert activation_service.calls
+    assert "# Activation Context" in joined
+    assert "Activation: evidence review sequence" in joined
+    assert "Evidence review stays mandatory before outbound approval." in joined
+    assert joined.index("# Activation Context") < joined.index(
+        "# Truth-First Lexical Recall",
+    )
+
+
+def test_query_execution_prompt_keeps_truth_first_scope_priority_with_activation() -> None:
+    recall_service = _CapturingMemoryRecallService()
+    activation_service = _FakeMemoryActivationService()
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        memory_recall_service=recall_service,
+    )
+    service._memory_activation_service = activation_service
+
+    lines = service._build_retrieved_knowledge_lines(
+        msgs=["Please check the work context note before outbound approval"],
+        owner_agent_id="copaw-agent-runner",
+        industry_instance_id="industry-1",
+        industry_role_id="execution-core",
+        owner_scope="runtime",
+        task_id="task-1",
+        work_context_id="ctx-media-ops",
+    )
+
+    assert activation_service.calls
+    activation_call = activation_service.calls[0]
+    assert activation_call["scope_type"] == "work_context"
+    assert activation_call["scope_id"] == "ctx-media-ops"
+    assert activation_call["work_context_id"] == "ctx-media-ops"
+    assert recall_service.calls
+    recall_call = recall_service.calls[0]
+    assert recall_call["scope_type"] == "work_context"
+    assert recall_call["scope_id"] == "ctx-media-ops"
+    assert any("Work context note" in line for line in lines)
 
 
 def test_retain_chat_writeback_creates_work_context_scoped_recall_hit(tmp_path) -> None:

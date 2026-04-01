@@ -289,6 +289,20 @@ def _get_derived_memory_index_service(request: Request):
     return service
 
 
+def _list_memory_relation_views(request: Request, **kwargs: object) -> list[object]:
+    service = getattr(request.app.state, "derived_memory_index_service", None)
+    list_relation_views = getattr(service, "list_relation_views", None)
+    if callable(list_relation_views):
+        return list(list_relation_views(**kwargs) or [])
+
+    repository = getattr(request.app.state, "memory_relation_view_repository", None)
+    list_views = getattr(repository, "list_views", None)
+    if callable(list_views):
+        return list(list_views(**kwargs) or [])
+
+    return []
+
+
 def _get_memory_recall_service(request: Request):
     service = getattr(request.app.state, "memory_recall_service", None)
     if service is None or not all(
@@ -296,6 +310,13 @@ def _get_memory_recall_service(request: Request):
         for method_name in ("recall", "list_backends")
     ):
         raise HTTPException(503, detail="Memory recall service is not available")
+    return service
+
+
+def _get_memory_activation_service(request: Request):
+    service = getattr(request.app.state, "memory_activation_service", None)
+    if service is None or not callable(getattr(service, "activate_for_query", None)):
+        raise HTTPException(503, detail="Memory activation service is not available")
     return service
 
 

@@ -162,6 +162,7 @@ class IndustryServiceRuntimeBindings:
     assignment_service: AssignmentService | None = None
     agent_report_service: AgentReportService | None = None
     browser_runtime_service: BrowserRuntimeService | None = None
+    memory_activation_service: object | None = None
 
 
 def build_industry_service_runtime_bindings(
@@ -192,6 +193,7 @@ def build_industry_service_runtime_bindings(
     agent_report_service: AgentReportService | None = None,
     browser_runtime_service: BrowserRuntimeService | None = None,
     memory_retain_service: object | None = None,
+    memory_activation_service: object | None = None,
 ) -> IndustryServiceRuntimeBindings:
     # `state_store` remains in the signature for compatibility with older
     # bootstrapping sites, but runtime bindings must now be assembled from
@@ -271,6 +273,7 @@ def build_industry_service_runtime_bindings(
         assignment_service=assignment_runtime_service,
         agent_report_service=report_service,
         browser_runtime_service=browser_service,
+        memory_activation_service=memory_activation_service,
     )
 
 _REMOTE_RECOMMENDATION_ROLE_LIMIT = 12

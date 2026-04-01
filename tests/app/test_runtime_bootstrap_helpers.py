@@ -30,6 +30,7 @@ from copaw.app.runtime_service_graph import (
 )
 from copaw.memory.models import MemoryBackendKind
 from copaw.state import SQLiteStateStore
+from copaw.state.models_memory import MemoryRelationViewRecord
 
 
 class _AsyncStopper:
@@ -101,6 +102,7 @@ def _build_bootstrap() -> RuntimeBootstrap:
         memory_fact_index_repository=object(),
         memory_entity_view_repository=object(),
         memory_opinion_view_repository=object(),
+        memory_relation_view_repository=object(),
         memory_reflection_run_repository=object(),
         workflow_template_repository=object(),
         workflow_preset_repository=object(),
@@ -354,6 +356,10 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
         is bootstrap.repositories.media_analysis_repository
     )
     assert bindings["memory_activation_service"] is bootstrap.memory_activation_service
+    assert (
+        bindings["memory_relation_view_repository"]
+        is bootstrap.repositories.memory_relation_view_repository
+    )
     assert bindings["operating_lane_repository"] is bootstrap.repositories.operating_lane_repository
     assert bindings["backlog_item_repository"] is bootstrap.repositories.backlog_item_repository
     assert bindings["operating_cycle_repository"] is bootstrap.repositories.operating_cycle_repository
@@ -386,6 +392,65 @@ def test_build_runtime_repositories_keeps_bootstrap_schedule_repo_separate(
     assert repositories.bootstrap_schedule_repository is not None
     assert repositories.bootstrap_schedule_repository is not repositories.schedule_repository
     assert repositories.session_mount_repository is not None
+
+
+def test_memory_relation_view_record_accepts_relation_metadata() -> None:
+    record = MemoryRelationViewRecord(
+        relation_id="rel:ctx-1:approval->finance",
+        source_node_id="fact:approval",
+        target_node_id="entity:finance-queue",
+        relation_kind="supports",
+        scope_type="work_context",
+        scope_id="ctx-1",
+        source_refs=["fact:approval"],
+        metadata={"reason": "queue ownership"},
+    )
+
+    assert record.relation_kind == "supports"
+    assert record.scope_type == "work_context"
+    assert record.metadata == {"reason": "queue ownership"}
+
+
+def test_build_runtime_repositories_includes_memory_relation_view_repository(
+    tmp_path,
+) -> None:
+    repositories = build_runtime_repositories(SQLiteStateStore(tmp_path / "state.db"))
+
+    assert repositories.memory_relation_view_repository is not None
+
+
+def test_memory_relation_view_repository_round_trips_sqlite_records(tmp_path) -> None:
+    repositories = build_runtime_repositories(SQLiteStateStore(tmp_path / "state.db"))
+    repository = repositories.memory_relation_view_repository
+    record = MemoryRelationViewRecord(
+        relation_id="rel:ctx-1:approval->finance",
+        source_node_id="fact:approval",
+        target_node_id="entity:finance-queue",
+        relation_kind="supports",
+        scope_type="work_context",
+        scope_id="ctx-1",
+        owner_agent_id="agent:ops",
+        industry_instance_id="industry:finops",
+        summary="Approval supports finance queue review.",
+        confidence=0.9,
+        source_refs=["fact:approval", "report:daily-1"],
+        metadata={"reason": "queue ownership"},
+    )
+
+    repository.upsert_view(record)
+
+    stored = repository.get_view(record.relation_id)
+    scoped = repository.list_views(
+        scope_type="work_context",
+        scope_id="ctx-1",
+        relation_kind="supports",
+        source_node_id="fact:approval",
+        target_node_id="entity:finance-queue",
+    )
+
+    assert stored is not None
+    assert stored.model_dump(mode="json") == record.model_dump(mode="json")
+    assert [item.relation_id for item in scoped] == [record.relation_id]
 
 
 def test_build_kernel_runtime_threads_state_store_into_capability_service(
