@@ -517,7 +517,7 @@ Current hard boundary:
 - activation remains derived from existing truth sources
 - no graph persistence table was introduced
 - no new canonical memory source was introduced
-- report synthesis / backlog replan / Runtime Center activation visualization remain follow-up phases
+- report synthesis / backlog replan remained follow-up phases at this stage
 
 ## Phase 2 Landed Boundary
 
@@ -534,7 +534,26 @@ Current hard boundary after phase 2:
 - activation remains derived from existing truth sources
 - no graph persistence table was introduced
 - no new canonical memory source was introduced
-- Runtime Center activation-specific visualization remains a follow-up phase
+- Runtime Center activation-specific visualization beyond current read surfaces had not landed yet
+
+## Phase 3 Landed Boundary
+
+`2026-04-01` phase 3 landed scope:
+
+- `runtime_center_routes_memory.py` now exposes `GET /runtime-center/memory/activation`
+- Runtime Center memory profile read surfaces can attach full activation payloads when `include_activation=true` and a `query` is supplied
+- Runtime Center memory episode read surfaces can also attach activation payloads under the same opt-in contract
+- `runtime_bootstrap_query.py` now wires `memory_activation_service` into `RuntimeCenterStateQueryService`
+- `RuntimeCenterStateQueryService` now derives compact activation summaries for Runtime Center task list/detail payloads
+- `runtime_center/models.py` now defines a conservative `RuntimeActivationSummary` read model for those task surfaces
+
+Current hard boundary after phase 3:
+
+- activation remains derived from existing truth sources
+- no graph persistence table was introduced
+- no new canonical memory source was introduced
+- task list/detail surfaces only expose conservative activation summaries, not full activated neuron payloads
+- Runtime Center activation visibility currently lands as route/read-surface payloads, not as a separate dedicated visualization system
 
 ## Integration Points
 

@@ -5,8 +5,17 @@ from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
+from copaw.app.runtime_center.state_query import RuntimeCenterStateQueryService
 from copaw.app.runtime_center.task_review_projection import build_task_review_payload
 from copaw.evidence import EvidenceRecord, ReplayPointer
+from copaw.memory import ActivationResult, KnowledgeNeuron
+from copaw.state import SQLiteStateStore, TaskRecord, TaskRuntimeRecord
+from copaw.state.repositories import (
+    SqliteDecisionRequestRepository,
+    SqliteScheduleRepository,
+    SqliteTaskRepository,
+    SqliteTaskRuntimeRepository,
+)
 from copaw.utils.runtime_routes import task_route
 
 from .runtime_center_api_parts.overview_governance import *  # noqa: F401,F403
@@ -538,3 +547,152 @@ def test_runtime_center_evidence_endpoint_filters_by_task_id() -> None:
             "result_summary": "Checkpoint stored with replay pointer",
         },
     ]
+
+
+class _FakeMemoryActivationService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def activate_for_query(self, **kwargs) -> ActivationResult:
+        self.calls.append(dict(kwargs))
+        return ActivationResult(
+            query=str(kwargs.get("query") or ""),
+            scope_type="work_context",
+            scope_id=str(kwargs.get("work_context_id") or "ctx-1"),
+            activated_neurons=[
+                KnowledgeNeuron(
+                    neuron_id="fact-approval-blocker",
+                    kind="fact",
+                    scope_type="work_context",
+                    scope_id="ctx-1",
+                    title="Approval blocker",
+                    summary="Outbound approval remains blocked pending finance sign-off.",
+                    entity_keys=["finance-queue", "outbound-approval"],
+                    source_refs=["memory:fact:approval-blocker"],
+                    evidence_refs=["evidence-approval-1"],
+                    activation_score=0.91,
+                ),
+                KnowledgeNeuron(
+                    neuron_id="strategy-outbound-guardrail",
+                    kind="strategy",
+                    scope_type="work_context",
+                    scope_id="ctx-1",
+                    title="Outbound guardrail",
+                    summary="Do not bypass guarded approval workflow.",
+                    entity_keys=["outbound-approval"],
+                    source_refs=["strategy:industry-ops"],
+                    activation_score=0.77,
+                ),
+            ],
+            contradictions=[
+                KnowledgeNeuron(
+                    neuron_id="fact-legacy-approval",
+                    kind="fact",
+                    scope_type="work_context",
+                    scope_id="ctx-1",
+                    title="Legacy approval claim",
+                    summary="An older note claimed approval was clear.",
+                    source_refs=["memory:fact:legacy-approval"],
+                    activation_score=0.41,
+                ),
+            ],
+            support_refs=[
+                "memory:fact:approval-blocker",
+                "strategy:industry-ops",
+            ],
+            evidence_refs=["evidence-approval-1"],
+            strategy_refs=["strategy:industry-ops"],
+            top_entities=["outbound-approval", "finance-queue"],
+            top_constraints=["Wait for finance sign-off", "Do not bypass guarded approval"],
+            top_next_actions=["Escalate finance approval"],
+            metadata={"activated_count": 2},
+        )
+
+
+def _build_runtime_center_activation_client(tmp_path):
+    app = build_runtime_center_app()
+    state_store = SQLiteStateStore(tmp_path / "runtime-center-activation.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    schedule_repository = SqliteScheduleRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-activation-1",
+            title="Clear outbound approval blocker",
+            summary="Investigate why outbound approval is still blocked.",
+            task_type="analysis",
+            status="running",
+            owner_agent_id="ops-agent",
+            work_context_id="ctx-1",
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-activation-1",
+            runtime_status="active",
+            current_phase="executing",
+            risk_level="guarded",
+            last_owner_agent_id="ops-agent",
+            last_result_summary="Finance sign-off is still missing for outbound approval.",
+        ),
+    )
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        schedule_repository=schedule_repository,
+        decision_request_repository=decision_request_repository,
+    )
+    activation_service = _FakeMemoryActivationService()
+    state_query._memory_activation_service = activation_service
+    app.state.state_query_service = state_query
+    return TestClient(app), activation_service
+
+
+def test_runtime_center_task_detail_includes_activation_summary_when_available(tmp_path) -> None:
+    client, activation_service = _build_runtime_center_activation_client(tmp_path)
+
+    response = client.get("/runtime-center/tasks/task-activation-1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["activation"]["scope_type"] == "work_context"
+    assert payload["activation"]["scope_id"] == "ctx-1"
+    assert payload["activation"]["activated_count"] == 2
+    assert payload["activation"]["contradiction_count"] == 1
+    assert payload["activation"]["top_entities"] == [
+        "outbound-approval",
+        "finance-queue",
+    ]
+    assert payload["activation"]["top_constraints"] == [
+        "Wait for finance sign-off",
+        "Do not bypass guarded approval",
+    ]
+    assert payload["activation"]["support_refs"] == [
+        "memory:fact:approval-blocker",
+        "strategy:industry-ops",
+    ]
+    assert "activated_neurons" not in payload["activation"]
+    assert activation_service.calls[0]["task_id"] == "task-activation-1"
+    assert activation_service.calls[0]["work_context_id"] == "ctx-1"
+
+
+def test_runtime_center_tasks_overview_includes_activation_hint_for_current_focus(tmp_path) -> None:
+    client, _ = _build_runtime_center_activation_client(tmp_path)
+
+    response = client.get("/runtime-center/tasks")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload[0]["id"] == "task-activation-1"
+    assert payload[0]["activation"]["top_constraints"] == [
+        "Wait for finance sign-off",
+        "Do not bypass guarded approval",
+    ]
+    assert payload[0]["activation"]["top_entities"] == [
+        "outbound-approval",
+        "finance-queue",
+    ]
+    assert payload[0]["activation"]["activated_count"] == 2

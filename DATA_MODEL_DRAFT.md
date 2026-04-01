@@ -1959,6 +1959,26 @@ Current activation-derived carry-over fields now include:
 - `activation.support_refs`
 - `activation.contradiction_count`
 
+`2026-04-01` phase 3 supplement:
+
+Current additionally-landed Runtime Center surfaces:
+
+- `GET /runtime-center/memory/activation`
+- `GET /runtime-center/memory/profiles*` with opt-in `include_activation + query`
+- `GET /runtime-center/memory/episodes` with opt-in `include_activation + query`
+- Runtime Center task list/detail read payloads with compact `activation` summaries
+
+Current Runtime Center conservative activation summary fields now include:
+
+- `activation.activated_count`
+- `activation.contradiction_count`
+- `activation.top_entities`
+- `activation.top_constraints`
+- `activation.top_next_actions`
+- `activation.support_refs`
+- `activation.evidence_refs`
+- `activation.strategy_refs`
+
 Hard boundary remains:
 
 - activation-derived fields are still projections over canonical truth
@@ -1968,7 +1988,7 @@ Hard boundary:
 
 - activation remains derived from existing `StrategyMemory / KnowledgeChunk / FactIndex / reflection views`
 - no graph database or separate durable activation store has been introduced
-- report synthesis / backlog replan / Runtime Center activation visualization remain follow-up integration phases
+- dedicated activation visualization beyond current Runtime Center route/read-surface payloads remains a follow-up integration phase
 ---
 
 ## 12.7 2026-03-19 media analysis ingest boundary

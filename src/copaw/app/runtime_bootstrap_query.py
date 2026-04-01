@@ -76,6 +76,7 @@ def build_runtime_query_services(
         human_assist_task_service=human_assist_task_service,
         runtime_event_bus=runtime_event_bus,
         environment_service=environment_service,
+        memory_activation_service=None,
     )
     evidence_query_service = RuntimeCenterEvidenceQueryService(
         evidence_ledger=evidence_ledger,
@@ -127,6 +128,7 @@ def build_runtime_query_services(
             derived_index_service=derived_memory_index_service,
             strategy_memory_service=strategy_memory_service,
         )
+        state_query_service._memory_activation_service = memory_activation_service
     experience_memory_service = AgentExperienceMemoryService(
         knowledge_service=knowledge_service,
     )

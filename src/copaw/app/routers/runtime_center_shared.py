@@ -299,6 +299,13 @@ def _get_memory_recall_service(request: Request):
     return service
 
 
+def _get_memory_activation_service(request: Request):
+    service = getattr(request.app.state, "memory_activation_service", None)
+    if service is None or not callable(getattr(service, "activate_for_query", None)):
+        raise HTTPException(503, detail="Memory activation service is not available")
+    return service
+
+
 def _get_memory_reflection_service(request: Request):
     service = getattr(request.app.state, "memory_reflection_service", None)
     if service is None or not all(

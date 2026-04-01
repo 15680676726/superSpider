@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .runtime_center_shared_core import *  # noqa: F401,F403
+from .runtime_center_shared import _get_memory_activation_service
 
 
 def _first_non_empty(*values: object) -> str | None:
@@ -66,6 +67,93 @@ def _resolve_memory_scope(
         if normalized_candidate_scope_id:
             return candidate_scope_type, normalized_candidate_scope_id
     return None, None
+
+
+def _activate_memory_for_surface(
+    *,
+    request: Request,
+    query: str,
+    role: str | None = None,
+    scope_type: str | None = None,
+    scope_id: str | None = None,
+    task_id: str | None = None,
+    work_context_id: str | None = None,
+    agent_id: str | None = None,
+    industry_instance_id: str | None = None,
+    global_scope_id: str | None = None,
+    limit: int = 12,
+):
+    service = _get_memory_activation_service(request)
+    resolved_scope_type, resolved_scope_id = _resolve_memory_scope(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        task_id=task_id,
+        work_context_id=work_context_id,
+        agent_id=agent_id,
+        industry_instance_id=industry_instance_id,
+        global_scope_id=global_scope_id,
+    )
+    resolved_task_id = task_id
+    resolved_work_context_id = work_context_id
+    resolved_agent_id = agent_id
+    resolved_industry_instance_id = industry_instance_id
+    resolved_global_scope_id = global_scope_id
+    if resolved_scope_type == "task":
+        resolved_task_id = resolved_scope_id
+    elif resolved_scope_type == "work_context":
+        resolved_work_context_id = resolved_scope_id
+    elif resolved_scope_type == "agent":
+        resolved_agent_id = resolved_scope_id
+    elif resolved_scope_type == "industry":
+        resolved_industry_instance_id = resolved_scope_id
+    elif resolved_scope_type == "global":
+        resolved_global_scope_id = resolved_scope_id
+    return service.activate_for_query(
+        query=query,
+        role=role,
+        scope_type=resolved_scope_type,
+        scope_id=resolved_scope_id,
+        task_id=resolved_task_id,
+        work_context_id=resolved_work_context_id,
+        agent_id=resolved_agent_id,
+        industry_instance_id=resolved_industry_instance_id,
+        global_scope_id=resolved_global_scope_id,
+        limit=limit,
+    )
+
+
+def _maybe_build_activation_payload(
+    *,
+    request: Request,
+    include_activation: bool,
+    query: str | None,
+    role: str | None = None,
+    scope_type: str | None = None,
+    scope_id: str | None = None,
+    task_id: str | None = None,
+    work_context_id: str | None = None,
+    agent_id: str | None = None,
+    industry_instance_id: str | None = None,
+    global_scope_id: str | None = None,
+    limit: int = 12,
+) -> dict[str, object] | None:
+    normalized_query = str(query or "").strip()
+    if not include_activation or not normalized_query:
+        return None
+    result = _activate_memory_for_surface(
+        request=request,
+        query=normalized_query,
+        role=role,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        task_id=task_id,
+        work_context_id=work_context_id,
+        agent_id=agent_id,
+        industry_instance_id=industry_instance_id,
+        global_scope_id=global_scope_id,
+        limit=limit,
+    )
+    return result.model_dump(mode="json")
 
 
 def _serialize_memory_entry(entry: object) -> dict[str, object]:
@@ -205,6 +293,13 @@ async def list_memory_profiles(
     response: Response,
     scope_type: Literal["global", "industry", "agent", "task", "work_context"] | None = None,
     scope_id: str | None = None,
+    task_id: str | None = None,
+    work_context_id: str | None = None,
+    agent_id: str | None = None,
+    global_scope_id: str | None = None,
+    include_activation: bool = False,
+    query: str | None = None,
+    role: str | None = None,
     owner_agent_id: str | None = None,
     industry_instance_id: str | None = None,
     limit: int = 20,
@@ -219,7 +314,23 @@ async def list_memory_profiles(
             industry_instance_id=industry_instance_id,
             limit=max(limit * 4, 12),
         )
-        return [_build_memory_profile_payload(scope_type=scope_type, scope_id=scope_id, entries=entries)]
+        payload = _build_memory_profile_payload(scope_type=scope_type, scope_id=scope_id, entries=entries)
+        activation = _maybe_build_activation_payload(
+            request=request,
+            include_activation=include_activation,
+            query=query,
+            role=role,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            task_id=task_id,
+            work_context_id=work_context_id,
+            agent_id=agent_id,
+            industry_instance_id=industry_instance_id,
+            global_scope_id=global_scope_id,
+        )
+        if activation is not None:
+            payload["activation"] = activation
+        return [payload]
 
     service = _get_derived_memory_index_service(request)
     entries = _sort_memory_entries(
@@ -263,6 +374,13 @@ async def get_memory_profile(
     scope_id: str,
     request: Request,
     response: Response,
+    task_id: str | None = None,
+    work_context_id: str | None = None,
+    agent_id: str | None = None,
+    global_scope_id: str | None = None,
+    include_activation: bool = False,
+    query: str | None = None,
+    role: str | None = None,
     owner_agent_id: str | None = None,
     industry_instance_id: str | None = None,
 ) -> dict[str, object]:
@@ -275,7 +393,23 @@ async def get_memory_profile(
         industry_instance_id=industry_instance_id,
         limit=20,
     )
-    return _build_memory_profile_payload(scope_type=scope_type, scope_id=scope_id, entries=entries)
+    payload = _build_memory_profile_payload(scope_type=scope_type, scope_id=scope_id, entries=entries)
+    activation = _maybe_build_activation_payload(
+        request=request,
+        include_activation=include_activation,
+        query=query,
+        role=role,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        task_id=task_id,
+        work_context_id=work_context_id,
+        agent_id=agent_id,
+        industry_instance_id=industry_instance_id,
+        global_scope_id=global_scope_id,
+    )
+    if activation is not None:
+        payload["activation"] = activation
+    return payload
 
 
 @router.get("/memory/episodes", response_model=list[dict[str, object]])
@@ -289,6 +423,9 @@ async def list_memory_episodes(
     agent_id: str | None = None,
     industry_instance_id: str | None = None,
     global_scope_id: str | None = None,
+    include_activation: bool = False,
+    query: str | None = None,
+    role: str | None = None,
     owner_agent_id: str | None = None,
     limit: int = 20,
 ) -> list[dict[str, object]]:
@@ -312,12 +449,29 @@ async def list_memory_episodes(
     )
     if resolved_scope_type is None or resolved_scope_id is None:
         return []
-    return _build_memory_episode_payloads(
+    payloads = _build_memory_episode_payloads(
         scope_type=resolved_scope_type,
         scope_id=resolved_scope_id,
         entries=entries,
         limit=limit,
     )
+    activation = _maybe_build_activation_payload(
+        request=request,
+        include_activation=include_activation,
+        query=query,
+        role=role,
+        scope_type=resolved_scope_type,
+        scope_id=resolved_scope_id,
+        task_id=task_id,
+        work_context_id=work_context_id,
+        agent_id=agent_id,
+        industry_instance_id=industry_instance_id,
+        global_scope_id=global_scope_id,
+    )
+    if activation is not None:
+        for payload in payloads:
+            payload["activation"] = activation
+    return payloads
 
 
 @router.get("/memory/history", response_model=list[dict[str, object]])
@@ -384,6 +538,38 @@ async def recall_memory(
         industry_instance_id=industry_instance_id,
         global_scope_id=global_scope_id,
         include_related_scopes=include_related_scopes,
+        limit=limit,
+    )
+    return result.model_dump(mode="json")
+
+
+@router.get("/memory/activation", response_model=dict[str, object])
+async def activate_memory(
+    request: Request,
+    response: Response,
+    query: str,
+    role: str | None = None,
+    scope_type: Literal["global", "industry", "agent", "task", "work_context"] | None = None,
+    scope_id: str | None = None,
+    task_id: str | None = None,
+    work_context_id: str | None = None,
+    agent_id: str | None = None,
+    industry_instance_id: str | None = None,
+    global_scope_id: str | None = None,
+    limit: int = 12,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    result = _activate_memory_for_surface(
+        request=request,
+        query=query,
+        role=role,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        task_id=task_id,
+        work_context_id=work_context_id,
+        agent_id=agent_id,
+        industry_instance_id=industry_instance_id,
+        global_scope_id=global_scope_id,
         limit=limit,
     )
     return result.model_dump(mode="json")
