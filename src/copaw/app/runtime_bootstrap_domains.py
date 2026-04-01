@@ -217,6 +217,7 @@ def build_runtime_domain_services(
         agent_report_service=agent_report_service,
         state_store=state_store,
         memory_retain_service=memory_retain_service,
+        memory_activation_service=memory_activation_service,
     )
     industry_service = IndustryService(
         goal_service=goal_service,
@@ -234,6 +235,7 @@ def build_runtime_domain_services(
         draft_generator=IndustryDraftGenerator(provider_manager=provider_manager),
         runtime_bindings=industry_runtime_bindings,
         memory_retain_service=memory_retain_service,
+        memory_activation_service=memory_activation_service,
         work_context_service=work_context_service,
         actor_mailbox_service=actor_mailbox_service,
     )

@@ -1944,6 +1944,26 @@ Current landed consumer surfaces:
 - query prompt retrieval
 - goal compiler memory context
 
+`2026-04-01` phase 2 supplement:
+
+Current additionally-landed consumer surfaces:
+
+- industry report synthesis
+- follow-up backlog / replan materialization
+- current-cycle runtime surface payload
+
+Current activation-derived carry-over fields now include:
+
+- `activation.top_constraints`
+- `activation.top_next_actions`
+- `activation.support_refs`
+- `activation.contradiction_count`
+
+Hard boundary remains:
+
+- activation-derived fields are still projections over canonical truth
+- backlog / assignment metadata may carry activation-derived hints, but those hints do not become a second durable memory truth
+
 Hard boundary:
 
 - activation remains derived from existing `StrategyMemory / KnowledgeChunk / FactIndex / reflection views`

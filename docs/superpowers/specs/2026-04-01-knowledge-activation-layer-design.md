@@ -519,6 +519,23 @@ Current hard boundary:
 - no new canonical memory source was introduced
 - report synthesis / backlog replan / Runtime Center activation visualization remain follow-up phases
 
+## Phase 2 Landed Boundary
+
+`2026-04-01` phase 2 landed scope:
+
+- `report_synthesis.py` can now accept activation-derived input and emit activation summaries into synthesis/replan surfaces
+- `service_report_closure.py` now carries activation-derived constraints, next actions, and support refs into follow-up backlog metadata
+- `service_lifecycle.py` now preserves activation metadata into the existing `synthesis -> follow-up backlog -> assignment` chain
+- `service_runtime_views.py` now exposes `synthesis.activation` on current-cycle runtime payloads when replan continuity points to that synthesis context
+- industry runtime wiring now makes `memory_activation_service` available to `IndustryService` via runtime bindings / explicit injection
+
+Current hard boundary after phase 2:
+
+- activation remains derived from existing truth sources
+- no graph persistence table was introduced
+- no new canonical memory source was introduced
+- Runtime Center activation-specific visualization remains a follow-up phase
+
 ## Integration Points
 
 第一版建议接入这些消费面：
