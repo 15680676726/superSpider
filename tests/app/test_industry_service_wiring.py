@@ -441,7 +441,7 @@ def test_runtime_domain_builder_passes_memory_activation_service_to_industry_ser
 
     domain_services = runtime_bootstrap_domains_module.build_runtime_domain_services(
         session_backend=object(),
-        memory_manager=object(),
+        conversation_compaction_service=object(),
         mcp_manager=object(),
         state_store=SQLiteStateStore(":memory:"),
         repositories=_RepoBag(),
