@@ -40,6 +40,8 @@ interface ExtendedSession extends IAgentScopeRuntimeWebUISession {
   meta: Record<string, unknown>;
 }
 
+const IN_PROGRESS_MESSAGE_STATUSES = new Set(["created", "queued", "in_progress"]);
+
 export interface BoundThreadPayload {
   name: string;
   threadId: string;
@@ -146,6 +148,10 @@ function toOutputMessage(msg: Message): OutputMessage {
 
 function buildUserCard(msg: Message): IAgentScopeRuntimeWebUIMessage {
   const text = extractTextFromContent(msg.content);
+  const status =
+    typeof msg.status === "string" && msg.status.trim().length > 0
+      ? msg.status.trim()
+      : "completed";
   return {
     id: (msg.id as string) || generateId(),
     role: "user",
@@ -157,7 +163,7 @@ function buildUserCard(msg: Message): IAgentScopeRuntimeWebUIMessage {
             {
               role: "user",
               type: "message",
-              content: [{ type: "text", text, status: "created" }],
+              content: [{ type: "text", text, status }],
             },
           ],
         },
@@ -304,6 +310,80 @@ function convertMessages(messages: Message[]): IAgentScopeRuntimeWebUIMessage[] 
   }
 
   return result;
+}
+
+function collectMessageStatuses(message: IAgentScopeRuntimeWebUIMessage): string[] {
+  const statuses: string[] = [];
+  if (typeof message.msgStatus === "string" && message.msgStatus.trim()) {
+    statuses.push(message.msgStatus.trim().toLowerCase());
+  }
+  const cards = Array.isArray(message.cards) ? message.cards : [];
+  for (const card of cards) {
+    if (!card || typeof card !== "object") {
+      continue;
+    }
+    const data = (card as {
+      data?: {
+        status?: unknown;
+        input?: Array<{
+          content?: Array<{ status?: unknown }>;
+        }>;
+      };
+    }).data;
+    if (typeof data?.status === "string" && data.status.trim()) {
+      statuses.push(data.status.trim().toLowerCase());
+    }
+    const input = Array.isArray(data?.input) ? data.input : [];
+    for (const item of input) {
+      const content = Array.isArray(item?.content) ? item.content : [];
+      for (const contentItem of content) {
+        if (
+          contentItem &&
+          typeof contentItem === "object" &&
+          typeof contentItem.status === "string" &&
+          contentItem.status.trim()
+        ) {
+          statuses.push(contentItem.status.trim().toLowerCase());
+        }
+      }
+    }
+  }
+  return statuses;
+}
+
+function hasInFlightMessages(messages: IAgentScopeRuntimeWebUIMessage[]): boolean {
+  return messages.some((message) =>
+    collectMessageStatuses(message).some(
+      (status) =>
+        status === "generating" || IN_PROGRESS_MESSAGE_STATUSES.has(status),
+    ),
+  );
+}
+
+function countUserMessages(messages: IAgentScopeRuntimeWebUIMessage[]): number {
+  return messages.filter((message) => message.role === "user").length;
+}
+
+function shouldPreferFetchedMessages(
+  existingMessages: IAgentScopeRuntimeWebUIMessage[],
+  fetchedMessages: IAgentScopeRuntimeWebUIMessage[],
+): boolean {
+  if (existingMessages.length <= fetchedMessages.length) {
+    return true;
+  }
+
+  const existingHasInFlight = hasInFlightMessages(existingMessages);
+  const fetchedHasInFlight = hasInFlightMessages(fetchedMessages);
+  if (!existingHasInFlight || fetchedHasInFlight) {
+    return false;
+  }
+
+  if (countUserMessages(fetchedMessages) < countUserMessages(existingMessages)) {
+    return false;
+  }
+
+  const lastFetchedMessage = fetchedMessages[fetchedMessages.length - 1];
+  return Boolean(lastFetchedMessage && lastFetchedMessage.role === "assistant");
 }
 
 function conversationToSession(
@@ -454,11 +534,9 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         ...(existing.meta || {}),
         ...(fetched.meta || {}),
       },
-      // Keep the richer in-memory transcript when the backend detail lags behind.
-      messages:
-        existingMessages.length > fetchedMessages.length
-          ? existingMessages
-          : fetchedMessages,
+      messages: shouldPreferFetchedMessages(existingMessages, fetchedMessages)
+        ? fetchedMessages
+        : existingMessages,
     };
   }
 
@@ -492,20 +570,6 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       return null;
     }
     return cached.session as ExtendedSession;
-  }
-
-  private startBackgroundRefresh(threadId: string, existing: ExtendedSession): void {
-    if (this.threadFetchPromises.has(threadId)) {
-      return;
-    }
-    const fetchPromise = this.fetchSessionFromBackend(threadId, existing).catch((error) => {
-      console.warn(`Failed to refresh runtime conversation ${threadId}:`, error);
-      return existing;
-    });
-    this.threadFetchPromises.set(threadId, fetchPromise);
-    void fetchPromise.finally(() => {
-      this.threadFetchPromises.delete(threadId);
-    });
   }
 
   private shouldUseSeedSessionFallback(
@@ -553,12 +617,6 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     if (!threadId) {
       return [...this.sessionList];
     }
-
-    const existing = this.sessionList.find((item) => item.id === threadId);
-    if (existing) {
-      return this.orderSessions(this.sessionList);
-    }
-
     await this.getSession(threadId);
     return [...this.sessionList];
   }
@@ -583,9 +641,30 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
 
     const existing = this.findExistingSession(normalizedThreadId);
     if (existing) {
-      this.cacheSession(existing);
-      this.startBackgroundRefresh(normalizedThreadId, existing);
-      return existing;
+      const existingMessages = Array.isArray(existing.messages) ? existing.messages : [];
+      const refreshInProgress = this.threadFetchPromises.get(normalizedThreadId);
+      if (refreshInProgress) {
+        return refreshInProgress;
+      }
+      const refreshPromise = this.fetchSessionFromBackend(
+        normalizedThreadId,
+        existing,
+      ).catch((error) => {
+        console.warn(
+          hasInFlightMessages(existingMessages)
+            ? `Failed to refresh active runtime conversation ${normalizedThreadId}:`
+            : `Failed to refresh stale runtime conversation ${normalizedThreadId}:`,
+          error,
+        );
+        this.cacheSession(existing);
+        return existing;
+      });
+      this.threadFetchPromises.set(normalizedThreadId, refreshPromise);
+      try {
+        return await refreshPromise;
+      } finally {
+        this.threadFetchPromises.delete(normalizedThreadId);
+      }
     }
 
     const existingPromise = this.threadFetchPromises.get(normalizedThreadId);

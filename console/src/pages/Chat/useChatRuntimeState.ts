@@ -172,7 +172,7 @@ export function useChatRuntimeState({
         fetch: runtimeTransport.fetch,
         responseParser: runtimeTransport.responseParser,
         cancel(payload: { session_id: string }) {
-          void payload;
+          runtimeTransport.cancelSession(payload.session_id);
         },
       },
     } as unknown as IAgentScopeRuntimeWebUIOptions;

@@ -1,7 +1,7 @@
 import { getApiToken, getApiUrl } from "../../api/config";
 import { providerApi } from "../../api/modules/provider";
-import type { ActiveModelsInfo } from "../../api/types/provider";
 import type { MediaSourceSpec } from "../../api/modules/media";
+import type { ActiveModelsInfo } from "../../api/types/provider";
 import { CHAT_RUNTIME_TEXT } from "./chatPageHelpers";
 import {
   extractRuntimeHealthNotice,
@@ -22,6 +22,7 @@ import {
   type RuntimeWebUiFetchData,
   type RuntimeWindowContext,
 } from "./runtimeTransportRequest";
+
 export type {
   RuntimeSessionContext,
   RuntimeThreadContext,
@@ -59,6 +60,17 @@ interface ParseRuntimeResponseChunkArgs {
   setRuntimeWaitState: (state: RuntimeWaitState | null) => void;
   dispatchGovernanceDirty?: () => void;
   dispatchHumanAssistDirty?: () => void;
+}
+
+interface LinkedAbortController {
+  signal: AbortSignal;
+  cleanup: () => void;
+}
+
+interface SessionAbortState {
+  cancelRequested: boolean;
+  controller: AbortController;
+  networkStarted: boolean;
 }
 
 const ACTIVE_MODELS_CACHE_TTL_MS = 30_000;
@@ -174,6 +186,76 @@ function handleModelError(
   );
 }
 
+function isAbortRuntimeError(error: unknown): boolean {
+  if (error instanceof DOMException) {
+    return error.name === "AbortError";
+  }
+  return (
+    error instanceof Error &&
+    (error.name === "AbortError" ||
+      error.message.toLowerCase().includes("aborted"))
+  );
+}
+
+function linkAbortSignals(
+  upstreamSignal: AbortSignal | null | undefined,
+  controller: AbortController,
+): LinkedAbortController {
+  if (!upstreamSignal) {
+    return {
+      signal: controller.signal,
+      cleanup: () => {},
+    };
+  }
+
+  if (upstreamSignal.aborted) {
+    controller.abort();
+    return {
+      signal: controller.signal,
+      cleanup: () => {},
+    };
+  }
+
+  const forwardAbort = () => controller.abort();
+  upstreamSignal.addEventListener("abort", forwardAbort, { once: true });
+  return {
+    signal: controller.signal,
+    cleanup: () => upstreamSignal.removeEventListener("abort", forwardAbort),
+  };
+}
+
+function createAbortRuntimeError(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error && signal.reason.name !== "AbortError") {
+    return signal.reason;
+  }
+  return new DOMException("The operation was aborted.", "AbortError");
+}
+
+function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(createAbortRuntimeError(signal));
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const handleAbort = () => {
+      signal.removeEventListener("abort", handleAbort);
+      reject(createAbortRuntimeError(signal));
+    };
+
+    signal.addEventListener("abort", handleAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", handleAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", handleAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 export function parseRuntimeResponseChunk(
   rawChunk: string,
   {
@@ -190,11 +272,13 @@ export function parseRuntimeResponseChunk(
     setRuntimeHealthNotice(healthNotice);
     return parsed;
   }
+
   if (hasRuntimeStartedResponding(parsed)) {
     setRuntimeWaitState(null);
     setRuntimeHealthNotice(null);
     return parsed;
   }
+
   if (
     parsed &&
     typeof parsed === "object" &&
@@ -203,12 +287,17 @@ export function parseRuntimeResponseChunk(
     const status = String(
       (parsed as Record<string, unknown>).status || "",
     ).toLowerCase();
-    if (["completed", "failed", "canceled"].includes(status)) {
+    if (
+      ["completed", "failed", "canceled", "rejected", "incomplete"].includes(
+        status,
+      )
+    ) {
       setRuntimeWaitState(null);
       dispatchGovernanceDirty?.();
       dispatchHumanAssistDirty?.();
     }
   }
+
   return parsed;
 }
 
@@ -229,128 +318,198 @@ export function createRuntimeTransport({
 }: CreateRuntimeTransportArgs): {
   fetch: (data: RuntimeWebUiFetchData) => Promise<Response>;
   responseParser: (rawChunk: string) => unknown;
+  cancelSession: (sessionId: string) => void;
 } {
   const activeModelsCache = {
     fetchedAt: 0,
     value: null as ActiveModelsInfo | null,
   };
+  const sessionAbortControllers = new Map<string, SessionAbortState>();
 
   const customFetch = async (data: RuntimeWebUiFetchData): Promise<Response> => {
-    let activeModels: ActiveModelsInfo | null = null;
+    const threadMeta = getThreadMeta();
+    const lastMessage = data.input[data.input.length - 1];
+    const sessionContext = resolveRuntimeSessionContext({
+      runtimeWindow,
+      requestedThreadId,
+      threadMeta,
+      session: lastMessage?.session,
+    });
+    const requestSessionId = firstNonEmptyString(
+      sessionContext.sessionId,
+      sessionContext.currentThreadId,
+    );
+    const localAbortController = new AbortController();
+    const linkedAbortController = linkAbortSignals(
+      data.signal,
+      localAbortController,
+    );
+    const sessionAbortState: SessionAbortState = {
+      cancelRequested: false,
+      controller: localAbortController,
+      networkStarted: false,
+    };
+
+    if (requestSessionId) {
+      sessionAbortControllers.set(requestSessionId, sessionAbortState);
+    }
+
     try {
-      const cached = activeModelsCache;
-      if (cached.value && Date.now() - cached.fetchedAt < ACTIVE_MODELS_CACHE_TTL_MS) {
-        activeModels = cached.value;
-      } else {
-        activeModels = await providerApi.getActiveModels();
-        activeModelsCache.fetchedAt = Date.now();
-        activeModelsCache.value = activeModels;
-      }
-      const resolvedSlot = activeModels?.resolved_llm || activeModels?.active_llm;
-      if (!resolvedSlot?.provider_id || !resolvedSlot?.model) {
+      let activeModels: ActiveModelsInfo | null = null;
+      try {
+        const cached = activeModelsCache;
+        if (
+          cached.value &&
+          Date.now() - cached.fetchedAt < ACTIVE_MODELS_CACHE_TTL_MS
+        ) {
+          activeModels = cached.value;
+        } else {
+          activeModels = await raceWithAbort(
+            providerApi.getActiveModels(),
+            localAbortController.signal,
+          );
+          activeModelsCache.fetchedAt = Date.now();
+          activeModelsCache.value = activeModels;
+        }
+
+        const resolvedSlot = activeModels?.resolved_llm || activeModels?.active_llm;
+        if (!resolvedSlot?.provider_id || !resolvedSlot?.model) {
+          return handleModelError(setRuntimeWaitState, setShowModelPrompt);
+        }
+
+        beginRuntimeWait(activeModels, setRuntimeHealthNotice, setRuntimeWaitState);
+      } catch (error) {
+        if (isAbortRuntimeError(error)) {
+          setRuntimeWaitState(null);
+          setRuntimeHealthNotice(null);
+          throw error;
+        }
+
+        activeModelsCache.fetchedAt = 0;
+        activeModelsCache.value = null;
+        console.error("Failed to check model configuration:", error);
         return handleModelError(setRuntimeWaitState, setShowModelPrompt);
       }
-      beginRuntimeWait(activeModels, setRuntimeHealthNotice, setRuntimeWaitState);
-    } catch (error) {
-      activeModelsCache.fetchedAt = 0;
-      activeModelsCache.value = null;
-      console.error("Failed to check model configuration:", error);
-      return handleModelError(setRuntimeWaitState, setShowModelPrompt);
-    }
 
-    const requestBody = trimRuntimeRequestBody(
-      buildRuntimeChatRequest({
-        data: {
-          ...data,
-          biz_params: sanitizeRuntimeBizParams(data.biz_params),
-        },
-        runtimeWindow,
-        requestedThreadId,
-        threadMeta: getThreadMeta(),
-        pendingMediaSources: getPendingMediaSources(),
-        selectedMediaAnalysisIds: getSelectedMediaAnalysisIds(),
-      }),
-    );
-
-    const headers: HeadersInit = {
-      "Content-Type": "application/json",
-    };
-    const token = getApiToken();
-    if (token) {
-      (headers as Record<string, string>).Authorization = `Bearer ${token}`;
-    }
-
-    const url = resolveRuntimeChatUrl(optionsBaseUrl);
-    const requestThreadId =
-      typeof requestBody.thread_id === "string" && requestBody.thread_id.trim()
-        ? requestBody.thread_id.trim()
-        : null;
-    const mediaInputs = Array.isArray(requestBody.media_inputs)
-      ? (requestBody.media_inputs as unknown[])
-      : [];
-
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(requestBody),
-        signal: data.signal,
-      });
-      if (response.ok) {
-        if (mediaInputs.length > 0) {
-          clearPendingMediaDrafts();
-        }
-        if (requestThreadId && mediaInputs.length > 0) {
-          void refreshThreadMediaAnalyses(requestThreadId);
-        }
-      }
-    } catch (error) {
-      setRuntimeWaitState(null);
-      const localized = localizeRuntimeError(
-        "MODEL_CONNECTION_FAILED",
-        error instanceof Error ? error.message : String(error),
+      const requestBody = trimRuntimeRequestBody(
+        buildRuntimeChatRequest({
+          data: {
+            ...data,
+            biz_params: sanitizeRuntimeBizParams(data.biz_params),
+          },
+          runtimeWindow,
+          requestedThreadId,
+          threadMeta,
+          pendingMediaSources: getPendingMediaSources(),
+          selectedMediaAnalysisIds: getSelectedMediaAnalysisIds(),
+        }),
       );
-      setRuntimeHealthNotice({
-        type: localized.type,
-        title: localized.title,
-        description: localized.description,
-      });
-      throw error;
-    }
 
-    if (!response.ok) {
-      setRuntimeWaitState(null);
-      const responseClone = response.clone();
-      void responseClone
-        .json()
-        .then((payload) => {
-          const record =
-            payload && typeof payload === "object"
-              ? (payload as Record<string, unknown>)
-              : {};
-          const localized = localizeRuntimeError(
-            record.code || record.error || "RUNTIME_ERROR",
-            record.message || record.detail || record.error,
-          );
-          setRuntimeHealthNotice({
-            type: localized.type,
-            title: localized.title,
-            description: localized.description,
-          });
-        })
-        .catch(() => {
-          const resolvedSlot = activeModels?.resolved_llm || activeModels?.active_llm;
-          setRuntimeHealthNotice({
-            type: "error",
-            title: "请求发送失败",
-            description: resolvedSlot
-              ? `请求已发送到 ${resolvedSlot.provider_id}/${resolvedSlot.model}，但服务端没有返回可用结果。`
-              : "服务端没有返回可用结果。",
-          });
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      const token = getApiToken();
+      if (token) {
+        (headers as Record<string, string>).Authorization = `Bearer ${token}`;
+      }
+
+      const url = resolveRuntimeChatUrl(optionsBaseUrl);
+      const requestThreadId =
+        typeof requestBody.thread_id === "string" && requestBody.thread_id.trim()
+          ? requestBody.thread_id.trim()
+          : null;
+      const mediaInputs = Array.isArray(requestBody.media_inputs)
+        ? (requestBody.media_inputs as unknown[])
+        : [];
+
+      let response: Response;
+      try {
+        const responsePromise = fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(requestBody),
+          signal: linkedAbortController.signal,
         });
+        sessionAbortState.networkStarted = true;
+        if (
+          sessionAbortState.cancelRequested &&
+          !localAbortController.signal.aborted
+        ) {
+          queueMicrotask(() => {
+            localAbortController.abort();
+          });
+        }
+        response = await responsePromise;
+        if (response.ok) {
+          if (mediaInputs.length > 0) {
+            clearPendingMediaDrafts();
+          }
+          if (requestThreadId && mediaInputs.length > 0) {
+            void refreshThreadMediaAnalyses(requestThreadId);
+          }
+        }
+      } catch (error) {
+        setRuntimeWaitState(null);
+        if (isAbortRuntimeError(error)) {
+          setRuntimeHealthNotice(null);
+          throw error;
+        }
+
+        const localized = localizeRuntimeError(
+          "MODEL_CONNECTION_FAILED",
+          error instanceof Error ? error.message : String(error),
+        );
+        setRuntimeHealthNotice({
+          type: localized.type,
+          title: localized.title,
+          description: localized.description,
+        });
+        throw error;
+      }
+
+      if (!response.ok) {
+        setRuntimeWaitState(null);
+        const responseClone = response.clone();
+        void responseClone
+          .json()
+          .then((payload) => {
+            const record =
+              payload && typeof payload === "object"
+                ? (payload as Record<string, unknown>)
+                : {};
+            const localized = localizeRuntimeError(
+              record.code || record.error || "RUNTIME_ERROR",
+              record.message || record.detail || record.error,
+            );
+            setRuntimeHealthNotice({
+              type: localized.type,
+              title: localized.title,
+              description: localized.description,
+            });
+          })
+          .catch(() => {
+            const resolvedSlot =
+              activeModels?.resolved_llm || activeModels?.active_llm;
+            setRuntimeHealthNotice({
+              type: "error",
+              title: "请求发送失败",
+              description: resolvedSlot
+                ? `请求已发送到 ${resolvedSlot.provider_id}/${resolvedSlot.model}，但服务端没有返回可用结果。`
+                : "服务端没有返回可用结果。",
+            });
+          });
+      }
+
+      return response;
+    } finally {
+      linkedAbortController.cleanup();
+      if (
+        requestSessionId &&
+        sessionAbortControllers.get(requestSessionId) === sessionAbortState
+      ) {
+        sessionAbortControllers.delete(requestSessionId);
+      }
     }
-    return response;
   };
 
   const responseParser = (rawChunk: string): unknown =>
@@ -361,8 +520,25 @@ export function createRuntimeTransport({
       dispatchHumanAssistDirty,
     });
 
+  const cancelSession = (sessionId: string): void => {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      return;
+    }
+    const sessionAbortState = sessionAbortControllers.get(normalizedSessionId);
+    if (sessionAbortState) {
+      sessionAbortState.cancelRequested = true;
+      if (sessionAbortState.networkStarted) {
+        sessionAbortState.controller.abort();
+      }
+    }
+    setRuntimeWaitState(null);
+    setRuntimeHealthNotice(null);
+  };
+
   return {
     fetch: customFetch,
     responseParser,
+    cancelSession,
   };
 }

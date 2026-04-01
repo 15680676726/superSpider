@@ -361,6 +361,127 @@ describe("runtimeTransport", () => {
     expect(requestBody.requested_actions).toBeUndefined();
   });
 
+  it("does not surface a connection error when the runtime request is aborted by the client", async () => {
+    vi.stubGlobal("BASE_URL", "http://testserver");
+    vi.spyOn(providerApi, "getActiveModels").mockResolvedValue({
+      resolved_llm: {
+        provider_id: "test-provider",
+        model: "test-model",
+      },
+    } as never);
+    const abortError = new DOMException("The operation was aborted.", "AbortError");
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(abortError);
+    const setRuntimeHealthNotice = vi.fn();
+    const setRuntimeWaitState = vi.fn();
+
+    const transport = createRuntimeTransport({
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      optionsBaseUrl: undefined,
+      getThreadMeta: () => ({
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      }),
+      getPendingMediaSources: () => [],
+      clearPendingMediaDrafts: vi.fn(),
+      refreshThreadMediaAnalyses: vi.fn(),
+      getSelectedMediaAnalysisIds: () => [],
+      setRuntimeHealthNotice,
+      setRuntimeWaitState,
+      setShowModelPrompt: vi.fn(),
+    });
+
+    await expect(
+      transport.fetch({
+        input: [
+          {
+            session: {
+              session_id: "session-thread",
+              user_id: "session-user",
+              channel: "session-channel",
+            },
+          },
+        ],
+        signal: AbortSignal.abort(),
+      }),
+    ).rejects.toThrow("The operation was aborted.");
+
+    expect(setRuntimeWaitState).toHaveBeenCalledWith(null);
+    expect(
+      setRuntimeHealthNotice.mock.calls.every(([value]) => value == null),
+    ).toBe(true);
+  });
+
+  it("cancels the matching in-flight runtime request", async () => {
+    vi.stubGlobal("BASE_URL", "http://testserver");
+    vi.spyOn(providerApi, "getActiveModels").mockResolvedValue({
+      resolved_llm: {
+        provider_id: "test-provider",
+        model: "test-model",
+      },
+    } as never);
+    const setRuntimeHealthNotice = vi.fn();
+    const setRuntimeWaitState = vi.fn();
+    let aborted = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+      const signal = init?.signal as AbortSignal;
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          },
+          { once: true },
+        );
+      });
+    });
+
+    const transport = createRuntimeTransport({
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      optionsBaseUrl: undefined,
+      getThreadMeta: () => ({
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      }),
+      getPendingMediaSources: () => [],
+      clearPendingMediaDrafts: vi.fn(),
+      refreshThreadMediaAnalyses: vi.fn(),
+      getSelectedMediaAnalysisIds: () => [],
+      setRuntimeHealthNotice,
+      setRuntimeWaitState,
+      setShowModelPrompt: vi.fn(),
+    });
+
+    const requestPromise = transport.fetch({
+      input: [
+        {
+          session: {
+            session_id: "session-thread",
+            user_id: "session-user",
+            channel: "session-channel",
+          },
+        },
+      ],
+    });
+
+    transport.cancelSession("industry-chat:industry-1:execution-core");
+
+    await expect(requestPromise).rejects.toThrow("The operation was aborted.");
+    expect(aborted).toBe(true);
+    expect(setRuntimeWaitState).toHaveBeenCalledWith(null);
+    expect(
+      setRuntimeHealthNotice.mock.calls.every(([value]) => value == null),
+    ).toBe(true);
+  });
+
   it("clears wait state and broadcasts governance refresh when a streamed response finishes", () => {
     const setRuntimeHealthNotice = vi.fn();
     const setRuntimeWaitState = vi.fn();
@@ -384,6 +505,35 @@ describe("runtimeTransport", () => {
     });
     expect(setRuntimeWaitState).toHaveBeenCalledWith(null);
     expect(dispatchGovernanceDirty).toHaveBeenCalledTimes(1);
+    expect(setRuntimeHealthNotice).not.toHaveBeenCalled();
+  });
+
+  it("treats rejected streamed responses as terminal and clears wait state", () => {
+    const setRuntimeHealthNotice = vi.fn();
+    const setRuntimeWaitState = vi.fn();
+    const dispatchGovernanceDirty = vi.fn();
+    const dispatchHumanAssistDirty = vi.fn();
+
+    const parsed = parseRuntimeResponseChunk(
+      JSON.stringify({
+        object: "response",
+        status: "rejected",
+      }),
+      {
+        setRuntimeHealthNotice,
+        setRuntimeWaitState,
+        dispatchGovernanceDirty,
+        dispatchHumanAssistDirty,
+      },
+    );
+
+    expect(parsed).toEqual({
+      object: "response",
+      status: "rejected",
+    });
+    expect(setRuntimeWaitState).toHaveBeenCalledWith(null);
+    expect(dispatchGovernanceDirty).toHaveBeenCalledTimes(1);
+    expect(dispatchHumanAssistDirty).toHaveBeenCalledTimes(1);
     expect(setRuntimeHealthNotice).not.toHaveBeenCalled();
   });
 });

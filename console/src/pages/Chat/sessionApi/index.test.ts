@@ -143,6 +143,217 @@ describe("sessionApi.openBoundThread", () => {
     expect(mockedGetRuntimeConversation).toHaveBeenCalledTimes(2);
   });
 
+  it("refreshes stale terminal transcripts from backend before returning the session", async () => {
+    const threadId = "industry-chat:industry-v1-acme:execution-core";
+    mockedGetRuntimeConversation.mockResolvedValueOnce(
+      buildConversation(threadId, [
+        {
+          id: "backend-user-1",
+          role: "user",
+          content: [{ type: "text", text: "第一轮" }],
+        },
+        {
+          id: "backend-assistant-1",
+          role: "assistant",
+          type: "message",
+          status: "completed",
+          content: [{ type: "text", text: "旧结果" }],
+          sequence_number: 1,
+        },
+      ]) as Awaited<ReturnType<typeof api.getRuntimeConversation>>,
+    );
+
+    await sessionApi.openBoundThread({
+      name: "Acme Pets - Spider Mesh 主脑",
+      threadId,
+      userId: "copaw-agent-runner",
+      channel: "console",
+      meta: {
+        session_kind: "industry-control-thread",
+      },
+    });
+
+    await sessionApi.updateSession({
+      id: threadId,
+      messages: [
+        { id: "local-user-1", role: "user", cards: [] },
+        { id: "local-assistant-1", role: "assistant", cards: [], msgStatus: "finished" },
+      ] as never[],
+    });
+
+    mockedGetRuntimeConversation.mockResolvedValueOnce(
+      buildConversation(threadId, [
+        {
+          id: "backend-user-1",
+          role: "user",
+          content: [{ type: "text", text: "第一轮" }],
+        },
+        {
+          id: "backend-assistant-1",
+          role: "assistant",
+          type: "message",
+          status: "completed",
+          content: [{ type: "text", text: "旧结果" }],
+          sequence_number: 1,
+        },
+        {
+          id: "backend-user-2",
+          role: "user",
+          content: [{ type: "text", text: "第二轮" }],
+        },
+        {
+          id: "backend-assistant-2",
+          role: "assistant",
+          type: "message",
+          status: "completed",
+          content: [{ type: "text", text: "新结果" }],
+          sequence_number: 2,
+        },
+      ]) as Awaited<ReturnType<typeof api.getRuntimeConversation>>,
+    );
+
+    sessionApiInternals.threadCacheTimeout = 0;
+
+    const restored = await sessionApi.getSession(threadId);
+
+    expect(restored.messages).toHaveLength(4);
+    expect(restored.messages[3]?.msgStatus).toBe("finished");
+  });
+
+  it("refreshes stale sessions before returning the session list", async () => {
+    const threadId = "industry-chat:industry-v1-acme:execution-core";
+    mockedGetRuntimeConversation.mockResolvedValueOnce(
+      buildConversation(threadId, [
+        {
+          id: "backend-user-1",
+          role: "user",
+          content: [{ type: "text", text: "第一轮" }],
+        },
+        {
+          id: "backend-assistant-1",
+          role: "assistant",
+          type: "message",
+          status: "completed",
+          content: [{ type: "text", text: "旧结果" }],
+          sequence_number: 1,
+        },
+      ]) as Awaited<ReturnType<typeof api.getRuntimeConversation>>,
+    );
+
+    await sessionApi.openBoundThread({
+      name: "Acme Pets - Spider Mesh 主脑",
+      threadId,
+      userId: "copaw-agent-runner",
+      channel: "console",
+      meta: {
+        session_kind: "industry-control-thread",
+      },
+    });
+
+    await sessionApi.updateSession({
+      id: threadId,
+      messages: [
+        { id: "local-user-1", role: "user", cards: [] },
+        { id: "local-assistant-1", role: "assistant", cards: [], msgStatus: "finished" },
+      ] as never[],
+    });
+
+    mockedGetRuntimeConversation.mockResolvedValueOnce(
+      buildConversation(threadId, [
+        {
+          id: "backend-user-1",
+          role: "user",
+          content: [{ type: "text", text: "第一轮" }],
+        },
+        {
+          id: "backend-assistant-1",
+          role: "assistant",
+          type: "message",
+          status: "completed",
+          content: [{ type: "text", text: "旧结果" }],
+          sequence_number: 1,
+        },
+        {
+          id: "backend-user-2",
+          role: "user",
+          content: [{ type: "text", text: "第二轮" }],
+        },
+        {
+          id: "backend-assistant-2",
+          role: "assistant",
+          type: "message",
+          status: "completed",
+          content: [{ type: "text", text: "新结果" }],
+          sequence_number: 2,
+        },
+      ]) as Awaited<ReturnType<typeof api.getRuntimeConversation>>,
+    );
+
+    sessionApiInternals.threadCacheTimeout = 0;
+
+    const sessions = await sessionApi.getSessionList();
+    const refreshed = sessions.find((item) => item.id === threadId);
+
+    expect(refreshed?.messages).toHaveLength(4);
+  });
+
+  it("prefers backend terminal transcript over a longer local generating transcript", async () => {
+    const threadId = "industry-chat:industry-v1-acme:execution-core";
+    mockedGetRuntimeConversation.mockResolvedValueOnce(
+      buildConversation(threadId, [
+        {
+          id: "backend-user-1",
+          role: "user",
+          content: [{ type: "text", text: "先开始" }],
+        },
+      ]) as Awaited<ReturnType<typeof api.getRuntimeConversation>>,
+    );
+
+    await sessionApi.openBoundThread({
+      name: "Acme Pets - Spider Mesh 主脑",
+      threadId,
+      userId: "copaw-agent-runner",
+      channel: "console",
+      meta: {
+        session_kind: "industry-control-thread",
+      },
+    });
+
+    await sessionApi.updateSession({
+      id: threadId,
+      messages: [
+        { id: "local-user-1", role: "user", cards: [] },
+        { id: "local-assistant-1", role: "assistant", cards: [], msgStatus: "generating" },
+        { id: "local-assistant-2", role: "assistant", cards: [], msgStatus: "generating" },
+      ] as never[],
+    });
+
+    mockedGetRuntimeConversation.mockResolvedValueOnce(
+      buildConversation(threadId, [
+        {
+          id: "backend-user-1",
+          role: "user",
+          content: [{ type: "text", text: "先开始" }],
+        },
+        {
+          id: "backend-assistant-1",
+          role: "assistant",
+          type: "message",
+          status: "completed",
+          content: [{ type: "text", text: "已经结束" }],
+          sequence_number: 1,
+        },
+      ]) as Awaited<ReturnType<typeof api.getRuntimeConversation>>,
+    );
+
+    sessionApiInternals.threadCacheTimeout = 0;
+
+    const restored = await sessionApi.getSession(threadId);
+
+    expect(restored.messages).toHaveLength(2);
+    expect(restored.messages[1]?.msgStatus).toBe("finished");
+  });
+
   it("prefers the terminal completed status over earlier in-progress chunks", async () => {
     const threadId = "industry-chat:industry-v1-acme:execution-core";
     mockedGetRuntimeConversation.mockResolvedValue(
@@ -175,5 +386,39 @@ describe("sessionApi.openBoundThread", () => {
 
     expect(session.messages).toHaveLength(2);
     expect(session.messages[1]?.msgStatus).toBe("finished");
+  });
+
+  it("marks persisted user messages as completed request cards", async () => {
+    const threadId = "industry-chat:industry-v1-acme:execution-core";
+    mockedGetRuntimeConversation.mockResolvedValue(
+      buildConversation(threadId, [
+        {
+          id: "user-1",
+          role: "user",
+          content: [{ type: "text", text: "已经发出去的消息" }],
+        },
+        {
+          id: "assistant-1-final",
+          role: "assistant",
+          type: "message",
+          status: "completed",
+          content: [{ type: "text", text: "收到" }],
+          sequence_number: 1,
+        },
+      ]) as Awaited<ReturnType<typeof api.getRuntimeConversation>>,
+    );
+
+    const session = await sessionApi.getSession(threadId);
+    const firstCard = session.messages[0]?.cards?.[0] as
+      | {
+          data?: {
+            input?: Array<{
+              content?: Array<{ status?: string }>;
+            }>;
+          };
+        }
+      | undefined;
+
+    expect(firstCard?.data?.input?.[0]?.content?.[0]?.status).toBe("completed");
   });
 });
