@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from copaw.capabilities import CapabilityMount, CapabilityService, CapabilityRegistry
+from copaw.capabilities.skill_service import CapabilitySkillService
 
 
 class _StaticRegistry(CapabilityRegistry):
@@ -40,6 +41,14 @@ class _FakeSkillService:
             if skill.name == skill_name:
                 return skill
         return None
+
+    def read_skill_package_binding(self, skill: object) -> dict[str, str | None]:
+        _ = skill
+        return {
+            "package_ref": None,
+            "package_kind": None,
+            "package_version": None,
+        }
 
     def enable_skill(self, skill_name: str) -> None:
         self.calls.append(("enable", skill_name))
@@ -126,3 +135,57 @@ def test_capability_service_skill_service_handles_file_load_and_sync() -> None:
     assert sync_result == (1, 0)
     assert ("load_file", ("research", "references/brief.md", "customized")) in skill_service.calls
     assert ("sync", (["research"], False)) in skill_service.calls
+
+
+def test_capability_skill_service_install_hub_skill_persists_package_binding(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    skill_dir = tmp_path / "research"
+    skill_dir.mkdir()
+    skill_md = skill_dir / "SKILL.md"
+    skill_md.write_text(
+        """---
+name: research
+description: Research skill
+---
+# Research
+""",
+        encoding="utf-8",
+    )
+    skill = SimpleNamespace(
+        name="research",
+        content=skill_md.read_text(encoding="utf-8"),
+        source="customized",
+        path=str(skill_dir),
+        references={},
+        scripts={},
+    )
+
+    monkeypatch.setattr(
+        "copaw.capabilities.skill_service.install_skill_from_hub",
+        lambda **_kwargs: SimpleNamespace(
+            name="research",
+            enabled=True,
+            source_url="https://example.com/research-pack.zip",
+        ),
+    )
+
+    service = CapabilitySkillService()
+    monkeypatch.setattr(
+        service,
+        "find_skill",
+        lambda skill_name: skill if skill_name == "research" else None,
+    )
+
+    result = service.install_skill_from_hub(
+        bundle_url="https://example.com/research-pack.zip",
+        version="1.2.3",
+        enable=True,
+    )
+    updated = skill_md.read_text(encoding="utf-8")
+
+    assert getattr(result, "source_url") == "https://example.com/research-pack.zip"
+    assert "package_ref: https://example.com/research-pack.zip" in updated
+    assert "package_kind: hub-bundle" in updated
+    assert "package_version: 1.2.3" in updated

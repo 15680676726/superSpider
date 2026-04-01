@@ -588,7 +588,15 @@ def test_skill_capability_execute_path(monkeypatch) -> None:
         name = "test-skill"
         source = "local"
         path = "/tmp/test-skill"
-        content = "Test skill content"
+        content = """---
+name: test-skill
+description: Test skill content
+package_ref: https://example.com/test-skill.zip
+package_kind: hub-bundle
+package_version: 2.0.0
+---
+Test skill content
+"""
         references = []
         scripts = []
 
@@ -606,11 +614,16 @@ def test_skill_capability_execute_path(monkeypatch) -> None:
         capability_id="skill:test-skill",
         payload={"action": "describe"},
     )
+    mount = capability_service.get_capability("skill:test-skill")
     assert payload["success"] is True
     assert payload["phase"] == "completed"
     assert "description loaded" in payload["summary"].lower()
     assert payload["output"]["skill"]["name"] == "test-skill"
     assert payload["output"]["skill"]["source"] == "local"
+    assert mount is not None
+    assert mount.package_ref == "https://example.com/test-skill.zip"
+    assert mount.package_kind == "hub-bundle"
+    assert mount.package_version == "2.0.0"
 
     evidence = evidence_ledger.list_by_task(payload["task_id"])
     assert len(evidence) == 1
@@ -644,6 +657,36 @@ def test_mcp_capability_execute_path() -> None:
     dispatcher = KernelDispatcher(capability_service=capability_service)
     app.state.kernel_dispatcher = dispatcher
 
+    with patch(
+        "copaw.capabilities.service.load_config",
+        return_value=SimpleNamespace(
+            mcp=SimpleNamespace(
+                clients={
+                    "browser": SimpleNamespace(
+                        name="Browser MCP",
+                        description="Run MCP browser tools.",
+                        enabled=True,
+                        transport="stdio",
+                        url="",
+                        headers={},
+                        command="npx",
+                        args=["-y", "@scope/browser@3.4.5"],
+                        env={},
+                        cwd="",
+                        registry=SimpleNamespace(
+                            install_kind="package",
+                            package_identifier="@scope/browser",
+                            package_registry_type="npm",
+                            remote_url="",
+                            version="3.4.5",
+                        ),
+                    ),
+                },
+            ),
+        ),
+    ):
+        mount = capability_service.get_capability("mcp:browser")
+
     payload = _execute_capability_direct(
         capability_service,
         dispatcher,
@@ -656,6 +699,10 @@ def test_mcp_capability_execute_path() -> None:
     assert payload["output"]["tool_name"] == "open_page"
     assert payload["output"]["client_key"] == "browser"
     assert payload["output"]["tool_output"]["wrap_tool_result"] is True
+    assert mount is not None
+    assert mount.package_ref == "@scope/browser"
+    assert mount.package_kind == "npm"
+    assert mount.package_version == "3.4.5"
 
     evidence = evidence_ledger.list_by_task(payload["task_id"])
     assert len(evidence) == 1

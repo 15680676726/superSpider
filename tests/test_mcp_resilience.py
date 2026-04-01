@@ -81,7 +81,9 @@ def test_build_client_attaches_rebuild_info(tmp_path: Path) -> None:
     rebuild_info = getattr(client, "_copaw_rebuild_info", None)
 
     assert isinstance(rebuild_info, dict)
+    assert rebuild_info["name"] == "mcp_everything"
     assert rebuild_info["transport"] == "stdio"
+    assert rebuild_info["headers"] == {}
     assert rebuild_info["command"] == "npx"
     assert rebuild_info["args"] == [
         "-y",
@@ -248,7 +250,7 @@ async def test_query_handler_skips_session_save_when_load_not_reached(
     fake_session = _FakeSession()
     service = query_execution_module.KernelQueryExecutionService(
         session_backend=fake_session,
-        memory_manager=None,
+        conversation_compaction_service=None,
         mcp_manager=None,
         tool_bridge=None,
         environment_service=None,

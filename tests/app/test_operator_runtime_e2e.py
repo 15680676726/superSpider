@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -25,8 +26,10 @@ from copaw.goals import GoalService
 from copaw.kernel import (
     AgentProfileService,
     KernelDispatcher,
+    KernelResult,
     KernelTask,
     KernelTaskStore,
+    KernelTurnExecutor,
 )
 from copaw.learning import LearningEngine, LearningService, PatchExecutor
 from copaw.state import SQLiteStateStore
@@ -672,3 +675,99 @@ def test_operator_runtime_chat_route_keeps_existing_sse_ingress(
         "industry-chat:industry-v1-ops:execution-core"
     )
     assert '"status": "completed"' in response.text
+
+
+def test_operator_runtime_chat_route_surfaces_canonical_blocked_diagnostics(
+    tmp_path,
+) -> None:
+    app = _build_operator_app(tmp_path)
+
+    class _BlockedDispatcher:
+        def submit(self, task):
+            return SimpleNamespace(
+                task_id=task.id,
+                phase="blocked",
+                summary="Runtime seat is still blocked by a host handoff.",
+                error="Runtime seat is still blocked by a host handoff.",
+                decision_request_id=None,
+            )
+
+    app.state.turn_executor = KernelTurnExecutor(
+        session_backend=object(),
+        kernel_dispatcher=_BlockedDispatcher(),
+        query_execution_service=object(),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-runtime-chat-blocked",
+            "session_id": "industry-chat:industry-v1-ops:execution-core",
+            "user_id": "ops-user",
+            "channel": "console",
+            "interaction_mode": "orchestrate",
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "Resume the blocked runtime."}],
+                }
+            ],
+            "control_thread_id": "industry-chat:industry-v1-ops:execution-core",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "Runtime seat is still blocked by a host handoff." in response.text
+    assert (
+        "Next step: Resolve the current runtime blocker before retrying the turn."
+        in response.text
+    )
+
+
+def test_operator_runtime_overview_surfaces_sidecar_memory_degradation(
+    tmp_path,
+) -> None:
+    app = _build_operator_app(tmp_path)
+    app.state.governance_service = SimpleNamespace(
+        get_status=lambda: SimpleNamespace(
+            control_id="runtime",
+            emergency_stop_active=False,
+            emergency_reason=None,
+            emergency_actor=None,
+            pending_decisions=0,
+            pending_patches=0,
+            paused_schedule_ids=[],
+            channel_shutdown_applied=False,
+            handoff={},
+            staffing={},
+            human_assist={},
+            host_twin={},
+            host_companion_session={},
+            host_twin_summary={},
+            updated_at=None,
+        )
+    )
+    app.state.actor_worker = SimpleNamespace(
+        runtime_contract={
+            "sidecar_memory": {
+                "status": "degraded",
+                "failure_source": "sidecar-memory",
+                "summary": "The private compaction memory sidecar is unavailable; runtime continues on canonical state only.",
+                "blocked_next_step": "Restore the compaction sidecar if long-horizon scratch recall is required.",
+            }
+        }
+    )
+    client = TestClient(app)
+
+    response = client.get("/runtime-center/overview")
+
+    assert response.status_code == 200
+    cards = {card["key"]: card for card in response.json()["cards"]}
+    governance = cards["governance"]
+    sidecar_memory = governance["meta"]["sidecar_memory"]
+    assert sidecar_memory["failure_source"] == "sidecar-memory"
+    assert "canonical state only" in sidecar_memory["summary"]
+    assert "Restore the compaction sidecar" in sidecar_memory["blocked_next_step"]

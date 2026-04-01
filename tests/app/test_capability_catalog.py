@@ -77,6 +77,11 @@ def _build_facade(
         list_all_skills=lambda: [],
         list_available_skill_names=lambda: [],
         list_available_skills=lambda: [],
+        read_skill_package_binding=lambda _skill: {
+            "package_ref": None,
+            "package_kind": None,
+            "package_version": None,
+        },
         enable_skill=lambda _name: None,
         disable_skill=lambda _name: None,
         delete_skill=lambda _name: True,
@@ -212,6 +217,11 @@ def test_capability_catalog_public_inventory_uses_one_snapshot() -> None:
         list_all_skills=lambda: [],
         list_available_skill_names=lambda: [],
         list_available_skills=lambda: [],
+        read_skill_package_binding=lambda _skill: {
+            "package_ref": None,
+            "package_kind": None,
+            "package_version": None,
+        },
         enable_skill=lambda _name: None,
         disable_skill=lambda _name: None,
         delete_skill=lambda _name: True,
@@ -233,3 +243,101 @@ def test_capability_catalog_public_inventory_uses_one_snapshot() -> None:
     assert summary.total == 1
     assert summary.enabled == 1
     assert summary.by_source == {"skill": 1}
+
+
+def test_capability_catalog_binds_formal_package_fields() -> None:
+    skill_content = """---
+name: research
+description: Research skill
+package_ref: https://example.com/research-pack.zip
+package_kind: hub-bundle
+package_version: 1.2.3
+---
+# Research
+"""
+    skill_service = SimpleNamespace(
+        list_all_skills=lambda: [
+            SimpleNamespace(
+                name="research",
+                content=skill_content,
+                source="customized",
+                path="/tmp/research",
+                references={},
+                scripts={},
+            ),
+        ],
+        list_available_skill_names=lambda: ["research"],
+        list_available_skills=lambda: [],
+        read_skill_package_binding=lambda _skill: {
+            "package_ref": "https://example.com/research-pack.zip",
+            "package_kind": "hub-bundle",
+            "package_version": "1.2.3",
+        },
+        enable_skill=lambda _name: None,
+        disable_skill=lambda _name: None,
+        delete_skill=lambda _name: True,
+    )
+    config = SimpleNamespace(
+        mcp=SimpleNamespace(
+            clients={
+                "filesystem": SimpleNamespace(
+                    name="Filesystem MCP",
+                    description="Filesystem tools",
+                    enabled=True,
+                    transport="stdio",
+                    url="",
+                    headers={},
+                    command="npx",
+                    args=["-y", "@scope/filesystem@1.0.0"],
+                    env={},
+                    cwd="",
+                    registry=SimpleNamespace(
+                        install_kind="package",
+                        package_identifier="@scope/filesystem",
+                        package_registry_type="npm",
+                        remote_url="",
+                        version="1.0.0",
+                    ),
+                ),
+            },
+        ),
+    )
+    facade = CapabilityCatalogFacade(
+        registry=_FakeRegistry(
+            [
+                CapabilityMount(
+                    id="skill:research",
+                    name="research",
+                    summary="Research",
+                    kind="skill-bundle",
+                    source_kind="skill",
+                    risk_level="guarded",
+                    enabled=True,
+                ),
+                CapabilityMount(
+                    id="mcp:filesystem",
+                    name="filesystem",
+                    summary="Filesystem tools",
+                    kind="remote-mcp",
+                    source_kind="mcp",
+                    risk_level="guarded",
+                    enabled=True,
+                ),
+            ],
+        ),
+        load_config_fn=lambda: config,
+        save_config_fn=lambda _config: None,
+        skill_service=skill_service,
+        override_repository=None,
+        agent_profile_service=None,
+        agent_profile_override_repository=None,
+    )
+
+    mounts = {mount.id: mount for mount in facade.list_capabilities()}
+
+    assert mounts["skill:research"].package_ref == "https://example.com/research-pack.zip"
+    assert mounts["skill:research"].package_kind == "hub-bundle"
+    assert mounts["skill:research"].package_version == "1.2.3"
+    assert mounts["mcp:filesystem"].package_ref == "@scope/filesystem"
+    assert mounts["mcp:filesystem"].package_kind == "npm"
+    assert mounts["mcp:filesystem"].package_version == "1.0.0"

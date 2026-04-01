@@ -62,7 +62,9 @@ class SystemDispatchFacade:
             }
 
         request_payload = (
-            resolved_payload.get("request")
+            resolved_payload.get("dispatch_request")
+            or resolved_payload.get("normalized_request")
+            or resolved_payload.get("request")
             or resolved_payload.get("request_payload")
             or resolved_payload.get("agent_request")
             or {}

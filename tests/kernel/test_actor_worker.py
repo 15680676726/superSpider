@@ -69,6 +69,19 @@ class _SubmitCancelledDispatcher:
         )
 
 
+class _InterruptibleDispatcher:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled: list[tuple[str, str]] = []
+
+    def cancel_task(self, task_id: str, *, resolution: str):
+        self.cancelled.append((task_id, resolution))
+
+    async def execute_task(self, task_id: str):
+        self.started.set()
+        await asyncio.Event().wait()
+
+
 def _build_mailbox_runtime(tmp_path):
     state_store = SQLiteStateStore(tmp_path / "actor-worker-state.db")
     runtime_repository = SqliteAgentRuntimeRepository(state_store)
@@ -323,6 +336,44 @@ def test_actor_worker_writes_completed_agent_experience_to_long_term_memory(tmp_
     )
     assert len(task_memory) == 1
     assert task_memory[0].document_id == "memory:task:task-completed"
+
+
+def test_actor_worker_marks_interrupted_runs_as_cancelled(tmp_path) -> None:
+    mailbox_service, runtime_repository, checkpoint_repository, _state_store = _build_mailbox_runtime(
+        tmp_path,
+    )
+    item = mailbox_service.enqueue_item(
+        agent_id="agent-1",
+        task_id="task-running",
+        title="Interruptible task",
+        capability_ref="system:dispatch_query",
+    )
+    dispatcher = _InterruptibleDispatcher()
+    worker = ActorWorker(
+        worker_id="actor-worker-test",
+        mailbox_service=mailbox_service,
+        kernel_dispatcher=dispatcher,
+    )
+
+    async def _run_and_cancel() -> bool:
+        task = asyncio.create_task(worker.run_once("agent-1"))
+        await dispatcher.started.wait()
+        task.cancel()
+        return await task
+
+    handled = asyncio.run(_run_and_cancel())
+
+    assert handled is True
+    assert dispatcher.cancelled == [("task-running", "cancelled by actor control")]
+    stored = mailbox_service.get_item(item.id)
+    assert stored is not None
+    assert stored.status == "cancelled"
+    runtime = runtime_repository.get_runtime("agent-1")
+    assert runtime is not None
+    assert runtime.runtime_status == "idle"
+    checkpoints = checkpoint_repository.list_checkpoints(agent_id="agent-1", limit=None)
+    assert checkpoints[0].phase == "cancelled"
+    assert checkpoints[0].status == "abandoned"
 
 
 def test_actor_mailbox_retry_clears_stale_blocked_error(tmp_path) -> None:

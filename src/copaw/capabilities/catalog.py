@@ -5,6 +5,7 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any, Callable
 
 from ..industry.identity import normalize_industry_role_id
+from .mcp_registry import resolve_mcp_registry_package_binding
 from .models import CapabilityMount, CapabilitySummary
 from .registry import CapabilityRegistry
 from .skill_service import CapabilitySkillService
@@ -62,7 +63,9 @@ class CapabilityCatalogFacade:
         kind: str | None = None,
         enabled_only: bool = False,
     ) -> list[CapabilityMount]:
-        mounts = self._apply_overrides(self._registry.list_capabilities())
+        mounts = self._bind_package_metadata(
+            self._apply_overrides(self._registry.list_capabilities()),
+        )
         if kind:
             mounts = [mount for mount in mounts if mount.kind == kind]
         if enabled_only:
@@ -198,15 +201,11 @@ class CapabilityCatalogFacade:
             if skill is None:
                 continue
             payload.append(
-                {
-                    "name": skill.name,
-                    "content": skill.content,
-                    "source": skill.source,
-                    "path": skill.path,
-                    "references": skill.references,
-                    "scripts": skill.scripts,
-                    "enabled": skill.name in enabled_names,
-                },
+                self._build_skill_spec_payload(
+                    mount=mount,
+                    skill=skill,
+                    enabled=skill.name in enabled_names,
+                ),
             )
         return payload
 
@@ -222,29 +221,27 @@ class CapabilityCatalogFacade:
             if skill is None:
                 continue
             payload.append(
-                {
-                    "name": skill.name,
-                    "content": skill.content,
-                    "source": skill.source,
-                    "path": skill.path,
-                    "references": skill.references,
-                    "scripts": skill.scripts,
-                    "enabled": True,
-                },
+                self._build_skill_spec_payload(
+                    mount=mount,
+                    skill=skill,
+                    enabled=True,
+                ),
             )
         return payload
 
     def list_mcp_client_infos(self) -> list[dict[str, object]]:
         config = self._load_config()
-        allowed_keys = {
-            _capability_name_from_id(mount.id, prefix="mcp:")
+        bound_mounts = {
+            _capability_name_from_id(mount.id, prefix="mcp:"): mount
             for mount in self.list_capabilities(kind="remote-mcp")
         }
+        allowed_keys = set(bound_mounts)
         payload: list[dict[str, object]] = []
         for key, client in config.mcp.clients.items():
             if key not in allowed_keys:
                 continue
             client_registry = getattr(client, "registry", None)
+            mount = bound_mounts.get(key)
             payload.append(
                 {
                     "key": key,
@@ -262,6 +259,11 @@ class CapabilityCatalogFacade:
                         client_registry.model_dump(mode="json")
                         if client_registry is not None
                         else None
+                    ),
+                    "package_ref": mount.package_ref if mount is not None else None,
+                    "package_kind": mount.package_kind if mount is not None else None,
+                    "package_version": (
+                        mount.package_version if mount is not None else None
                     ),
                 },
             )
@@ -300,6 +302,90 @@ class CapabilityCatalogFacade:
                 update["risk_level"] = override.forced_risk_level
             updated.append(mount.model_copy(update=update))
         return updated
+
+    def _bind_package_metadata(
+        self,
+        mounts: list[CapabilityMount],
+    ) -> list[CapabilityMount]:
+        if not mounts:
+            return mounts
+        needs_skill_binding = any(
+            mount.source_kind == "skill" and not mount.package_ref
+            for mount in mounts
+        )
+        needs_mcp_binding = any(
+            mount.source_kind == "mcp" and not mount.package_ref
+            for mount in mounts
+        )
+        skill_map = {}
+        if needs_skill_binding:
+            skill_map = {
+                skill.name: skill
+                for skill in self._skill_service.list_all_skills()
+            }
+        mcp_clients = {}
+        if needs_mcp_binding:
+            config = self._load_config()
+            mcp_clients = dict(getattr(getattr(config, "mcp", None), "clients", {}) or {})
+        bound_mounts: list[CapabilityMount] = []
+        for mount in mounts:
+            package_ref = mount.package_ref
+            package_kind = mount.package_kind
+            package_version = mount.package_version
+            if mount.source_kind == "skill" and not package_ref:
+                skill_name = _capability_name_from_id(mount.id, prefix="skill:")
+                skill = skill_map.get(skill_name)
+                if skill is not None:
+                    binding = self._skill_service.read_skill_package_binding(skill)
+                    package_ref = binding["package_ref"]
+                    package_kind = binding["package_kind"]
+                    package_version = binding["package_version"]
+            elif mount.source_kind == "mcp" and not package_ref:
+                client_key = _capability_name_from_id(mount.id, prefix="mcp:")
+                client = mcp_clients.get(client_key)
+                registry = getattr(client, "registry", None) if client is not None else None
+                (
+                    package_ref,
+                    package_kind,
+                    package_version,
+                ) = resolve_mcp_registry_package_binding(registry)
+            if (
+                package_ref == mount.package_ref
+                and package_kind == mount.package_kind
+                and package_version == mount.package_version
+            ):
+                bound_mounts.append(mount)
+                continue
+            bound_mounts.append(
+                mount.model_copy(
+                    update={
+                        "package_ref": package_ref,
+                        "package_kind": package_kind,
+                        "package_version": package_version,
+                    },
+                ),
+            )
+        return bound_mounts
+
+    @staticmethod
+    def _build_skill_spec_payload(
+        *,
+        mount: CapabilityMount,
+        skill: Any,
+        enabled: bool,
+    ) -> dict[str, object]:
+        return {
+            "name": skill.name,
+            "content": skill.content,
+            "source": skill.source,
+            "path": skill.path,
+            "references": skill.references,
+            "scripts": skill.scripts,
+            "enabled": enabled,
+            "package_ref": mount.package_ref,
+            "package_kind": mount.package_kind,
+            "package_version": mount.package_version,
+        }
 
     def _resolve_agent_profile(self, agent_id: str | None) -> "AgentProfile | None":
         if self._agent_profile_service is None or not agent_id:

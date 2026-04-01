@@ -24,12 +24,9 @@ class RuntimeHost:
         *,
         session_backend: Any | None = None,
         conversation_compaction_service: ConversationCompactionService | None = None,
-        memory_manager: Any | None = None,
     ) -> None:
         self._session_backend = session_backend
-        self._conversation_compaction_service = (
-            conversation_compaction_service or memory_manager
-        )
+        self._conversation_compaction_service = conversation_compaction_service
         self._restart_callback: RestartCallback | None = None
 
     @property
@@ -38,10 +35,6 @@ class RuntimeHost:
 
     @property
     def conversation_compaction_service(self) -> ConversationCompactionService | None:
-        return self._conversation_compaction_service
-
-    @property
-    def memory_manager(self) -> ConversationCompactionService | None:
         return self._conversation_compaction_service
 
     @property
@@ -56,9 +49,6 @@ class RuntimeHost:
         conversation_compaction_service: ConversationCompactionService | None,
     ) -> None:
         self._conversation_compaction_service = conversation_compaction_service
-
-    def set_memory_manager(self, memory_manager: Any | None) -> None:
-        self._conversation_compaction_service = memory_manager
 
     def set_restart_callback(
         self,
@@ -80,10 +70,6 @@ class RuntimeHost:
         )
         if callable(compaction_setter):
             compaction_setter(self._conversation_compaction_service)
-        else:
-            memory_setter = getattr(turn_executor, "set_memory_manager", None)
-            if callable(memory_setter):
-                memory_setter(self._conversation_compaction_service)
         restart_setter = getattr(turn_executor, "set_restart_callback", None)
         if callable(restart_setter):
             restart_setter(self._restart_callback)

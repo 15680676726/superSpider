@@ -427,13 +427,23 @@ The implemented `P0` landed in the following concrete shape:
 6. `_resolve_execution_task_context(...)` remains the canonical query-runtime merge point for `main_brain_runtime / work_context / environment` continuity.
 7. `/runtime-center/chat/run` stays as the same SSE ingress; this work did not introduce a second front door or a donor-style `turn_loop`.
 
-## Immediate Next Step
+## 2026-04-01 P1-P2 Landed Shape
 
-Write and execute a narrow `P0` plan in this order:
+The follow-up `P1/P2` work landed in the following concrete shape:
 
-1. `execution_context.py`
-2. outcome / failure taxonomy hardening
-3. interrupt / cancel / timeout / cleanup hardening
-4. file/shell front-door hardening
-5. evidence/result contract hardening
-6. request normalization hardening
+1. MCP runtime now has a typed runtime/rebuild contract; `MCPClientManager` no longer hand-shapes multiple raw diagnostic dict variants for init/reload/remove flows.
+2. task interpretation now hardens around one canonical request view: system dispatch prefers `dispatch_request`, delegated child-run payloads carry `dispatch_request + request + request_context`, and lineage stays in `meta`, so dispatcher/persistence/read surfaces all consume one normalized request family.
+3. delegated `execute=True` no longer performs per-caller mailbox terminal cleanup inside `TaskDelegationService`; ownership now centers on `ActorSupervisor -> ActorWorker`.
+4. worker interruption, submit-time terminal handling, and result-time terminal handling now close through one mailbox finalization path without introducing a new lifecycle vocabulary.
+5. richer execution diagnostics now normalize `failure_source / blocked_next_step / remediation_summary` for blocked admissions and operator-visible governance surfaces.
+6. capability mounts now carry formal `package_ref / package_kind / package_version`; skill frontmatter and MCP registry provenance both bind into the same read model instead of bespoke shaping.
+7. skill package binding now has a real write/read path: hub install writes package metadata back into `SKILL.md`, and the capability catalog reads it back through the formal binding contract.
+8. sidecar-memory and degraded-runtime handling are now explicit degradation contracts rather than hidden fallback behavior; the runtime-side `sidecar_memory` contract now derives from the same `conversation_compaction_service` boundary that query execution uses, so query execution checkpoints/runtime metadata and Runtime Center overview can surface one consistent degradation path without treating it as a truth-source failure.
+
+## 2026-04-01 Conditional Extraction Audit
+
+The conditional extraction audit was completed and both candidate extractions were rejected for this wave:
+
+1. `task_state_machine.py` was not extracted because the remaining task-phase logic now shares contract helpers without enough duplicated transition code to justify a second state-machine shell.
+2. `turn_loop.py` was not extracted because `KernelTurnExecutor + MainBrainOrchestrator + QueryExecutionRuntime` still form one coherent existing chain; adding a donor-style turn loop here would create a second orchestration explanation layer without deleting enough real complexity.
+3. The practical rule remains: only extract either file in a future wave if the extraction deletes real duplication in the same commit and does not introduce a second execution center.

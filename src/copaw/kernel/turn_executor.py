@@ -32,6 +32,7 @@ from ..app.runtime_commands import (
     run_command_path,
 )
 from ..providers.model_diagnostics import normalize_runtime_exception
+from .runtime_outcome import build_execution_diagnostics
 from .main_brain_intake import (
     extract_main_brain_intake_text,
     resolve_request_main_brain_intake_contract,
@@ -303,8 +304,22 @@ def _approval_required_message(
     )
 
 
-def _admission_blocked_message(*, summary: str | None) -> Msg:
-    detail = summary or "运行准入已被治理控制阻断。"
+def _admission_blocked_message(
+    *,
+    phase: str | None,
+    error: str | None = None,
+    summary: str | None,
+) -> Msg:
+    diagnostics = build_execution_diagnostics(
+        phase=phase,
+        error=error,
+        summary=summary,
+        default_remediation_summary="运行准入已被治理控制阻断。",
+    )
+    detail = diagnostics["remediation_summary"] or "运行准入已被治理控制阻断。"
+    blocked_next_step = diagnostics["blocked_next_step"]
+    if blocked_next_step:
+        detail = f"{detail}\nNext step: {blocked_next_step}"
     return Msg(
         name="Spider Mesh",
         role="assistant",
@@ -463,7 +478,6 @@ class KernelTurnExecutor:
         *,
         session_backend: Any,
         conversation_compaction_service: ConversationCompactionService | None = None,
-        memory_manager: Any | None = None,
         mcp_manager: Any | None = None,
         kernel_dispatcher: Any | None = None,
         tool_bridge: Any | None = None,
@@ -475,18 +489,15 @@ class KernelTurnExecutor:
         in_type_converters: dict[str, Callable] | None = None,
         out_type_converters: dict[str, Callable] | None = None,
     ) -> None:
-        resolved_compaction_service = (
-            conversation_compaction_service or memory_manager
-        )
         self._session_backend = session_backend
-        self._conversation_compaction_service = resolved_compaction_service
+        self._conversation_compaction_service = conversation_compaction_service
         self._mcp_manager = mcp_manager
         self._kernel_dispatcher = kernel_dispatcher
         self._tool_bridge = tool_bridge
         self._environment_service = environment_service
         self._query_execution_service = query_execution_service or KernelQueryExecutionService(
             session_backend=session_backend,
-            conversation_compaction_service=resolved_compaction_service,
+            conversation_compaction_service=conversation_compaction_service,
             mcp_manager=mcp_manager,
             tool_bridge=tool_bridge,
             environment_service=environment_service,
@@ -501,7 +512,7 @@ class KernelTurnExecutor:
         )
         self._sync_query_execution_service(
             session_backend=session_backend,
-            conversation_compaction_service=resolved_compaction_service,
+            conversation_compaction_service=conversation_compaction_service,
             mcp_manager=mcp_manager,
             tool_bridge=tool_bridge,
             environment_service=environment_service,
@@ -530,9 +541,6 @@ class KernelTurnExecutor:
         self._sync_query_execution_compaction_service(
             conversation_compaction_service,
         )
-
-    def set_memory_manager(self, memory_manager: Any | None) -> None:
-        self.set_conversation_compaction_service(memory_manager)
 
     def set_mcp_manager(self, mcp_manager: Any | None) -> None:
         self._mcp_manager = mcp_manager
@@ -659,14 +667,6 @@ class KernelTurnExecutor:
         )
         if callable(method):
             method(conversation_compaction_service)
-            return
-        legacy_method = getattr(
-            self._query_execution_service,
-            "set_memory_manager",
-            None,
-        )
-        if callable(legacy_method):
-            legacy_method(conversation_compaction_service)
 
     def _sync_main_brain_orchestrator(
         self,
@@ -795,7 +795,9 @@ class KernelTurnExecutor:
                         if admitted.phase != "executing":
                             yield (
                                 _admission_blocked_message(
-                                    summary=admitted.summary or admitted.error,
+                                    phase=admitted.phase,
+                                    error=admitted.error,
+                                    summary=admitted.summary,
                                 ),
                                 True,
                             )
@@ -864,7 +866,9 @@ class KernelTurnExecutor:
                     if admitted.phase != "executing":
                         yield (
                             _admission_blocked_message(
-                                summary=admitted.summary or admitted.error,
+                                phase=admitted.phase,
+                                error=admitted.error,
+                                summary=admitted.summary,
                             ),
                             True,
                         )

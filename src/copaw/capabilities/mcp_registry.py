@@ -53,6 +53,22 @@ def _normalize_text(value: object | None) -> str:
     return " ".join(str(value or "").strip().split())
 
 
+def resolve_mcp_registry_package_binding(
+    registry: MCPRegistryProvenance | None,
+) -> tuple[str | None, str | None, str | None]:
+    if registry is None:
+        return None, None, None
+    package_version = _normalize_text(registry.version) or None
+    if registry.install_kind == "package":
+        package_ref = _normalize_text(registry.package_identifier) or None
+        package_kind = _normalize_text(registry.package_registry_type) or None
+        return package_ref, package_kind, package_version
+    package_ref = _normalize_text(registry.remote_url) or None
+    if package_ref is None:
+        package_ref = _normalize_text(registry.server_name) or None
+    return package_ref, "remote", package_version
+
+
 def _normalize_transport(value: object | None) -> Literal["stdio", "streamable_http", "sse"]:
     normalized = str(value or "").strip().lower().replace("-", "_")
     mapped = _TRANSPORT_ALIAS_MAP.get(normalized.replace("_", "-")) or _TRANSPORT_ALIAS_MAP.get(normalized)

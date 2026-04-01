@@ -93,6 +93,42 @@ def test_phase_next_runtime_center_overview_surfaces_main_brain_cockpit_card() -
     assert entry["meta"]["strategy_id"] == "strategy:industry:industry-v1-ops:copaw-agent-runner"
 
 
+def test_phase_next_runtime_center_overview_surfaces_routine_degradation_contract() -> None:
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+
+    class _DegradedRoutineService(FakeRoutineService):
+        def get_runtime_center_overview(self, *, limit: int = 5) -> dict[str, object]:
+            payload = dict(super().get_runtime_center_overview(limit=limit))
+            payload.update(
+                {
+                    "degraded": 1,
+                    "last_fallback": "sidecar-memory-disabled",
+                }
+            )
+            return payload
+
+    app.state.routine_service = _DegradedRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+
+    response = client.get("/runtime-center/overview")
+
+    assert response.status_code == 200
+    cards = {card["key"]: card for card in response.json()["cards"]}
+    routines = cards["routines"]
+    assert routines["meta"]["failure_source"] == "sidecar-memory"
+    assert "canonical state only" in routines["meta"]["remediation_summary"]
+    assert "Restore the compaction sidecar" in routines["meta"]["blocked_next_step"]
+
+
 def test_phase_next_industry_long_run_smoke_keeps_followup_focus_and_replan_truth(
     tmp_path,
 ) -> None:

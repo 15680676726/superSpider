@@ -20,7 +20,6 @@ class RuntimeHealthService:
         kernel_dispatcher: object | None = None,
         governance_service: object | None = None,
         runtime_event_bus: object | None = None,
-        memory_manager: object | None = None,
         browser_runtime_service: object | None = None,
     ) -> None:
         self._core_services = {
@@ -33,7 +32,6 @@ class RuntimeHealthService:
             "runtime_event_bus": runtime_event_bus,
         }
         self._capability_service = capability_service
-        self._memory_manager = memory_manager
         self._browser_runtime_service = browser_runtime_service
 
     @classmethod
@@ -46,7 +44,6 @@ class RuntimeHealthService:
             kernel_dispatcher=getattr(app_state, "kernel_dispatcher", None),
             governance_service=getattr(app_state, "governance_service", None),
             runtime_event_bus=getattr(app_state, "runtime_event_bus", None),
-            memory_manager=getattr(app_state, "memory_manager", None),
             browser_runtime_service=getattr(
                 app_state,
                 "browser_runtime_service",

@@ -15,6 +15,7 @@ from copaw.app.runtime_bootstrap import (
     attach_runtime_state,
     build_runtime_repositories,
     build_runtime_state_bindings,
+    initialize_mcp_manager,
     runtime_manager_stack_from_app_state,
     stop_runtime_manager_stack,
 )
@@ -116,7 +117,7 @@ def _build_bootstrap() -> RuntimeBootstrap:
     )
     return RuntimeBootstrap(
         session_backend=object(),
-        memory_manager=object(),
+        conversation_compaction_service=object(),
         runtime_thread_history_reader=object(),
         state_store=object(),
         repositories=repositories,
@@ -261,6 +262,11 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
     )
 
     assert bindings["runtime_host"] is runtime_host
+    assert (
+        bindings["conversation_compaction_service"]
+        is bootstrap.conversation_compaction_service
+    )
+    assert "memory_manager" not in bindings
     assert bindings["schedule_repository"] is bootstrap.repositories.schedule_repository
     assert (
         bindings["human_assist_task_repository"]
@@ -404,6 +410,7 @@ def test_build_kernel_runtime_threads_state_store_into_capability_service(
         repositories=repositories,
         runtime_event_bus=object(),
         state_query_service=state_query_service,
+        conversation_compaction_service=None,
         experience_memory_service=None,
         state_store=state_store,
         work_context_service=object(),
@@ -610,3 +617,41 @@ def test_resolve_state_store_uses_runtime_working_dir_layout(monkeypatch, tmp_pa
 
     assert isinstance(state_store, SQLiteStateStore)
     assert state_store.path == tmp_path / "state" / "phase1.sqlite3"
+
+
+@pytest.mark.asyncio
+async def test_initialize_mcp_manager_forwards_strict_and_timeout(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeMCPManager:
+        async def init_from_config(
+            self,
+            config,
+            *,
+            strict: bool,
+            timeout: float,
+        ) -> None:
+            captured["config"] = config
+            captured["strict"] = strict
+            captured["timeout"] = timeout
+
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "MCPClientManager",
+        _FakeMCPManager,
+    )
+    config = SimpleNamespace(mcp=object())
+
+    manager = await initialize_mcp_manager(
+        config=config,
+        logger=logging.getLogger(__name__),
+        strict=True,
+        timeout=9.5,
+    )
+
+    assert isinstance(manager, _FakeMCPManager)
+    assert captured == {
+        "config": config.mcp,
+        "strict": True,
+        "timeout": 9.5,
+    }

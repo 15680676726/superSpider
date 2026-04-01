@@ -46,6 +46,9 @@ class CapabilityMount(BaseModel):
     executor_ref: str | None = None
     provider_ref: str | None = None
     timeout_policy: str | None = None
+    package_ref: str | None = None
+    package_kind: str | None = None
+    package_version: str | None = None
     replay_support: bool = False
     enabled: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)

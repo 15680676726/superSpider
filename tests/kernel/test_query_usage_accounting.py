@@ -47,17 +47,6 @@ def test_record_turn_usage_persists_runtime_and_evidence(tmp_path, monkeypatch) 
             last_owner_agent_id="agent-1",
         ),
     )
-    monkeypatch.setattr(
-        "copaw.kernel.query_execution_runtime.ProviderManager.get_instance",
-        lambda: SimpleNamespace(
-            resolve_model_slot=lambda: (
-                SimpleNamespace(provider_id="openai", model="gpt-5"),
-                False,
-                "Using configured active model.",
-                [],
-            ),
-        ),
-    )
     service = KernelQueryExecutionService(
         session_backend=object(),
         agent_profile_service=SimpleNamespace(
@@ -71,6 +60,14 @@ def test_record_turn_usage_persists_runtime_and_evidence(tmp_path, monkeypatch) 
         agent_runtime_repository=agent_runtime_repository,
         task_runtime_repository=task_runtime_repository,
         evidence_ledger=evidence_ledger,
+        provider_manager=SimpleNamespace(
+            resolve_model_slot=lambda: (
+                SimpleNamespace(provider_id="openai", model="gpt-5"),
+                False,
+                "Using configured active model.",
+                [],
+            ),
+        ),
     )
     request = AgentRequest(
         id="req-usage",
@@ -133,3 +130,71 @@ def test_record_turn_usage_persists_runtime_and_evidence(tmp_path, monkeypatch) 
     }
     assert evidence.metadata["cost_estimate"] == 0.12
     assert evidence.metadata["owner_agent_id"] == "agent-1"
+
+
+def test_record_turn_usage_does_not_instantiate_provider_manager_fallback(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    agent_runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
+    agent_runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-2",
+            actor_key="agent-2",
+        ),
+    )
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-2",
+            title="Track usage without provider fallback",
+            task_type="system:dispatch_query",
+            owner_agent_id="agent-2",
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-2",
+            risk_level="auto",
+            last_owner_agent_id="agent-2",
+        ),
+    )
+
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        agent_profile_service=SimpleNamespace(
+            get_agent=lambda agent_id: (
+                SimpleNamespace(agent_id=agent_id)
+                if agent_id == "agent-2"
+                else None
+            ),
+            list_agents=lambda: [SimpleNamespace(agent_id="agent-2")],
+        ),
+        agent_runtime_repository=agent_runtime_repository,
+        task_runtime_repository=task_runtime_repository,
+        evidence_ledger=evidence_ledger,
+        provider_manager=None,
+    )
+    request = AgentRequest(
+        id="req-no-provider",
+        session_id="sess-no-provider",
+        user_id="user-no-provider",
+        channel="console",
+        input=[],
+    )
+    request.agent_id = "agent-2"
+
+    service.record_turn_usage(
+        request=request,
+        kernel_task_id="task-2",
+        usage={
+            "input_tokens": 2,
+            "output_tokens": 1,
+        },
+    )
+
+    runtime = agent_runtime_repository.get_runtime("agent-2")
+    assert runtime is not None
+    assert "last_query_model_context" not in (runtime.metadata or {})

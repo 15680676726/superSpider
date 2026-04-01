@@ -27,6 +27,17 @@ class RuntimeCleanupDisposition:
     mailbox_action: Literal["complete", "block", "cancel", "fail"]
 
 
+_DEFAULT_BLOCKED_NEXT_STEPS: dict[str, str] = {
+    "waiting-confirm": "Review the pending decision request before retrying the turn.",
+    "blocked": "Resolve the current runtime blocker before retrying the turn.",
+    "cancelled": "Restart the task or submit a new turn when you are ready to continue.",
+    "timeout": "Retry the turn after extending or stabilizing the runtime path.",
+    "runtime-error": "Inspect the runtime failure and retry after the blocker is cleared.",
+    "degraded-runtime": "Inspect the degraded runtime path before relying on autonomous continuation.",
+    "sidecar-memory": "Restore the compaction sidecar if long-horizon scratch recall is required.",
+}
+
+
 def normalize_runtime_summary(value: str | None) -> str | None:
     if not isinstance(value, str):
         return None
@@ -73,6 +84,46 @@ def classify_runtime_outcome(
     if success:
         return "completed"
     return "failed"
+
+
+def build_execution_diagnostics(
+    *,
+    phase: str | None = None,
+    error: str | None = None,
+    summary: str | None = None,
+    failure_source: str | None = None,
+    blocked_next_step: str | None = None,
+    remediation_summary: str | None = None,
+    default_remediation_summary: str | None = None,
+) -> dict[str, str | None]:
+    resolved_failure_source = normalize_runtime_summary(failure_source)
+    normalized_phase = normalize_runtime_summary(phase)
+    if resolved_failure_source is None:
+        if normalized_phase in {"waiting-confirm", "blocked", "cancelled", "timeout"}:
+            resolved_failure_source = normalized_phase
+        elif is_timeout_runtime_error(error):
+            resolved_failure_source = "timeout"
+        elif is_cancellation_runtime_error(error):
+            resolved_failure_source = "cancelled"
+        elif normalize_runtime_summary(error) is not None:
+            resolved_failure_source = "runtime-error"
+
+    resolved_next_step = normalize_runtime_summary(blocked_next_step)
+    if resolved_next_step is None and resolved_failure_source is not None:
+        resolved_next_step = _DEFAULT_BLOCKED_NEXT_STEPS.get(resolved_failure_source)
+
+    resolved_remediation_summary = (
+        normalize_runtime_summary(remediation_summary)
+        or normalize_runtime_summary(summary)
+        or normalize_runtime_summary(error)
+        or normalize_runtime_summary(default_remediation_summary)
+    )
+
+    return {
+        "failure_source": resolved_failure_source,
+        "blocked_next_step": resolved_next_step,
+        "remediation_summary": resolved_remediation_summary,
+    }
 
 
 def evidence_status_for_outcome(

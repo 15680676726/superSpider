@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+import frontmatter
 
 from ..agents.skills_hub import install_skill_from_hub as _install_skill_from_hub
 from ..skill_service import (
@@ -13,6 +16,19 @@ from ..skill_service import (
 
 def install_skill_from_hub(**kwargs: object) -> object:
     return _install_skill_from_hub(**kwargs)
+
+
+def _normalize_text(value: object | None) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _skill_package_kind_from_ref(package_ref: str) -> str:
+    normalized = _normalize_text(package_ref).lower()
+    if normalized.startswith("http://") or normalized.startswith("https://"):
+        return "hub-bundle"
+    if normalized:
+        return "filesystem"
+    return ""
 
 
 class CapabilitySkillService:
@@ -39,6 +55,63 @@ class CapabilitySkillService:
                 return skill
         return None
 
+    def read_skill_package_binding(self, skill: Any) -> dict[str, str | None]:
+        content = getattr(skill, "content", "")
+        package_ref = ""
+        package_kind = ""
+        package_version = ""
+        if isinstance(content, str) and content.strip():
+            try:
+                post = frontmatter.loads(content)
+            except Exception:
+                post = None
+            if post is not None:
+                package_ref = _normalize_text(post.get("package_ref"))
+                package_kind = _normalize_text(post.get("package_kind"))
+                package_version = _normalize_text(post.get("package_version"))
+        if not package_ref:
+            package_ref = _normalize_text(getattr(skill, "path", None))
+        if not package_kind:
+            package_kind = _skill_package_kind_from_ref(package_ref)
+        return {
+            "package_ref": package_ref or None,
+            "package_kind": package_kind or None,
+            "package_version": package_version or None,
+        }
+
+    def bind_skill_package_metadata(
+        self,
+        *,
+        skill_name: str,
+        package_ref: str,
+        package_kind: str,
+        package_version: str,
+    ) -> bool:
+        skill = self.find_skill(skill_name)
+        if skill is None:
+            return False
+        skill_path = Path(str(getattr(skill, "path", "") or "")).expanduser()
+        skill_md_path = skill_path / "SKILL.md"
+        if not skill_md_path.exists():
+            return False
+        try:
+            content = skill_md_path.read_text(encoding="utf-8")
+            post = frontmatter.loads(content)
+        except Exception:
+            return False
+        package_fields = {
+            "package_ref": _normalize_text(package_ref),
+            "package_kind": _normalize_text(package_kind),
+            "package_version": _normalize_text(package_version),
+        }
+        for key, value in package_fields.items():
+            if value:
+                post[key] = value
+            else:
+                post.metadata.pop(key, None)
+        skill_md_path.write_text(frontmatter.dumps(post), encoding="utf-8")
+        return True
+
     def enable_skill(self, skill_name: str) -> None:
         SkillService.enable_skill(skill_name)
 
@@ -52,7 +125,30 @@ class CapabilitySkillService:
         return SkillService.create_skill(**kwargs)
 
     def install_skill_from_hub(self, **kwargs: object) -> object:
-        return install_skill_from_hub(**kwargs)
+        result = install_skill_from_hub(**kwargs)
+        skill_name = _normalize_text(getattr(result, "name", None))
+        package_ref = _normalize_text(
+            getattr(result, "source_url", None) or kwargs.get("bundle_url"),
+        )
+        package_kind = _skill_package_kind_from_ref(package_ref)
+        package_version = _normalize_text(kwargs.get("version"))
+        if skill_name and package_ref:
+            self.bind_skill_package_metadata(
+                skill_name=skill_name,
+                package_ref=package_ref,
+                package_kind=package_kind,
+                package_version=package_version,
+            )
+            for key, value in (
+                ("package_ref", package_ref),
+                ("package_kind", package_kind),
+                ("package_version", package_version or None),
+            ):
+                try:
+                    setattr(result, key, value)
+                except Exception:
+                    pass
+        return result
 
     def load_skill_file(
         self,

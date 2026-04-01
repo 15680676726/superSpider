@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from ...config import get_heartbeat_config
+from ...kernel.runtime_outcome import build_execution_diagnostics
 from ...utils.runtime_action_links import build_decision_actions, build_patch_actions
 from .overview_helpers import build_runtime_surface
 from .overview_main_brain import RuntimeCenterMainBrainAssembly
@@ -135,22 +136,48 @@ class _RuntimeCenterOverviewCardsSupport:
             self._normalize_list(overview.get("entries")),
         )
         total = self._int(overview.get("total"), len(entries))
+        degraded = self._int(overview.get("degraded"), 0)
+        last_fallback = self._string(overview.get("last_fallback"))
+        routine_failure_source = None
+        routine_remediation_summary = None
+        if degraded > 0:
+            if last_fallback and "memory" in last_fallback.lower():
+                routine_failure_source = "sidecar-memory"
+                routine_remediation_summary = (
+                    "Routine execution is continuing on canonical state only because the "
+                    "memory sidecar fallback is active."
+                )
+            else:
+                routine_failure_source = "degraded-runtime"
+                routine_remediation_summary = (
+                    "One or more routines are running in degraded mode and require runtime review."
+                )
+        routine_diagnostics = build_execution_diagnostics(
+            failure_source=routine_failure_source,
+            remediation_summary=routine_remediation_summary,
+        )
+        card_summary = self._summarize_routines_card(overview, total)
+        if routine_diagnostics["remediation_summary"]:
+            card_summary = f"{routine_diagnostics['remediation_summary']} {card_summary}"
         return RuntimeOverviewCard(
             key="routines",
             title="例行",
             source="routine_service",
             status="state-service",
             count=total,
-            summary=self._summarize_routines_card(overview, total),
+            summary=card_summary,
             entries=entries,
             meta={
                 "active": self._int(overview.get("active"), 0),
-                "degraded": self._int(overview.get("degraded"), 0),
+                "degraded": degraded,
                 "recent_success_rate": overview.get("recent_success_rate"),
                 "last_verified_at": self._string(overview.get("last_verified_at")),
                 "last_failure_class": self._string(overview.get("last_failure_class")),
-                "last_fallback": self._string(overview.get("last_fallback")),
+                "last_fallback": last_fallback,
                 "resource_conflicts": self._int(overview.get("resource_conflicts"), 0),
+                "failure_source": routine_diagnostics["failure_source"],
+                "blocked_next_step": routine_diagnostics["blocked_next_step"],
+                "remediation_summary": routine_diagnostics["remediation_summary"],
                 "visible_count": len(entries),
                 "truncated": total > len(entries),
             },
@@ -281,14 +308,42 @@ class _RuntimeCenterOverviewCardsSupport:
             or int(human_assist.get("blocked_count") or 0) > 0
             or host_twin_blocked
         )
+        sidecar_memory = self._resolve_runtime_contract_sidecar_memory(app_state)
         current_status = "active" if emergency_active else ("blocked" if runtime_blocked else "idle")
         summary = payload.get("emergency_reason")
-        if not summary and handoff.get("active"):
-            summary = "Human handoff is active and runtime dispatch is temporarily gated."
-        if not summary and int(staffing.get("pending_confirmation_count") or 0) > 0:
-            summary = "Staffing confirmation is still pending for active runtime work."
-        if not summary and int(human_assist.get("blocked_count") or 0) > 0:
-            summary = "Human assist tasks are still blocking automatic continuation."
+        failure_source = None
+        blocked_next_step = None
+        default_summary = "运行时正在接收新工作。"
+        if emergency_active:
+            failure_source = "emergency-stop"
+            blocked_next_step = "Clear the emergency stop before resuming runtime dispatch."
+            default_summary = "Emergency stop is active and runtime dispatch remains paused."
+        elif handoff.get("active"):
+            failure_source = "handoff"
+            blocked_next_step = (
+                "Confirm the active handoff return condition before resuming runtime dispatch."
+            )
+            summary = summary or "Human handoff is active and runtime dispatch is temporarily gated."
+        elif int(staffing.get("pending_confirmation_count") or 0) > 0:
+            failure_source = "staffing"
+            blocked_next_step = (
+                "Confirm who owns the runtime follow-up before resuming automatic execution."
+            )
+            summary = summary or "Staffing confirmation is still pending for active runtime work."
+        elif int(human_assist.get("blocked_count") or 0) > 0:
+            failure_source = "human-assist"
+            blocked_next_step = (
+                "Review the blocking human assist tasks and resume only after evidence is accepted."
+            )
+            summary = summary or "Human assist tasks are still blocking automatic continuation."
+        if (
+            failure_source is None
+            and isinstance(sidecar_memory, dict)
+            and self._string(sidecar_memory.get("status")) == "degraded"
+        ):
+            failure_source = self._string(sidecar_memory.get("failure_source")) or "sidecar-memory"
+            blocked_next_step = self._string(sidecar_memory.get("blocked_next_step"))
+            summary = summary or self._string(sidecar_memory.get("summary"))
         if (
             not summary
             and isinstance(host_twin_summary_payload, dict)
@@ -323,13 +378,23 @@ class _RuntimeCenterOverviewCardsSupport:
                     summary += "; active app families: " + ", ".join(active_family_keys)
                 summary += "."
             else:
+                failure_source = failure_source or "host-twin"
+                blocked_next_step = blocked_next_step or (
+                    f"Follow the host coordination action: {coordination_action}."
+                )
                 active_count = int(host_twin_summary_payload.get("active_app_family_count") or 0)
                 summary = (
                     "Host twin coordination recommends "
                     f"{coordination_action} "
                     f"with {active_count} active app family twin(s)."
                 )
-        summary = summary or "运行时正在接收新工作。"
+        diagnostics = build_execution_diagnostics(
+            failure_source=failure_source,
+            blocked_next_step=blocked_next_step,
+            remediation_summary=self._string(summary),
+            default_remediation_summary=default_summary,
+        )
+        summary = diagnostics["remediation_summary"] or default_summary
         entry = RuntimeOverviewEntry(
             id=str(payload.get("control_id") or "runtime"),
             title="运行治理",
@@ -347,9 +412,13 @@ class _RuntimeCenterOverviewCardsSupport:
                 "host_twin": payload.get("host_twin"),
                 "host_companion_session": payload.get("host_companion_session"),
                 "host_twin_summary": host_twin_summary_payload,
+                "sidecar_memory": sidecar_memory,
                 "handoff": handoff,
                 "staffing": staffing,
                 "human_assist": human_assist,
+                "failure_source": diagnostics["failure_source"],
+                "blocked_next_step": diagnostics["blocked_next_step"],
+                "remediation_summary": diagnostics["remediation_summary"],
             },
         )
         return RuntimeOverviewCard(
@@ -360,8 +429,26 @@ class _RuntimeCenterOverviewCardsSupport:
             count=1,
             summary=str(summary),
             entries=[entry],
-            meta={**payload, "host_twin_summary": host_twin_summary_payload},
+            meta={
+                **payload,
+                "host_twin_summary": host_twin_summary_payload,
+                "sidecar_memory": sidecar_memory,
+                "failure_source": diagnostics["failure_source"],
+                "blocked_next_step": diagnostics["blocked_next_step"],
+                "remediation_summary": diagnostics["remediation_summary"],
+            },
         )
+
+    def _resolve_runtime_contract_sidecar_memory(self, app_state: Any) -> dict[str, Any] | None:
+        for attr_name in ("actor_worker", "actor_supervisor"):
+            target = getattr(app_state, attr_name, None)
+            runtime_contract = self._mapping(getattr(target, "runtime_contract", None))
+            if not runtime_contract:
+                continue
+            sidecar_memory = self._mapping(runtime_contract.get("sidecar_memory"))
+            if sidecar_memory:
+                return sidecar_memory
+        return None
 
     async def _build_evidence_card(self, app_state: Any) -> RuntimeOverviewCard:
         target = getattr(app_state, "evidence_query_service", None)

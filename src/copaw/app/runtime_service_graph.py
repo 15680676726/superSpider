@@ -125,12 +125,17 @@ async def initialize_mcp_manager(
     config: Any,
     logger: logging.Logger,
     strict: bool,
+    timeout: float = 60.0,
 ) -> MCPClientManager:
     mcp_manager = MCPClientManager()
     if not hasattr(config, "mcp"):
         return mcp_manager
     try:
-        await mcp_manager.init_from_config(config.mcp)
+        await mcp_manager.init_from_config(
+            config.mcp,
+            strict=strict,
+            timeout=timeout,
+        )
     except BaseException as exc:
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
@@ -204,6 +209,7 @@ def _build_kernel_runtime(
     repositories: RuntimeRepositories,
     runtime_event_bus: RuntimeEventBus,
     state_query_service: RuntimeCenterStateQueryService,
+    conversation_compaction_service: object | None,
     experience_memory_service: AgentExperienceMemoryService | None,
     state_store: SQLiteStateStore,
     work_context_service: WorkContextService,
@@ -225,6 +231,7 @@ def _build_kernel_runtime(
         repositories=repositories,
         runtime_event_bus=runtime_event_bus,
         state_query_service=state_query_service,
+        conversation_compaction_service=conversation_compaction_service,
         experience_memory_service=experience_memory_service,
         state_store=state_store,
         work_context_service=work_context_service,
@@ -277,7 +284,7 @@ def _warm_runtime_memory_services(
 def build_runtime_bootstrap(
     *,
     session_backend: Any,
-    memory_manager: Any,
+    conversation_compaction_service: Any,
     mcp_manager: MCPClientManager,
 ) -> RuntimeBootstrap:
     runtime_thread_history_reader = SessionRuntimeThreadHistoryReader(
@@ -338,6 +345,7 @@ def build_runtime_bootstrap(
         repositories=repositories,
         runtime_event_bus=runtime_event_bus,
         state_query_service=state_query_service,
+        conversation_compaction_service=conversation_compaction_service,
         experience_memory_service=agent_experience_service,
         state_store=state_store,
         work_context_service=work_context_service,
@@ -345,7 +353,7 @@ def build_runtime_bootstrap(
 
     domain_services = build_runtime_domain_services(
         session_backend=session_backend,
-        memory_manager=memory_manager,
+        conversation_compaction_service=conversation_compaction_service,
         mcp_manager=mcp_manager,
         state_store=state_store,
         repositories=repositories,
@@ -398,7 +406,7 @@ def build_runtime_bootstrap(
     )
     turn_executor = KernelTurnExecutor(
         session_backend=session_backend,
-        memory_manager=memory_manager,
+        conversation_compaction_service=conversation_compaction_service,
         mcp_manager=mcp_manager,
         kernel_dispatcher=kernel_dispatcher,
         tool_bridge=kernel_tool_bridge,
@@ -416,12 +424,11 @@ def build_runtime_bootstrap(
         kernel_dispatcher=kernel_dispatcher,
         governance_service=governance_service,
         runtime_event_bus=runtime_event_bus,
-        memory_manager=memory_manager,
     )
 
     return RuntimeBootstrap(
         session_backend=session_backend,
-        memory_manager=memory_manager,
+        conversation_compaction_service=conversation_compaction_service,
         runtime_thread_history_reader=runtime_thread_history_reader,
         state_store=state_store,
         repositories=repositories,

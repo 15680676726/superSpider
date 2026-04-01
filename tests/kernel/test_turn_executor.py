@@ -40,9 +40,6 @@ class FakeQueryExecutionService:
             conversation_compaction_service
         )
 
-    def set_memory_manager(self, memory_manager) -> None:
-        self.synced["memory_manager"] = memory_manager
-
     def set_kernel_dispatcher(self, kernel_dispatcher) -> None:
         self.synced["kernel_dispatcher"] = kernel_dispatcher
 
@@ -1426,7 +1423,7 @@ def test_kernel_turn_executor_syncs_conversation_compaction_service_without_lega
     query_execution_service = FakeQueryExecutionService()
     executor = KernelTurnExecutor(
         session_backend=object(),
-        memory_manager=conversation_compaction_service,
+        conversation_compaction_service=conversation_compaction_service,
     )
 
     executor.set_query_execution_service(query_execution_service)
@@ -1435,7 +1432,7 @@ def test_kernel_turn_executor_syncs_conversation_compaction_service_without_lega
         query_execution_service.synced["conversation_compaction_service"]
         is conversation_compaction_service
     )
-    assert "memory_manager" not in query_execution_service.synced
+    assert not hasattr(KernelTurnExecutor, "set_memory_manager")
 
 
 def test_runtime_host_syncs_turn_executor_session_backend() -> None:
@@ -1452,6 +1449,8 @@ def test_runtime_host_syncs_turn_executor_session_backend() -> None:
 
     assert query_execution_service.synced["session_backend"] is host.session_backend
     assert main_brain_chat_service.synced["session_backend"] is host.session_backend
+    assert not hasattr(RuntimeHost, "memory_manager")
+    assert not hasattr(RuntimeHost, "set_memory_manager")
 
 
 @pytest.mark.asyncio

@@ -37,6 +37,34 @@ RuntimeExecutionStack: TypeAlias = tuple[
 ]
 
 
+def _build_runtime_contract(
+    *,
+    conversation_compaction_service: object | None,
+) -> dict[str, dict[str, str]]:
+    if conversation_compaction_service is None:
+        return {
+            "sidecar_memory": {
+                "status": "degraded",
+                "failure_source": "sidecar-memory",
+                "summary": (
+                    "The private compaction memory sidecar is unavailable; "
+                    "runtime continues on canonical state only."
+                ),
+                "blocked_next_step": (
+                    "Restore the compaction sidecar if long-horizon scratch recall is required."
+                ),
+            }
+        }
+    return {
+        "sidecar_memory": {
+            "status": "available",
+            "failure_source": "sidecar-memory",
+            "summary": "The private compaction memory sidecar is attached.",
+            "blocked_next_step": "",
+        }
+    }
+
+
 def build_runtime_execution_stack(
     *,
     mcp_manager: MCPClientManager,
@@ -45,6 +73,7 @@ def build_runtime_execution_stack(
     repositories: RuntimeRepositories,
     runtime_event_bus: RuntimeEventBus,
     state_query_service: RuntimeCenterStateQueryService,
+    conversation_compaction_service: object | None,
     experience_memory_service: AgentExperienceMemoryService | None,
     state_store: SQLiteStateStore,
     work_context_service: WorkContextService,
@@ -130,6 +159,11 @@ def build_runtime_execution_stack(
         worker=actor_worker,
         runtime_event_bus=runtime_event_bus,
     )
+    runtime_contract = _build_runtime_contract(
+        conversation_compaction_service=conversation_compaction_service,
+    )
+    setattr(actor_worker, "runtime_contract", dict(runtime_contract))
+    setattr(actor_supervisor, "runtime_contract", dict(runtime_contract))
     governance_service.set_kernel_dispatcher(kernel_dispatcher)
     state_query_service.set_kernel_dispatcher(kernel_dispatcher)
     return (

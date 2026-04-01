@@ -660,6 +660,45 @@ def test_runtime_center_overview_governance_uses_canonical_host_twin_summary_for
     assert "legacy-surfaces" not in cards
 
 
+def test_runtime_center_overview_governance_exposes_canonical_execution_diagnostics():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    governance_service = FakeGovernanceService()
+    governance_service.status["human_assist"] = {
+        "open_count": 1,
+        "blocked_count": 2,
+        "need_more_evidence_count": 1,
+        "task_ids": ["assist-1", "assist-2"],
+        "chat_thread_ids": ["thread-1"],
+    }
+    app.state.governance_service = governance_service
+    app.state.routine_service = FakeRoutineService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/overview")
+
+    assert response.status_code == 200
+    cards = {card["key"]: card for card in response.json()["cards"]}
+    governance = cards["governance"]
+    assert governance["summary"] == (
+        "Human assist tasks are still blocking automatic continuation."
+    )
+    assert governance["meta"]["failure_source"] == "human-assist"
+    assert governance["meta"]["blocked_next_step"] == (
+        "Review the blocking human assist tasks and resume only after evidence is accepted."
+    )
+    assert governance["meta"]["remediation_summary"] == governance["summary"]
+    assert governance["entries"][0]["meta"]["failure_source"] == "human-assist"
+    assert governance["entries"][0]["meta"]["blocked_next_step"] == (
+        "Review the blocking human assist tasks and resume only after evidence is accepted."
+    )
+
+
 def test_runtime_center_work_context_detail_endpoint() -> None:
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()

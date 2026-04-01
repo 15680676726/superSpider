@@ -79,7 +79,7 @@ class RuntimeDomainServices:
 def build_runtime_domain_services(
     *,
     session_backend: Any,
-    memory_manager: Any,
+    conversation_compaction_service: Any,
     mcp_manager: MCPClientManager,
     state_store: SQLiteStateStore,
     repositories: RuntimeRepositories,
@@ -326,7 +326,7 @@ def build_runtime_domain_services(
 
     query_execution_service = KernelQueryExecutionService(
         session_backend=session_backend,
-        memory_manager=memory_manager,
+        conversation_compaction_service=conversation_compaction_service,
         mcp_manager=mcp_manager,
         tool_bridge=kernel_tool_bridge,
         environment_service=environment_service,

@@ -63,7 +63,7 @@ async def lifespan(
     add_copaw_file_handler(WORKING_DIR / "copaw.log")
     await runtime_host.start()
     session_backend = runtime_host.session_backend
-    memory_manager = runtime_host.memory_manager
+    conversation_compaction_service = runtime_host.conversation_compaction_service
     config = load_config()
     mcp_manager = await initialize_mcp_manager(
         config=config,
@@ -72,7 +72,7 @@ async def lifespan(
     )
     bootstrap = build_runtime_bootstrap(
         session_backend=session_backend,
-        memory_manager=memory_manager,
+        conversation_compaction_service=conversation_compaction_service,
         mcp_manager=mcp_manager,
     )
     runtime_host.sync_turn_executor(bootstrap.turn_executor)

@@ -69,6 +69,10 @@ def test_usage_runtime_helpers_are_sourced_from_usage_module() -> None:
         assert getattr(KernelQueryExecutionService, helper_name).__module__ == expected_module
 
 
+def test_query_execution_runtime_drops_legacy_memory_manager_alias() -> None:
+    assert not hasattr(KernelQueryExecutionService, "set_memory_manager")
+
+
 def test_query_execution_runtime_resolves_execution_context_from_task_runtime_and_request(
     tmp_path,
 ) -> None:
@@ -134,3 +138,25 @@ def test_query_execution_runtime_resolves_execution_context_from_task_runtime_an
     assert resolved["main_brain_runtime"]["environment"]["ref"] == "desktop:request"
     assert resolved["main_brain_runtime"]["recovery"]["mode"] == "runtime-metadata"
     assert resolved["main_brain_runtime"]["recovery"]["reason"] == "request-bound"
+
+
+def test_query_execution_runtime_marks_sidecar_memory_boundary_as_degraded_when_missing() -> None:
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        conversation_compaction_service=None,
+    )
+
+    resolved = service._resolve_execution_task_context(  # pylint: disable=protected-access
+        request=SimpleNamespace(),
+        agent_id="ops-agent",
+        kernel_task_id=None,
+        conversation_thread_id="industry-chat:industry-v1-ops:execution-core",
+    )
+
+    degradation = resolved.get("degradation")
+    assert isinstance(degradation, dict)
+    sidecar_memory = degradation.get("sidecar_memory")
+    assert isinstance(sidecar_memory, dict)
+    assert sidecar_memory["failure_source"] == "sidecar-memory"
+    assert "private compaction memory sidecar" in sidecar_memory["remediation_summary"]
+    assert "Restore the compaction sidecar" in sidecar_memory["blocked_next_step"]

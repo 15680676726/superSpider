@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     )
     from ..learning import LearningService
     from ..memory import (
+        ConversationCompactionService,
         DerivedMemoryIndexService,
         MemoryRecallService,
         MemoryReflectionService,
@@ -160,7 +161,7 @@ class RuntimeRepositories:
 @dataclass(slots=True)
 class RuntimeBootstrap:
     session_backend: Any
-    memory_manager: Any
+    conversation_compaction_service: ConversationCompactionService | None
     runtime_thread_history_reader: SessionRuntimeThreadHistoryReader
     state_store: SQLiteStateStore
     repositories: RuntimeRepositories

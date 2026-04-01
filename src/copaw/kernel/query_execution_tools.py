@@ -231,6 +231,7 @@ class _QueryExecutionToolsMixin:
                     ),
                 }
                 payload = {
+                    "dispatch_request": request_payload,
                     "request": request_payload,
                     "mode": "final",
                     "dispatch_events": False,

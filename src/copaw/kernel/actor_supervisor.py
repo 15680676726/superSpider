@@ -30,6 +30,7 @@ class ActorSupervisor:
         self._loop_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
         self._agent_locks: dict[str, asyncio.Lock] = {}
+        self._agent_tasks: dict[str, asyncio.Task[bool]] = {}
 
     async def start(self) -> None:
         if self._loop_task is not None and not self._loop_task.done():
@@ -46,6 +47,15 @@ class ActorSupervisor:
                 await self._loop_task
             except asyncio.CancelledError:
                 pass
+        running_tasks = [
+            task
+            for task in self._agent_tasks.values()
+            if not task.done()
+        ]
+        for task in running_tasks:
+            task.cancel()
+        if running_tasks:
+            await asyncio.gather(*running_tasks, return_exceptions=True)
         self._publish_runtime_event(topic="actor-supervisor", action="stopped", payload={})
 
     def mailbox_service(self) -> ActorMailboxService:
@@ -56,7 +66,19 @@ class ActorSupervisor:
         if lock.locked():
             return False
         async with lock:
-            return await self._worker.run_once(agent_id)
+            existing = self._agent_tasks.get(agent_id)
+            if existing is not None and not existing.done():
+                return False
+            task = asyncio.create_task(
+                self._worker.run_once(agent_id),
+                name=f"copaw-actor:{agent_id}",
+            )
+            self._agent_tasks[agent_id] = task
+            try:
+                return await task
+            finally:
+                if self._agent_tasks.get(agent_id) is task:
+                    self._agent_tasks.pop(agent_id, None)
 
     async def run_poll_cycle(self) -> bool:
         agent_ids = [

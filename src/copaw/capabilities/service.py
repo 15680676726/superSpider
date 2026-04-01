@@ -297,6 +297,9 @@ class CapabilityService:
     def list_available_skill_specs(self) -> list[dict[str, object]]:
         return self._catalog.list_available_skill_specs()
 
+    def install_skill_from_hub(self, **kwargs: object) -> object:
+        return self._skill_service.install_skill_from_hub(**kwargs)
+
     def load_skill_file(
         self,
         *,

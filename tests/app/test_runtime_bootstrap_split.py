@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from copaw.app import runtime_bootstrap_domains as runtime_bootstrap_domains_module
 from copaw.app import runtime_service_graph as runtime_service_graph_module
+from copaw.app import runtime_bootstrap_execution as runtime_bootstrap_execution_module
 from copaw.app.runtime_service_graph import build_runtime_bootstrap
 from copaw.app.runtime_events import RuntimeEventBus
 from copaw.environments import (
@@ -176,7 +177,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
 
     bootstrap = build_runtime_bootstrap(
         session_backend="session-backend",
-        memory_manager="memory-manager",
+        conversation_compaction_service="conversation-compaction-service",
         mcp_manager="mcp-manager",
     )
 
@@ -184,12 +185,32 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     assert calls["domain_builder_kwargs"]["capability_service"] is capability_service
     assert calls["governance_environment_service"] == "environment-service"
     assert calls["governance_industry_service"] == "industry-service"
+    assert (
+        calls["domain_builder_kwargs"]["conversation_compaction_service"]
+        == "conversation-compaction-service"
+    )
     assert calls["turn_executor_kwargs"]["main_brain_chat_service"] == "main-brain-chat-service"
     assert calls["turn_executor_kwargs"]["main_brain_orchestrator"] == "main-brain-orchestrator"
     assert calls["turn_executor_kwargs"]["query_execution_service"] == "query-execution-service"
+    assert (
+        calls["turn_executor_kwargs"]["conversation_compaction_service"]
+        == "conversation-compaction-service"
+    )
     assert bootstrap.goal_service == "goal-service"
     assert bootstrap.main_brain_orchestrator == "main-brain-orchestrator"
     assert bootstrap.turn_executor == "turn-executor"
+
+
+def test_runtime_execution_contract_tracks_compaction_sidecar_instead_of_experience_memory() -> None:
+    degraded = runtime_bootstrap_execution_module._build_runtime_contract(
+        conversation_compaction_service=None,
+    )
+    available = runtime_bootstrap_execution_module._build_runtime_contract(
+        conversation_compaction_service=object(),
+    )
+
+    assert degraded["sidecar_memory"]["status"] == "degraded"
+    assert available["sidecar_memory"]["status"] == "available"
 
 
 def test_environment_service_rebinds_cooperative_facade_after_late_bootstrap_injection(
@@ -466,7 +487,7 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
 
     runtime_bootstrap_domains_module.build_runtime_domain_services(
         session_backend=object(),
-        memory_manager=object(),
+        conversation_compaction_service=object(),
         mcp_manager=object(),
         state_store=SQLiteStateStore(":memory:"),
         repositories=_RepoBag(),

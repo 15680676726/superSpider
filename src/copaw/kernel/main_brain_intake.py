@@ -48,15 +48,6 @@ def read_attached_main_brain_intake_contract(
     return intake_contract
 
 
-def read_attached_main_brain_runtime_context(
-    *,
-    request: Any,
-) -> dict[str, Any] | None:
-    return normalize_main_brain_runtime_context(
-        getattr(request, "_copaw_main_brain_runtime_context", None),
-    )
-
-
 def normalize_main_brain_runtime_context(
     value: Any,
 ) -> dict[str, Any] | None:
@@ -345,7 +336,6 @@ __all__ = [
     "extract_main_brain_intake_text",
     "materialize_main_brain_intake_contract",
     "read_attached_main_brain_intake_contract",
-    "read_attached_main_brain_runtime_context",
     "normalize_main_brain_runtime_context",
     "resolve_execution_core_industry_instance_id",
     "resolve_main_brain_intake_contract",

@@ -74,6 +74,17 @@ class FakeCapabilityService(CapabilityService):
                 kind="skill-bundle",
                 source_kind="skill",
                 risk_level="guarded",
+                package_ref="https://example.com/research-pack.zip",
+                package_kind="hub-bundle",
+                package_version="1.2.3",
+            ),
+            CapabilityMount(
+                id="mcp:browser",
+                name="Browser MCP",
+                summary="Remote browser automation",
+                kind="remote-mcp",
+                source_kind="mcp",
+                risk_level="guarded",
             ),
         ]
 
@@ -85,12 +96,24 @@ class FakeCapabilityService(CapabilityService):
             mounts = [mount for mount in mounts if mount.enabled]
         return mounts
 
+    def list_public_capabilities(
+        self,
+        *,
+        kind: str | None = None,
+        enabled_only: bool = False,
+    ):
+        return [
+            mount
+            for mount in self.list_capabilities(kind=kind, enabled_only=enabled_only)
+            if mount.source_kind != "system"
+        ]
+
     def summarize(self) -> CapabilitySummary:
         return CapabilitySummary(
-            total=2,
-            enabled=2,
-            by_kind={"system-op": 1, "skill-bundle": 1},
-            by_source={"system": 1, "skill": 1},
+            total=3,
+            enabled=3,
+            by_kind={"remote-mcp": 1, "skill-bundle": 1, "system-op": 1},
+            by_source={"mcp": 1, "skill": 1, "system": 1},
         )
 
     def list_skill_specs(self, *, enabled_only: bool = False):
@@ -133,6 +156,7 @@ class DriftingCapabilityService(FakeCapabilityService):
 
     def __init__(self) -> None:
         super().__init__()
+        self._mounts = [mount for mount in self._mounts if mount.source_kind != "mcp"]
         self._public_read_count = 0
 
     def list_public_capabilities(
@@ -448,6 +472,9 @@ def test_capability_market_read_surfaces_expose_canonical_lists() -> None:
     capability_items = capabilities.json()
     assert capability_items
     assert all(item["kind"] == "skill-bundle" for item in capability_items)
+    assert capability_items[0]["package_ref"] == "https://example.com/research-pack.zip"
+    assert capability_items[0]["package_kind"] == "hub-bundle"
+    assert capability_items[0]["package_version"] == "1.2.3"
     assert summary.status_code == 200
     summary_payload = summary.json()
     assert summary_payload["total"] == sum(summary_payload["by_kind"].values())
@@ -1147,6 +1174,10 @@ def test_capability_market_mcp_registry_install_persists_registry_provenance(
             },
         )
         listing = client.get("/capability-market/mcp")
+        capability_listing = client.get(
+            "/capability-market/capabilities",
+            params={"kind": "remote-mcp"},
+        )
 
     assert response.status_code == 201
     payload = response.json()
@@ -1162,6 +1193,15 @@ def test_capability_market_mcp_registry_install_persists_registry_provenance(
     )
     assert installed["registry"]["server_name"] == "io.github/example-filesystem"
     assert installed["registry"]["version"] == "1.0.0"
+    assert capability_listing.status_code == 200
+    installed_mount = next(
+        item
+        for item in capability_listing.json()
+        if item["id"] == "mcp:io_github_example_filesystem"
+    )
+    assert installed_mount["package_ref"] == "@scope/filesystem"
+    assert installed_mount["package_kind"] == "npm"
+    assert installed_mount["package_version"] == "1.0.0"
 
 
 def test_capability_market_mcp_registry_upgrade_updates_version(

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from ..evidence import EvidenceRecord
-from ..providers import ProviderManager
 from .query_execution_shared import *  # noqa: F401,F403
 
 
@@ -164,9 +163,12 @@ class _QueryExecutionUsageRuntimeMixin:
         owner_agent_id: str | None,
     ) -> dict[str, Any]:
         del request, owner_agent_id
+        if self._provider_manager is None:
+            return {}
         try:
-            manager = self._provider_manager or ProviderManager()
-            slot, using_fallback, reason, unavailable = manager.resolve_model_slot()
+            slot, using_fallback, reason, unavailable = (
+                self._provider_manager.resolve_model_slot()
+            )
         except Exception:
             return {}
         return {

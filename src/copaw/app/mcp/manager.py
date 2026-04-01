@@ -13,6 +13,14 @@ from typing import Any, Dict, List, TYPE_CHECKING
 
 from agentscope.mcp import HttpStatefulClient, StdIOStatefulClient
 
+from .runtime_contract import (
+    MCPClientRuntimeRecord,
+    MCPErrorMode,
+    MCPRuntimeStatus,
+    build_mcp_rebuild_spec,
+    build_mcp_runtime_record,
+)
+
 if TYPE_CHECKING:
     from ...config.config import MCPClientConfig, MCPConfig
 
@@ -33,9 +41,16 @@ class MCPClientManager:
     def __init__(self) -> None:
         """Initialize an empty MCP client manager."""
         self._clients: Dict[str, Any] = {}
+        self._runtime_records: Dict[str, MCPClientRuntimeRecord] = {}
         self._lock = asyncio.Lock()
 
-    async def init_from_config(self, config: "MCPConfig") -> None:
+    async def init_from_config(
+        self,
+        config: "MCPConfig",
+        *,
+        strict: bool = False,
+        timeout: float = 60.0,
+    ) -> None:
         """Initialize clients from configuration.
 
         Args:
@@ -45,18 +60,40 @@ class MCPClientManager:
         for key, client_config in config.clients.items():
             if not client_config.enabled:
                 logger.debug(f"MCP client '{key}' is disabled, skipping")
+                await self._set_runtime_record(
+                    key,
+                    client_config,
+                    status="disabled",
+                    init_mode="strict" if strict else "warn",
+                    connect_timeout_seconds=timeout,
+                )
                 continue
 
             try:
-                await self._add_client(key, client_config)
+                await self._add_client(
+                    key,
+                    client_config,
+                    timeout=timeout,
+                    init_mode="strict" if strict else "warn",
+                )
                 logger.debug(f"MCP client '{key}' initialized successfully")
             except BaseException as e:
                 if isinstance(e, (KeyboardInterrupt, SystemExit)):
                     raise
+                await self._set_runtime_record(
+                    key,
+                    client_config,
+                    status="failed",
+                    init_mode="strict" if strict else "warn",
+                    connect_timeout_seconds=timeout,
+                    error=str(e),
+                )
                 logger.warning(
                     f"Failed to initialize MCP client '{key}': {e}",
                     exc_info=True,
                 )
+                if strict:
+                    raise
 
     async def get_clients(self) -> List[Any]:
         """Get list of all active MCP clients.
@@ -79,6 +116,23 @@ class MCPClientManager:
         async with self._lock:
             return self._clients.get(key)
 
+    async def list_runtime_records(self) -> List[MCPClientRuntimeRecord]:
+        """Return MCP runtime diagnostics in stable key order."""
+        async with self._lock:
+            return [
+                self._runtime_records[key].model_copy(deep=True)
+                for key in sorted(self._runtime_records.keys())
+            ]
+
+    async def get_runtime_record(
+        self,
+        key: str,
+    ) -> MCPClientRuntimeRecord | None:
+        """Return runtime diagnostics for one client if available."""
+        async with self._lock:
+            record = self._runtime_records.get(key)
+            return record.model_copy(deep=True) if record is not None else None
+
     async def replace_client(
         self,
         key: str,
@@ -95,6 +149,14 @@ class MCPClientManager:
             client_config: New client configuration
             timeout: Connection timeout in seconds (default 60s)
         """
+        await self._set_runtime_record(
+            key,
+            client_config,
+            status="reloading",
+            init_mode="warn",
+            connect_timeout_seconds=timeout,
+            summary=f"MCP client '{key}' is reloading.",
+        )
         # 1. Create and connect new client outside lock (may be slow)
         logger.debug(f"Connecting new MCP client: {key}")
         new_client = self._build_client(client_config)
@@ -103,6 +165,14 @@ class MCPClientManager:
             # Add timeout to prevent indefinite blocking
             await asyncio.wait_for(new_client.connect(), timeout=timeout)
         except asyncio.TimeoutError:
+            await self._set_runtime_record(
+                key,
+                client_config,
+                status="failed",
+                init_mode="warn",
+                connect_timeout_seconds=timeout,
+                error=f"timeout after {timeout}s",
+            )
             logger.warning(
                 f"Timeout connecting MCP client '{key}' after {timeout}s",
             )
@@ -112,6 +182,14 @@ class MCPClientManager:
                 pass
             raise
         except Exception as e:
+            await self._set_runtime_record(
+                key,
+                client_config,
+                status="failed",
+                init_mode="warn",
+                connect_timeout_seconds=timeout,
+                error=str(e),
+            )
             logger.warning(f"Failed to connect MCP client '{key}': {e}")
             try:
                 await new_client.close()
@@ -134,6 +212,14 @@ class MCPClientManager:
                     )
             else:
                 logger.debug(f"Added new MCP client: {key}")
+        await self._set_runtime_record(
+            key,
+            client_config,
+            status="ready",
+            init_mode="warn",
+            connect_timeout_seconds=timeout,
+            connected=True,
+        )
 
     async def remove_client(self, key: str) -> None:
         """Remove and close a client.
@@ -143,6 +229,15 @@ class MCPClientManager:
         """
         async with self._lock:
             old_client = self._clients.pop(key, None)
+            existing_record = self._runtime_records.get(key)
+            if existing_record is not None:
+                self._runtime_records[key] = existing_record.model_copy(
+                    update={
+                        "status": "removed",
+                        "summary": f"MCP client '{key}' has been removed.",
+                        "connected": False,
+                    },
+                )
 
         if old_client is not None:
             logger.debug(f"Removing MCP client: {key}")
@@ -159,6 +254,14 @@ class MCPClientManager:
         async with self._lock:
             clients_snapshot = list(self._clients.items())
             self._clients.clear()
+            for key, record in list(self._runtime_records.items()):
+                self._runtime_records[key] = record.model_copy(
+                    update={
+                        "status": "closing",
+                        "summary": f"MCP client '{key}' is closing.",
+                        "connected": False,
+                    },
+                )
 
         logger.debug("Closing all MCP clients")
         for key, client in clients_snapshot:
@@ -173,6 +276,7 @@ class MCPClientManager:
         key: str,
         client_config: "MCPClientConfig",
         timeout: float = 60.0,
+        init_mode: str = "warn",
     ) -> None:
         """Add a new client (used during initial setup).
 
@@ -181,6 +285,14 @@ class MCPClientManager:
             client_config: Client configuration
             timeout: Connection timeout in seconds (default 60s)
         """
+        await self._set_runtime_record(
+            key,
+            client_config,
+            status="connecting",
+            init_mode="strict" if init_mode == "strict" else "warn",
+            connect_timeout_seconds=timeout,
+            summary=f"MCP client '{key}' is connecting.",
+        )
         client = self._build_client(client_config)
 
         # Add timeout to prevent indefinite blocking
@@ -188,20 +300,21 @@ class MCPClientManager:
 
         async with self._lock:
             self._clients[key] = client
+            self._runtime_records[key] = build_mcp_runtime_record(
+                key,
+                client_config,
+                status="ready",
+                init_mode="strict" if init_mode == "strict" else "warn",
+                connect_timeout_seconds=timeout,
+                connected=True,
+            )
 
     @staticmethod
     def _build_client(client_config: "MCPClientConfig") -> Any:
         """Build MCP client instance by configured transport."""
-        rebuild_info = {
-            "name": client_config.name,
-            "transport": client_config.transport,
-            "url": client_config.url,
-            "headers": client_config.headers or None,
-            "command": client_config.command,
-            "args": list(client_config.args),
-            "env": dict(client_config.env),
-            "cwd": client_config.cwd or None,
-        }
+        rebuild_info = build_mcp_rebuild_spec(
+            client_config,
+        ).as_client_attribute()
 
         if client_config.transport == "stdio":
             client = StdIOStatefulClient(
@@ -222,3 +335,27 @@ class MCPClientManager:
         )
         setattr(client, "_copaw_rebuild_info", rebuild_info)
         return client
+
+    async def _set_runtime_record(
+        self,
+        key: str,
+        client_config: "MCPClientConfig",
+        *,
+        status: MCPRuntimeStatus,
+        init_mode: MCPErrorMode,
+        connect_timeout_seconds: float,
+        error: str | None = None,
+        summary: str | None = None,
+        connected: bool = False,
+    ) -> None:
+        async with self._lock:
+            self._runtime_records[key] = build_mcp_runtime_record(
+                key,
+                client_config,
+                status=status,  # type: ignore[arg-type]
+                init_mode=init_mode,  # type: ignore[arg-type]
+                connect_timeout_seconds=connect_timeout_seconds,
+                error=error,
+                summary=summary,
+                connected=connected,
+            )

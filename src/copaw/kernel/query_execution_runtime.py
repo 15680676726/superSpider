@@ -4,7 +4,6 @@ from __future__ import annotations
 import importlib
 
 from ..memory.conversation_compaction_service import ConversationCompactionService
-from ..providers import ProviderManager  # noqa: F401
 from .main_brain_intake import (
     build_industry_chat_action_kwargs,
     normalize_main_brain_runtime_context,
@@ -14,6 +13,7 @@ from .main_brain_intake import (
 from .query_execution_resident_runtime import _QueryExecutionResidentRuntimeMixin
 from .query_execution_shared import *  # noqa: F401,F403
 from .query_execution_usage_runtime import _QueryExecutionUsageRuntimeMixin
+from .runtime_outcome import build_execution_diagnostics
 
 
 def CoPawAgent(*args, **kwargs):
@@ -49,7 +49,6 @@ class _QueryExecutionRuntimeMixin(
         *,
         session_backend: Any,
         conversation_compaction_service: ConversationCompactionService | None = None,
-        memory_manager: Any | None = None,
         mcp_manager: Any | None = None,
         tool_bridge: Any | None = None,
         environment_service: Any | None = None,
@@ -71,11 +70,8 @@ class _QueryExecutionRuntimeMixin(
         provider_manager: Any | None = None,
         lease_heartbeat_interval_seconds: float = 15.0,
     ) -> None:
-        resolved_compaction_service = (
-            conversation_compaction_service or memory_manager
-        )
         self._session_backend = session_backend
-        self._conversation_compaction_service = resolved_compaction_service
+        self._conversation_compaction_service = conversation_compaction_service
         self._mcp_manager = mcp_manager
         self._tool_bridge = tool_bridge
         self._environment_service = environment_service
@@ -115,9 +111,6 @@ class _QueryExecutionRuntimeMixin(
         conversation_compaction_service: ConversationCompactionService | None,
     ) -> None:
         self._conversation_compaction_service = conversation_compaction_service
-
-    def set_memory_manager(self, memory_manager: Any | None) -> None:
-        self._conversation_compaction_service = memory_manager
 
     def set_mcp_manager(self, mcp_manager: Any | None) -> None:
         self._mcp_manager = mcp_manager
@@ -1093,6 +1086,7 @@ class _QueryExecutionRuntimeMixin(
         checkpoint_id = getattr(checkpoint, "id", None) if checkpoint is not None else None
         if runtime is None or runtime_repository is None:
             return
+        degradation = _mapping_value((execution_context or {}).get("degradation"))
         main_brain_runtime = self._merge_main_brain_runtime_contexts(
             dict(runtime.metadata or {}).get("main_brain_runtime"),
             (execution_context or {}).get("main_brain_runtime"),
@@ -1114,6 +1108,10 @@ class _QueryExecutionRuntimeMixin(
                 ).get("segment_id"),
             ),
         }
+        if degradation:
+            metadata["runtime_degradation"] = degradation
+        else:
+            metadata.pop("runtime_degradation", None)
         if main_brain_runtime is not None:
             metadata["main_brain_runtime"] = main_brain_runtime
         runtime_repository.upsert_runtime(
@@ -1172,6 +1170,7 @@ class _QueryExecutionRuntimeMixin(
         if runtime is None or runtime_repository is None:
             return
         blocking_error = resolved_error if should_block_runtime_error(resolved_error) else None
+        degradation = _mapping_value((execution_context or {}).get("degradation"))
         main_brain_runtime = self._merge_main_brain_runtime_contexts(
             dict(runtime.metadata or {}).get("main_brain_runtime"),
             (execution_context or {}).get("main_brain_runtime"),
@@ -1188,9 +1187,15 @@ class _QueryExecutionRuntimeMixin(
                 if blocking_error
                 else "cancelled"
                 if resolved_error
+                else "degraded"
+                if degradation
                 else "completed"
             ),
         }
+        if degradation:
+            metadata["runtime_degradation"] = degradation
+        else:
+            metadata.pop("runtime_degradation", None)
         if main_brain_runtime is not None:
             metadata["main_brain_runtime"] = main_brain_runtime
         runtime_repository.upsert_runtime(
@@ -1282,7 +1287,49 @@ class _QueryExecutionRuntimeMixin(
         _merge_main_brain_runtime(
             self._resolve_request_main_brain_runtime_context(request=request),
         )
+        degradation = self._resolve_execution_degradation_context(
+            request=request,
+            agent_id=agent_id,
+        )
+        if degradation:
+            context["degradation"] = degradation
         return context
+
+    def _resolve_execution_degradation_context(
+        self,
+        *,
+        request: Any | None,
+        agent_id: str,
+    ) -> dict[str, Any]:
+        degradation: dict[str, Any] = {}
+        if self._conversation_compaction_service is None:
+            degradation["sidecar_memory"] = build_execution_diagnostics(
+                failure_source="sidecar-memory",
+                remediation_summary=(
+                    "The private compaction memory sidecar is unavailable; "
+                    "runtime continues on canonical state only."
+                ),
+            )
+        requested_candidates = self._request_agent_candidates(request) if request is not None else []
+        if agent_id == EXECUTION_CORE_AGENT_ID:
+            for candidate in requested_candidates:
+                if candidate == EXECUTION_CORE_AGENT_ID:
+                    break
+                if self._get_agent_profile(candidate) is not None:
+                    break
+                degradation["owner_fallback"] = {
+                    **build_execution_diagnostics(
+                        failure_source="degraded-runtime",
+                        remediation_summary=(
+                            f"Requested agent '{candidate}' is unavailable; "
+                            "runtime fell back to execution core."
+                        ),
+                    ),
+                    "requested_agent_id": candidate,
+                    "resolved_agent_id": agent_id,
+                }
+                break
+        return degradation
 
     def _record_query_checkpoint(
         self,
@@ -1336,6 +1383,9 @@ class _QueryExecutionRuntimeMixin(
         }
         if main_brain_runtime is not None:
             checkpoint_payload["main_brain_runtime"] = main_brain_runtime
+        degradation = _mapping_value((execution_context or {}).get("degradation"))
+        if degradation:
+            checkpoint_payload["degradation"] = degradation
         return create_checkpoint(
             agent_id=agent_id,
             mailbox_id=mailbox_id,

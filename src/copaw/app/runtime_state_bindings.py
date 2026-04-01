@@ -20,7 +20,7 @@ def build_runtime_state_bindings(
     return {
         "runtime_host": runtime_host,
         "session_backend": bootstrap.session_backend,
-        "memory_manager": bootstrap.memory_manager,
+        "conversation_compaction_service": bootstrap.conversation_compaction_service,
         "runtime_thread_history_reader": bootstrap.runtime_thread_history_reader,
         "channel_manager": manager_stack.channel_manager,
         "cron_manager": manager_stack.cron_manager,

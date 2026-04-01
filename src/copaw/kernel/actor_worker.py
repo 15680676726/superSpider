@@ -2,6 +2,7 @@
 """Resident actor worker for mailbox-driven execution."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -104,164 +105,48 @@ class ActorWorker:
                     task_id=task_id,
                 )
                 if admitted is not None and getattr(admitted, "phase", None) != "executing":
-                    disposition = resolve_runtime_cleanup_disposition(
-                        str(getattr(admitted, "phase", "failed")),
-                    )
-                    phase = disposition.phase
-                    summary = str(getattr(admitted, "summary", phase))
-                    checkpoint = self._mailbox_service.create_checkpoint(
+                    self._finalize_mailbox_item(
                         agent_id=agent_id,
-                        mailbox_id=started.id,
+                        item=started,
                         task_id=task_id,
-                        work_context_id=started.work_context_id,
-                        checkpoint_kind="task-result",
-                        status=disposition.checkpoint_status,
-                        phase=phase,
-                        conversation_thread_id=started.conversation_thread_id,
-                        summary=summary,
-                        resume_payload={"task_id": task_id, "phase": phase},
+                        phase=str(getattr(admitted, "phase", "failed")),
+                        summary=str(getattr(admitted, "summary", "failed")),
+                        snapshot_payload={"result": _model_dump(admitted)},
                     )
-                    if disposition.mailbox_action == "block":
-                        self._mailbox_service.block_item(
-                            started.id,
-                            reason=summary,
-                            task_id=task_id,
-                            checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                        )
-                    elif disposition.mailbox_action == "cancel":
-                        self._mailbox_service.cancel_item(
-                            started.id,
-                            reason=summary,
-                            task_id=task_id,
-                            checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                        )
-                        self._maybe_write_experience(
-                            agent_id=agent_id,
-                            item=started,
-                            status="cancelled",
-                            summary=summary,
-                            task_id=task_id,
-                            checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                        )
-                    else:
-                        self._mailbox_service.fail_item(
-                            started.id,
-                            error_summary=summary,
-                            retryable=False,
-                            task_id=task_id,
-                            checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                        )
-                        self._maybe_write_experience(
-                            agent_id=agent_id,
-                            item=started,
-                            status="failed",
-                            summary=summary,
-                            error_summary=summary,
-                            task_id=task_id,
-                            checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                        )
                     return True
                 result = await self._execute_task_with_heartbeat(task_id, lease)
 
-            result_phase = str(getattr(result, "phase", "completed"))
-            result_summary = str(getattr(result, "summary", "Actor mailbox item completed"))
-            disposition = resolve_runtime_cleanup_disposition(result_phase)
-            checkpoint = self._mailbox_service.create_checkpoint(
+            self._finalize_mailbox_item(
                 agent_id=agent_id,
-                mailbox_id=item.id,
+                item=started,
                 task_id=task_id,
-                work_context_id=item.work_context_id,
-                checkpoint_kind="task-result",
-                status=disposition.checkpoint_status,
-                phase=disposition.phase,
-                conversation_thread_id=item.conversation_thread_id,
-                summary=result_summary,
-                resume_payload={"task_id": task_id, "phase": disposition.phase},
+                phase=str(getattr(result, "phase", "completed")),
+                summary=str(getattr(result, "summary", "Actor mailbox item completed")),
                 snapshot_payload={"result": _model_dump(result)},
             )
-            if disposition.mailbox_action == "complete":
-                self._mailbox_service.complete_item(
-                    item.id,
-                    result_summary=result_summary,
-                    checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                    task_id=task_id,
-                )
-                self._maybe_write_experience(
-                    agent_id=agent_id,
-                    item=started,
-                    status="completed",
-                    summary=result_summary,
-                    task_id=task_id,
-                    checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                )
-            elif disposition.mailbox_action == "block":
-                self._mailbox_service.block_item(
-                    item.id,
-                    reason=result_summary,
-                    task_id=task_id,
-                    checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                )
-            elif disposition.mailbox_action == "cancel":
-                self._mailbox_service.cancel_item(
-                    item.id,
-                    reason=result_summary,
-                    task_id=task_id,
-                    checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                )
-                self._maybe_write_experience(
-                    agent_id=agent_id,
-                    item=started,
-                    status="cancelled",
-                    summary=result_summary,
-                    task_id=task_id,
-                    checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                )
-            else:
-                self._mailbox_service.fail_item(
-                    item.id,
-                    error_summary=result_summary,
-                    retryable=False,
-                    task_id=task_id,
-                    checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                )
-                self._maybe_write_experience(
-                    agent_id=agent_id,
-                    item=started,
-                    status="failed",
-                    summary=result_summary,
-                    error_summary=result_summary,
-                    task_id=task_id,
-                    checkpoint_id=checkpoint.id if checkpoint is not None else None,
-                )
+            return True
+        except asyncio.CancelledError:
+            resolution = "cancelled by actor control"
+            if isinstance(task_id, str) and task_id.strip():
+                self._cancel_kernel_task(task_id, resolution=resolution)
+            self._finalize_mailbox_item(
+                agent_id=agent_id,
+                item=started,
+                task_id=task_id,
+                phase="cancelled",
+                summary=resolution,
+                snapshot_payload={"error": resolution},
+            )
             return True
         except Exception as exc:
-            failed_checkpoint = self._mailbox_service.create_checkpoint(
+            self._finalize_mailbox_item(
                 agent_id=agent_id,
-                mailbox_id=item.id,
-                task_id=item.task_id,
-                work_context_id=item.work_context_id,
-                checkpoint_kind="task-result",
-                status="failed",
-                phase="worker-error",
-                conversation_thread_id=item.conversation_thread_id,
+                item=started,
+                task_id=task_id,
+                phase="failed",
                 summary=str(exc),
                 snapshot_payload={"error": str(exc)},
-            )
-            self._mailbox_service.fail_item(
-                item.id,
-                error_summary=str(exc),
                 retryable=True,
-                checkpoint_id=failed_checkpoint.id if failed_checkpoint is not None else None,
-                task_id=item.task_id,
-            )
-            self._maybe_write_experience(
-                agent_id=agent_id,
-                item=item,
-                status="failed",
-                summary=str(exc),
-                error_summary=str(exc),
-                task_id=item.task_id,
-                checkpoint_id=failed_checkpoint.id if failed_checkpoint is not None else None,
             )
             return True
         finally:
@@ -342,6 +227,102 @@ class ActorWorker:
             ),
         )
 
+    def _cancel_kernel_task(self, task_id: str, *, resolution: str) -> None:
+        dispatcher = self._kernel_dispatcher
+        if dispatcher is None:
+            return
+        cancel = getattr(dispatcher, "cancel_task", None)
+        if not callable(cancel):
+            return
+        try:
+            cancel(task_id, resolution=resolution)
+        except KeyError:
+            return
+
+    def _finalize_mailbox_item(
+        self,
+        *,
+        agent_id: str,
+        item: object,
+        task_id: str | None,
+        phase: str,
+        summary: str,
+        snapshot_payload: dict[str, object] | None = None,
+        retryable: bool = False,
+    ) -> None:
+        disposition = resolve_runtime_cleanup_disposition(phase)
+        checkpoint = self._mailbox_service.create_checkpoint(
+            agent_id=agent_id,
+            mailbox_id=str(getattr(item, "id", "") or ""),
+            task_id=task_id,
+            work_context_id=getattr(item, "work_context_id", None),
+            checkpoint_kind="task-result",
+            status=disposition.checkpoint_status,
+            phase=disposition.phase,
+            conversation_thread_id=getattr(item, "conversation_thread_id", None),
+            summary=summary,
+            resume_payload={"task_id": task_id, "phase": disposition.phase},
+            snapshot_payload=snapshot_payload,
+        )
+        checkpoint_id = checkpoint.id if checkpoint is not None else None
+        mailbox_id = str(getattr(item, "id", "") or "")
+        if disposition.mailbox_action == "complete":
+            self._mailbox_service.complete_item(
+                mailbox_id,
+                result_summary=summary,
+                checkpoint_id=checkpoint_id,
+                task_id=task_id,
+            )
+            self._maybe_write_experience(
+                agent_id=agent_id,
+                item=item,
+                status="completed",
+                summary=summary,
+                task_id=task_id,
+                checkpoint_id=checkpoint_id,
+            )
+            return
+        if disposition.mailbox_action == "block":
+            self._mailbox_service.block_item(
+                mailbox_id,
+                reason=summary,
+                task_id=task_id,
+                checkpoint_id=checkpoint_id,
+            )
+            return
+        if disposition.mailbox_action == "cancel":
+            self._mailbox_service.cancel_item(
+                mailbox_id,
+                reason=summary,
+                task_id=task_id,
+                checkpoint_id=checkpoint_id,
+            )
+            self._maybe_write_experience(
+                agent_id=agent_id,
+                item=item,
+                status="cancelled",
+                summary=summary,
+                task_id=task_id,
+                checkpoint_id=checkpoint_id,
+            )
+            return
+        self._mailbox_service.fail_item(
+            mailbox_id,
+            error_summary=summary,
+            retryable=retryable,
+            task_id=task_id,
+            checkpoint_id=checkpoint_id,
+        )
+        self._maybe_write_experience(
+            agent_id=agent_id,
+            item=item,
+            status="failed",
+            summary=summary,
+            error_summary=summary,
+            task_id=task_id,
+            checkpoint_id=checkpoint_id,
+        )
+
     def _maybe_write_experience(
         self,
         *,
@@ -414,4 +395,12 @@ class ActorWorker:
 def _model_dump(value: object) -> object:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
+    if isinstance(value, dict):
+        return dict(value)
+    if hasattr(value, "__dict__"):
+        return {
+            key: item
+            for key, item in vars(value).items()
+            if not key.startswith("_")
+        }
     return value
