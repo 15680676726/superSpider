@@ -629,7 +629,9 @@
 - `V4` 的角色治理语义还应继续收紧：`execution-core` 产品上应呈现为团队总控核，推荐能力集以 dispatch / delegate / supervise / summarize 为主；外部执行能力推荐应优先出现在专业 agent 的 capability surface 中
   - 当前 overview 已覆盖 tasks / routines / goals / schedules / industry / agents / predictions / capabilities / evidence / governance / decisions / patches / growth 等正式卡片，前端直接消费 `/runtime-center/overview`，不再合成 mock/chat fallback，并已接入 decision approve/reject、routine replay/diagnosis 与 Patch/Growth 一等卡片
   - 当前 `/runtime-center/conversations/{thread_id}` 已成为 chat widget 的正式线程读面，替代旧 `/chats` session shell persistence
-  - 当前 `GET /runtime-center/decisions/{id}` 已保持纯读；`POST /runtime-center/decisions/{id}/review` 才负责把 `open` 显式推进到 `reviewing`
+  - 当前 `GET /runtime-center/decisions/{id}` 已保持纯读；正式 review 写 front-door 现只剩 `POST /runtime-center/governed/decisions/{id}/review`，用于把 `open` 显式推进到 `reviewing`
+  - 当前 `GET /runtime-center/kernel/tasks` 已改走 persisted `KernelTaskStore` read projection，不再依赖 live `dispatcher.lifecycle.list_tasks()`；因此 `phase=waiting-confirm` 等 kernel 相位会继续按 kernel truth 原样返回，而不是退化成 generic task status
+  - `2026-04-02` 补充：`RuntimeCenterStateQueryService` 已把 task list / kernel task 读面下沉到 `app/runtime_center/task_list_projection.py`，后续继续拆 projector 时应优先沿这种独立 read-collaborator 方向推进，而不是回到巨型 service 内聚合
   - 当前 `/runtime-center/events` 已提供 SSE runtime event stream；前端只把它当作 reload trigger，而不是第二真相源
   - 当前 `/runtime-center/recovery/latest` 与 `/runtime-center/sessions/{id}/lease/force-release` 仍是一等 operator 动作；`/runtime-center/replays/{id}/execute` 已于 `2026-03-25` 从 router 物理删除，不再允许人类前台直接重放执行
   - `V6` 的 routine diagnosis / lock conflict / replay fallback 也应继续落在 Runtime Center detail/drawer 体系里，不允许再造 page-local routine operator 面

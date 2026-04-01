@@ -557,23 +557,39 @@ async def get_decision_detail(
     return decision if isinstance(decision, dict) else {"decision": decision}
 
 
-@router.post("/decisions/{decision_id}/review", response_model=dict[str, object])
-async def review_decision(
+async def _review_decision_payload(
+    decision_id: str,
+    request: Request,
+) -> dict[str, object]:
+    dispatcher = _get_kernel_dispatcher(request)
+    task_store = getattr(dispatcher, "task_store", None)
+    reviewer = getattr(task_store, "mark_decision_reviewing", None)
+    if not callable(reviewer):
+        raise HTTPException(503, detail="Decision review updates are not available")
+    decision_record = reviewer(decision_id)
+    if decision_record is None:
+        raise HTTPException(404, detail=f"Decision request '{decision_id}' not found")
+    state_query = _get_state_query_service(request)
+    decision = await _call_runtime_query_method(
+        state_query,
+        "get_decision_request",
+        not_available_detail="Decision detail queries are not available",
+        decision_id=decision_id,
+    )
+    if decision is None:
+        return {"decision": _model_dump_or_dict(decision_record)}
+    return decision if isinstance(decision, dict) else {"decision": decision}
+
+
+@router.post("/governed/decisions/{decision_id}/review", response_model=dict[str, object])
+async def review_decision_governed(
     decision_id: str,
     request: Request,
     response: Response,
 ) -> dict[str, object]:
+    """Advance a decision from open to reviewing through the governed write surface."""
     apply_runtime_center_surface_headers(response, surface="runtime-center")
-    state_query = _get_state_query_service(request)
-    decision = await _call_runtime_query_method(
-        state_query,
-        "mark_decision_reviewing",
-        not_available_detail="Decision review updates are not available",
-        decision_id=decision_id,
-    )
-    if decision is None:
-        raise HTTPException(404, detail=f"Decision request '{decision_id}' not found")
-    return decision if isinstance(decision, dict) else {"decision": decision}
+    return await _review_decision_payload(decision_id, request)
 
 
 @router.post("/decisions/{decision_id}/approve", response_model=dict[str, object])
@@ -701,13 +717,14 @@ async def list_kernel_tasks(
 ) -> list[dict[str, object]]:
     """List active kernel tasks."""
     apply_runtime_center_surface_headers(response, surface="runtime-center")
-    from ...kernel import KernelDispatcher
-
-    dispatcher = getattr(request.app.state, "kernel_dispatcher", None)
-    if dispatcher is None:
-        return []
-    tasks = dispatcher.lifecycle.list_tasks(phase=phase)
-    return [t.model_dump(mode="json") for t in tasks]
+    state_query = _get_state_query_service(request)
+    tasks = await _call_runtime_query_method(
+        state_query,
+        "list_kernel_tasks",
+        not_available_detail="Kernel task queries are not available",
+        phase=phase,
+    )
+    return tasks if isinstance(tasks, list) else []
 
 
 @router.post("/kernel/tasks/{task_id}/confirm", response_model=dict[str, object])

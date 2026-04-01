@@ -10,7 +10,12 @@ from ..industry.identity import normalize_industry_role_id
 from .mcp_registry import resolve_mcp_registry_package_binding
 from .models import CapabilityMount, CapabilitySummary
 from .registry import CapabilityRegistry
-from .skill_service import CapabilitySkillService
+from .skill_service import (
+    CapabilitySkillService,
+    _normalize_package_ref,
+    _normalize_package_version,
+    _normalize_package_kind,
+)
 
 if TYPE_CHECKING:
     from ..kernel.agent_profile import AgentProfile
@@ -311,10 +316,7 @@ class CapabilityCatalogFacade:
     ) -> list[CapabilityMount]:
         if not mounts:
             return mounts
-        needs_skill_binding = any(
-            mount.source_kind == "skill" and not mount.package_ref
-            for mount in mounts
-        )
+        needs_skill_binding = any(mount.source_kind == "skill" for mount in mounts)
         needs_mcp_binding = any(
             mount.source_kind == "mcp" and not mount.package_ref
             for mount in mounts
@@ -331,17 +333,38 @@ class CapabilityCatalogFacade:
             mcp_clients = dict(getattr(getattr(config, "mcp", None), "clients", {}) or {})
         bound_mounts: list[CapabilityMount] = []
         for mount in mounts:
-            package_ref = mount.package_ref
-            package_kind = mount.package_kind
-            package_version = mount.package_version
-            if mount.source_kind == "skill" and not package_ref:
+            package_kind = _normalize_package_kind(mount.package_kind) or None
+            package_ref = _normalize_package_ref(
+                mount.package_ref,
+                package_kind=package_kind,
+            ) or None
+            package_version = _normalize_package_version(mount.package_version) or None
+            if mount.source_kind == "skill":
                 skill_name = _capability_name_from_id(mount.id, prefix="skill:")
                 skill = skill_map.get(skill_name)
                 if skill is not None:
                     binding = self._read_skill_package_binding(skill)
-                    package_ref = binding["package_ref"]
-                    package_kind = binding["package_kind"]
-                    package_version = binding["package_version"]
+                    binding_ref = binding["package_ref"]
+                    binding_kind = binding["package_kind"]
+                    binding_version = binding["package_version"]
+                    prefer_binding = False
+                    if binding_ref and not package_ref:
+                        prefer_binding = True
+                    elif binding_ref and binding_kind == "filesystem" and (
+                        package_kind in (None, "filesystem")
+                    ):
+                        prefer_binding = True
+                    elif (
+                        binding_ref
+                        and binding_kind
+                        and package_ref == binding_ref
+                        and package_kind == binding_kind
+                    ):
+                        prefer_binding = True
+                    if prefer_binding:
+                        package_ref = binding_ref
+                        package_kind = binding_kind
+                        package_version = binding_version or package_version
             elif mount.source_kind == "mcp" and not package_ref:
                 client_key = _capability_name_from_id(mount.id, prefix="mcp:")
                 client = mcp_clients.get(client_key)
@@ -374,10 +397,18 @@ class CapabilityCatalogFacade:
         if callable(reader):
             binding = reader(skill)
             if isinstance(binding, dict):
+                package_kind = _normalize_package_kind(binding.get("package_kind")) or None
                 return {
-                    "package_ref": _normalize_package_text(binding.get("package_ref")),
-                    "package_kind": _normalize_package_text(binding.get("package_kind")),
-                    "package_version": _normalize_package_text(binding.get("package_version")),
+                    "package_ref": _normalize_package_ref(
+                        binding.get("package_ref"),
+                        package_kind=package_kind,
+                    )
+                    or None,
+                    "package_kind": package_kind,
+                    "package_version": _normalize_package_version(
+                        binding.get("package_version"),
+                    )
+                    or None,
                 }
         return _fallback_skill_package_binding(skill)
 
@@ -551,11 +582,17 @@ def _fallback_skill_package_binding(skill: Any) -> dict[str, str | None]:
         except Exception:
             post = None
         if post is not None:
-            package_ref = _normalize_package_text(post.get("package_ref"))
-            package_kind = _normalize_package_text(post.get("package_kind"))
-            package_version = _normalize_package_text(post.get("package_version"))
+            package_kind = _normalize_package_kind(post.get("package_kind")) or None
+            package_ref = _normalize_package_ref(
+                post.get("package_ref"),
+                package_kind=package_kind,
+            ) or None
+            package_version = _normalize_package_version(post.get("package_version")) or None
     if package_ref is None:
-        package_ref = _normalize_package_text(getattr(skill, "path", None))
+        package_ref = _normalize_package_ref(
+            getattr(skill, "path", None),
+            package_kind="filesystem",
+        ) or None
     if package_kind is None:
         package_kind = _skill_package_kind_from_ref(package_ref)
     return {

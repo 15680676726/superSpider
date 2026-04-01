@@ -36,6 +36,7 @@ from ...state.repositories import (
     SqliteWorkContextRepository,
 )
 from .models import RuntimeActivationSummary
+from .task_list_projection import RuntimeCenterTaskListProjector
 from .task_review_projection import (
     build_task_review_payload,
     build_host_twin_summary,
@@ -49,12 +50,6 @@ from .task_review_projection import (
     string_list_from_values,
     trace_id_from_kernel_meta,
 )
-
-
-def _work_context_context_key(work_context: dict[str, object] | None) -> str | None:
-    if not isinstance(work_context, dict):
-        return None
-    return first_non_empty(work_context.get("context_key"))
 
 
 class RuntimeCenterStateQueryService:
@@ -75,8 +70,6 @@ class RuntimeCenterStateQueryService:
         learning_service: object | None = None,
         agent_profile_service: object | None = None,
         human_assist_task_service: object | None = None,
-        kernel_dispatcher: object | None = None,
-        runtime_event_bus: object | None = None,
         environment_service: object | None = None,
         memory_activation_service: object | None = None,
     ) -> None:
@@ -92,64 +85,25 @@ class RuntimeCenterStateQueryService:
         self._learning_service = learning_service
         self._agent_profile_service = agent_profile_service
         self._human_assist_task_service = human_assist_task_service
-        self._kernel_dispatcher = kernel_dispatcher
-        self._runtime_event_bus = runtime_event_bus
         self._environment_service = environment_service
         self._memory_activation_service = memory_activation_service
+        self._task_list_projector = RuntimeCenterTaskListProjector(
+            task_repository=self._task_repository,
+            task_runtime_repository=self._task_runtime_repository,
+            work_context_loader=self._serialize_work_context,
+            activation_summary_builder=self._build_task_activation_summary,
+        )
 
     def list_tasks(self, limit: int | None = 5) -> list[dict[str, object]]:
-        tasks = self._task_repository.list_tasks(limit=limit)
-        tasks.sort(key=lambda item: item.updated_at, reverse=True)
-        payload: list[dict[str, object]] = []
-        for task in tasks:
-            runtime = self._task_runtime_repository.get_runtime(task.id)
-            kernel_meta = decode_kernel_task_metadata(task.acceptance_criteria)
-            child_task_count = len(self._task_repository.list_tasks(parent_task_id=task.id))
-            work_context = self._serialize_work_context(task.work_context_id)
-            activation = self._build_task_activation_summary(
-                task=task,
-                runtime=runtime,
-                kernel_metadata=kernel_meta,
-            )
-            payload.append(
-                {
-                    "id": task.id,
-                    "trace_id": trace_id_from_kernel_meta(task.id, kernel_meta),
-                    "title": task.title,
-                    "kind": task.task_type,
-                    "status": (
-                        runtime.runtime_status
-                        if runtime is not None and task.status == "running"
-                        else task.status
-                    ),
-                    "owner_agent_id": (
-                        runtime.last_owner_agent_id
-                        if runtime is not None and runtime.last_owner_agent_id
-                        else task.owner_agent_id
-                    ),
-                    "summary": (
-                        runtime.last_result_summary
-                        if runtime is not None and runtime.last_result_summary
-                        else task.summary
-                    ),
-                    "current_progress_summary": (
-                        runtime.last_result_summary
-                        if runtime is not None and runtime.last_result_summary
-                        else task.summary
-                    ),
-                    "updated_at": (
-                        runtime.updated_at if runtime is not None else task.updated_at
-                    ),
-                    "parent_task_id": task.parent_task_id,
-                    "work_context_id": task.work_context_id,
-                    "context_key": _work_context_context_key(work_context),
-                    "work_context": work_context,
-                    "child_task_count": child_task_count,
-                    "route": task_route(task.id),
-                    "activation": activation,
-                },
-            )
-        return payload
+        return self._task_list_projector.list_tasks(limit=limit)
+
+    def list_kernel_tasks(
+        self,
+        *,
+        phase: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, object]]:
+        return self._task_list_projector.list_kernel_tasks(phase=phase, limit=limit)
 
     def get_task_detail(self, task_id: str) -> dict[str, object] | None:
         task = self._task_repository.get_task(task_id)
@@ -913,40 +867,13 @@ class RuntimeCenterStateQueryService:
         decisions = self._decision_request_repository.list_decision_requests(limit=limit)
         payload: list[dict[str, object]] = []
         for decision in decisions:
-            decision = self._maybe_expire_decision(decision)
             payload.append(self._serialize_decision_request(decision))
         return payload
-
-    def set_kernel_dispatcher(self, kernel_dispatcher: object | None) -> None:
-        self._kernel_dispatcher = kernel_dispatcher
-
-    def set_runtime_event_bus(self, runtime_event_bus: object | None) -> None:
-        self._runtime_event_bus = runtime_event_bus
 
     def get_decision_request(self, decision_id: str) -> dict[str, object] | None:
         decision = self._decision_request_repository.get_decision_request(decision_id)
         if decision is None:
             return None
-        decision = self._maybe_expire_decision(decision)
-        return self._serialize_decision_request(decision)
-
-    def mark_decision_reviewing(self, decision_id: str) -> dict[str, object] | None:
-        decision = self._decision_request_repository.get_decision_request(decision_id)
-        if decision is None:
-            return None
-        decision = self._maybe_expire_decision(decision)
-        if decision.status == "open":
-            updated = decision.model_copy(update={"status": "reviewing"})
-            decision = self._decision_request_repository.upsert_decision_request(updated)
-            self._publish_runtime_event(
-                topic="decision",
-                action="reviewing",
-                payload={
-                    "decision_id": decision.id,
-                    "task_id": decision.task_id,
-                    "status": decision.status,
-                },
-            )
         return self._serialize_decision_request(decision)
 
     def _serialize_decision_request(self, decision) -> dict[str, object]:
@@ -991,44 +918,6 @@ class RuntimeCenterStateQueryService:
             "requires_human_confirmation": requires_human_confirmation,
             "actions": actions,
         }
-
-    def _maybe_expire_decision(self, decision):
-        if decision.status not in {"open", "reviewing"}:
-            return decision
-        expires_at = getattr(decision, "expires_at", None)
-        if expires_at is None:
-            return decision
-        now = datetime.now(timezone.utc)
-        if expires_at > now:
-            return decision
-        resolution = "Decision expired before confirmation."
-        if self._kernel_dispatcher is not None:
-            try:
-                expire_method = getattr(self._kernel_dispatcher, "expire_decision", None)
-                if callable(expire_method):
-                    expire_method(decision.id, resolution=resolution)
-                    refreshed = self._decision_request_repository.get_decision_request(decision.id)
-                    return refreshed or decision
-            except Exception:
-                pass
-        updated = decision.model_copy(
-            update={
-                "status": "expired",
-                "resolution": resolution,
-                "resolved_at": now,
-            },
-        )
-        persisted = self._decision_request_repository.upsert_decision_request(updated)
-        self._publish_runtime_event(
-            topic="decision",
-            action="expired",
-            payload={
-                "decision_id": persisted.id,
-                "task_id": persisted.task_id,
-                "status": persisted.status,
-            },
-        )
-        return persisted
 
     def _resolve_goal(self, goal_id: str | None) -> dict[str, object] | None:
         if not goal_id:
@@ -1143,22 +1032,6 @@ class RuntimeCenterStateQueryService:
             agent_payload["route"] = agent_route(agent_id)
             payload.append(agent_payload)
         return payload
-
-    def _publish_runtime_event(
-        self,
-        *,
-        topic: str,
-        action: str,
-        payload: dict[str, object],
-    ) -> None:
-        if self._runtime_event_bus is None:
-            return
-        self._runtime_event_bus.publish(
-            topic=topic,
-            action=action,
-            payload=payload,
-        )
-
 
 Phase1StateQueryService = RuntimeCenterStateQueryService
 RuntimeStateQueryService = RuntimeCenterStateQueryService

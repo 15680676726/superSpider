@@ -524,7 +524,6 @@ def _build_industry_app(
         evidence_ledger=evidence_ledger,
         learning_service=learning_service,
         agent_profile_service=agent_profile_service,
-        kernel_dispatcher=dispatcher,
         work_context_repository=work_context_repository,
     )
     evidence_query_service = RuntimeCenterEvidenceQueryService(

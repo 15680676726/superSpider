@@ -10,6 +10,7 @@ from .agent_profile import AgentProfile, DEFAULT_AGENTS
 from .persistence import decode_kernel_task_metadata
 from ..evidence import EvidenceLedger
 from ..industry.identity import EXECUTION_CORE_AGENT_ID, EXECUTION_CORE_ROLE_ID
+from ..utils.runtime_action_links import build_decision_actions
 from ..state.repositories import (
     SqliteAgentCheckpointRepository,
     SqliteAgentLeaseRepository,
@@ -920,18 +921,10 @@ class AgentProfileService:
         status = _coerce_non_empty_str(getattr(decision, "status", None))
         if decision_id is None or status is None:
             return {}
-        base = f"/api/runtime-center/decisions/{decision_id}"
         if status == "open":
-            return {
-                "review": f"{base}/review",
-                "approve": f"{base}/approve",
-                "reject": f"{base}/reject",
-            }
+            return build_decision_actions(decision_id, status="open")
         if status == "reviewing":
-            return {
-                "approve": f"{base}/approve",
-                "reject": f"{base}/reject",
-            }
+            return build_decision_actions(decision_id, status="reviewing")
         return {}
 
     def _build_runtime_seed_profile(self, runtime: object) -> AgentProfile:

@@ -518,13 +518,22 @@ class EnvironmentService:
         limit: int = 20,
         allow_cross_process_recovery: bool = False,
     ) -> tuple[bool, str]:
-        _ = allow_cross_process_recovery
-        plan = self._host_event_recovery_service.plan_recovery(limit=limit)
+        plan = self._host_event_recovery_service.plan_recovery(
+            limit=limit,
+            allow_cross_process_recovery=allow_cross_process_recovery,
+        )
         planned = int(plan.get("planned") or 0)
         if planned > 0:
             return (True, "actionable-host-events")
         skipped = int(plan.get("skipped") or 0)
         if skipped > 0:
+            skipped_events = plan.get("skipped_events") or []
+            if any(
+                isinstance(item, dict)
+                and item.get("reason") == "cross-process-recovery-disabled"
+                for item in skipped_events
+            ):
+                return (False, "cross-process-recovery-disabled")
             return (False, "host-events-already-handled")
         return (False, "no-actionable-host-events")
 
@@ -534,9 +543,9 @@ class EnvironmentService:
         limit: int = 20,
         allow_cross_process_recovery: bool = False,
     ) -> dict[str, Any]:
-        _ = allow_cross_process_recovery
         return self._host_event_recovery_service.run_recovery_cycle(
             limit=limit,
+            allow_cross_process_recovery=allow_cross_process_recovery,
         )
 
     def register_browser_companion(self, **kwargs) -> dict[str, Any]:

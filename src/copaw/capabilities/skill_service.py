@@ -22,6 +22,14 @@ def _normalize_text(value: object | None) -> str:
     return " ".join(str(value or "").strip().split())
 
 
+def _normalize_package_kind(value: object | None) -> str:
+    return _normalize_text(value).lower()
+
+
+def _normalize_package_version(value: object | None) -> str:
+    return _normalize_text(value)
+
+
 def _skill_package_kind_from_ref(package_ref: str) -> str:
     normalized = _normalize_text(package_ref).lower()
     if normalized.startswith("http://") or normalized.startswith("https://"):
@@ -29,6 +37,25 @@ def _skill_package_kind_from_ref(package_ref: str) -> str:
     if normalized:
         return "filesystem"
     return ""
+
+
+def _normalize_package_ref(
+    package_ref: object | None,
+    *,
+    package_kind: object | None = None,
+) -> str:
+    normalized = _normalize_text(package_ref)
+    if not normalized:
+        return ""
+    normalized_kind = _normalize_package_kind(package_kind)
+    if not normalized_kind:
+        normalized_kind = _skill_package_kind_from_ref(normalized)
+    if normalized_kind == "filesystem":
+        try:
+            return str(Path(normalized).expanduser().resolve())
+        except Exception:
+            return str(Path(normalized).expanduser())
+    return normalized
 
 
 class CapabilitySkillService:
@@ -66,11 +93,17 @@ class CapabilitySkillService:
             except Exception:
                 post = None
             if post is not None:
-                package_ref = _normalize_text(post.get("package_ref"))
-                package_kind = _normalize_text(post.get("package_kind"))
-                package_version = _normalize_text(post.get("package_version"))
+                package_kind = _normalize_package_kind(post.get("package_kind"))
+                package_ref = _normalize_package_ref(
+                    post.get("package_ref"),
+                    package_kind=package_kind,
+                )
+                package_version = _normalize_package_version(post.get("package_version"))
         if not package_ref:
-            package_ref = _normalize_text(getattr(skill, "path", None))
+            package_ref = _normalize_package_ref(
+                getattr(skill, "path", None),
+                package_kind="filesystem",
+            )
         if not package_kind:
             package_kind = _skill_package_kind_from_ref(package_ref)
         return {
@@ -99,10 +132,17 @@ class CapabilitySkillService:
             post = frontmatter.loads(content)
         except Exception:
             return False
+        normalized_package_kind = _normalize_package_kind(package_kind)
+        normalized_package_ref = _normalize_package_ref(
+            package_ref,
+            package_kind=normalized_package_kind,
+        )
+        if not normalized_package_kind:
+            normalized_package_kind = _skill_package_kind_from_ref(normalized_package_ref)
         package_fields = {
-            "package_ref": _normalize_text(package_ref),
-            "package_kind": _normalize_text(package_kind),
-            "package_version": _normalize_text(package_version),
+            "package_ref": normalized_package_ref,
+            "package_kind": normalized_package_kind,
+            "package_version": _normalize_package_version(package_version),
         }
         for key, value in package_fields.items():
             if value:

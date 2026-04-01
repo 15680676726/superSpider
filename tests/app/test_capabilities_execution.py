@@ -407,7 +407,7 @@ def test_capability_can_be_approved_by_decision_id(tmp_path) -> None:
     assert decision_detail.status_code == 200
     assert decision_detail.json()["status"] == "open"
 
-    reviewing = client.post(f"/runtime-center/decisions/{decision_id}/review")
+    reviewing = client.post(f"/runtime-center/governed/decisions/{decision_id}/review")
     assert reviewing.status_code == 200
     assert reviewing.json()["status"] == "reviewing"
 
@@ -557,6 +557,62 @@ def test_query_tool_confirmation_task_confirm_routes_through_decision_resume(
     )
     assert decision is not None
     assert decision.status == "approved"
+
+
+def test_runtime_center_kernel_task_list_reads_from_state_query_not_live_lifecycle(
+    tmp_path,
+) -> None:
+    app = FastAPI()
+    app.include_router(runtime_center_router)
+
+    state_store = SQLiteStateStore(tmp_path / "state.db")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    schedule_repository = SqliteScheduleRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    task_store = KernelTaskStore(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        decision_request_repository=decision_request_repository,
+        evidence_ledger=EvidenceLedger(),
+    )
+    dispatcher = KernelDispatcher(task_store=task_store)
+    app.state.kernel_dispatcher = dispatcher
+    app.state.state_query_service = Phase1StateQueryService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        schedule_repository=schedule_repository,
+        decision_request_repository=decision_request_repository,
+    )
+
+    task = KernelTask(
+        title="Approve treasury transfer",
+        capability_ref="tool:confirm_transfer",
+        environment_ref="env:finance:payments",
+        owner_agent_id="finance-agent",
+        risk_level="confirm",
+        payload={"decision_type": "query-tool-confirmation"},
+    )
+    admitted = dispatcher.submit(task)
+    assert admitted.phase == "waiting-confirm"
+
+    def _unexpected_list_tasks(*args, **kwargs):
+        _ = (args, kwargs)
+        raise AssertionError("kernel task route should read from state query service")
+
+    dispatcher.lifecycle.list_tasks = _unexpected_list_tasks
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/kernel/tasks?phase=waiting-confirm")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["id"] == task.id
+    assert payload[0]["phase"] == "waiting-confirm"
+    assert payload[0]["risk_level"] == "confirm"
+    assert payload[0]["environment_ref"] == "env:finance:payments"
+    assert payload[0]["payload"] == {"decision_type": "query-tool-confirmation"}
 
 
 def test_skill_capability_execute_path(monkeypatch) -> None:

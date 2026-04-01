@@ -753,7 +753,9 @@ def test_query_execution_tool_preflight_creates_runtime_center_decision_for_risk
     )
     assert payload["task_route"] == f"/api/runtime-center/tasks/{payload['task_id']}"
     assert payload["actions"] == {
-        "review": f"/api/runtime-center/decisions/{payload['decision_request_id']}/review",
+        "review": (
+            f"/api/runtime-center/governed/decisions/{payload['decision_request_id']}/review"
+        ),
         "approve": f"/api/runtime-center/decisions/{payload['decision_request_id']}/approve",
         "reject": f"/api/runtime-center/decisions/{payload['decision_request_id']}/reject",
     }

@@ -1168,6 +1168,91 @@ def test_environment_service_does_not_take_over_same_host_other_process_lease_du
     assert detail["recovery"]["startup_recovery_required"] is True
 
 
+def test_environment_service_host_recovery_respects_cross_process_recovery_flag(
+    tmp_path,
+):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="host-a",
+        process_id=101,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="desktop",
+        session_id="sess-host-recovery",
+        user_id="u1",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={"window": "excel-live"},
+        metadata={
+            "resume_kind": "resume-environment",
+            "verification_channel": "runtime-center-self-check",
+        },
+    )
+
+    other_process_registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="host-a",
+        process_id=202,
+    )
+    other_process_service = EnvironmentService(
+        registry=other_process_registry,
+        lease_ttl_seconds=120,
+    )
+    other_process_service.set_session_repository(session_repo)
+    other_process_service.set_runtime_event_bus(RuntimeEventBus(max_events=20))
+    other_process_service.register_session_handle_restorer(
+        "desktop",
+        lambda _context: {"handle": {"window": "excel-restored"}},
+    )
+    other_process_service._runtime_event_bus.publish(
+        topic="host",
+        action="human-return-ready",
+        payload={
+            "session_mount_id": lease.id,
+            "environment_id": lease.environment_id,
+            "checkpoint_ref": "checkpoint:captcha",
+            "verification_channel": "runtime-center-self-check",
+            "return_condition": "captcha-cleared",
+            "handoff_owner_ref": "human-operator:alice",
+        },
+    )
+
+    blocked_allowed, blocked_reason = other_process_service.should_run_host_recovery(
+        limit=10,
+    )
+    allowed_allowed, allowed_reason = other_process_service.should_run_host_recovery(
+        limit=10,
+        allow_cross_process_recovery=True,
+    )
+    blocked_result = other_process_service.run_host_recovery_cycle(limit=10)
+    allowed_result = other_process_service.run_host_recovery_cycle(
+        limit=10,
+        allow_cross_process_recovery=True,
+    )
+
+    assert blocked_allowed is False
+    assert blocked_reason == "cross-process-recovery-disabled"
+    assert allowed_allowed is True
+    assert allowed_reason == "actionable-host-events"
+    assert blocked_result["executed"] == 0
+    assert blocked_result["skipped"] == 1
+    assert allowed_result["executed"] == 1
+    assert allowed_result["decisions"]["recover"] == 1
+
+    restored_session = session_repo.get_session(lease.id)
+    assert restored_session is not None
+    assert restored_session.lease_status == "leased"
+    assert restored_session.metadata["lease_restore_status"] == "restored"
+
+
 def test_environment_service_execute_replay_prefers_registered_executor(tmp_path):
     ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
     stored = ledger.append(

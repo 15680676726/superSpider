@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
+
+import frontmatter
 
 from copaw.capabilities import CapabilityMount, CapabilityService, CapabilityRegistry
 from copaw.capabilities.skill_service import CapabilitySkillService
@@ -189,3 +192,53 @@ description: Research skill
     assert "package_ref: https://example.com/research-pack.zip" in updated
     assert "package_kind: hub-bundle" in updated
     assert "package_version: 1.2.3" in updated
+
+
+def test_capability_skill_service_bind_skill_package_metadata_canonicalizes_filesystem_binding(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    skill_dir = tmp_path / "skills" / "research"
+    skill_dir.mkdir(parents=True)
+    skill_md = skill_dir / "SKILL.md"
+    skill_md.write_text(
+        """---
+name: research
+description: Research skill
+---
+# Research
+""",
+        encoding="utf-8",
+    )
+    skill = SimpleNamespace(
+        name="research",
+        content=skill_md.read_text(encoding="utf-8"),
+        source="customized",
+        path=str(skill_dir),
+        references={},
+        scripts={},
+    )
+    non_canonical_ref = str(skill_dir.parent / "nested" / ".." / "research")
+
+    service = CapabilitySkillService()
+    monkeypatch.setattr(
+        service,
+        "find_skill",
+        lambda skill_name: skill if skill_name == "research" else None,
+    )
+
+    assert (
+        service.bind_skill_package_metadata(
+            skill_name="research",
+            package_ref=non_canonical_ref,
+            package_kind=" Filesystem ",
+            package_version=" 2026.04 ",
+        )
+        is True
+    )
+
+    updated = frontmatter.loads(skill_md.read_text(encoding="utf-8"))
+
+    assert updated["package_ref"] == str(Path(non_canonical_ref).resolve())
+    assert updated["package_kind"] == "filesystem"
+    assert str(updated["package_version"]) == "2026.04"

@@ -195,6 +195,78 @@ def test_host_event_recovery_service_recovers_human_return_ready_with_registered
     ]
 
 
+def test_host_event_recovery_service_blocks_cross_process_recover_until_allowed(
+    tmp_path,
+) -> None:
+    original = _build_recovery_harness(
+        tmp_path,
+        host_id="windows-host",
+        process_id=5151,
+    )
+    lease = original.environment_service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-return-gated",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={"window": "excel-main"},
+        metadata={
+            "resume_kind": "resume-environment",
+            "verification_channel": "runtime-center-self-check",
+        },
+    )
+
+    recovered = _build_recovery_harness(
+        tmp_path,
+        host_id="windows-host",
+        process_id=6262,
+    )
+    recovered.environment_service.register_session_handle_restorer(
+        "desktop",
+        lambda context: {
+            "handle": {"window": "excel-restored"},
+            "metadata": {"restore_source": context["channel"]},
+        },
+    )
+    recovered.event_bus.publish(
+        topic="host",
+        action="human-return-ready",
+        payload={
+            "session_mount_id": lease.id,
+            "environment_id": lease.environment_id,
+            "checkpoint_ref": "checkpoint:captcha",
+            "verification_channel": "runtime-center-self-check",
+            "return_condition": "captcha-cleared",
+            "handoff_owner_ref": "human-operator:alice",
+        },
+    )
+
+    blocked_plan = recovered.recovery_service.plan_recovery(limit=10)
+    blocked_result = recovered.recovery_service.run_recovery_cycle(limit=10)
+    allowed_result = recovered.recovery_service.run_recovery_cycle(
+        limit=10,
+        allow_cross_process_recovery=True,
+    )
+
+    assert blocked_plan["planned"] == 0
+    assert blocked_plan["skipped"] == 1
+    assert blocked_plan["skipped_events"] == [
+        {
+            "event_id": 1,
+            "event_name": "host.human-return-ready",
+            "reason": "cross-process-recovery-disabled",
+        }
+    ]
+    assert blocked_result["executed"] == 0
+    assert blocked_result["skipped"] == 1
+    assert allowed_result["executed"] == 1
+    assert allowed_result["decisions"]["recover"] == 1
+
+    restored = recovered.session_repo.get_session(lease.id)
+    assert restored is not None
+    assert restored.metadata["restore_source"] == "desktop"
+    assert restored.metadata["lease_restore_status"] == "restored"
+
+
 def test_host_event_recovery_service_resumes_unlock_events_when_handle_is_still_live(
     tmp_path,
 ) -> None:

@@ -6,7 +6,7 @@ from copaw.utils.runtime_action_links import build_decision_actions, build_patch
 
 def test_decision_actions_use_one_shared_contract() -> None:
     assert build_decision_actions("decision-1", status="open") == {
-        "review": "/api/runtime-center/decisions/decision-1/review",
+        "review": "/api/runtime-center/governed/decisions/decision-1/review",
         "approve": "/api/runtime-center/decisions/decision-1/approve",
         "reject": "/api/runtime-center/decisions/decision-1/reject",
     }

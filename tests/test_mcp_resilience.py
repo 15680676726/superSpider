@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=protected-access,unused-argument
 import asyncio
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,7 +11,9 @@ from anyio import ClosedResourceError
 import copaw.kernel.query_execution as query_execution_module
 from copaw.agents.react_agent import CoPawAgent
 from copaw.app.mcp.manager import MCPClientManager
+from copaw.app.mcp.watcher import MCPConfigWatcher
 from copaw.config.config import MCPClientConfig
+from copaw.config.config import MCPConfig
 
 
 class _FakeToolkit:
@@ -66,6 +69,40 @@ class _FakeMCPClient:
             raise RuntimeError("connect failed")
 
 
+class _FakeWatcherManager:
+    def __init__(self) -> None:
+        self.replace_attempts: list[str] = []
+        self.remove_attempts: list[str] = []
+        self.fail_replace_keys: set[str] = set()
+
+    async def replace_client(self, key: str, new_cfg) -> None:
+        self.replace_attempts.append(key)
+        if key in self.fail_replace_keys:
+            raise RuntimeError(f"replace failed for {key}")
+
+    async def remove_client(self, key: str) -> None:
+        self.remove_attempts.append(key)
+
+
+def _build_watcher_mcp_config(*, alpha_command: str, beta_command: str) -> MCPConfig:
+    return MCPConfig(
+        clients={
+            "alpha": MCPClientConfig(
+                name="alpha",
+                enabled=True,
+                transport="stdio",
+                command=alpha_command,
+            ),
+            "beta": MCPClientConfig(
+                name="beta",
+                enabled=True,
+                transport="stdio",
+                command=beta_command,
+            ),
+        },
+    )
+
+
 def test_build_client_attaches_rebuild_info(tmp_path: Path) -> None:
     cfg = MCPClientConfig(
         name="mcp_everything",
@@ -109,6 +146,59 @@ async def test_register_mcp_clients_retries_once_on_closed_resource() -> None:
     assert flaky.connect_calls == 1
     assert toolkit.calls["healthy"] == 1
     assert toolkit.registered == ["flaky", "healthy"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_watcher_retries_same_snapshot_after_partial_reload_failure(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "mcp.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    initial_mcp = _build_watcher_mcp_config(
+        alpha_command="python",
+        beta_command="python",
+    )
+    changed_mcp = _build_watcher_mcp_config(
+        alpha_command="python3",
+        beta_command="python3",
+    )
+    current_mcp = initial_mcp
+
+    manager = _FakeWatcherManager()
+    manager.fail_replace_keys = {"beta"}
+
+    watcher = MCPConfigWatcher(
+        mcp_manager=manager,  # type: ignore[arg-type]
+        config_loader=lambda: current_mcp,
+        config_path=config_path,
+    )
+    watcher._snapshot()
+    original_hash = watcher._last_mcp_hash
+    original_mtime = watcher._last_mtime
+
+    current_mcp = changed_mcp
+    os.utime(config_path, (original_mtime + 1, original_mtime + 1))
+
+    await watcher._check()
+    assert watcher._reload_task is not None
+    await watcher._reload_task
+
+    assert manager.replace_attempts == ["alpha", "beta"]
+    assert watcher._last_mcp_hash == original_hash
+    assert watcher._last_mcp is not None
+    assert watcher._last_mcp.clients["beta"].command == "python"
+
+    manager.fail_replace_keys.clear()
+
+    await watcher._check()
+    assert watcher._reload_task is not None
+    await watcher._reload_task
+
+    assert manager.replace_attempts == ["alpha", "beta", "alpha", "beta"]
+    assert watcher._last_mcp_hash == watcher._mcp_hash(changed_mcp)
+    assert watcher._last_mcp is not None
+    assert watcher._last_mcp.clients["beta"].command == "python3"
 
 
 @pytest.mark.asyncio
