@@ -38,6 +38,8 @@ from .runtime_outcome import (
 )
 from .main_brain_intake import (
     extract_main_brain_intake_text,
+    normalize_main_brain_runtime_context,
+    read_attached_main_brain_intake_contract,
     resolve_request_main_brain_intake_contract,
 )
 from .main_brain_chat_service import MainBrainChatService
@@ -210,9 +212,15 @@ def _interaction_mode_cache_key(
     has_cognitive_pressure = _request_has_unresolved_cognitive_pressure(
         request=request,
     )
+    attached_intake_contract = read_attached_main_brain_intake_contract(request=request)
+    has_continuity_contract = _request_has_active_confirmation_or_continuity(
+        request=request,
+    )
     return (
         f"text:{text}|actions:{requested_actions}|"
-        f"pressure:{'1' if has_cognitive_pressure else '0'}"
+        f"pressure:{'1' if has_cognitive_pressure else '0'}|"
+        f"attached:{'1' if attached_intake_contract is not None else '0'}|"
+        f"continuity:{'1' if has_continuity_contract else '0'}"
     )
 
 
@@ -231,6 +239,40 @@ def _resolve_interaction_mode(request: AgentRequest) -> str:
         if normalized in {"auto", "chat", "orchestrate"}:
             return normalized
     return "orchestrate"
+
+
+def _request_has_active_confirmation_or_continuity(*, request: Any) -> bool:
+    if _first_non_empty(
+        getattr(request, "decision_request_id", None),
+        getattr(request, "pending_decision_request_id", None),
+        getattr(request, "human_assist_task_id", None),
+        getattr(request, "resume_checkpoint_id", None),
+        getattr(request, "resume_mailbox_id", None),
+        getattr(request, "resume_kernel_task_id", None),
+        getattr(request, "environment_continuity_token", None),
+    ):
+        return True
+    runtime_context = normalize_main_brain_runtime_context(
+        getattr(request, "_copaw_main_brain_runtime_context", None),
+    )
+    if not runtime_context:
+        return False
+    recovery = runtime_context.get("recovery")
+    if isinstance(recovery, dict) and _first_non_empty(
+        recovery.get("mode"),
+        recovery.get("checkpoint_id"),
+        recovery.get("mailbox_id"),
+        recovery.get("kernel_task_id"),
+    ):
+        return True
+    environment = runtime_context.get("environment")
+    if not isinstance(environment, dict):
+        return False
+    return bool(environment.get("resume_ready")) or bool(
+        _first_non_empty(
+            environment.get("continuity_token"),
+        ),
+    )
 
 
 def _initial_turn_title(msgs: list[Any]) -> str:
@@ -367,22 +409,24 @@ async def _resolve_auto_chat_mode(
         return "chat"
     if not has_cognitive_pressure and _is_short_chat_inspection(text):
         return "chat"
-    try:
-        intake_contract = await resolve_request_main_brain_intake_contract(
-            request=request,
-            msgs=msgs,
-        )
-    except Exception:
-        logger.debug("Main-brain auto mode resolution failed", exc_info=True)
-        intake_contract = None
+    intake_contract = None
+    if _first_non_empty(
+        getattr(request, "industry_instance_id", None),
+        getattr(request, "control_thread_id", None),
+        getattr(request, "industry_role_id", None),
+    ):
+        try:
+            intake_contract = await resolve_request_main_brain_intake_contract(
+                request=request,
+                msgs=msgs,
+            )
+        except Exception:
+            logger.debug("Main-brain attached intake contract resolution failed", exc_info=True)
     if intake_contract is not None:
-        _set_request_runtime_value(
-            request,
-            "_copaw_main_brain_intake_contract",
-            intake_contract,
-        )
         if intake_contract.should_route_to_orchestrate:
             return "orchestrate"
+    if _request_has_active_confirmation_or_continuity(request=request):
+        return "orchestrate"
     if has_cognitive_pressure and (
         (
             _is_plain_acknowledgement(text)

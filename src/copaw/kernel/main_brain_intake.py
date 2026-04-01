@@ -264,10 +264,9 @@ async def resolve_request_main_brain_intake_contract(
     request: Any,
     msgs: list[Any],
 ) -> MainBrainIntakeContract | None:
+    del msgs
     attached = read_attached_main_brain_intake_contract(request=request)
-    if attached is not None:
-        return attached
-    return await resolve_main_brain_intake_contract(msgs=msgs)
+    return attached
 
 
 def resolve_execution_core_industry_instance_id(

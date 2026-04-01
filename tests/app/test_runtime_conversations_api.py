@@ -5,7 +5,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from copaw.app.routers.runtime_center import router as runtime_center_router
-from copaw.app.runtime_threads import RuntimeThreadHistory, RuntimeThreadSpec
+from copaw.app.runtime_threads import (
+    RuntimeThreadHistory,
+    RuntimeThreadSpec,
+    SessionRuntimeThreadHistoryReader,
+)
 from copaw.kernel.models import KernelTask
 from copaw.kernel.persistence import encode_kernel_task_metadata
 from copaw.state import (
@@ -361,6 +365,33 @@ class _FakeHumanAssistTaskService:
         )
 
 
+class _FakeSessionBackend:
+    def __init__(self) -> None:
+        self._snapshots: dict[tuple[str, str], dict[str, object]] = {}
+
+    def load_session_snapshot(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        allow_not_exist: bool = True,
+    ) -> dict[str, object] | None:
+        _ = allow_not_exist
+        payload = self._snapshots.get((session_id, user_id))
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def save_session_snapshot(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        payload: dict[str, object],
+        source_ref: str,
+    ) -> None:
+        _ = source_ref
+        self._snapshots[(session_id, user_id)] = dict(payload)
+
+
 def _build_app(
     *,
     history_reader: _FakeHistoryReader | None = None,
@@ -369,11 +400,13 @@ def _build_app(
     thread_binding_repository: object | None = None,
     task_repository: object | None = None,
     work_context_repository: object | None = None,
+    session_backend: object | None = None,
 ) -> tuple[FastAPI, _FakeHistoryReader]:
     app = FastAPI()
     app.include_router(runtime_center_router)
     history_reader = history_reader or _FakeHistoryReader()
     app.state.runtime_thread_history_reader = history_reader
+    app.state.session_backend = session_backend
     app.state.industry_service = industry_service or _FakeIndustryService()
     app.state.agent_profile_service = _FakeAgentProfileService()
     app.state.agent_thread_binding_repository = (
@@ -634,6 +667,72 @@ def test_runtime_conversation_detail_infers_bound_context_from_control_thread() 
         "control-thread:industry-chat:industry-v1-acme:execution-core"
     )
     assert payload["meta"]["work_context"]["id"] == "ctx-acme-execution-core"
+
+
+def test_runtime_conversation_detail_surfaces_persisted_main_brain_commit_state_for_same_thread_reload() -> None:
+    control_thread_id = "industry-chat:industry-v1-acme:execution-core"
+    session_backend = _FakeSessionBackend()
+    session_backend.save_session_snapshot(
+        session_id=control_thread_id,
+        user_id="copaw-agent-runner",
+        payload={
+            "agent": {
+                "memory": [],
+            },
+            "main_brain": {
+                "phase2_commit": {
+                    "status": "confirm_required",
+                    "action_type": "writeback_operating_truth",
+                    "control_thread_id": control_thread_id,
+                    "session_id": control_thread_id,
+                    "work_context_id": "ctx-acme-execution-core",
+                }
+            },
+        },
+        source_ref="test:/main-brain-commit-state",
+    )
+    app, _history_reader = _build_app(
+        history_reader=SessionRuntimeThreadHistoryReader(session_backend=session_backend),
+        session_backend=session_backend,
+    )
+    client = TestClient(app)
+
+    response = client.get(f"/runtime-center/conversations/{control_thread_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == control_thread_id
+    assert payload["meta"]["main_brain_commit"]["status"] == "confirm_required"
+    assert payload["meta"]["main_brain_commit"]["control_thread_id"] == control_thread_id
+
+    session_backend.save_session_snapshot(
+        session_id=control_thread_id,
+        user_id="copaw-agent-runner",
+        payload={
+            "agent": {
+                "memory": [],
+            },
+            "main_brain": {
+                "phase2_commit": {
+                    "status": "committed",
+                    "action_type": "writeback_operating_truth",
+                    "control_thread_id": control_thread_id,
+                    "session_id": control_thread_id,
+                    "work_context_id": "ctx-acme-execution-core",
+                    "record_id": "strategy-memory-1",
+                }
+            },
+        },
+        source_ref="test:/main-brain-commit-state",
+    )
+
+    reloaded = client.get(f"/runtime-center/conversations/{control_thread_id}")
+
+    assert reloaded.status_code == 200
+    reloaded_payload = reloaded.json()
+    assert reloaded_payload["id"] == control_thread_id
+    assert reloaded_payload["meta"]["main_brain_commit"]["status"] == "committed"
+    assert reloaded_payload["meta"]["main_brain_commit"]["record_id"] == "strategy-memory-1"
 
 
 def test_runtime_conversation_detail_rejects_legacy_chat_shell_ids() -> None:

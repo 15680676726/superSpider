@@ -364,6 +364,13 @@ def build_runtime_domain_services(
         scope_snapshot_signature_builder=MainBrainChatService._build_scope_snapshot_signature,
         scope_key_resolver=MainBrainChatService._resolve_scope_snapshot_key,
     )
+    retain_dirty_marker_setter = getattr(
+        memory_retain_service,
+        "set_scope_snapshot_dirty_marker",
+        None,
+    )
+    if callable(retain_dirty_marker_setter):
+        retain_dirty_marker_setter(scope_snapshot_service.mark_dirty)
     commit_service = MainBrainCommitService(
         session_backend=session_backend,
         action_handlers={

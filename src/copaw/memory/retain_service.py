@@ -28,9 +28,13 @@ class MemoryRetainService:
         self._knowledge_service = knowledge_service
         self._derived_index_service = derived_index_service
         self._reflection_service = reflection_service
+        self._scope_snapshot_dirty_marker: object | None = None
 
     def set_reflection_service(self, reflection_service: object | None) -> None:
         self._reflection_service = reflection_service
+
+    def set_scope_snapshot_dirty_marker(self, marker: object | None) -> None:
+        self._scope_snapshot_dirty_marker = marker
 
     def retain_agent_report(self, report: object) -> object | None:
         industry_instance_id = str(getattr(report, "industry_instance_id", "") or "").strip()
@@ -157,6 +161,11 @@ class MemoryRetainService:
             industry_instance_id=normalized_industry_instance_id or None,
             trigger_kind="retain-chat-writeback",
         )
+        self._mark_scope_snapshot_dirty(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            industry_instance_id=normalized_industry_instance_id or None,
+        )
         return {
             "industry_instance_id": normalized_industry_instance_id,
             "work_context_id": normalized_work_context_id,
@@ -233,5 +242,30 @@ class MemoryRetainService:
                 trigger_kind=trigger_kind,
                 create_learning_proposals=False,
             )
+        except Exception:
+            return
+
+    def _mark_scope_snapshot_dirty(
+        self,
+        *,
+        scope_type: str,
+        scope_id: str,
+        industry_instance_id: str | None = None,
+    ) -> None:
+        marker = self._scope_snapshot_dirty_marker
+        if not callable(marker):
+            return
+        try:
+            if scope_type == "work_context":
+                marker(
+                    work_context_id=scope_id,
+                    industry_instance_id=industry_instance_id,
+                )
+                return
+            if scope_type == "industry":
+                marker(industry_instance_id=scope_id)
+                return
+            if scope_type == "agent":
+                marker(agent_id=scope_id)
         except Exception:
             return

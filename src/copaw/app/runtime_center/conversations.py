@@ -78,6 +78,9 @@ class RuntimeConversationFacade:
 
     def _build_conversation_meta(self, thread_spec: RuntimeThreadSpec) -> dict[str, object]:
         meta = _compact_mapping(thread_spec.meta)
+        main_brain_commit = self._get_persisted_main_brain_commit(thread_spec)
+        if main_brain_commit is not None:
+            meta["main_brain_commit"] = main_brain_commit
         human_assist_task = self._get_current_human_assist_task(thread_spec.id)
         if human_assist_task is not None:
             meta["human_assist_task"] = human_assist_task
@@ -85,6 +88,35 @@ class RuntimeConversationFacade:
                 "tasks_route",
             ) or human_assist_task_list_route(chat_thread_id=thread_spec.id)
         return meta
+
+    def _get_persisted_main_brain_commit(
+        self,
+        thread_spec: RuntimeThreadSpec,
+    ) -> dict[str, object] | None:
+        backend = getattr(self._history_reader, "_session_backend", None)
+        loader = getattr(backend, "load_session_snapshot", None)
+        if not callable(loader):
+            return None
+        payload = loader(
+            session_id=thread_spec.session_id,
+            user_id=thread_spec.user_id,
+            allow_not_exist=True,
+        )
+        if not isinstance(payload, dict):
+            return None
+        main_brain = payload.get("main_brain")
+        if not isinstance(main_brain, dict):
+            return None
+        commit_payload = _compact_mapping(main_brain.get("phase2_commit"))
+        if not commit_payload:
+            return None
+        control_thread_id = _first_non_empty(
+            commit_payload.get("control_thread_id"),
+            commit_payload.get("session_id"),
+        )
+        if control_thread_id is not None and control_thread_id != thread_spec.id:
+            return None
+        return commit_payload
 
     def _get_current_human_assist_task(
         self,

@@ -38,6 +38,27 @@ from copaw.state.repositories import (
 from copaw.state.strategy_memory_service import StateStrategyMemoryService
 
 
+class _ScopeSnapshotDirtyRecorder:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def __call__(
+        self,
+        *,
+        work_context_id: str | None = None,
+        industry_instance_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> None:
+        if work_context_id:
+            self.calls.append(("work_context", work_context_id))
+            return
+        if industry_instance_id:
+            self.calls.append(("industry", industry_instance_id))
+            return
+        if agent_id:
+            self.calls.append(("agent", agent_id))
+
+
 def _build_media_runtime(tmp_path: Path) -> SimpleNamespace:
     store = SQLiteStateStore(tmp_path / "state.db")
     industry_repository = SqliteIndustryInstanceRepository(store)
@@ -125,6 +146,7 @@ def _build_media_runtime(tmp_path: Path) -> SimpleNamespace:
         media_repository=media_repository,
         backlog_repository=backlog_repository,
         knowledge_service=knowledge_service,
+        memory_retain_service=memory_retain_service,
         memory_recall_service=memory_recall_service,
         strategy_memory_service=strategy_memory_service,
     )
@@ -247,6 +269,38 @@ def test_enrich_agent_request_with_media_writes_back_industry_chat_attachments(
     )
 
 
+def test_runtime_chat_media_retain_marks_scope_snapshot_dirty_for_work_context(
+    tmp_path: Path,
+) -> None:
+    runtime = _build_media_runtime(tmp_path)
+    dirty_recorder = _ScopeSnapshotDirtyRecorder()
+    runtime.memory_retain_service.set_scope_snapshot_dirty_marker(dirty_recorder)
+    attachment_path = tmp_path / "retain-dirty-brief.md"
+    attachment_path.write_text(
+        "# Runtime media retain dirty mark\nKeep this work context hot after attachment writeback.",
+        encoding="utf-8",
+    )
+
+    asyncio.run(
+        enrich_agent_request_with_media(
+            _build_industry_request(
+                media_inputs=[
+                    {
+                        "source_kind": "upload",
+                        "filename": attachment_path.name,
+                        "storage_uri": str(attachment_path),
+                        "entry_point": "chat",
+                        "purpose": "chat-answer",
+                    }
+                ],
+            ),
+            app_state=runtime,
+        )
+    )
+
+    assert dirty_recorder.calls == [("work_context", "ctx-media-ops")]
+
+
 def test_enrich_agent_request_with_media_adopts_existing_analysis_into_industry_state(
     tmp_path: Path,
 ) -> None:
@@ -326,6 +380,48 @@ def test_enrich_agent_request_with_media_adopts_existing_analysis_into_industry_
         item.source_ref == f"media-analysis:{analysis_id}"
         for item in recall.hits
     )
+
+
+def test_runtime_chat_media_adopt_marks_scope_snapshot_dirty_for_work_context(
+    tmp_path: Path,
+) -> None:
+    runtime = _build_media_runtime(tmp_path)
+    dirty_recorder = _ScopeSnapshotDirtyRecorder()
+    runtime.memory_retain_service.set_scope_snapshot_dirty_marker(dirty_recorder)
+    attachment_path = tmp_path / "adopt-dirty-brief.md"
+    attachment_path.write_text(
+        "# Runtime media adopt dirty mark\nAdopt the analysis into the active work context.",
+        encoding="utf-8",
+    )
+    initial = asyncio.run(
+        runtime.media_service.analyze(
+            MediaAnalysisRequest(
+                sources=[
+                    MediaSourceSpec(
+                        source_kind="upload",
+                        filename=attachment_path.name,
+                        storage_uri=str(attachment_path),
+                        entry_point="chat",
+                        purpose="chat-answer",
+                    )
+                ],
+                thread_id="chat:generic-thread",
+                entry_point="chat",
+                purpose="chat-answer",
+                writeback=False,
+            )
+        )
+    )
+    analysis_id = initial.analyses[0].analysis_id
+
+    asyncio.run(
+        enrich_agent_request_with_media(
+            _build_industry_request(media_analysis_ids=[analysis_id]),
+            app_state=runtime,
+        )
+    )
+
+    assert dirty_recorder.calls == [("work_context", "ctx-media-ops")]
 
 
 def test_media_service_lists_shared_media_analyses_by_work_context_continuity(
