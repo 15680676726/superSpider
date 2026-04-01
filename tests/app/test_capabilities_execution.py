@@ -890,6 +890,47 @@ def test_execution_failure_contract_classifies_shell_timeout_separately(
     assert result["environment_ref"] == "session:console:test"
 
 
+def test_execution_failure_contract_classifies_blocked_shell_separately(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    calls: list[tuple[str, str, int]] = []
+
+    def _fake_subprocess(cmd: str, cwd: str, timeout: int):
+        calls.append((cmd, cwd, timeout))
+        return (0, "should not run", "")
+
+    monkeypatch.setattr(
+        "copaw.agents.tools.shell._execute_subprocess_sync",
+        _fake_subprocess,
+    )
+    capability_service = CapabilityService(
+        evidence_ledger=EvidenceLedger(),
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                title="Blocked shell call",
+                capability_ref="tool:execute_shell_command",
+                owner_agent_id="copaw-operator",
+                environment_ref="session:console:test",
+                payload={
+                    "command": "git reset --hard HEAD",
+                    "timeout": 5,
+                    "cwd": str(tmp_path),
+                },
+            ),
+        ),
+    )
+
+    assert calls == []
+    assert result["success"] is False
+    assert result["error_kind"] == "blocked"
+    assert "blocked" in result["summary"].lower()
+    assert "git reset --hard head" in result["summary"].lower()
+
+
 def test_file_execution_builds_internal_execution_context(tmp_path) -> None:
     target = tmp_path / "notes.txt"
     target.write_text("hello world", encoding="utf-8")

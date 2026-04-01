@@ -112,6 +112,32 @@ def test_shell_timeout(shell_test_dir):
     assert "timeout" in text.lower()
 
 
+def test_shell_blocked_command_returns_policy_message(
+    monkeypatch,
+    shell_test_dir,
+):
+    """Test blocked shell command returns a policy denial message."""
+    calls: list[tuple[str, str, int]] = []
+
+    def _fake_subprocess(cmd: str, cwd: str, timeout: int):
+        calls.append((cmd, cwd, timeout))
+        return (0, "should not run", "")
+
+    monkeypatch.setattr(shell, "_execute_subprocess_sync", _fake_subprocess)
+
+    result = asyncio.run(
+        shell.execute_shell_command(
+            "git reset --hard HEAD",
+            cwd=shell_test_dir,
+        ),
+    )
+    text = result.content[0].get("text", "")
+
+    assert calls == []
+    assert "blocked" in text.lower()
+    assert "git reset --hard head" in text.lower()
+
+
 def _python_command(code: str) -> str:
     escaped = code.replace("\"", "\\\"")
     return f'"{sys.executable}" -c "{escaped}"'

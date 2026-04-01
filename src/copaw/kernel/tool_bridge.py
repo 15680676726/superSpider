@@ -38,8 +38,9 @@ class KernelToolBridge:
         command = self._string(payload.get("command")) or "shell"
         stdout = self._string(payload.get("stdout"))
         stderr = self._string(payload.get("stderr"))
+        rule_id = self._string(payload.get("rule_id"))
         environment_ref = self._string(payload.get("cwd"))
-        summary = self._shell_summary(status, command, stdout, stderr)
+        summary = self._shell_summary(status, command, stdout, stderr, rule_id)
         replay_pointer = self._build_shell_replay_pointer(
             task=task,
             payload=payload,
@@ -228,10 +229,17 @@ class KernelToolBridge:
         command: str,
         stdout: str | None,
         stderr: str | None,
+        rule_id: str | None = None,
     ) -> str:
         if status == "success":
             suffix = stdout or "command completed without output"
             return f"Shell command succeeded: {command} -> {suffix}"
+        if status == "blocked":
+            prefix = "Shell command blocked"
+            if rule_id:
+                prefix = f"{prefix} ({rule_id})"
+            suffix = stderr or stdout or "command blocked by policy"
+            return f"{prefix}: {command} -> {suffix}"
         suffix = stderr or stdout or "command failed without diagnostic output"
         return f"Shell command {status}: {command} -> {suffix}"
 

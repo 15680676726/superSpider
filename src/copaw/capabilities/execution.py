@@ -287,6 +287,7 @@ class CapabilityExecutionFacade:
         error_kind = classify_runtime_outcome(
             summary,
             success=_tool_response_success(response),
+            phase=self._response_phase(output_dict),
             timed_out=self._response_timed_out(output_dict),
         )
         success = error_kind == "completed"
@@ -367,6 +368,18 @@ class CapabilityExecutionFacade:
             return True
         status = str(output_payload.get("status") or "").strip().lower()
         return status == "timeout"
+
+    @staticmethod
+    def _response_phase(output_payload: dict[str, object] | None) -> str | None:
+        if not isinstance(output_payload, dict):
+            return None
+        phase = str(output_payload.get("phase") or "").strip().lower()
+        if phase in {"waiting-confirm", "blocked", "cancelled", "timeout"}:
+            return phase
+        status = str(output_payload.get("status") or "").strip().lower()
+        if status in {"blocked", "cancelled", "timeout"}:
+            return status
+        return None
 
     @staticmethod
     def _build_execution_result(

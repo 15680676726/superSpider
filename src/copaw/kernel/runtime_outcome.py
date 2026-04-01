@@ -20,6 +20,10 @@ _TIMEOUT_MARKERS = (
     "timed out",
     "exceeded the timeout",
 )
+_BLOCKED_MARKERS = (
+    "blocked by shell safety policy",
+    "shell command blocked",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +67,14 @@ def is_timeout_runtime_error(error: str | None) -> bool:
     return any(marker in lowered for marker in _TIMEOUT_MARKERS)
 
 
+def is_blocked_runtime_error(error: str | None) -> bool:
+    normalized = normalize_runtime_summary(error)
+    if normalized is None:
+        return False
+    lowered = normalized.casefold()
+    return any(marker in lowered for marker in _BLOCKED_MARKERS)
+
+
 def classify_runtime_outcome(
     error: str | None,
     *,
@@ -79,6 +91,8 @@ def classify_runtime_outcome(
         return "cancelled"
     if normalized_phase == "timeout":
         return "timeout"
+    if is_blocked_runtime_error(error):
+        return "blocked"
     if timed_out or is_timeout_runtime_error(error):
         return "timeout"
     if is_cancellation_runtime_error(error):
@@ -103,6 +117,8 @@ def build_execution_diagnostics(
     if resolved_failure_source is None:
         if normalized_phase in {"waiting-confirm", "blocked", "cancelled", "timeout"}:
             resolved_failure_source = normalized_phase
+        elif is_blocked_runtime_error(error):
+            resolved_failure_source = "blocked"
         elif is_timeout_runtime_error(error):
             resolved_failure_source = "timeout"
         elif is_cancellation_runtime_error(error):

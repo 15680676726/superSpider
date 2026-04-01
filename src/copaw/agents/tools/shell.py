@@ -16,6 +16,7 @@ from agentscope.tool import ToolResponse
 
 from copaw.constant import WORKING_DIR
 from .evidence_runtime import ShellEvidenceEvent, emit_shell_evidence
+from .shell_safety import validate_shell_command
 from .utils import truncate_shell_output
 
 
@@ -46,8 +47,10 @@ async def _emit_shell_evidence_event(
     stderr: str,
     started_at: datetime,
     finished_at: datetime,
+    status_override: str | None = None,
+    rule_id: str | None = None,
 ) -> None:
-    status = _classify_shell_status(returncode, stderr)
+    status = status_override or _classify_shell_status(returncode, stderr)
     duration_ms = max(
         0,
         int((finished_at - started_at).total_seconds() * 1000),
@@ -65,6 +68,7 @@ async def _emit_shell_evidence_event(
             finished_at=finished_at,
             duration_ms=duration_ms,
             timed_out=(status == "timeout"),
+            rule_id=rule_id,
         ),
     )
 
@@ -152,6 +156,36 @@ async def execute_shell_command(
     # Set working directory
     working_dir = cwd if cwd is not None else WORKING_DIR
     started_at = _utc_now()
+    decision = validate_shell_command(cmd)
+
+    if not decision.allowed:
+        finished_at = _utc_now()
+        denial_reason = decision.reason or "Blocked by shell safety policy."
+        stderr_str = truncate_shell_output(denial_reason)
+        await _emit_shell_evidence_event(
+            command=cmd,
+            cwd=working_dir,
+            timeout=timeout,
+            returncode=-1,
+            stdout="",
+            stderr=stderr_str,
+            started_at=started_at,
+            finished_at=finished_at,
+            status_override="blocked",
+            rule_id=decision.rule_id,
+        )
+        response_text = (
+            f"Blocked by shell safety policy: {cmd}\n"
+            f"Reason: {denial_reason}"
+        )
+        return ToolResponse(
+            content=[
+                TextBlock(
+                    type="text",
+                    text=response_text,
+                ),
+            ],
+        )
 
     try:
         if sys.platform == "win32":

@@ -111,3 +111,39 @@ def test_execute_shell_command_emits_timeout_payload_with_async_sink(
     assert payloads[0]["timed_out"] is True
     assert payloads[0]["timeout_seconds"] == 5
     assert payloads[0]["duration_ms"] >= 0
+
+
+def test_execute_shell_command_emits_blocked_payload_without_running_subprocess(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    calls: list[tuple[str, str, int]] = []
+
+    def _fake_subprocess(cmd: str, cwd: str, timeout: int):
+        calls.append((cmd, cwd, timeout))
+        return (0, "should not run", "")
+
+    monkeypatch.setattr(
+        "copaw.agents.tools.shell._execute_subprocess_sync",
+        _fake_subprocess,
+    )
+    payloads: list[dict[str, object]] = []
+
+    async def run() -> None:
+        with bind_shell_evidence_sink(payloads.append):
+            response = await execute_shell_command(
+                "git reset --hard HEAD",
+                cwd=tmp_path,
+            )
+        text = response.content[0]["text"]
+        assert "blocked" in text.lower()
+        assert "git reset --hard head" in text.lower()
+
+    asyncio.run(run())
+
+    assert calls == []
+    assert len(payloads) == 1
+    assert payloads[0]["status"] == "blocked"
+    assert payloads[0]["command"] == "git reset --hard HEAD"
+    assert payloads[0]["rule_id"] == "destructive-git"
+    assert payloads[0]["timed_out"] is False

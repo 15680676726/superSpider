@@ -17,7 +17,7 @@ from typing import Any, Callable, Iterator, Literal
 
 logger = logging.getLogger(__name__)
 
-ShellEvidenceStatus = Literal["success", "error", "timeout"]
+ShellEvidenceStatus = Literal["success", "error", "timeout", "blocked"]
 ShellEvidenceSink = Callable[[dict[str, Any]], Any]
 BrowserEvidenceStatus = Literal["success", "error"]
 BrowserEvidenceSink = Callable[[dict[str, Any]], Any]
@@ -53,6 +53,7 @@ class ShellEvidenceEvent:
     finished_at: datetime
     duration_ms: int
     timed_out: bool = False
+    rule_id: str | None = None
     tool_name: str = "execute_shell_command"
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -71,6 +72,7 @@ class ShellEvidenceEvent:
             "finished_at": self.finished_at.isoformat(),
             "duration_ms": self.duration_ms,
             "timed_out": self.timed_out,
+            "rule_id": self.rule_id,
             "metadata": dict(self.metadata),
         }
 
