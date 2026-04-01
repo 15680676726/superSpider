@@ -4,6 +4,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import TYPE_CHECKING, Any, Callable
 
+import frontmatter
+
 from ..industry.identity import normalize_industry_role_id
 from .mcp_registry import resolve_mcp_registry_package_binding
 from .models import CapabilityMount, CapabilitySummary
@@ -336,7 +338,7 @@ class CapabilityCatalogFacade:
                 skill_name = _capability_name_from_id(mount.id, prefix="skill:")
                 skill = skill_map.get(skill_name)
                 if skill is not None:
-                    binding = self._skill_service.read_skill_package_binding(skill)
+                    binding = self._read_skill_package_binding(skill)
                     package_ref = binding["package_ref"]
                     package_kind = binding["package_kind"]
                     package_version = binding["package_version"]
@@ -366,6 +368,18 @@ class CapabilityCatalogFacade:
                 ),
             )
         return bound_mounts
+
+    def _read_skill_package_binding(self, skill: Any) -> dict[str, str | None]:
+        reader = getattr(self._skill_service, "read_skill_package_binding", None)
+        if callable(reader):
+            binding = reader(skill)
+            if isinstance(binding, dict):
+                return {
+                    "package_ref": _normalize_package_text(binding.get("package_ref")),
+                    "package_kind": _normalize_package_text(binding.get("package_kind")),
+                    "package_version": _normalize_package_text(binding.get("package_version")),
+                }
+        return _fallback_skill_package_binding(skill)
 
     @staticmethod
     def _build_skill_spec_payload(
@@ -404,6 +418,15 @@ class CapabilityCatalogFacade:
         override = self._agent_profile_override_repository.get_override(agent_id)
         if override is None or override.capabilities is None:
             return None
+        profile = self._resolve_agent_profile(agent_id)
+        if profile is not None:
+            merged_capabilities = [
+                str(capability_id).strip()
+                for capability_id in getattr(profile, "capabilities", []) or []
+                if str(capability_id).strip()
+            ]
+            if merged_capabilities:
+                return set(merged_capabilities)
         return {
             str(capability_id).strip()
             for capability_id in override.capabilities
@@ -501,6 +524,45 @@ def _mask_mapping(value: dict[str, str] | None) -> dict[str, str]:
     if not value:
         return {}
     return {key: _mask_secret(secret) for key, secret in value.items()}
+
+
+def _normalize_package_text(value: object | None) -> str | None:
+    normalized = " ".join(str(value or "").strip().split())
+    return normalized or None
+
+
+def _skill_package_kind_from_ref(package_ref: str | None) -> str | None:
+    normalized = (_normalize_package_text(package_ref) or "").lower()
+    if normalized.startswith("http://") or normalized.startswith("https://"):
+        return "hub-bundle"
+    if normalized:
+        return "filesystem"
+    return None
+
+
+def _fallback_skill_package_binding(skill: Any) -> dict[str, str | None]:
+    package_ref = None
+    package_kind = None
+    package_version = None
+    content = getattr(skill, "content", "")
+    if isinstance(content, str) and content.strip():
+        try:
+            post = frontmatter.loads(content)
+        except Exception:
+            post = None
+        if post is not None:
+            package_ref = _normalize_package_text(post.get("package_ref"))
+            package_kind = _normalize_package_text(post.get("package_kind"))
+            package_version = _normalize_package_text(post.get("package_version"))
+    if package_ref is None:
+        package_ref = _normalize_package_text(getattr(skill, "path", None))
+    if package_kind is None:
+        package_kind = _skill_package_kind_from_ref(package_ref)
+    return {
+        "package_ref": package_ref,
+        "package_kind": package_kind,
+        "package_version": package_version,
+    }
 
 
 def _mask_secret(value: str) -> str:

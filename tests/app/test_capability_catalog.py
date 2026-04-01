@@ -67,11 +67,20 @@ class _AgentOverrideRepository:
         return SimpleNamespace(capabilities=list(self._capabilities))
 
 
+class _AgentProfileService:
+    def __init__(self, profile) -> None:
+        self._profile = profile
+
+    def get_agent(self, _agent_id: str):
+        return self._profile
+
+
 def _build_facade(
     mounts: list[CapabilityMount],
     *,
     override_repository=None,
     agent_profile_override_repository=None,
+    agent_profile_service=None,
 ) -> CapabilityCatalogFacade:
     skill_service = SimpleNamespace(
         list_all_skills=lambda: [],
@@ -92,7 +101,7 @@ def _build_facade(
         save_config_fn=lambda _config: None,
         skill_service=skill_service,
         override_repository=override_repository,
-        agent_profile_service=None,
+        agent_profile_service=agent_profile_service,
         agent_profile_override_repository=agent_profile_override_repository,
     )
 
@@ -168,6 +177,52 @@ def test_capability_catalog_access_prefers_explicit_allowlist() -> None:
     )
 
     assert [mount.id for mount in mounts] == ["tool:allowed"]
+
+
+def test_capability_catalog_access_prefers_merged_profile_capabilities_over_raw_override() -> None:
+    facade = _build_facade(
+        [
+            CapabilityMount(
+                id="tool:read_file",
+                name="read_file",
+                summary="Read file",
+                kind="local-tool",
+                source_kind="tool",
+                risk_level="auto",
+                enabled=True,
+                role_access_policy=["all"],
+            ),
+            CapabilityMount(
+                id="system:dispatch_query",
+                name="dispatch_query",
+                summary="Dispatch query",
+                kind="system-op",
+                source_kind="system",
+                risk_level="guarded",
+                enabled=True,
+                role_access_policy=["operator"],
+            ),
+        ],
+        agent_profile_override_repository=_AgentOverrideRepository(
+            ["system:dispatch_query"],
+        ),
+        agent_profile_service=_AgentProfileService(
+            SimpleNamespace(
+                agent_id="copaw-agent-runner",
+                capabilities=["system:dispatch_query", "tool:read_file"],
+            ),
+        ),
+    )
+
+    mounts = facade.list_accessible_capabilities(
+        agent_id="copaw-agent-runner",
+        enabled_only=True,
+    )
+
+    assert {mount.id for mount in mounts} == {
+        "system:dispatch_query",
+        "tool:read_file",
+    }
 
 
 def test_capability_catalog_public_inventory_uses_one_snapshot() -> None:
