@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from .shared import *  # noqa: F401,F403
 
@@ -1087,6 +1088,142 @@ def test_runtime_center_chat_run_chat_only_turn_skips_orchestrator_runtime_conte
     assert getattr(request, "_copaw_resolved_interaction_mode") == "chat"
     assert not hasattr(request, "_copaw_main_brain_runtime_context")
     assert '"resolved_interaction_mode":"chat"' in response.text
+
+class _CommitAwareTurnExecutor:
+    def __init__(self, *, runtime_context: dict[str, object] | None = None) -> None:
+        self.runtime_context = dict(runtime_context or {})
+
+    async def stream_request(
+        self,
+        request_payload,
+        *,
+        kernel_task_id: str | None = None,
+        skip_kernel_admission: bool = False,
+    ):
+        if self.runtime_context:
+            setattr(request_payload, "_copaw_main_brain_runtime_context", self.runtime_context)
+        yield {
+            "object": "response",
+            "status": "completed",
+            "sequence_number": 0,
+        }
+
+
+def _parse_sse_events(raw_text: str) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
+    for chunk in raw_text.strip().split("\n\n"):
+        if not chunk:
+            continue
+        lines = [line for line in chunk.splitlines() if line.strip()]
+        for line in lines:
+            if not line.startswith("data:"):
+                continue
+            payload_text = line[len("data:"):].strip()
+            if not payload_text:
+                continue
+            events.append(json.loads(payload_text))
+    return events
+
+
+def test_runtime_center_chat_run_streams_reply_then_sidecar_commit_events() -> None:
+    app = build_runtime_center_app()
+    runtime_context = {
+        "kernel_task_id": "ktask-sidecar",
+        "execution_intent": "execute-task",
+        "environment_ref": "desktop:session-1",
+        "writeback_requested": True,
+        "should_kickoff": False,
+        "intake_contract": SimpleNamespace(
+            intent_kind="execute-task",
+            writeback_requested=True,
+            should_kickoff=False,
+            decision=SimpleNamespace(intention="execute-task", id="decision-1"),
+        ),
+    }
+    app.state.turn_executor = _CommitAwareTurnExecutor(runtime_context=runtime_context)
+
+    control_thread_id = "industry-chat:industry-v1-ops:commit-lane"
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-sidecar",
+            "session_id": "session-sidecar",
+            "user_id": "ops-user",
+            "channel": "console",
+            "thread_id": control_thread_id,
+            "control_thread_id": control_thread_id,
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {"type": "text", "text": "测试主脑流式回复后续 sidecar"}
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    sidecar_events = [
+        event
+        for event in _parse_sse_events(response.text)
+        if event.get("sidecar_event")
+    ]
+    assert [event["sidecar_event"] for event in sidecar_events] == [
+        "turn_reply_done",
+        "commit_started",
+        "confirm_required",
+        "committed",
+    ]
+    assert sidecar_events[0]["control_thread_id"] == control_thread_id
+
+
+def test_runtime_center_chat_run_keeps_commit_events_in_same_control_thread() -> None:
+    app = build_runtime_center_app()
+    runtime_context = {
+        "kernel_task_id": "ktask-thread",
+        "execution_intent": "execute-task",
+        "environment_ref": "desktop:session-1",
+        "writeback_requested": True,
+        "should_kickoff": True,
+        "intake_contract": SimpleNamespace(
+            intent_kind="execute-task",
+            writeback_requested=True,
+            should_kickoff=True,
+        ),
+    }
+    executor = _CommitAwareTurnExecutor(runtime_context=runtime_context)
+    app.state.turn_executor = executor
+
+    control_thread_id = "industry-chat:industry-v1-ops:thread-same"
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-thread",
+            "session_id": "session-thread",
+            "user_id": "ops-user",
+            "channel": "console",
+            "thread_id": control_thread_id,
+            "control_thread_id": control_thread_id,
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "保持线程一致"}],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    for event in _parse_sse_events(response.text):
+        if not event.get("sidecar_event"):
+            continue
+        assert event.get("control_thread_id") == control_thread_id
+        assert event.get("thread_id") == control_thread_id
 
 
 def test_runtime_center_chat_run_collects_requested_actions_and_enriches_media_inputs(
