@@ -464,7 +464,6 @@ export default function ChatPage() {
     setAutoBindingPending,
     setRuntimeHealthNotice,
     setRuntimeWaitState,
-    setShowModelPrompt,
     suggestedTeams,
     threadBootstrapError,
     threadBootstrapPending,

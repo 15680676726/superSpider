@@ -48,7 +48,6 @@ interface CreateRuntimeTransportArgs {
   getSelectedMediaAnalysisIds: () => string[];
   setRuntimeHealthNotice: (notice: RuntimeHealthNotice | null) => void;
   setRuntimeWaitState: (state: RuntimeWaitState | null) => void;
-  setShowModelPrompt: (show: boolean) => void;
   dispatchGovernanceDirty?: () => void;
   dispatchHumanAssistDirty?: () => void;
 }
@@ -195,38 +194,6 @@ function linkAbortSignals(
   };
 }
 
-function createAbortRuntimeError(signal: AbortSignal): Error {
-  if (signal.reason instanceof Error && signal.reason.name !== "AbortError") {
-    return signal.reason;
-  }
-  return new DOMException("The operation was aborted.", "AbortError");
-}
-
-function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) {
-    return Promise.reject(createAbortRuntimeError(signal));
-  }
-
-  return new Promise<T>((resolve, reject) => {
-    const handleAbort = () => {
-      signal.removeEventListener("abort", handleAbort);
-      reject(createAbortRuntimeError(signal));
-    };
-
-    signal.addEventListener("abort", handleAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener("abort", handleAbort);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener("abort", handleAbort);
-        reject(error);
-      },
-    );
-  });
-}
-
 export function parseRuntimeResponseChunk(
   rawChunk: string,
   {
@@ -283,7 +250,6 @@ export function createRuntimeTransport({
   getSelectedMediaAnalysisIds,
   setRuntimeHealthNotice,
   setRuntimeWaitState,
-  setShowModelPrompt,
   dispatchGovernanceDirty,
   dispatchHumanAssistDirty,
 }: CreateRuntimeTransportArgs): {

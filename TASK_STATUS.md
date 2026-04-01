@@ -109,6 +109,9 @@
 - `2026-03-28` 补充：`need_more_evidence` 现已是正式持久化状态，不再和 `rejected` 混写；`accepted` 之后的恢复链也已接回真实消费者，前门会先自动重试一次恢复，再决定是否阻塞。立即恢复成功会收尾到 `closed`，恢复失败才会落到 `handoff_blocked`，异步恢复则短暂进入 `resume_queued` 后再按结果收尾。
 - `2026-03-28` 补充：`KernelTurnExecutor auto` 的聊天/执行分流已继续收紧为“显式 `requested_actions` + 主脑 intake contract”双来源；`生成一下 / 开始吧 / 好的` 这类自然话术不再由 `turn_executor` 自己关键词猜执行。`query_execution_runtime / query_execution_team` 的 writeback/kickoff 侧效现在也只认已挂到 request 的 intake contract，不再在内部偷偷补跑一份 sync intake heuristics。
 - `2026-03-28` 补充：`main_brain_intake.py` 里的 `resolve_main_brain_intake_contract_sync / resolve_request_main_brain_intake_contract_sync` 已从代码基线移除；当前主链只保留异步 intake 解析 + 已挂载 contract 读取，不再保留 sync 兼容后门。
+- `2026-04-02` 补充：`/runtime-center/chat/run` 的单环主脑聊天口径已正式收口。普通聊天前台不再阻塞等待 frontend model precheck，`KernelTurnExecutor auto` 也不再为普通文本额外触发 intake 模型判定；只有显式 `requested_actions`、已挂载 intake contract、确认/恢复连续性这几类正式信号才会转入 orchestrate。
+- `2026-04-02` 补充：聊天流 contract 已锁成“同一控制线程、同一 SSE、先回复后 sidecar”。`/runtime-center/chat/run` 会先流出 reply tokens，再在同一条 `industry-chat:*` / `agent-chat:*` 控制线程里追加 main-brain commit sidecar events；前台不再引入第二聊天窗口、第二轮询路由，也不恢复 `task-chat:*`。
+- `2026-04-02` 补充：主脑 phase-2 commit 状态现已正式持久化进 session snapshot 的 `main_brain.phase2_commit`。`RuntimeConversationFacade` 会在同一控制线程重载时把它回填到 conversation `meta.main_brain_commit`，因此确认中/已提交状态不会因为刷新聊天页而丢失。
 - 当前产品口径已经固定为：
   - 人类默认先和主脑说话
   - 主脑决定本轮是继续聊天还是进入执行编排
@@ -208,6 +211,7 @@
 - `2026-03-29` 补充：runtime chat media 这条链也已继续补厚成正式 `work_context` 闭环。行业 control thread 的 `media analyze / adopt existing analysis / memory retain / memory recall` 现在都会显式透传 `work_context_id`，媒体 writeback 会进入 `memory:work_context:*` scope，recall consumer 也会优先回显原始 `source_ref`，不再只看到 retain chunk 的内部 id。
 - `2026-03-31` 补充：媒体闭环最后一段也已收口。`/media/analyses` 与 console chat 现在都会显式消费 `work_context_id`，恢复/换线程后的同一连续工作上下文仍能重新拉回既有 media analyses；主脑聊天侧在同时存在 `industry_instance_id + work_context_id` 时也会优先按 `work_context` 做 truth-first recall，不再把更细的媒体连续记忆让位给行业级粗粒度召回。
 - `2026-03-31` 补充：media-backed memory trace 与 operator surface 也已补齐。truth-first recall 命中的 `media-analysis:*` 来源现在会直接回路由到原始 `/api/media/analyses/{analysis_id}`，`Runtime Center` 行业 detail 也已新增正式 `Media Analyses` section，不再只把媒体分析记录当 generic array 混在 detail drawer 里。
+- `2026-04-02` 补充：truth-first memory 的主脑 scope snapshot 现已正式转向“scope snapshot + 增量刷新”。runtime chat media 的 retain/adopt 写回会通过同一条 `work_context / industry / agent` scope 解析链标记 snapshot dirty，下一轮只刷新相关 scope，不再为附件写回把整份主脑记忆上下文全量重建。
 - `2026-03-25` 补充：`run_operating_cycle()` 已切掉 `goal` 物化中转；backlog 现在直接生成 `Assignment` 并编译成 assignment-backed `TaskRecord`，`AgentReport` 也优先按 `assignment_id` 回收，不再走旧 goal-phase 假链。
 - `2026-03-25` 补充：`main_chain.routine` 在没有 live task 时，会回锚到最新 `AgentReport` 对应的 assignment/task 元数据；已完成的固定 SOP / routine 执行不会再在主链上丢失执行面信息。
 

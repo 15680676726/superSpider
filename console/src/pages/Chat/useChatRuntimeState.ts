@@ -62,7 +62,6 @@ type UseChatRuntimeStateArgs = {
   setAutoBindingPending: Dispatch<SetStateAction<boolean>>;
   setRuntimeHealthNotice: Dispatch<SetStateAction<RuntimeHealthNotice | null>>;
   setRuntimeWaitState: Dispatch<SetStateAction<RuntimeWaitState | null>>;
-  setShowModelPrompt: Dispatch<SetStateAction<boolean>>;
   suggestedTeams: IndustryInstanceSummary[];
   threadBootstrapError: string | null;
   threadBootstrapPending: boolean;
@@ -118,7 +117,6 @@ export function useChatRuntimeState({
   setAutoBindingPending,
   setRuntimeHealthNotice,
   setRuntimeWaitState,
-  setShowModelPrompt,
   suggestedTeams,
   threadBootstrapError,
   threadBootstrapPending,
@@ -167,7 +165,6 @@ export function useChatRuntimeState({
       getSelectedMediaAnalysisIds: () => selectedMediaAnalysisIdsRef.current,
       setRuntimeHealthNotice,
       setRuntimeWaitState,
-      setShowModelPrompt,
       dispatchGovernanceDirty: () =>
         window.dispatchEvent(new CustomEvent("copaw:governance-status-dirty")),
       dispatchHumanAssistDirty: () =>
@@ -228,7 +225,6 @@ export function useChatRuntimeState({
     selectedMediaAnalysisIdsRef,
     setRuntimeHealthNotice,
     setRuntimeWaitState,
-    setShowModelPrompt,
   ]);
 
   const industryLabel =

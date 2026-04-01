@@ -19,6 +19,10 @@
   - `host_twin_summary` is the canonical consumer summary for workflow preview/run/resume, fixed-SOP doctor/run, and Runtime Center read surfaces; it may be cached at top-level detail payloads or nested inside `host_snapshot`, but it remains a derived projection of canonical `host_twin`
   - follow-up backlog records born from `failed report -> synthesis -> replan` must preserve `control_thread_id / session_id / environment_ref / chat_writeback_channel / requested_surfaces`, so governance, human-assist, and resume flows can reconnect to the same execution chain before a new assignment exists
   - `work_context_id + recommended_scheduler_action` now form a shared continuity contract across human-assist, schedule resume, runtime chat media, and recovery/reentry surfaces; they are continuity keys on the same runtime truth chain, not a second runtime state model
+- `2026-04-02` supplement:
+  - single-loop main-brain chat keeps exactly one formal chat/control thread; `/runtime-center/chat/run` streams reply tokens first and same-thread commit sidecar events second, and must not reintroduce `task-chat:*` or a second chat object
+  - `main_brain.phase2_commit` is canonical session snapshot state; conversation read surfaces may project it as `meta.main_brain_commit` for same-thread reload, but that projection is not a new top-level runtime object
+  - truth-first main-brain scope snapshots are derived caches keyed by `work_context / industry / agent`; media adopt/retain/writeback must dirty-mark the relevant scope and refresh incrementally instead of rebuilding the entire prompt memory every turn
 
 本文件用于定义 `CoPaw` 理想载体升级中的**正式数据模型草案**。
 
@@ -2198,6 +2202,7 @@ Persistence/query landing:
   - `work_context` summary
 - media/chat writeback 与 memory recall 也必须显式把 `work_context_id` 作为正式 scope 消费；当媒体分析、长期记忆或 report drill-down 已绑定共享工作上下文时，不允许再次退回只靠 `task_id` 猜当前工作身份
 - `control_thread_id`、`task-session:*` 这类线程锚点可以参与解析，但不应单独充当正式工作身份
+- conversation read surface 在同线程存在主脑 phase-2 commit 持久态时，可把 canonical session snapshot 投影为 `meta.main_brain_commit`；这只是聊天 reload/read-model 的派生字段，不构成新的 `ChatCommit` 一级对象。
 
 ## 13.7 Fixed SOP Kernel
 

@@ -256,7 +256,6 @@ describe("runtimeTransport", () => {
       getSelectedMediaAnalysisIds: () => [],
       setRuntimeHealthNotice: vi.fn(),
       setRuntimeWaitState: vi.fn(),
-      setShowModelPrompt: vi.fn(),
       dispatchHumanAssistDirty,
     });
 
@@ -328,7 +327,6 @@ describe("runtimeTransport", () => {
       getSelectedMediaAnalysisIds: () => [],
       setRuntimeHealthNotice: vi.fn(),
       setRuntimeWaitState: vi.fn(),
-      setShowModelPrompt: vi.fn(),
     });
 
     await transport.fetch({
@@ -405,7 +403,6 @@ describe("runtimeTransport", () => {
       getSelectedMediaAnalysisIds: () => [],
       setRuntimeHealthNotice: vi.fn(),
       setRuntimeWaitState: vi.fn(),
-      setShowModelPrompt: vi.fn(),
     });
 
     await transport.fetch({
@@ -454,7 +451,6 @@ describe("runtimeTransport", () => {
       getSelectedMediaAnalysisIds: () => [],
       setRuntimeHealthNotice,
       setRuntimeWaitState,
-      setShowModelPrompt: vi.fn(),
     });
 
     await expect(
@@ -520,7 +516,6 @@ describe("runtimeTransport", () => {
       getSelectedMediaAnalysisIds: () => [],
       setRuntimeHealthNotice,
       setRuntimeWaitState,
-      setShowModelPrompt: vi.fn(),
     });
 
     const requestPromise = transport.fetch({
