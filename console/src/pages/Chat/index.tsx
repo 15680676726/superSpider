@@ -54,6 +54,7 @@ import {
 } from "./runtimeDiagnostics";
 import sessionApi from "./sessionApi";
 import { ChatComposerAdapter } from "./ChatComposerAdapter";
+import { ChatCommitConfirmationCard } from "./ChatCommitConfirmationCard";
 import { ChatHumanAssistPanel } from "./ChatHumanAssistPanel";
 import { ChatRuntimeSidebar } from "./ChatRuntimeSidebar";
 import { useChatMedia } from "./useChatMedia";
@@ -478,7 +479,12 @@ export default function ChatPage() {
     hasSuggestedTeams,
     options,
     openSuggestedIndustryChat,
+    approveCommitBusy,
+    approveCommitDecisions,
+    rejectCommitBusy,
+    rejectCommitDecisions,
     sessionKind,
+    runtimeCommitState,
   } = runtimeState;
 
   const {
@@ -580,6 +586,13 @@ export default function ChatPage() {
           <ChatHumanAssistPanel
             activeChatThreadId={activeChatThreadId}
             threadMeta={threadMeta}
+          />
+          <ChatCommitConfirmationCard
+            state={runtimeCommitState}
+            approveBusy={approveCommitBusy}
+            rejectBusy={rejectCommitBusy}
+            onApprove={approveCommitDecisions}
+            onReject={rejectCommitDecisions}
           />
 
           {/* 错误提示 */}
