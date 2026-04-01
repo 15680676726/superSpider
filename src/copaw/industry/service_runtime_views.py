@@ -356,6 +356,29 @@ class _IndustryRuntimeViewsMixin:
             return current_cycle_entry
         return cycles[0] if cycles else None
 
+    def _propagate_replan_activation_summary(
+        self,
+        *,
+        current_cycle: dict[str, Any] | None,
+        replan_cycle: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(current_cycle, dict):
+            return current_cycle
+        current_synthesis = self._resolve_cycle_synthesis_payload(current_cycle)
+        if _mapping(current_synthesis.get("activation")):
+            return current_cycle
+        replan_synthesis = self._resolve_cycle_synthesis_payload(replan_cycle)
+        replan_activation = _mapping(replan_synthesis.get("activation"))
+        if not replan_activation:
+            return current_cycle
+        return {
+            **current_cycle,
+            "synthesis": {
+                **current_synthesis,
+                "activation": dict(replan_activation),
+            },
+        }
+
     def _build_instance_main_chain(
         self,
         *,
@@ -1986,6 +2009,15 @@ class _IndustryRuntimeViewsMixin:
             for cycle in cycle_records
 
         ]
+
+        current_cycle = self._propagate_replan_activation_summary(
+            current_cycle=current_cycle,
+            replan_cycle=self._resolve_replan_cycle_entry(
+                current_cycle=current_cycle,
+                current_cycle_entry=current_cycle,
+                cycles=[item for item in cycles if isinstance(item, dict)],
+            ),
+        )
 
         assignments = [
 

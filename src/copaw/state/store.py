@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 22
+STATE_SCHEMA_VERSION = 23
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS goals (
@@ -1282,6 +1282,30 @@ CREATE INDEX IF NOT EXISTS idx_memory_opinion_views_scope
     ON memory_opinion_views(scope_type, scope_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_opinion_views_subject
     ON memory_opinion_views(subject_key, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_relation_views (
+    relation_id TEXT PRIMARY KEY,
+    source_node_id TEXT NOT NULL,
+    target_node_id TEXT NOT NULL,
+    relation_kind TEXT NOT NULL DEFAULT 'references',
+    scope_type TEXT NOT NULL DEFAULT 'global',
+    scope_id TEXT NOT NULL,
+    owner_agent_id TEXT,
+    industry_instance_id TEXT,
+    summary TEXT NOT NULL DEFAULT '',
+    confidence REAL NOT NULL DEFAULT 0,
+    source_refs_json TEXT NOT NULL DEFAULT '[]',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_relation_views_scope
+    ON memory_relation_views(scope_type, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_relation_views_kind
+    ON memory_relation_views(relation_kind, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_relation_views_source_target
+    ON memory_relation_views(source_node_id, target_node_id, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS memory_reflection_runs (
     run_id TEXT PRIMARY KEY,

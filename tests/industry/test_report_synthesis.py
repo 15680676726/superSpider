@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from copaw.industry.report_synthesis import synthesize_reports
+from copaw.memory.activation_models import ActivationResult, KnowledgeNeuron
 from copaw.state import AgentReportRecord
 
 
@@ -42,6 +43,24 @@ def _report(
         followup_reason=followup_reason,
         metadata=metadata or {},
         updated_at=updated_at,
+    )
+
+
+def _activation(
+    *,
+    top_constraints: list[str] | None = None,
+    top_next_actions: list[str] | None = None,
+    support_refs: list[str] | None = None,
+    contradictions: list[KnowledgeNeuron] | None = None,
+) -> ActivationResult:
+    return ActivationResult(
+        query="review report closure",
+        scope_type="industry",
+        scope_id="industry-1",
+        top_constraints=top_constraints or [],
+        top_next_actions=top_next_actions or [],
+        support_refs=support_refs or [],
+        contradictions=contradictions or [],
     )
 
 
@@ -444,4 +463,58 @@ def test_synthesize_reports_detects_recommendation_conflicts_and_builds_directiv
             "recommended_action_id": f"resolve-conflict:{conflict['conflict_id']}",
         },
     ]
+    assert synthesis["needs_replan"] is True
+
+
+def test_synthesize_reports_includes_activation_constraints_in_replan_surface() -> None:
+    report = _report(
+        headline="Weekend variance review completed",
+        owner_agent_id="agent-a",
+        lane_id="lane-support",
+        findings=["Weekday response time stayed inside target."],
+    )
+    activation = _activation(
+        top_constraints=["Staffing changes still require validated weekend-cause evidence."],
+        top_next_actions=["Validate the weekend-cause hypothesis before changing staffing."],
+        support_refs=["activation:support:weekend-variance"],
+    )
+
+    synthesis = synthesize_reports([report], activation_result=activation)
+
+    assert synthesis["activation"]["top_constraints"] == [
+        "Staffing changes still require validated weekend-cause evidence.",
+    ]
+    assert synthesis["activation"]["top_next_actions"] == [
+        "Validate the weekend-cause hypothesis before changing staffing.",
+    ]
+    assert synthesis["activation"]["support_refs"] == [
+        "activation:support:weekend-variance",
+    ]
+    assert synthesis["replan_decision"]["status"] == "needs-replan"
+    assert synthesis["needs_replan"] is True
+
+
+def test_synthesize_reports_surfaces_activation_contradictions() -> None:
+    report = _report(
+        headline="Warehouse issue resolved",
+        owner_agent_id="agent-a",
+        goal_id="goal-shared",
+        lane_id="lane-ops",
+        result="completed",
+        findings=["The warehouse issue is resolved."],
+    )
+    contradiction = KnowledgeNeuron(
+        neuron_id="fact:industry-1:warehouse-approval",
+        kind="fact",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Warehouse approval conflict",
+        summary="Recent memory says the missing approval blocker remains unresolved.",
+    )
+    activation = _activation(contradictions=[contradiction])
+
+    synthesis = synthesize_reports([report], activation_result=activation)
+
+    assert synthesis["activation"]["contradiction_count"] == 1
+    assert synthesis["replan_decision"]["status"] == "needs-replan"
     assert synthesis["needs_replan"] is True

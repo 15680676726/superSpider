@@ -126,6 +126,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
                 prepare_sidecar_backends=lambda prewarm_backend_ids: calls.setdefault("prewarm_backends", list(prewarm_backend_ids)),
             ),
             "memory-retain-service",
+            "memory-activation-service",
             "agent-experience-service",
         ),
     )
@@ -197,6 +198,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
         == "conversation-compaction-service"
     )
     assert bootstrap.goal_service == "goal-service"
+    assert bootstrap.memory_activation_service == "memory-activation-service"
     assert bootstrap.main_brain_orchestrator == "main-brain-orchestrator"
     assert bootstrap.turn_executor == "turn-executor"
 

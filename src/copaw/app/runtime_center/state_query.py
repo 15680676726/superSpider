@@ -35,6 +35,7 @@ from ...state.repositories import (
     SqliteTaskRuntimeRepository,
     SqliteWorkContextRepository,
 )
+from .models import RuntimeActivationSummary
 from .task_review_projection import (
     build_task_review_payload,
     build_host_twin_summary,
@@ -77,6 +78,7 @@ class RuntimeCenterStateQueryService:
         kernel_dispatcher: object | None = None,
         runtime_event_bus: object | None = None,
         environment_service: object | None = None,
+        memory_activation_service: object | None = None,
     ) -> None:
         self._task_repository = task_repository
         self._task_runtime_repository = task_runtime_repository
@@ -93,6 +95,7 @@ class RuntimeCenterStateQueryService:
         self._kernel_dispatcher = kernel_dispatcher
         self._runtime_event_bus = runtime_event_bus
         self._environment_service = environment_service
+        self._memory_activation_service = memory_activation_service
 
     def list_tasks(self, limit: int | None = 5) -> list[dict[str, object]]:
         tasks = self._task_repository.list_tasks(limit=limit)
@@ -103,6 +106,11 @@ class RuntimeCenterStateQueryService:
             kernel_meta = decode_kernel_task_metadata(task.acceptance_criteria)
             child_task_count = len(self._task_repository.list_tasks(parent_task_id=task.id))
             work_context = self._serialize_work_context(task.work_context_id)
+            activation = self._build_task_activation_summary(
+                task=task,
+                runtime=runtime,
+                kernel_metadata=kernel_meta,
+            )
             payload.append(
                 {
                     "id": task.id,
@@ -138,6 +146,7 @@ class RuntimeCenterStateQueryService:
                     "work_context": work_context,
                     "child_task_count": child_task_count,
                     "route": task_route(task.id),
+                    "activation": activation,
                 },
             )
         return payload
@@ -242,6 +251,11 @@ class RuntimeCenterStateQueryService:
             owner_agent=related_agents_by_id.get(str(owner_agent_id or "").strip()),
             task_route=task_route(task.id),
         )
+        activation = self._build_task_activation_summary(
+            task=task,
+            runtime=runtime,
+            kernel_metadata=kernel_metadata,
+        )
         return {
             "trace_id": trace_id_from_kernel_meta(task_id, kernel_metadata),
             "task": task.model_dump(mode="json"),
@@ -281,6 +295,7 @@ class RuntimeCenterStateQueryService:
             "patches": patches,
             "growth": growth,
             "review": review_payload,
+            "activation": activation,
             "stats": {
                 "frame_count": len(frames),
                 "decision_count": len(decisions),
@@ -292,6 +307,88 @@ class RuntimeCenterStateQueryService:
             },
             "route": task_route(task_id),
         }
+
+    def _build_task_activation_summary(
+        self,
+        *,
+        task: object,
+        runtime: object | None,
+        kernel_metadata: dict[str, object] | None,
+    ) -> dict[str, object] | None:
+        service = self._memory_activation_service
+        activate_for_query = getattr(service, "activate_for_query", None)
+        if not callable(activate_for_query):
+            return None
+        task_id = first_non_empty(getattr(task, "id", None))
+        if task_id is None:
+            return None
+        query = self._build_task_activation_query(task=task, runtime=runtime)
+        if query is None:
+            return None
+        owner_agent_id = first_non_empty(
+            getattr(runtime, "last_owner_agent_id", None) if runtime is not None else None,
+            getattr(task, "owner_agent_id", None),
+        )
+        result = activate_for_query(
+            query=query,
+            task_id=task_id,
+            work_context_id=first_non_empty(getattr(task, "work_context_id", None)),
+            owner_agent_id=owner_agent_id,
+            capability_ref=first_non_empty((kernel_metadata or {}).get("capability_ref")),
+            risk_level=first_non_empty(
+                getattr(runtime, "risk_level", None) if runtime is not None else None,
+            ),
+            current_phase=first_non_empty(
+                getattr(runtime, "current_phase", None) if runtime is not None else None,
+            ),
+            include_strategy=True,
+            include_reports=True,
+            limit=6,
+        )
+        return self._serialize_activation_summary(result)
+
+    def _build_task_activation_query(
+        self,
+        *,
+        task: object,
+        runtime: object | None,
+    ) -> str | None:
+        query_parts = string_list_from_values(
+            getattr(task, "title", None),
+            getattr(runtime, "last_result_summary", None) if runtime is not None else None,
+            getattr(task, "summary", None),
+        )
+        if not query_parts:
+            return None
+        return " | ".join(dict.fromkeys(query_parts))
+
+    def _serialize_activation_summary(self, result: object) -> dict[str, object] | None:
+        model_dump = getattr(result, "model_dump", None)
+        if not callable(model_dump):
+            return None
+        payload = model_dump(mode="json")
+        if not isinstance(payload, dict):
+            return None
+        summary = RuntimeActivationSummary(
+            scope_type=first_non_empty(payload.get("scope_type")) or "global",
+            scope_id=first_non_empty(payload.get("scope_id")) or "runtime",
+            activated_count=len(payload.get("activated_neurons") or []),
+            contradiction_count=len(payload.get("contradictions") or []),
+            top_entities=string_list_from_values(payload.get("top_entities")),
+            top_constraints=string_list_from_values(payload.get("top_constraints")),
+            top_next_actions=string_list_from_values(payload.get("top_next_actions")),
+            support_refs=string_list_from_values(payload.get("support_refs")),
+            evidence_refs=string_list_from_values(payload.get("evidence_refs")),
+            strategy_refs=string_list_from_values(payload.get("strategy_refs")),
+        )
+        if (
+            summary.activated_count <= 0
+            and not summary.top_entities
+            and not summary.top_constraints
+            and not summary.support_refs
+        ):
+            return None
+        return summary.model_dump(mode="json")
 
     def list_human_assist_tasks(
         self,

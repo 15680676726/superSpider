@@ -327,6 +327,9 @@ class _IndustryLifecycleMixin:
             "source_report_id",
             "source_report_ids",
             "synthesis_kind",
+            "activation_top_constraints",
+            "activation_top_next_actions",
+            "activation_support_refs",
             "upstream_backlog_source_ref",
         ):
             value = metadata.get(key)

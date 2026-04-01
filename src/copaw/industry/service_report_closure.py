@@ -41,6 +41,27 @@ def _unique_strings(*values: object) -> list[str]:
     return items
 
 
+def _activation_followup_metadata(synthesis: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(synthesis, Mapping):
+        return {}
+    activation = synthesis.get("activation")
+    if not isinstance(activation, Mapping):
+        return {}
+    metadata: dict[str, Any] = {}
+    for source_key, target_key in (
+        ("top_constraints", "activation_top_constraints"),
+        ("top_next_actions", "activation_top_next_actions"),
+        ("support_refs", "activation_support_refs"),
+    ):
+        value = activation.get(source_key)
+        if not isinstance(value, Sequence) or isinstance(value, str):
+            continue
+        copied = list(value)
+        if copied:
+            metadata[target_key] = copied
+    return metadata
+
+
 def synthesize_agent_reports(
     *,
     list_agent_report_records: Callable[..., list[AgentReportRecord]],
@@ -81,6 +102,9 @@ def record_report_synthesis_backlog(
         metadata = dict(action_metadata)
         if carried_metadata:
             metadata.update(carried_metadata)
+        activation_metadata = _activation_followup_metadata(synthesis)
+        if activation_metadata:
+            metadata.update(activation_metadata)
         if not metadata:
             metadata = None
         try:

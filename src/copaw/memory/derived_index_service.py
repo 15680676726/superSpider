@@ -17,6 +17,7 @@ from ..state import (
     RoutineRunRecord,
     StrategyMemoryRecord,
 )
+from ..state.models_memory import MemoryRelationViewRecord
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{2,}")
 _MEMORY_DOCUMENT_PREFIX = "memory:"
@@ -84,6 +85,13 @@ def normalize_memory_scope_type(scope_type: str | None) -> str:
 def normalize_scope_id(scope_id: str | None) -> str:
     normalized = str(scope_id or "").strip()
     return normalized or "runtime"
+
+
+def normalize_optional_text(value: object | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def parse_memory_document_id(document_id: str | None) -> tuple[str, str] | None:
@@ -196,6 +204,16 @@ def tokenize(text: str | None) -> list[str]:
     if not isinstance(text, str) or not text.strip():
         return []
     return [token.lower() for token in _TOKEN_RE.findall(text)]
+
+
+def dedupe_texts(values: Iterable[object]) -> list[str]:
+    collected: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in collected:
+            continue
+        collected.append(text)
+    return collected
 
 
 def extract_entity_candidates(
@@ -340,6 +358,7 @@ class DerivedMemoryIndexService:
         fact_index_repository,
         entity_view_repository=None,
         opinion_view_repository=None,
+        relation_view_repository=None,
         reflection_run_repository=None,
         knowledge_repository=None,
         strategy_repository=None,
@@ -355,6 +374,7 @@ class DerivedMemoryIndexService:
         self._fact_index_repository = fact_index_repository
         self._entity_view_repository = entity_view_repository
         self._opinion_view_repository = opinion_view_repository
+        self._relation_view_repository = relation_view_repository
         self._reflection_run_repository = reflection_run_repository
         self._knowledge_repository = knowledge_repository
         self._strategy_repository = strategy_repository
@@ -389,6 +409,28 @@ class DerivedMemoryIndexService:
             return []
         return self._opinion_view_repository.list_views(**kwargs)
 
+    def list_relation_views(self, **kwargs: Any) -> list[MemoryRelationViewRecord]:
+        if self._relation_view_repository is None:
+            return []
+        list_kwargs = dict(kwargs)
+        scope_type = normalize_optional_text(list_kwargs.get("scope_type"))
+        scope_id = normalize_optional_text(list_kwargs.get("scope_id"))
+        if scope_type is not None:
+            list_kwargs["scope_type"] = normalize_memory_scope_type(scope_type)
+        if scope_id is not None:
+            list_kwargs["scope_id"] = normalize_scope_id(scope_id)
+        for field in (
+            "owner_agent_id",
+            "industry_instance_id",
+            "relation_kind",
+            "source_node_id",
+            "target_node_id",
+        ):
+            normalized = normalize_optional_text(list_kwargs.get(field))
+            if normalized is not None:
+                list_kwargs[field] = normalized
+        return self._relation_view_repository.list_views(**list_kwargs)
+
     def list_reflection_runs(self, **kwargs: Any) -> list[MemoryReflectionRunRecord]:
         if self._reflection_run_repository is None:
             return []
@@ -404,6 +446,55 @@ class DerivedMemoryIndexService:
             self._entity_view_repository.clear(scope_type=scope_type, scope_id=scope_id)
         if self._opinion_view_repository is not None:
             self._opinion_view_repository.clear(scope_type=scope_type, scope_id=scope_id)
+        if self._relation_view_repository is not None:
+            self._relation_view_repository.clear(scope_type=scope_type, scope_id=scope_id)
+
+    def rebuild_relation_views(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        owner_agent_id: str | None = None,
+        industry_instance_id: str | None = None,
+    ) -> list[MemoryRelationViewRecord]:
+        if self._relation_view_repository is None:
+            return []
+        normalized_scope_type = (
+            normalize_memory_scope_type(scope_type)
+            if isinstance(scope_type, str) and scope_type.strip()
+            else None
+        )
+        normalized_scope_id = (
+            normalize_scope_id(scope_id)
+            if isinstance(scope_id, str) and scope_id.strip()
+            else None
+        )
+        list_kwargs: dict[str, Any] = {
+            "scope_type": normalized_scope_type,
+            "scope_id": normalized_scope_id,
+            "owner_agent_id": owner_agent_id,
+            "industry_instance_id": industry_instance_id,
+            "limit": None,
+        }
+        fact_entries = self.list_fact_entries(**list_kwargs)
+        entity_views = self.list_entity_views(**list_kwargs)
+        opinion_views = self.list_opinion_views(**list_kwargs)
+        self._relation_view_repository.clear(
+            scope_type=normalized_scope_type,
+            scope_id=normalized_scope_id,
+        )
+        relation_views = self._build_relation_views(
+            fact_entries=fact_entries,
+            entity_views=entity_views,
+            opinion_views=opinion_views,
+            scope_type=normalized_scope_type,
+            scope_id=normalized_scope_id,
+            owner_agent_id=owner_agent_id,
+            industry_instance_id=industry_instance_id,
+        )
+        for relation_view in relation_views:
+            self._relation_view_repository.upsert_view(relation_view)
+        return self.list_relation_views(**list_kwargs)
 
     def delete_source(self, *, source_type: str, source_ref: str) -> int:
         existing_entries = self._fact_index_repository.list_entries(
@@ -1592,3 +1683,283 @@ class DerivedMemoryIndexService:
 
     def _stable_entry_id(self, source_type: str, source_ref: object) -> str:
         return f"memory-index:{source_type}:{slugify(source_ref, fallback='entry')}"
+
+    def _relation_scope_matches(
+        self,
+        *,
+        candidate_scope_type: str | None,
+        candidate_scope_id: str | None,
+        relation_scope_type: str | None,
+        relation_scope_id: str | None,
+    ) -> bool:
+        return self._matches_record_scope(
+            record_scope_type=candidate_scope_type,
+            record_scope_id=candidate_scope_id,
+            scope_type=relation_scope_type,
+            scope_id=relation_scope_id,
+        )
+
+    def _build_relation_views(
+        self,
+        *,
+        fact_entries: list[MemoryFactIndexRecord],
+        entity_views: list[MemoryEntityViewRecord],
+        opinion_views: list[MemoryOpinionViewRecord],
+        scope_type: str | None,
+        scope_id: str | None,
+        owner_agent_id: str | None,
+        industry_instance_id: str | None,
+    ) -> list[MemoryRelationViewRecord]:
+        entities_by_key: dict[str, list[MemoryEntityViewRecord]] = {}
+        for entity_view in entity_views:
+            entity_key = str(getattr(entity_view, "entity_key", "") or "").strip()
+            if not entity_key:
+                continue
+            entities_by_key.setdefault(entity_key, []).append(entity_view)
+
+        opinions_by_key: dict[str, list[MemoryOpinionViewRecord]] = {}
+        for opinion_view in opinion_views:
+            opinion_key = str(getattr(opinion_view, "opinion_key", "") or "").strip()
+            if not opinion_key:
+                continue
+            opinions_by_key.setdefault(opinion_key, []).append(opinion_view)
+
+        relation_views: dict[str, MemoryRelationViewRecord] = {}
+        for entry in fact_entries:
+            fact_id = str(getattr(entry, "id"))
+            fact_scope_type = normalize_memory_scope_type(
+                scope_type or str(getattr(entry, "scope_type", "global"))
+            )
+            fact_scope_id = normalize_scope_id(scope_id or str(getattr(entry, "scope_id", "runtime")))
+            fact_refs = set(
+                dedupe_texts(
+                    [
+                        fact_id,
+                        getattr(entry, "source_ref", None),
+                        *list(getattr(entry, "evidence_refs", []) or []),
+                    ],
+                )
+            )
+            for entity_key in list(getattr(entry, "entity_keys", []) or []):
+                for entity_view in entities_by_key.get(str(entity_key), []):
+                    if not self._relation_scope_matches(
+                        candidate_scope_type=_safe_getattr(entity_view, "scope_type"),
+                        candidate_scope_id=_safe_getattr(entity_view, "scope_id"),
+                        relation_scope_type=fact_scope_type,
+                        relation_scope_id=fact_scope_id,
+                    ):
+                        continue
+                    relation = self._make_relation_view(
+                        source_node_id=fact_id,
+                        target_node_id=str(getattr(entity_view, "entity_id")),
+                        relation_kind="mentions",
+                        scope_type=fact_scope_type,
+                        scope_id=fact_scope_id,
+                        owner_agent_id=owner_agent_id
+                        or _safe_getattr(entry, "owner_agent_id")
+                        or _safe_getattr(entity_view, "owner_agent_id"),
+                        industry_instance_id=industry_instance_id
+                        or _safe_getattr(entry, "industry_instance_id")
+                        or _safe_getattr(entity_view, "industry_instance_id"),
+                        summary=(
+                            f"{getattr(entry, 'title', '') or getattr(entry, 'summary', '')} "
+                            f"mentions {getattr(entity_view, 'display_name', '') or getattr(entity_view, 'entity_key', '')}"
+                        ),
+                        confidence=(
+                            float(getattr(entry, "confidence", 0.0) or 0.0)
+                            + float(getattr(entity_view, "confidence", 0.0) or 0.0)
+                        )
+                        / 2.0,
+                        source_refs=dedupe_texts(
+                            [
+                                getattr(entry, "source_ref", None),
+                                *list(getattr(entry, "evidence_refs", []) or []),
+                                *list(getattr(entity_view, "source_refs", []) or []),
+                                *list(getattr(entity_view, "supporting_refs", []) or []),
+                            ],
+                        ),
+                        metadata={
+                            "source_kind": "fact",
+                            "target_kind": "entity",
+                            "entity_key": getattr(entity_view, "entity_key", None),
+                            "fact_source_type": getattr(entry, "source_type", None),
+                        },
+                    )
+                    relation_views[relation.relation_id] = relation
+
+            for opinion_key in list(getattr(entry, "opinion_keys", []) or []):
+                for opinion_view in opinions_by_key.get(str(opinion_key), []):
+                    if not self._relation_scope_matches(
+                        candidate_scope_type=_safe_getattr(opinion_view, "scope_type"),
+                        candidate_scope_id=_safe_getattr(opinion_view, "scope_id"),
+                        relation_scope_type=fact_scope_type,
+                        relation_scope_id=fact_scope_id,
+                    ):
+                        continue
+                    opinion_support_refs = set(
+                        dedupe_texts(getattr(opinion_view, "supporting_refs", []) or [])
+                    )
+                    opinion_contradiction_refs = set(
+                        dedupe_texts(getattr(opinion_view, "contradicting_refs", []) or [])
+                    )
+                    relation_kind = "mentions"
+                    if fact_refs.intersection(opinion_support_refs):
+                        relation_kind = "supports"
+                    elif fact_refs.intersection(opinion_contradiction_refs):
+                        relation_kind = "contradicts"
+                    relation = self._make_relation_view(
+                        source_node_id=fact_id,
+                        target_node_id=str(getattr(opinion_view, "opinion_id")),
+                        relation_kind=relation_kind,
+                        scope_type=fact_scope_type,
+                        scope_id=fact_scope_id,
+                        owner_agent_id=owner_agent_id
+                        or _safe_getattr(entry, "owner_agent_id")
+                        or _safe_getattr(opinion_view, "owner_agent_id"),
+                        industry_instance_id=industry_instance_id
+                        or _safe_getattr(entry, "industry_instance_id")
+                        or _safe_getattr(opinion_view, "industry_instance_id"),
+                        summary=(
+                            f"{getattr(entry, 'title', '') or getattr(entry, 'summary', '')} "
+                            f"{relation_kind} {getattr(opinion_view, 'opinion_key', '')}"
+                        ),
+                        confidence=(
+                            float(getattr(entry, "confidence", 0.0) or 0.0)
+                            + float(getattr(opinion_view, "confidence", 0.0) or 0.0)
+                        )
+                        / 2.0,
+                        source_refs=dedupe_texts(
+                            [
+                                getattr(entry, "source_ref", None),
+                                *list(getattr(entry, "evidence_refs", []) or []),
+                                *list(getattr(opinion_view, "source_refs", []) or []),
+                                *list(getattr(opinion_view, "supporting_refs", []) or []),
+                                *list(getattr(opinion_view, "contradicting_refs", []) or []),
+                            ],
+                        ),
+                        metadata={
+                            "source_kind": "fact",
+                            "target_kind": "opinion",
+                            "opinion_key": getattr(opinion_view, "opinion_key", None),
+                            "subject_key": getattr(opinion_view, "subject_key", None),
+                        },
+                    )
+                    relation_views[relation.relation_id] = relation
+
+        for opinion_view in opinion_views:
+            opinion_scope_type = normalize_memory_scope_type(
+                scope_type or str(getattr(opinion_view, "scope_type", "global"))
+            )
+            opinion_scope_id = normalize_scope_id(
+                scope_id or str(getattr(opinion_view, "scope_id", "runtime"))
+            )
+            opinion_support_refs = set(
+                dedupe_texts(getattr(opinion_view, "supporting_refs", []) or [])
+            )
+            opinion_contradiction_refs = set(
+                dedupe_texts(getattr(opinion_view, "contradicting_refs", []) or [])
+            )
+            for entity_key in dedupe_texts(
+                [
+                    getattr(opinion_view, "subject_key", None),
+                    *list(getattr(opinion_view, "entity_keys", []) or []),
+                ],
+            ):
+                for entity_view in entities_by_key.get(entity_key, []):
+                    if not self._relation_scope_matches(
+                        candidate_scope_type=_safe_getattr(entity_view, "scope_type"),
+                        candidate_scope_id=_safe_getattr(entity_view, "scope_id"),
+                        relation_scope_type=opinion_scope_type,
+                        relation_scope_id=opinion_scope_id,
+                    ):
+                        continue
+                    entity_support_refs = set(
+                        dedupe_texts(getattr(entity_view, "supporting_refs", []) or [])
+                    )
+                    entity_contradiction_refs = set(
+                        dedupe_texts(getattr(entity_view, "contradicting_refs", []) or [])
+                    )
+                    relation_kind = "mentions"
+                    if opinion_support_refs.intersection(entity_support_refs):
+                        relation_kind = "supports"
+                    elif (
+                        opinion_contradiction_refs.intersection(entity_support_refs)
+                        or opinion_support_refs.intersection(entity_contradiction_refs)
+                    ):
+                        relation_kind = "contradicts"
+                    relation = self._make_relation_view(
+                        source_node_id=str(getattr(opinion_view, "opinion_id")),
+                        target_node_id=str(getattr(entity_view, "entity_id")),
+                        relation_kind=relation_kind,
+                        scope_type=opinion_scope_type,
+                        scope_id=opinion_scope_id,
+                        owner_agent_id=owner_agent_id
+                        or _safe_getattr(opinion_view, "owner_agent_id")
+                        or _safe_getattr(entity_view, "owner_agent_id"),
+                        industry_instance_id=industry_instance_id
+                        or _safe_getattr(opinion_view, "industry_instance_id")
+                        or _safe_getattr(entity_view, "industry_instance_id"),
+                        summary=(
+                            f"{getattr(opinion_view, 'opinion_key', '')} "
+                            f"{relation_kind} {getattr(entity_view, 'display_name', '') or getattr(entity_view, 'entity_key', '')}"
+                        ),
+                        confidence=(
+                            float(getattr(opinion_view, "confidence", 0.0) or 0.0)
+                            + float(getattr(entity_view, "confidence", 0.0) or 0.0)
+                        )
+                        / 2.0,
+                        source_refs=dedupe_texts(
+                            [
+                                *list(getattr(opinion_view, "source_refs", []) or []),
+                                *list(getattr(opinion_view, "supporting_refs", []) or []),
+                                *list(getattr(opinion_view, "contradicting_refs", []) or []),
+                                *list(getattr(entity_view, "source_refs", []) or []),
+                            ],
+                        ),
+                        metadata={
+                            "source_kind": "opinion",
+                            "target_kind": "entity",
+                            "entity_key": getattr(entity_view, "entity_key", None),
+                            "opinion_key": getattr(opinion_view, "opinion_key", None),
+                        },
+                    )
+                    relation_views[relation.relation_id] = relation
+
+        return list(relation_views.values())
+
+    def _make_relation_view(
+        self,
+        *,
+        source_node_id: str,
+        target_node_id: str,
+        relation_kind: str,
+        scope_type: str,
+        scope_id: str,
+        owner_agent_id: str | None,
+        industry_instance_id: str | None,
+        summary: str,
+        confidence: float,
+        source_refs: list[str],
+        metadata: dict[str, Any],
+    ) -> MemoryRelationViewRecord:
+        normalized_scope_type = normalize_memory_scope_type(scope_type)
+        normalized_scope_id = normalize_scope_id(scope_id)
+        normalized_relation_kind = str(relation_kind or "references").strip().lower() or "references"
+        return MemoryRelationViewRecord(
+            relation_id=(
+                f"memory-relation:{slugify(normalized_scope_type)}:{slugify(normalized_scope_id)}:"
+                f"{slugify(source_node_id)}:{slugify(normalized_relation_kind)}:{slugify(target_node_id)}"
+            ),
+            source_node_id=source_node_id,
+            target_node_id=target_node_id,
+            relation_kind=normalized_relation_kind,
+            scope_type=normalized_scope_type,
+            scope_id=normalized_scope_id,
+            owner_agent_id=owner_agent_id,
+            industry_instance_id=industry_instance_id,
+            summary=truncate_text(summary, max_length=320),
+            confidence=max(0.0, min(round(confidence, 4), 1.0)),
+            source_refs=source_refs,
+            metadata=metadata,
+            updated_at=utc_now(),
+        )

@@ -7,18 +7,21 @@ from fastapi.testclient import TestClient
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.memory import (
     DerivedMemoryIndexService,
+    MemoryActivationService,
     MemoryRecallService,
     MemoryReflectionService,
     MemoryRetainService,
 )
-from copaw.state import SQLiteStateStore
+from copaw.state import SQLiteStateStore, StrategyMemoryRecord
 from copaw.state.knowledge_service import StateKnowledgeService
+from copaw.state.models_memory import MemoryRelationViewRecord
 from copaw.state.repositories import (
     SqliteKnowledgeChunkRepository,
     SqliteMemoryEntityViewRepository,
     SqliteMemoryFactIndexRepository,
     SqliteMemoryOpinionViewRepository,
     SqliteMemoryReflectionRunRepository,
+    SqliteMemoryRelationViewRepository,
     SqliteStrategyMemoryRepository,
 )
 from copaw.state.strategy_memory_service import StateStrategyMemoryService
@@ -32,11 +35,13 @@ def _build_client(tmp_path) -> TestClient:
     fact_repo = SqliteMemoryFactIndexRepository(store)
     entity_repo = SqliteMemoryEntityViewRepository(store)
     opinion_repo = SqliteMemoryOpinionViewRepository(store)
+    relation_repo = SqliteMemoryRelationViewRepository(store)
     reflection_repo = SqliteMemoryReflectionRunRepository(store)
     derived = DerivedMemoryIndexService(
         fact_index_repository=fact_repo,
         entity_view_repository=entity_repo,
         opinion_view_repository=opinion_repo,
+        relation_view_repository=relation_repo,
         reflection_run_repository=reflection_repo,
         knowledge_repository=knowledge_repo,
         strategy_repository=strategy_repo,
@@ -63,6 +68,11 @@ def _build_client(tmp_path) -> TestClient:
     app.state.memory_recall_service = MemoryRecallService(
         derived_index_service=derived,
     )
+    app.state.memory_activation_service = MemoryActivationService(
+        derived_index_service=derived,
+        strategy_memory_service=strategy,
+    )
+    app.state.memory_relation_view_repository = relation_repo
     app.state.memory_reflection_service = reflection
     app.state.memory_retain_service = MemoryRetainService(
         knowledge_service=knowledge,
@@ -247,3 +257,297 @@ def test_runtime_center_memory_recall_accepts_work_context_selector(tmp_path) ->
     assert payload["hits"][0]["scope_id"] == "ctx-industry-control"
     assert payload["hits"][0]["title"] == "Shared Memory Profile"
     assert any(item["title"] == "Control-thread note" for item in payload["hits"])
+
+
+def _upsert_industry_strategy(client: TestClient, *, industry_instance_id: str = "industry-1") -> None:
+    client.app.state.strategy_memory_service.upsert_strategy(
+        StrategyMemoryRecord(
+            strategy_id=f"strategy:industry:{industry_instance_id}:main-brain",
+            scope_type="industry",
+            scope_id=industry_instance_id,
+            owner_agent_id="main-brain",
+            industry_instance_id=industry_instance_id,
+            title="Outbound evidence discipline",
+            summary="Keep outbound execution blocked until evidence clears the action.",
+            mission="Protect operator execution quality.",
+            execution_constraints=["Only approve outbound after evidence review."],
+            current_focuses=["Resolve outbound approval blockers with evidence."],
+        ),
+    )
+
+
+def test_runtime_center_memory_activation_route_returns_activation_result(tmp_path) -> None:
+    client = _build_client(tmp_path)
+    _upsert_industry_strategy(client)
+
+    remember_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "Outbound approval blocked",
+            "content": "Outbound approval is blocked until evidence review is complete.",
+            "scope_type": "work_context",
+            "scope_id": "ctx-1",
+            "source_ref": "memory:ctx-1:approval",
+            "role_bindings": ["execution-core"],
+            "tags": ["outbound", "approval"],
+        },
+    )
+    assert remember_response.status_code == 200
+
+    response = client.get(
+        "/runtime-center/memory/activation",
+        params={
+            "query": "outbound approval blocked",
+            "work_context_id": "ctx-1",
+            "industry_instance_id": "industry-1",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["activated_neurons"]
+    assert payload["top_constraints"] == ["Only approve outbound after evidence review."]
+
+
+def test_runtime_center_memory_activation_route_preserves_scope_priority(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    industry_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "Industry approval note",
+            "content": "Industry scope tracks outbound approval review.",
+            "scope_type": "industry",
+            "scope_id": "industry-1",
+            "source_ref": "memory:industry-1:approval",
+            "role_bindings": ["execution-core"],
+            "tags": ["industry"],
+        },
+    )
+    assert industry_response.status_code == 200
+
+    context_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "Context approval blocker",
+            "content": "This work context is blocked on outbound approval.",
+            "scope_type": "work_context",
+            "scope_id": "ctx-1",
+            "source_ref": "memory:ctx-1:blocker",
+            "role_bindings": ["execution-core"],
+            "tags": ["work-context"],
+        },
+    )
+    assert context_response.status_code == 200
+
+    response = client.get(
+        "/runtime-center/memory/activation",
+        params={
+            "query": "outbound approval blocked",
+            "work_context_id": "ctx-1",
+            "industry_instance_id": "industry-1",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["scope_type"] == "work_context"
+    assert payload["scope_id"] == "ctx-1"
+
+
+def test_runtime_center_memory_relations_route_lists_relation_views(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    client.app.state.memory_relation_view_repository.upsert_view(
+        MemoryRelationViewRecord(
+            relation_id="rel:ctx-1:approval->finance",
+            source_node_id="fact:approval",
+            target_node_id="entity:finance-queue",
+            relation_kind="supports",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            owner_agent_id="execution-core",
+            industry_instance_id="industry-1",
+            summary="Outbound approval supports finance queue review.",
+            confidence=0.91,
+            source_refs=["fact:approval"],
+            metadata={"reason": "queue ownership"},
+        ),
+    )
+
+    response = client.get(
+        "/runtime-center/memory/relations",
+        params={"scope_type": "work_context", "scope_id": "ctx-1"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload
+    assert payload[0]["relation_id"] == "rel:ctx-1:approval->finance"
+    assert payload[0]["relation_kind"] == "supports"
+    assert payload[0]["metadata"] == {"reason": "queue ownership"}
+
+
+def test_runtime_center_memory_relations_route_filters_by_relation_fields(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    repository = client.app.state.memory_relation_view_repository
+    repository.upsert_view(
+        MemoryRelationViewRecord(
+            relation_id="rel:ctx-1:approval->finance",
+            source_node_id="fact:approval",
+            target_node_id="entity:finance-queue",
+            relation_kind="supports",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval supports finance queue review.",
+            source_refs=["fact:approval"],
+        ),
+    )
+    repository.upsert_view(
+        MemoryRelationViewRecord(
+            relation_id="rel:ctx-1:approval->legal",
+            source_node_id="fact:approval",
+            target_node_id="entity:legal-queue",
+            relation_kind="mentions",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval mentions legal queue review.",
+            source_refs=["fact:approval"],
+        ),
+    )
+
+    response = client.get(
+        "/runtime-center/memory/relations",
+        params={
+            "scope_type": "work_context",
+            "scope_id": "ctx-1",
+            "relation_kind": "supports",
+            "target_node_id": "entity:finance-queue",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["relation_id"] == "rel:ctx-1:approval->finance"
+    assert payload[0]["relation_kind"] == "supports"
+    assert payload[0]["target_node_id"] == "entity:finance-queue"
+
+
+def test_runtime_center_memory_relations_route_accepts_scope_selectors(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    repository = client.app.state.memory_relation_view_repository
+    repository.upsert_view(
+        MemoryRelationViewRecord(
+            relation_id="rel:ctx-1:approval->finance",
+            source_node_id="fact:approval",
+            target_node_id="entity:finance-queue",
+            relation_kind="supports",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            summary="Approval supports finance queue review.",
+            source_refs=["fact:approval"],
+        ),
+    )
+    repository.upsert_view(
+        MemoryRelationViewRecord(
+            relation_id="rel:ctx-2:approval->legal",
+            source_node_id="fact:approval",
+            target_node_id="entity:legal-queue",
+            relation_kind="supports",
+            scope_type="work_context",
+            scope_id="ctx-2",
+            summary="Approval supports legal queue review.",
+            source_refs=["fact:approval"],
+        ),
+    )
+
+    response = client.get(
+        "/runtime-center/memory/relations",
+        params={"work_context_id": "ctx-1"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["relation_id"] == "rel:ctx-1:approval->finance"
+    assert payload[0]["scope_type"] == "work_context"
+    assert payload[0]["scope_id"] == "ctx-1"
+
+
+def test_runtime_center_memory_relations_route_degrades_when_repository_missing(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    client.app.state.memory_relation_view_repository = None
+    client.app.state.derived_memory_index_service._relation_view_repository = None
+
+    response = client.get(
+        "/runtime-center/memory/relations",
+        params={"scope_type": "work_context", "scope_id": "ctx-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_runtime_center_memory_profile_includes_activation_summary_when_requested(tmp_path) -> None:
+    client = _build_client(tmp_path)
+    _upsert_industry_strategy(client)
+
+    remember_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "Industry outbound blocker",
+            "content": "Outbound approval stays blocked until the evidence pass completes.",
+            "scope_type": "industry",
+            "scope_id": "industry-1",
+            "source_ref": "memory:industry-1:blocker",
+            "role_bindings": ["execution-core"],
+            "tags": ["outbound", "industry"],
+        },
+    )
+    assert remember_response.status_code == 200
+
+    response = client.get(
+        "/runtime-center/memory/profiles/industry/industry-1",
+        params={"include_activation": True, "query": "outbound approval blocked"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["activation"]["activated_neurons"]
+    assert payload["activation"]["top_constraints"] == ["Only approve outbound after evidence review."]
+
+
+def test_runtime_center_memory_episodes_can_include_activation_refs(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    remember_response = client.post(
+        "/runtime-center/knowledge/memory",
+        json={
+            "title": "Control-thread blocker",
+            "content": "Escalate outbound approval only after the evidence review is complete.",
+            "scope_type": "work_context",
+            "scope_id": "ctx-1",
+            "source_ref": "work-context:ctx-1:approval",
+            "role_bindings": ["execution-core"],
+            "tags": ["outbound", "approval"],
+        },
+    )
+    assert remember_response.status_code == 200
+
+    response = client.get(
+        "/runtime-center/memory/episodes",
+        params={
+            "work_context_id": "ctx-1",
+            "include_activation": True,
+            "query": "outbound approval blocked",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload
+    assert payload[0]["activation"]["support_refs"]

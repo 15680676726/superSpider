@@ -20,6 +20,7 @@ from copaw.app.runtime_bootstrap import (
     stop_runtime_manager_stack,
 )
 from copaw.app import runtime_service_graph as runtime_service_graph_module
+from copaw.app.runtime_bootstrap_query import build_runtime_query_services
 from copaw.app.runtime_service_graph import (
     _build_kernel_runtime,
     _resolve_provider_manager,
@@ -29,6 +30,7 @@ from copaw.app.runtime_service_graph import (
 )
 from copaw.memory.models import MemoryBackendKind
 from copaw.state import SQLiteStateStore
+from copaw.state.models_memory import MemoryRelationViewRecord
 
 
 class _AsyncStopper:
@@ -100,6 +102,7 @@ def _build_bootstrap() -> RuntimeBootstrap:
         memory_fact_index_repository=object(),
         memory_entity_view_repository=object(),
         memory_opinion_view_repository=object(),
+        memory_relation_view_repository=object(),
         memory_reflection_run_repository=object(),
         workflow_template_repository=object(),
         workflow_preset_repository=object(),
@@ -138,6 +141,7 @@ def _build_bootstrap() -> RuntimeBootstrap:
         memory_recall_service=object(),
         memory_reflection_service=object(),
         memory_retain_service=object(),
+        memory_activation_service=object(),
         agent_experience_service=object(),
         reporting_service=object(),
         delegation_service=object(),
@@ -166,6 +170,55 @@ def _build_bootstrap() -> RuntimeBootstrap:
         actor_worker=object(),
         actor_supervisor=object(),
     )
+
+
+def test_build_runtime_query_services_returns_memory_activation_service_when_available(
+    monkeypatch,
+) -> None:
+    created: dict[str, object] = {}
+
+    class _FakeMemoryActivationService:
+        def __init__(self, *, derived_index_service, strategy_memory_service) -> None:
+            created["derived_index_service"] = derived_index_service
+            created["strategy_memory_service"] = strategy_memory_service
+
+    monkeypatch.setattr(
+        "copaw.app.runtime_bootstrap_query._resolve_memory_activation_service_cls",
+        lambda: _FakeMemoryActivationService,
+    )
+
+    repositories = SimpleNamespace(
+        task_repository=object(),
+        task_runtime_repository=object(),
+        runtime_frame_repository=object(),
+        schedule_repository=object(),
+        goal_repository=object(),
+        work_context_repository=object(),
+        decision_request_repository=object(),
+        memory_fact_index_repository=object(),
+        memory_entity_view_repository=object(),
+        memory_opinion_view_repository=object(),
+        memory_reflection_run_repository=object(),
+        knowledge_chunk_repository=object(),
+        strategy_memory_repository=object(),
+        agent_report_repository=object(),
+        routine_repository=object(),
+        routine_run_repository=object(),
+        industry_instance_repository=object(),
+    )
+
+    bootstrap = build_runtime_query_services(
+        repositories=repositories,
+        evidence_ledger=object(),
+        runtime_event_bus=object(),
+        human_assist_task_service=object(),
+        environment_service=object(),
+    )
+
+    assert len(bootstrap) == 10
+    assert bootstrap[8] is not None
+    assert created["derived_index_service"] is bootstrap[4]
+    assert created["strategy_memory_service"] is bootstrap[2]
 
 
 def test_attach_runtime_state_binds_bootstrap_and_manager_stack() -> None:
@@ -239,6 +292,21 @@ def test_attach_runtime_state_binds_bootstrap_and_manager_stack() -> None:
     assert app.state.automation_tasks == automation_tasks
 
 
+def test_attach_runtime_state_binds_memory_activation_service() -> None:
+    app = FastAPI()
+    bootstrap = _build_bootstrap()
+
+    attach_runtime_state(
+        app,
+        runtime_host=object(),
+        bootstrap=bootstrap,
+        manager_stack=RuntimeManagerStack(),
+        startup_recovery_summary={"reason": "startup"},
+    )
+
+    assert app.state.memory_activation_service is bootstrap.memory_activation_service
+
+
 def test_build_runtime_state_bindings_materializes_single_state_payload() -> None:
     bootstrap = _build_bootstrap()
     runtime_host = object()
@@ -287,6 +355,11 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
         bindings["media_analysis_repository"]
         is bootstrap.repositories.media_analysis_repository
     )
+    assert bindings["memory_activation_service"] is bootstrap.memory_activation_service
+    assert (
+        bindings["memory_relation_view_repository"]
+        is bootstrap.repositories.memory_relation_view_repository
+    )
     assert bindings["operating_lane_repository"] is bootstrap.repositories.operating_lane_repository
     assert bindings["backlog_item_repository"] is bootstrap.repositories.backlog_item_repository
     assert bindings["operating_cycle_repository"] is bootstrap.repositories.operating_cycle_repository
@@ -319,6 +392,65 @@ def test_build_runtime_repositories_keeps_bootstrap_schedule_repo_separate(
     assert repositories.bootstrap_schedule_repository is not None
     assert repositories.bootstrap_schedule_repository is not repositories.schedule_repository
     assert repositories.session_mount_repository is not None
+
+
+def test_memory_relation_view_record_accepts_relation_metadata() -> None:
+    record = MemoryRelationViewRecord(
+        relation_id="rel:ctx-1:approval->finance",
+        source_node_id="fact:approval",
+        target_node_id="entity:finance-queue",
+        relation_kind="supports",
+        scope_type="work_context",
+        scope_id="ctx-1",
+        source_refs=["fact:approval"],
+        metadata={"reason": "queue ownership"},
+    )
+
+    assert record.relation_kind == "supports"
+    assert record.scope_type == "work_context"
+    assert record.metadata == {"reason": "queue ownership"}
+
+
+def test_build_runtime_repositories_includes_memory_relation_view_repository(
+    tmp_path,
+) -> None:
+    repositories = build_runtime_repositories(SQLiteStateStore(tmp_path / "state.db"))
+
+    assert repositories.memory_relation_view_repository is not None
+
+
+def test_memory_relation_view_repository_round_trips_sqlite_records(tmp_path) -> None:
+    repositories = build_runtime_repositories(SQLiteStateStore(tmp_path / "state.db"))
+    repository = repositories.memory_relation_view_repository
+    record = MemoryRelationViewRecord(
+        relation_id="rel:ctx-1:approval->finance",
+        source_node_id="fact:approval",
+        target_node_id="entity:finance-queue",
+        relation_kind="supports",
+        scope_type="work_context",
+        scope_id="ctx-1",
+        owner_agent_id="agent:ops",
+        industry_instance_id="industry:finops",
+        summary="Approval supports finance queue review.",
+        confidence=0.9,
+        source_refs=["fact:approval", "report:daily-1"],
+        metadata={"reason": "queue ownership"},
+    )
+
+    repository.upsert_view(record)
+
+    stored = repository.get_view(record.relation_id)
+    scoped = repository.list_views(
+        scope_type="work_context",
+        scope_id="ctx-1",
+        relation_kind="supports",
+        source_node_id="fact:approval",
+        target_node_id="entity:finance-queue",
+    )
+
+    assert stored is not None
+    assert stored.model_dump(mode="json") == record.model_dump(mode="json")
+    assert [item.relation_id for item in scoped] == [record.relation_id]
 
 
 def test_build_kernel_runtime_threads_state_store_into_capability_service(

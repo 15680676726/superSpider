@@ -46,6 +46,7 @@ from ..models_memory import (
     MemoryEntityViewRecord,
     MemoryFactIndexRecord,
     MemoryOpinionViewRecord,
+    MemoryRelationViewRecord,
     MemoryReflectionRunRecord,
 )
 from ..models_work_context import WorkContextRecord
@@ -1198,6 +1199,52 @@ class BaseMemoryOpinionViewRepository(ABC):
 
     @abstractmethod
     def delete_view(self, opinion_id: str) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def clear(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+    ) -> int:
+        raise NotImplementedError
+
+
+class BaseMemoryRelationViewRepository(ABC):
+    """Abstract repository for compiled memory relation views."""
+
+    @abstractmethod
+    def get_view(
+        self,
+        relation_id: str,
+    ) -> Optional[MemoryRelationViewRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_views(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        owner_agent_id: str | None = None,
+        industry_instance_id: str | None = None,
+        relation_kind: str | None = None,
+        source_node_id: str | None = None,
+        target_node_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemoryRelationViewRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_view(
+        self,
+        record: MemoryRelationViewRecord,
+    ) -> MemoryRelationViewRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_view(self, relation_id: str) -> bool:
         raise NotImplementedError
 
     @abstractmethod

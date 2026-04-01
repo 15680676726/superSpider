@@ -1909,6 +1909,8 @@ The next memory enhancement must land as a derived layer on top of unified
 - `Retain / Recall / Reflect` services
 - `EntityMemoryView / OpinionMemoryView / MemoryRecallHit` read models
 - rebuildable profile/latest/history projections over canonical truth
+- `Knowledge Activation Layer` derived from `StrategyMemoryRecord + KnowledgeChunkRecord + MemoryFactIndexRecord + Entity/Opinion/Profile/Episode/Relation views`
+- `KnowledgeNeuron / ActivationInput / ActivationResult` as derived activation-layer objects for scope-first neuron activation and evidence/strategy rehydration
 
 ### Hard boundary:
 
@@ -1925,6 +1927,85 @@ The next memory enhancement must land as a derived layer on top of unified
 - `Recall` is exposed through a unified recall facade, not through backend-specific callers
 - `Reflect` produces read models, compiled summaries, or reviewable patch/proposal inputs
 - all derived indexes must be fully rebuildable from canonical `state / evidence`
+
+### `2026-04-01` activation-layer supplement
+
+The next memory-layer enhancement has now started landing as a derived activation layer instead of a new memory truth source.
+
+Current landed objects and service surface:
+
+- `KnowledgeNeuron`
+- `ActivationInput`
+- `ActivationResult`
+- `MemoryActivationService`
+
+Current landed consumer surfaces:
+
+- query prompt retrieval
+- goal compiler memory context
+
+`2026-04-01` phase 2 supplement:
+
+Current additionally-landed consumer surfaces:
+
+- industry report synthesis
+- follow-up backlog / replan materialization
+- current-cycle runtime surface payload
+
+Current activation-derived carry-over fields now include:
+
+- `activation.top_constraints`
+- `activation.top_next_actions`
+- `activation.support_refs`
+- `activation.contradiction_count`
+
+`2026-04-01` phase 3 supplement:
+
+Current additionally-landed Runtime Center surfaces:
+
+- `GET /runtime-center/memory/activation`
+- `GET /runtime-center/memory/profiles*` with opt-in `include_activation + query`
+- `GET /runtime-center/memory/episodes` with opt-in `include_activation + query`
+- Runtime Center task list/detail read payloads with compact `activation` summaries
+
+Current Runtime Center conservative activation summary fields now include:
+
+- `activation.activated_count`
+- `activation.contradiction_count`
+- `activation.top_entities`
+- `activation.top_constraints`
+- `activation.top_next_actions`
+- `activation.support_refs`
+- `activation.evidence_refs`
+- `activation.strategy_refs`
+
+Hard boundary remains:
+
+- activation-derived fields are still projections over canonical truth
+- backlog / assignment metadata may carry activation-derived hints, but those hints do not become a second durable memory truth
+
+Hard boundary:
+
+- activation remains derived from existing `StrategyMemory / KnowledgeChunk / FactIndex / reflection views`
+- no graph database or separate durable activation store has been introduced
+- dedicated activation visualization beyond current Runtime Center route/read-surface payloads remains a follow-up integration phase
+
+`2026-04-01` phase 4 supplement:
+
+Current additionally-landed derived relation objects/read surfaces:
+
+- `MemoryRelationViewRecord`
+- SQLite-backed `memory_relation_views` compiled read model inside the unified state store
+- `DerivedMemoryIndexService.list_relation_views(...)`
+- `DerivedMemoryIndexService.rebuild_relation_views(...)`
+- `GET /runtime-center/memory/relations`
+
+Current hard boundary after phase 4:
+
+- persisted relation views are derived-only and rebuildable from existing `MemoryFactIndexRecord + MemoryEntityViewRecord + MemoryOpinionViewRecord`
+- persisted relation views remain SQLite-backed compiled read models, not a second durable memory truth source
+- no graph database or graph-native execution write path has been introduced
+- generic `rebuild_all` / `POST /runtime-center/memory/rebuild` does not yet auto-rebuild relation views; relation rebuild currently remains an explicit derived-index operation
 ---
 
 ## 12.7 2026-03-19 media analysis ingest boundary

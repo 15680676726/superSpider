@@ -76,6 +76,7 @@ def build_runtime_query_services(
         human_assist_task_service=human_assist_task_service,
         runtime_event_bus=runtime_event_bus,
         environment_service=environment_service,
+        memory_activation_service=None,
     )
     evidence_query_service = RuntimeCenterEvidenceQueryService(
         evidence_ledger=evidence_ledger,
@@ -84,6 +85,11 @@ def build_runtime_query_services(
         fact_index_repository=repositories.memory_fact_index_repository,
         entity_view_repository=repositories.memory_entity_view_repository,
         opinion_view_repository=repositories.memory_opinion_view_repository,
+        relation_view_repository=getattr(
+            repositories,
+            "memory_relation_view_repository",
+            None,
+        ),
         reflection_run_repository=repositories.memory_reflection_run_repository,
         knowledge_repository=repositories.knowledge_chunk_repository,
         strategy_repository=repositories.strategy_memory_repository,

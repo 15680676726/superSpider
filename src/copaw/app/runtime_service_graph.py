@@ -370,6 +370,7 @@ def build_runtime_bootstrap(
         memory_reflection_service=memory_reflection_service,
         memory_recall_service=memory_recall_service,
         memory_retain_service=memory_retain_service,
+        memory_activation_service=memory_activation_service,
         agent_experience_service=agent_experience_service,
         work_context_service=work_context_service,
         learning_service=learning_service,

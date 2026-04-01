@@ -11,6 +11,7 @@ from ..models_memory import (
     MemoryFactIndexRecord,
     MemoryOpinionViewRecord,
     MemoryProfileViewRecord,
+    MemoryRelationViewRecord,
     MemoryReflectionRunRecord,
 )
 from ..store import SQLiteStateStore
@@ -18,6 +19,7 @@ from .base import (
     BaseMemoryEntityViewRepository,
     BaseMemoryFactIndexRepository,
     BaseMemoryOpinionViewRepository,
+    BaseMemoryRelationViewRepository,
     BaseMemoryReflectionRunRepository,
 )
 from .sqlite_shared import _decode_json_list, _decode_json_mapping, _encode_json, _payload
@@ -880,6 +882,153 @@ class SqliteMemoryOpinionViewRepository(BaseMemoryOpinionViewRepository):
         )
 
 
+class SqliteMemoryRelationViewRepository(BaseMemoryRelationViewRepository):
+    """SQLite-backed repository for compiled memory relation views."""
+
+    def __init__(self, store: SQLiteStateStore):
+        self._store = store
+        self._store.initialize()
+
+    def get_view(self, relation_id: str) -> MemoryRelationViewRecord | None:
+        with self._store.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM memory_relation_views WHERE relation_id = ?",
+                (relation_id,),
+            ).fetchone()
+        return _memory_relation_view_from_row(row)
+
+    def list_views(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+        owner_agent_id: str | None = None,
+        industry_instance_id: str | None = None,
+        relation_kind: str | None = None,
+        source_node_id: str | None = None,
+        target_node_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[MemoryRelationViewRecord]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if scope_type is not None:
+            clauses.append("scope_type = ?")
+            params.append(scope_type)
+        if scope_id is not None:
+            clauses.append("scope_id = ?")
+            params.append(scope_id)
+        if owner_agent_id is not None:
+            clauses.append("owner_agent_id = ?")
+            params.append(owner_agent_id)
+        if industry_instance_id is not None:
+            clauses.append("industry_instance_id = ?")
+            params.append(industry_instance_id)
+        if relation_kind is not None:
+            clauses.append("relation_kind = ?")
+            params.append(relation_kind)
+        if source_node_id is not None:
+            clauses.append("source_node_id = ?")
+            params.append(source_node_id)
+        if target_node_id is not None:
+            clauses.append("target_node_id = ?")
+            params.append(target_node_id)
+        query = "SELECT * FROM memory_relation_views"
+        if clauses:
+            query = f"{query} WHERE {' AND '.join(clauses)}"
+        query = f"{query} ORDER BY updated_at DESC, created_at DESC"
+        if isinstance(limit, int) and limit >= 0:
+            query = f"{query} LIMIT {int(limit)}"
+        with self._store.connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [
+            record
+            for record in (_memory_relation_view_from_row(row) for row in rows)
+            if record is not None
+        ]
+
+    def upsert_view(self, record: MemoryRelationViewRecord) -> MemoryRelationViewRecord:
+        payload = _payload(record)
+        payload["source_refs_json"] = json.dumps(
+            record.source_refs,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        payload["metadata_json"] = _encode_json(record.metadata)
+        with self._store.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO memory_relation_views (
+                    relation_id,
+                    source_node_id,
+                    target_node_id,
+                    relation_kind,
+                    scope_type,
+                    scope_id,
+                    owner_agent_id,
+                    industry_instance_id,
+                    summary,
+                    confidence,
+                    source_refs_json,
+                    metadata_json,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    :relation_id,
+                    :source_node_id,
+                    :target_node_id,
+                    :relation_kind,
+                    :scope_type,
+                    :scope_id,
+                    :owner_agent_id,
+                    :industry_instance_id,
+                    :summary,
+                    :confidence,
+                    :source_refs_json,
+                    :metadata_json,
+                    :created_at,
+                    :updated_at
+                )
+                ON CONFLICT(relation_id) DO UPDATE SET
+                    source_node_id = excluded.source_node_id,
+                    target_node_id = excluded.target_node_id,
+                    relation_kind = excluded.relation_kind,
+                    scope_type = excluded.scope_type,
+                    scope_id = excluded.scope_id,
+                    owner_agent_id = excluded.owner_agent_id,
+                    industry_instance_id = excluded.industry_instance_id,
+                    summary = excluded.summary,
+                    confidence = excluded.confidence,
+                    source_refs_json = excluded.source_refs_json,
+                    metadata_json = excluded.metadata_json,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at
+                """,
+                payload,
+            )
+        return record
+
+    def delete_view(self, relation_id: str) -> bool:
+        with self._store.connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM memory_relation_views WHERE relation_id = ?",
+                (relation_id,),
+            )
+        return cursor.rowcount > 0
+
+    def clear(
+        self,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+    ) -> int:
+        return _delete_with_optional_scope(
+            store=self._store,
+            table_name="memory_relation_views",
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+
+
 class SqliteMemoryReflectionRunRepository(BaseMemoryReflectionRunRepository):
     """SQLite-backed repository for memory reflection job records."""
 
@@ -1127,6 +1276,17 @@ def _memory_opinion_view_from_row(
     payload["source_refs"] = _decode_json_list(payload.pop("source_refs_json", None)) or []
     payload["metadata"] = _decode_json_mapping(payload.pop("metadata_json", None))
     return MemoryOpinionViewRecord.model_validate(payload)
+
+
+def _memory_relation_view_from_row(
+    row: sqlite3.Row | None,
+) -> MemoryRelationViewRecord | None:
+    if row is None:
+        return None
+    payload = dict(row)
+    payload["source_refs"] = _decode_json_list(payload.pop("source_refs_json", None)) or []
+    payload["metadata"] = _decode_json_mapping(payload.pop("metadata_json", None))
+    return MemoryRelationViewRecord.model_validate(payload)
 
 
 def _memory_reflection_run_from_row(

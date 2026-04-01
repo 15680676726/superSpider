@@ -1197,7 +1197,8 @@ class _QueryExecutionPromptMixin:
     ) -> list[str]:
         service = self._knowledge_service
         recall_service = getattr(self, "_memory_recall_service", None)
-        if service is None and recall_service is None:
+        activation_service = getattr(self, "_memory_activation_service", None)
+        if service is None and recall_service is None and activation_service is None:
             return []
         query = _message_query_text(msgs)
         if query is None:
@@ -1221,20 +1222,37 @@ class _QueryExecutionPromptMixin:
             if callable(knowledge_retriever)
             else []
         )
+        resolved_scope_type = (
+            "work_context"
+            if resolved_work_context_id
+            else "task"
+            if task_id
+            else None
+        )
+        resolved_scope_id = resolved_work_context_id or (task_id if task_id else None)
+        activate_for_query = getattr(activation_service, "activate_for_query", None)
+        activation_result = (
+            activate_for_query(
+                query=query,
+                role=industry_role_id,
+                scope_type=resolved_scope_type,
+                scope_id=resolved_scope_id,
+                task_id=task_id,
+                work_context_id=resolved_work_context_id,
+                agent_id=owner_agent_id,
+                industry_instance_id=industry_instance_id,
+                global_scope_id=owner_scope,
+                limit=4,
+            )
+            if callable(activate_for_query)
+            else None
+        )
         if callable(recall):
             recall_response = recall(
                 query=query,
                 role=industry_role_id,
-                scope_type=(
-                    "work_context"
-                    if resolved_work_context_id
-                    else "task"
-                    if task_id
-                    else None
-                ),
-                scope_id=resolved_work_context_id or (
-                    task_id if task_id else None
-                ),
+                scope_type=resolved_scope_type,
+                scope_id=resolved_scope_id,
                 task_id=task_id,
                 work_context_id=resolved_work_context_id,
                 agent_id=owner_agent_id,
@@ -1289,14 +1307,8 @@ class _QueryExecutionPromptMixin:
         if derived_service is not None and callable(getattr(derived_service, "list_fact_entries", None)):
             truth_first_entries = list(
                 derived_service.list_fact_entries(
-                    scope_type=(
-                        "work_context"
-                        if resolved_work_context_id
-                        else "task"
-                        if task_id
-                        else None
-                    ),
-                    scope_id=resolved_work_context_id or (task_id if task_id else None),
+                    scope_type=resolved_scope_type,
+                    scope_id=resolved_scope_id,
                     owner_agent_id=owner_agent_id,
                     industry_instance_id=industry_instance_id,
                     limit=6,
@@ -1357,6 +1369,24 @@ class _QueryExecutionPromptMixin:
                 lines.append("")
                 lines.append("# Truth-First Memory History")
                 lines.extend(_knowledge_line(chunk) for chunk in history_entries[:2])
+        activated_neurons = list(getattr(activation_result, "activated_neurons", []) or [])
+        if activated_neurons:
+            if lines:
+                lines.append("")
+            lines.append("# Activation Context")
+            lines.extend(_knowledge_line(chunk) for chunk in activated_neurons[:3])
+            top_constraints = list(getattr(activation_result, "top_constraints", []) or [])
+            if top_constraints:
+                lines.append(f"- Activation constraints: {'; '.join(str(item) for item in top_constraints[:3])}")
+            top_next_actions = list(getattr(activation_result, "top_next_actions", []) or [])
+            if top_next_actions:
+                lines.append(f"- Activation next actions: {'; '.join(str(item) for item in top_next_actions[:3])}")
+            support_refs = list(getattr(activation_result, "support_refs", []) or [])
+            if support_refs:
+                lines.append(f"- Activation support refs: {', '.join(str(item) for item in support_refs[:4])}")
+            evidence_refs = list(getattr(activation_result, "evidence_refs", []) or [])
+            if evidence_refs:
+                lines.append(f"- Activation evidence refs: {', '.join(str(item) for item in evidence_refs[:4])}")
         if memory_chunks:
             if lines:
                 lines.append("")

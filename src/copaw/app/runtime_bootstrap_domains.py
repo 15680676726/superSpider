@@ -26,6 +26,7 @@ from ..learning.runtime_bindings import LearningRuntimeBindings
 from ..media import MediaService
 from ..memory import (
     DerivedMemoryIndexService,
+    MemoryActivationService,
     MemoryRecallService,
     MemoryReflectionService,
     MemoryRetainService,
@@ -94,6 +95,7 @@ def build_runtime_domain_services(
     memory_reflection_service: MemoryReflectionService,
     memory_recall_service: MemoryRecallService,
     memory_retain_service: MemoryRetainService,
+    memory_activation_service: MemoryActivationService | None = None,
     agent_experience_service: AgentExperienceMemoryService | None,
     work_context_service: WorkContextService,
     learning_service: LearningService,
@@ -116,6 +118,7 @@ def build_runtime_domain_services(
         strategy_memory_service=strategy_memory_service,
         knowledge_service=knowledge_service,
         memory_recall_service=memory_recall_service,
+        memory_activation_service=memory_activation_service,
         industry_instance_repository=repositories.industry_instance_repository,
         runtime_event_bus=runtime_event_bus,
     )
@@ -214,6 +217,7 @@ def build_runtime_domain_services(
         agent_report_service=agent_report_service,
         state_store=state_store,
         memory_retain_service=memory_retain_service,
+        memory_activation_service=memory_activation_service,
     )
     industry_service = IndustryService(
         goal_service=goal_service,
@@ -231,6 +235,7 @@ def build_runtime_domain_services(
         draft_generator=IndustryDraftGenerator(provider_manager=provider_manager),
         runtime_bindings=industry_runtime_bindings,
         memory_retain_service=memory_retain_service,
+        memory_activation_service=memory_activation_service,
         work_context_service=work_context_service,
         actor_mailbox_service=actor_mailbox_service,
     )
@@ -339,6 +344,7 @@ def build_runtime_domain_services(
         prediction_service=prediction_service,
         knowledge_service=knowledge_service,
         memory_recall_service=memory_recall_service,
+        memory_activation_service=memory_activation_service,
         actor_mailbox_service=actor_mailbox_service,
         agent_runtime_repository=repositories.agent_runtime_repository,
         governance_control_repository=repositories.governance_control_repository,
