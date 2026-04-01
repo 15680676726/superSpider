@@ -49,6 +49,60 @@ def dict_from_value(value: object) -> dict[str, object] | None:
     return None
 
 
+def resolve_canonical_host_identity(
+    host_payload: dict[str, object] | None,
+    *,
+    metadata: dict[str, object] | None = None,
+    fallback_environment_ref: str | None = None,
+    fallback_environment_id: str | None = None,
+    fallback_session_mount_id: str | None = None,
+) -> tuple[str | None, str | None, str | None]:
+    host_payload = dict(host_payload or {})
+    metadata = dict(metadata or {})
+    scheduler_inputs = dict_from_value(host_payload.get("scheduler_inputs")) or {}
+    host_twin_summary = dict_from_value(host_payload.get("host_twin_summary")) or {}
+    coordination = dict_from_value(host_payload.get("coordination")) or {}
+
+    canonical_environment_ref = first_non_empty(
+        scheduler_inputs.get("environment_ref"),
+        scheduler_inputs.get("environment_id"),
+        host_twin_summary.get("selected_seat_ref"),
+        coordination.get("selected_seat_ref"),
+        host_payload.get("environment_ref"),
+        host_payload.get("environment_id"),
+        metadata.get("environment_ref"),
+        metadata.get("environment_id"),
+        fallback_environment_ref,
+        fallback_environment_id,
+    )
+    canonical_environment_id = first_non_empty(
+        scheduler_inputs.get("environment_id"),
+        scheduler_inputs.get("environment_ref"),
+        host_twin_summary.get("selected_seat_ref"),
+        coordination.get("selected_seat_ref"),
+        host_payload.get("environment_id"),
+        host_payload.get("environment_ref"),
+        metadata.get("environment_id"),
+        metadata.get("environment_ref"),
+        fallback_environment_id,
+        fallback_environment_ref,
+        canonical_environment_ref,
+    )
+    canonical_session_mount_id = first_non_empty(
+        scheduler_inputs.get("session_mount_id"),
+        host_twin_summary.get("selected_session_mount_id"),
+        coordination.get("selected_session_mount_id"),
+        host_payload.get("session_mount_id"),
+        metadata.get("session_mount_id"),
+        fallback_session_mount_id,
+    )
+    return (
+        canonical_environment_ref,
+        canonical_environment_id,
+        canonical_session_mount_id,
+    )
+
+
 def runtime_metadata_from_runtime(runtime: Any | None) -> dict[str, object]:
     if runtime is None:
         return {}
@@ -175,6 +229,11 @@ def host_twin_summary_ready(
 ) -> bool:
     if host_twin_summary is None:
         return False
+    continuity_state = first_non_empty(
+        host_twin_summary.get("continuity_state"),
+    )
+    if continuity_state is not None:
+        return continuity_state == "ready"
     recommended_action = first_non_empty(
         host_twin_summary.get("recommended_scheduler_action"),
     )
@@ -200,6 +259,56 @@ def host_twin_summary_ready(
         and blocked_surface_count == 0
         and host_companion_ready
     )
+
+
+def derive_host_twin_continuity_state(
+    host_twin_summary: dict[str, object] | None,
+) -> str:
+    if host_twin_summary is None:
+        return "blocked"
+    recommended_action = first_non_empty(
+        host_twin_summary.get("recommended_scheduler_action"),
+    )
+    legal_recovery_mode = first_non_empty(
+        host_twin_summary.get("legal_recovery_mode"),
+    )
+    host_companion_status = first_non_empty(
+        host_twin_summary.get("host_companion_status"),
+    )
+    contention_severity = first_non_empty(
+        host_twin_summary.get("contention_severity"),
+    )
+    try:
+        blocked_surface_count = int(host_twin_summary.get("blocked_surface_count") or 0)
+    except (TypeError, ValueError):
+        blocked_surface_count = 0
+    host_companion_ready = (
+        host_companion_status in {"attached", "restorable", "same-host-other-process"}
+        if host_companion_status is not None
+        else True
+    )
+    if recommended_action in {"continue", "proceed", "ready", "clear"}:
+        if (
+            host_companion_ready
+            and legal_recovery_mode != "handoff"
+            and blocked_surface_count == 0
+        ):
+            return "ready"
+    if (
+        not host_companion_ready
+        or legal_recovery_mode == "handoff"
+        or blocked_surface_count > 0
+        or recommended_action in {"recover", "handoff", "retry"}
+    ):
+        return "blocked"
+    if (
+        recommended_action is not None
+        or contention_severity in {"guarded", "warn", "warning"}
+        or contention_severity == "blocked"
+        or legal_recovery_mode is not None
+    ):
+        return "guarded"
+    return "blocked"
 
 
 def host_twin_legal_recovery_summary(host_twin: dict[str, object] | None) -> str | None:
@@ -400,7 +509,7 @@ def build_host_twin_summary(
         for family_key, value in app_family_twins.items()
         if isinstance(value, dict)
     }
-    return {
+    summary = {
         "seat_owner_ref": first_non_empty(
             embedded_summary.get("seat_owner_ref"),
             coordination.get("seat_owner_ref"),
@@ -517,6 +626,12 @@ def build_host_twin_summary(
         "writable_surface_label": host_twin_writable_surface_label(host_twin),
         "trusted_anchor_ref": host_twin_trusted_anchor(host_twin),
     }
+    summary["continuity_state"] = first_non_empty(
+        embedded_summary.get("continuity_state"),
+        host_twin.get("continuity_state"),
+        derive_host_twin_continuity_state(summary),
+    )
+    return summary
 
 
 def trace_id_from_metadata(task_id: str, metadata: dict[str, Any]) -> str:

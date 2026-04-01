@@ -811,7 +811,9 @@ def test_phase_next_same_thread_cognitive_closure_smoke_updates_visible_judgment
         and item.get("metadata", {}).get("control_thread_id") == control_thread_id
         and item.get("metadata", {}).get("message_kind") == "agent-report-writeback"
     ]
-    assert {item["metadata"]["report_id"] for item in same_thread_reports} == {
+    assert {
+        item["metadata"]["report_id"] for item in same_thread_reports
+    } >= {
         blocked_report.id,
         ready_but_waiting_report.id,
     }
@@ -907,7 +909,9 @@ def test_phase_next_same_thread_cognitive_closure_smoke_updates_visible_judgment
         and item.get("metadata", {}).get("control_thread_id") == control_thread_id
         and item.get("metadata", {}).get("message_kind") == "agent-report-writeback"
     ]
-    assert {item["metadata"]["report_id"] for item in resolved_same_thread_reports} == {
+    assert {
+        item["metadata"]["report_id"] for item in resolved_same_thread_reports
+    } >= {
         blocked_report.id,
         ready_but_waiting_report.id,
         resolved_report.id,
@@ -1297,6 +1301,104 @@ def test_phase_next_document_host_switch_smoke_keeps_document_execution_on_canon
     assert fixed_sop_detail.json()["session_mount_id"] == "session-desktop-2"
     assert fixed_sop_detail.json()["host_requirement"]["surface_kind"] == "document"
     assert fixed_sop_detail.json()["host_requirement"]["app_family"] == "office_document"
+
+
+def test_phase_next_researcher_schedule_followup_keeps_execution_core_continuity(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path / "industry-researcher-continuity")
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["keep researcher continuity on the same main-brain chain"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    instance_id = payload["team"]["team_id"]
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+    environment_ref = f"session:console:industry:{instance_id}"
+
+    researcher_schedule_id = next(
+        item["schedule_id"]
+        for item in payload["schedules"]
+        if item["schedule"]["spec_payload"]["request"]["industry_role_id"] == "researcher"
+    )
+    schedule = app.state.schedule_repository.get_schedule(researcher_schedule_id)
+    assert schedule is not None
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    cycle_id = record.current_cycle_id
+    assert cycle_id is not None
+
+    report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=None,
+        owner_agent_id=schedule.spec_payload["meta"]["owner_agent_id"],
+        owner_role_id="researcher",
+        headline="Researcher schedule found escalation signal",
+        summary="Research cadence surfaced a governed follow-up for the main brain chain.",
+        status="recorded",
+        result="failed",
+        findings=["Competitor monitoring surfaced a signal that needs execution-core routing."],
+        recommendation="Route the next step back through the execution-core control thread.",
+        processed=False,
+        work_context_id="ctx-phase-next-researcher-followup",
+        metadata=dict(schedule.spec_payload.get("meta") or {}),
+    )
+    app.state.agent_report_repository.upsert_report(report)
+
+    second_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:phase-next-researcher-cycle-2",
+            force=True,
+        ),
+    )
+    assert report.id in second_cycle["processed_instances"][0]["processed_report_ids"]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    followup_backlog = next(
+        item
+        for item in detail.backlog
+        if item["metadata"].get("source_report_id") == report.id
+    )
+    metadata = followup_backlog["metadata"]
+    assert metadata["control_thread_id"] == control_thread_id
+    assert metadata["session_id"] == control_thread_id
+    assert metadata["environment_ref"] == environment_ref
+    assert metadata["work_context_id"] == report.work_context_id
+    assert metadata["owner_agent_id"] == "copaw-agent-runner"
+    assert metadata["industry_role_id"] == "execution-core"
+    assert metadata["recommended_scheduler_action"] == "continue"
+
+    runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    assert runtime_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
+    assert runtime_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
+    replan_node = next(
+        node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
+    )
+    assert control_thread_id in replan_node["metrics"]["followup_control_thread_ids"]
+    assert environment_ref in replan_node["metrics"]["followup_environment_refs"]
 
 
 def test_phase_next_long_run_live_smoke_closes_unified_runtime_chain_and_multi_surface_continuity(

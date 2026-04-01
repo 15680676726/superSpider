@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from copaw.app.runtime_center.task_review_projection import (
+    build_host_twin_summary,
     build_task_review_payload,
+    resolve_canonical_host_identity,
     trace_id_from_kernel_meta,
 )
 from copaw.evidence import EvidenceRecord
@@ -31,6 +33,68 @@ def test_runtime_routes_share_one_contract() -> None:
 def test_trace_id_from_kernel_meta_prefers_explicit_trace_id() -> None:
     assert trace_id_from_kernel_meta("task-1", {"trace_id": "trace-override"}) == "trace-override"
     assert trace_id_from_kernel_meta("task-1", {}) == "trace:task-1"
+
+
+def test_resolve_canonical_host_identity_prefers_scheduler_inputs_environment_ref() -> None:
+    assert resolve_canonical_host_identity(
+        {
+            "scheduler_inputs": {
+                "environment_ref": "env:scheduler",
+                "session_mount_id": "session:scheduler",
+            },
+            "host_twin_summary": {
+                "selected_seat_ref": "env:summary",
+                "selected_session_mount_id": "session:summary",
+            },
+            "coordination": {
+                "selected_seat_ref": "env:coordination",
+                "selected_session_mount_id": "session:coordination",
+            },
+            "environment_ref": "env:payload",
+            "environment_id": "env:payload-id",
+            "session_mount_id": "session:payload",
+        },
+        metadata={
+            "environment_ref": "env:metadata",
+            "environment_id": "env:metadata-id",
+            "session_mount_id": "session:metadata",
+        },
+    ) == ("env:scheduler", "env:scheduler", "session:scheduler")
+
+
+def test_resolve_canonical_host_identity_falls_back_to_payload_environment_ref() -> None:
+    assert resolve_canonical_host_identity(
+        {
+            "environment_ref": "env:payload-only",
+            "session_mount_id": "session:payload-only",
+        },
+    ) == ("env:payload-only", "env:payload-only", "session:payload-only")
+
+
+def test_build_host_twin_summary_includes_continuity_state() -> None:
+    summary = build_host_twin_summary(
+        {
+            "continuity": {
+                "status": "attached",
+                "valid": True,
+                "requires_human_return": False,
+            },
+            "legal_recovery": {
+                "path": "resume",
+            },
+            "coordination": {
+                "recommended_scheduler_action": "continue",
+                "contention_forecast": {"severity": "clear"},
+            },
+            "host_companion_session": {
+                "continuity_status": "restorable",
+            },
+            "blocked_surfaces": [],
+        }
+    )
+
+    assert summary is not None
+    assert summary["continuity_state"] == "ready"
 
 
 def test_build_task_review_payload_preserves_runtime_review_contract() -> None:

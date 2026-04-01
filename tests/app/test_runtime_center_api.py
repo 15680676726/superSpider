@@ -413,6 +413,7 @@ def test_task_review_prefers_canonical_host_twin_summary_after_reentry() -> None
                 "contention_reason": "clean reentry confirmed",
                 "host_companion_status": "attached",
                 "host_companion_source": "live-handle",
+                "continuity_state": "ready",
             },
             "host_twin": {
                 "ownership": {
@@ -459,6 +460,10 @@ def test_task_review_prefers_canonical_host_twin_summary_after_reentry() -> None
     assert (
         payload["execution_runtime"]["host_twin_summary"]["recommended_scheduler_action"]
         == "proceed"
+    )
+    assert (
+        payload["execution_runtime"]["host_twin_summary"]["continuity_state"]
+        == "ready"
     )
     assert payload["continuity"]["handoff"]["state"] is None
     assert payload["continuity"]["handoff"]["reason"] is None

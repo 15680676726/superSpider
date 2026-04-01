@@ -125,6 +125,33 @@ def _resolve_industry_instance_id_from_thread_id(thread_id: str | None) -> str |
     return _first_non_empty(parts[1])
 
 
+def _canonical_host_twin_summary(
+    detail_payload: dict[str, object],
+    host_twin: dict[str, object],
+) -> dict[str, object]:
+    from ..app.runtime_center.task_review_projection import (
+        build_host_twin_summary,
+        derive_host_twin_continuity_state,
+    )
+
+    existing_summary = _mapping_value(detail_payload.get("host_twin_summary"))
+    derived_summary = build_host_twin_summary(
+        host_twin,
+        host_companion_session=_mapping_value(detail_payload.get("host_companion_session")),
+    )
+    if not derived_summary:
+        return existing_summary
+    if not existing_summary:
+        return derived_summary
+    merged_summary = dict(derived_summary)
+    merged_summary.update(existing_summary)
+    merged_summary["continuity_state"] = _first_non_empty(
+        existing_summary.get("continuity_state"),
+        derive_host_twin_continuity_state(merged_summary),
+    )
+    return merged_summary
+
+
 def _resolve_candidate_environment_refs(
     *,
     payload: dict[str, object],
@@ -373,7 +400,8 @@ class GovernanceService:
             return None
         detail_payload = _mapping_value(detail)
         host_twin = _mapping_value(detail_payload.get("host_twin"))
-        if not self._host_twin_requires_handoff(host_twin):
+        host_twin_summary = _canonical_host_twin_summary(detail_payload, host_twin)
+        if not self._host_twin_requires_handoff(host_twin, host_twin_summary):
             return None
         self._ensure_environment_handoff_human_assist_task(
             task=task,
@@ -381,6 +409,7 @@ class GovernanceService:
             host_twin=host_twin,
         )
         owner_ref = _first_non_empty(
+            host_twin_summary.get("handoff_owner_ref"),
             _mapping_value(host_twin.get("ownership")).get("handoff_owner_ref"),
             host_twin.get("handoff_owner_ref"),
         )
@@ -590,6 +619,8 @@ class GovernanceService:
         return None
 
     def _summarize_host_runtime_governance(self) -> tuple[dict[str, object], dict[str, object]]:
+        from ..app.runtime_center.task_review_projection import host_twin_summary_ready
+
         host_twin_summary = {
             "blocking_session_count": 0,
             "blocking_families": [],
@@ -632,16 +663,21 @@ class GovernanceService:
             except Exception:
                 logger.exception("Failed to inspect runtime session '%s'", session_id)
                 continue
-            host_twin = _mapping_value(_mapping_value(detail).get("host_twin"))
+            detail_payload = _mapping_value(detail)
+            host_twin = _mapping_value(detail_payload.get("host_twin"))
+            host_twin_summary_payload = _canonical_host_twin_summary(detail_payload, host_twin)
+            if host_twin_summary_ready(host_twin_summary_payload):
+                continue
             families = _string_list(host_twin.get("active_blocker_families"))
             if families:
                 host_twin_summary["blocking_session_count"] = int(host_twin_summary["blocking_session_count"]) + 1
                 host_twin_summary["session_ids"] = [*host_twin_summary["session_ids"], session_id]
                 blocking_families.extend(families)
-            if self._host_twin_requires_handoff(host_twin):
+            if self._host_twin_requires_handoff(host_twin, host_twin_summary_payload):
                 handoff_summary["active"] = True
                 handoff_summary["session_ids"] = [*handoff_summary["session_ids"], session_id]
                 owner_ref = _first_non_empty(
+                    host_twin_summary_payload.get("handoff_owner_ref"),
                     _mapping_value(host_twin.get("ownership")).get("handoff_owner_ref"),
                     host_twin.get("handoff_owner_ref"),
                 )
@@ -756,21 +792,31 @@ class GovernanceService:
         return summary
 
     @staticmethod
-    def _host_twin_requires_handoff(host_twin: dict[str, object]) -> bool:
+    def _host_twin_requires_handoff(
+        host_twin: dict[str, object],
+        host_twin_summary: dict[str, object] | None = None,
+    ) -> bool:
+        from ..app.runtime_center.task_review_projection import host_twin_summary_ready
+
+        if host_twin_summary_ready(host_twin_summary):
+            return False
         continuity = _mapping_value(host_twin.get("continuity"))
         coordination = _mapping_value(host_twin.get("coordination"))
         legal_recovery = _mapping_value(host_twin.get("legal_recovery"))
         ownership = _mapping_value(host_twin.get("ownership"))
         recommended_action = _first_non_empty(
+            _mapping_value(host_twin_summary).get("recommended_scheduler_action"),
             coordination.get("recommended_scheduler_action"),
             coordination.get("recommended_action"),
         )
         legal_path = _first_non_empty(
+            _mapping_value(host_twin_summary).get("legal_recovery_mode"),
             legal_recovery.get("path"),
             legal_recovery.get("recovery_path"),
         )
         return bool(
             continuity.get("requires_human_return")
+            or _mapping_value(host_twin_summary).get("handoff_owner_ref")
             or ownership.get("handoff_owner_ref")
             or recommended_action == "handoff"
             or legal_path == "handoff"

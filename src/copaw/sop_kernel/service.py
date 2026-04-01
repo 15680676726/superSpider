@@ -12,7 +12,11 @@ from ..state.repositories import (
     SqliteFixedSopTemplateRepository,
     SqliteWorkflowRunRepository,
 )
-from ..app.runtime_center.task_review_projection import build_host_twin_summary
+from ..app.runtime_center.task_review_projection import (
+    build_host_twin_summary,
+    host_twin_summary_ready,
+    resolve_canonical_host_identity,
+)
 from .builtin_templates import builtin_fixed_sop_templates
 from .models import (
     FixedSopBindingCreateRequest,
@@ -530,35 +534,9 @@ class FixedSopService:
         host_preflight: dict[str, Any],
     ) -> dict[str, Any]:
         normalized = dict(host_context or {})
-        summary = (
-            dict(host_preflight.get("host_twin_summary"))
-            if isinstance(host_preflight.get("host_twin_summary"), dict)
-            else {}
-        )
-        coordination = (
-            dict(host_preflight.get("coordination"))
-            if isinstance(host_preflight.get("coordination"), dict)
-            else {}
-        )
-        environment_id = (
-            str(
-                summary.get("selected_seat_ref")
-                or coordination.get("selected_seat_ref")
-                or host_preflight.get("environment_id")
-                or normalized.get("environment_id")
-                or ""
-            ).strip()
-            or None
-        )
-        session_mount_id = (
-            str(
-                summary.get("selected_session_mount_id")
-                or coordination.get("selected_session_mount_id")
-                or host_preflight.get("session_mount_id")
-                or normalized.get("session_mount_id")
-                or ""
-            ).strip()
-            or None
+        _, environment_id, session_mount_id = resolve_canonical_host_identity(
+            host_preflight,
+            metadata=normalized,
         )
         normalized["environment_id"] = environment_id
         normalized["session_mount_id"] = session_mount_id
@@ -615,13 +593,7 @@ class FixedSopService:
             )
         except (TypeError, ValueError):
             summary_blocked_surface_count = 0
-        canonical_host_ready = (
-            bool(host_twin_summary)
-            and bool(recommended_action)
-            and recommended_action not in self._HOST_PRELIGHT_BLOCKING_RESPONSES
-            and summary_recovery_mode != "handoff"
-            and summary_blocked_surface_count == 0
-        )
+        canonical_host_ready = host_twin_summary_ready(host_twin_summary)
         if canonical_host_ready:
             requires_human_return = False
             writable = True

@@ -216,9 +216,12 @@ export interface RuntimeMainBrainResponse {
   strategy: Record<string, unknown>;
   carrier: Record<string, unknown>;
   lanes: Record<string, unknown>[];
+  cycles: Record<string, unknown>[];
+  backlog: Record<string, unknown>[];
   current_cycle: Record<string, unknown> | null;
   assignments: Record<string, unknown>[];
   reports: Record<string, unknown>[];
+  report_cognition: Record<string, unknown>;
   environment: Record<string, unknown>;
   governance: Record<string, unknown>;
   recovery: Record<string, unknown>;

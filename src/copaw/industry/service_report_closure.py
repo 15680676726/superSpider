@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from .identity import EXECUTION_CORE_AGENT_ID, EXECUTION_CORE_NAME, EXECUTION_CORE_ROLE_ID
 from .report_synthesis import synthesize_reports
 from ..state import (
     AgentReportRecord,
@@ -317,7 +318,7 @@ def build_report_followup_metadata(
         carried.setdefault("role_summary", supervisor_role_name)
     carried.setdefault("task_mode", "report-followup")
     if report is not None and _string(getattr(report, "work_context_id", None)) is not None:
-        carried.setdefault("work_context_id", report.work_context_id)
+        carried["work_context_id"] = report.work_context_id
     if report is not None:
         if _string(report.owner_agent_id) is not None:
             carried.setdefault("source_owner_agent_id", report.owner_agent_id)
@@ -330,9 +331,22 @@ def build_report_followup_metadata(
             carried.setdefault("source_industry_role_id", assignment.owner_role_id)
     if original_backlog_item is not None and original_backlog_item.source_ref is not None:
         carried.setdefault("upstream_backlog_source_ref", original_backlog_item.source_ref)
+    report_instance_id = _string(getattr(report, "industry_instance_id", None))
+    report_owner_role_id = _string(getattr(report, "owner_role_id", None))
+    if report_instance_id is not None and report_owner_role_id not in {None, EXECUTION_CORE_ROLE_ID}:
+        carried.setdefault("supervisor_owner_agent_id", EXECUTION_CORE_AGENT_ID)
+        carried.setdefault("supervisor_industry_role_id", EXECUTION_CORE_ROLE_ID)
+        carried.setdefault("supervisor_role_name", EXECUTION_CORE_NAME)
+        carried.setdefault("owner_agent_id", EXECUTION_CORE_AGENT_ID)
+        carried.setdefault("industry_role_id", EXECUTION_CORE_ROLE_ID)
+        carried.setdefault("industry_role_name", EXECUTION_CORE_NAME)
+        carried.setdefault("role_name", EXECUTION_CORE_NAME)
+        carried.setdefault("recommended_scheduler_action", "continue")
     control_thread_id = _string(carried.get("control_thread_id")) or _string(
         carried.get("session_id"),
     )
+    if control_thread_id is None and report_instance_id is not None:
+        control_thread_id = f"industry-chat:{report_instance_id}:{EXECUTION_CORE_ROLE_ID}"
     if control_thread_id is not None:
         carried["control_thread_id"] = control_thread_id
         carried["session_id"] = control_thread_id

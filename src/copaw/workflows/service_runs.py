@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .service_shared import *  # noqa: F401,F403
+from ..app.runtime_center.task_review_projection import resolve_canonical_host_identity
 
 
 class _WorkflowServiceRunMixin:
@@ -629,54 +630,12 @@ class _WorkflowServiceRunMixin:
         fallback_environment_id: str | None = None,
         fallback_session_mount_id: str | None = None,
     ) -> tuple[str | None, str | None, str | None]:
-        metadata = dict(metadata or {})
-        scheduler_inputs = (
-            dict(host_snapshot.get("scheduler_inputs"))
-            if isinstance(host_snapshot.get("scheduler_inputs"), dict)
-            else {}
-        )
-        host_twin_summary = (
-            dict(host_snapshot.get("host_twin_summary"))
-            if isinstance(host_snapshot.get("host_twin_summary"), dict)
-            else {}
-        )
-        coordination = (
-            dict(host_snapshot.get("coordination"))
-            if isinstance(host_snapshot.get("coordination"), dict)
-            else {}
-        )
-        canonical_environment_ref = (
-            _string(scheduler_inputs.get("environment_ref"))
-            or _string(scheduler_inputs.get("environment_id"))
-            or _string(host_twin_summary.get("selected_seat_ref"))
-            or _string(coordination.get("selected_seat_ref"))
-            or _string(host_snapshot.get("environment_ref"))
-            or _string(host_snapshot.get("environment_id"))
-            or _string(metadata.get("environment_ref"))
-            or _string(metadata.get("environment_id"))
-            or fallback_environment_id
-        )
-        canonical_environment_id = (
-            _string(scheduler_inputs.get("environment_id"))
-            or _string(host_twin_summary.get("selected_seat_ref"))
-            or _string(coordination.get("selected_seat_ref"))
-            or _string(host_snapshot.get("environment_id"))
-            or _string(metadata.get("environment_id"))
-            or fallback_environment_id
-            or canonical_environment_ref
-        )
-        canonical_session_mount_id = (
-            _string(scheduler_inputs.get("session_mount_id"))
-            or _string(host_twin_summary.get("selected_session_mount_id"))
-            or _string(coordination.get("selected_session_mount_id"))
-            or _string(host_snapshot.get("session_mount_id"))
-            or _string(metadata.get("session_mount_id"))
-            or fallback_session_mount_id
-        )
-        return (
-            canonical_environment_ref,
-            canonical_environment_id,
-            canonical_session_mount_id,
+        return resolve_canonical_host_identity(
+            host_snapshot,
+            metadata=dict(metadata or {}),
+            fallback_environment_ref=fallback_environment_id,
+            fallback_environment_id=fallback_environment_id,
+            fallback_session_mount_id=fallback_session_mount_id,
         )
 
     def _build_schedule_spec(

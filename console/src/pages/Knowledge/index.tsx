@@ -54,7 +54,6 @@ type StrategyItem = {
   thinking_axes: string[];
   delegation_policy: string[];
   evidence_requirements: string[];
-  active_goal_titles: string[];
   status: string;
 };
 
@@ -694,11 +693,6 @@ export default function KnowledgePage() {
                             {item.evidence_requirements.join(" | ")}
                           </Text>
                         ) : null}
-                        {item.active_goal_titles.length > 0 ? (
-                          <Text>
-                            活跃目标: {item.active_goal_titles.join(" | ")}
-                          </Text>
-                        ) : null}
                       </Space>
                     </Card>
                   </List.Item>
@@ -1292,7 +1286,7 @@ export default function KnowledgePage() {
                         </Space>
                         <Text>
                           {normalizeSpiderMeshBrand(
-                            selectedAgent?.current_goal ||
+                            selectedAgent?.current_focus ||
                               selectedAgent?.role_summary ||
                               "暂无执行摘要。",
                           )}

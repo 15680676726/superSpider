@@ -692,15 +692,6 @@ export interface GovernedCapabilityAssignmentResult {
 
 const EXECUTION_CORE_ROLE_ID = "execution-core";
 
-function resolveFocusedGoalId(agent: AgentProfile | null | undefined): string | null {
-  const focusKind = agent?.current_focus_kind?.trim().toLowerCase();
-  const focusId = agent?.current_focus_id?.trim() || null;
-  if (focusKind === "goal" && focusId) {
-    return focusId;
-  }
-  return null;
-}
-
 function resolveRuntimeIndustryFocus(agent: AgentProfile | null | undefined): {
   assignmentId?: string;
   backlogItemId?: string;
@@ -748,17 +739,13 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
   const [capabilityCatalog, setCapabilityCatalog] = useState<CapabilityMount[]>([]);
   const [environments, setEnvironments] = useState<EnvironmentItem[]>([]);
   const [evidence, setEvidence] = useState<EvidenceListItem[]>([]);
-  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
-  const [goalDetail, setGoalDetail] = useState<GoalDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [agentDetailLoading, setAgentDetailLoading] = useState(false);
   const [industryDetailLoading, setIndustryDetailLoading] = useState(false);
   const [capabilityCatalogLoading, setCapabilityCatalogLoading] = useState(false);
-  const [goalLoading, setGoalLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [agentDetailError, setAgentDetailError] = useState<string | null>(null);
   const [industryDetailError, setIndustryDetailError] = useState<string | null>(null);
-  const [goalError, setGoalError] = useState<string | null>(null);
   const [capabilityActionKey, setCapabilityActionKey] = useState<string | null>(null);
   const [actorActionKey, setActorActionKey] = useState<string | null>(null);
   const selectedIndustryInstanceId =
@@ -802,21 +789,6 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
       setLoading(false);
     }
   }, [industryInstanceId]);
-
-  const fetchGoalDetail = useCallback(async (goalId: string) => {
-    setGoalLoading(true);
-    try {
-      setGoalError(null);
-      const detail = await request<GoalDetail>(`/goals/${goalId}/detail`);
-      setGoalDetail(detail);
-    } catch (error) {
-      console.error("Failed to load goal detail:", error);
-      setGoalDetail(null);
-      setGoalError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setGoalLoading(false);
-    }
-  }, []);
 
   const fetchAgentDetail = useCallback(async (agentId: string) => {
     setAgentDetailLoading(true);
@@ -898,14 +870,6 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
   }, [fetchAgentDetail, selectedAgent?.agent_id]);
 
   useEffect(() => {
-    if (!selectedGoalId) {
-      setGoalDetail(null);
-      return;
-    }
-    void fetchGoalDetail(selectedGoalId);
-  }, [fetchGoalDetail, selectedGoalId]);
-
-  useEffect(() => {
     if (!selectedIndustryInstanceId) {
       setIndustryDetail(null);
       setIndustryDetailLoading(false);
@@ -914,29 +878,6 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
     }
     void refreshIndustryDetail(selectedIndustryInstanceId, selectedAgent);
   }, [refreshIndustryDetail, selectedAgent, selectedIndustryInstanceId]);
-
-  useEffect(() => {
-    const focusedGoalId = resolveFocusedGoalId(selectedAgent);
-    if (focusedGoalId) {
-      if (focusedGoalId !== selectedGoalId) {
-        setSelectedGoalId(focusedGoalId);
-      }
-      return;
-    }
-    if (agentDetailLoading) {
-      return;
-    }
-    const visibleGoalIds = new Set((agentDetail?.goals || []).map((goal) => goal.id));
-    if (selectedGoalId !== null && !visibleGoalIds.has(selectedGoalId)) {
-      setSelectedGoalId(null);
-    }
-  }, [
-    agentDetail?.goals,
-    agentDetailLoading,
-    selectedAgent?.current_focus_id,
-    selectedAgent?.current_focus_kind,
-    selectedGoalId,
-  ]);
 
   const refresh = useCallback(async () => {
     await Promise.all([
@@ -1123,18 +1064,13 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
     capabilityCatalog,
     environments,
     evidence,
-    selectedGoalId,
-    setSelectedGoalId,
-    goalDetail,
     loading,
     agentDetailLoading,
     industryDetailLoading,
     capabilityCatalogLoading,
-    goalLoading,
     dashboardError,
     agentDetailError,
     industryDetailError,
-    goalError,
     capabilityActionKey,
     actorActionKey,
     refresh,

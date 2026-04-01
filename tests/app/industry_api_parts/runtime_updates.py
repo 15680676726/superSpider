@@ -216,10 +216,15 @@ def test_industry_bootstrap_goal_compile_regression_keeps_specialist_runtime_con
         ),
     )
 
-    compiled = client.post(f"/goals/{specialist_goal_id}/compile", json={})
+    compiled = [
+        spec.model_dump(mode="json")
+        for spec in app.state.goal_service.compile_goal(
+            specialist_goal_id,
+            context={},
+        )
+    ]
 
-    assert compiled.status_code == 200
-    payload = compiled.json()[0]["payload"]
+    payload = compiled[0]["payload"]
     assert payload["request"]["agent_id"] == specialist_goal["owner_agent_id"]
     assert payload["request"]["industry_instance_id"] == bootstrap_payload["team"]["team_id"]
     assert payload["request"]["lane_id"] == specialist_goal_record.lane_id
@@ -1319,6 +1324,110 @@ def test_industry_chat_writeback_approved_staffing_proposal_unblocks_materializa
     assert backlog_item.assignment_id is not None
 
 
+def test_bootstrap_researcher_schedule_report_keeps_main_brain_continuity(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+    owner_scope = "industry-v1-northwind-robotics"
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["build a stable inspection loop"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        owner_scope,
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    instance_id = payload["team"]["team_id"]
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+    environment_ref = f"session:console:industry:{instance_id}"
+
+    researcher_schedule_id = next(
+        item["schedule_id"]
+        for item in payload["schedules"]
+        if item["schedule"]["spec_payload"]["request"]["industry_role_id"] == "researcher"
+    )
+    schedule = app.state.schedule_repository.get_schedule(researcher_schedule_id)
+    assert schedule is not None
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    cycle_id = record.current_cycle_id
+    assert cycle_id is not None
+
+    report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=None,
+        owner_agent_id=schedule.spec_payload["meta"]["owner_agent_id"],
+        owner_role_id=schedule.spec_payload["request"]["industry_role_id"],
+        headline="Research signal loop found follow-up pressure",
+        summary="Research loop surfaced a governed follow-up that should return to the main brain chain.",
+        status="recorded",
+        result="failed",
+        findings=["Competitor monitoring surfaced a signal that needs main-brain follow-up."],
+        recommendation="Route this follow-up back through the same control thread and governed runtime chain.",
+        processed=False,
+        work_context_id="work-context:researcher-schedule-followup",
+        metadata=dict(schedule.spec_payload.get("meta") or {}),
+    )
+    app.state.agent_report_repository.upsert_report(report)
+
+    processed = app.state.industry_service._process_pending_agent_reports(
+        record=record,
+        cycle_id=cycle_id,
+    )
+    assert [item.id for item in processed] == [report.id]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    followup_backlog = next(
+        item
+        for item in detail.backlog
+        if item["metadata"].get("source_report_id") == report.id
+    )
+    metadata = followup_backlog["metadata"]
+    assert metadata["control_thread_id"] == control_thread_id
+    assert metadata["session_id"] == control_thread_id
+    assert metadata["environment_ref"] == environment_ref
+    assert metadata["work_context_id"] == report.work_context_id
+    assert metadata["owner_agent_id"] == "copaw-agent-runner"
+    assert metadata["industry_role_id"] == "execution-core"
+
+    runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    cognitive_surface = runtime_payload["current_cycle"]["main_brain_cognitive_surface"]
+    assert cognitive_surface["continuity"]["work_context_ids"] == [report.work_context_id]
+    assert cognitive_surface["continuity"]["control_thread_ids"] == [control_thread_id]
+    assert cognitive_surface["continuity"]["environment_refs"] == [environment_ref]
+    assert runtime_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
+    assert runtime_payload["execution"]["current_focus"] == followup_backlog["title"]
+    assert runtime_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
+    assert runtime_payload["main_chain"]["current_focus"] == followup_backlog["title"]
+    replan_node = next(
+        node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
+    )
+    assert replan_node["status"] == "active"
+    assert replan_node["metrics"]["needs_replan"] is True
+    assert replan_node["metrics"]["replan_reason_count"] >= 1
+    assert replan_node["metrics"]["followup_pressure_count"] >= 1
+    assert replan_node["metrics"]["recommended_action"] is not None
+
+
 def test_staffed_assignment_failure_keeps_supervisor_chain_and_replan_truth(
     tmp_path,
 ) -> None:
@@ -1897,6 +2006,154 @@ def test_failed_report_followup_uses_supervisor_metadata_without_original_backlo
     assert metadata["work_context_id"] == report.work_context_id
     assert "browser" in metadata["seat_requested_surfaces"]
     assert "desktop" in metadata["seat_requested_surfaces"]
+
+
+def test_researcher_followup_assignment_persists_execution_core_continuity_without_backlog_anchor(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["keep researcher follow-up continuity stable across cycle materialization"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    instance_id = payload["team"]["team_id"]
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+    environment_ref = f"session:console:industry:{instance_id}"
+
+    researcher_schedule_id = next(
+        item["schedule_id"]
+        for item in payload["schedules"]
+        if item["schedule"]["spec_payload"]["request"]["industry_role_id"] == "researcher"
+    )
+    schedule = app.state.schedule_repository.get_schedule(researcher_schedule_id)
+    assert schedule is not None
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    cycle_id = record.current_cycle_id
+    assert cycle_id is not None
+
+    first_report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=None,
+        owner_agent_id=schedule.spec_payload["meta"]["owner_agent_id"],
+        owner_role_id="researcher",
+        headline="Researcher schedule found another escalation signal",
+        summary="Research cadence surfaced a follow-up that should stay on the main-brain control thread.",
+        status="recorded",
+        result="failed",
+        findings=["A governed follow-up is still required on the execution-core thread."],
+        recommendation="Route the next step back through the formal execution-core continuity.",
+        processed=False,
+        work_context_id="ctx-researcher-followup-assignment-1",
+        metadata=dict(schedule.spec_payload.get("meta") or {}),
+    )
+    app.state.agent_report_repository.upsert_report(first_report)
+
+    processed = app.state.industry_service._process_pending_agent_reports(
+        record=record,
+        cycle_id=cycle_id,
+    )
+    assert [item.id for item in processed] == [first_report.id]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    followup_backlog = next(
+        item
+        for item in detail.backlog
+        if item["metadata"].get("source_report_id") == first_report.id
+    )
+
+    cycle_result = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:researcher-followup-materialize",
+            force=True,
+            backlog_item_ids=[followup_backlog["backlog_item_id"]],
+            auto_dispatch_materialized_goals=False,
+        ),
+    )
+    created_assignment_ids = cycle_result["processed_instances"][0]["created_assignment_ids"]
+    assert created_assignment_ids
+    assignment = app.state.assignment_repository.get_assignment(created_assignment_ids[0])
+    assert assignment is not None
+    assert assignment.metadata["control_thread_id"] == control_thread_id
+    assert assignment.metadata["session_id"] == control_thread_id
+    assert assignment.metadata["environment_ref"] == environment_ref
+    assert assignment.metadata["work_context_id"] == "ctx-researcher-followup-assignment-1"
+    assert assignment.metadata["owner_agent_id"] == "copaw-agent-runner"
+    assert assignment.metadata["industry_role_id"] == "execution-core"
+    assert assignment.metadata["recommended_scheduler_action"] == "continue"
+
+    app.state.assignment_repository.upsert_assignment(
+        assignment.model_copy(update={"backlog_item_id": None}),
+    )
+    updated_record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert updated_record is not None
+    updated_cycle_id = updated_record.current_cycle_id
+    assert updated_cycle_id is not None
+
+    second_report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=updated_cycle_id,
+        assignment_id=assignment.id,
+        owner_agent_id=assignment.owner_agent_id,
+        owner_role_id=assignment.owner_role_id,
+        headline="Researcher follow-up still needs execution-core routing",
+        summary="The materialized follow-up assignment still routes back through execution-core.",
+        status="recorded",
+        result="failed",
+        findings=["The second follow-up must keep the same execution-core continuity."],
+        recommendation="Keep the follow-up on the same control thread even without the original backlog anchor.",
+        processed=False,
+        work_context_id="ctx-researcher-followup-assignment-2",
+        metadata=dict(assignment.metadata or {}),
+    )
+    app.state.agent_report_repository.upsert_report(second_report)
+
+    processed_again = app.state.industry_service._process_pending_agent_reports(
+        record=updated_record,
+        cycle_id=updated_cycle_id,
+    )
+    assert [item.id for item in processed_again] == [second_report.id]
+
+    refreshed_detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert refreshed_detail is not None
+    second_followup_backlog = next(
+        item
+        for item in refreshed_detail.backlog
+        if item["metadata"].get("source_report_id") == second_report.id
+    )
+    metadata = second_followup_backlog["metadata"]
+    assert metadata["control_thread_id"] == control_thread_id
+    assert metadata["session_id"] == control_thread_id
+    assert metadata["environment_ref"] == environment_ref
+    assert metadata["work_context_id"] == "ctx-researcher-followup-assignment-2"
+    assert metadata["owner_agent_id"] == "copaw-agent-runner"
+    assert metadata["industry_role_id"] == "execution-core"
+    assert metadata["recommended_scheduler_action"] == "continue"
 
 
 def test_runtime_replan_node_persists_previous_cycle_synthesis_after_rollover(

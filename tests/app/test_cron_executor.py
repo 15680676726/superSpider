@@ -177,3 +177,24 @@ def test_cron_executor_prefers_canonical_selected_seat_when_scheduler_inputs_are
     assert submitted.payload["meta"]["session_mount_id"] == (
         "session:canonical-selected-seat"
     )
+
+
+def test_cron_executor_persists_canonical_environment_id_when_only_environment_ref_is_available() -> None:
+    dispatcher = _FakeKernelDispatcher()
+    executor = CronExecutor(kernel_dispatcher=dispatcher)
+    job = _agent_job(
+        meta={
+            "host_snapshot": {
+                "environment_ref": "env:canonical-host-ref",
+                "session_mount_id": "session:canonical-host-ref",
+            },
+        }
+    )
+
+    asyncio.run(executor.execute(job))
+
+    assert len(dispatcher.tasks) == 1
+    submitted = dispatcher.tasks[0]
+    assert submitted.environment_ref == "env:canonical-host-ref"
+    assert submitted.payload["meta"]["environment_id"] == "env:canonical-host-ref"
+    assert submitted.payload["meta"]["session_mount_id"] == "session:canonical-host-ref"

@@ -102,6 +102,47 @@ class _FakeEnvironmentService:
         }
 
 
+class _FakeCanonicalReadyEnvironmentService:
+    def list_sessions(self, **kwargs):
+        _ = kwargs
+        return [SimpleNamespace(id="session:web:canonical")]
+
+    def get_session_detail(self, session_mount_id: str, *, limit: int = 20):
+        _ = limit
+        if session_mount_id != "session:web:canonical":
+            return None
+        return {
+            "session_mount_id": session_mount_id,
+            "host_twin_summary": {
+                "recommended_scheduler_action": "proceed",
+                "blocked_surface_count": 0,
+                "legal_recovery_mode": "resume-environment",
+                "continuity_state": "ready",
+                "seat_owner_ref": "ops-agent",
+            },
+            "host_twin": {
+                "active_blocker_families": ["modal-uac-login"],
+                "continuity": {"requires_human_return": True},
+                "ownership": {"handoff_owner_ref": "human-operator:alice"},
+                "coordination": {
+                    "recommended_scheduler_action": "handoff",
+                    "summary": "human handoff is still active",
+                },
+                "legal_recovery": {
+                    "path": "handoff",
+                    "resume_kind": "resume-runtime",
+                    "return_condition": "captcha-cleared",
+                },
+                "host_twin_summary": {
+                    "recommended_scheduler_action": "handoff",
+                    "blocked_surface_count": 1,
+                    "legal_recovery_mode": "handoff",
+                    "continuity_state": "blocked",
+                },
+            },
+        }
+
+
 class _FakeHumanAssistTaskService:
     def list_tasks(self, **kwargs):
         chat_thread_id = kwargs.get("chat_thread_id")
@@ -248,3 +289,49 @@ def test_governance_admission_issues_human_assist_task_for_host_handoff_once(
     assert tasks[0].reason_code == "host-handoff-active"
     assert tasks[0].resume_checkpoint_ref == "captcha-cleared"
     assert tasks[0].acceptance_spec["hard_anchors"] == ["captcha-cleared"]
+
+
+def test_governance_admission_prefers_canonical_ready_host_twin_summary(
+    tmp_path,
+) -> None:
+    repository = SqliteGovernanceControlRepository(
+        SQLiteStateStore(tmp_path / "governance.sqlite3"),
+    )
+    service = GovernanceService(
+        control_repository=repository,
+        environment_service=_FakeCanonicalReadyEnvironmentService(),
+        human_assist_task_service=_FakeHumanAssistTaskService(),
+        industry_service=_FakeIndustryService(),
+    )
+
+    task = KernelTask(
+        title="Dispatch browser work",
+        capability_ref="system:dispatch_query",
+        environment_ref="session:web:canonical",
+        payload={
+            "chat_thread_id": "thread-canonical",
+        },
+    )
+
+    reason = service.admission_block_reason(task)
+
+    assert reason is None
+
+
+def test_governance_status_prefers_canonical_ready_host_twin_summary(
+    tmp_path,
+) -> None:
+    repository = SqliteGovernanceControlRepository(
+        SQLiteStateStore(tmp_path / "governance.sqlite3"),
+    )
+    service = GovernanceService(
+        control_repository=repository,
+        environment_service=_FakeCanonicalReadyEnvironmentService(),
+        human_assist_task_service=_FakeHumanAssistTaskService(),
+        industry_service=_FakeIndustryService(),
+    )
+
+    status = service.get_status()
+
+    assert status.handoff["active"] is False
+    assert status.handoff["session_ids"] == []

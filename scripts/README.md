@@ -36,3 +36,18 @@ bash scripts/docker_build.sh [IMAGE_TAG] [EXTRA_ARGS...]
 
 - Default tag: `copaw:latest`. Uses `deploy/Dockerfile` (multi-stage: builds console then Python app).
 - Example: `bash scripts/docker_build.sh myreg/copaw:v1 --no-cache`.
+
+## P0 Runtime Terminal Gate
+
+```bash
+python scripts/run_p0_runtime_terminal_gate.py --list
+python scripts/run_p0_runtime_terminal_gate.py
+```
+
+- `--list` 只打印当前正式 gate 命令束，不执行。
+- 默认执行顺序会串起：
+  - 后端主链回归
+  - 长跑与删旧回归
+  - 控制台定向回归
+  - 控制台构建
+- 这条脚本用于 `P0-4` 的正式发布前门槛，不替代开发中的单项定向测试。

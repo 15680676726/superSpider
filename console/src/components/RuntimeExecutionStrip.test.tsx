@@ -89,7 +89,7 @@ describe("RuntimeExecutionStrip", () => {
 
     expect(screen.getByText(currentWorkTitle)).toHaveAttribute("title", currentWorkTitle);
     expect(screen.getByText(currentWorkSummary)).toHaveAttribute("title", currentWorkSummary);
-    expect(screen.getByText(`目标：${currentGoal}`)).toHaveAttribute("title", `目标：${currentGoal}`);
+    expect(screen.getByText(`焦点：${currentGoal}`)).toHaveAttribute("title", `焦点：${currentGoal}`);
     expect(screen.getByText(`触发：${triggerReason}`)).toHaveAttribute("title", `触发：${triggerReason}`);
     expect(screen.getByText(`下一步：${nextStep}`)).toHaveAttribute("title", `下一步：${nextStep}`);
     expect(screen.getByText(`风险：${primaryRisk}`)).toHaveAttribute("title", `风险：${primaryRisk}`);

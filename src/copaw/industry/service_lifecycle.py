@@ -285,6 +285,56 @@ class _IndustryLifecycleMixin:
             "conflict",
         }
 
+    def _clone_materialization_metadata_value(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                str(key): self._clone_materialization_metadata_value(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._clone_materialization_metadata_value(item) for item in value]
+        return value
+
+    def _materialized_assignment_continuity_metadata(
+        self,
+        metadata: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(metadata, dict):
+            return {}
+        carried: dict[str, Any] = {}
+        for key in (
+            "supervisor_owner_agent_id",
+            "supervisor_industry_role_id",
+            "supervisor_role_name",
+            "owner_agent_id",
+            "industry_role_id",
+            "industry_role_name",
+            "role_name",
+            "role_summary",
+            "mission",
+            "work_context_id",
+            "chat_writeback_channel",
+            "chat_writeback_requested_surfaces",
+            "seat_requested_surfaces",
+            "requested_surfaces",
+            "control_thread_id",
+            "session_id",
+            "environment_ref",
+            "recommended_scheduler_action",
+            "report_back_mode",
+            "decision_request_id",
+            "proposal_status",
+            "source_report_id",
+            "source_report_ids",
+            "synthesis_kind",
+            "upstream_backlog_source_ref",
+        ):
+            value = metadata.get(key)
+            if value is None:
+                continue
+            carried[key] = self._clone_materialization_metadata_value(value)
+        return carried
+
     def _rank_materializable_backlog_items(
         self,
         items: list[Any],
@@ -2988,6 +3038,9 @@ class _IndustryLifecycleMixin:
                         ),
                         "report_back_mode": _string(item.metadata.get("report_back_mode")) or "summary",
                         "metadata": {
+                            **self._materialized_assignment_continuity_metadata(
+                                item.metadata,
+                            ),
                             "source_ref": item.source_ref,
                             "source_kind": item.source_kind,
                             "fixed_sop_binding_id": _string(

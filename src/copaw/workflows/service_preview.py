@@ -5,6 +5,7 @@ from .service_shared import *  # noqa: F401,F403
 from ..app.runtime_center.task_review_projection import (
     build_host_twin_summary,
     host_twin_summary_ready,
+    resolve_canonical_host_identity,
 )
 
 
@@ -32,13 +33,44 @@ class _WorkflowServicePreviewMixin:
     def _canonical_host_summary_overrides_live_blockers(
         self,
         host_twin_summary: dict[str, Any],
+        *,
+        active_alert_families: object | None = None,
+        host_blocker: dict[str, Any] | None = None,
+        host_twin_scheduler: dict[str, Any] | None = None,
     ) -> bool:
         if not self._canonical_host_summary_ready(host_twin_summary):
             return False
         recommended_scheduler_action = self._first_string(
             host_twin_summary.get("recommended_scheduler_action"),
         )
-        return recommended_scheduler_action in {"proceed", "ready", "clear"}
+        if recommended_scheduler_action in {"proceed", "ready", "clear"}:
+            return True
+        blocking_families = set(
+            _unique_strings(
+                active_alert_families,
+                host_twin_summary.get("active_blocker_families"),
+                host_twin_summary.get("active_blocker_family"),
+                host_twin_scheduler.get("active_blocker_family")
+                if isinstance(host_twin_scheduler, dict)
+                else None,
+            ),
+        )
+        host_blocker_family = self._first_string(
+            host_blocker.get("event_family") if isinstance(host_blocker, dict) else None,
+        )
+        host_blocker_response = self._first_string(
+            host_blocker.get("recommended_runtime_response")
+            if isinstance(host_blocker, dict)
+            else None,
+        )
+        if (
+            host_blocker_family is not None
+            and host_blocker_response in self._HOST_TWIN_BLOCKING_RESPONSES
+        ):
+            blocking_families.add(host_blocker_family)
+        if blocking_families:
+            return False
+        return recommended_scheduler_action in {"continue", "proceed", "ready", "clear"}
 
     def get_run_detail(self, run_id: str) -> WorkflowRunDetail:
         run = self._workflow_run_repository.get_run(run_id)
@@ -453,27 +485,18 @@ class _WorkflowServicePreviewMixin:
     ) -> WorkflowPreviewRequest:
         metadata = dict(run.metadata or {})
         host_snapshot = self._mapping(metadata.get("host_snapshot"))
-        scheduler_inputs = self._mapping(host_snapshot.get("scheduler_inputs"))
-        host_twin_summary = self._mapping(host_snapshot.get("host_twin_summary"))
-        coordination = self._mapping(host_snapshot.get("coordination"))
+        canonical_environment_ref, canonical_environment_id, canonical_session_mount_id = (
+            resolve_canonical_host_identity(
+                host_snapshot,
+                metadata=metadata,
+            )
+        )
         return WorkflowPreviewRequest(
             owner_scope=preview.owner_scope or run.owner_scope,
             industry_instance_id=preview.industry_instance_id or run.industry_instance_id,
             owner_agent_id=run.owner_agent_id,
-            environment_id=(
-                _string(scheduler_inputs.get("environment_id"))
-                or _string(host_twin_summary.get("selected_seat_ref"))
-                or _string(coordination.get("selected_seat_ref"))
-                or _string(host_snapshot.get("environment_id"))
-                or _string(metadata.get("environment_id"))
-            ),
-            session_mount_id=(
-                _string(scheduler_inputs.get("session_mount_id"))
-                or _string(host_twin_summary.get("selected_session_mount_id"))
-                or _string(coordination.get("selected_session_mount_id"))
-                or _string(host_snapshot.get("session_mount_id"))
-                or _string(metadata.get("session_mount_id"))
-            ),
+            environment_id=canonical_environment_id or canonical_environment_ref,
+            session_mount_id=canonical_session_mount_id,
             preset_id=_string(metadata.get("preset_id")),
             parameters=dict(run.parameter_payload or preview.parameters or {}),
         )
@@ -789,6 +812,9 @@ class _WorkflowServicePreviewMixin:
                 blocking_families: set[str] = set()
                 if not self._canonical_host_summary_overrides_live_blockers(
                     host_twin_summary,
+                    active_alert_families=active_alert_families,
+                    host_blocker=host_blocker,
+                    host_twin_scheduler=host_twin_scheduler,
                 ):
                     blocking_families = set(active_alert_families)
                     host_blocker_family = self._first_string(host_blocker.get("event_family"))

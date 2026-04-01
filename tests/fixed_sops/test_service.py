@@ -276,6 +276,26 @@ def test_fixed_sop_service_blocks_mutating_run_when_host_preflight_requires_hand
         )
 
 
+def test_fixed_sop_service_canonicalize_host_context_falls_back_to_environment_ref(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+
+    canonical = service._canonicalize_host_context(
+        host_context={
+            "environment_id": None,
+            "session_mount_id": None,
+        },
+        host_preflight={
+            "environment_ref": "env:host-ref-only",
+            "session_mount_id": "session:host-ref-only",
+        },
+    )
+
+    assert canonical["environment_id"] == "env:host-ref-only"
+    assert canonical["session_mount_id"] == "session:host-ref-only"
+
+
 def test_fixed_sop_service_records_host_snapshot_in_run_and_evidence(tmp_path) -> None:
     service = _build_service(
         tmp_path,
@@ -511,6 +531,50 @@ def test_fixed_sop_service_ignores_stale_handoff_metadata_when_canonical_summary
         )
     )
     assert response.status == "success"
+
+
+def test_fixed_sop_service_accepts_continuity_state_ready_without_scheduler_action(
+    tmp_path,
+) -> None:
+    detail = _host_detail(
+        recommended_scheduler_action="handoff",
+        requires_human_return=True,
+        legal_recovery_path="handoff",
+        legal_recovery_reason="stale handoff metadata should not block continuity-state ready",
+    )
+    detail["host_twin"]["host_twin_summary"] = {
+        "active_app_family_keys": ["office_document"],
+        "seat_owner_ref": "ops-agent",
+        "blocked_surface_count": 0,
+        "legal_recovery_mode": "resume-environment",
+        "continuity_state": "ready",
+    }
+    service = _build_service(
+        tmp_path,
+        environment_service=_FakeEnvironmentService(detail),
+    )
+    binding = service.create_binding(
+        FixedSopBindingCreateRequest(
+            template_id="fixed-sop-http-routine-bridge",
+            binding_name="Host Continuity State SOP",
+            status="active",
+            metadata={
+                "environment_id": "env-desktop-1",
+                "session_mount_id": "session-desktop-1",
+                "host_requirement": {
+                    "surface_kind": "desktop",
+                    "app_family": "office_document",
+                    "mutating": True,
+                },
+            },
+        )
+    )
+
+    doctor = service.run_doctor(binding.binding.binding_id)
+
+    assert doctor.status == "ready"
+    host_check = next(item for item in doctor.checks if item.key == "host-preflight")
+    assert host_check.status == "pass"
 
 
 def test_fixed_sop_service_uses_canonical_selected_seat_from_host_preflight(

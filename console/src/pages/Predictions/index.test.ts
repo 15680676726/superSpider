@@ -39,12 +39,12 @@ function createRecommendationFixture(
 }
 
 describe("presentRecommendationActionKind", () => {
-  it("hides legacy goal dispatch jargon from the operator surface", () => {
+  it("does not keep the retired dispatch-goal display shim", () => {
     expect(presentRecommendationActionKind("system:dispatch_goal")).toBe(
-      "内部编排",
+      "system:dispatch_goal",
     );
     expect(presentRecommendationActionKind("system:dispatch_active_goals")).toBe(
-      "内部编排",
+      "system:dispatch_active_goals",
     );
     expect(presentRecommendationActionKind("manual:coordinate-main-brain")).toBe(
       "主脑协调",

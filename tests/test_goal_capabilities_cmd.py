@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from click.testing import CliRunner
 
 import copaw.cli.capabilities_cmd as capabilities_cmd_module
-import copaw.cli.goals_cmd as goals_cmd_module
+import copaw.cli.main as cli_main_module
 
 
 @dataclass
@@ -88,27 +88,15 @@ def test_capabilities_cli_execute_acceptance_matrix(monkeypatch) -> None:
         assert calls == []
 
 
-def test_goals_cli_dispatch_command_is_removed(monkeypatch) -> None:
-    calls: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        goals_cmd_module,
-        "client",
-        lambda base_url: FakeHttpClient(calls, {"goal": {"id": "goal-1"}, "dispatch_results": []}),
-    )
+def test_main_cli_help_no_longer_lists_goals_group() -> None:
+    result = CliRunner().invoke(cli_main_module.cli, ["--help"])
 
-    result = CliRunner().invoke(
-        goals_cmd_module.goals_group,
-        [
-            "dispatch",
-            "goal-1",
-            "--execute",
-            "--owner-agent-id",
-            "ops-agent",
-            "--context-json",
-            '{"source":"cli"}',
-        ],
-    )
+    assert result.exit_code == 0
+    assert "goals" not in result.output
+
+
+def test_main_cli_no_longer_registers_goals_group() -> None:
+    result = CliRunner().invoke(cli_main_module.cli, ["goals", "--help"])
 
     assert result.exit_code != 0
-    assert "No such command 'dispatch'" in result.output
-    assert calls == []
+    assert "No such command 'goals'" in result.output

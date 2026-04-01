@@ -324,10 +324,17 @@ def test_runtime_center_main_brain_route_exposes_industry_stats():
     assert payload["carrier"]["industry_instance_id"] == "industry-v1-ops"
     assert payload["carrier"]["route"] == "/api/runtime-center/industry/industry-v1-ops"
     assert len(payload["lanes"]) == 2
+    assert len(payload["cycles"]) == 1
+    assert "backlog" in payload
+    assert isinstance(payload["backlog"], list)
     assert payload["current_cycle"]["cycle_id"] == "cycle-1"
     assert len(payload["assignments"]) == 1
     assert len(payload["reports"]) == 1
     assert payload["environment"]["route"] == "/api/runtime-center/governance/status"
+    assert "host_twin_summary" in payload["environment"]
+    assert "handoff" in payload["environment"]
+    assert "staffing" in payload["environment"]
+    assert "human_assist" in payload["environment"]
     assert payload["meta"]["lane_count"] == 2
     assert payload["meta"]["assignment_count"] == 2
     assert payload["meta"]["report_count"] == 1
@@ -357,7 +364,7 @@ def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
 
     assert response.status_code == 200
     payload = response.json()
-    cognition = payload["meta"]["report_cognition"]
+    cognition = payload["report_cognition"]
 
     assert cognition["needs_replan"] is True
     assert cognition["replan_reasons"] == [
@@ -378,6 +385,7 @@ def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
     assert cognition["conflicts"][0]["conflict_id"] == "result-mismatch:report-1"
     assert cognition["holes"][0]["hole_id"] == "followup-needed:report-1"
     assert cognition["followup_backlog"][0]["backlog_item_id"] == "backlog-followup-1"
+    assert payload["backlog"][0]["backlog_item_id"] == "backlog-followup-1"
     assert cognition["unconsumed_reports"][0]["report_id"] == "report-1"
     assert cognition["needs_followup_reports"][0]["report_id"] == "report-1"
     assert payload["reports"][0]["route"] == (
@@ -387,6 +395,7 @@ def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
     assert payload["signals"]["report_cognition"]["status"] == "attention"
     assert payload["signals"]["report_cognition"]["count"] == 4
     assert payload["meta"]["agent_reports"]["unconsumed_count"] == 1
+    assert payload["meta"]["report_cognition"]["needs_replan"] is True
 
 
 def test_runtime_center_main_brain_route_exposes_unified_operator_sections():
@@ -632,6 +641,7 @@ def test_runtime_center_overview_governance_uses_canonical_host_twin_summary_for
         "office_document",
     ]
     assert governance["meta"]["host_twin_summary"]["host_companion_status"] == "attached"
+    assert governance["meta"]["host_twin_summary"]["continuity_state"] == "ready"
     assert governance["meta"]["host_twin_summary"]["seat_count"] == 2
     assert governance["meta"]["host_twin_summary"]["ready_app_family_keys"] == [
         "browser_backoffice",

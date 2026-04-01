@@ -138,91 +138,119 @@ def _build_goal_app(tmp_path, *, turn_executor=None) -> FastAPI:
     return app
 
 
-def test_goals_crud_compile_and_dispatch(tmp_path) -> None:
+def _create_goal(
+    app: FastAPI,
+    *,
+    title: str,
+    summary: str,
+    status: str = "draft",
+    priority: int = 0,
+    owner_scope: str | None = None,
+    industry_instance_id: str | None = None,
+):
+    return app.state.goal_service.create_goal(
+        title=title,
+        summary=summary,
+        status=status,
+        priority=priority,
+        owner_scope=owner_scope,
+        industry_instance_id=industry_instance_id,
+    )
+
+
+def _compile_goal(
+    app: FastAPI,
+    goal_id: str,
+    *,
+    context: dict[str, object] | None = None,
+) -> list[dict[str, object]]:
+    return [
+        spec.model_dump(mode="json")
+        for spec in app.state.goal_service.compile_goal(
+            goal_id,
+            context=context or {},
+        )
+    ]
+
+
+def test_goals_hidden_crud_compile_shell_is_removed_but_detail_survives(tmp_path) -> None:
     app = _build_goal_app(tmp_path)
     client = TestClient(app)
 
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Make goals visible",
-            "summary": "Expose goals in runtime center and agent workbench.",
-            "status": "draft",
-            "priority": 2,
-        },
+    goal = _create_goal(
+        app,
+        title="Make goals visible",
+        summary="Expose goals in runtime center and agent workbench.",
+        status="draft",
+        priority=2,
     )
-    assert created.status_code == 200
-    goal_id = created.json()["id"]
+    goal_id = goal.id
 
-    listed = client.get("/goals")
-    assert listed.status_code == 200
-    assert any(goal["id"] == goal_id for goal in listed.json())
-
-    updated = client.patch(
-        f"/goals/{goal_id}",
-        json={"status": "active", "priority": 4},
+    app.state.goal_service.update_goal(
+        goal_id,
+        status="active",
+        priority=4,
     )
-    assert updated.status_code == 200
-    assert updated.json()["status"] == "active"
 
-    goal_read = client.get(f"/goals/{goal_id}")
-    assert goal_read.status_code == 405
-
-    compiled = client.post(
-        f"/goals/{goal_id}/compile",
-        json={"context": {"source": "test", "owner_agent_id": "ops-agent"}},
+    compiled_payload = _compile_goal(
+        app,
+        goal_id,
+        context={"source": "test", "owner_agent_id": "ops-agent"},
     )
-    assert compiled.status_code == 200
-    compiled_payload = compiled.json()
     assert compiled_payload
     assert compiled_payload[0]["capability_ref"] == "system:dispatch_query"
     assert compiled_payload[0]["payload"]["request"]["channel"] == "goal"
     assert compiled_payload[0]["payload"]["request"]["user_id"] == "ops-agent"
     assert compiled_payload[0]["payload"]["dispatch_events"] is False
 
-    dispatched = client.post(
+    detail = client.get(f"/goals/{goal_id}/detail")
+    assert detail.status_code == 200
+    assert detail.json()["goal"]["status"] == "active"
+
+    assert client.get("/goals").status_code == 404
+    assert client.post("/goals", json={"title": "Retired frontdoor"}).status_code == 404
+    assert client.get(f"/goals/{goal_id}").status_code == 404
+    assert client.patch(f"/goals/{goal_id}", json={"status": "active"}).status_code == 404
+    assert client.delete(f"/goals/{goal_id}").status_code == 404
+    assert client.post(
+        f"/goals/{goal_id}/compile",
+        json={"context": {"source": "test", "owner_agent_id": "ops-agent"}},
+    ).status_code == 404
+    assert client.post(
         f"/goals/{goal_id}/dispatch",
         json={"execute": True, "activate": True, "owner_agent_id": "ops-agent"},
-    )
-    assert dispatched.status_code == 404
-    deleted = client.delete(f"/goals/{goal_id}")
-    assert deleted.status_code == 200
-    assert deleted.json()["deleted"] is True
+    ).status_code == 404
 
 
-def test_goals_list_respects_limit_query(tmp_path) -> None:
+def test_goal_service_list_respects_limit_query(tmp_path) -> None:
     app = _build_goal_app(tmp_path)
-    client = TestClient(app)
 
     for index in range(3):
-        created = client.post(
-            "/goals",
-            json={
-                "title": f"Goal {index}",
-                "summary": "List limit test",
-                "status": "active",
-                "priority": index,
-            },
+        _create_goal(
+            app,
+            title=f"Goal {index}",
+            summary="List limit test",
+            status="active",
+            priority=index,
         )
-        assert created.status_code == 200
 
-    listed = client.get("/goals", params={"status": "active", "limit": 2})
-    assert listed.status_code == 200
-    assert len(listed.json()) == 2
+    listed = app.state.goal_service.list_goals(status="active", limit=2)
+    assert len(listed) == 2
 
 
-def test_goals_list_supports_industry_instance_filter(tmp_path) -> None:
+def test_goal_service_list_supports_industry_instance_filter(tmp_path) -> None:
     app = _build_goal_app(tmp_path)
-    client = TestClient(app)
 
-    matched = app.state.goal_service.create_goal(
+    matched = _create_goal(
+        app,
         title="Industry Goal A",
         summary="Matches the requested industry instance.",
         status="active",
         owner_scope="custom-owner-scope-a",
         industry_instance_id="industry-v1-alpha",
     )
-    app.state.goal_service.create_goal(
+    _create_goal(
+        app,
         title="Industry Goal B",
         summary="Belongs to another industry instance.",
         status="active",
@@ -230,40 +258,32 @@ def test_goals_list_supports_industry_instance_filter(tmp_path) -> None:
         industry_instance_id="industry-v1-beta",
     )
 
-    listed = client.get(
-        "/goals",
-        params={"industry_instance_id": "industry-v1-alpha", "status": "active"},
+    payload = app.state.goal_service.list_goals(
+        industry_instance_id="industry-v1-alpha",
+        status="active",
     )
-    assert listed.status_code == 200
-    payload = listed.json()
-    assert [item["id"] for item in payload] == [matched.id]
-    assert payload[0]["industry_instance_id"] == "industry-v1-alpha"
+    assert [item.id for item in payload] == [matched.id]
+    assert payload[0].industry_instance_id == "industry-v1-alpha"
 
 
-def test_dispatch_active_goals(tmp_path) -> None:
+def test_dispatch_active_goals_frontdoor_is_removed(tmp_path) -> None:
     app = _build_goal_app(tmp_path)
     client = TestClient(app)
 
-    active = client.post(
-        "/goals",
-        json={
-            "title": "Active goal",
-            "summary": "Should be dispatched.",
-            "status": "active",
-            "priority": 1,
-        },
+    _create_goal(
+        app,
+        title="Active goal",
+        summary="Should be dispatched.",
+        status="active",
+        priority=1,
     )
-    draft = client.post(
-        "/goals",
-        json={
-            "title": "Draft goal",
-            "summary": "Should not be dispatched.",
-            "status": "draft",
-            "priority": 0,
-        },
+    _create_goal(
+        app,
+        title="Draft goal",
+        summary="Should not be dispatched.",
+        status="draft",
+        priority=0,
     )
-    assert active.status_code == 200
-    assert draft.status_code == 200
 
     dispatched = client.post(
         "/goals/automation/dispatch-active",
@@ -276,19 +296,15 @@ def test_dispatch_goal_preserves_override_owner_when_request_owner_is_missing(
     tmp_path,
 ) -> None:
     app = _build_goal_app(tmp_path)
-    client = TestClient(app)
 
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Preserve compiler owner",
-            "summary": "Keep the goal-specific owner when dispatch payload omits one.",
-            "status": "active",
-            "priority": 1,
-        },
+    goal = _create_goal(
+        app,
+        title="Preserve compiler owner",
+        summary="Keep the goal-specific owner when dispatch payload omits one.",
+        status="active",
+        priority=1,
     )
-    assert created.status_code == 200
-    goal_id = created.json()["id"]
+    goal_id = goal.id
 
     app.state.goal_override_repository.upsert_override(
         GoalOverrideRecord(
@@ -518,17 +534,14 @@ def test_goal_detail_does_not_reconcile_goal_status(tmp_path) -> None:
     app = _build_goal_app(tmp_path)
     client = TestClient(app)
 
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Keep goal detail read-only",
-            "summary": "Detail reads should not mutate goal status.",
-            "status": "active",
-            "priority": 2,
-        },
+    goal = _create_goal(
+        app,
+        title="Keep goal detail read-only",
+        summary="Detail reads should not mutate goal status.",
+        status="active",
+        priority=2,
     )
-    assert created.status_code == 200
-    goal_id = created.json()["id"]
+    goal_id = goal.id
 
     completed_task = TaskRecord(
         id="task-goal-detail-read-only",
@@ -566,17 +579,14 @@ def test_goal_detail_endpoint_remains_read_only(tmp_path) -> None:
     app = _build_goal_app(tmp_path)
     client = TestClient(app)
 
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Goal detail stays read-only",
-            "summary": "The detail endpoint must not become a write surface.",
-            "status": "active",
-            "priority": 1,
-        },
+    goal = _create_goal(
+        app,
+        title="Goal detail stays read-only",
+        summary="The detail endpoint must not become a write surface.",
+        status="active",
+        priority=1,
     )
-    assert created.status_code == 200
-    goal_id = created.json()["id"]
+    goal_id = goal.id
 
     detail = client.get(f"/goals/{goal_id}/detail")
     assert detail.status_code == 200
@@ -591,17 +601,14 @@ def test_goal_detail_links_tasks_agents_patches_and_growth(tmp_path) -> None:
     app = _build_goal_app(tmp_path)
     client = TestClient(app)
 
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Make goal detail visible",
-            "summary": "Link goal, tasks, evidence, decisions, patches, and growth.",
-            "status": "active",
-            "priority": 3,
-        },
+    goal = _create_goal(
+        app,
+        title="Make goal detail visible",
+        summary="Link goal, tasks, evidence, decisions, patches, and growth.",
+        status="active",
+        priority=3,
     )
-    assert created.status_code == 200
-    goal_id = created.json()["id"]
+    goal_id = goal.id
 
     task = TaskRecord(
         id="task-goal-detail-1",
@@ -706,19 +713,14 @@ def test_goal_detail_links_tasks_agents_patches_and_growth(tmp_path) -> None:
 
 def test_compile_persists_state_backed_compiler_context_metadata(tmp_path) -> None:
     app = _build_goal_app(tmp_path)
-    client = TestClient(app)
-
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Launch runtime center",
-            "summary": "Promote the runtime center as operator cockpit.",
-            "status": "active",
-            "priority": 2,
-        },
+    goal = _create_goal(
+        app,
+        title="Launch runtime center",
+        summary="Promote the runtime center as operator cockpit.",
+        status="active",
+        priority=2,
     )
-    assert created.status_code == 200
-    goal_id = created.json()["id"]
+    goal_id = goal.id
 
     app.state.goal_override_repository.upsert_override(
         GoalOverrideRecord(
@@ -731,9 +733,7 @@ def test_compile_persists_state_backed_compiler_context_metadata(tmp_path) -> No
         ),
     )
 
-    compiled = client.post(f"/goals/{goal_id}/compile", json={})
-    assert compiled.status_code == 200
-    payload = compiled.json()
+    payload = _compile_goal(app, goal_id)
     assert len(payload) == 1
     assert [item["task_id"] for item in payload] == [
         task.id for task in app.state.task_repository.list_tasks(goal_id=goal_id)
@@ -772,19 +772,14 @@ def test_compile_goal_feeds_learning_patch_and_growth_back_into_compiler_context
     tmp_path,
 ) -> None:
     app = _build_goal_app(tmp_path)
-    client = TestClient(app)
-
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Close runtime loop",
-            "summary": "Feed runtime learning back into the next compiler pass.",
-            "status": "active",
-            "priority": 2,
-        },
+    goal = _create_goal(
+        app,
+        title="Close runtime loop",
+        summary="Feed runtime learning back into the next compiler pass.",
+        status="active",
+        priority=2,
     )
-    assert created.status_code == 200
-    goal_id = created.json()["id"]
+    goal_id = goal.id
 
     feedback_task = TaskRecord(
         id="task-feedback-1",
@@ -873,9 +868,7 @@ def test_compile_goal_feeds_learning_patch_and_growth_back_into_compiler_context
         ),
     )
 
-    compiled = client.post(f"/goals/{goal_id}/compile", json={})
-    assert compiled.status_code == 200
-    payload = compiled.json()
+    payload = _compile_goal(app, goal_id)
     assert payload
 
     first_spec = payload[0]
@@ -901,7 +894,6 @@ def test_compile_goal_feeds_learning_patch_and_growth_back_into_compiler_context
 
 def test_compile_goal_injects_knowledge_and_memory_context(tmp_path) -> None:
     app = _build_goal_app(tmp_path)
-    client = TestClient(app)
 
     app.state.knowledge_service.import_document(
         title="Ops SOP",
@@ -917,16 +909,14 @@ def test_compile_goal_injects_knowledge_and_memory_context(tmp_path) -> None:
         role_bindings=["execution-core"],
     )
 
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Prepare execution brief",
-            "summary": "Review evidence checkpoints and draft the next update.",
-            "status": "active",
-            "priority": 1,
-        },
+    goal = _create_goal(
+        app,
+        title="Prepare execution brief",
+        summary="Review evidence checkpoints and draft the next update.",
+        status="active",
+        priority=1,
     )
-    goal_id = created.json()["id"]
+    goal_id = goal.id
     app.state.goal_override_repository.upsert_override(
         GoalOverrideRecord(
             goal_id=goal_id,
@@ -937,27 +927,21 @@ def test_compile_goal_injects_knowledge_and_memory_context(tmp_path) -> None:
         ),
     )
 
-    compiled = client.post(f"/goals/{goal_id}/compile", json={})
-    assert compiled.status_code == 200
-    payload = compiled.json()[0]["payload"]["compiler"]
+    payload = _compile_goal(app, goal_id)[0]["payload"]["compiler"]
     assert payload["knowledge_refs"]
     assert payload["memory_refs"]
 
 
 def test_compile_goal_propagates_runtime_request_context_and_role_brief(tmp_path) -> None:
     app = _build_goal_app(tmp_path)
-    client = TestClient(app)
-
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Operate Acme account",
-            "summary": "Prepare the next operating move.",
-            "status": "active",
-            "priority": 1,
-        },
+    goal = _create_goal(
+        app,
+        title="Operate Acme account",
+        summary="Prepare the next operating move.",
+        status="active",
+        priority=1,
     )
-    goal_id = created.json()["id"]
+    goal_id = goal.id
     app.state.goal_override_repository.upsert_override(
         GoalOverrideRecord(
             goal_id=goal_id,
@@ -978,10 +962,7 @@ def test_compile_goal_propagates_runtime_request_context_and_role_brief(tmp_path
         ),
     )
 
-    compiled = client.post(f"/goals/{goal_id}/compile", json={})
-
-    assert compiled.status_code == 200
-    payload = compiled.json()[0]["payload"]
+    payload = _compile_goal(app, goal_id)[0]["payload"]
     assert payload["request"]["agent_id"] == "ops-agent"
     assert payload["request"]["industry_instance_id"] == "industry-v1-acme"
     assert payload["request"]["owner_scope"] == "industry-v1-acme"
@@ -1048,16 +1029,14 @@ def test_goal_detail_exposes_execution_core_identity_from_industry_instance(tmp_
         ),
     )
 
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Operate Acme account",
-            "summary": "Prepare the next operating move.",
-            "status": "active",
-            "priority": 1,
-        },
+    goal = _create_goal(
+        app,
+        title="Operate Acme account",
+        summary="Prepare the next operating move.",
+        status="active",
+        priority=1,
     )
-    goal_id = created.json()["id"]
+    goal_id = goal.id
     app.state.goal_override_repository.upsert_override(
         GoalOverrideRecord(
             goal_id=goal_id,
@@ -1082,7 +1061,6 @@ def test_goal_detail_exposes_execution_core_identity_from_industry_instance(tmp_
 
 def test_compile_goal_injects_strategy_memory_context(tmp_path) -> None:
     app = _build_goal_app(tmp_path)
-    client = TestClient(app)
 
     app.state.industry_instance_repository.upsert_instance(
         IndustryInstanceRecord(
@@ -1151,16 +1129,14 @@ def test_compile_goal_injects_strategy_memory_context(tmp_path) -> None:
         ),
     )
 
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Operate Acme account",
-            "summary": "Prepare the next operating move.",
-            "status": "active",
-            "priority": 1,
-        },
+    goal = _create_goal(
+        app,
+        title="Operate Acme account",
+        summary="Prepare the next operating move.",
+        status="active",
+        priority=1,
     )
-    goal_id = created.json()["id"]
+    goal_id = goal.id
     app.state.goal_override_repository.upsert_override(
         GoalOverrideRecord(
             goal_id=goal_id,
@@ -1172,10 +1148,7 @@ def test_compile_goal_injects_strategy_memory_context(tmp_path) -> None:
         ),
     )
 
-    compiled = client.post(f"/goals/{goal_id}/compile", json={})
-
-    assert compiled.status_code == 200
-    compiler_payload = compiled.json()[0]["payload"]["compiler"]
+    compiler_payload = _compile_goal(app, goal_id)[0]["payload"]["compiler"]
     assert compiler_payload["strategy_id"] == "strategy:industry:industry-v1-acme:copaw-agent-runner"
     assert compiler_payload["strategy_items"]
     assert any("North star: 稳定交付并持续增长" in item for item in compiler_payload["strategy_items"])
@@ -1232,16 +1205,14 @@ def test_goal_detail_exposes_strategy_memory_from_industry_instance(tmp_path) ->
         ),
     )
 
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Operate Acme account",
-            "summary": "Prepare the next operating move.",
-            "status": "active",
-            "priority": 1,
-        },
+    goal = _create_goal(
+        app,
+        title="Operate Acme account",
+        summary="Prepare the next operating move.",
+        status="active",
+        priority=1,
     )
-    goal_id = created.json()["id"]
+    goal_id = goal.id
     app.state.goal_override_repository.upsert_override(
         GoalOverrideRecord(
             goal_id=goal_id,

@@ -31,6 +31,8 @@ const dedicatedPayload: RuntimeMainBrainResponse = {
   strategy: {},
   carrier: {},
   lanes: [],
+  cycles: [],
+  backlog: [],
   current_cycle: {
     title: "Cycle 99",
     next_cycle_due_at: "2026-03-31T23:59:59Z",
@@ -38,6 +40,7 @@ const dedicatedPayload: RuntimeMainBrainResponse = {
   },
   assignments: [],
   reports: [],
+  report_cognition: {},
   environment: {},
   governance: {},
   recovery: {},
@@ -77,6 +80,29 @@ const unifiedPayload = {
     { lane_id: "lane-ops", title: "Operations lane", status: "active" },
     { lane_id: "lane-risk", title: "Risk lane", status: "queued" },
   ],
+  cycles: [
+    {
+      cycle_id: "cycle-8",
+      title: "Cycle 8",
+      status: "completed",
+      route: "/api/runtime-center/industry/industry-v1-ops",
+    },
+    {
+      cycle_id: "cycle-9",
+      title: "Cycle 9",
+      status: "active",
+      route: "/api/runtime-center/industry/industry-v1-ops",
+    },
+  ],
+  backlog: [
+    {
+      backlog_item_id: "backlog-followup-1",
+      title: "Resolve handoff return evidence gap",
+      summary: "Dispatch a governed browser follow-up on the same control thread.",
+      route: "/api/runtime-center/industry/industry-v1-ops?backlog_item_id=backlog-followup-1",
+      status: "open",
+    },
+  ],
   current_cycle: {
     cycle_id: "cycle-9",
     title: "Cycle 9",
@@ -103,9 +129,94 @@ const unifiedPayload = {
       route: "/api/runtime-center/industry/industry-v1-ops",
     },
   ],
+  report_cognition: {
+    needs_replan: true,
+    replan_reasons: [
+      "Reports disagree on whether the handoff is cleared.",
+      "Supervisor review is still missing for the handoff return.",
+    ],
+    judgment: {
+      status: "attention",
+      summary: "Main brain must compare unresolved reports and decide whether to dispatch follow-up work.",
+      route: "/api/runtime-center/industry/industry-v1-ops",
+    },
+    next_action: {
+      kind: "followup-backlog",
+      title: "Resolve handoff return evidence gap",
+      summary: "Dispatch a governed browser follow-up on the same control thread.",
+      route: "/api/runtime-center/industry/industry-v1-ops?backlog_item_id=backlog-followup-1",
+    },
+    latest_findings: [
+      {
+        report_id: "report-1",
+        title: "Delivery blocker needs supervisor review",
+        summary: "Operator must compare the evidence gap before dispatching the next cycle.",
+        route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-1",
+        needs_followup: true,
+        report_consumed: false,
+      },
+    ],
+    conflicts: [
+      {
+        conflict_id: "result-mismatch:report-1",
+        title: "Report conflict",
+        summary: "Reports disagree on whether the handoff is cleared.",
+        route: "/api/runtime-center/industry/industry-v1-ops",
+      },
+    ],
+    holes: [
+      {
+        hole_id: "followup-needed:report-1",
+        title: "Follow-up gap",
+        summary: "Supervisor review is still missing for the handoff return.",
+        route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-1",
+      },
+    ],
+    followup_backlog: [
+      {
+        backlog_item_id: "backlog-followup-1",
+        title: "Resolve handoff return evidence gap",
+        summary: "Dispatch a governed browser follow-up on the same control thread.",
+        route: "/api/runtime-center/industry/industry-v1-ops?backlog_item_id=backlog-followup-1",
+      },
+    ],
+    unconsumed_reports: [
+      {
+        report_id: "report-1",
+        title: "Need supervisor decision",
+        summary: "Operator must compare the evidence gap before dispatching the next cycle.",
+        route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-1",
+        report_consumed: false,
+      },
+    ],
+    needs_followup_reports: [
+      {
+        report_id: "report-1",
+        title: "Need supervisor decision",
+        summary: "Operator must compare the evidence gap before dispatching the next cycle.",
+        route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-1",
+        needs_followup: true,
+      },
+    ],
+  },
   environment: {
     route: "/api/runtime-center/governance/status",
     summary: "Host twin ready on seat-b with multi-surface continuity.",
+    host_twin_summary: {
+      selected_seat_ref: "env:desktop:seat-b",
+      recommended_scheduler_action: "proceed",
+      continuity_state: "ready",
+      active_app_family_keys: ["browser_backoffice", "office_document"],
+    },
+    handoff: {
+      active: false,
+    },
+    staffing: {
+      pending_confirmation_count: 1,
+    },
+    human_assist: {
+      blocked_count: 2,
+    },
   },
   governance: {
     route: "/api/runtime-center/governance/status",
@@ -195,76 +306,7 @@ const unifiedPayload = {
     },
   },
   meta: {
-    report_cognition: {
-      needs_replan: true,
-      replan_reasons: [
-        "Reports disagree on whether the handoff is cleared.",
-        "Supervisor review is still missing for the handoff return.",
-      ],
-      judgment: {
-        status: "attention",
-        summary: "Main brain must compare unresolved reports and decide whether to dispatch follow-up work.",
-        route: "/api/runtime-center/industry/industry-v1-ops",
-      },
-      next_action: {
-        kind: "followup-backlog",
-        title: "Resolve handoff return evidence gap",
-        summary: "Dispatch a governed browser follow-up on the same control thread.",
-        route: "/api/runtime-center/industry/industry-v1-ops?backlog_item_id=backlog-followup-1",
-      },
-      latest_findings: [
-        {
-          report_id: "report-1",
-          title: "Delivery blocker needs supervisor review",
-          summary: "Operator must compare the evidence gap before dispatching the next cycle.",
-          route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-1",
-          needs_followup: true,
-          report_consumed: false,
-        },
-      ],
-      conflicts: [
-        {
-          conflict_id: "result-mismatch:report-1",
-          title: "Report conflict",
-          summary: "Reports disagree on whether the handoff is cleared.",
-          route: "/api/runtime-center/industry/industry-v1-ops",
-        },
-      ],
-      holes: [
-        {
-          hole_id: "followup-needed:report-1",
-          title: "Follow-up gap",
-          summary: "Supervisor review is still missing for the handoff return.",
-          route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-1",
-        },
-      ],
-      followup_backlog: [
-        {
-          backlog_item_id: "backlog-followup-1",
-          title: "Resolve handoff return evidence gap",
-          summary: "Dispatch a governed browser follow-up on the same control thread.",
-          route: "/api/runtime-center/industry/industry-v1-ops?backlog_item_id=backlog-followup-1",
-        },
-      ],
-      unconsumed_reports: [
-        {
-          report_id: "report-1",
-          title: "Need supervisor decision",
-          summary: "Operator must compare the evidence gap before dispatching the next cycle.",
-          route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-1",
-          report_consumed: false,
-        },
-      ],
-      needs_followup_reports: [
-        {
-          report_id: "report-1",
-          title: "Need supervisor decision",
-          summary: "Operator must compare the evidence gap before dispatching the next cycle.",
-          route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-1",
-          needs_followup: true,
-        },
-      ],
-    },
+    report_cognition: undefined,
     control_chain: [
       { key: "carrier", value: "Northwind Ops" },
       { key: "strategy", value: "Northwind field operations strategy" },
@@ -319,6 +361,16 @@ describe("MainBrainCockpitPanel", () => {
     expect(screen.getAllByText("运行治理").length).toBeGreaterThan(0);
     expect(screen.getAllByText("恢复").length).toBeGreaterThan(0);
     expect(screen.getAllByText("自动化").length).toBeGreaterThan(0);
+    expect(screen.getByText("周期序列")).toBeInTheDocument();
+    expect(screen.getByText("周期 8")).toBeInTheDocument();
+    expect(screen.getAllByText("周期 9").length).toBeGreaterThan(0);
+    expect(screen.getByText("待办")).toBeInTheDocument();
+    expect(screen.getByText("连续性状态")).toBeInTheDocument();
+    expect(screen.getByText("已就绪")).toBeInTheDocument();
+    expect(screen.getByText("browser_backoffice, office_document")).toBeInTheDocument();
+    expect(screen.getByText("待确认补位")).toBeInTheDocument();
+    expect(screen.getByText("人工协作阻塞")).toBeInTheDocument();
+    expect(screen.getAllByText("Resolve handoff return evidence gap").length).toBeGreaterThan(0);
     expect(screen.getByText("检查点证据")).toBeInTheDocument();
     expect(screen.getByText("批准宿主返回")).toBeInTheDocument();
     expect(screen.getByText("应用连续性补丁")).toBeInTheDocument();

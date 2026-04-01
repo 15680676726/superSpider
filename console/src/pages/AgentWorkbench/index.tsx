@@ -47,12 +47,10 @@ import { presentExecutionActorName } from "../../runtime/executionPresentation";
 
 import {
   TAB_KEYS,
-  GoalSelector,
   isExecutionCoreAgent,
   ProfileCard,
   CapabilityGovernancePanel,
   ActorRuntimePanel,
-  GoalDetailPanel,
   EvidencePanel,
   statusColor,
 } from "./pageSections";
@@ -72,18 +70,13 @@ export default function AgentWorkbenchPage() {
     industryDetail,
     capabilityCatalog,
     evidence,
-    selectedGoalId,
-    setSelectedGoalId,
-    goalDetail,
     loading,
     agentDetailLoading,
     industryDetailLoading,
     capabilityCatalogLoading,
-    goalLoading,
     dashboardError,
     agentDetailError,
     industryDetailError,
-    goalError,
     capabilityActionKey,
     actorActionKey,
     refresh,
@@ -120,7 +113,6 @@ export default function AgentWorkbenchPage() {
     [agents, executionCoreAgent, executionSeatAgents],
   );
   const displayedAgent = agentDetail?.agent ?? selectedAgent ?? defaultFocusedAgent;
-  const displayedGoals = agentDetail?.goals ?? [];
   const displayedEvidence = agentDetail ? agentDetail.evidence : evidence;
 
   React.useEffect(() => {
@@ -164,13 +156,6 @@ export default function AgentWorkbenchPage() {
     setSearchParams,
     setSelectedAgent,
   ]);
-
-  const selectedGoal = useMemo(() => {
-    if (!selectedGoalId) {
-      return null;
-    }
-    return displayedGoals.find((goal) => goal.id === selectedGoalId) ?? null;
-  }, [displayedGoals, selectedGoalId]);
 
   const handleTabChange = (nextTab: string) => {
     const nextParams = new URLSearchParams(searchParams);
@@ -412,7 +397,7 @@ export default function AgentWorkbenchPage() {
                 {displayedAgent ? (
                   <ProfileCard
                     agent={displayedAgent}
-                    linkedGoal={selectedGoal}
+                    linkedGoal={null}
                     onOpenChat={() => {
                       void handleOpenChat(displayedAgent);
                     }}
@@ -447,16 +432,6 @@ export default function AgentWorkbenchPage() {
                   onResumeActor={resumeActorRuntime}
                   onRetryMailbox={retryActorMailboxRuntime}
                   onCancelActor={cancelActorRuntime}
-                />
-                <GoalSelector
-                  goals={displayedGoals}
-                  selectedGoalId={selectedGoalId}
-                  onSelect={setSelectedGoalId}
-                />
-                <GoalDetailPanel
-                  detail={goalDetail}
-                  loading={goalLoading}
-                  error={goalError}
                 />
                 <EvidencePanel evidence={displayedEvidence} agents={agents} />
               </>

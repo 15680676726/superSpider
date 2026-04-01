@@ -5,6 +5,7 @@ import asyncio
 import logging
 from typing import Any, Dict, TYPE_CHECKING
 
+from ..runtime_center.task_review_projection import resolve_canonical_host_identity
 from ..runtime_commands import infer_turn_capability_and_risk
 from .models import CronJobSpec
 
@@ -298,41 +299,20 @@ class CronExecutor:
             if isinstance(meta.get("host_snapshot"), dict)
             else {}
         )
-        host_twin_summary = (
-            dict(host_snapshot.get("host_twin_summary"))
-            if isinstance(host_snapshot.get("host_twin_summary"), dict)
-            else {}
-        )
-        coordination = (
-            dict(host_snapshot.get("coordination"))
-            if isinstance(host_snapshot.get("coordination"), dict)
-            else {}
-        )
         scheduler_inputs = (
             dict(host_snapshot.get("scheduler_inputs"))
             if isinstance(host_snapshot.get("scheduler_inputs"), dict)
             else {}
         )
-        environment_ref = (
-            _string_value(scheduler_inputs.get("environment_ref"))
-            or _string_value(scheduler_inputs.get("environment_id"))
-            or _string_value(host_twin_summary.get("selected_seat_ref"))
-            or _string_value(coordination.get("selected_seat_ref"))
-            or _string_value(host_snapshot.get("environment_ref"))
-            or _string_value(host_snapshot.get("environment_id"))
-            or _string_value(meta.get("environment_ref"))
-            or _string_value(meta.get("environment_id"))
+        environment_ref, environment_id, session_mount_id = resolve_canonical_host_identity(
+            host_snapshot,
+            metadata=meta,
         )
         host_meta: Dict[str, Any] = {}
         if environment_ref is not None:
             host_meta["environment_ref"] = environment_ref
-        session_mount_id = (
-            _string_value(scheduler_inputs.get("session_mount_id"))
-            or _string_value(host_twin_summary.get("selected_session_mount_id"))
-            or _string_value(coordination.get("selected_session_mount_id"))
-            or _string_value(host_snapshot.get("session_mount_id"))
-            or _string_value(meta.get("session_mount_id"))
-        )
+        if environment_id is not None:
+            host_meta["environment_id"] = environment_id
         if session_mount_id is not None:
             host_meta["session_mount_id"] = session_mount_id
         host_requirement = meta.get("host_requirement")

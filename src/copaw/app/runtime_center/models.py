@@ -89,9 +89,12 @@ class RuntimeMainBrainResponse(BaseModel):
     strategy: dict[str, Any] = Field(default_factory=dict)
     carrier: dict[str, Any] = Field(default_factory=dict)
     lanes: list[dict[str, Any]] = Field(default_factory=list)
+    cycles: list[dict[str, Any]] = Field(default_factory=list)
+    backlog: list[dict[str, Any]] = Field(default_factory=list)
     current_cycle: dict[str, Any] | None = None
     assignments: list[dict[str, Any]] = Field(default_factory=list)
     reports: list[dict[str, Any]] = Field(default_factory=list)
+    report_cognition: dict[str, Any] = Field(default_factory=dict)
     environment: dict[str, Any] = Field(default_factory=dict)
     governance: dict[str, Any] = Field(default_factory=dict)
     recovery: dict[str, Any] = Field(default_factory=dict)

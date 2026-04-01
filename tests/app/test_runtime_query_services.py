@@ -688,6 +688,12 @@ def test_runtime_query_services_read_state_backed_surfaces(tmp_path) -> None:
         == "handoff"
     )
     assert (
+        task_review["review"]["execution_runtime"]["host_twin_summary"][
+            "continuity_state"
+        ]
+        == "blocked"
+    )
+    assert (
         task_review["review"]["continuity"]["handoff"]["state"]
         == "handoff-required"
     )
@@ -853,6 +859,7 @@ def test_runtime_query_services_prefer_canonical_top_level_host_twin_summary(
                     "legal_recovery_mode": "resume-environment",
                     "contention_severity": "clear",
                     "contention_reason": "clean-reentry",
+                    "continuity_state": "ready",
                     "seat_owner_ref": "ops-agent",
                     "active_app_family_keys": ["office_document"],
                 },
@@ -925,6 +932,10 @@ def test_runtime_query_services_prefer_canonical_top_level_host_twin_summary(
         == "proceed"
     )
     assert review_payload["execution_runtime"]["host_twin_summary"]["blocked_surface_count"] == 0
+    assert (
+        review_payload["execution_runtime"]["host_twin_summary"]["continuity_state"]
+        == "ready"
+    )
     assert review_payload["continuity"]["handoff"]["state"] is None
     assert not any("Handoff:" in line for line in review_payload["summary_lines"])
 

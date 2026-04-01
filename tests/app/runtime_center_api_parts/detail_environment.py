@@ -1048,6 +1048,7 @@ def test_runtime_center_environment_detail_surfaces_host_twin_summary() -> None:
                 "host_twin_summary": {
                     "host_companion_status": "restorable",
                     "host_companion_source": "live-handle",
+                    "continuity_state": "blocked",
                     "seat_count": 2,
                     "ready_app_family_keys": [
                         "browser_backoffice",
@@ -1079,6 +1080,7 @@ def test_runtime_center_environment_detail_surfaces_host_twin_summary() -> None:
     assert payload["host_twin_summary"]["blocked_app_family_keys"] == [
         "desktop_specialized",
     ]
+    assert payload["host_twin_summary"]["continuity_state"] == "blocked"
 
 
 def test_runtime_center_environment_detail_prefers_canonical_host_twin_summary_after_reentry() -> None:
@@ -1104,6 +1106,7 @@ def test_runtime_center_environment_detail_prefers_canonical_host_twin_summary_a
                 "host_twin_summary": {
                     "host_companion_status": "attached" if self._reentered else "restorable",
                     "host_companion_source": "live-handle",
+                    "continuity_state": "ready" if self._reentered else "blocked",
                     "seat_count": 2,
                     "recommended_scheduler_action": "proceed" if self._reentered else "handoff",
                     "ready_app_family_keys": [
@@ -1140,6 +1143,7 @@ def test_runtime_center_environment_detail_prefers_canonical_host_twin_summary_a
     assert payload["host_twin_summary"]["host_companion_status"] == "attached"
     assert payload["host_twin_summary"]["recommended_scheduler_action"] == "proceed"
     assert payload["host_twin_summary"]["blocked_app_family_keys"] == []
+    assert payload["host_twin_summary"]["continuity_state"] == "ready"
 
 
 def test_runtime_center_environment_action_endpoints() -> None:

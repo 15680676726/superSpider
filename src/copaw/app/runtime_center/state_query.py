@@ -38,6 +38,7 @@ from ...state.repositories import (
 from .task_review_projection import (
     build_task_review_payload,
     build_host_twin_summary,
+    derive_host_twin_continuity_state,
     extract_chat_thread_payload,
     first_non_empty,
     serialize_child_rollup,
@@ -652,6 +653,10 @@ class RuntimeCenterStateQueryService:
             if isinstance(existing_summary, dict):
                 merged_summary = dict(derived_summary or {})
                 merged_summary.update(existing_summary)
+                merged_summary["continuity_state"] = first_non_empty(
+                    existing_summary.get("continuity_state"),
+                    derive_host_twin_continuity_state(merged_summary),
+                )
                 feedback["host_twin_summary"] = merged_summary
             elif derived_summary is not None:
                 feedback["host_twin_summary"] = derived_summary

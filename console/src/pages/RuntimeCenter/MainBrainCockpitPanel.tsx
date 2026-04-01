@@ -319,6 +319,17 @@ function formatUtcMinute(value: string | null): string {
   return `${parsed.toISOString().slice(0, 16).replace("T", " ")}Z`;
 }
 
+function formatContinuityState(value: unknown): string | null {
+  const normalized = firstString(value)?.toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === "ready") return "已就绪";
+  if (normalized === "guarded") return "受守护";
+  if (normalized === "blocked") return "受阻";
+  return firstString(value);
+}
+
 function extractFocusCount(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -466,10 +477,18 @@ export default function MainBrainCockpitPanel({
   const environmentPayload = isRecord(mainBrainData?.environment)
     ? (mainBrainData?.environment as Record<string, unknown>)
     : null;
-  const reportCognitionPayload = isRecord(mainBrainData?.meta?.report_cognition)
-    ? (mainBrainData?.meta?.report_cognition as Record<string, unknown>)
-    : null;
+  const reportCognitionPayload = isRecord(mainBrainData?.report_cognition)
+    ? (mainBrainData?.report_cognition as Record<string, unknown>)
+    : isRecord(mainBrainData?.meta?.report_cognition)
+      ? (mainBrainData?.meta?.report_cognition as Record<string, unknown>)
+      : null;
   const assignmentRecords = recordList(mainBrainData?.assignments);
+  const backlogRecords = recordList(mainBrainData?.backlog);
+  const laneRecords = recordList(mainBrainData?.lanes);
+  const currentCycleRecords = recordList(
+    mainBrainData?.current_cycle ? [mainBrainData.current_cycle] : [],
+  );
+  const cycleSequenceRecords = recordList(mainBrainData?.cycles);
   const reportRecords = recordList(mainBrainData?.reports);
   const latestFindingRecords = recordList(reportCognitionPayload?.latest_findings);
   const conflictRecords = recordList(reportCognitionPayload?.conflicts);
@@ -634,6 +653,80 @@ export default function MainBrainCockpitPanel({
 
       {mainBrainData ? (
         <section className={styles.panelGrid}>
+          <Card size="small" title="规划面" style={{ marginBottom: 16 }}>
+            <div className={styles.metaGrid}>
+              <div className={styles.controlCard}>
+                <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                  <div>
+                    <h3 className={styles.entryTitle}>泳道</h3>
+                    <p className={styles.selectionSummary}>
+                      展示当前主脑持有的长期责任泳道。
+                    </p>
+                  </div>
+                </div>
+                {renderCompactRecordList(laneRecords, {
+                  emptyLabel: "当前没有可见泳道。",
+                  fallbackRoute: industryRoute,
+                  fallbackRouteTitle: "泳道",
+                  onOpenRoute,
+                })}
+              </div>
+              <div className={styles.controlCard}>
+                <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                  <div>
+                    <h3 className={styles.entryTitle}>当前周期</h3>
+                    <p className={styles.selectionSummary}>
+                      展示当前主脑周期与当前聚焦的推进窗口。
+                    </p>
+                  </div>
+                </div>
+                {renderCompactRecordList(currentCycleRecords, {
+                  emptyLabel: "当前没有可见周期。",
+                  fallbackRoute: industryRoute,
+                  fallbackRouteTitle: "当前周期",
+                  onOpenRoute,
+                })}
+              </div>
+              <div className={styles.controlCard}>
+                <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                  <div>
+                    <h3 className={styles.entryTitle}>周期序列</h3>
+                    <p className={styles.selectionSummary}>
+                      展示主脑当前还在跟踪的正式周期序列。
+                    </p>
+                  </div>
+                </div>
+                {renderCompactRecordList(
+                  cycleSequenceRecords.length > 0
+                    ? cycleSequenceRecords
+                    : currentCycleRecords,
+                  {
+                    emptyLabel: "当前没有可见周期序列。",
+                    fallbackRoute: industryRoute,
+                    fallbackRouteTitle: "周期序列",
+                    onOpenRoute,
+                  },
+                )}
+              </div>
+              <div className={styles.controlCard}>
+                <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                  <div>
+                    <h3 className={styles.entryTitle}>待办</h3>
+                    <p className={styles.selectionSummary}>
+                      展示当前主脑仍需调度、物化或跟进的正式待办。
+                    </p>
+                  </div>
+                </div>
+                {renderCompactRecordList(backlogRecords, {
+                  emptyLabel: "当前没有可见待办。",
+                  fallbackRoute: industryRoute,
+                  fallbackRouteTitle: "待办",
+                  onOpenRoute,
+                })}
+              </div>
+            </div>
+          </Card>
+
           {reportCognitionPayload ? (
             <Card size="small" title="汇报认知" style={{ marginBottom: 16 }}>
               <div className={styles.metaGrid}>
@@ -669,7 +762,7 @@ export default function MainBrainCockpitPanel({
                     items={[
                       {
                         key: "next_action",
-                        label: "Next action",
+                        label: "下一动作",
                         children:
                           firstString(
                             cognitionNextAction?.title,
@@ -865,16 +958,58 @@ export default function MainBrainCockpitPanel({
                   [
                     "已选席位",
                     firstString(
-                      isRecord(governancePayload?.host_twin_summary)
-                        ? governancePayload?.host_twin_summary.selected_seat_ref
+                      isRecord(environmentPayload?.host_twin_summary)
+                        ? environmentPayload?.host_twin_summary.selected_seat_ref
                         : null,
                     ),
                   ],
                   [
                     "调度动作",
                     firstString(
-                      isRecord(governancePayload?.host_twin_summary)
-                        ? governancePayload?.host_twin_summary.recommended_scheduler_action
+                      isRecord(environmentPayload?.host_twin_summary)
+                        ? environmentPayload?.host_twin_summary.recommended_scheduler_action
+                        : null,
+                    ),
+                  ],
+                  [
+                    "连续性状态",
+                    formatContinuityState(
+                      isRecord(environmentPayload?.host_twin_summary)
+                        ? environmentPayload?.host_twin_summary.continuity_state
+                        : null,
+                    ),
+                  ],
+                  [
+                    "活动宿主族",
+                    firstString(
+                      isRecord(environmentPayload?.host_twin_summary)
+                        ? Array.isArray(environmentPayload?.host_twin_summary.active_app_family_keys)
+                          ? environmentPayload?.host_twin_summary.active_app_family_keys.join(", ")
+                          : null
+                        : null,
+                    ),
+                  ],
+                  [
+                    "交接是否激活",
+                    firstString(
+                      isRecord(environmentPayload?.handoff)
+                        ? environmentPayload?.handoff.active
+                        : null,
+                    ),
+                  ],
+                  [
+                    "待确认补位",
+                    firstString(
+                      isRecord(environmentPayload?.staffing)
+                        ? environmentPayload?.staffing.pending_confirmation_count
+                        : null,
+                    ),
+                  ],
+                  [
+                    "人工协作阻塞",
+                    firstString(
+                      isRecord(environmentPayload?.human_assist)
+                        ? environmentPayload?.human_assist.blocked_count
                         : null,
                     ),
                   ],

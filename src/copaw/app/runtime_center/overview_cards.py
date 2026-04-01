@@ -13,7 +13,11 @@ from ...config import get_heartbeat_config
 from ...utils.runtime_action_links import build_decision_actions, build_patch_actions
 from .overview_helpers import build_runtime_surface
 from .overview_main_brain import RuntimeCenterMainBrainAssembly
-from .task_review_projection import build_host_twin_summary
+from .task_review_projection import (
+    build_host_twin_summary,
+    derive_host_twin_continuity_state,
+    host_twin_summary_ready,
+)
 from .models import (
     RuntimeMainBrainResponse,
     RuntimeMainBrainSection,
@@ -244,6 +248,11 @@ class _RuntimeCenterOverviewCardsSupport:
             host_twin,
             host_companion_session=host_companion_session,
         )
+        if isinstance(host_twin_summary_payload, dict):
+            host_twin_summary_payload["continuity_state"] = self._string(
+                host_twin_summary_payload.get("continuity_state"),
+            ) or derive_host_twin_continuity_state(host_twin_summary_payload)
+        canonical_host_ready = host_twin_summary_ready(host_twin_summary_payload)
         host_twin_blocked = False
         if isinstance(host_twin_summary_payload, dict):
             recommended_scheduler_action = self._string(
@@ -254,7 +263,7 @@ class _RuntimeCenterOverviewCardsSupport:
                 if recommended_scheduler_action is not None
                 else ""
             )
-            host_twin_blocked = bool(
+            host_twin_blocked = not canonical_host_ready and bool(
                 (
                     recommended_scheduler_action
                     and normalized_scheduler_action not in {"proceed", "ready", "clear", "none"}
@@ -304,7 +313,7 @@ class _RuntimeCenterOverviewCardsSupport:
                 if coordination_action is not None
                 else ""
             )
-            if normalized_scheduler_action in {"proceed", "ready", "clear", "none"}:
+            if canonical_host_ready or normalized_scheduler_action in {"proceed", "ready", "clear", "none"}:
                 summary = "Host twin ready"
                 if selected_seat_ref:
                     summary += f" on {selected_seat_ref}"
@@ -842,6 +851,14 @@ class _RuntimeCenterOverviewCardsSupport:
             self._normalize_list(industry_detail.get("agent_reports")),
             industry_instance_id=industry_instance_id,
         )
+        normalized_backlog = [
+            self._normalize_main_brain_cognition_backlog(
+                self._mapping(item) or {},
+                industry_instance_id=industry_instance_id,
+            )
+            for item in self._normalize_list(industry_detail.get("backlog"))
+            if self._mapping(item)
+        ]
         report_cognition = self._build_main_brain_report_cognition_payload(
             industry_detail=industry_detail,
             industry_instance_id=industry_instance_id,
@@ -861,9 +878,12 @@ class _RuntimeCenterOverviewCardsSupport:
             strategy=strategy,
             carrier=carrier,
             lanes=self._normalize_list(industry_detail.get("lanes")),
+            cycles=self._normalize_list(industry_detail.get("cycles")),
+            backlog=normalized_backlog,
             current_cycle=self._mapping(industry_detail.get("current_cycle")),
             assignments=self._normalize_list(industry_detail.get("assignments")),
             reports=normalized_reports,
+            report_cognition=report_cognition,
             environment=self._build_main_brain_environment_payload(governance_card),
             governance=governance,
             recovery=recovery,

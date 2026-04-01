@@ -162,12 +162,6 @@ function canCoordinateRecommendation(
 
 function presentRecommendationActionKind(actionKind?: string | null): string {
   const normalized = readString(actionKind);
-  if (
-    normalized === "system:dispatch_goal" ||
-    normalized === "system:dispatch_active_goals"
-  ) {
-    return "内部编排";
-  }
   if (normalized === "manual:coordinate-main-brain") {
     return "主脑协调";
   }
@@ -635,7 +629,7 @@ export default function PredictionsPage() {
                     {meetingWindow ? <Tag>{meetingWindow}</Tag> : null}
                     <Tag>待处理汇报 {pendingReportCount}</Tag>
                     <Tag>未消化待办 {openBacklogCount}</Tag>
-                    <Tag>目标状态面 {goalStatusCount}</Tag>
+                    <Tag>焦点状态面 {goalStatusCount}</Tag>
                     <Tag>参与输入 {participantInputCount}</Tag>
                     <Tag>派单摘要 {assignmentSummaryCount}</Tag>
                     <Tag>泳道摘要 {laneSummaryCount}</Tag>
@@ -684,7 +678,7 @@ export default function PredictionsPage() {
                                 {presentInsightText(scenario.summary)}
                               </Text>
                               <Space wrap size={4}>
-                                <Tag>目标 {scenario.goal_delta}</Tag>
+                                <Tag>焦点 {scenario.goal_delta}</Tag>
                                 <Tag>负载 {scenario.task_load_delta}</Tag>
                                 <Tag>风险 {scenario.risk_delta}</Tag>
                               </Space>

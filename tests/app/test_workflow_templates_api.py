@@ -40,8 +40,8 @@ from copaw.state.repositories import (
     SqliteWorkflowRunRepository,
     SqliteWorkflowTemplateRepository,
 )
-from copaw.state import WorkflowTemplateRecord
-from copaw.workflows.models import WorkflowLaunchRequest
+from copaw.state import WorkflowRunRecord, WorkflowTemplateRecord
+from copaw.workflows.models import WorkflowLaunchRequest, WorkflowTemplatePreview
 from copaw.workflows import WorkflowTemplateService
 from copaw.industry import (
     IndustryDraftGoal,
@@ -406,6 +406,37 @@ def _bootstrap_industry(client: TestClient) -> str:
     )
     assert bootstrap.status_code == 200
     return bootstrap.json()["team"]["team_id"]
+
+
+def test_workflow_build_run_preview_request_prefers_host_snapshot_environment_ref_when_environment_id_is_missing(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    service = client.app.state.workflow_template_service
+
+    request = service._build_run_preview_request(
+        run=WorkflowRunRecord(
+            template_id="workflow-template-a",
+            title="Workflow Run A",
+            owner_scope="industry",
+            industry_instance_id="industry-1",
+            metadata={
+                "host_snapshot": {
+                    "environment_ref": "env:from-host-ref",
+                    "session_mount_id": "session:from-host-ref",
+                },
+            },
+        ),
+        preview=WorkflowTemplatePreview(
+            template_id="workflow-template-a",
+            title="Workflow Preview A",
+            owner_scope="industry",
+            industry_instance_id="industry-1",
+        ),
+    )
+
+    assert request.environment_id == "env:from-host-ref"
+    assert request.session_mount_id == "session:from-host-ref"
 
 
 def _industry_role_agent_id(client: TestClient, instance_id: str, role_id: str) -> str:
@@ -1256,6 +1287,89 @@ def test_workflow_preview_prefers_canonical_host_twin_summary_over_stale_handoff
     assert "host-twin-recovery-handoff-only" not in blocker_codes
     assert "host-twin-contention-forecast-blocked" not in blocker_codes
     assert "host-twin-active-host-blockers" not in blocker_codes
+
+
+def test_workflow_preview_accepts_continuity_state_ready_without_scheduler_action(
+    tmp_path,
+) -> None:
+    detail = _desktop_host_preflight_detail(
+        recommended_scheduler_action="handoff",
+        continuity_status="attached",
+        continuity_source="live-handle",
+        handoff_state="active",
+        handoff_reason="stale-handoff-metadata",
+        active_alert_families=[],
+        host_blocker_family=None,
+        host_blocker_response=None,
+    )
+    detail["host_twin"]["host_twin_summary"] = {
+        "active_app_family_keys": ["office_document"],
+        "seat_owner_ref": "ops-agent",
+        "blocked_surface_count": 0,
+        "legal_recovery_mode": "resume-environment",
+        "continuity_state": "ready",
+    }
+    environment_service = FakeWorkflowEnvironmentService(
+        session_details={str(detail["session_mount_id"]): detail},
+    )
+    client = TestClient(
+        _build_workflow_app(tmp_path, environment_service=environment_service),
+    )
+    instance_id = _bootstrap_industry(client)
+    solution_lead_agent_id = _industry_role_agent_id(client, instance_id, "solution-lead")
+    _grant_capability_to_agent(
+        client,
+        agent_id=solution_lead_agent_id,
+        capability_ids=["mcp:desktop_windows"],
+    )
+    repository = client.app.state.workflow_template_repository
+    repository.upsert_template(
+        WorkflowTemplateRecord(
+            template_id="phase-next-office-document-continuity-state",
+            title="Phase Next Office Document Continuity State",
+            summary="Mutating desktop step should trust continuity-state readiness.",
+            category="desktop-ops",
+            status="active",
+            version="v1",
+            owner_role_id="solution-lead",
+            suggested_role_ids=["solution-lead"],
+            dependency_capability_ids=["system:dispatch_query", "mcp:desktop_windows"],
+            step_specs=[
+                {
+                    "id": "office-document-leaf",
+                    "kind": "goal",
+                    "execution_mode": "leaf",
+                    "owner_role_id": "solution-lead",
+                    "title": "Update workbook",
+                    "summary": "Mutate office workbook with continuity-state readiness.",
+                    "required_capability_ids": [
+                        "system:dispatch_query",
+                        "mcp:desktop_windows",
+                    ],
+                    "environment_preflight": {
+                        "surface_kind": "desktop",
+                        "mutating": True,
+                        "app_family": "office_document",
+                    },
+                },
+            ],
+        ),
+    )
+
+    preview = client.post(
+        "/workflow-templates/phase-next-office-document-continuity-state/preview",
+        json={
+            "industry_instance_id": instance_id,
+            "environment_id": detail["environment_id"],
+            "session_mount_id": detail["session_mount_id"],
+        },
+    )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert payload["can_launch"] is True
+    blocker_codes = {item["code"] for item in payload["launch_blockers"]}
+    assert "host-twin-continuity-invalid" not in blocker_codes
 
 
 def test_workflow_preview_accepts_explicit_document_surface_from_canonical_host_twin(

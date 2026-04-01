@@ -230,7 +230,7 @@ export default function RuntimeExecutionStrip({
                 item.nextStep || item.blockedReason || item.stuckReason || "",
               );
               const currentGoalText = item.currentGoal
-                ? `目标：${localizeWorkbenchText(item.currentGoal)}`
+                ? `焦点：${localizeWorkbenchText(item.currentGoal)}`
                 : null;
               const currentOwnerText = item.currentOwnerName
                 ? `负责人：${localizeWorkbenchText(item.currentOwnerName)}`

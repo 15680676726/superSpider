@@ -1165,6 +1165,23 @@ class FakeIndustryService:
                         "report_ids": ["report-1"],
                         "metadata": {},
                     },
+                    "cycles": [
+                        {
+                            "cycle_id": "cycle-1",
+                            "cycle_kind": "weekly",
+                            "title": "本周增长与交付协调",
+                            "summary": "先稳交付，再补增长。",
+                            "status": "active",
+                            "focus_lane_ids": ["lane-growth"],
+                            "goal_ids": [],
+                            "backlog_item_ids": ["backlog-1"],
+                            "assignment_ids": ["assignment-1"],
+                            "report_ids": ["report-1"],
+                            "metadata": {},
+                            "is_current": True,
+                            "route": "/api/runtime-center/industry/industry-v1-ops",
+                        },
+                    ],
                     "assignments": [
                         {
                             "assignment_id": "assignment-1",
