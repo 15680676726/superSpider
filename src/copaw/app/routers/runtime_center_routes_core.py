@@ -5,6 +5,7 @@ import asyncio
 import inspect
 
 from .runtime_center_shared_core import *  # noqa: F401,F403
+from ..runtime_chat_stream_events import stream_runtime_chat_events
 
 from agentscope.message import Msg
 from agentscope_runtime.adapters.agentscope.stream import adapt_agentscope_message_stream
@@ -806,11 +807,11 @@ async def _stream_runtime_chat_events(
     turn_executor: object,
     request_payload: AgentRequest,
 ):
-    stream_request = getattr(turn_executor, "stream_request", None)
-    if not callable(stream_request):
-        raise RuntimeError("Kernel turn executor does not support streaming chat execution")
-    async for event in stream_request(request_payload):
-        yield _encode_sse_event(event)
+    async for encoded in stream_runtime_chat_events(
+        turn_executor=turn_executor,
+        request_payload=request_payload,
+    ):
+        yield encoded
 
 
 async def _run_runtime_chat_turn(
