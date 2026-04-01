@@ -16,6 +16,11 @@ from ..agents.tools import (
     send_file_to_user,
     write_file,
 )
+from ..kernel.runtime_outcome import (
+    classify_runtime_outcome,
+    evidence_status_for_outcome,
+)
+from .execution_context import CapabilityExecutionContext
 from .execution_support import (
     _build_script_command,
     _capability_name_from_id,
@@ -156,17 +161,35 @@ class CapabilityExecutionFacade:
 
     async def execute_task(self, task: "KernelTask") -> dict[str, object]:
         capability_id = task.capability_ref or ""
+        payload = dict(task.payload or {})
+        if capability_id.startswith("system:"):
+            payload.setdefault("task_id", task.id)
+            payload.setdefault("owner_agent_id", task.owner_agent_id)
+            payload.setdefault("goal_id", task.goal_id)
+            payload.setdefault("environment_ref", task.environment_ref)
+        execution_context = self._build_execution_context(task, payload=payload)
+
         mount = self._get_capability(capability_id)
         if mount is None:
-            return {
-                "success": False,
-                "error": f"Capability '{capability_id}' not found",
-            }
+            summary = f"Capability '{capability_id}' not found"
+            return self._build_execution_result(
+                execution_context=execution_context,
+                mount=None,
+                payload=_json_safe(execution_context.payload),
+                success=False,
+                summary=summary,
+                error_kind="failed",
+            )
         if not mount.enabled:
-            return {
-                "success": False,
-                "error": f"Capability '{capability_id}' is disabled",
-            }
+            summary = f"Capability '{capability_id}' is disabled"
+            return self._build_execution_result(
+                execution_context=execution_context,
+                mount=mount,
+                payload=_json_safe(execution_context.payload),
+                success=False,
+                summary=summary,
+                error_kind="failed",
+            )
 
         profile = self._resolve_agent_profile(task.owner_agent_id)
         explicit_allowlist = self._resolve_explicit_capability_allowlist(
@@ -178,35 +201,38 @@ class CapabilityExecutionFacade:
             profile=profile,
             explicit_allowlist=explicit_allowlist,
         ):
-            return {
-                "success": False,
-                "error": (
-                    f"Capability '{capability_id}' is not authorized for "
-                    f"agent '{task.owner_agent_id}'"
-                ),
-            }
+            summary = (
+                f"Capability '{capability_id}' is not authorized for "
+                f"agent '{task.owner_agent_id}'"
+            )
+            return self._build_execution_result(
+                execution_context=execution_context,
+                mount=mount,
+                payload=_json_safe(execution_context.payload),
+                success=False,
+                summary=summary,
+                error_kind="failed",
+            )
 
         executor = self.resolve_executor(capability_id)
         if executor is None:
-            return {
-                "success": False,
-                "error": (
-                    f"Capability '{capability_id}' does not have a unified executor yet"
-                ),
-            }
+            summary = (
+                f"Capability '{capability_id}' does not have a unified executor yet"
+            )
+            return self._build_execution_result(
+                execution_context=execution_context,
+                mount=mount,
+                payload=_json_safe(execution_context.payload),
+                success=False,
+                summary=summary,
+                error_kind="failed",
+            )
 
-        payload = dict(task.payload or {})
-        if capability_id.startswith("system:"):
-            payload.setdefault("task_id", task.id)
-            payload.setdefault("owner_agent_id", task.owner_agent_id)
-            payload.setdefault("goal_id", task.goal_id)
-            payload.setdefault("environment_ref", task.environment_ref)
-
-        kwargs = _filter_executor_kwargs(executor, payload)
+        kwargs = _filter_executor_kwargs(executor, execution_context.payload)
         json_safe_kwargs = _json_safe(kwargs)
         evidence_emitted = False
         metadata = {
-            "trace_id": task.trace_id,
+            "trace_id": execution_context.trace_id,
             "trace_stage": "capability.execute",
             "trace_component": "capability.execution",
             "capability_kind": mount.kind,
@@ -215,10 +241,13 @@ class CapabilityExecutionFacade:
             "evidence_contract": list(mount.evidence_contract),
             "environment_requirements": list(mount.environment_requirements),
             "payload": json_safe_kwargs,
-            "task_owner_agent_id": task.owner_agent_id,
-            "task_risk_level": task.risk_level,
+            "task_owner_agent_id": execution_context.owner_agent_id,
+            "task_risk_level": execution_context.risk_level,
             "mount_risk_level": mount.risk_level,
-            "goal_id": task.goal_id,
+            "goal_id": execution_context.goal_id,
+            "work_context_id": execution_context.work_context_id,
+            "action_mode": execution_context.action_mode,
+            "read_only": execution_context.is_read_only,
         }
 
         with bind_shell_evidence_sink(self._make_shell_evidence_sink(task.id)):
@@ -230,38 +259,37 @@ class CapabilityExecutionFacade:
                         response = await executor(**kwargs)
                     except Exception as exc:
                         summary = f"{exc.__class__.__name__}: {exc}"
+                        error_kind = classify_runtime_outcome(summary, success=False)
                         evidence_id = self._append_execution_evidence(
                             task=task,
                             mount=mount,
                             result_summary=summary,
-                            status="failed",
+                            status=evidence_status_for_outcome(error_kind),
                             metadata={
                                 **metadata,
                                 "error_class": exc.__class__.__name__,
+                                "error_kind": error_kind,
                             },
                         )
-                        return {
-                            "success": False,
-                            "summary": summary,
-                            "trace_id": task.trace_id,
-                            "capability_id": capability_id,
-                            "kind": mount.kind,
-                            "payload": json_safe_kwargs,
-                            "risk_level": mount.risk_level,
-                            "risk_description": mount.risk_description,
-                            "evidence_contract": list(mount.evidence_contract),
-                            "environment_requirements": list(
-                                mount.environment_requirements,
-                            ),
-                            "environment_ref": task.environment_ref,
-                            "evidence_id": evidence_id,
-                            "error": summary,
-                        }
+                        return self._build_execution_result(
+                            execution_context=execution_context,
+                            mount=mount,
+                            payload=json_safe_kwargs,
+                            success=False,
+                            summary=summary,
+                            error_kind=error_kind,
+                            evidence_id=evidence_id,
+                        )
 
         summary = _tool_response_summary(response)
-        success = _tool_response_success(response)
         output_payload = _tool_response_payload(response)
         output_dict = output_payload if isinstance(output_payload, dict) else None
+        error_kind = classify_runtime_outcome(
+            summary,
+            success=_tool_response_success(response),
+            timed_out=self._response_timed_out(output_dict),
+        )
+        success = error_kind == "completed"
         extra_evidence_metadata = {}
         if isinstance(output_dict, dict):
             candidate = output_dict.get("evidence_metadata")
@@ -278,28 +306,103 @@ class CapabilityExecutionFacade:
                 task=task,
                 mount=mount,
                 result_summary=summary,
-                status="recorded" if success else "failed",
-                metadata={**metadata, **extra_evidence_metadata},
+                status=evidence_status_for_outcome(error_kind),
+                metadata={
+                    **metadata,
+                    **extra_evidence_metadata,
+                    "error_kind": error_kind,
+                },
             )
             evidence_emitted = evidence_id is not None
         else:
             evidence_id = None
 
+        return self._build_execution_result(
+            execution_context=execution_context,
+            mount=mount,
+            payload=json_safe_kwargs,
+            success=success,
+            summary=summary,
+            error_kind=error_kind,
+            evidence_id=evidence_id,
+            evidence_emitted=evidence_emitted or handled_by_tool_bridge,
+            output=_json_safe(output_payload) if output_payload is not None else None,
+        )
+
+    def _build_execution_context(
+        self,
+        task: "KernelTask",
+        *,
+        payload: dict[str, object],
+    ) -> CapabilityExecutionContext:
+        return CapabilityExecutionContext.from_kernel_task(
+            task,
+            action_mode=self._resolve_action_mode(task.capability_ref),
+            payload=payload,
+        )
+
+    @staticmethod
+    def _resolve_action_mode(capability_ref: str | None) -> str | None:
+        if capability_ref in {
+            "tool:desktop_screenshot",
+            "tool:get_current_time",
+            "tool:read_file",
+        }:
+            return "read"
+        if capability_ref in {
+            "tool:browser_use",
+            "tool:edit_file",
+            "tool:execute_shell_command",
+            "tool:send_file_to_user",
+            "tool:write_file",
+        }:
+            return "write"
+        return None
+
+    @staticmethod
+    def _response_timed_out(output_payload: dict[str, object] | None) -> bool:
+        if not isinstance(output_payload, dict):
+            return False
+        if bool(output_payload.get("timed_out")):
+            return True
+        status = str(output_payload.get("status") or "").strip().lower()
+        return status == "timeout"
+
+    @staticmethod
+    def _build_execution_result(
+        *,
+        execution_context: CapabilityExecutionContext,
+        mount: "CapabilityMount | None",
+        payload: object,
+        success: bool,
+        summary: str,
+        error_kind: str,
+        evidence_id: str | None = None,
+        evidence_emitted: bool = False,
+        output: object | None = None,
+    ) -> dict[str, object]:
         return {
             "success": success,
             "summary": summary,
-            "trace_id": task.trace_id,
-            "capability_id": capability_id,
-            "kind": mount.kind,
-            "payload": json_safe_kwargs,
-            "risk_level": mount.risk_level,
-            "risk_description": mount.risk_description,
-            "evidence_contract": list(mount.evidence_contract),
-            "environment_requirements": list(mount.environment_requirements),
-            "environment_ref": task.environment_ref,
+            "trace_id": execution_context.trace_id,
+            "capability_id": execution_context.capability_ref,
+            "kind": mount.kind if mount is not None else None,
+            "payload": payload,
+            "risk_level": (
+                mount.risk_level if mount is not None else execution_context.risk_level
+            ),
+            "risk_description": mount.risk_description if mount is not None else None,
+            "evidence_contract": list(mount.evidence_contract) if mount is not None else [],
+            "environment_requirements": (
+                list(mount.environment_requirements) if mount is not None else []
+            ),
+            "environment_ref": execution_context.environment_ref,
+            "work_context_id": execution_context.work_context_id,
+            "action_mode": execution_context.action_mode,
             "evidence_id": evidence_id,
-            "evidence_emitted": evidence_emitted or handled_by_tool_bridge,
-            "output": _json_safe(output_payload) if output_payload is not None else None,
+            "evidence_emitted": evidence_emitted,
+            "output": output,
+            "error_kind": error_kind,
             "error": None if success else summary,
         }
 

@@ -9,6 +9,7 @@ from ..industry.identity import is_execution_core_agent_id
 from .actor_mailbox import ActorMailboxService
 from .lease_heartbeat import LeaseHeartbeat
 from .models import KernelTask
+from .runtime_outcome import resolve_runtime_cleanup_disposition
 
 
 def _utc_now() -> datetime:
@@ -103,7 +104,10 @@ class ActorWorker:
                     task_id=task_id,
                 )
                 if admitted is not None and getattr(admitted, "phase", None) != "executing":
-                    phase = str(getattr(admitted, "phase", "blocked"))
+                    disposition = resolve_runtime_cleanup_disposition(
+                        str(getattr(admitted, "phase", "failed")),
+                    )
+                    phase = disposition.phase
                     summary = str(getattr(admitted, "summary", phase))
                     checkpoint = self._mailbox_service.create_checkpoint(
                         agent_id=agent_id,
@@ -111,26 +115,20 @@ class ActorWorker:
                         task_id=task_id,
                         work_context_id=started.work_context_id,
                         checkpoint_kind="task-result",
-                        status=(
-                            "ready"
-                            if phase == "waiting-confirm"
-                            else "abandoned"
-                            if phase == "cancelled"
-                            else "failed"
-                        ),
+                        status=disposition.checkpoint_status,
                         phase=phase,
                         conversation_thread_id=started.conversation_thread_id,
                         summary=summary,
                         resume_payload={"task_id": task_id, "phase": phase},
                     )
-                    if phase == "waiting-confirm":
+                    if disposition.mailbox_action == "block":
                         self._mailbox_service.block_item(
                             started.id,
                             reason=summary,
                             task_id=task_id,
                             checkpoint_id=checkpoint.id if checkpoint is not None else None,
                         )
-                    elif phase == "cancelled":
+                    elif disposition.mailbox_action == "cancel":
                         self._mailbox_service.cancel_item(
                             started.id,
                             reason=summary,
@@ -167,28 +165,21 @@ class ActorWorker:
 
             result_phase = str(getattr(result, "phase", "completed"))
             result_summary = str(getattr(result, "summary", "Actor mailbox item completed"))
+            disposition = resolve_runtime_cleanup_disposition(result_phase)
             checkpoint = self._mailbox_service.create_checkpoint(
                 agent_id=agent_id,
                 mailbox_id=item.id,
                 task_id=task_id,
                 work_context_id=item.work_context_id,
                 checkpoint_kind="task-result",
-                status=(
-                    "applied"
-                    if result_phase == "completed"
-                    else "ready"
-                    if result_phase == "waiting-confirm"
-                    else "abandoned"
-                    if result_phase == "cancelled"
-                    else "failed"
-                ),
-                phase=result_phase,
+                status=disposition.checkpoint_status,
+                phase=disposition.phase,
                 conversation_thread_id=item.conversation_thread_id,
                 summary=result_summary,
-                resume_payload={"task_id": task_id, "phase": result_phase},
+                resume_payload={"task_id": task_id, "phase": disposition.phase},
                 snapshot_payload={"result": _model_dump(result)},
             )
-            if result_phase == "completed":
+            if disposition.mailbox_action == "complete":
                 self._mailbox_service.complete_item(
                     item.id,
                     result_summary=result_summary,
@@ -203,14 +194,14 @@ class ActorWorker:
                     task_id=task_id,
                     checkpoint_id=checkpoint.id if checkpoint is not None else None,
                 )
-            elif result_phase == "waiting-confirm":
+            elif disposition.mailbox_action == "block":
                 self._mailbox_service.block_item(
                     item.id,
                     reason=result_summary,
                     task_id=task_id,
                     checkpoint_id=checkpoint.id if checkpoint is not None else None,
                 )
-            elif result_phase == "cancelled":
+            elif disposition.mailbox_action == "cancel":
                 self._mailbox_service.cancel_item(
                     item.id,
                     reason=result_summary,

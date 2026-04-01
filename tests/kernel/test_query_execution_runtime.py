@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from copaw.agents.react_agent import (
     bind_reasoning_tool_choice_resolver,
@@ -12,7 +13,10 @@ from copaw.agents.tools.evidence_runtime import (
     bind_file_evidence_sink,
     bind_shell_evidence_sink,
 )
+from copaw.kernel import KernelTask
 from copaw.kernel.query_execution import KernelQueryExecutionService
+from copaw.state import AgentRuntimeRecord, SQLiteStateStore
+from copaw.state.repositories import SqliteAgentRuntimeRepository
 
 
 async def _yield_once_with_runtime_bindings() -> None:
@@ -63,3 +67,70 @@ def test_usage_runtime_helpers_are_sourced_from_usage_module() -> None:
     )
     for helper_name in helper_names:
         assert getattr(KernelQueryExecutionService, helper_name).__module__ == expected_module
+
+
+def test_query_execution_runtime_resolves_execution_context_from_task_runtime_and_request(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "query-runtime-state.db")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="ops-agent",
+            actor_key="industry-v1-ops:execution-core",
+            actor_fingerprint="fp-ops",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            metadata={
+                "main_brain_runtime": {
+                    "environment": {"ref": "desktop:runtime"},
+                    "recovery": {"mode": "runtime-metadata"},
+                },
+            },
+        ),
+    )
+    kernel_task = KernelTask(
+        id="ktask:query-runtime",
+        title="Continue the bound environment task",
+        owner_agent_id="ops-agent",
+        work_context_id="work-context-task",
+        payload={
+            "request_context": {
+                "main_brain_runtime": {
+                    "intent": {"mode": "environment-bound"},
+                    "environment": {"session_id": "session:console:desktop-session-1"},
+                },
+            },
+        },
+    )
+    dispatcher = SimpleNamespace(
+        lifecycle=SimpleNamespace(get_task=lambda task_id: kernel_task if task_id == kernel_task.id else None),
+    )
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        kernel_dispatcher=dispatcher,
+        agent_runtime_repository=runtime_repository,
+    )
+
+    resolved = service._resolve_execution_task_context(  # pylint: disable=protected-access
+        request=SimpleNamespace(
+            _copaw_main_brain_runtime_context={
+                "environment": {"ref": "desktop:request"},
+                "recovery": {"reason": "request-bound"},
+            },
+        ),
+        agent_id="ops-agent",
+        kernel_task_id=kernel_task.id,
+        conversation_thread_id="industry-chat:industry-v1-ops:execution-core",
+    )
+
+    assert resolved["work_context_id"] == "work-context-task"
+    assert resolved["main_brain_runtime"]["intent"]["mode"] == "environment-bound"
+    assert (
+        resolved["main_brain_runtime"]["environment"]["session_id"]
+        == "session:console:desktop-session-1"
+    )
+    assert resolved["main_brain_runtime"]["environment"]["ref"] == "desktop:request"
+    assert resolved["main_brain_runtime"]["recovery"]["mode"] == "runtime-metadata"
+    assert resolved["main_brain_runtime"]["recovery"]["reason"] == "request-bound"

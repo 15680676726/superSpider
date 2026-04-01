@@ -550,6 +550,10 @@
 - `/media/analyses`、console chat、主脑 recall 与 Runtime Center detail 现已共享 `work_context` continuity contract
 - media-backed memory hit 现已可直接追回原始 `MediaAnalysisRecord`
 - `Runtime Center` 已有正式 `Media Analyses` operator section
+- `2026-04-01` 补充：`/runtime-center/main-brain` 正式 payload 已补上顶层 `cycles` 与顶层 `report_cognition`；前台驾驶舱也已把 `周期序列` 收进正式规划面，不再只靠 `meta.report_cognition` 和单个 `current_cycle` 临时拼装。
+- `2026-04-01` 补充：`researcher` 的 schedule-originated continuity 已继续补厚到“follow-up backlog 物化 assignment 后仍保住 execution-core continuity 合同”。`service_lifecycle` 现会把 `control_thread_id / session_id / environment_ref / work_context_id / supervisor_* / requested_surfaces / recommended_scheduler_action` 从 follow-up backlog 正式持久化进 assignment metadata；`service_report_closure` 也会优先使用最新 report 的 `work_context_id`，不再让旧 assignment metadata 把新工作上下文盖掉。
+- `2026-04-01` 补充：`AgentWorkbench` 前台已停止展示 `GoalSelector / GoalDetailPanel`，也不再主动请求 `/goals/{goal_id}/detail`；执行条文案已把 `目标` 收成 `焦点`，`Predictions` 里的 `目标状态面 / 目标 delta` 也已改成 `焦点` 口径，避免继续把 operator 拉回旧 `goal-era` 心智。
+- `2026-04-01` 补充：`P0-4` 已新增正式 gate 入口 `scripts/run_p0_runtime_terminal_gate.py`，把后端主链回归、长跑与删旧回归、控制台定向回归和控制台构建收口成一个仓库级可执行门槛；`scripts/README.md` 已同步写明用法。
 
 ---
 
@@ -577,7 +581,7 @@
    - 当前已闭环：`/runtime-center/main-brain` 已成为 dedicated main-brain cockpit contract，`Runtime Center` main-brain panel 现在会把 `carrier / strategy / lanes / backlog / cycle / assignment / report / environment / governance / recovery / automation / evidence / decision / patch` 放进同一驾驶舱，并形成 `Execution Envelope / Operator Closure / Trace Closure` 三段闭环；`/runtime-center/industry/{instance_id}` 已支持 `focus_kind + focus_id` drill-down，`/runtime-center/reports` 也已支持按 `industry / assignment / lane / cycle / needs_followup / processed` 过滤。
    - 终态标准：前台不是 detail 堆叠页，而是统一运行中心；上述核心对象都能在一个驾驶舱里被看见、被关联、被追踪；驾驶舱不只展示结果，还能承载治理、调度、恢复、证据追踪与 patch/decision 闭环；主脑对象、执行对象、证据对象之间的关系前台可直接看清；重要运行真相不再藏在日志、内部状态或零散 detail 里，也不再出现第二套平行执行器。
 4. 宽回归与 `live smoke`
-   - 当前已闭环：关键 `industry / runtime / workflow / fixed-SOP / host-aware` 主链已进入聚合回归；`tests/app/test_phase_next_autonomy_smoke.py::test_phase_next_long_run_live_smoke_closes_unified_runtime_chain_and_multi_surface_continuity` 已把 `multi-cycle industry`、`handoff -> human-assist -> resume`、`schedule pause-resume`、`host switch + reentry + replay continuity`、以及 `browser / desktop / document + cockpit contract + evidence / decision / patch continuity` 锁进同一条长跑 smoke，`tests/app/test_runtime_human_assist_tasks_api.py`、`tests/app/runtime_center_api_parts/overview_governance.py` 与 `tests/app/runtime_center_api_parts/detail_environment.py` 也继续作为正式聚合回归护栏。
+   - 当前已闭环：关键 `industry / runtime / workflow / fixed-SOP / host-aware` 主链已进入聚合回归；`tests/app/test_phase_next_autonomy_smoke.py::test_phase_next_long_run_live_smoke_closes_unified_runtime_chain_and_multi_surface_continuity` 已把 `multi-cycle industry`、`handoff -> human-assist -> resume`、`schedule pause-resume`、`host switch + reentry + replay continuity`、以及 `browser / desktop / document + cockpit contract + evidence / decision / patch continuity` 锁进同一条长跑 smoke，`tests/app/test_runtime_human_assist_tasks_api.py`、`tests/app/runtime_center_api_parts/overview_governance.py` 与 `tests/app/runtime_center_api_parts/detail_environment.py` 也继续作为正式聚合回归护栏；同时仓库已新增单入口 gate `python scripts/run_p0_runtime_terminal_gate.py` 作为正式门槛入口。
    - 终态标准：关键主链都有稳定宽回归，而不是只靠局部单测；存在长时间连续 smoke，覆盖恢复点、重入、宿主切换、handoff、调度恢复、证据回放；多 agent / 多 cycle / 多 host / 多执行位组合场景能稳定通过；回归能锁住关键合同漂移；smoke 本身成为成熟度门槛，而不是开发时顺手跑一遍的附属检查。
 
 ### 6.2 其他已收口 / 持续工程项
@@ -586,7 +590,10 @@
    - 当前已闭环：公开 `/goals` frontdoor、公开 `GET /goals/{goal_id}`、retired dispatch alias 与旧公共 `dispatch_goal(...)` 名称都已退役；当前只剩显式 `compile_goal_dispatch / dispatch_goal_execute_now / dispatch_goal_background / dispatch_goal_deferred_background` 这组 leaf dispatch family，prediction 侧只保留启动期 retired recommendation 清理，已不再构成运行期 compat 分支。
 2. hard-cut 全量收口：`[合同硬切已锁住基线]`
    - 当前已闭环：retired frontdoor、legacy goal alias、runtime-center 写面与治理壳的关键合同已锁住，并已补到更宽的 `industry / runtime / workflow / fixed-SOP` 聚合回归。
-3. 重模块继续拆分：`[当前已闭环，后续如再拆视为新一轮增强]`
+3. Claude-derived execution contract hardening `P0`：`[当前已闭环，后续新增执行面再单独登记]`
+   - 当前已闭环：`CapabilityExecutionContext` 已成为 `CapabilityExecutionFacade` 的内部标准执行上下文，`error_kind / action_mode / work_context_id / evidence_id` 已进入统一 capability result contract，早返回 / 异常 / tool-response 三类路径不再各自漂移；`runtime_outcome.py` 现统一 lower execution outcome taxonomy，并提供共享 `cleanup disposition` 给 `ActorWorker / TaskDelegationService`；file/shell/browser 的 `KernelToolBridge` evidence 现落明确 outcome status，不再只有模糊 `recorded`；`_resolve_execution_task_context(...)` 与 `/runtime-center/chat/run` 的现有 front door 已补正式回归，当前实现明确是 execution-contract hardening，不是第二套 `turn_loop` 或 donor runtime 移植。
+   - 当前验证：`$env:PYTHONPATH='src'; python -m pytest tests/capabilities/test_execution_context.py tests/app/test_capabilities_execution.py tests/agents/test_file_tool_evidence.py tests/agents/test_shell_tool_evidence.py tests/kernel/test_query_execution_runtime.py tests/kernel/test_actor_worker.py tests/app/test_runtime_center_task_delegation_api.py tests/app/test_operator_runtime_e2e.py tests/app/runtime_center_api_parts/overview_governance.py -q` -> `94 passed`
+4. 重模块继续拆分：`[当前已闭环，后续如再拆视为新一轮增强]`
    - 当前已闭环：本轮超重前台模块已完成正式 split wave。`IndustryRuntimeCockpitPanel.tsx` 已继续把环境可见化、focus/work-context 与媒体/推荐展示收回共享 `industryPagePresentation / runtimePresentation`；`MainBrainCockpitPanel.tsx` 已把 compact-record / operator / trace / cognition 渲染块抽到 `mainBrainCockpitSections.tsx`；`runtimeIndustrySections.tsx` 已把 operator/media sections 抽到 `runtimeIndustryOperatorSections.tsx`；`controlChainPresentation.ts` 已把 graph/synthesis/metrics 归一化 helper 下沉到 `controlChainPresentationHelpers.ts`。本轮已执行 `npm --prefix console run build` -> 通过，`npm --prefix console test -- runtimePresentation.test.tsx MainBrainCockpitPanel.test.tsx runtimeDetailDrawer.test.tsx controlChainPresentation.test.ts index.test.tsx` -> `18 passed`。后续若继续拆 `FixedSopPanel`、Automation surface 或更深 backend 模块，按新增增强任务单独登记，不再把当前项保留为未闭环。
 
 ---

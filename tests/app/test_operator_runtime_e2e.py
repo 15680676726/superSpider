@@ -207,23 +207,51 @@ def _admit_confirm_capability(
     return dispatcher.submit(task).model_dump(mode="json")
 
 
+def _create_goal(
+    app: FastAPI,
+    *,
+    title: str,
+    summary: str,
+    status: str = "draft",
+    priority: int = 0,
+):
+    return app.state.goal_service.create_goal(
+        title=title,
+        summary=summary,
+        status=status,
+        priority=priority,
+    )
+
+
+def _compile_goal(
+    app: FastAPI,
+    goal_id: str,
+    *,
+    context: dict[str, object] | None = None,
+) -> list[dict[str, object]]:
+    return [
+        spec.model_dump(mode="json")
+        for spec in app.state.goal_service.compile_goal(
+            goal_id,
+            context=context or {},
+        )
+    ]
+
+
 def test_operator_runtime_e2e_covers_feedback_governance_and_runtime_center(
     tmp_path,
 ) -> None:
     app = _build_operator_app(tmp_path)
     client = TestClient(app)
 
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Close operator loop",
-            "summary": "Exercise goal compile, runtime center drill-down, and governance.",
-            "status": "active",
-            "priority": 3,
-        },
+    created = _create_goal(
+        app,
+        title="Close operator loop",
+        summary="Exercise goal compile, runtime center drill-down, and governance.",
+        status="active",
+        priority=3,
     )
-    assert created.status_code == 200
-    goal_id = created.json()["id"]
+    goal_id = created.id
 
     evidence = app.state.evidence_ledger.append(
         EvidenceRecord(
@@ -257,12 +285,11 @@ def test_operator_runtime_e2e_covers_feedback_governance_and_runtime_center(
     growth = app.state.learning_service.list_growth(goal_id=goal_id, limit=10)
     assert growth
 
-    compiled = client.post(
-        f"/goals/{goal_id}/compile",
-        json={"context": {"owner_agent_id": "ops-agent"}},
+    compiled_payload = _compile_goal(
+        app,
+        goal_id,
+        context={"owner_agent_id": "ops-agent"},
     )
-    assert compiled.status_code == 200
-    compiled_payload = compiled.json()
     assert compiled_payload
     compiler_meta = compiled_payload[0]["payload"]["compiler"]
     assert compiler_meta["feedback_patch_ids"] == [applied_patch.id]
@@ -411,17 +438,14 @@ def test_operator_runtime_e2e_covers_governed_patch_apply_writeback(
     app = _build_operator_app(tmp_path)
     client = TestClient(app)
 
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Apply governed patch",
-            "summary": "Lock the approval and writeback chain for runtime-center patch apply.",
-            "status": "active",
-            "priority": 2,
-        },
+    created = _create_goal(
+        app,
+        title="Apply governed patch",
+        summary="Lock the approval and writeback chain for runtime-center patch apply.",
+        status="active",
+        priority=2,
     )
-    assert created.status_code == 200
-    goal_id = created.json()["id"]
+    goal_id = created.id
 
     patch_result = app.state.learning_service.create_patch(
         kind="plan_patch",
@@ -491,17 +515,14 @@ def test_operator_runtime_e2e_covers_governed_patch_rejection_evidence(
     app = _build_operator_app(tmp_path)
     client = TestClient(app)
 
-    created = client.post(
-        "/goals",
-        json={
-            "title": "Reject governed patch",
-            "summary": "Lock rejection evidence for runtime-center patch governance.",
-            "status": "active",
-            "priority": 2,
-        },
+    created = _create_goal(
+        app,
+        title="Reject governed patch",
+        summary="Lock rejection evidence for runtime-center patch governance.",
+        status="active",
+        priority=2,
     )
-    assert created.status_code == 200
-    goal_id = created.json()["id"]
+    goal_id = created.id
 
     patch_result = app.state.learning_service.create_patch(
         kind="plan_patch",
@@ -603,3 +624,51 @@ def test_operator_manual_environment_e2e_covers_force_release_and_recovery_repor
     assert recovery_payload["reason"] == "startup"
     assert recovery_payload["recovered_orphaned_leases"] == 1
     assert any("cross-process recovery" in note for note in recovery_payload["notes"])
+
+
+def test_operator_runtime_chat_route_keeps_existing_sse_ingress(
+    tmp_path,
+) -> None:
+    app = _build_operator_app(tmp_path)
+
+    class _CapturingTurnExecutor:
+        def __init__(self) -> None:
+            self.requests: list[object] = []
+
+        async def stream_request(self, request, **kwargs):
+            _ = kwargs
+            self.requests.append(request)
+            yield {
+                "object": "message",
+                "status": "completed",
+                "session_id": getattr(request, "session_id", None),
+            }
+
+    app.state.turn_executor = _CapturingTurnExecutor()
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-runtime-chat",
+            "session_id": "industry-chat:industry-v1-ops:execution-core",
+            "user_id": "ops-user",
+            "channel": "console",
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "Continue the operator loop."}],
+                }
+            ],
+            "control_thread_id": "industry-chat:industry-v1-ops:execution-core",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(app.state.turn_executor.requests) == 1
+    assert app.state.turn_executor.requests[0].session_id == (
+        "industry-chat:industry-v1-ops:execution-core"
+    )
+    assert '"status": "completed"' in response.text

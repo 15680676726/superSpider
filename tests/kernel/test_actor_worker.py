@@ -61,6 +61,14 @@ class _CancelledDispatcher:
         )
 
 
+class _SubmitCancelledDispatcher:
+    def submit(self, task):
+        return SimpleNamespace(
+            phase="cancelled",
+            summary=f"Cancelled {task.id} before execution",
+        )
+
+
 def _build_mailbox_runtime(tmp_path):
     state_store = SQLiteStateStore(tmp_path / "actor-worker-state.db")
     runtime_repository = SqliteAgentRuntimeRepository(state_store)
@@ -218,6 +226,39 @@ def test_actor_worker_marks_cancelled_kernel_results_as_cancelled(tmp_path) -> N
     stored = mailbox_service.get_item(item.id)
     assert stored is not None
     assert stored.status == "cancelled"
+    runtime = runtime_repository.get_runtime("agent-1")
+    assert runtime is not None
+    assert runtime.runtime_status == "idle"
+    assert runtime.last_error_summary is None
+    checkpoints = checkpoint_repository.list_checkpoints(agent_id="agent-1", limit=None)
+    assert checkpoints[0].phase == "cancelled"
+    assert checkpoints[0].status == "abandoned"
+
+
+def test_actor_worker_marks_submit_time_cancellations_as_cancelled(tmp_path) -> None:
+    mailbox_service, runtime_repository, checkpoint_repository, _state_store = _build_mailbox_runtime(
+        tmp_path,
+    )
+    item = mailbox_service.enqueue_item(
+        agent_id="agent-1",
+        title="Cancelled before execute",
+        capability_ref="system:dispatch_query",
+        payload={"payload": {"prompt_text": "skip"}, "risk_level": "guarded"},
+    )
+    worker = ActorWorker(
+        worker_id="actor-worker-test",
+        mailbox_service=mailbox_service,
+        kernel_dispatcher=_SubmitCancelledDispatcher(),
+    )
+
+    handled = asyncio.run(worker.run_once("agent-1"))
+
+    assert handled is True
+    stored = mailbox_service.get_item(item.id)
+    assert stored is not None
+    assert stored.status == "cancelled"
+    assert stored.error_summary is not None
+    assert stored.error_summary.startswith("Cancelled ktask:")
     runtime = runtime_repository.get_runtime("agent-1")
     assert runtime is not None
     assert runtime.runtime_status == "idle"

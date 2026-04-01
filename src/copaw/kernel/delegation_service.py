@@ -11,6 +11,7 @@ from ..state.repositories import SqliteTaskRepository, SqliteTaskRuntimeReposito
 from .dispatcher import KernelDispatcher
 from .models import KernelResult, KernelTask, RiskLevel
 from .persistence import decode_kernel_task_metadata
+from .runtime_outcome import resolve_runtime_cleanup_disposition
 from .teammate_resolution import resolve_teammate_target
 
 _TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "cancelled"})
@@ -347,6 +348,7 @@ class TaskDelegationService:
             None,
         )
         if callable(create_checkpoint) and isinstance(mailbox_id, str) and mailbox_id.strip():
+            disposition = resolve_runtime_cleanup_disposition(result.phase)
             checkpoint_payload = (
                 result.model_dump(mode="json")
                 if hasattr(result, "model_dump")
@@ -363,33 +365,36 @@ class TaskDelegationService:
                 mailbox_id=mailbox_id,
                 task_id=child_task.id,
                 checkpoint_kind="task-result",
-                status=(
-                    "applied"
-                    if result.phase == "completed"
-                    else "ready"
-                    if result.phase == "waiting-confirm"
-                    else "failed"
-                ),
-                phase=result.phase,
+                status=disposition.checkpoint_status,
+                phase=disposition.phase,
                 conversation_thread_id=conversation_thread_id,
                 summary=result.summary,
-                resume_payload={"task_id": child_task.id, "phase": result.phase},
+                resume_payload={"task_id": child_task.id, "phase": disposition.phase},
                 snapshot_payload={"result": checkpoint_payload},
             )
+        else:
+            disposition = resolve_runtime_cleanup_disposition(result.phase)
         checkpoint_id = getattr(checkpoint, "id", None)
 
         if isinstance(mailbox_id, str) and mailbox_id.strip():
-            if result.phase == "completed":
+            if disposition.mailbox_action == "complete":
                 self._actor_mailbox_service.complete_item(
                     mailbox_id,
                     result_summary=result.summary,
                     checkpoint_id=checkpoint_id,
                     task_id=child_task.id,
                 )
-            elif result.phase == "waiting-confirm":
+            elif disposition.mailbox_action == "block":
                 self._actor_mailbox_service.block_item(
                     mailbox_id,
                     reason=result.summary,
+                    checkpoint_id=checkpoint_id,
+                    task_id=child_task.id,
+                )
+            elif disposition.mailbox_action == "cancel":
+                self._actor_mailbox_service.cancel_item(
+                    mailbox_id,
+                    reason=result.error or result.summary,
                     checkpoint_id=checkpoint_id,
                     task_id=child_task.id,
                 )

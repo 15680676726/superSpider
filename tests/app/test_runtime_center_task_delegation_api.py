@@ -9,7 +9,13 @@ from fastapi.testclient import TestClient
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.app.runtime_center.state_query import RuntimeCenterStateQueryService
 from copaw.evidence import EvidenceLedger
-from copaw.kernel import ActorMailboxService, ActorWorker, KernelDispatcher, TaskDelegationService
+from copaw.kernel import (
+    ActorMailboxService,
+    ActorWorker,
+    KernelDispatcher,
+    KernelResult,
+    TaskDelegationService,
+)
 from copaw.kernel.persistence import KernelTaskStore
 from copaw.state.agent_experience_service import AgentExperienceMemoryService
 from copaw.state.knowledge_service import StateKnowledgeService
@@ -344,6 +350,100 @@ def test_delegation_service_execute_true_still_lands_mailbox(tmp_path) -> None:
     )
     assert len(task_memory) == 1
     assert task_memory[0].document_id == f"memory:task:{result['child_task_id']}"
+
+
+def test_delegation_service_execute_true_marks_cancelled_child_mailbox_as_cancelled(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    evidence_ledger = EvidenceLedger(tmp_path / "evidence.db")
+    task_repository = SqliteTaskRepository(store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(store)
+    runtime_repository = SqliteAgentRuntimeRepository(store)
+    mailbox_repository = SqliteAgentMailboxRepository(store)
+    checkpoint_repository = SqliteAgentCheckpointRepository(store)
+
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-parent",
+            goal_id="goal-1",
+            title="Parent task",
+            summary="Delegate the work.",
+            task_type="system:dispatch_query",
+            status="running",
+            owner_agent_id="execution-core-agent",
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-parent",
+            runtime_status="active",
+            current_phase="executing",
+            active_environment_id="session:console:execution-core-main",
+            last_owner_agent_id="execution-core-agent",
+        ),
+    )
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="worker",
+            actor_key="industry-v1-ops:worker",
+            actor_fingerprint="fp-worker",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="solution-lead",
+            display_name="Worker",
+            role_name="Worker",
+        ),
+    )
+    mailbox_service = ActorMailboxService(
+        mailbox_repository=mailbox_repository,
+        runtime_repository=runtime_repository,
+        checkpoint_repository=checkpoint_repository,
+    )
+
+    class _CancelledDispatcher:
+        def submit(self, task):
+            return SimpleNamespace(phase="executing", summary="Queued delegated task")
+
+        async def execute_task(self, task_id: str):
+            return KernelResult(
+                task_id=task_id,
+                success=False,
+                phase="cancelled",
+                summary=f"Cancelled {task_id}",
+                error="Cancelled by delegated worker",
+            )
+
+    service = TaskDelegationService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        kernel_dispatcher=_CancelledDispatcher(),
+        evidence_ledger=evidence_ledger,
+        actor_mailbox_service=mailbox_service,
+    )
+
+    result = asyncio.run(
+        service.delegate_task(
+            "task-parent",
+            title="Worker follow-up",
+            owner_agent_id="execution-core-agent",
+            target_agent_id="worker",
+            prompt_text="Review the evidence and stop the task.",
+            execute=True,
+            channel="console",
+        ),
+    )
+
+    assert result["mailbox_id"] is not None
+    assert result["dispatch_status"] == "cancelled"
+    mailbox_item = mailbox_repository.get_item(result["mailbox_id"])
+    assert mailbox_item is not None
+    assert mailbox_item.status == "cancelled"
+    checkpoints = checkpoint_repository.list_checkpoints(agent_id="worker", limit=None)
+    assert checkpoints[0].phase == "cancelled"
+    assert checkpoints[0].status == "abandoned"
 
 
 def test_preview_delegation_ignores_cold_compiled_tasks_for_overload_and_conflicts(

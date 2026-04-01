@@ -415,6 +415,18 @@ Main risks:
 6. the current live route still works
 7. complete-task execution becomes materially more reliable without changing upper truth layers
 
+## 2026-04-01 P0 Landed Shape
+
+The implemented `P0` landed in the following concrete shape:
+
+1. `CapabilityExecutionContext` is now wired into `CapabilityExecutionFacade`; it is no longer only a design placeholder.
+2. capability execution now returns one normalized result contract across early-return, exception, and tool-response paths.
+3. lower execution failure taxonomy is explicit through `error_kind`, with `completed / failed / cancelled / timeout` now distinguished at the capability contract level.
+4. mailbox/delegation cleanup now reuses one shared `cleanup disposition` helper keyed off existing kernel phases, without introducing a second state machine.
+5. file/shell/browser tool-bridge evidence now records concrete outcome status instead of collapsing everything into a generic success record.
+6. `_resolve_execution_task_context(...)` remains the canonical query-runtime merge point for `main_brain_runtime / work_context / environment` continuity.
+7. `/runtime-center/chat/run` stays as the same SSE ingress; this work did not introduce a second front door or a donor-style `turn_loop`.
+
 ## Immediate Next Step
 
 Write and execute a narrow `P0` plan in this order:

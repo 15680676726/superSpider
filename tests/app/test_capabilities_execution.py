@@ -19,7 +19,13 @@ from copaw.capabilities.system_team_handlers import SystemTeamCapabilityFacade
 from copaw.capabilities.remote_skill_contract import RemoteSkillCandidate
 from copaw.evidence import EvidenceLedger
 from copaw.goals import GoalService
-from copaw.kernel import AgentProfileService, KernelDispatcher, KernelTask, KernelTaskStore
+from copaw.kernel import (
+    AgentProfileService,
+    KernelDispatcher,
+    KernelTask,
+    KernelTaskStore,
+    KernelToolBridge,
+)
 from copaw.routines import (
     RoutineDetail,
     RoutineDiagnosis,
@@ -40,6 +46,7 @@ from copaw.state.repositories import (
     SqliteFixedSopTemplateRepository,
     SqliteGoalOverrideRepository,
     SqliteGoalRepository,
+    SqliteRuntimeFrameRepository,
     SqliteScheduleRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
@@ -119,6 +126,35 @@ class FakeMCPErrorManager:
     async def get_client(self, client_key: str):
         if client_key == "browser":
             return FakeMCPErrorClient()
+        return None
+
+
+class FakeMCPCancelledClient:
+    async def get_callable_function(
+        self,
+        tool_name: str,
+        wrap_tool_result: bool = True,
+        execution_timeout: float | None = None,
+    ):
+        _ = (tool_name, wrap_tool_result, execution_timeout)
+
+        async def _callable(**tool_args):
+            _ = tool_args
+            return SimpleNamespace(
+                content=[
+                    {
+                        "text": "Query was cancelled before completion.",
+                    },
+                ],
+            )
+
+        return _callable
+
+
+class FakeMCPCancelledManager:
+    async def get_client(self, client_key: str):
+        if client_key == "browser":
+            return FakeMCPCancelledClient()
         return None
 
 
@@ -665,6 +701,220 @@ def test_mcp_capability_execute_marks_tool_errors_as_failed() -> None:
     assert payload["output"]["success"] is False
     assert payload["output"]["tool_output"]["success"] is False
     assert payload["output"]["tool_output"]["error"] == payload["error"]
+
+
+def test_execution_failure_contract_classifies_cancellation_separately() -> None:
+    capability_service = CapabilityService(
+        registry=StaticCapabilityRegistry(
+            CapabilityMount(
+                id="mcp:browser",
+                name="browser",
+                summary="Run MCP browser tools.",
+                kind="remote-mcp",
+                source_kind="mcp",
+                risk_level="auto",
+                environment_requirements=["mcp"],
+                evidence_contract=["call-record"],
+                role_access_policy=["operator"],
+                enabled=True,
+            ),
+        ),
+        evidence_ledger=EvidenceLedger(),
+        mcp_manager=FakeMCPCancelledManager(),
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                title="Cancelled MCP call",
+                capability_ref="mcp:browser",
+                owner_agent_id="copaw-operator",
+                payload={
+                    "tool_name": "open_page",
+                    "tool_args": {"url": "https://example.com"},
+                },
+            ),
+        ),
+    )
+
+    assert result["success"] is False
+    assert result["error_kind"] == "cancelled"
+    assert result["error"] == "Query was cancelled before completion."
+
+
+def test_execution_failure_contract_classifies_tool_error_as_failed() -> None:
+    capability_service = CapabilityService(
+        registry=StaticCapabilityRegistry(
+            CapabilityMount(
+                id="mcp:browser",
+                name="browser",
+                summary="Run MCP browser tools.",
+                kind="remote-mcp",
+                source_kind="mcp",
+                risk_level="auto",
+                environment_requirements=["mcp"],
+                evidence_contract=["call-record"],
+                role_access_policy=["operator"],
+                enabled=True,
+            ),
+        ),
+        evidence_ledger=EvidenceLedger(),
+        mcp_manager=FakeMCPErrorManager(),
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                title="Errored MCP call",
+                capability_ref="mcp:browser",
+                owner_agent_id="copaw-operator",
+                payload={
+                    "tool_name": "focus_window",
+                    "tool_args": {"process_id": 1},
+                },
+            ),
+        ),
+    )
+
+    assert result["success"] is False
+    assert result["error_kind"] == "failed"
+    assert "Error executing tool focus_window" in result["error"]
+
+
+def test_execution_result_contract_normalizes_missing_capability_failure() -> None:
+    capability_service = CapabilityService(
+        evidence_ledger=EvidenceLedger(),
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                title="Missing capability",
+                capability_ref="system:dispatch_goal",
+                owner_agent_id="copaw-operator",
+                environment_ref="session:console:test",
+                payload={"goal_id": "goal-1"},
+            ),
+        ),
+    )
+
+    assert result["success"] is False
+    assert result["capability_id"] == "system:dispatch_goal"
+    assert result["environment_ref"] == "session:console:test"
+    assert result["error_kind"] == "failed"
+    assert result["summary"] == result["error"]
+    assert "evidence_id" in result
+
+
+def test_execution_failure_contract_classifies_shell_timeout_separately(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(
+        "copaw.agents.tools.shell._execute_subprocess_sync",
+        lambda cmd, cwd, timeout: (
+            -1,
+            "",
+            f"Command execution exceeded the timeout of {timeout} seconds.",
+        ),
+    )
+    capability_service = CapabilityService(
+        evidence_ledger=EvidenceLedger(),
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                title="Timed out shell call",
+                capability_ref="tool:execute_shell_command",
+                owner_agent_id="copaw-operator",
+                environment_ref="session:console:test",
+                payload={
+                    "command": "sleep 10",
+                    "timeout": 5,
+                    "cwd": str(tmp_path),
+                },
+            ),
+        ),
+    )
+
+    assert result["success"] is False
+    assert result["error_kind"] == "timeout"
+    assert result["environment_ref"] == "session:console:test"
+
+
+def test_file_execution_builds_internal_execution_context(tmp_path) -> None:
+    target = tmp_path / "notes.txt"
+    target.write_text("hello world", encoding="utf-8")
+    capability_service = CapabilityService(
+        evidence_ledger=EvidenceLedger(),
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                title="Read file",
+                capability_ref="tool:read_file",
+                owner_agent_id="copaw-operator",
+                environment_ref="session:console:test",
+                payload={"file_path": str(target)},
+            ),
+        ),
+    )
+
+    assert result["success"] is True
+    assert result["capability_id"] == "tool:read_file"
+    assert result["environment_ref"] == "session:console:test"
+    assert result["action_mode"] == "read"
+
+
+def test_shell_execution_writes_evidence_via_unified_contract(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(
+        "copaw.agents.tools.shell._execute_subprocess_sync",
+        lambda cmd, cwd, timeout: (0, "hello world", ""),
+    )
+    state_store = SQLiteStateStore(tmp_path / "tool-bridge-state.db")
+    evidence_ledger = EvidenceLedger(tmp_path / "tool-bridge-evidence.db")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    runtime_frame_repository = SqliteRuntimeFrameRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    task_store = KernelTaskStore(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        runtime_frame_repository=runtime_frame_repository,
+        decision_request_repository=decision_request_repository,
+        evidence_ledger=evidence_ledger,
+    )
+    tool_bridge = KernelToolBridge(task_store=task_store)
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+        tool_bridge=tool_bridge,
+    )
+    dispatcher = KernelDispatcher(
+        task_store=task_store,
+        capability_service=capability_service,
+    )
+
+    payload = _execute_capability_direct(
+        capability_service,
+        dispatcher,
+        capability_id="tool:execute_shell_command",
+        environment_ref="session:console:test",
+        payload={"command": "echo hello", "cwd": str(tmp_path)},
+    )
+
+    assert payload["success"] is True
+    records = evidence_ledger.list_by_task(payload["task_id"])
+    assert any(
+        record.capability_ref == "tool:execute_shell_command"
+        and record.status == "succeeded"
+        and record.metadata["status"] == "success"
+        for record in records
+    )
 
 
 def test_system_dispatch_query_executes_through_kernel_query_execution_service() -> None:

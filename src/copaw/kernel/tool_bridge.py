@@ -50,6 +50,7 @@ class KernelToolBridge:
             task,
             action_summary=f"shell {status}",
             result_summary=summary,
+            status=self._tool_evidence_status(status),
             environment_ref=environment_ref,
             capability_ref="tool:execute_shell_command",
             actor_ref="tool:execute_shell_command",
@@ -81,6 +82,7 @@ class KernelToolBridge:
             task,
             action_summary=f"file {action} {status}",
             result_summary=summary,
+            status=self._tool_evidence_status(status),
             environment_ref=resolved_path,
             capability_ref=f"tool:{tool_name}",
             actor_ref=f"tool:{tool_name}",
@@ -112,6 +114,7 @@ class KernelToolBridge:
             task,
             action_summary=f"browser {action} {status}",
             result_summary=summary,
+            status=self._tool_evidence_status(status),
             environment_ref=environment_ref,
             capability_ref="tool:browser_use",
             actor_ref="tool:browser_use",
@@ -144,6 +147,7 @@ class KernelToolBridge:
         *,
         action_summary: str,
         result_summary: str,
+        status: str,
         environment_ref: str | None,
         capability_ref: str | None,
         actor_ref: str | None,
@@ -154,6 +158,7 @@ class KernelToolBridge:
             task,
             action_summary=action_summary,
             result_summary=result_summary,
+            status=status,
             metadata={
                 **metadata,
                 "environment_ref": environment_ref,
@@ -257,6 +262,17 @@ class KernelToolBridge:
         if result_summary:
             return f"{prefix} -> {result_summary}"
         return prefix
+
+    @staticmethod
+    def _tool_evidence_status(status: str) -> str:
+        normalized = str(status or "").strip().lower()
+        if normalized == "success":
+            return "succeeded"
+        if normalized == "timeout":
+            return "timeout"
+        if normalized == "cancelled":
+            return "cancelled"
+        return "failed"
 
     @staticmethod
     def _coerce_datetime(value: object) -> datetime | None:
