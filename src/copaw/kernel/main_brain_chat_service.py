@@ -19,6 +19,10 @@ from .main_brain_intake import (
     extract_main_brain_intake_text,
 )
 from .main_brain_orchestrator import build_main_brain_cognitive_surface
+from .main_brain_commit_service import MainBrainCommitService
+from .main_brain_result_committer import MainBrainResultCommitter
+from .main_brain_scope_snapshot_service import MainBrainScopeSnapshotService
+from .main_brain_turn_result import MainBrainCommitState, MainBrainTurnResult
 from ..providers.provider_manager import ProviderManager
 from .query_execution_shared import (
     _first_non_empty,
@@ -636,17 +640,83 @@ class MainBrainChatService:
         agent_profile_service: AgentProfileService | None = None,
         memory_recall_service: MemoryRecallService | None = None,
         model_factory: Callable[[], object] | None = None,
+        scope_snapshot_service: MainBrainScopeSnapshotService | None = None,
+        commit_service: MainBrainCommitService | None = None,
     ) -> None:
         self._session_backend = session_backend
         self._industry_service = industry_service
         self._agent_profile_service = agent_profile_service
         self._memory_recall_service = memory_recall_service
         self._model_factory = model_factory or ProviderManager.get_active_chat_model
+        self._scope_snapshot_service = scope_snapshot_service or MainBrainScopeSnapshotService(
+            stable_prefix_builder=self._build_stable_prompt_prefix,
+            stable_prefix_signature_builder=self._build_prompt_context_signature,
+            scope_snapshot_builder=self._build_scope_snapshot_body,
+            scope_snapshot_signature_builder=self._build_scope_snapshot_signature,
+            scope_key_resolver=self._resolve_scope_snapshot_key,
+        )
+        self._commit_service = commit_service or MainBrainCommitService(
+            session_backend=session_backend,
+            action_handlers={
+                "writeback_operating_truth": MainBrainResultCommitter(
+                    industry_service=industry_service,
+                ).commit_action,
+                "create_backlog_item": MainBrainResultCommitter(
+                    industry_service=industry_service,
+                ).commit_action,
+                "orchestrate_execution": MainBrainResultCommitter(
+                    industry_service=industry_service,
+                ).commit_action,
+                "resume_execution": MainBrainResultCommitter(
+                    industry_service=industry_service,
+                ).commit_action,
+                "submit_human_assist": MainBrainResultCommitter(
+                    industry_service=industry_service,
+                ).commit_action,
+            },
+            dirty_marker=self.mark_scope_snapshot_dirty,
+        )
+        set_owner = getattr(self._scope_snapshot_service, "set_owner", None)
+        if callable(set_owner):
+            set_owner(self)
         self._session_cache: dict[tuple[str, str], _PureChatSessionCacheEntry] = {}
         self._background_tasks: set[asyncio.Task[Any]] = set()
 
     def set_session_backend(self, session_backend: Any) -> None:
         self._session_backend = session_backend
+
+    def mark_scope_snapshot_dirty(
+        self,
+        *,
+        work_context_id: str | None = None,
+        industry_instance_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> None:
+        self._scope_snapshot_service.mark_dirty(
+            work_context_id=work_context_id,
+            industry_instance_id=industry_instance_id,
+            agent_id=agent_id,
+        )
+
+    def get_persisted_commit_state(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+    ) -> MainBrainCommitState | None:
+        return self._commit_service.get_persisted_commit_state(
+            session_id=session_id,
+            user_id=user_id,
+        )
+
+    def _read_commit_state_from_snapshot(
+        self,
+        snapshot: dict[str, Any],
+    ) -> MainBrainCommitState | None:
+        payload = _safe_mapping(_safe_mapping(snapshot.get("main_brain")).get("phase2_commit"))
+        if not payload:
+            return None
+        return MainBrainCommitState.model_validate(payload)
 
     def _persist_interrupted_snapshot(
         self,
@@ -715,6 +785,14 @@ class MainBrainChatService:
             snapshot = cache_entry.snapshot
             memory = cache_entry.memory
 
+        persisted_commit_state = self._read_commit_state_from_snapshot(snapshot)
+        if persisted_commit_state is not None:
+            self._set_request_runtime_value(
+                request,
+                "_copaw_main_brain_commit_state",
+                persisted_commit_state,
+            )
+
         prior_messages = await memory.get_memory(prepend_summary=False)
         prompt_messages = self._build_prompt_messages(
             request=request,
@@ -727,6 +805,7 @@ class MainBrainChatService:
         assistant_message: Msg | None = None
         assistant_usage: object | None = None
         reply_already_streamed = False
+        model_result = MainBrainTurnResult.from_reply_text("")
         try:
             if msgs:
                 await memory.add(msgs, allow_duplicates=False)
@@ -748,6 +827,7 @@ class MainBrainChatService:
                 prompt_messages=prompt_messages,
                 force_non_stream=False,
             )
+            model_result = MainBrainTurnResult.normalize(response)
             text = ""
             thinking = ""
             if hasattr(response, "__aiter__"):
@@ -802,14 +882,19 @@ class MainBrainChatService:
             else:
                 text, thinking = _response_to_text_and_thinking(response)
                 assistant_usage = getattr(response, "usage", None)
+                if not text and model_result.reply_text:
+                    text = model_result.reply_text
             if not text and not thinking:
                 response = await self._call_model_response(
                     model=model,
                     prompt_messages=prompt_messages,
                     force_non_stream=True,
                 )
+                model_result = MainBrainTurnResult.normalize(response)
                 text, thinking = _response_to_text_and_thinking(response)
                 assistant_usage = getattr(response, "usage", None)
+                if not text and model_result.reply_text:
+                    text = model_result.reply_text
         except asyncio.CancelledError:
             self._persist_interrupted_snapshot(
                 session_id=session_id,
@@ -837,6 +922,10 @@ class MainBrainChatService:
                 "Main-brain pure chat returned an empty response; using fallback text",
             )
             text = _PURE_CHAT_EMPTY_REPLY_FALLBACK
+        model_result = MainBrainTurnResult.normalize(
+            model_result,
+            fallback_reply_text=text,
+        )
         assistant_message = _build_assistant_message(
             text=text,
             thinking=thinking,
@@ -864,6 +953,28 @@ class MainBrainChatService:
             )
         except Exception:
             logger.exception("Failed to persist main-brain chat snapshot")
+        commit_state = await self._commit_service.commit_turn_result_async(
+            turn_result=model_result,
+            request=request,
+        )
+        if cache_entry is not None and not (
+            commit_state.status == "commit_deferred"
+            and commit_state.reason == "no_commit_action"
+        ):
+            main_brain_payload = _safe_mapping(cache_entry.snapshot.get("main_brain"))
+            main_brain_payload["phase2_commit"] = commit_state.model_dump(mode="json")
+            cache_entry.snapshot["main_brain"] = main_brain_payload
+            cache_entry.dirty = True
+        self._set_request_runtime_value(
+            request,
+            "_copaw_main_brain_turn_result",
+            model_result,
+        )
+        self._set_request_runtime_value(
+            request,
+            "_copaw_main_brain_commit_state",
+            commit_state,
+        )
         if not reply_already_streamed:
             yield assistant_message, True
 
@@ -913,6 +1024,17 @@ class MainBrainChatService:
             payload=dict(snapshot),
             source_ref="state:/main-brain-chat-session",
         )
+
+    def _set_request_runtime_value(self, request: Any, name: str, value: Any) -> None:
+        try:
+            object.__setattr__(request, name, value)
+            return
+        except Exception:
+            pass
+        try:
+            setattr(request, name, value)
+        except Exception:
+            logger.debug("Failed to set runtime request attribute '%s'", name)
 
     def _persist_cache_entry_if_needed(
         self,
@@ -1024,14 +1146,26 @@ class MainBrainChatService:
         current_messages: list[Any],
         cache_entry: _PureChatSessionCacheEntry | None = None,
     ) -> list[dict[str, str]]:
+        _ = cache_entry
         detail = self._load_industry_detail(request)
         owner_agent_id = self._resolve_owner_agent_id(request, detail=detail)
-        context_body = self._build_or_reuse_prompt_context_body(
+        prompt_context = self._scope_snapshot_service.resolve_prompt_context(
             request=request,
-            query=query,
             detail=detail,
             owner_agent_id=owner_agent_id,
-            cache_entry=cache_entry,
+        )
+        lexical_recall = self._build_lexical_recall_context(
+            request=request,
+            query=query,
+        )
+        context_body = "\n\n".join(
+            part
+            for part in (
+                prompt_context.stable_prefix,
+                prompt_context.scope_snapshot,
+                lexical_recall,
+            )
+            if part
         )
         history_messages = self._build_history_messages(
             prior_messages=prior_messages,
@@ -1043,49 +1177,7 @@ class MainBrainChatService:
             *history_messages,
         ]
 
-    def _build_or_reuse_prompt_context_body(
-        self,
-        *,
-        request: Any,
-        query: str | None,
-        detail: object | None,
-        owner_agent_id: str | None,
-        cache_entry: _PureChatSessionCacheEntry | None,
-    ) -> str:
-        context_signature = self._build_prompt_context_signature(
-            request=request,
-            detail=detail,
-            owner_agent_id=owner_agent_id,
-        )
-        cached_static_context = (
-            cache_entry.prompt_context_body
-            if (
-                cache_entry is not None
-                and cache_entry.prompt_context_signature == context_signature
-                and isinstance(cache_entry.prompt_context_body, str)
-                and cache_entry.prompt_context_body.strip()
-            )
-            else None
-        )
-        if cached_static_context is None:
-            static_context = self._build_static_prompt_context_body(
-                request=request,
-                detail=detail,
-                owner_agent_id=owner_agent_id,
-            )
-            if cache_entry is not None:
-                cache_entry.prompt_context_signature = context_signature
-                cache_entry.prompt_context_body = static_context
-        else:
-            static_context = cached_static_context
-        memory_context = self._resolve_truth_first_memory_context(
-            request=request,
-            query=query,
-            owner_agent_id=owner_agent_id,
-        )
-        return "\n\n".join([static_context, memory_context])
-
-    def _build_static_prompt_context_body(
+    def _build_stable_prompt_prefix(
         self,
         *,
         request: Any,
@@ -1114,6 +1206,90 @@ class MainBrainChatService:
             context_body,
             count=1,
         )
+
+    def _build_scope_snapshot_body(
+        self,
+        *,
+        request: Any,
+        detail: object | None,
+        owner_agent_id: str | None,
+    ) -> str:
+        service = self._memory_recall_service
+        if service is None:
+            return "## Truth-First Memory Profile\n- No truth-first memory service available."
+        scope_type, scope_id = self._resolve_truth_first_scope(request)
+        derived_service = getattr(service, "_derived_index_service", None)
+        if derived_service is not None and callable(getattr(derived_service, "list_fact_entries", None)):
+            entries = _sort_truth_first_entries(
+                list(
+                    derived_service.list_fact_entries(
+                        scope_type=scope_type,
+                        scope_id=scope_id,
+                        owner_agent_id=owner_agent_id,
+                        industry_instance_id=str(
+                            getattr(request, "industry_instance_id", "") or "",
+                        ).strip()
+                        or None,
+                        limit=8,
+                    )
+                    or []
+                ),
+            )
+        else:
+            entries = []
+        latest_entries = entries[:2]
+        history_entries = entries[2:4]
+        return "\n".join(
+            [
+                f"## Truth-First Memory Profile\n{_format_truth_first_profile(scope_type=scope_type, scope_id=scope_id, entries=entries)}",
+                f"## Truth-First Memory Latest Facts\n{_format_truth_first_entry_lines(latest_entries, limit=2)}",
+                f"## Truth-First Memory History\n{_format_truth_first_entry_lines(history_entries, limit=2)}",
+            ],
+        )
+
+    def _build_scope_snapshot_signature(
+        self,
+        *,
+        request: Any,
+        detail: object | None,
+        owner_agent_id: str | None,
+    ) -> str:
+        return self._build_prompt_context_signature(
+            request=request,
+            detail=detail,
+            owner_agent_id=owner_agent_id,
+        )
+
+    def _resolve_scope_snapshot_key(
+        self,
+        *,
+        request: Any,
+        detail: object | None = None,
+        owner_agent_id: str | None = None,
+    ) -> str:
+        _ = (detail, owner_agent_id)
+        work_context_id = str(getattr(request, "work_context_id", "") or "").strip()
+        if work_context_id:
+            return work_context_id
+        industry_instance_id = str(getattr(request, "industry_instance_id", "") or "").strip()
+        if industry_instance_id:
+            return f"industry:{industry_instance_id}"
+        agent_id = str(getattr(request, "agent_id", "") or "").strip()
+        if agent_id:
+            return f"agent:{agent_id}"
+        return "global:runtime"
+
+    def _resolve_truth_first_scope(self, request: Any) -> tuple[str, str]:
+        work_context_id = str(getattr(request, "work_context_id", "") or "").strip()
+        industry_instance_id = str(getattr(request, "industry_instance_id", "") or "").strip()
+        agent_id = str(getattr(request, "agent_id", "") or "").strip()
+        if work_context_id:
+            return ("work_context", work_context_id)
+        if industry_instance_id:
+            return ("industry", industry_instance_id)
+        if agent_id:
+            return ("agent", agent_id)
+        return ("global", "runtime")
 
     def _build_prompt_context_signature(
         self,
@@ -1212,61 +1388,14 @@ class MainBrainChatService:
         hits = getattr(result, "hits", None)
         return list(hits or [])
 
-    def _resolve_truth_first_memory_context(
+    def _build_lexical_recall_context(
         self,
         *,
         request: Any,
         query: str | None,
-        owner_agent_id: str | None,
     ) -> str:
-        service = self._memory_recall_service
-        if service is None:
-            return "## Truth-First Memory Profile\n- No truth-first memory service available."
-
-        industry_instance_id = str(getattr(request, "industry_instance_id", "") or "").strip() or None
-        work_context_id = str(getattr(request, "work_context_id", "") or "").strip() or None
-        agent_id = str(getattr(request, "agent_id", "") or "").strip() or None
-        if work_context_id:
-            scope_type = "work_context"
-            scope_id = work_context_id
-        elif industry_instance_id:
-            scope_type = "industry"
-            scope_id = industry_instance_id
-        elif agent_id:
-            scope_type = "agent"
-            scope_id = agent_id
-        else:
-            scope_type = "global"
-            scope_id = "runtime"
-
-        derived_service = getattr(service, "_derived_index_service", None)
-        if derived_service is not None and callable(getattr(derived_service, "list_fact_entries", None)):
-            entries = _sort_truth_first_entries(
-                list(
-                    derived_service.list_fact_entries(
-                        scope_type=scope_type,
-                        scope_id=scope_id,
-                        owner_agent_id=owner_agent_id,
-                        industry_instance_id=industry_instance_id,
-                        limit=8,
-                    )
-                    or []
-                ),
-            )
-        else:
-            entries = []
-
-        latest_entries = entries[:2]
-        history_entries = entries[2:4]
         lexical_hits = self._recall_memory(request=request, query=query)
-        return "\n".join(
-            [
-                f"## Truth-First Memory Profile\n{_format_truth_first_profile(scope_type=scope_type, scope_id=scope_id, entries=entries)}",
-                f"## Truth-First Memory Latest Facts\n{_format_truth_first_entry_lines(latest_entries, limit=2)}",
-                f"## Truth-First Memory History\n{_format_truth_first_entry_lines(history_entries, limit=2)}",
-                f"## Truth-First Lexical Recall\n{_format_memory_hits(lexical_hits)}",
-            ],
-        )
+        return f"## Truth-First Lexical Recall\n{_format_memory_hits(lexical_hits)}"
 
     def _build_history_messages(
         self,

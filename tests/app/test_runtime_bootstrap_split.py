@@ -287,6 +287,277 @@ def test_environment_service_rebinds_cooperative_facade_after_late_bootstrap_inj
     assert "cooperative_adapter.browser_companion_updated" in event_names
 
 
+def test_build_runtime_domain_services_wires_scope_snapshot_and_commit_services(monkeypatch) -> None:
+    captured_chat_kwargs: dict[str, object] = {}
+
+    class _GoalServiceStub:
+        def set_agent_profile_service(self, service) -> None:
+            self.agent_profile_service = service
+
+    class _AgentProfileServiceStub:
+        def backfill_industry_baseline_capabilities(self) -> None:
+            self.backfilled = True
+
+    class _IndustryServiceStub:
+        def set_prediction_service(self, service) -> None:
+            self.prediction_service = service
+
+    class _FixedSopServiceStub:
+        def set_routine_service(self, service) -> None:
+            self.routine_service = service
+
+    class _CapabilityDiscoveryStub:
+        def set_fixed_sop_service(self, service) -> None:
+            self.fixed_sop_service = service
+
+    class _CapabilityServiceStub:
+        def __init__(self) -> None:
+            self.discovery = _CapabilityDiscoveryStub()
+
+        def set_goal_service(self, service) -> None:
+            self.goal_service = service
+
+        def set_agent_profile_service(self, service) -> None:
+            self.agent_profile_service = service
+
+        def set_industry_service(self, service) -> None:
+            self.industry_service = service
+
+        def set_routine_service(self, service) -> None:
+            self.routine_service = service
+
+        def set_fixed_sop_service(self, service) -> None:
+            self.fixed_sop_service = service
+
+        def set_delegation_service(self, service) -> None:
+            self.delegation_service = service
+
+        def set_actor_mailbox_service(self, service) -> None:
+            self.actor_mailbox_service = service
+
+        def set_actor_supervisor(self, service) -> None:
+            self.actor_supervisor = service
+
+        def get_discovery_service(self):
+            return self.discovery
+
+    class _StateQueryServiceStub:
+        def set_goal_service(self, service) -> None:
+            self.goal_service = service
+
+        def set_learning_service(self, service) -> None:
+            self.learning_service = service
+
+        def set_agent_profile_service(self, service) -> None:
+            self.agent_profile_service = service
+
+    class _DerivedMemoryIndexServiceStub:
+        def set_reporting_service(self, service) -> None:
+            self.reporting_service = service
+
+        def set_learning_service(self, service) -> None:
+            self.learning_service = service
+
+    class _MemoryReflectionServiceStub:
+        def set_learning_service(self, service) -> None:
+            self.learning_service = service
+
+    class _LearningServiceStub:
+        def configure_bindings(self, bindings) -> None:
+            self.bindings = bindings
+
+    class _EnvironmentServiceStub:
+        def set_kernel_dispatcher(self, dispatcher) -> None:
+            self.kernel_dispatcher = dispatcher
+
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "GoalService",
+        lambda **kwargs: _GoalServiceStub(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "AgentProfileService",
+        lambda **kwargs: _AgentProfileServiceStub(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "StateReportingService",
+        lambda **kwargs: "reporting-service",
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "OperatingLaneService",
+        lambda **kwargs: "operating-lane-service",
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "BacklogService",
+        lambda **kwargs: "backlog-service",
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "OperatingCycleService",
+        lambda **kwargs: "operating-cycle-service",
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "AssignmentService",
+        lambda **kwargs: "assignment-service",
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "AgentReportService",
+        lambda **kwargs: "agent-report-service",
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "MediaService",
+        lambda **kwargs: "media-service",
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "build_industry_service_runtime_bindings",
+        lambda **kwargs: "industry-runtime-bindings",
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "IndustryDraftGenerator",
+        lambda **kwargs: "draft-generator",
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "IndustryService",
+        lambda **kwargs: _IndustryServiceStub(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "WorkflowTemplateService",
+        lambda **kwargs: "workflow-template-service",
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "FixedSopService",
+        lambda **kwargs: _FixedSopServiceStub(),
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "RoutineService",
+        lambda **kwargs: "routine-service",
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "PredictionService",
+        lambda **kwargs: "prediction-service",
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "TaskDelegationService",
+        lambda **kwargs: "delegation-service",
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "KernelQueryExecutionService",
+        lambda **kwargs: "query-execution-service",
+    )
+
+    def _fake_main_brain_chat_service(**kwargs):
+        captured_chat_kwargs.update(kwargs)
+        return "main-brain-chat-service"
+
+    _fake_main_brain_chat_service._build_stable_prompt_prefix = staticmethod(lambda *args, **kwargs: "")
+    _fake_main_brain_chat_service._build_prompt_context_signature = staticmethod(lambda *args, **kwargs: "")
+    _fake_main_brain_chat_service._build_scope_snapshot_body = staticmethod(lambda *args, **kwargs: "")
+    _fake_main_brain_chat_service._build_scope_snapshot_signature = staticmethod(lambda *args, **kwargs: "")
+    _fake_main_brain_chat_service._resolve_scope_snapshot_key = staticmethod(lambda *args, **kwargs: "global:runtime")
+
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "MainBrainChatService",
+        _fake_main_brain_chat_service,
+    )
+    monkeypatch.setattr(
+        runtime_bootstrap_domains_module,
+        "MainBrainOrchestrator",
+        lambda **kwargs: "main-brain-orchestrator",
+    )
+
+    repositories = SimpleNamespace(
+        goal_repository=object(),
+        goal_override_repository=object(),
+        task_repository=object(),
+        task_runtime_repository=object(),
+        runtime_frame_repository=object(),
+        decision_request_repository=object(),
+        industry_instance_repository=object(),
+        agent_profile_override_repository=object(),
+        agent_runtime_repository=object(),
+        agent_mailbox_repository=object(),
+        agent_checkpoint_repository=object(),
+        agent_lease_repository=object(),
+        agent_thread_binding_repository=object(),
+        prediction_case_repository=object(),
+        prediction_recommendation_repository=object(),
+        prediction_review_repository=object(),
+        operating_lane_repository=object(),
+        backlog_item_repository=object(),
+        operating_cycle_repository=object(),
+        assignment_repository=object(),
+        agent_report_repository=object(),
+        media_analysis_repository=object(),
+        schedule_repository=object(),
+        strategy_memory_repository=object(),
+        workflow_run_repository=object(),
+        prediction_scenario_repository=object(),
+        prediction_signal_repository=object(),
+        workflow_template_repository=object(),
+        workflow_preset_repository=object(),
+        fixed_sop_template_repository=object(),
+        fixed_sop_binding_repository=object(),
+        governance_control_repository=object(),
+        routine_repository=object(),
+        routine_run_repository=object(),
+    )
+    capability_service = _CapabilityServiceStub()
+    state_query_service = _StateQueryServiceStub()
+    derived_memory_index_service = _DerivedMemoryIndexServiceStub()
+    memory_reflection_service = _MemoryReflectionServiceStub()
+    learning_service = _LearningServiceStub()
+    environment_service = _EnvironmentServiceStub()
+
+    services = runtime_bootstrap_domains_module.build_runtime_domain_services(
+        session_backend="session-backend",
+        conversation_compaction_service="conversation-compaction-service",
+        mcp_manager="mcp-manager",
+        state_store="state-store",
+        repositories=repositories,
+        evidence_ledger="evidence-ledger",
+        environment_service=environment_service,
+        runtime_event_bus="runtime-event-bus",
+        provider_manager=SimpleNamespace(get_active_chat_model="active-chat-model"),
+        state_query_service=state_query_service,
+        strategy_memory_service="strategy-memory-service",
+        knowledge_service="knowledge-service",
+        derived_memory_index_service=derived_memory_index_service,
+        memory_reflection_service=memory_reflection_service,
+        memory_recall_service="memory-recall-service",
+        memory_retain_service="memory-retain-service",
+        memory_activation_service="memory-activation-service",
+        agent_experience_service="agent-experience-service",
+        work_context_service="work-context-service",
+        learning_service=learning_service,
+        capability_service=capability_service,
+        kernel_dispatcher="kernel-dispatcher",
+        kernel_tool_bridge="kernel-tool-bridge",
+        actor_mailbox_service="actor-mailbox-service",
+        actor_supervisor="actor-supervisor",
+    )
+
+    assert services.main_brain_chat_service == "main-brain-chat-service"
+    assert "scope_snapshot_service" in captured_chat_kwargs
+    assert "commit_service" in captured_chat_kwargs
+
+
 def test_domain_builder_wires_environment_service_into_fixed_sop_service(
     monkeypatch,
 ) -> None:
@@ -476,10 +747,19 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
         "KernelQueryExecutionService",
         lambda **kwargs: SimpleNamespace(),
     )
+    def _fake_chat_service(**kwargs):
+        _ = kwargs
+        return SimpleNamespace()
+
+    _fake_chat_service._build_stable_prompt_prefix = staticmethod(lambda *args, **kwargs: "")
+    _fake_chat_service._build_prompt_context_signature = staticmethod(lambda *args, **kwargs: "")
+    _fake_chat_service._build_scope_snapshot_body = staticmethod(lambda *args, **kwargs: "")
+    _fake_chat_service._build_scope_snapshot_signature = staticmethod(lambda *args, **kwargs: "")
+    _fake_chat_service._resolve_scope_snapshot_key = staticmethod(lambda *args, **kwargs: "global:runtime")
     monkeypatch.setattr(
         runtime_bootstrap_domains_module,
         "MainBrainChatService",
-        lambda **kwargs: SimpleNamespace(),
+        _fake_chat_service,
     )
     monkeypatch.setattr(
         runtime_bootstrap_domains_module,
