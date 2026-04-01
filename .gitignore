@@ -84,6 +84,8 @@ logs/
 openspec
 /AGENTS.md
 CLAUDE.md
+# External donor/reference source tree, not part of CoPaw
+claude-code-source-code-main/
 *.tmp
 codex_desktop_smoke_*.txt
 
