@@ -759,31 +759,28 @@ def test_phase_next_same_thread_cognitive_closure_smoke_updates_visible_judgment
     app.state.strategy_memory_service.upsert_strategy(
         strategy.model_copy(
             update={
-                "metadata": {
-                    **dict(strategy.metadata or {}),
-                    "strategic_uncertainties": [
-                        {
-                            "uncertainty_id": "uncertainty-same-thread-publish",
-                            "statement": "Same-thread publish may still require governed browser follow-up.",
-                            "scope": "strategy",
-                            "impact_level": "high",
-                            "current_confidence": 0.38,
-                            "review_by_cycle": "cycle-weekly-1",
-                            "escalate_when": ["repeated-blocker", "target-miss"],
-                        }
-                    ],
-                    "lane_budgets": [
-                        {
-                            "lane_id": "lane-growth",
-                            "budget_window": "next-2-cycles",
-                            "target_share": 0.5,
-                            "min_share": 0.35,
-                            "max_share": 0.65,
-                            "review_pressure": "high",
-                            "force_include_reason": "Protect governed browser follow-up while the publish uncertainty is unresolved.",
-                        }
-                    ],
-                },
+                "strategic_uncertainties": [
+                    {
+                        "uncertainty_id": "uncertainty-same-thread-publish",
+                        "statement": "Same-thread publish may still require governed browser follow-up.",
+                        "scope": "strategy",
+                        "impact_level": "high",
+                        "current_confidence": 0.38,
+                        "review_by_cycle": "cycle-weekly-1",
+                        "escalate_when": ["repeated-blocker", "target-miss"],
+                    }
+                ],
+                "lane_budgets": [
+                    {
+                        "lane_id": "lane-growth",
+                        "budget_window": "next-2-cycles",
+                        "target_share": 0.5,
+                        "min_share": 0.35,
+                        "max_share": 0.65,
+                        "review_pressure": "high",
+                        "force_include_reason": "Protect governed browser follow-up while the publish uncertainty is unresolved.",
+                    }
+                ],
             },
         ),
     )

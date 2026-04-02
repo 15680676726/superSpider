@@ -490,6 +490,102 @@ class RuntimeCenterMainBrainAssembly:
             ),
         }
 
+    def _unique_cognition_strings(self, *values: object) -> list[str]:
+        seen: set[str] = set()
+        items: list[str] = []
+        for value in values:
+            if not isinstance(value, list):
+                continue
+            for raw in value:
+                text = self._string(raw)
+                if text is None or text in seen:
+                    continue
+                seen.add(text)
+                items.append(text)
+        return items
+
+    def _resolve_main_brain_replan_payload(
+        self,
+        *,
+        industry_detail: Mapping[str, Any],
+        current_cycle: Mapping[str, Any],
+        current_cycle_synthesis: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        planning = self._mapping(industry_detail.get("main_brain_planning")) or {}
+        persisted = self._mapping(planning.get("replan")) or {}
+        if not persisted:
+            formal_planning = (
+                self._mapping(current_cycle.get("formal_planning"))
+                or self._mapping((self._mapping(current_cycle.get("metadata")) or {}).get("formal_planning"))
+                or {}
+            )
+            persisted = self._mapping(formal_planning.get("report_replan")) or {}
+        raw_decision = self._mapping(current_cycle_synthesis.get("replan_decision")) or {}
+        activation = self._mapping(current_cycle_synthesis.get("activation")) or {}
+        strategy_change = self._mapping(activation.get("strategy_change")) or {}
+        trigger_families = self._unique_cognition_strings(
+            persisted.get("trigger_families"),
+            raw_decision.get("trigger_families"),
+            strategy_change.get("trigger_families"),
+        )
+        trigger_rule_ids = self._unique_cognition_strings(
+            persisted.get("trigger_rule_ids"),
+            raw_decision.get("trigger_rule_ids"),
+            strategy_change.get("trigger_rule_ids"),
+        )
+        affected_lane_ids = self._unique_cognition_strings(
+            persisted.get("affected_lane_ids"),
+            raw_decision.get("affected_lane_ids"),
+            strategy_change.get("affected_lane_ids"),
+        )
+        affected_uncertainty_ids = self._unique_cognition_strings(
+            persisted.get("affected_uncertainty_ids"),
+            raw_decision.get("affected_uncertainty_ids"),
+            strategy_change.get("affected_uncertainty_ids"),
+        )
+        has_synthesis_pressure = bool(
+            current_cycle_synthesis.get("needs_replan")
+            or list(current_cycle_synthesis.get("conflicts") or [])
+            or list(current_cycle_synthesis.get("holes") or [])
+            or list(current_cycle_synthesis.get("replan_reasons") or [])
+            or list(current_cycle_synthesis.get("recommended_actions") or [])
+        )
+        decision_kind = (
+            self._string(persisted.get("decision_kind"))
+            or self._string(raw_decision.get("decision_kind"))
+            or self._string(strategy_change.get("decision_kind"))
+            or ("follow_up_backlog" if has_synthesis_pressure else "clear")
+        )
+        status = (
+            self._string(persisted.get("status"))
+            or self._string(raw_decision.get("status"))
+            or ("needs-replan" if decision_kind != "clear" else "clear")
+        )
+        return {
+            **dict(persisted),
+            "status": status,
+            "decision_kind": decision_kind,
+            "summary": (
+                self._string(persisted.get("summary"))
+                or self._string(raw_decision.get("summary"))
+                or (
+                    "No unresolved report synthesis pressure."
+                    if decision_kind == "clear"
+                    else "Report synthesis requires main-brain replan."
+                )
+            ),
+            "trigger_families": trigger_families,
+            "trigger_rule_ids": trigger_rule_ids,
+            "affected_lane_ids": affected_lane_ids,
+            "affected_uncertainty_ids": affected_uncertainty_ids,
+            "trigger_context": {
+                "trigger_families": trigger_families,
+                "trigger_rule_ids": trigger_rule_ids,
+                "affected_lane_ids": affected_lane_ids,
+                "affected_uncertainty_ids": affected_uncertainty_ids,
+            },
+        }
+
     def build_main_brain_report_cognition_payload(
         self,
         *,
@@ -549,8 +645,17 @@ class RuntimeCenterMainBrainAssembly:
             for reason in (self._string(item) for item in list(current_cycle_synthesis.get("replan_reasons") or []))
             if reason is not None
         ]
+        replan = self._resolve_main_brain_replan_payload(
+            industry_detail=industry_detail,
+            current_cycle=current_cycle,
+            current_cycle_synthesis=current_cycle_synthesis,
+        )
         needs_replan = bool(current_cycle_synthesis.get("needs_replan")) or bool(
-            conflicts or holes or followup_backlog
+            self._string(replan.get("status")) == "needs-replan"
+            or self._string(replan.get("decision_kind")) not in {None, "", "clear"}
+            or conflicts
+            or holes
+            or followup_backlog
         )
         unresolved_count = len(conflicts) + len(holes) + len(unconsumed_reports) + len(followup_backlog)
         if needs_replan:
@@ -569,6 +674,7 @@ class RuntimeCenterMainBrainAssembly:
         if followup_backlog:
             next_action = {
                 "kind": "followup-backlog",
+                "decision_kind": self._string(replan.get("decision_kind")) or "follow_up_backlog",
                 "title": self._string(followup_backlog[0].get("title")) or "Review follow-up backlog",
                 "summary": self._string(followup_backlog[0].get("summary"))
                 or "Dispatch the formal follow-up backlog created from the current report synthesis.",
@@ -577,18 +683,48 @@ class RuntimeCenterMainBrainAssembly:
         elif unconsumed_reports:
             next_action = {
                 "kind": "consume-report",
+                "decision_kind": self._string(replan.get("decision_kind")) or "clear",
                 "title": self._string(unconsumed_reports[0].get("headline"))
                 or self._string(unconsumed_reports[0].get("title"))
                 or "Consume report",
                 "summary": "Consume the latest unconsumed report before dispatching more work.",
                 "route": self._string(unconsumed_reports[0].get("route")) or current_cycle_route,
             }
+        elif self._string(replan.get("decision_kind")) == "strategy_review_required":
+            next_action = {
+                "kind": "strategy-review",
+                "decision_kind": "strategy_review_required",
+                "title": "Trigger strategy review",
+                "summary": self._string(replan.get("summary"))
+                or "Escalate this cycle pressure into a strategy review.",
+                "route": current_cycle_route,
+            }
+        elif self._string(replan.get("decision_kind")) == "cycle_rebalance":
+            next_action = {
+                "kind": "cycle-rebalance",
+                "decision_kind": "cycle_rebalance",
+                "title": "Rebalance current cycle",
+                "summary": self._string(replan.get("summary"))
+                or "Rebalance the current cycle before dispatching more work.",
+                "route": current_cycle_route,
+            }
+        elif self._string(replan.get("decision_kind")) == "lane_reweight":
+            next_action = {
+                "kind": "lane-reweight",
+                "decision_kind": "lane_reweight",
+                "title": "Reweight lane priorities",
+                "summary": self._string(replan.get("summary"))
+                or "Reweight lane priorities before planning the next cycle.",
+                "route": current_cycle_route,
+            }
         else:
             next_action = {
                 "kind": "review-cycle-synthesis" if needs_replan else "continue-cycle",
+                "decision_kind": self._string(replan.get("decision_kind")) or "clear",
                 "title": "Review cycle synthesis" if needs_replan else "Continue current cycle",
                 "summary": (
-                    "Review the cycle synthesis and decide the next operating step."
+                    self._string(replan.get("summary"))
+                    or "Review the cycle synthesis and decide the next operating step."
                     if needs_replan
                     else "No explicit report cognition pressure is blocking the cycle."
                 ),
@@ -602,7 +738,10 @@ class RuntimeCenterMainBrainAssembly:
                 "status": judgment_status,
                 "summary": judgment_summary,
                 "route": current_cycle_route,
+                "decision_kind": self._string(replan.get("decision_kind")) or "clear",
             },
+            "replan": replan,
+            "decision_kind": self._string(replan.get("decision_kind")) or "clear",
             "next_action": next_action,
             "needs_replan": needs_replan,
             "replan_reasons": replan_reasons,
@@ -616,15 +755,17 @@ class RuntimeCenterMainBrainAssembly:
 
     def build_main_brain_report_cognition_signal(self, cognition: Mapping[str, Any]) -> dict[str, Any]:
         needs_replan = bool(cognition.get("needs_replan"))
+        decision_kind = self._string(cognition.get("decision_kind")) or "clear"
         return {
             "key": "report_cognition",
             "count": self._int(cognition.get("count"), 0),
-            "value": "attention" if needs_replan else "clear",
+            "value": "attention" if needs_replan or decision_kind != "clear" else "clear",
             "detail": self._string(self._mapping(cognition.get("judgment")).get("summary")),
             "route": self._string(self._mapping(cognition.get("next_action")).get("route"))
             or self._string(cognition.get("route")),
             "status": self._string(self._mapping(cognition.get("judgment")).get("status"))
-            or ("attention" if needs_replan else "clear"),
+            or ("attention" if needs_replan or decision_kind != "clear" else "clear"),
+            "decision_kind": decision_kind,
             "needs_replan": needs_replan,
             "replan_reason_count": len(list(cognition.get("replan_reasons") or [])),
             "unconsumed_count": len(list(cognition.get("unconsumed_reports") or [])),

@@ -4,6 +4,20 @@ from __future__ import annotations
 from .sqlite_shared import *  # noqa: F401,F403
 
 
+def _jsonable_model_list(values: object | None) -> list[dict[str, Any]]:
+    if not isinstance(values, list):
+        return []
+    items: list[dict[str, Any]] = []
+    for item in values:
+        if isinstance(item, dict):
+            items.append(dict(item))
+            continue
+        model_dump = getattr(item, "model_dump", None)
+        if callable(model_dump):
+            items.append(model_dump(mode="json"))
+    return items
+
+
 class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
     """SQLite-backed repository for formal strategy memory records."""
 
@@ -96,6 +110,16 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
             sort_keys=True,
         )
         payload["lane_weights_json"] = _encode_json(record.lane_weights)
+        payload["strategic_uncertainties_json"] = json.dumps(
+            _jsonable_model_list(record.strategic_uncertainties),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        payload["lane_budgets_json"] = json.dumps(
+            _jsonable_model_list(record.lane_budgets),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
         payload["planning_policy_json"] = json.dumps(
             record.planning_policy,
             sort_keys=True,
@@ -107,12 +131,6 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
         payload["paused_lane_ids_json"] = json.dumps(
             record.paused_lane_ids,
             sort_keys=True,
-        )
-        payload["strategic_uncertainties_json"] = _encode_json(
-            payload.get("strategic_uncertainties", []),
-        )
-        payload["lane_budgets_json"] = _encode_json(
-            payload.get("lane_budgets", []),
         )
         payload["review_rules_json"] = json.dumps(
             record.review_rules,
@@ -143,11 +161,11 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
                     active_goal_titles_json,
                     teammate_contracts_json,
                     lane_weights_json,
+                    strategic_uncertainties_json,
+                    lane_budgets_json,
                     planning_policy_json,
                     current_focuses_json,
                     paused_lane_ids_json,
-                    strategic_uncertainties_json,
-                    lane_budgets_json,
                     review_rules_json,
                     source_ref,
                     status,
@@ -175,11 +193,11 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
                     :active_goal_titles_json,
                     :teammate_contracts_json,
                     :lane_weights_json,
+                    :strategic_uncertainties_json,
+                    :lane_budgets_json,
                     :planning_policy_json,
                     :current_focuses_json,
                     :paused_lane_ids_json,
-                    :strategic_uncertainties_json,
-                    :lane_budgets_json,
                     :review_rules_json,
                     :source_ref,
                     :status,
@@ -207,11 +225,11 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
                     active_goal_titles_json = excluded.active_goal_titles_json,
                     teammate_contracts_json = excluded.teammate_contracts_json,
                     lane_weights_json = excluded.lane_weights_json,
+                    strategic_uncertainties_json = excluded.strategic_uncertainties_json,
+                    lane_budgets_json = excluded.lane_budgets_json,
                     planning_policy_json = excluded.planning_policy_json,
                     current_focuses_json = excluded.current_focuses_json,
                     paused_lane_ids_json = excluded.paused_lane_ids_json,
-                    strategic_uncertainties_json = excluded.strategic_uncertainties_json,
-                    lane_budgets_json = excluded.lane_budgets_json,
                     review_rules_json = excluded.review_rules_json,
                     source_ref = excluded.source_ref,
                     status = excluded.status,
@@ -264,6 +282,12 @@ def _strategy_memory_from_row(
     if not isinstance(payload["teammate_contracts"], list):
         payload["teammate_contracts"] = []
     payload["lane_weights"] = _decode_json_mapping(payload.pop("lane_weights_json", None))
+    payload["strategic_uncertainties"] = _decode_any_json(
+        payload.pop("strategic_uncertainties_json", None),
+    ) or []
+    payload["lane_budgets"] = _decode_any_json(
+        payload.pop("lane_budgets_json", None),
+    ) or []
     payload["planning_policy"] = _decode_json_list(
         payload.pop("planning_policy_json", None),
     ) or []
@@ -273,16 +297,6 @@ def _strategy_memory_from_row(
     payload["paused_lane_ids"] = _decode_json_list(
         payload.pop("paused_lane_ids_json", None),
     ) or []
-    payload["strategic_uncertainties"] = _decode_any_json(
-        payload.pop("strategic_uncertainties_json", None),
-    )
-    if not isinstance(payload["strategic_uncertainties"], list):
-        payload["strategic_uncertainties"] = []
-    payload["lane_budgets"] = _decode_any_json(
-        payload.pop("lane_budgets_json", None),
-    )
-    if not isinstance(payload["lane_budgets"], list):
-        payload["lane_budgets"] = []
     payload["review_rules"] = _decode_json_list(
         payload.pop("review_rules_json", None),
     ) or []

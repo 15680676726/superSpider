@@ -314,15 +314,32 @@ class _IndustryRuntimeViewsMixin:
         self,
         cycle_entry: dict[str, Any] | None,
     ) -> bool:
-        payload = self._resolve_cycle_synthesis_payload(cycle_entry)
-        if not payload:
+        synthesis = self._resolve_cycle_synthesis_payload(cycle_entry)
+        replan = self._resolve_report_replan_payload(
+            cycle_entry=cycle_entry,
+            synthesis=synthesis,
+        )
+        if replan:
+            status = _string(replan.get("status"))
+            decision_kind = _string(replan.get("decision_kind"))
+            if status == "needs-replan" or decision_kind not in {None, "", "clear"}:
+                return True
+            if any(
+                (
+                    list(replan.get("reason_ids") or []),
+                    list(replan.get("directives") or []),
+                    list(replan.get("recommended_actions") or []),
+                )
+            ):
+                return True
+        if not synthesis:
             return False
         return bool(
-            payload.get("needs_replan")
-            or list(payload.get("conflicts") or [])
-            or list(payload.get("holes") or [])
-            or list(payload.get("replan_reasons") or [])
-            or list(payload.get("recommended_actions") or [])
+            synthesis.get("needs_replan")
+            or list(synthesis.get("conflicts") or [])
+            or list(synthesis.get("holes") or [])
+            or list(synthesis.get("replan_reasons") or [])
+            or list(synthesis.get("recommended_actions") or [])
         )
 
     def _resolve_replan_cycle_entry(
@@ -433,39 +450,121 @@ class _IndustryRuntimeViewsMixin:
             payload["lane_budgets"] = lane_budgets
         return payload
 
-    def _report_replan_surface_payload(
+    def _resolve_report_replan_payload(
         self,
         *,
-        planning_sidecar: Mapping[str, Any],
-        replan_synthesis: Mapping[str, Any] | None,
+        cycle_entry: dict[str, Any] | None,
+        synthesis: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        planning_sidecar = self._resolve_formal_planning_payload(cycle_entry)
+        replan_synthesis = (
+            synthesis
+            if isinstance(synthesis, Mapping)
+            else self._resolve_cycle_synthesis_payload(cycle_entry)
+        )
         compiled = self._planner_sidecar_payload(
             self._report_replan_engine.compile(replan_synthesis),
         )
         raw_decision = _mapping(_mapping(replan_synthesis).get("replan_decision"))
-        if raw_decision:
-            compiled.update(raw_decision)
         sidecar_payload = _mapping(planning_sidecar.get("report_replan"))
-        if sidecar_payload:
-            compiled.update(sidecar_payload)
         raw_trigger_context = dict(_mapping(raw_decision.get("trigger_context")))
         sidecar_trigger_context = dict(_mapping(sidecar_payload.get("trigger_context")))
-        if raw_trigger_context and sidecar_trigger_context:
-            compiled["trigger_context"] = {
-                **raw_trigger_context,
-                **sidecar_trigger_context,
+        merged_activation = _mapping(compiled.get("activation"))
+        sidecar_activation = _mapping(sidecar_payload.get("activation"))
+        if sidecar_activation:
+            merged_activation = {
+                **merged_activation,
+                **sidecar_activation,
+                "strategy_change": {
+                    **_mapping(merged_activation.get("strategy_change")),
+                    **_mapping(sidecar_activation.get("strategy_change")),
+                },
             }
-        elif raw_trigger_context:
-            compiled["trigger_context"] = raw_trigger_context
-        elif sidecar_trigger_context:
-            compiled["trigger_context"] = sidecar_trigger_context
-        if sidecar_payload.get("directives"):
-            compiled["directives"] = self._mapping_list(sidecar_payload.get("directives"))
-        if sidecar_payload.get("recommended_actions"):
-            compiled["recommended_actions"] = self._mapping_list(
-                sidecar_payload.get("recommended_actions"),
+        trigger_families = _unique_strings(
+            compiled.get("trigger_families"),
+            sidecar_payload.get("trigger_families"),
+            raw_trigger_context.get("trigger_families"),
+            sidecar_trigger_context.get("trigger_families"),
+        )
+        trigger_rule_ids = _unique_strings(
+            compiled.get("trigger_rule_ids"),
+            sidecar_payload.get("trigger_rule_ids"),
+            raw_trigger_context.get("trigger_rule_ids"),
+            sidecar_trigger_context.get("trigger_rule_ids"),
+        )
+        affected_lane_ids = _unique_strings(
+            compiled.get("affected_lane_ids"),
+            sidecar_payload.get("affected_lane_ids"),
+            raw_trigger_context.get("affected_lane_ids"),
+            sidecar_trigger_context.get("affected_lane_ids"),
+        )
+        affected_uncertainty_ids = _unique_strings(
+            compiled.get("affected_uncertainty_ids"),
+            sidecar_payload.get("affected_uncertainty_ids"),
+            raw_trigger_context.get("affected_uncertainty_ids"),
+            raw_trigger_context.get("strategic_uncertainty_ids"),
+            sidecar_trigger_context.get("affected_uncertainty_ids"),
+            sidecar_trigger_context.get("strategic_uncertainty_ids"),
+        )
+        trigger_context = {
+            **raw_trigger_context,
+            **sidecar_trigger_context,
+        }
+        if trigger_families:
+            trigger_context["trigger_families"] = trigger_families
+        if trigger_rule_ids:
+            trigger_context["trigger_rule_ids"] = trigger_rule_ids
+        if affected_lane_ids:
+            trigger_context["affected_lane_ids"] = affected_lane_ids
+        if affected_uncertainty_ids:
+            trigger_context["affected_uncertainty_ids"] = affected_uncertainty_ids
+            trigger_context["strategic_uncertainty_ids"] = affected_uncertainty_ids
+        return {
+            **compiled,
+            **raw_decision,
+            **sidecar_payload,
+            "status": _string(sidecar_payload.get("status"))
+            or _string(compiled.get("status"))
+            or "clear",
+            "decision_kind": (
+                _string(sidecar_payload.get("decision_kind"))
+                or _string(compiled.get("decision_kind"))
+                or "clear"
+            ),
+            "decision_id": _string(sidecar_payload.get("decision_id"))
+            or _string(compiled.get("decision_id"))
+            or "report-synthesis:clear",
+            "summary": _string(sidecar_payload.get("summary"))
+            or _string(compiled.get("summary"))
+            or "No unresolved report synthesis pressure.",
+            "reason_ids": _unique_strings(
+                compiled.get("reason_ids"),
+                sidecar_payload.get("reason_ids"),
+            ),
+            "source_report_ids": _unique_strings(
+                compiled.get("source_report_ids"),
+                sidecar_payload.get("source_report_ids"),
+            ),
+            "topic_keys": _unique_strings(
+                compiled.get("topic_keys"),
+                sidecar_payload.get("topic_keys"),
+            ),
+            "trigger_families": trigger_families,
+            "trigger_rule_ids": trigger_rule_ids,
+            "affected_lane_ids": affected_lane_ids,
+            "affected_uncertainty_ids": affected_uncertainty_ids,
+            "trigger_context": trigger_context,
+            "directives": self._mapping_list(
+                sidecar_payload.get("directives") or _mapping(replan_synthesis).get("replan_directives"),
             )
-        return compiled
+            or self._mapping_list(compiled.get("directives")),
+            "recommended_actions": self._mapping_list(
+                sidecar_payload.get("recommended_actions")
+                or _mapping(replan_synthesis).get("recommended_actions"),
+            )
+            or self._mapping_list(compiled.get("recommended_actions")),
+            "activation": merged_activation,
+        }
 
     def _resolve_latest_planning_cycle_entry(
         self,
@@ -663,9 +762,9 @@ class _IndustryRuntimeViewsMixin:
             cycles=cycles,
         )
         replan_synthesis = self._resolve_cycle_synthesis_payload(replan_cycle)
-        replan = self._report_replan_surface_payload(
-            planning_sidecar=planning_sidecar,
-            replan_synthesis=replan_synthesis,
+        replan = self._resolve_report_replan_payload(
+            cycle_entry=replan_cycle,
+            synthesis=replan_synthesis,
         )
 
         return IndustryMainBrainPlanningSurface(
@@ -1160,8 +1259,15 @@ class _IndustryRuntimeViewsMixin:
             for item in list(current_cycle_synthesis.get("replan_reasons") or [])
             if _string(item) is not None
         ]
+        replan_payload = self._resolve_report_replan_payload(
+            cycle_entry=replan_cycle_entry,
+            synthesis=current_cycle_synthesis,
+        )
+        replan_decision_kind = _string(replan_payload.get("decision_kind")) or "clear"
         replan_needed = bool(current_cycle_synthesis.get("needs_replan")) or bool(
-            synthesis_conflicts
+            _string(replan_payload.get("status")) == "needs-replan"
+            or replan_decision_kind != "clear"
+            or synthesis_conflicts
             or synthesis_holes
             or synthesis_replan_reasons
             or followup_backlog_items
@@ -1176,8 +1282,26 @@ class _IndustryRuntimeViewsMixin:
                 f"{len(followup_backlog_items)} follow-up backlog item(s) remain open; "
                 "keep replan active until continuity pressure is closed."
             )
+        elif replan_decision_kind == "strategy_review_required":
+            replan_summary = (
+                _string(replan_payload.get("summary"))
+                or "Escalate the current report pressure into an explicit strategy review."
+            )
+        elif replan_decision_kind == "cycle_rebalance":
+            replan_summary = (
+                _string(replan_payload.get("summary"))
+                or "Rebalance the current operating cycle before dispatching more work."
+            )
+        elif replan_decision_kind == "lane_reweight":
+            replan_summary = (
+                _string(replan_payload.get("summary"))
+                or "Reweight lane investment before selecting the next cycle work."
+            )
         elif replan_needed:
-            replan_summary = "Main brain should review the latest cycle synthesis before dispatching more work."
+            replan_summary = (
+                _string(replan_payload.get("summary"))
+                or "Main brain should review the latest cycle synthesis before dispatching more work."
+            )
         else:
             replan_summary = "No explicit replan request is pending."
         recommended_replan_action = None
@@ -1187,6 +1311,12 @@ class _IndustryRuntimeViewsMixin:
             recommended_replan_action = (
                 f"dispatch-governed-followup-on-{followup_pressure_surfaces[0]}-surface"
             )
+        elif replan_decision_kind == "strategy_review_required":
+            recommended_replan_action = "escalate-strategy-review"
+        elif replan_decision_kind == "cycle_rebalance":
+            recommended_replan_action = "rebalance-current-cycle"
+        elif replan_decision_kind == "lane_reweight":
+            recommended_replan_action = "reweight-next-cycle-lanes"
         elif replan_needed:
             recommended_replan_action = "review-reports-and-materialize-next-followup-cycle"
         nodes = [
@@ -1473,8 +1603,15 @@ class _IndustryRuntimeViewsMixin:
                     "conflict_count": len(synthesis_conflicts),
                     "hole_count": len(synthesis_holes),
                     "needs_replan": replan_needed,
+                    "decision_kind": replan_decision_kind,
                     "replan_reason_count": len(synthesis_replan_reasons),
                     "replan_reasons": synthesis_replan_reasons,
+                    "trigger_families": list(replan_payload.get("trigger_families") or []),
+                    "trigger_rule_ids": list(replan_payload.get("trigger_rule_ids") or []),
+                    "affected_lane_ids": list(replan_payload.get("affected_lane_ids") or []),
+                    "affected_uncertainty_ids": list(
+                        replan_payload.get("affected_uncertainty_ids") or []
+                    ),
                     "followup_pressure_count": len(followup_backlog_items),
                     "pending_followup_confirmation_count": len(pending_followup_confirmations),
                     "followup_pressure_surfaces": followup_pressure_surfaces,

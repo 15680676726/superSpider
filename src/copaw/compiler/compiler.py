@@ -419,6 +419,26 @@ class SemanticCompiler:
             "strategy_id": unit.context.get("strategy_id"),
             "strategy_summary": unit.context.get("strategy_summary"),
             "strategy_items": _string_context_list(unit.context.get("strategy_items")),
+            "strategy_mission": _string_context_value(unit.context.get("strategy_mission")),
+            "strategy_north_star": _string_context_value(unit.context.get("strategy_north_star")),
+            "strategy_priority_order": _string_context_list(
+                unit.context.get("strategy_priority_order"),
+            ),
+            "strategy_strategic_uncertainties": _mapping_context_list(
+                unit.context.get("strategy_strategic_uncertainties"),
+            ),
+            "strategy_lane_budgets": _mapping_context_list(
+                unit.context.get("strategy_lane_budgets"),
+            ),
+            "strategy_planning_policy": _string_context_list(
+                unit.context.get("strategy_planning_policy"),
+            ),
+            "strategy_review_rules": _string_context_list(
+                unit.context.get("strategy_review_rules"),
+            ),
+            "strategy_current_focuses": _string_context_list(
+                unit.context.get("strategy_current_focuses"),
+            ),
             "knowledge_items": _string_context_list(unit.context.get("knowledge_items")),
             "knowledge_refs": _string_context_list(unit.context.get("knowledge_refs")),
             "knowledge_documents": _string_context_list(
@@ -888,6 +908,16 @@ def _checkpoint_context_list(value: object) -> list[dict[str, object]]:
             continue
         checkpoints.append(dict(item))
     return checkpoints
+
+
+def _mapping_context_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    items: list[dict[str, object]] = []
+    for item in value:
+        if isinstance(item, dict):
+            items.append(dict(item))
+    return items
 
 
 def _runtime_execution_prompt_lines(context: dict[str, object]) -> list[str]:

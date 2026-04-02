@@ -1402,6 +1402,7 @@ def test_main_brain_chat_service_prompt_includes_structured_cognitive_closure_st
     context_prompt = prompt_messages[1]["content"]
     assert "## 主脑 cognitive closure" in context_prompt
     assert "needs_replan=yes" in context_prompt
+    assert "decision_kind=follow_up_backlog" in context_prompt
     assert "Reports disagree on assignment-shared." in context_prompt
     assert "Weekend variance still lacks a validated cause." in context_prompt
     assert "Weekend variance review completed" in context_prompt

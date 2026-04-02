@@ -536,6 +536,10 @@ class _GoalServiceCompilerMixin:
             "strategy_mission": _string(strategy_payload.get("mission")),
             "strategy_north_star": _string(strategy_payload.get("north_star")),
             "strategy_priority_order": _string_list(strategy_payload.get("priority_order")),
+            "strategy_strategic_uncertainties": list(
+                strategy_payload.get("strategic_uncertainties") or []
+            ),
+            "strategy_lane_budgets": list(strategy_payload.get("lane_budgets") or []),
             "strategy_planning_policy": _string_list(
                 strategy_payload.get("planning_policy"),
             ),
@@ -655,6 +659,24 @@ class _GoalServiceCompilerMixin:
                 strategy_payload.get("priority_order"),
             ),
             lane_weights=lane_weights,
+            strategic_uncertainties=[
+                dict(item)
+                for item in list(
+                    context.get("strategy_strategic_uncertainties")
+                    or strategy_payload.get("strategic_uncertainties")
+                    or []
+                )
+                if isinstance(item, dict)
+            ],
+            lane_budgets=[
+                dict(item)
+                for item in list(
+                    context.get("strategy_lane_budgets")
+                    or strategy_payload.get("lane_budgets")
+                    or []
+                )
+                if isinstance(item, dict)
+            ],
             planning_policy=_string_list(
                 context.get("strategy_planning_policy"),
                 strategy_payload.get("planning_policy"),
@@ -671,6 +693,15 @@ class _GoalServiceCompilerMixin:
                 context.get("strategy_current_focuses"),
                 strategy_payload.get("current_focuses"),
             ),
+            strategy_trigger_rules=[
+                dict(item)
+                for item in list(
+                    context.get("strategy_trigger_rules")
+                    or strategy_payload.get("strategy_trigger_rules")
+                    or []
+                )
+                if isinstance(item, dict)
+            ],
         )
 
     def _build_knowledge_context(

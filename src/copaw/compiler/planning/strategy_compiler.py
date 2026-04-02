@@ -2,7 +2,7 @@
 """Compile persisted strategy memory into formal planning constraints."""
 from __future__ import annotations
 
-from ...state import StrategyMemoryRecord
+from ...state import LaneBudgetRecord, StrategicUncertaintyRecord, StrategyMemoryRecord
 from .models import (
     PlanningLaneBudget,
     PlanningStrategicUncertainty,
@@ -10,67 +10,74 @@ from .models import (
     StrategyTriggerRule,
 )
 
-_UNCERTAINTY_TRIGGER_FAMILY = {
-    "repeated blocker": "repeated_blocker",
-    "confidence drop": "confidence_collapse",
-    "target miss": "target_miss",
-}
 
-_UNCERTAINTY_DECISION_HINT = {
-    "repeated blocker": "strategy_review_required",
-    "confidence drop": "strategy_review_required",
-    "target miss": "lane_reweight",
-}
+def _signal_slug(value: str) -> str:
+    return value.strip().lower().replace("_", "-").replace(" ", "-")
 
 
-def _compile_uncertainties(strategy: StrategyMemoryRecord) -> list[PlanningStrategicUncertainty]:
-    return [
-        PlanningStrategicUncertainty.model_validate(
-            uncertainty.model_dump(mode="python"),
+def _family_from_signal(value: str) -> str:
+    normalized = _signal_slug(value)
+    if "target-miss" in normalized or "lane-miss" in normalized:
+        return "target_miss"
+    if "confidence-drop" in normalized or "confidence-collapse" in normalized:
+        return "confidence_collapse"
+    if "blocker" in normalized:
+        return "repeated_blocker"
+    return "review_rule"
+
+
+def _decision_kind_from_signal(value: str) -> str:
+    normalized = _signal_slug(value)
+    if any(token in normalized for token in ("target-miss", "lane-miss", "reweight")):
+        return "lane_reweight"
+    if any(token in normalized for token in ("contradiction", "conflict", "rebalance")):
+        return "cycle_rebalance"
+    if any(
+        token in normalized
+        for token in (
+            "blocker",
+            "repeat-failure",
+            "confidence-drop",
+            "confidence-collapse",
+            "strategy-review",
+            "review",
         )
-        for uncertainty in list(strategy.strategic_uncertainties or [])
-    ]
+    ):
+        return "strategy_review_required"
+    return "follow_up_backlog"
 
 
-def _compile_lane_budgets(strategy: StrategyMemoryRecord) -> list[PlanningLaneBudget]:
-    return [
-        PlanningLaneBudget.model_validate(
-            lane_budget.model_dump(mode="python"),
-        )
-        for lane_budget in list(strategy.lane_budgets or [])
-    ]
+def _compile_uncertainty(record: StrategicUncertaintyRecord) -> PlanningStrategicUncertainty:
+    return PlanningStrategicUncertainty(
+        uncertainty_id=record.uncertainty_id,
+        statement=record.statement,
+        scope=record.scope,
+        impact_level=record.impact_level,
+        current_confidence=record.current_confidence,
+        evidence_for_refs=list(record.evidence_for_refs or []),
+        evidence_against_refs=list(record.evidence_against_refs or []),
+        review_by_cycle=record.review_by_cycle,
+        escalate_when=list(record.escalate_when or []),
+        lane_id=record.lane_id,
+        metadata=dict(record.metadata or {}),
+    )
 
 
-def _compile_trigger_rules(strategy: StrategyMemoryRecord) -> list[StrategyTriggerRule]:
-    rules: list[StrategyTriggerRule] = []
-    for index, review_rule in enumerate(list(strategy.review_rules or [])):
-        rules.append(
-            StrategyTriggerRule(
-                rule_id=f"review-rule:{index}",
-                source_type="review_rule",
-                trigger_family="review_rule",
-                summary=review_rule,
-            ),
-        )
-    for uncertainty in list(strategy.strategic_uncertainties or []):
-        for escalate_when in list(uncertainty.escalate_when or []):
-            normalized = str(escalate_when).strip().lower()
-            if normalized not in _UNCERTAINTY_TRIGGER_FAMILY:
-                continue
-            rules.append(
-                StrategyTriggerRule(
-                    rule_id=(
-                        f"uncertainty:{uncertainty.uncertainty_id}:"
-                        f"{normalized.replace(' ', '-')}"
-                    ),
-                    source_type="uncertainty_escalation",
-                    source_ref=uncertainty.uncertainty_id,
-                    trigger_family=_UNCERTAINTY_TRIGGER_FAMILY[normalized],
-                    summary=f"{uncertainty.statement} ({normalized})",
-                    decision_hint=_UNCERTAINTY_DECISION_HINT[normalized],
-                ),
-            )
-    return rules
+def _compile_lane_budget(record: LaneBudgetRecord) -> PlanningLaneBudget:
+    return PlanningLaneBudget(
+        lane_id=record.lane_id,
+        budget_window=record.budget_window,
+        target_share=record.target_share,
+        min_share=record.min_share,
+        max_share=record.max_share,
+        current_share=record.current_share,
+        review_pressure=record.review_pressure,
+        defer_reason=record.defer_reason or None,
+        force_include_reason=record.force_include_reason or None,
+        completed_cycles=record.completed_cycles,
+        consumed_cycles=record.consumed_cycles,
+        metadata=dict(record.metadata or {}),
+    )
 
 
 class StrategyPlanningCompiler:
@@ -82,6 +89,11 @@ class StrategyPlanningCompiler:
     ) -> PlanningStrategyConstraints:
         if strategy is None:
             return PlanningStrategyConstraints()
+        strategic_uncertainties = [
+            _compile_uncertainty(record)
+            for record in list(strategy.strategic_uncertainties or [])
+        ]
+        lane_budgets = self._compile_lane_budgets(strategy)
         return PlanningStrategyConstraints(
             mission=strategy.mission,
             north_star=strategy.north_star,
@@ -91,11 +103,93 @@ class StrategyPlanningCompiler:
                 for lane_id, weight in dict(strategy.lane_weights or {}).items()
                 if str(lane_id).strip()
             },
+            strategic_uncertainties=strategic_uncertainties,
+            lane_budgets=lane_budgets,
             planning_policy=list(strategy.planning_policy or []),
             review_rules=list(strategy.review_rules or []),
             paused_lane_ids=list(strategy.paused_lane_ids or []),
             current_focuses=list(strategy.current_focuses or []),
-            strategic_uncertainties=_compile_uncertainties(strategy),
-            lane_budgets=_compile_lane_budgets(strategy),
-            strategy_trigger_rules=_compile_trigger_rules(strategy),
+            strategy_trigger_rules=self._compile_trigger_rules(
+                review_rules=list(strategy.review_rules or []),
+                strategic_uncertainties=strategic_uncertainties,
+            ),
         )
+
+    def _compile_lane_budgets(
+        self,
+        strategy: StrategyMemoryRecord,
+    ) -> list[PlanningLaneBudget]:
+        explicit = [
+            _compile_lane_budget(record)
+            for record in list(strategy.lane_budgets or [])
+            if record.lane_id
+        ]
+        if explicit:
+            return explicit
+        lane_weights = {
+            str(lane_id): float(weight)
+            for lane_id, weight in dict(strategy.lane_weights or {}).items()
+            if str(lane_id).strip()
+        }
+        total_weight = sum(max(weight, 0.0) for weight in lane_weights.values()) or 1.0
+        compiled: list[PlanningLaneBudget] = []
+        for lane_id, weight in lane_weights.items():
+            target_share = max(weight, 0.0) / total_weight
+            min_share = max(0.0, round(target_share * 0.5, 4))
+            max_share = min(1.0, round(max(target_share, target_share * 1.5), 4))
+            compiled.append(
+                PlanningLaneBudget(
+                    lane_id=lane_id,
+                    budget_window="next-3-cycles",
+                    target_share=round(target_share, 4),
+                    min_share=min_share,
+                    max_share=max_share,
+                    review_pressure="normal",
+                ),
+            )
+        return compiled
+
+    def _compile_trigger_rules(
+        self,
+        *,
+        review_rules: list[str],
+        strategic_uncertainties: list[PlanningStrategicUncertainty],
+    ) -> list[StrategyTriggerRule]:
+        rules: list[StrategyTriggerRule] = []
+        for index, review_rule in enumerate(review_rules):
+            summary = str(review_rule).strip()
+            if not summary:
+                continue
+            decision_kind = _decision_kind_from_signal(summary)
+            rules.append(
+                StrategyTriggerRule(
+                    rule_id=f"review-rule:{index}",
+                    source_type="review_rule",
+                    trigger_family="review_rule",
+                    summary=summary,
+                    decision_hint=decision_kind,
+                    source="review-rule",
+                    decision_kind=decision_kind,
+                    trigger_signals=[_signal_slug(summary)],
+                ),
+            )
+        for uncertainty in strategic_uncertainties:
+            for signal in list(uncertainty.escalate_when or []):
+                slug = _signal_slug(signal)
+                decision_kind = _decision_kind_from_signal(signal)
+                rules.append(
+                    StrategyTriggerRule(
+                        rule_id=f"uncertainty:{uncertainty.uncertainty_id}:{slug}",
+                        source_type="uncertainty_escalation",
+                        source_ref=uncertainty.uncertainty_id,
+                        trigger_family=_family_from_signal(signal),
+                        summary=f"{uncertainty.statement or uncertainty.uncertainty_id} ({signal})",
+                        decision_hint=decision_kind,
+                        source="uncertainty-register",
+                        decision_kind=decision_kind,
+                        trigger_signals=[slug],
+                        uncertainty_ids=[uncertainty.uncertainty_id],
+                        lane_ids=[uncertainty.lane_id] if uncertainty.lane_id else [],
+                    ),
+                )
+        return rules

@@ -1108,6 +1108,7 @@ async def test_main_brain_orchestrator_runtime_context_carries_cognitive_surface
     assert len(streamed) == 1
     runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
     assert runtime_context["cognitive"]["needs_replan"] is True
+    assert runtime_context["cognitive"]["decision_kind"] == "follow_up_backlog"
     assert runtime_context["cognitive"]["has_unresolved_conflicts"] is True
     assert runtime_context["cognitive"]["replan_reasons"] == [
         "Reports disagree on assignment-shared.",
@@ -1988,8 +1989,14 @@ async def test_query_execution_runtime_reuses_shared_intake_contract_for_writeba
         )
     )
 
-    assert chat_writeback_summary == {"applied": True}
-    assert industry_kickoff_summary == {"activated": True}
+    assert chat_writeback_summary["applied"] is True
+    assert chat_writeback_summary["status"] == "committed"
+    assert chat_writeback_summary["action_type"] == "writeback_operating_truth"
+    assert chat_writeback_summary["commit_key"] == "query_execution_runtime:writeback"
+    assert industry_kickoff_summary["activated"] is True
+    assert industry_kickoff_summary["status"] == "committed"
+    assert industry_kickoff_summary["action_type"] == "orchestrate_execution"
+    assert industry_kickoff_summary["commit_key"] == "query_execution_runtime:kickoff"
     assert len(industry_service.writeback_calls) == 1
     assert industry_service.writeback_calls[0]["writeback_plan"] is writeback_plan
     assert len(industry_service.kickoff_calls) == 1

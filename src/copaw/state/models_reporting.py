@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_serializer, field_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 
 from .model_support import CreatedRecord, UpdatedRecord, _new_record_id, _normalize_text_list, _utc_now
 from .models_core import ReportScopeType, ReportWindow, StrategyMemoryStatus, StrategyScopeType
@@ -22,9 +22,9 @@ class StrategicUncertaintyRecord(BaseModel):
     evidence_for_refs: list[str] = Field(default_factory=list)
     evidence_against_refs: list[str] = Field(default_factory=list)
     review_by_cycle: str | None = None
-    escalate_when: list[Literal["repeated blocker", "confidence drop", "target miss"]] = Field(
-        default_factory=list,
-    )
+    escalate_when: list[str] = Field(default_factory=list)
+    lane_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator(
         "evidence_for_refs",
@@ -41,13 +41,25 @@ class LaneBudgetRecord(BaseModel):
     """Typed multi-cycle lane budget persisted on strategy truth."""
 
     lane_id: str = Field(..., min_length=1)
-    budget_window: str = Field(..., min_length=1)
+    budget_window: str = Field(default="next-cycle", min_length=1)
     target_share: float = Field(default=0.0, ge=0.0, le=1.0)
     min_share: float = Field(default=0.0, ge=0.0, le=1.0)
     max_share: float = Field(default=1.0, ge=0.0, le=1.0)
+    current_share: float | None = Field(default=None, ge=0.0, le=1.0)
     review_pressure: str = ""
     defer_reason: str | None = None
     force_include_reason: str | None = None
+    completed_cycles: int = Field(default=0, ge=0)
+    consumed_cycles: int = Field(default=0, ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_budget_shares(self) -> "LaneBudgetRecord":
+        if self.min_share > self.max_share:
+            raise ValueError("Lane budget min_share cannot exceed max_share")
+        if self.target_share < self.min_share or self.target_share > self.max_share:
+            raise ValueError("Lane budget target_share must stay within min_share and max_share")
+        return self
 
 
 class StrategyMemoryRecord(UpdatedRecord):

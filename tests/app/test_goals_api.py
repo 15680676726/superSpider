@@ -1328,6 +1328,26 @@ def test_compile_goal_injects_strategy_memory_context(tmp_path) -> None:
             evidence_requirements=["每次外部动作保留证据"],
             active_goal_titles=["Operate Acme account"],
             teammate_contracts=[],
+            strategic_uncertainties=[
+                {
+                    "uncertainty_id": "uncertainty:acme-launch-window",
+                    "statement": "Launch window confidence is still low.",
+                    "scope": "strategy",
+                    "impact_level": "high",
+                    "current_confidence": 0.4,
+                    "review_by_cycle": "next-cycle",
+                    "escalate_when": ["confidence-drop"],
+                }
+            ],
+            lane_budgets=[
+                {
+                    "lane_id": "lane-growth",
+                    "budget_window": "next-3-cycles",
+                    "target_share": 0.5,
+                    "min_share": 0.25,
+                    "max_share": 0.75,
+                }
+            ],
         ),
     )
 
@@ -1354,6 +1374,10 @@ def test_compile_goal_injects_strategy_memory_context(tmp_path) -> None:
     assert compiler_payload["strategy_id"] == "strategy:industry:industry-v1-acme:copaw-agent-runner"
     assert compiler_payload["strategy_items"]
     assert any("North star: 稳定交付并持续增长" in item for item in compiler_payload["strategy_items"])
+    assert compiler_payload["strategy_strategic_uncertainties"][0]["uncertainty_id"] == (
+        "uncertainty:acme-launch-window"
+    )
+    assert compiler_payload["strategy_lane_budgets"][0]["lane_id"] == "lane-growth"
 
 
 def test_goal_detail_exposes_strategy_memory_from_industry_instance(tmp_path) -> None:

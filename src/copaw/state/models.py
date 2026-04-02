@@ -80,10 +80,12 @@ from .models_prediction import (
     PredictionSignalRecord,
 )
 from .models_reporting import (
+    LaneBudgetRecord,
     MetricRecord,
     ReportEvidenceDigest,
     ReportRecord,
     ReportTaskDigest,
+    StrategicUncertaintyRecord,
     StrategyMemoryRecord,
 )
 from .models_work_context import WorkContextRecord, WorkContextStatus
@@ -129,6 +131,7 @@ __all__ = [
     "GovernanceControlRecord",
     "IndustryInstanceRecord",
     "KnowledgeChunkRecord",
+    "LaneBudgetRecord",
     "MediaAnalysisRecord",
     "MemoryEntityViewRecord",
     "MemoryFactIndexRecord",
@@ -166,6 +169,7 @@ __all__ = [
     "RuntimeFrameRecord",
     "ScheduleRecord",
     "ScheduleStatus",
+    "StrategicUncertaintyRecord",
     "StrategyMemoryRecord",
     "StrategyMemoryStatus",
     "StrategyScopeType",

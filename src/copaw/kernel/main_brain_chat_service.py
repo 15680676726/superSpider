@@ -580,8 +580,10 @@ def _format_cognitive_closure(
         for item in list(surface.get("replan_reasons") or [])[:3]
         if str(item).strip()
     ]
+    decision_kind = _first_non_empty(surface.get("decision_kind")) or "clear"
     lines = [
         f"- needs_replan={'yes' if surface.get('needs_replan') else 'no'}",
+        f"- decision_kind={decision_kind}",
         f"- unresolved conflicts={len(conflicts)}",
         f"- unresolved holes={len(holes)}",
     ]

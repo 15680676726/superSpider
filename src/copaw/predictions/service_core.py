@@ -375,6 +375,17 @@ class _PredictionServiceCoreMixin:
     ) -> dict[str, Any]:
         planning_context = _mapping_dict(formal_planning_context)
         planning_metadata = _mapping_dict(planning_context.get("metadata"))
+        strategy_constraints = _mapping_dict(planning_context.get("strategy_constraints"))
+        cycle_decision = _mapping_dict(planning_context.get("cycle_decision"))
+        if not cycle_decision:
+            cycle_decision = {
+                "summary": _string(planning_context.get("summary")),
+                "planning_policy": _string_list(planning_context.get("planning_policy"))[:8],
+                "selected_lane_ids": _string_list(planning_context.get("selected_lane_ids"))[:8],
+                "selected_backlog_item_ids": _string_list(
+                    planning_context.get("selected_backlog_item_ids"),
+                )[:12],
+            }
         overlap_with_formal_review = bool(planning_context) or bool(report_synthesis)
         review_ref = _string(planning_context.get("review_ref")) or (
             f"prediction-cycle-review:{industry_instance_id}:{cycle_id or meeting_window}:{review_date_local}"
@@ -385,11 +396,94 @@ class _PredictionServiceCoreMixin:
         open_backlog_count = _int_value(planning_metadata.get("open_backlog_count"))
         if open_backlog_count is None:
             open_backlog_count = len(_string_list(open_backlog_ids))
-        strategy_constraints = _mapping_dict(planning_context.get("strategy_constraints"))
-        cycle_decision = _mapping_dict(planning_context.get("cycle_decision"))
-        replan = ReportReplanEngine().compile(report_synthesis)
+        compiled_replan = ReportReplanEngine().compile(report_synthesis)
         synthesis_payload = _mapping_dict(report_synthesis)
         raw_replan = _mapping_dict(synthesis_payload.get("replan_decision"))
+        persisted_replan = _mapping_dict(planning_context.get("report_replan"))
+        trigger_context = {
+            **_mapping_dict(raw_replan.get("trigger_context")),
+            **_mapping_dict(persisted_replan.get("trigger_context")),
+        }
+        trigger_families = (
+            _string_list(
+                trigger_context.get("trigger_families"),
+                persisted_replan.get("trigger_families"),
+            )[:8]
+            or _string_list(compiled_replan.trigger_families)[:8]
+        )
+        trigger_rule_ids = (
+            _string_list(
+                trigger_context.get("trigger_rule_ids"),
+                persisted_replan.get("trigger_rule_ids"),
+            )[:8]
+            or _string_list(compiled_replan.trigger_rule_ids)[:8]
+        )
+        affected_lane_ids = (
+            _string_list(
+                trigger_context.get("affected_lane_ids"),
+                persisted_replan.get("affected_lane_ids"),
+            )[:8]
+            or _string_list(compiled_replan.affected_lane_ids)[:8]
+        )
+        affected_uncertainty_ids = (
+            _string_list(
+                trigger_context.get("affected_uncertainty_ids"),
+                trigger_context.get("strategic_uncertainty_ids"),
+                persisted_replan.get("affected_uncertainty_ids"),
+            )[:8]
+            or _string_list(compiled_replan.affected_uncertainty_ids)[:8]
+        )
+        if trigger_families:
+            trigger_context["trigger_families"] = trigger_families
+        if trigger_rule_ids:
+            trigger_context["trigger_rule_ids"] = trigger_rule_ids
+        if affected_lane_ids:
+            trigger_context["affected_lane_ids"] = affected_lane_ids
+        if affected_uncertainty_ids:
+            trigger_context["affected_uncertainty_ids"] = affected_uncertainty_ids
+            trigger_context["strategic_uncertainty_ids"] = affected_uncertainty_ids
+        replan_status = _string(persisted_replan.get("status")) or compiled_replan.status
+        replan_decision_kind = (
+            _string(persisted_replan.get("decision_kind"))
+            or _string(raw_replan.get("decision_kind"))
+            or compiled_replan.decision_kind
+        )
+        replan_decision_id = (
+            _string(persisted_replan.get("decision_id"))
+            or _string(raw_replan.get("decision_id"))
+            or compiled_replan.decision_id
+        )
+        replan_summary = (
+            _string(persisted_replan.get("summary"))
+            or _string(raw_replan.get("summary"))
+            or compiled_replan.summary
+        )
+        replan_reason_ids = _string_list(
+            persisted_replan.get("reason_ids"),
+            compiled_replan.reason_ids,
+        )[:8]
+        replan_source_report_ids = _string_list(
+            persisted_replan.get("source_report_ids"),
+            compiled_replan.source_report_ids,
+        )[:8]
+        replan_topic_keys = _string_list(
+            persisted_replan.get("topic_keys"),
+            compiled_replan.topic_keys,
+        )[:8]
+        replan_directives = _mapping_list(
+            persisted_replan.get("directives") or synthesis_payload.get("replan_directives"),
+        )[:8] or _mapping_list(compiled_replan.directives)[:8]
+        replan_recommended_actions = _mapping_list(
+            persisted_replan.get("recommended_actions") or synthesis_payload.get("recommended_actions"),
+        )[:8] or _mapping_list(compiled_replan.recommended_actions)[:8]
+        replan_activation = _mapping_dict(synthesis_payload.get("activation")) or dict(
+            compiled_replan.activation
+        )
+        if _mapping_dict(persisted_replan.get("activation")):
+            replan_activation = {
+                **replan_activation,
+                **_mapping_dict(persisted_replan.get("activation")),
+            }
         return {
             "is_truth_store": False,
             "overlap_with_formal_review": overlap_with_formal_review,
@@ -416,22 +510,24 @@ class _PredictionServiceCoreMixin:
             "pending_report_count": pending_report_count,
             "open_backlog_count": open_backlog_count,
             "replan": {
-                "status": replan.status,
-                "decision_id": replan.decision_id,
-                "summary": replan.summary,
-                "reason_ids": list(replan.reason_ids[:8]),
-                "source_report_ids": list(replan.source_report_ids[:8]),
-                "topic_keys": list(replan.topic_keys[:8]),
-                "decision_kind": _string(raw_replan.get("decision_kind")),
-                "trigger_context": _mapping_dict(raw_replan.get("trigger_context")),
-                "directives": _mapping_list(synthesis_payload.get("replan_directives"))[:8],
-                "recommended_actions": _mapping_list(
-                    synthesis_payload.get("recommended_actions"),
-                )[:8],
-                "activation": _mapping_dict(synthesis_payload.get("activation")),
-                "directive_count": len(replan.directives),
-                "recommended_action_count": len(replan.recommended_actions),
-                "activation_keys": sorted(replan.activation.keys())[:8],
+                "status": replan_status,
+                "decision_kind": replan_decision_kind,
+                "decision_id": replan_decision_id,
+                "summary": replan_summary,
+                "reason_ids": replan_reason_ids,
+                "source_report_ids": replan_source_report_ids,
+                "topic_keys": replan_topic_keys,
+                "trigger_families": trigger_families,
+                "trigger_rule_ids": trigger_rule_ids,
+                "affected_lane_ids": affected_lane_ids,
+                "affected_uncertainty_ids": affected_uncertainty_ids,
+                "trigger_context": trigger_context,
+                "directives": replan_directives,
+                "recommended_actions": replan_recommended_actions,
+                "activation": replan_activation,
+                "directive_count": len(replan_directives),
+                "recommended_action_count": len(replan_recommended_actions),
+                "activation_keys": sorted(replan_activation.keys())[:8],
             },
         }
 

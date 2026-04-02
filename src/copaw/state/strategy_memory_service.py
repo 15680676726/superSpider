@@ -420,8 +420,8 @@ class StateStrategyMemoryService:
             )
         )
         existing = self._repository.get_strategy(strategy_id)
-        compacted = record.model_copy(
-            update={
+        compacted = StrategyMemoryRecord.model_validate(
+            {
                 **compact_strategy_payload(record.model_dump(mode="python")),
                 "strategy_id": strategy_id,
                 "scope_type": _normalize_scope_type(record.scope_type),

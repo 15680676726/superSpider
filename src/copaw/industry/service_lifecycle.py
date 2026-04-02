@@ -2958,6 +2958,7 @@ class _IndustryLifecycleMixin:
         cycle_decision: CyclePlanningDecision,
         meeting_window: str,
         strategy_constraints_sidecar: Mapping[str, Any] | None = None,
+        report_replan_sidecar: Mapping[str, Any] | None = None,
     ) -> dict[str, object]:
         metadata = dict(cycle_decision.metadata or {})
         review_anchor = cycle_decision.selected_backlog_item_ids or [
@@ -2980,6 +2981,7 @@ class _IndustryLifecycleMixin:
             "planning_policy": list(cycle_decision.planning_policy or []),
             "strategy_constraints": dict(strategy_constraints_sidecar or {}),
             "cycle_decision": self._planner_sidecar_payload(cycle_decision),
+            "report_replan": dict(report_replan_sidecar or {}),
             "selected_lane_ids": list(cycle_decision.selected_lane_ids or []),
             "selected_backlog_item_ids": list(
                 cycle_decision.selected_backlog_item_ids or []
@@ -3033,14 +3035,20 @@ class _IndustryLifecycleMixin:
                 force=force,
                 strategy_constraints=strategy_constraints,
             )
+            strategy_constraints_payload = self._strategy_constraints_sidecar_payload(
+                record=record,
+                strategy_constraints=strategy_constraints,
+            )
+            report_replan_payload = self._report_replan_sidecar_payload(
+                synthesis=report_synthesis,
+                strategy_constraints_payload=strategy_constraints_payload,
+            )
             formal_planning_context = self._build_prediction_formal_planning_context(
                 record=record,
                 cycle_decision=cycle_decision,
                 meeting_window=meeting_window,
-                strategy_constraints_sidecar=self._strategy_constraints_sidecar_payload(
-                    record=record,
-                    strategy_constraints=strategy_constraints,
-                ),
+                strategy_constraints_sidecar=strategy_constraints_payload,
+                report_replan_sidecar=report_replan_payload,
             )
         goal_statuses: dict[str, str] = {}
         for goal_id in list(record.goal_ids or []):
@@ -3573,6 +3581,7 @@ class _IndustryLifecycleMixin:
                 open_backlog=open_backlog,
                 pending_reports=pending_reports,
                 force=force,
+                force_scoped_backlog=bool(scoped_backlog_ids),
                 strategy_constraints=strategy_constraints,
             )
             reason = cycle_decision.reason

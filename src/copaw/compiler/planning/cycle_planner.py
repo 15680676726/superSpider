@@ -99,6 +99,7 @@ class CyclePlanningCompiler:
         open_backlog: Sequence[BacklogItemRecord],
         pending_reports: Sequence[AgentReportRecord],
         force: bool,
+        force_scoped_backlog: bool = False,
         strategy_constraints: PlanningStrategyConstraints | None = None,
     ) -> CyclePlanningDecision:
         constraints = strategy_constraints or PlanningStrategyConstraints()
@@ -148,6 +149,7 @@ class CyclePlanningCompiler:
                     constraints=constraints,
                     lane_budget_outcomes=lane_budget_outcomes,
                     lane_budget_mode="force-override" if lane_budgets else None,
+                    force_scoped_backlog=force_scoped_backlog,
                 ),
             )
 
@@ -166,6 +168,7 @@ class CyclePlanningCompiler:
                     constraints=constraints,
                     lane_budget_outcomes=lane_budget_outcomes,
                     lane_budget_mode="constrained" if lane_budgets else None,
+                    force_scoped_backlog=force_scoped_backlog,
                 ),
             )
 
@@ -203,6 +206,7 @@ class CyclePlanningCompiler:
                 constraints=constraints,
                 lane_budget_outcomes=lane_budget_outcomes,
                 lane_budget_mode="constrained" if lane_budgets else None,
+                force_scoped_backlog=force_scoped_backlog,
             ),
         )
 
@@ -238,6 +242,7 @@ class CyclePlanningCompiler:
         constraints: PlanningStrategyConstraints,
         lane_budget_outcomes: dict[str, dict[str, object]],
         lane_budget_mode: str | None,
+        force_scoped_backlog: bool,
     ) -> dict[str, object]:
         metadata: dict[str, object] = {
             "industry_instance_id": record.instance_id,
@@ -246,6 +251,7 @@ class CyclePlanningCompiler:
             "paused_lane_ids": list(constraints.paused_lane_ids or []),
             "graph_focus_entities": list(constraints.graph_focus_entities or []),
             "graph_focus_opinions": list(constraints.graph_focus_opinions or []),
+            "force_scoped_backlog": force_scoped_backlog,
         }
         if lane_budget_mode is not None:
             metadata["lane_budget_mode"] = lane_budget_mode
@@ -286,7 +292,7 @@ class CyclePlanningCompiler:
             if lane_id is None:
                 continue
             budget_window = _read_field(entry, "budget_window")
-            current_share = self._budget_current_share(budget_window)
+            current_share = self._budget_current_share(entry)
             target_share = max(_number(_read_field(entry, "target_share")), 0.0)
             min_share = max(_number(_read_field(entry, "min_share")), 0.0)
             max_share = max(_number(_read_field(entry, "max_share")), 0.0)
@@ -309,15 +315,27 @@ class CyclePlanningCompiler:
     def _budget_current_share(self, budget_window: object | None) -> float:
         if isinstance(budget_window, (int, float)):
             return float(budget_window)
-        current_share = _number(_read_field(budget_window or {}, "current_share"))
-        if current_share > 0.0:
-            return current_share
+        raw_current_share = _read_field(budget_window or {}, "current_share")
+        if raw_current_share is not None:
+            return _number(raw_current_share)
+        nested_budget_window = _read_field(budget_window or {}, "budget_window")
+        if nested_budget_window is not None and nested_budget_window is not budget_window:
+            nested_current_share = self._budget_current_share(nested_budget_window)
+            if nested_current_share > 0.0:
+                return nested_current_share
         completed_cycles = int(_number(_read_field(budget_window or {}, "completed_cycles")))
         allocated_cycles = int(
             _number(_read_field(budget_window or {}, "allocated_cycles"))
             or _number(_read_field(budget_window or {}, "selected_cycles"))
             or _number(_read_field(budget_window or {}, "consumed_cycles"))
         )
+        if completed_cycles <= 0 and nested_budget_window is not None and nested_budget_window is not budget_window:
+            completed_cycles = int(_number(_read_field(nested_budget_window or {}, "completed_cycles")))
+            allocated_cycles = int(
+                _number(_read_field(nested_budget_window or {}, "allocated_cycles"))
+                or _number(_read_field(nested_budget_window or {}, "selected_cycles"))
+                or _number(_read_field(nested_budget_window or {}, "consumed_cycles"))
+            )
         if completed_cycles > 0 and allocated_cycles >= 0:
             return allocated_cycles / completed_cycles
         return 0.0
