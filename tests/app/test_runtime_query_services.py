@@ -16,7 +16,13 @@ from copaw.app.runtime_center import (
     RuntimeCenterEvidenceQueryService,
     RuntimeCenterStateQueryService,
 )
+from copaw.app.runtime_center.task_list_projection import RuntimeCenterTaskListProjector
+from copaw.app.runtime_center.work_context_projection import (
+    RuntimeCenterWorkContextProjector,
+)
 from copaw.evidence import EvidenceLedger, EvidenceRecord
+from copaw.kernel.models import KernelTask
+from copaw.kernel.persistence import KernelTaskStore
 from copaw.state import (
     DecisionRequestRecord,
     HumanAssistTaskRecord,
@@ -938,6 +944,386 @@ def test_runtime_query_services_prefer_canonical_top_level_host_twin_summary(
     )
     assert review_payload["continuity"]["handoff"]["state"] is None
     assert not any("Handoff:" in line for line in review_payload["summary_lines"])
+
+
+def test_runtime_query_services_list_kernel_tasks_from_state_with_phase_filter(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    schedule_repository = SqliteScheduleRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+
+    kernel_task_store = KernelTaskStore(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+    )
+
+    kernel_task_store.upsert(
+        KernelTask(
+            id="ktask-executing",
+            trace_id="trace:ktask-executing",
+            title="Sync storefront inventory",
+            capability_ref="browser_use",
+            environment_ref="env:browser:jd",
+            owner_agent_id="ops-agent",
+            actor_owner_id="actor:ops-agent",
+            phase="executing",
+            risk_level="guarded",
+            task_segment={"kind": "inventory-sync"},
+            resume_point={"checkpoint": "inventory:page-3"},
+            payload={"step": "sync-inventory", "attempt": 2},
+            created_at=datetime(2026, 4, 1, 8, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 4, 1, 9, 0, tzinfo=timezone.utc),
+        ),
+    )
+    kernel_task_store.upsert(
+        KernelTask(
+            id="ktask-waiting-confirm",
+            trace_id="trace:ktask-waiting-confirm",
+            title="Approve payout release",
+            capability_ref="tool:confirm_transfer",
+            environment_ref="env:finance:payments",
+            owner_agent_id="finance-agent",
+            phase="waiting-confirm",
+            risk_level="confirm",
+            payload={"decision_type": "query-tool-confirmation"},
+            created_at=datetime(2026, 4, 1, 7, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 4, 1, 8, 30, tzinfo=timezone.utc),
+        ),
+    )
+    task_repository.upsert_task(
+        TaskRecord(
+            id="non-kernel-task",
+            title="Non-kernel task",
+            summary="Should not leak into the kernel list.",
+            task_type="text",
+            status="running",
+            owner_agent_id="ops-agent",
+            created_at=datetime(2026, 4, 1, 10, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 4, 1, 10, 0, tzinfo=timezone.utc),
+        ),
+    )
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        schedule_repository=schedule_repository,
+        decision_request_repository=decision_request_repository,
+    )
+
+    tasks = state_query.list_kernel_tasks()
+
+    assert [task["id"] for task in tasks] == [
+        "ktask-executing",
+        "ktask-waiting-confirm",
+    ]
+    assert tasks[0] == {
+        "id": "ktask-executing",
+        "trace_id": "trace:ktask-executing",
+        "goal_id": None,
+        "parent_task_id": None,
+        "work_context_id": None,
+        "title": "Sync storefront inventory",
+        "capability_ref": "browser_use",
+        "environment_ref": "env:browser:jd",
+        "owner_agent_id": "ops-agent",
+        "actor_owner_id": "actor:ops-agent",
+        "phase": "executing",
+        "risk_level": "guarded",
+        "task_segment": {"kind": "inventory-sync"},
+        "resume_point": {"checkpoint": "inventory:page-3"},
+        "payload": {"step": "sync-inventory", "attempt": 2},
+        "created_at": "2026-04-01T08:00:00Z",
+        "updated_at": "2026-04-01T09:00:00Z",
+    }
+    assert tasks[1]["phase"] == "waiting-confirm"
+    assert tasks[1]["environment_ref"] == "env:finance:payments"
+    assert tasks[1]["payload"] == {"decision_type": "query-tool-confirmation"}
+
+    waiting_confirm = state_query.list_kernel_tasks(phase="waiting-confirm")
+    assert [task["id"] for task in waiting_confirm] == ["ktask-waiting-confirm"]
+
+
+def test_runtime_task_list_projector_projects_stable_task_list_fields(tmp_path) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    work_context_repository = SqliteWorkContextRepository(state_store)
+
+    task_timestamp = datetime(2026, 4, 2, 9, 0, tzinfo=timezone.utc)
+    runtime_timestamp = datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc)
+    work_context_repository.upsert_context(
+        WorkContextRecord(
+            id="ctx-projector",
+            title="Projector context",
+            summary="Stable task list projection context.",
+            context_type="control-thread",
+            status="active",
+            context_key="control-thread:projector",
+            owner_scope="projector-scope",
+        ),
+    )
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-projector-parent",
+            title="Project stable list payload",
+            summary="Task summary from task record.",
+            task_type="system:dispatch_query",
+            status="running",
+            owner_agent_id="task-owner",
+            work_context_id="ctx-projector",
+            acceptance_criteria=json.dumps(
+                {
+                    "kind": "kernel-task-meta-v1",
+                    "trace_id": "trace:projector-parent",
+                },
+            ),
+            created_at=task_timestamp,
+            updated_at=task_timestamp,
+        ),
+    )
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-projector-child",
+            title="Projector child",
+            summary="Child task",
+            task_type="system:dispatch_query",
+            status="completed",
+            owner_agent_id="child-owner",
+            parent_task_id="task-projector-parent",
+            created_at=task_timestamp,
+            updated_at=task_timestamp,
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-projector-parent",
+            runtime_status="active",
+            current_phase="executing",
+            risk_level="guarded",
+            last_result_summary="Runtime summary wins.",
+            last_owner_agent_id="runtime-owner",
+            updated_at=runtime_timestamp,
+        ),
+    )
+
+    projector = RuntimeCenterTaskListProjector(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        work_context_loader=lambda work_context_id: (
+            None
+            if not work_context_id
+            else {
+                "id": "ctx-projector",
+                "title": "Projector context",
+                "context_type": "control-thread",
+                "status": "active",
+                "context_key": "control-thread:projector",
+            }
+        ),
+        task_route_builder=lambda task_id: f"/tasks/{task_id}",
+        activation_summary_builder=lambda *, task, runtime, kernel_metadata: {
+            "scope_id": getattr(task, "id"),
+            "activated_count": 1,
+            "trace_id": (kernel_metadata or {}).get("trace_id"),
+            "owner_agent_id": getattr(runtime, "last_owner_agent_id", None),
+        },
+    )
+
+    tasks = projector.list_tasks(limit=10)
+
+    assert len(tasks) == 2
+    assert tasks[0] == {
+        "id": "task-projector-parent",
+        "trace_id": "trace:projector-parent",
+        "title": "Project stable list payload",
+        "kind": "system:dispatch_query",
+        "status": "active",
+        "owner_agent_id": "runtime-owner",
+        "summary": "Runtime summary wins.",
+        "current_progress_summary": "Runtime summary wins.",
+        "updated_at": runtime_timestamp,
+        "parent_task_id": None,
+        "work_context_id": "ctx-projector",
+        "context_key": "control-thread:projector",
+        "work_context": {
+            "id": "ctx-projector",
+            "title": "Projector context",
+            "context_type": "control-thread",
+            "status": "active",
+            "context_key": "control-thread:projector",
+        },
+        "child_task_count": 1,
+        "route": "/tasks/task-projector-parent",
+        "activation": {
+            "scope_id": "task-projector-parent",
+            "activated_count": 1,
+            "trace_id": "trace:projector-parent",
+            "owner_agent_id": "runtime-owner",
+        },
+    }
+    assert tasks[1]["id"] == "task-projector-child"
+    assert tasks[1]["child_task_count"] == 0
+
+
+def test_runtime_work_context_projector_uses_runtime_owner_for_detail_rollups(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    work_context_repository = SqliteWorkContextRepository(state_store)
+
+    timestamp = datetime(2026, 4, 2, 11, 0, tzinfo=timezone.utc)
+    work_context_repository.upsert_context(
+        WorkContextRecord(
+            id="ctx-runtime-owner",
+            title="Runtime owner context",
+            summary="Ensure work-context detail follows runtime ownership.",
+            context_type="control-thread",
+            status="active",
+            context_key="control-thread:runtime-owner",
+            owner_scope="runtime-owner-scope",
+            primary_thread_id="thread:runtime-owner",
+        ),
+    )
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-runtime-owner",
+            title="Follow runtime owner",
+            summary="Task owner should not lag behind runtime owner.",
+            task_type="system:dispatch_query",
+            status="running",
+            owner_agent_id="task-owner",
+            work_context_id="ctx-runtime-owner",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-runtime-owner",
+            runtime_status="active",
+            current_phase="executing",
+            risk_level="guarded",
+            last_result_summary="Runtime owner has taken over the task.",
+            last_owner_agent_id="runtime-owner",
+            updated_at=timestamp,
+        ),
+    )
+
+    requested_agent_ids: list[set[str]] = []
+    projector = RuntimeCenterWorkContextProjector(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        work_context_repository=work_context_repository,
+        related_agents_loader=lambda agent_ids: (
+            requested_agent_ids.append(set(agent_ids)) or [
+                {
+                    "agent_id": "runtime-owner",
+                    "name": "Runtime Owner",
+                    "status": "active",
+                },
+            ]
+        ),
+    )
+
+    detail = projector.get_work_context_detail("ctx-runtime-owner")
+
+    assert detail is not None
+    assert requested_agent_ids == [{"runtime-owner"}]
+    assert detail["agents"] == [
+        {
+            "agent_id": "runtime-owner",
+            "name": "Runtime Owner",
+            "status": "active",
+        },
+    ]
+    assert detail["tasks"][0]["owner_agent_id"] == "runtime-owner"
+    assert detail["tasks"][0]["owner_agent_name"] == "Runtime Owner"
+    assert detail["stats"]["owner_agent_count"] == 1
+
+
+def test_runtime_work_context_projector_counts_real_contexts(tmp_path) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    work_context_repository = SqliteWorkContextRepository(state_store)
+
+    work_context_repository.upsert_context(
+        WorkContextRecord(
+            id="ctx-count-1",
+            title="Count context one",
+            summary="First context",
+            context_type="control-thread",
+            status="active",
+            context_key="control-thread:count-1",
+            owner_scope="count-scope",
+        ),
+    )
+    work_context_repository.upsert_context(
+        WorkContextRecord(
+            id="ctx-count-2",
+            title="Count context two",
+            summary="Second context",
+            context_type="control-thread",
+            status="active",
+            context_key="control-thread:count-2",
+            owner_scope="count-scope",
+        ),
+    )
+
+    projector = RuntimeCenterWorkContextProjector(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        work_context_repository=work_context_repository,
+        related_agents_loader=lambda agent_ids: [],
+    )
+
+    assert projector.count_work_contexts() == 2
+    contexts = projector.list_work_contexts(limit=10)
+    assert {item["id"] for item in contexts} == {"ctx-count-1", "ctx-count-2"}
+
+
+def test_runtime_query_service_counts_work_contexts_from_projector_backed_state(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    work_context_repository = SqliteWorkContextRepository(state_store)
+    work_context_repository.upsert_context(
+        WorkContextRecord(
+            id="ctx-state-query-1",
+            title="State query one",
+            summary="First context for state query count.",
+            context_type="control-thread",
+            status="active",
+            context_key="control-thread:state-query-1",
+            owner_scope="state-query-scope",
+        ),
+    )
+    work_context_repository.upsert_context(
+        WorkContextRecord(
+            id="ctx-state-query-2",
+            title="State query two",
+            summary="Second context for state query count.",
+            context_type="control-thread",
+            status="active",
+            context_key="control-thread:state-query-2",
+            owner_scope="state-query-scope",
+        ),
+    )
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=SqliteTaskRepository(state_store),
+        task_runtime_repository=SqliteTaskRuntimeRepository(state_store),
+        schedule_repository=SqliteScheduleRepository(state_store),
+        decision_request_repository=SqliteDecisionRequestRepository(state_store),
+        work_context_repository=work_context_repository,
+    )
+
+    assert state_query.count_work_contexts() == 2
 
 
 def test_runtime_query_services_expose_human_assist_task_surfaces(tmp_path) -> None:

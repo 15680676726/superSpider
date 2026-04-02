@@ -396,3 +396,63 @@ package_version: 1.2.3
     assert mounts["mcp:filesystem"].package_ref == "@scope/filesystem"
     assert mounts["mcp:filesystem"].package_kind == "npm"
     assert mounts["mcp:filesystem"].package_version == "1.0.0"
+
+
+def test_capability_catalog_canonicalizes_skill_filesystem_package_identity(tmp_path) -> None:
+    skill_dir = tmp_path / "skills" / "research"
+    skill_dir.mkdir(parents=True)
+    canonical_ref = str(skill_dir.resolve())
+    non_canonical_ref = str(skill_dir.parent / "nested" / ".." / "research")
+    skill_service = SimpleNamespace(
+        list_all_skills=lambda: [
+            SimpleNamespace(
+                name="research",
+                content="---\nname: research\n---\n# Research\n",
+                source="customized",
+                path=canonical_ref,
+                references={},
+                scripts={},
+            ),
+        ],
+        list_available_skill_names=lambda: ["research"],
+        list_available_skills=lambda: [],
+        read_skill_package_binding=lambda _skill: {
+            "package_ref": canonical_ref,
+            "package_kind": "filesystem",
+            "package_version": "2026.04",
+        },
+        enable_skill=lambda _name: None,
+        disable_skill=lambda _name: None,
+        delete_skill=lambda _name: True,
+    )
+    facade = CapabilityCatalogFacade(
+        registry=_FakeRegistry(
+            [
+                CapabilityMount(
+                    id="skill:research",
+                    name="research",
+                    summary="Research",
+                    kind="skill-bundle",
+                    source_kind="skill",
+                    risk_level="guarded",
+                    enabled=True,
+                    package_ref=non_canonical_ref,
+                    package_kind=" Filesystem ",
+                    package_version=" 2026.04 ",
+                ),
+            ],
+        ),
+        load_config_fn=lambda: SimpleNamespace(mcp=SimpleNamespace(clients={})),
+        save_config_fn=lambda _config: None,
+        skill_service=skill_service,
+        override_repository=None,
+        agent_profile_service=None,
+        agent_profile_override_repository=None,
+    )
+
+    mount = facade.get_capability("skill:research")
+
+    assert mount is not None
+    assert mount.package_ref == canonical_ref
+    assert mount.package_kind == "filesystem"
+    assert mount.package_version == "2026.04"

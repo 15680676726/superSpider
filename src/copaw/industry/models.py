@@ -729,6 +729,17 @@ class IndustryDetailFocusSelection(BaseModel):
     route: str | None = None
 
 
+class IndustryMainBrainPlanningSurface(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    is_truth_store: bool = False
+    source: Literal["industry-runtime-read-model"] = "industry-runtime-read-model"
+    strategy_constraints: dict[str, Any] = Field(default_factory=dict)
+    latest_cycle_decision: dict[str, Any] = Field(default_factory=dict)
+    focused_assignment_plan: dict[str, Any] = Field(default_factory=dict)
+    replan: dict[str, Any] = Field(default_factory=dict)
+
+
 class IndustryInstanceDetail(IndustryInstanceSummary):
     goals: list[dict[str, Any]] = Field(default_factory=list)
     agents: list[dict[str, Any]] = Field(default_factory=list)
@@ -751,6 +762,7 @@ class IndustryInstanceDetail(IndustryInstanceSummary):
     onboarding_runs: list[dict[str, Any]] = Field(default_factory=list)
     execution: IndustryExecutionSummary | None = None
     main_chain: IndustryMainChainGraph | None = None
+    main_brain_planning: IndustryMainBrainPlanningSurface | None = None
     focus_selection: IndustryDetailFocusSelection | None = None
     reports: dict[str, IndustryReportSnapshot] = Field(default_factory=dict)
     media_analyses: list[MediaAnalysisSummary] = Field(default_factory=list)

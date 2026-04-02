@@ -282,6 +282,104 @@ class EnvironmentService:
             validate_token=validate_token,
         )
 
+    def ack_bridge_session_work(
+        self,
+        session_mount_id: str,
+        *,
+        lease_token: str,
+        work_id: str,
+        bridge_session_id: str | None = None,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+        workspace_trusted: bool | None = None,
+        elevated_auth_state: str | None = None,
+    ) -> SessionMount:
+        return self._lease_service.ack_bridge_session_work(
+            session_mount_id,
+            lease_token=lease_token,
+            work_id=work_id,
+            bridge_session_id=bridge_session_id,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+            workspace_trusted=workspace_trusted,
+            elevated_auth_state=elevated_auth_state,
+        )
+
+    def heartbeat_bridge_session_work(
+        self,
+        session_mount_id: str,
+        *,
+        lease_token: str,
+        work_id: str,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+    ) -> SessionMount:
+        return self._lease_service.heartbeat_bridge_session_work(
+            session_mount_id,
+            lease_token=lease_token,
+            work_id=work_id,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+        )
+
+    def reconnect_bridge_session_work(
+        self,
+        session_mount_id: str,
+        *,
+        lease_token: str,
+        work_id: str,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+    ) -> SessionMount:
+        return self._lease_service.reconnect_bridge_session_work(
+            session_mount_id,
+            lease_token=lease_token,
+            work_id=work_id,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+        )
+
+    def stop_bridge_session_work(
+        self,
+        session_mount_id: str,
+        *,
+        work_id: str,
+        force: bool = False,
+        lease_token: str | None = None,
+        reason: str | None = None,
+    ) -> SessionMount:
+        return self._lease_service.stop_bridge_session_work(
+            session_mount_id,
+            work_id=work_id,
+            force=force,
+            lease_token=lease_token,
+            reason=reason,
+        )
+
+    def archive_bridge_session(
+        self,
+        session_mount_id: str,
+        *,
+        lease_token: str | None = None,
+        reason: str | None = None,
+    ) -> SessionMount | None:
+        return self._lease_service.archive_bridge_session(
+            session_mount_id,
+            lease_token=lease_token,
+            reason=reason,
+        )
+
+    def deregister_bridge_environment(
+        self,
+        environment_id: str,
+        *,
+        reason: str | None = None,
+    ) -> EnvironmentMount | None:
+        return self._lease_service.deregister_bridge_environment(
+            environment_id,
+            reason=reason,
+        )
+
     def force_release_session_lease(
         self,
         session_mount_id: str,
@@ -329,6 +427,40 @@ class EnvironmentService:
             metadata=metadata,
         )
 
+    def acquire_shared_writer_lease(
+        self,
+        *,
+        writer_lock_scope: str,
+        owner: str,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> SessionMount:
+        return self._lease_service.acquire_shared_writer_lease(
+            writer_lock_scope=writer_lock_scope,
+            owner=owner,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+            metadata=metadata,
+        )
+
+    def heartbeat_shared_writer_lease(
+        self,
+        lease_id: str,
+        *,
+        lease_token: str,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> SessionMount:
+        return self._lease_service.heartbeat_shared_writer_lease(
+            lease_id,
+            lease_token=lease_token,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+            metadata=metadata,
+        )
+
     def release_resource_slot_lease(
         self,
         *,
@@ -339,6 +471,23 @@ class EnvironmentService:
         validate_token: bool = True,
     ) -> SessionMount | None:
         return self._lease_service.release_resource_slot_lease(
+            lease_id=lease_id,
+            lease_token=lease_token,
+            reason=reason,
+            release_status=release_status,
+            validate_token=validate_token,
+        )
+
+    def release_shared_writer_lease(
+        self,
+        *,
+        lease_id: str,
+        lease_token: str | None = None,
+        reason: str | None = None,
+        release_status: str = "released",
+        validate_token: bool = True,
+    ) -> SessionMount | None:
+        return self._lease_service.release_shared_writer_lease(
             lease_id=lease_id,
             lease_token=lease_token,
             reason=reason,
@@ -366,6 +515,22 @@ class EnvironmentService:
         return self._lease_service.get_resource_slot_lease(
             scope_type=scope_type,
             scope_value=scope_value,
+        )
+
+    def list_shared_writer_leases(
+        self,
+        *,
+        limit: int | None = None,
+    ) -> list[SessionMount]:
+        return self._lease_service.list_shared_writer_leases(limit=limit)
+
+    def get_shared_writer_lease(
+        self,
+        *,
+        writer_lock_scope: str,
+    ) -> SessionMount | None:
+        return self._lease_service.get_shared_writer_lease(
+            writer_lock_scope=writer_lock_scope,
         )
 
     def reap_expired_leases(
@@ -518,13 +683,22 @@ class EnvironmentService:
         limit: int = 20,
         allow_cross_process_recovery: bool = False,
     ) -> tuple[bool, str]:
-        _ = allow_cross_process_recovery
-        plan = self._host_event_recovery_service.plan_recovery(limit=limit)
+        plan = self._host_event_recovery_service.plan_recovery(
+            limit=limit,
+            allow_cross_process_recovery=allow_cross_process_recovery,
+        )
         planned = int(plan.get("planned") or 0)
         if planned > 0:
             return (True, "actionable-host-events")
         skipped = int(plan.get("skipped") or 0)
         if skipped > 0:
+            skipped_events = plan.get("skipped_events") or []
+            if any(
+                isinstance(item, dict)
+                and item.get("reason") == "cross-process-recovery-disabled"
+                for item in skipped_events
+            ):
+                return (False, "cross-process-recovery-disabled")
             return (False, "host-events-already-handled")
         return (False, "no-actionable-host-events")
 
@@ -534,9 +708,9 @@ class EnvironmentService:
         limit: int = 20,
         allow_cross_process_recovery: bool = False,
     ) -> dict[str, Any]:
-        _ = allow_cross_process_recovery
         return self._host_event_recovery_service.run_recovery_cycle(
             limit=limit,
+            allow_cross_process_recovery=allow_cross_process_recovery,
         )
 
     def register_browser_companion(self, **kwargs) -> dict[str, Any]:
@@ -684,6 +858,7 @@ class EnvironmentService:
         adapter_refs,
         app_identity: str | None = None,
         control_channel: str | None = None,
+        execution_guardrails: dict[str, object] | None = None,
         preferred_execution_path: str | None = None,
         ui_fallback_mode: str | None = None,
         adapter_gap_or_blocker: str | None = None,
@@ -694,6 +869,7 @@ class EnvironmentService:
             adapter_refs=adapter_refs,
             app_identity=app_identity,
             control_channel=control_channel,
+            execution_guardrails=execution_guardrails,
             preferred_execution_path=preferred_execution_path,
             ui_fallback_mode=ui_fallback_mode,
             adapter_gap_or_blocker=adapter_gap_or_blocker,
@@ -725,6 +901,9 @@ class EnvironmentService:
         session_mount_id: str,
         limit: int = 20,
     ) -> dict[str, Any]:
+        detail = self.get_session_detail(session_mount_id, limit=limit)
+        if detail is None:
+            raise LookupError(f"Session mount was not found: {session_mount_id}")
         projection = self._cooperative_projection_for_session(
             session_mount_id,
             limit=limit,
@@ -737,6 +916,9 @@ class EnvironmentService:
             "adapter_gap_or_blocker": projection.get("current_gap_or_blocker"),
             "windows_app_adapters": dict(
                 projection.get("windows_app_adapters") or {},
+            ),
+            "desktop_app_contract": dict(
+                detail.get("desktop_app_contract") or {},
             ),
         }
 

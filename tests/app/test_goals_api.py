@@ -831,6 +831,101 @@ def test_compile_persists_state_backed_compiler_context_metadata(tmp_path) -> No
     )
 
 
+def test_compile_goal_carries_assignment_local_planning_shell_as_sidecar(
+    tmp_path,
+) -> None:
+    app = _build_goal_app(tmp_path)
+    goal = _create_goal(
+        app,
+        title="Prepare assignment shell",
+        summary="Carry the assignment-local planning shell without replacing truth ids.",
+        status="active",
+        priority=2,
+    )
+    goal_id = goal.id
+
+    app.state.goal_override_repository.upsert_override(
+        GoalOverrideRecord(
+            goal_id=goal_id,
+            compiler_context={
+                "owner_agent_id": "ops-agent",
+                "assignment_id": "assignment-live-7",
+                "backlog_item_id": "backlog-live-3",
+                "lane_id": "lane-growth",
+                "cycle_id": "cycle-daily-1",
+                "report_back_mode": "detailed",
+                "plan_steps": [
+                    "Draft operator brief",
+                    "Verify evidence packet",
+                ],
+                "plan_acceptance_criteria": [
+                    "Operator brief ready for supervisor review.",
+                    "Evidence packet attached to the assignment handoff.",
+                ],
+                "assignment_metadata": {
+                    "private_notes": "should stay out of bounded sidecar plan",
+                },
+            },
+        ),
+    )
+
+    compiled_payload = _compile_goal(app, goal_id)
+    assert len(compiled_payload) == 1
+    payload = compiled_payload[0]["payload"]
+    compiler_meta = payload["compiler"]
+    task_seed = payload["task_seed"]
+
+    for node in (compiler_meta, task_seed):
+        envelope = node["assignment_plan_envelope"]
+        assert envelope["assignment_id"] == "assignment-live-7"
+        assert envelope["backlog_item_id"] == "backlog-live-3"
+        assert envelope["lane_id"] == "lane-growth"
+        assert envelope["cycle_id"] == "cycle-daily-1"
+        assert envelope["report_back_mode"] == "detailed"
+        assert node["assignment_sidecar_plan"]["checklist"] == [
+            "Draft operator brief",
+            "Verify evidence packet",
+        ]
+        assert "private_notes" not in node["assignment_sidecar_plan"]
+        assert any(
+            checkpoint["label"] == "Draft operator brief"
+            for checkpoint in node["assignment_plan_checkpoints"]
+        )
+        assert any(
+            checkpoint["kind"] == "verify"
+            or checkpoint["label"] == "Verify evidence packet"
+            for checkpoint in node["assignment_plan_checkpoints"]
+        )
+        assert (
+            "Operator brief ready for supervisor review."
+            in node["assignment_plan_acceptance_criteria"]
+        )
+        assert (
+            "Evidence packet attached to the assignment handoff."
+            in node["assignment_plan_acceptance_criteria"]
+        )
+
+    assert payload["request"]["assignment_id"] == "assignment-live-7"
+    assert payload["request_context"]["assignment_id"] == "assignment-live-7"
+    assert payload["meta"]["goal_id"] == goal_id
+    assert compiler_meta["goal_id"] == goal_id
+    assert (
+        compiler_meta["assignment_plan_envelope"]["assignment_id"]
+        == payload["request_context"]["assignment_id"]
+    )
+
+    [persisted_task] = app.state.task_repository.list_tasks(goal_id=goal_id)
+    metadata = decode_kernel_task_metadata(persisted_task.acceptance_criteria)
+    assert metadata is not None
+    assert metadata["payload"]["compiler"]["assignment_plan_envelope"] == (
+        compiler_meta["assignment_plan_envelope"]
+    )
+    assert metadata["payload"]["task_seed"]["assignment_sidecar_plan"] == (
+        task_seed["assignment_sidecar_plan"]
+    )
+    assert metadata["goal_id"] == goal_id
+
+
 def test_compile_goal_feeds_learning_patch_and_growth_back_into_compiler_context(
     tmp_path,
 ) -> None:

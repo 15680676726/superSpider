@@ -10,6 +10,45 @@
 
 ---
 
+## Boundary Clarification
+
+Completing `P1/P2` hardening does **not** by itself make CoPaw a complete short/mid/long-horizon planner.
+
+This plan is for:
+
+- stronger execution-shell discipline
+- cleaner assignment-local planning shells
+- long-task context control
+- worker/subagent/MCP cleanup consistency
+
+This plan is **not** for:
+
+- replacing CoPaw's formal planning truth
+- replacing `StrategyMemory -> OperatingLane -> BacklogItem -> OperatingCycle -> Assignment -> AgentReport`
+- turning Claude-style session planning into CoPaw's strategic center
+
+The correct rule remains:
+
+- borrow Claude's planning shell
+- keep CoPaw's planning truth
+
+## Additional Extraction Priorities From Real Claude-Code Flow
+
+These items should be treated as explicit `P1/P2+` priorities rather than implicit side-effects:
+
+1. context entropy control:
+   - elevate tool-result budget, compaction discipline, and turn-summary carry-forward as runtime-hardening work for `query_execution_runtime` and sidecar compaction boundaries
+2. read-only concurrency vs writer serialization:
+   - make read-parallel / write-serialized execution an explicit contract for file/browser/desktop/document work
+3. hook-first runtime discipline:
+   - continue concentrating permission/evidence/failure handling in before/after/failure hook surfaces rather than service-local branch drift
+4. agent-additive MCP/runtime shell:
+   - harden worker/delegation child-run startup, additive mounts, and finish-time cleanup
+5. skill provenance and path-scoped activation:
+   - formalize source provenance, validation, and path-conditional activation in capability metadata instead of informal skill loading
+
+These priorities stay below CoPaw's upper truth layer and should not create a second orchestration center.
+
 ## Scope Guard
 
 This plan covers only:
@@ -44,6 +83,7 @@ This plan does **not** cover:
 - truth-first memory redesign
 - mandatory `task_state_machine.py`
 - mandatory `turn_loop.py`
+- replacing CoPaw's formal planner with Claude-style session planning
 
 ## File Map
 
@@ -248,3 +288,12 @@ This plan does **not** cover:
 - [ ] **Step 2: Run focused full regression for `P1/P2` scope**
 - [ ] **Step 3: Run build/contract checks if frontend surfaces changed indirectly**
 - [ ] **Step 4: Commit**
+
+## Cross-Cutting Clarifications
+
+During `P1/P2` execution, the following interpretations are required:
+
+1. any Claude-derived planning shell work must stay sidecar to `Assignment` or execution-local planning, not become new strategic truth
+2. any context-control work should be evaluated partly by whether long tasks stay clean enough to complete without runaway prompt entropy
+3. any execution concurrency work should default to read-parallel / writer-serialized until a surface proves stronger safety guarantees
+4. any skill/package hardening work should include provenance and path-scope, not just more metadata fields

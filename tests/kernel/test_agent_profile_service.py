@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 from copaw.kernel.agent_profile_service import AgentProfileService
+from copaw.kernel import KernelTask, KernelTaskStore
 from copaw.state import (
     AgentCheckpointRecord,
     AgentMailboxRecord,
+    DecisionRequestRecord,
     AgentProfileOverrideRecord,
     AgentRuntimeRecord,
     TaskRecord,
@@ -13,6 +15,7 @@ from copaw.state.repositories import (
     SqliteAgentMailboxRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteAgentRuntimeRepository,
+    SqliteDecisionRequestRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
 )
@@ -156,6 +159,9 @@ def test_agent_profile_service_projects_runtime_only_actor(tmp_path) -> None:
 def test_agent_profile_service_capability_surface_for_runtime_only_actor(tmp_path) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
     runtime_repo = SqliteAgentRuntimeRepository(store)
+    task_repo = SqliteTaskRepository(store)
+    task_runtime_repo = SqliteTaskRuntimeRepository(store)
+    decision_repo = SqliteDecisionRequestRepository(store)
     runtime_repo.upsert_runtime(
         AgentRuntimeRecord(
             agent_id="agent-1",
@@ -171,13 +177,51 @@ def test_agent_profile_service_capability_surface_for_runtime_only_actor(tmp_pat
         ),
     )
 
-    service = AgentProfileService(agent_runtime_repository=runtime_repo)
+    task_store = KernelTaskStore(
+        task_repository=task_repo,
+        task_runtime_repository=task_runtime_repo,
+        decision_request_repository=decision_repo,
+    )
+    task = KernelTask(
+        id="task-capability-review-1",
+        title="Govern operator capability surface",
+        capability_ref="system:apply_role",
+        owner_agent_id="copaw-governance",
+        risk_level="confirm",
+        phase="waiting-confirm",
+        payload={
+            "agent_id": "agent-1",
+            "capabilities": ["system:dispatch_query"],
+            "actor": "runtime-center",
+        },
+    )
+    task_store.upsert(task)
+    decision_repo.upsert_decision_request(
+        DecisionRequestRecord(
+            id="decision-capability-review-1",
+            task_id=task.id,
+            decision_type="capability-governance",
+            risk_level="confirm",
+            summary="Review operator capability change",
+            status="open",
+        ),
+    )
+
+    service = AgentProfileService(
+        agent_runtime_repository=runtime_repo,
+        task_repository=task_repo,
+        task_runtime_repository=task_runtime_repo,
+        decision_request_repository=decision_repo,
+    )
     surface = service.get_capability_surface("agent-1")
 
     assert surface is not None
     assert surface["default_mode"] == "governed"
     assert "system:dispatch_query" in surface["baseline_capabilities"]
     assert "system:dispatch_query" in surface["effective_capabilities"]
+    assert surface["pending_decisions"][0]["actions"]["review"] == (
+        "/api/runtime-center/governed/decisions/decision-capability-review-1/review"
+    )
 
 
 def test_agent_profile_service_builds_prompt_capability_projection(tmp_path) -> None:

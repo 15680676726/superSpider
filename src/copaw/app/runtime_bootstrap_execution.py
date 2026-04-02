@@ -165,7 +165,6 @@ def build_runtime_execution_stack(
     setattr(actor_worker, "runtime_contract", dict(runtime_contract))
     setattr(actor_supervisor, "runtime_contract", dict(runtime_contract))
     governance_service.set_kernel_dispatcher(kernel_dispatcher)
-    state_query_service.set_kernel_dispatcher(kernel_dispatcher)
     return (
         learning_service,
         governance_service,

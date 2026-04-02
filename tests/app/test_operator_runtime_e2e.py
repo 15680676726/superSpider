@@ -138,7 +138,6 @@ def _build_operator_app(tmp_path) -> FastAPI:
         evidence_ledger=evidence_ledger,
         learning_service=learning_service,
         agent_profile_service=agent_profile_service,
-        kernel_dispatcher=dispatcher,
     )
     evidence_query_service = RuntimeCenterEvidenceQueryService(
         evidence_ledger=evidence_ledger,
@@ -334,7 +333,10 @@ def test_operator_runtime_e2e_covers_feedback_governance_and_runtime_center(
     assert decision_detail.status_code == 200
     assert decision_detail.json()["status"] == "open"
 
-    reviewing = client.post(f"/runtime-center/decisions/{decision_id}/review")
+    legacy_review = client.post(f"/runtime-center/decisions/{decision_id}/review")
+    assert legacy_review.status_code == 404
+
+    reviewing = client.post(f"/runtime-center/governed/decisions/{decision_id}/review")
     assert reviewing.status_code == 200
     assert reviewing.json()["status"] == "reviewing"
 
@@ -382,7 +384,7 @@ def test_operator_runtime_e2e_covers_rejection_visibility_in_runtime_center(
     decision_id = admitted_payload["decision_request_id"]
     task_id = admitted_payload["task_id"]
 
-    reviewing = client.post(f"/runtime-center/decisions/{decision_id}/review")
+    reviewing = client.post(f"/runtime-center/governed/decisions/{decision_id}/review")
     assert reviewing.status_code == 200
     assert reviewing.json()["status"] == "reviewing"
 

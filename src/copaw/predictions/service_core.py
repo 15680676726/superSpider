@@ -1,7 +1,30 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from ..compiler.planning import ReportReplanEngine
 from .service_shared import *  # noqa: F401,F403
+
+
+def _mapping_dict(value: object | None) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _int_value(value: object | None) -> int | None:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    text = _string(value)
+    if text is None:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
 
 
 class _PredictionServiceCoreMixin:
@@ -85,8 +108,14 @@ class _PredictionServiceCoreMixin:
             if str(item.recommendation.get("status") or "") == "waiting-confirm"
         )
         latest_review = reviews[0] if reviews else None
+        case_payload = case.model_dump(mode="json")
+        case_metadata = _safe_dict(case_payload.get("metadata"))
+        planning_snapshot = _mapping_dict(case_metadata.get("planning_snapshot"))
+        if planning_snapshot:
+            case_payload["planning"] = dict(planning_snapshot)
+        planning_replan = _mapping_dict(planning_snapshot.get("replan"))
         return PredictionCaseDetail(
-            case=case.model_dump(mode="json"),
+            case=case_payload,
             scenarios=[item.model_dump(mode="json") for item in scenarios],
             signals=[item.model_dump(mode="json") for item in signals],
             recommendations=recommendation_views,
@@ -98,6 +127,9 @@ class _PredictionServiceCoreMixin:
                 "review_count": len(reviews),
                 "pending_decision_count": pending_decisions,
                 "latest_review_outcome": latest_review.outcome if latest_review is not None else None,
+                "planning_overlap": bool(case_metadata.get("planning_overlap")),
+                "planning_review_ref": _string(planning_snapshot.get("review_ref")),
+                "planning_replan_status": _string(planning_replan.get("status")),
             },
             routes={
                 "self": _route_prediction(case_id),
@@ -189,6 +221,8 @@ class _PredictionServiceCoreMixin:
         participant_inputs: list[dict[str, Any]] | None = None,
         assignment_summaries: list[dict[str, Any]] | None = None,
         lane_summaries: list[dict[str, Any]] | None = None,
+        formal_planning_context: Mapping[str, Any] | None = None,
+        report_synthesis: Mapping[str, Any] | None = None,
         force: bool = False,
     ) -> PredictionCaseDetail | None:
         normalized_instance_id = _string(industry_instance_id)
@@ -197,28 +231,53 @@ class _PredictionServiceCoreMixin:
             return None
         normalized_meeting_window = _string(meeting_window) or "cycle-review"
         local_review_date = datetime.now().astimezone().date().isoformat()
-        fingerprint_payload = {
-            "industry_instance_id": normalized_instance_id,
-            "cycle_id": _string(cycle_id),
-            "meeting_window": normalized_meeting_window,
-            "review_date_local": local_review_date,
-            "pending_report_ids": _string_list(pending_report_ids)[:12],
-            "open_backlog_ids": _string_list(open_backlog_ids)[:12],
-            "open_backlog_source_refs": _string_list(open_backlog_source_refs)[:12],
-            "assignment_ids": [
-                assignment_id
-                for assignment_id in (
-                    _string(item.get("assignment_id"))
-                    for item in list(participant_inputs or [])[:12]
-                    if isinstance(item, dict)
-                )
-                if assignment_id is not None
-            ],
-            "goal_statuses": {
-                str(goal_id): str(status)
-                for goal_id, status in sorted((goal_statuses or {}).items())
-            },
-        }
+        planning_snapshot = self._build_cycle_case_planning_snapshot(
+            industry_instance_id=normalized_instance_id,
+            cycle_id=_string(cycle_id),
+            meeting_window=normalized_meeting_window,
+            review_date_local=local_review_date,
+            pending_report_ids=pending_report_ids,
+            open_backlog_ids=open_backlog_ids,
+            participant_inputs=participant_inputs,
+            assignment_summaries=assignment_summaries,
+            lane_summaries=lane_summaries,
+            formal_planning_context=formal_planning_context,
+            report_synthesis=report_synthesis,
+        )
+        formal_review_ref = _string(planning_snapshot.get("review_ref"))
+        replan_snapshot = _mapping_dict(planning_snapshot.get("replan"))
+        if formal_review_ref is not None and bool(planning_snapshot.get("overlap_with_formal_review")):
+            fingerprint_payload = {
+                "industry_instance_id": normalized_instance_id,
+                "cycle_id": _string(cycle_id),
+                "planning_review_ref": formal_review_ref,
+                "planning_review_window": _string(planning_snapshot.get("review_window")),
+                "replan_decision_id": _string(replan_snapshot.get("decision_id")),
+                "replan_reason_ids": _string_list(replan_snapshot.get("reason_ids"))[:12],
+            }
+        else:
+            fingerprint_payload = {
+                "industry_instance_id": normalized_instance_id,
+                "cycle_id": _string(cycle_id),
+                "meeting_window": normalized_meeting_window,
+                "review_date_local": local_review_date,
+                "pending_report_ids": _string_list(pending_report_ids)[:12],
+                "open_backlog_ids": _string_list(open_backlog_ids)[:12],
+                "open_backlog_source_refs": _string_list(open_backlog_source_refs)[:12],
+                "assignment_ids": [
+                    assignment_id
+                    for assignment_id in (
+                        _string(item.get("assignment_id"))
+                        for item in list(participant_inputs or [])[:12]
+                        if isinstance(item, dict)
+                    )
+                    if assignment_id is not None
+                ],
+                "goal_statuses": {
+                    str(goal_id): str(status)
+                    for goal_id, status in sorted((goal_statuses or {}).items())
+                },
+            }
         fingerprint = _stable_prediction_fingerprint(fingerprint_payload)
         if not force:
             recent_cases = self._case_repository.list_cases(
@@ -229,7 +288,10 @@ class _PredictionServiceCoreMixin:
             for case in recent_cases:
                 metadata = _safe_dict(case.metadata)
                 if _string(metadata.get("cycle_fingerprint")) == fingerprint:
-                    return self.get_case_detail(case.case_id)
+                    return self._persist_cycle_case_planning_snapshot(
+                        case.case_id,
+                        planning_snapshot,
+                    )
         meeting_label = {
             "morning": "Morning Review",
             "evening": "Evening Review",
@@ -277,9 +339,101 @@ class _PredictionServiceCoreMixin:
                 "participant_inputs": list(participant_inputs or []),
                 "assignment_summaries": list(assignment_summaries or []),
                 "lane_summaries": list(lane_summaries or []),
+                "planning_overlap": bool(planning_snapshot.get("overlap_with_formal_review")),
+                "planning_snapshot": planning_snapshot,
             },
         )
-        return self.create_case(request, case_kind="cycle")
+        detail = self.create_case(request, case_kind="cycle")
+        case_id = _string(_safe_dict(detail.case).get("case_id"))
+        if case_id is None:
+            return detail
+        return self._persist_cycle_case_planning_snapshot(case_id, planning_snapshot)
+
+    def _build_cycle_case_planning_snapshot(
+        self,
+        *,
+        industry_instance_id: str,
+        cycle_id: str | None,
+        meeting_window: str,
+        review_date_local: str,
+        pending_report_ids: list[str] | None,
+        open_backlog_ids: list[str] | None,
+        participant_inputs: list[dict[str, Any]] | None,
+        assignment_summaries: list[dict[str, Any]] | None,
+        lane_summaries: list[dict[str, Any]] | None,
+        formal_planning_context: Mapping[str, Any] | None,
+        report_synthesis: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        planning_context = _mapping_dict(formal_planning_context)
+        planning_metadata = _mapping_dict(planning_context.get("metadata"))
+        overlap_with_formal_review = bool(planning_context) or bool(report_synthesis)
+        review_ref = _string(planning_context.get("review_ref")) or (
+            f"prediction-cycle-review:{industry_instance_id}:{cycle_id or meeting_window}:{review_date_local}"
+        )
+        pending_report_count = _int_value(planning_metadata.get("pending_report_count"))
+        if pending_report_count is None:
+            pending_report_count = len(_string_list(pending_report_ids))
+        open_backlog_count = _int_value(planning_metadata.get("open_backlog_count"))
+        if open_backlog_count is None:
+            open_backlog_count = len(_string_list(open_backlog_ids))
+        replan = ReportReplanEngine().compile(report_synthesis)
+        return {
+            "is_truth_store": False,
+            "overlap_with_formal_review": overlap_with_formal_review,
+            "source": (
+                "formal-cycle-review-overlap"
+                if overlap_with_formal_review
+                else "prediction-cycle-review"
+            ),
+            "review_ref": review_ref,
+            "review_window": _string(planning_context.get("review_window")) or meeting_window,
+            "cycle_id": cycle_id,
+            "meeting_window": meeting_window,
+            "summary": _string(planning_context.get("summary")),
+            "planning_policy": _string_list(planning_context.get("planning_policy"))[:8],
+            "selected_lane_ids": _string_list(planning_context.get("selected_lane_ids"))[:8],
+            "selected_backlog_item_ids": _string_list(
+                planning_context.get("selected_backlog_item_ids"),
+            )[:12],
+            "participant_count": len(list(participant_inputs or [])),
+            "assignment_count": len(list(assignment_summaries or [])),
+            "lane_count": len(list(lane_summaries or [])),
+            "pending_report_count": pending_report_count,
+            "open_backlog_count": open_backlog_count,
+            "replan": {
+                "status": replan.status,
+                "decision_id": replan.decision_id,
+                "summary": replan.summary,
+                "reason_ids": list(replan.reason_ids[:8]),
+                "source_report_ids": list(replan.source_report_ids[:8]),
+                "topic_keys": list(replan.topic_keys[:8]),
+                "directive_count": len(replan.directives),
+                "recommended_action_count": len(replan.recommended_actions),
+                "activation_keys": sorted(replan.activation.keys())[:8],
+            },
+        }
+
+    def _persist_cycle_case_planning_snapshot(
+        self,
+        case_id: str,
+        planning_snapshot: dict[str, Any],
+    ) -> PredictionCaseDetail:
+        case = self._case_repository.get_case(case_id)
+        if case is None:
+            raise KeyError(f"Prediction case '{case_id}' not found")
+        metadata = _safe_dict(case.metadata)
+        metadata["planning_overlap"] = bool(planning_snapshot.get("overlap_with_formal_review"))
+        metadata["planning_snapshot"] = dict(planning_snapshot)
+        input_payload = _safe_dict(case.input_payload)
+        input_payload["planning"] = dict(planning_snapshot)
+        updated = case.model_copy(
+            update={
+                "metadata": metadata,
+                "input_payload": input_payload,
+            },
+        )
+        self._case_repository.upsert_case(updated)
+        return self.get_case_detail(case_id)
 
     async def execute_recommendation(
         self,

@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..capabilities import CapabilityService
+from ..compiler import (
+    AssignmentPlanningCompiler,
+    CyclePlanningCompiler,
+    ReportReplanEngine,
+    StrategyPlanningCompiler,
+)
 from ..evidence import EvidenceLedger
 from ..environments import EnvironmentService
 from ..goals import GoalService
@@ -21,9 +27,6 @@ from ..kernel import (
     MainBrainOrchestrator,
     TaskDelegationService,
 )
-from ..kernel.main_brain_commit_service import MainBrainCommitService
-from ..kernel.main_brain_result_committer import MainBrainResultCommitter
-from ..kernel.main_brain_scope_snapshot_service import MainBrainScopeSnapshotService
 from ..learning import LearningService
 from ..learning.runtime_bindings import LearningRuntimeBindings
 from ..media import MediaService
@@ -80,6 +83,22 @@ class RuntimeDomainServices:
     main_brain_orchestrator: MainBrainOrchestrator
 
 
+def _build_goal_service(
+    *,
+    assignment_planner: AssignmentPlanningCompiler,
+    **kwargs: Any,
+) -> GoalService:
+    try:
+        return GoalService(
+            assignment_planner=assignment_planner,
+            **kwargs,
+        )
+    except TypeError as exc:
+        if "assignment_planner" not in str(exc):
+            raise
+        return GoalService(**kwargs)
+
+
 def build_runtime_domain_services(
     *,
     session_backend: Any,
@@ -108,7 +127,13 @@ def build_runtime_domain_services(
     actor_mailbox_service: ActorMailboxService,
     actor_supervisor: ActorSupervisor,
 ) -> RuntimeDomainServices:
-    goal_service = GoalService(
+    strategy_planning_compiler = StrategyPlanningCompiler()
+    cycle_planner = CyclePlanningCompiler()
+    assignment_planner = AssignmentPlanningCompiler()
+    report_replan_engine = ReportReplanEngine()
+
+    goal_service = _build_goal_service(
+        assignment_planner=assignment_planner,
         repository=repositories.goal_repository,
         override_repository=repositories.goal_override_repository,
         dispatcher=kernel_dispatcher,
@@ -218,6 +243,10 @@ def build_runtime_domain_services(
         operating_cycle_service=operating_cycle_service,
         assignment_service=assignment_service,
         agent_report_service=agent_report_service,
+        strategy_planning_compiler=strategy_planning_compiler,
+        cycle_planner=cycle_planner,
+        assignment_planner=assignment_planner,
+        report_replan_engine=report_replan_engine,
         state_store=state_store,
         memory_retain_service=memory_retain_service,
         memory_activation_service=memory_activation_service,
@@ -322,6 +351,7 @@ def build_runtime_domain_services(
         evidence_ledger=evidence_ledger,
         agent_profile_service=agent_profile_service,
         industry_service=industry_service,
+        environment_service=environment_service,
         actor_mailbox_service=actor_mailbox_service,
         actor_supervisor=actor_supervisor,
         runtime_event_bus=runtime_event_bus,
@@ -356,40 +386,12 @@ def build_runtime_domain_services(
         evidence_ledger=evidence_ledger,
         provider_manager=provider_manager,
     )
-    result_committer = MainBrainResultCommitter(industry_service=industry_service)
-    scope_snapshot_service = MainBrainScopeSnapshotService(
-        stable_prefix_builder=MainBrainChatService._build_stable_prompt_prefix,
-        stable_prefix_signature_builder=MainBrainChatService._build_prompt_context_signature,
-        scope_snapshot_builder=MainBrainChatService._build_scope_snapshot_body,
-        scope_snapshot_signature_builder=MainBrainChatService._build_scope_snapshot_signature,
-        scope_key_resolver=MainBrainChatService._resolve_scope_snapshot_key,
-    )
-    retain_dirty_marker_setter = getattr(
-        memory_retain_service,
-        "set_scope_snapshot_dirty_marker",
-        None,
-    )
-    if callable(retain_dirty_marker_setter):
-        retain_dirty_marker_setter(scope_snapshot_service.mark_dirty)
-    commit_service = MainBrainCommitService(
-        session_backend=session_backend,
-        action_handlers={
-            "writeback_operating_truth": result_committer.commit_action,
-            "create_backlog_item": result_committer.commit_action,
-            "orchestrate_execution": result_committer.commit_action,
-            "resume_execution": result_committer.commit_action,
-            "submit_human_assist": result_committer.commit_action,
-        },
-        dirty_marker=scope_snapshot_service.mark_dirty,
-    )
     main_brain_chat_service = MainBrainChatService(
         session_backend=session_backend,
         industry_service=industry_service,
         agent_profile_service=agent_profile_service,
         memory_recall_service=memory_recall_service,
         model_factory=provider_manager.get_active_chat_model,
-        scope_snapshot_service=scope_snapshot_service,
-        commit_service=commit_service,
     )
     main_brain_orchestrator = MainBrainOrchestrator(
         query_execution_service=query_execution_service,

@@ -8,13 +8,14 @@ def build_decision_actions(
     status: str = "open",
 ) -> dict[str, str]:
     route = f"/api/runtime-center/decisions/{decision_id}"
+    review_route = f"/api/runtime-center/governed/decisions/{decision_id}/review"
     if status == "reviewing":
         return {
             "approve": f"{route}/approve",
             "reject": f"{route}/reject",
         }
     return {
-        "review": f"{route}/review",
+        "review": review_route,
         "approve": f"{route}/approve",
         "reject": f"{route}/reject",
     }
@@ -38,4 +39,3 @@ def build_patch_actions(
     if status == "applied":
         return {"rollback": f"{base}/rollback"}
     return {}
-

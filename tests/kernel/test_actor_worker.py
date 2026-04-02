@@ -4,7 +4,12 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from copaw.environments import EnvironmentRegistry, EnvironmentRepository, EnvironmentService
+from copaw.environments import (
+    EnvironmentRegistry,
+    EnvironmentRepository,
+    EnvironmentService,
+    SessionMountRepository,
+)
 from copaw.kernel import ActorMailboxService, ActorWorker
 from copaw.state.agent_experience_service import AgentExperienceMemoryService
 from copaw.state.knowledge_service import StateKnowledgeService
@@ -215,6 +220,76 @@ def test_actor_worker_heartbeats_actor_lease_during_long_execution(tmp_path, mon
     lease = lease_repository.get_lease("actor:agent-1")
     assert lease is not None
     assert lease.lease_status == "released"
+
+
+def test_actor_worker_releases_shared_writer_lease_when_run_is_cancelled(tmp_path) -> None:
+    mailbox_service, _runtime_repository, _checkpoint_repository, state_store = _build_mailbox_runtime(
+        tmp_path,
+    )
+    item = mailbox_service.enqueue_item(
+        agent_id="agent-1",
+        task_id="task-writer",
+        title="Locked writer task",
+        capability_ref="system:dispatch_query",
+        payload={
+            "payload": {
+                "meta": {
+                    "access_mode": "writer",
+                    "lease_class": "exclusive-writer",
+                    "writer_lock_scope": "workbook:weekly-report",
+                },
+            },
+        },
+        metadata={
+            "access_mode": "writer",
+            "lease_class": "exclusive-writer",
+            "writer_lock_scope": "workbook:weekly-report",
+        },
+    )
+    lease_repository = SqliteAgentLeaseRepository(state_store)
+    env_repository = EnvironmentRepository(state_store)
+    session_repository = SessionMountRepository(state_store)
+    environment_service = EnvironmentService(
+        registry=EnvironmentRegistry(
+            repository=env_repository,
+            session_repository=session_repository,
+        ),
+        lease_ttl_seconds=30,
+    )
+    environment_service.set_session_repository(session_repository)
+    environment_service.set_agent_lease_repository(lease_repository)
+    dispatcher = _InterruptibleDispatcher()
+    worker = ActorWorker(
+        worker_id="actor-worker-test",
+        mailbox_service=mailbox_service,
+        kernel_dispatcher=dispatcher,
+        environment_service=environment_service,
+        lease_ttl_seconds=30,
+        lease_heartbeat_interval_seconds=0.01,
+    )
+
+    async def _run() -> bool:
+        task = asyncio.create_task(worker.run_once("agent-1"))
+        await dispatcher.started.wait()
+        active_writer_lease = environment_service.get_shared_writer_lease(
+            writer_lock_scope="workbook:weekly-report",
+        )
+        assert active_writer_lease is not None
+        assert active_writer_lease.lease_status == "leased"
+        task.cancel()
+        return await task
+
+    handled = asyncio.run(_run())
+
+    assert handled is True
+    stored = mailbox_service.get_item(item.id)
+    assert stored is not None
+    assert stored.status == "cancelled"
+    writer_lease = environment_service.get_shared_writer_lease(
+        writer_lock_scope="workbook:weekly-report",
+    )
+    assert writer_lease is not None
+    assert writer_lease.lease_status == "released"
 
 
 def test_actor_worker_marks_cancelled_kernel_results_as_cancelled(tmp_path) -> None:

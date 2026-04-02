@@ -9,6 +9,10 @@ from typing import Any
 from ..evidence import EvidenceLedger, EvidenceRecord
 from ..industry.identity import is_execution_core_agent_id
 from ..state.repositories import SqliteTaskRepository, SqliteTaskRuntimeRepository
+from .child_run_shell import (
+    resolve_child_run_writer_contract,
+    run_child_task_with_writer_lease,
+)
 from .dispatcher import KernelDispatcher
 from .models import KernelResult, KernelTask, RiskLevel
 from .persistence import decode_kernel_task_metadata
@@ -75,6 +79,7 @@ class TaskDelegationService:
         evidence_ledger: EvidenceLedger | None = None,
         agent_profile_service: object | None = None,
         industry_service: object | None = None,
+        environment_service: object | None = None,
         actor_mailbox_service: object | None = None,
         actor_supervisor: object | None = None,
         runtime_event_bus: object | None = None,
@@ -87,6 +92,7 @@ class TaskDelegationService:
         self._evidence_ledger = evidence_ledger
         self._agent_profile_service = agent_profile_service
         self._industry_service = industry_service
+        self._environment_service = environment_service
         self._actor_mailbox_service = actor_mailbox_service
         self._actor_supervisor = actor_supervisor
         self._runtime_event_bus = runtime_event_bus
@@ -122,6 +128,9 @@ class TaskDelegationService:
         session_kind: str | None = None,
         work_context_id: str | None = None,
         context_key: str | None = None,
+        access_mode: str | None = None,
+        lease_class: str | None = None,
+        writer_lock_scope: str | None = None,
     ) -> dict[str, object]:
         parent_task = self._task_repository.get_task(parent_task_id)
         if parent_task is None:
@@ -164,12 +173,15 @@ class TaskDelegationService:
             parent_task_id=parent_task_id,
             owner_agent_id=resolved_agent_id,
             environment_ref=resolved_environment_ref,
+            access_mode=access_mode,
+            lease_class=lease_class,
+            writer_lock_scope=writer_lock_scope,
         )
         if governance["blocked"] and not force:
             error_code = "governance_blocked"
             if governance.get("overloaded"):
                 error_code = "target_overloaded"
-            elif governance.get("conflict_count"):
+            elif governance.get("conflict_count") or governance.get("writer_conflict_count"):
                 error_code = "environment_conflict"
             raise DelegationError(str(governance["summary"]), code=error_code)
 
@@ -195,6 +207,10 @@ class TaskDelegationService:
             lane_id=getattr(parent_task, "lane_id", None),
             cycle_id=getattr(parent_task, "cycle_id", None),
             report_back_mode=getattr(parent_task, "report_back_mode", None),
+            environment_ref=resolved_environment_ref,
+            access_mode=access_mode,
+            lease_class=lease_class,
+            writer_lock_scope=writer_lock_scope,
         )
         child_task = KernelTask(
             goal_id=parent_task.goal_id,
@@ -241,6 +257,10 @@ class TaskDelegationService:
                             if getattr(parent_task, "assignment_id", None)
                             else "delegation"
                         ),
+                        "access_mode": access_mode,
+                        "lease_class": lease_class,
+                        "writer_lock_scope": writer_lock_scope,
+                        "environment_ref": resolved_environment_ref,
                     },
                 )
                 if admitted.phase != "executing":
@@ -340,7 +360,20 @@ class TaskDelegationService:
         mailbox_item: object | None,
     ) -> KernelResult | None:
         if mailbox_item is None or self._actor_mailbox_service is None:
-            result = await self._kernel_dispatcher.execute_task(child_task.id)
+            contract = resolve_child_run_writer_contract(
+                payload=child_task.payload,
+                environment_ref=child_task.environment_ref,
+            )
+            result = await run_child_task_with_writer_lease(
+                label=f"delegation:{child_task.owner_agent_id}",
+                execute=lambda: self._kernel_dispatcher.execute_task(child_task.id),
+                environment_service=self._environment_service,
+                owner_agent_id=child_task.owner_agent_id,
+                worker_id=None,
+                contract=contract,
+                ttl_seconds=180,
+                heartbeat_interval_seconds=15.0,
+            )
             self._maybe_write_experience(
                 child_task=child_task,
                 mailbox_item=mailbox_item,
@@ -423,6 +456,9 @@ class TaskDelegationService:
         parent_task_id: str,
         owner_agent_id: str,
         environment_ref: str | None,
+        access_mode: str | None = None,
+        lease_class: str | None = None,
+        writer_lock_scope: str | None = None,
     ) -> dict[str, object]:
         active_tasks = [
             task
@@ -439,6 +475,37 @@ class TaskDelegationService:
             and task.owner_agent_id != owner_agent_id
         ]
         overloaded = len(active_tasks) >= self._overload_threshold
+        writer_conflicts: list[dict[str, object]] = []
+        normalized_scope = _non_empty_text(writer_lock_scope)
+        if (
+            access_mode == "writer"
+            and normalized_scope is not None
+            and self._environment_service is not None
+        ):
+            getter = getattr(self._environment_service, "get_shared_writer_lease", None)
+            if callable(getter):
+                lease = getter(writer_lock_scope=normalized_scope)
+                if (
+                    lease is not None
+                    and getattr(lease, "lease_status", None) == "leased"
+                    and getattr(lease, "lease_owner", None)
+                    and getattr(lease, "lease_owner", None) != owner_agent_id
+                ):
+                    lease_metadata = (
+                        getattr(lease, "metadata", {})
+                        if isinstance(getattr(lease, "metadata", None), dict)
+                        else {}
+                    )
+                    writer_conflicts.append(
+                        {
+                            "lease_id": getattr(lease, "id", None),
+                            "lease_owner": getattr(lease, "lease_owner", None),
+                            "lease_class": lease_class or lease_metadata.get("lease_class"),
+                            "access_mode": access_mode,
+                            "writer_lock_scope": normalized_scope,
+                            "environment_ref": lease_metadata.get("environment_ref"),
+                        },
+                    )
         reasons: list[str] = []
         if overloaded:
             reasons.append(
@@ -447,6 +514,10 @@ class TaskDelegationService:
         if conflicting_tasks:
             reasons.append(
                 f"Environment '{environment_ref}' is already in use by {len(conflicting_tasks)} active task(s).",
+            )
+        if writer_conflicts:
+            reasons.append(
+                f"Writer scope '{normalized_scope}' is already reserved by '{writer_conflicts[0]['lease_owner']}'.",
             )
         return {
             "blocked": bool(reasons),
@@ -460,6 +531,9 @@ class TaskDelegationService:
             "overloaded": overloaded,
             "conflict_count": len(conflicting_tasks),
             "conflicting_tasks": conflicting_tasks[:10],
+            "writer_conflict_count": len(writer_conflicts),
+            "writer_conflicts": writer_conflicts[:10],
+            "writer_lock_scope": normalized_scope,
             "target_environment_ref": environment_ref,
             "thresholds": {
                 "overload_threshold": self._overload_threshold,
@@ -568,6 +642,10 @@ class TaskDelegationService:
         lane_id: str | None,
         cycle_id: str | None,
         report_back_mode: str | None,
+        environment_ref: str | None,
+        access_mode: str | None,
+        lease_class: str | None,
+        writer_lock_scope: str | None,
     ) -> dict[str, object]:
         execution_source = "assignment" if _non_empty_text(assignment_id) else "delegation"
 
@@ -585,6 +663,10 @@ class TaskDelegationService:
                     "lane_id": lane_id,
                     "cycle_id": cycle_id,
                     "report_back_mode": report_back_mode,
+                    "environment_ref": environment_ref,
+                    "access_mode": access_mode,
+                    "lease_class": lease_class,
+                    "writer_lock_scope": writer_lock_scope,
                 },
             )
             base_payload["meta"] = {

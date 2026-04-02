@@ -490,6 +490,9 @@ class _GoalServiceCompilerMixin:
         strategy_context = self._build_strategy_context(context=merged_context)
         if strategy_context:
             merged_context.update(strategy_context)
+        assignment_plan_context = self._build_assignment_plan_context(context=merged_context)
+        if assignment_plan_context:
+            merged_context.update(assignment_plan_context)
         return CompilationUnit(
             kind="goal",
             source_text=source_text,
@@ -530,7 +533,58 @@ class _GoalServiceCompilerMixin:
             "strategy_id": strategy_payload.get("strategy_id"),
             "strategy_summary": strategy_payload.get("summary"),
             "strategy_items": strategy_items,
+            "strategy_mission": _string(strategy_payload.get("mission")),
+            "strategy_north_star": _string(strategy_payload.get("north_star")),
+            "strategy_priority_order": _string_list(strategy_payload.get("priority_order")),
+            "strategy_planning_policy": _string_list(
+                strategy_payload.get("planning_policy"),
+            ),
+            "strategy_review_rules": _string_list(strategy_payload.get("review_rules")),
+            "strategy_current_focuses": _string_list(
+                strategy_payload.get("current_focuses"),
+            ),
         }
+
+    def _build_assignment_plan_context(
+        self,
+        *,
+        context: dict[str, object],
+    ) -> dict[str, object]:
+        planner = getattr(self, "_assignment_planning_compiler", None)
+        if planner is None:
+            return {}
+        strategy_constraints = self._build_assignment_strategy_constraints(context=context)
+        envelope = planner.plan_from_context(
+            context,
+            strategy_constraints=strategy_constraints,
+        )
+        if envelope is None:
+            return {}
+        envelope_payload = envelope.model_dump(mode="json")
+        return {
+            "assignment_plan_envelope": envelope_payload,
+            "assignment_plan_checkpoints": list(envelope_payload.get("checkpoints") or []),
+            "assignment_plan_acceptance_criteria": list(
+                envelope_payload.get("acceptance_criteria") or [],
+            ),
+            "assignment_sidecar_plan": dict(envelope_payload.get("sidecar_plan") or {}),
+            "report_back_mode": _string(context.get("report_back_mode"))
+            or envelope.report_back_mode,
+        }
+
+    def _build_assignment_strategy_constraints(
+        self,
+        *,
+        context: dict[str, object],
+    ) -> PlanningStrategyConstraints:
+        return PlanningStrategyConstraints(
+            mission=_string(context.get("strategy_mission")) or "",
+            north_star=_string(context.get("strategy_north_star")) or "",
+            priority_order=_string_list(context.get("strategy_priority_order")),
+            planning_policy=_string_list(context.get("strategy_planning_policy")),
+            review_rules=_string_list(context.get("strategy_review_rules")),
+            current_focuses=_string_list(context.get("strategy_current_focuses")),
+        )
 
     def _build_knowledge_context(
         self,

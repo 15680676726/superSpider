@@ -5,6 +5,7 @@ from .service_context import *  # noqa: F401,F403
 from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
 from .main_brain_cognitive_surface import build_main_brain_cognitive_surface
+from .models import IndustryMainBrainPlanningSurface
 
 
 class _IndustryRuntimeViewsMixin:
@@ -378,6 +379,227 @@ class _IndustryRuntimeViewsMixin:
                 "activation": dict(replan_activation),
             },
         }
+
+    def _resolve_formal_planning_payload(
+        self,
+        entry: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(entry, dict):
+            return {}
+        payload = _mapping(entry.get("formal_planning"))
+        if payload:
+            return payload
+        return _mapping(_mapping(entry.get("metadata")).get("formal_planning"))
+
+    def _resolve_latest_planning_cycle_entry(
+        self,
+        *,
+        current_cycle: dict[str, Any] | None,
+        cycles: Sequence[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if _mapping(self._resolve_formal_planning_payload(current_cycle)).get(
+            "cycle_decision",
+        ):
+            return current_cycle
+        for cycle in cycles:
+            if _mapping(self._resolve_formal_planning_payload(cycle)).get(
+                "cycle_decision",
+            ):
+                return cycle
+        if isinstance(current_cycle, dict):
+            return current_cycle
+        return cycles[0] if cycles else None
+
+    def _resolve_current_assignment_for_planning(
+        self,
+        *,
+        current_cycle: dict[str, Any] | None,
+        assignments: Sequence[dict[str, Any]],
+        selected_assignment_id: str | None = None,
+        selected_backlog_item_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        if selected_assignment_id is not None:
+            current_assignment = next(
+                (
+                    item
+                    for item in assignments
+                    if _string(item.get("assignment_id")) == selected_assignment_id
+                ),
+                None,
+            )
+            if isinstance(current_assignment, dict):
+                return current_assignment
+        if selected_backlog_item_id is not None:
+            current_assignment = next(
+                (
+                    item
+                    for item in assignments
+                    if _string(item.get("backlog_item_id")) == selected_backlog_item_id
+                ),
+                None,
+            )
+            if isinstance(current_assignment, dict):
+                return current_assignment
+        for assignment_id in _unique_strings(_mapping(current_cycle).get("assignment_ids")):
+            current_assignment = next(
+                (
+                    item
+                    for item in assignments
+                    if _string(item.get("assignment_id")) == assignment_id
+                ),
+                None,
+            )
+            if isinstance(current_assignment, dict):
+                return current_assignment
+        return assignments[0] if assignments else None
+
+    def _build_fallback_cycle_planning_decision(
+        self,
+        *,
+        cycle_entry: dict[str, Any] | None,
+        assignments: Sequence[dict[str, Any]],
+        strategy_constraints: dict[str, Any],
+    ) -> dict[str, Any]:
+        cycle_payload = _mapping(cycle_entry)
+        cycle_id = _string(cycle_payload.get("cycle_id"))
+        selected_assignment_ids = _unique_strings(cycle_payload.get("assignment_ids"))
+        if cycle_id is not None and not selected_assignment_ids:
+            selected_assignment_ids = _unique_strings(
+                [
+                    item.get("assignment_id")
+                    for item in assignments
+                    if _string(item.get("cycle_id")) == cycle_id
+                ],
+            )
+        selected_backlog_item_ids = _unique_strings(cycle_payload.get("backlog_item_ids"))
+        selected_lane_ids = _unique_strings(
+            cycle_payload.get("focus_lane_ids"),
+            [
+                item.get("lane_id")
+                for item in assignments
+                if cycle_id is None or _string(item.get("cycle_id")) == cycle_id
+            ],
+        )
+        max_assignment_count = int(cycle_payload.get("max_assignment_count") or 0)
+        if max_assignment_count <= 0:
+            max_assignment_count = len(selected_assignment_ids) or len(
+                selected_backlog_item_ids,
+            )
+        return {
+            "should_start": bool(selected_assignment_ids or selected_backlog_item_ids),
+            "reason": "cycle-record-fallback",
+            "cycle_id": cycle_id,
+            "cycle_kind": _string(cycle_payload.get("cycle_kind")) or "daily",
+            "selected_backlog_item_ids": selected_backlog_item_ids,
+            "selected_lane_ids": selected_lane_ids,
+            "selected_assignment_ids": selected_assignment_ids,
+            "max_assignment_count": max_assignment_count,
+            "summary": (
+                _string(cycle_payload.get("summary"))
+                or "Formal cycle decision derived from the current cycle record."
+            ),
+            "planning_policy": _unique_strings(
+                strategy_constraints.get("planning_policy"),
+            ),
+            "metadata": {
+                "source": "cycle-record-fallback",
+            },
+        }
+
+    def _build_main_brain_planning_surface(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        current_cycle: dict[str, Any] | None,
+        cycles: list[dict[str, Any]],
+        assignments: list[dict[str, Any]],
+        selected_assignment_id: str | None = None,
+        selected_backlog_item_id: str | None = None,
+    ) -> IndustryMainBrainPlanningSurface:
+        planning_cycle = self._resolve_latest_planning_cycle_entry(
+            current_cycle=current_cycle,
+            cycles=cycles,
+        )
+        planning_sidecar = self._resolve_formal_planning_payload(planning_cycle)
+        strategy_constraints = _mapping(planning_sidecar.get("strategy_constraints"))
+        if not strategy_constraints:
+            strategy_constraints = self._planner_sidecar_payload(
+                self._compile_strategy_constraints(record=record),
+            )
+
+        cycle_decision = _mapping(planning_sidecar.get("cycle_decision"))
+        if cycle_decision:
+            cycle_payload = _mapping(planning_cycle)
+            selected_assignment_ids = _unique_strings(
+                cycle_decision.get("selected_assignment_ids"),
+                cycle_payload.get("assignment_ids"),
+            )
+            selected_backlog_item_ids = _unique_strings(
+                cycle_decision.get("selected_backlog_item_ids"),
+                cycle_payload.get("backlog_item_ids"),
+            )
+            cycle_decision = {
+                **cycle_decision,
+                "cycle_id": _string(cycle_decision.get("cycle_id"))
+                or _string(cycle_payload.get("cycle_id")),
+                "cycle_kind": _string(cycle_decision.get("cycle_kind"))
+                or _string(cycle_payload.get("cycle_kind"))
+                or "daily",
+                "selected_lane_ids": _unique_strings(
+                    cycle_decision.get("selected_lane_ids"),
+                    cycle_payload.get("focus_lane_ids"),
+                ),
+                "selected_backlog_item_ids": selected_backlog_item_ids,
+                "selected_assignment_ids": selected_assignment_ids,
+                "max_assignment_count": int(
+                    cycle_decision.get("max_assignment_count")
+                    or len(selected_assignment_ids)
+                    or len(selected_backlog_item_ids),
+                ),
+                "summary": (
+                    _string(cycle_decision.get("summary"))
+                    or _string(cycle_payload.get("summary"))
+                    or "Formal cycle decision derived from persisted planning sidecars."
+                ),
+                "planning_policy": _unique_strings(
+                    cycle_decision.get("planning_policy"),
+                    strategy_constraints.get("planning_policy"),
+                ),
+            }
+        else:
+            cycle_decision = self._build_fallback_cycle_planning_decision(
+                cycle_entry=planning_cycle,
+                assignments=assignments,
+                strategy_constraints=strategy_constraints,
+            )
+
+        current_assignment = self._resolve_current_assignment_for_planning(
+            current_cycle=current_cycle,
+            assignments=assignments,
+            selected_assignment_id=selected_assignment_id,
+            selected_backlog_item_id=selected_backlog_item_id,
+        )
+        assignment_sidecar = self._resolve_formal_planning_payload(current_assignment)
+        focused_assignment_plan = _mapping(assignment_sidecar.get("assignment_plan"))
+
+        replan_cycle = self._resolve_replan_cycle_entry(
+            current_cycle=current_cycle,
+            current_cycle_entry=current_cycle,
+            cycles=cycles,
+        )
+        replan_synthesis = self._resolve_cycle_synthesis_payload(replan_cycle)
+        replan = self._planner_sidecar_payload(
+            self._report_replan_engine.compile(replan_synthesis),
+        )
+
+        return IndustryMainBrainPlanningSurface(
+            is_truth_store=False,
+            source="industry-runtime-read-model",
+            strategy_constraints=strategy_constraints,
+            latest_cycle_decision=cycle_decision,
+            focused_assignment_plan=focused_assignment_plan,
+            replan=replan,
+        )
 
     def _build_instance_main_chain(
         self,
@@ -2278,6 +2500,20 @@ class _IndustryRuntimeViewsMixin:
             for cycle in cycles
 
         ]
+        main_brain_planning = self._build_main_brain_planning_surface(
+            record=record,
+            current_cycle=current_cycle,
+            cycles=cycles,
+            assignments=assignments,
+            selected_assignment_id=selected_assignment_id,
+            selected_backlog_item_id=selected_backlog_item_id,
+        )
+        main_brain_planning_payload = main_brain_planning.model_dump(mode="json")
+        if current_cycle is not None:
+            current_cycle = {
+                **current_cycle,
+                "main_brain_planning": main_brain_planning_payload,
+            }
 
         goals: list[dict[str, Any]] = []
 
@@ -3033,6 +3269,7 @@ class _IndustryRuntimeViewsMixin:
             execution=execution,
 
             main_chain=main_chain,
+            main_brain_planning=main_brain_planning,
 
             focus_selection=focus_selection,
 

@@ -150,6 +150,8 @@ class MCPConfigWatcher:
 
     async def _check(self) -> None:
         """Check for config changes and reload if needed."""
+        observed_mtime: Optional[float] = None
+
         # 1) Check mtime if config path is provided
         if self._config_path:
             try:
@@ -158,7 +160,7 @@ class MCPConfigWatcher:
                 return
             if mtime == self._last_mtime:
                 return
-            self._last_mtime = mtime
+            observed_mtime = mtime
 
         # 2) Load new config; quick-reject if MCP section unchanged
         try:
@@ -169,6 +171,8 @@ class MCPConfigWatcher:
 
         new_hash = self._mcp_hash(new_mcp)
         if new_hash == self._last_mcp_hash:
+            if observed_mtime is not None:
+                self._last_mtime = observed_mtime
             return  # No changes
 
         # 3) Check if previous reload is still running
@@ -177,6 +181,7 @@ class MCPConfigWatcher:
                 "MCPConfigWatcher: skipping reload, "
                 "previous reload still in progress",
             )
+            await self._mark_pending_reload(new_mcp)
             return
 
         # 4) Trigger non-blocking reload in background task
@@ -184,7 +189,7 @@ class MCPConfigWatcher:
             "MCPConfigWatcher: detected config changes, starting reload",
         )
         self._reload_task = asyncio.create_task(
-            self._reload_changed_clients_wrapper(new_mcp),
+            self._reload_changed_clients_wrapper(new_mcp, observed_mtime),
             name="mcp_reload_task",
         )
         # Note: Snapshot is updated by the background task on success
@@ -192,6 +197,7 @@ class MCPConfigWatcher:
     async def _reload_changed_clients_wrapper(
         self,
         new_mcp: "MCPConfig",
+        observed_mtime: Optional[float] = None,
     ) -> None:
         """Wrapper for reload that handles exceptions without crashing watcher.
 
@@ -204,15 +210,22 @@ class MCPConfigWatcher:
         new_hash = self._mcp_hash(new_mcp)
 
         try:
-            await self._reload_changed_clients(new_mcp)
+            if not await self._reload_changed_clients(new_mcp):
+                logger.warning(
+                    "MCPConfigWatcher: reload task failed, "
+                    "keeping previous snapshot for retry",
+                )
+                return
             # Success: update snapshot
             self._last_mcp = new_mcp.model_copy(deep=True)
             self._last_mcp_hash = new_hash
+            if observed_mtime is not None:
+                self._last_mtime = observed_mtime
             logger.debug("MCPConfigWatcher: reload completed successfully")
         except Exception:
             logger.warning("MCPConfigWatcher: reload task failed")
 
-    async def _reload_changed_clients(self, new_mcp: "MCPConfig") -> None:
+    async def _reload_changed_clients(self, new_mcp: "MCPConfig") -> bool:
         """Compare old and new MCP configs and reload changed clients.
 
         Args:
@@ -220,23 +233,57 @@ class MCPConfigWatcher:
         """
         old_mcp = self._last_mcp
         old_clients = old_mcp.clients if old_mcp else {}
+        reload_succeeded = True
 
         # Check for new or changed clients
         for key, new_cfg in new_mcp.clients.items():
             old_cfg = old_clients.get(key)
-            await self._handle_client_update(key, old_cfg, new_cfg)
+            reload_succeeded = (
+                await self._handle_client_update(key, old_cfg, new_cfg)
+                and reload_succeeded
+            )
 
         # Remove clients that no longer exist in config
         for key in old_clients:
             if key not in new_mcp.clients:
-                await self._handle_client_removal(key)
+                reload_succeeded = (
+                    await self._handle_client_removal(key)
+                    and reload_succeeded
+                )
+
+        return reload_succeeded
+
+    async def _mark_pending_reload(self, new_mcp: "MCPConfig") -> None:
+        """Surface dirty/pending reload state without mutating clients."""
+        old_mcp = self._last_mcp
+        old_clients = old_mcp.clients if old_mcp else {}
+        note_reload_pending = getattr(self._mcp_manager, "note_reload_pending", None)
+        if not callable(note_reload_pending):
+            return
+
+        for key, new_cfg in new_mcp.clients.items():
+            old_cfg = old_clients.get(key)
+            if not new_cfg.enabled or old_cfg == new_cfg:
+                continue
+            try:
+                await note_reload_pending(
+                    key,
+                    new_cfg,
+                    reason="reload-in-progress",
+                )
+            except Exception:
+                logger.debug(
+                    "MCPConfigWatcher: failed to mark pending reload for '%s'",
+                    key,
+                    exc_info=True,
+                )
 
     async def _handle_client_update(
         self,
         key: str,
         old_cfg,
         new_cfg,
-    ) -> None:
+    ) -> bool:
         """Handle update for a single client."""
         # Client disabled: remove if it was previously enabled
         if not new_cfg.enabled:
@@ -253,19 +300,21 @@ class MCPConfigWatcher:
                         "MCPConfigWatcher: failed to remove client '%s'",
                         key,
                     )
-            return
+                    return False
+            return True
 
         # Client enabled: check if config changed
         if old_cfg != new_cfg:
-            await self._reload_single_client(key, new_cfg)
+            return await self._reload_single_client(key, new_cfg)
+        return True
 
-    async def _reload_single_client(self, key: str, new_cfg) -> None:
+    async def _reload_single_client(self, key: str, new_cfg) -> bool:
         """Reload a single client with retry tracking."""
         client_hash = hash(str(new_cfg.model_dump(mode="json")))
 
         # Check if this client should be skipped
         if self._should_skip_client(key, client_hash):
-            return
+            return False
 
         logger.debug(
             "MCPConfigWatcher: client '%s' config changed, reloading",
@@ -278,8 +327,10 @@ class MCPConfigWatcher:
                 key,
             )
             self._client_failures.pop(key, None)
+            return True
         except Exception:
             self._track_client_failure(key, client_hash)
+            return False
 
     def _should_skip_client(self, key: str, client_hash: int) -> bool:
         """Check if client should be skipped due to failures."""
@@ -317,7 +368,7 @@ class MCPConfigWatcher:
                 f"(attempt {new_count}/{self._max_retries})",
             )
 
-    async def _handle_client_removal(self, key: str) -> None:
+    async def _handle_client_removal(self, key: str) -> bool:
         """Handle removal of a client from config."""
         logger.debug(
             "MCPConfigWatcher: client '%s' removed from config",
@@ -326,8 +377,10 @@ class MCPConfigWatcher:
         try:
             await self._mcp_manager.remove_client(key)
             self._client_failures.pop(key, None)
+            return True
         except Exception:
             logger.debug(
                 "MCPConfigWatcher: failed to remove client '%s'",
                 key,
             )
+            return False

@@ -62,11 +62,16 @@ class HostEventRecoveryService:
         after_event_id: int = 0,
         limit: int = 100,
         session_mount_id: str | None = None,
+        allow_cross_process_recovery: bool = False,
     ) -> dict[str, Any]:
         actions: list[HostRecoveryAction] = []
         skipped: list[dict[str, Any]] = []
         for event in self._list_actionable_events(after_event_id=after_event_id, limit=limit):
-            planned = self._plan_event(event, session_mount_id=session_mount_id)
+            planned = self._plan_event(
+                event,
+                session_mount_id=session_mount_id,
+                allow_cross_process_recovery=allow_cross_process_recovery,
+            )
             if isinstance(planned, HostRecoveryAction):
                 actions.append(planned)
                 continue
@@ -90,11 +95,13 @@ class HostEventRecoveryService:
         after_event_id: int = 0,
         limit: int = 100,
         session_mount_id: str | None = None,
+        allow_cross_process_recovery: bool = False,
     ) -> dict[str, Any]:
         plan = self.plan_recovery(
             after_event_id=after_event_id,
             limit=limit,
             session_mount_id=session_mount_id,
+            allow_cross_process_recovery=allow_cross_process_recovery,
         )
         executed_actions: list[dict[str, Any]] = []
         skipped = int(plan.get("skipped") or 0)
@@ -144,6 +151,7 @@ class HostEventRecoveryService:
         event: RuntimeEvent,
         *,
         session_mount_id: str | None,
+        allow_cross_process_recovery: bool,
     ) -> HostRecoveryAction | dict[str, Any] | None:
         payload = _mapping(event.payload)
         target_session_mount_id = _string(payload.get("session_mount_id"))
@@ -157,6 +165,15 @@ class HostEventRecoveryService:
                 "event_id": event.event_id,
                 "event_name": event.event_name,
                 "reason": "missing-session",
+            }
+        if not self._session_recovery_allowed(
+            session,
+            allow_cross_process_recovery=allow_cross_process_recovery,
+        ):
+            return {
+                "event_id": event.event_id,
+                "event_name": event.event_name,
+                "reason": "cross-process-recovery-disabled",
             }
         recovery_state = _mapping(session.metadata.get("host_recovery_state"))
         last_handled_event_id = recovery_state.get("last_handled_event_id")
@@ -248,6 +265,23 @@ class HostEventRecoveryService:
             )
         except TypeError:
             return bool(has_live_handle(session.environment_id))
+
+    def _session_recovery_allowed(
+        self,
+        session,
+        *,
+        allow_cross_process_recovery: bool,
+    ) -> bool:
+        lease_service = getattr(self._environment_service, "_lease_service", None)
+        checker = getattr(lease_service, "session_should_be_recovered_locally", None)
+        if not callable(checker):
+            return True
+        return bool(
+            checker(
+                session,
+                allow_cross_process_recovery=allow_cross_process_recovery,
+            ),
+        )
 
     def _execute_action(self, action: HostRecoveryAction) -> dict[str, Any]:
         session = self._get_session_record(action.session_mount_id)

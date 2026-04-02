@@ -639,6 +639,190 @@ async def force_release_session_lease(
     return session_payload
 
 
+def _bridge_service_method(service: object, method_name: str):
+    method = getattr(service, method_name, None)
+    if not callable(method):
+        raise HTTPException(503, detail="Bridge lifecycle surface is not available")
+    return method
+
+
+def _bridge_session_payload_or_404(session: object | None, session_mount_id: str) -> dict[str, object]:
+    session_payload = _runtime_surface_payload(
+        session,
+        not_serializable_detail="Session payload is not serializable",
+    )
+    if session_payload is None:
+        raise HTTPException(404, detail=f"Session '{session_mount_id}' not found")
+    return session_payload
+
+
+def _bridge_environment_payload_or_404(environment: object | None, environment_id: str) -> dict[str, object]:
+    environment_payload = _runtime_surface_payload(
+        environment,
+        not_serializable_detail="Environment payload is not serializable",
+    )
+    if environment_payload is None:
+        raise HTTPException(404, detail=f"Environment '{environment_id}' not found")
+    return environment_payload
+
+
+@router.post("/sessions/{session_mount_id}/bridge/ack", response_model=dict[str, object])
+async def ack_bridge_session_work(
+    session_mount_id: str,
+    request: Request,
+    response: Response,
+    payload: BridgeSessionWorkAckRequest,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_environment_service(request)
+    try:
+        session = _bridge_service_method(service, "ack_bridge_session_work")(
+            session_mount_id,
+            lease_token=payload.lease_token,
+            work_id=payload.work_id,
+            bridge_session_id=payload.bridge_session_id,
+            ttl_seconds=payload.ttl_seconds,
+            handle=payload.handle,
+            workspace_trusted=payload.workspace_trusted,
+            elevated_auth_state=payload.elevated_auth_state,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, detail=str(exc).strip("'")) from exc
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    return _bridge_session_payload_or_404(session, session_mount_id)
+
+
+@router.post("/sessions/{session_mount_id}/bridge/heartbeat", response_model=dict[str, object])
+async def heartbeat_bridge_session_work(
+    session_mount_id: str,
+    request: Request,
+    response: Response,
+    payload: BridgeSessionWorkHeartbeatRequest,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_environment_service(request)
+    try:
+        session = _bridge_service_method(service, "heartbeat_bridge_session_work")(
+            session_mount_id,
+            lease_token=payload.lease_token,
+            work_id=payload.work_id,
+            ttl_seconds=payload.ttl_seconds,
+            handle=payload.handle,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, detail=str(exc).strip("'")) from exc
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    return _bridge_session_payload_or_404(session, session_mount_id)
+
+
+@router.post("/sessions/{session_mount_id}/bridge/reconnect", response_model=dict[str, object])
+async def reconnect_bridge_session_work(
+    session_mount_id: str,
+    request: Request,
+    response: Response,
+    payload: BridgeSessionWorkReconnectRequest,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_environment_service(request)
+    try:
+        session = _bridge_service_method(service, "reconnect_bridge_session_work")(
+            session_mount_id,
+            lease_token=payload.lease_token,
+            work_id=payload.work_id,
+            ttl_seconds=payload.ttl_seconds,
+            handle=payload.handle,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, detail=str(exc).strip("'")) from exc
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    return _bridge_session_payload_or_404(session, session_mount_id)
+
+
+@router.post("/sessions/{session_mount_id}/bridge/stop", response_model=dict[str, object])
+async def stop_bridge_session_work(
+    session_mount_id: str,
+    request: Request,
+    response: Response,
+    payload: BridgeSessionWorkStopRequest,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_environment_service(request)
+    try:
+        session = _bridge_service_method(service, "stop_bridge_session_work")(
+            session_mount_id,
+            work_id=payload.work_id,
+            force=payload.force,
+            lease_token=payload.lease_token,
+            reason=payload.reason,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, detail=str(exc).strip("'")) from exc
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    return _bridge_session_payload_or_404(session, session_mount_id)
+
+
+@router.post("/sessions/{session_mount_id}/bridge/archive", response_model=dict[str, object])
+async def archive_bridge_session(
+    session_mount_id: str,
+    request: Request,
+    response: Response,
+    payload: BridgeSessionArchiveRequest | None = None,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_environment_service(request)
+    try:
+        session = _bridge_service_method(service, "archive_bridge_session")(
+            session_mount_id,
+            lease_token=payload.lease_token if payload is not None else None,
+            reason=payload.reason if payload is not None else None,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, detail=str(exc).strip("'")) from exc
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    return _bridge_session_payload_or_404(session, session_mount_id)
+
+
+@router.post(
+    "/environments/{environment_id}/bridge/deregister",
+    response_model=dict[str, object],
+)
+async def deregister_bridge_environment(
+    environment_id: str,
+    request: Request,
+    response: Response,
+    payload: BridgeEnvironmentDeregisterRequest | None = None,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_environment_service(request)
+    try:
+        environment = _bridge_service_method(service, "deregister_bridge_environment")(
+            environment_id,
+            reason=payload.reason if payload is not None else None,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, detail=str(exc).strip("'")) from exc
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    return _bridge_environment_payload_or_404(environment, environment_id)
+
+
 @router.get("/observations", response_model=list[dict[str, object]])
 async def list_observations(
     request: Request,

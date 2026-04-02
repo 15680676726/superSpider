@@ -30,7 +30,7 @@ class _FakeDecision:
 
 def test_runtime_decision_actions_stay_aligned_with_runtime_center() -> None:
     assert runtime_decision_actions("decision-1", status="open") == {
-        "review": "/api/runtime-center/decisions/decision-1/review",
+        "review": "/api/runtime-center/governed/decisions/decision-1/review",
         "approve": "/api/runtime-center/decisions/decision-1/approve",
         "reject": "/api/runtime-center/decisions/decision-1/reject",
     }

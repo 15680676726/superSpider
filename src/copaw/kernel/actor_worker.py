@@ -8,6 +8,10 @@ from typing import Any
 
 from ..industry.identity import is_execution_core_agent_id
 from .actor_mailbox import ActorMailboxService
+from .child_run_shell import (
+    resolve_child_run_writer_contract,
+    run_child_task_with_writer_lease,
+)
 from .lease_heartbeat import LeaseHeartbeat
 from .models import KernelTask
 from .runtime_outcome import resolve_runtime_cleanup_disposition
@@ -73,7 +77,12 @@ class ActorWorker:
                     worker_id=self._worker_id,
                     task_id=task_id,
                 )
-                result = await self._execute_task_with_heartbeat(task_id, lease)
+                result = await self._execute_task_with_heartbeat(
+                    task_id,
+                    lease,
+                    mailbox_item=started,
+                    agent_id=agent_id,
+                )
             else:
                 capability_ref = str(
                     item.capability_ref
@@ -114,7 +123,12 @@ class ActorWorker:
                         snapshot_payload={"result": _model_dump(admitted)},
                     )
                     return True
-                result = await self._execute_task_with_heartbeat(task_id, lease)
+                result = await self._execute_task_with_heartbeat(
+                    task_id,
+                    lease,
+                    mailbox_item=started,
+                    agent_id=agent_id,
+                )
 
             self._finalize_mailbox_item(
                 agent_id=agent_id,
@@ -171,12 +185,33 @@ class ActorWorker:
             return await result
         return result
 
-    async def _execute_task_with_heartbeat(self, task_id: str, lease) -> Any:
+    async def _execute_task_with_heartbeat(
+        self,
+        task_id: str,
+        lease,
+        *,
+        mailbox_item: object | None,
+        agent_id: str,
+    ) -> Any:
         heartbeat = self._build_actor_lease_heartbeat(lease)
-        if heartbeat is None:
-            return await self._execute_task(task_id)
-        async with heartbeat:
-            return await self._execute_task(task_id)
+        contract = resolve_child_run_writer_contract(mailbox_item=mailbox_item)
+
+        async def _execute() -> Any:
+            if heartbeat is None:
+                return await self._execute_task(task_id)
+            async with heartbeat:
+                return await self._execute_task(task_id)
+
+        return await run_child_task_with_writer_lease(
+            label=f"actor-worker:{self._worker_id}",
+            execute=_execute,
+            environment_service=self._environment_service,
+            owner_agent_id=agent_id,
+            worker_id=self._worker_id,
+            contract=contract,
+            ttl_seconds=self._lease_ttl_seconds,
+            heartbeat_interval_seconds=self._lease_heartbeat_interval_seconds,
+        )
 
     def _acquire_actor_lease(self, agent_id: str):
         service = self._environment_service

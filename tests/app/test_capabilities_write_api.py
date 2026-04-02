@@ -64,7 +64,6 @@ def build_app(tmp_path) -> FastAPI:
         schedule_repository=schedule_repository,
         decision_request_repository=decision_request_repository,
         evidence_ledger=evidence_ledger,
-        kernel_dispatcher=dispatcher,
     )
     return app
 

@@ -138,4 +138,18 @@ describe("useAgentWorkbench", () => {
     expect(requestRuntimeEvidenceListMock).toHaveBeenCalledTimes(1);
     expect(requestRuntimeGoalsMock).not.toHaveBeenCalled();
   });
+
+  it("routes capability review decisions through the governed runtime-center path", async () => {
+    const { result } = renderHook(() => useAgentWorkbench());
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await result.current.resolveCapabilityDecision("decision-1", "review");
+
+    expect(requestMock).toHaveBeenCalledWith(
+      "/runtime-center/governed/decisions/decision-1/review",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+  });
 });

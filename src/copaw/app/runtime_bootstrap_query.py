@@ -74,7 +74,6 @@ def build_runtime_query_services(
         decision_request_repository=repositories.decision_request_repository,
         evidence_ledger=evidence_ledger,
         human_assist_task_service=human_assist_task_service,
-        runtime_event_bus=runtime_event_bus,
         environment_service=environment_service,
         memory_activation_service=None,
     )

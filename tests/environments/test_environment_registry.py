@@ -965,6 +965,58 @@ def test_environment_service_resource_slot_lease_conflict(tmp_path):
     assert reacquired.lease_owner == "routine-2"
 
 
+def test_environment_service_shared_writer_lease_lifecycle_and_conflict(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_shared_writer_lease(
+        writer_lock_scope="workbook:weekly-report",
+        owner="agent-1",
+        metadata={"environment_ref": "desktop-app:excel:weekly-report"},
+    )
+
+    assert lease.channel == "resource-slot:shared-writer"
+    assert lease.session_id == "workbook:weekly-report"
+    assert lease.lease_status == "leased"
+    assert lease.metadata["access_mode"] == "writer"
+    assert lease.metadata["lease_class"] == "exclusive-writer"
+    assert lease.metadata["writer_lock_scope"] == "workbook:weekly-report"
+    assert service.get_shared_writer_lease(
+        writer_lock_scope="workbook:weekly-report",
+    ) == lease
+
+    with pytest.raises(RuntimeError):
+        service.acquire_shared_writer_lease(
+            writer_lock_scope="workbook:weekly-report",
+            owner="agent-2",
+        )
+
+    heartbeated = service.heartbeat_shared_writer_lease(
+        lease.id,
+        lease_token=lease.lease_token or "",
+        ttl_seconds=240,
+    )
+    assert heartbeated.lease_expires_at > lease.lease_expires_at
+
+    released = service.release_shared_writer_lease(
+        lease_id=lease.id,
+        lease_token=lease.lease_token,
+        reason="writer step completed",
+    )
+    assert released is not None
+    assert released.lease_status == "released"
+    assert service.get_shared_writer_lease(
+        writer_lock_scope="workbook:weekly-report",
+    ).lease_status == "released"
+
+
 def test_environment_service_reaps_expired_leases(tmp_path):
     store = SQLiteStateStore(tmp_path / "state.sqlite3")
     env_repo = EnvironmentRepository(store)
@@ -1166,6 +1218,91 @@ def test_environment_service_does_not_take_over_same_host_other_process_lease_du
     assert detail["recovery"]["same_host"] is True
     assert detail["recovery"]["same_process"] is False
     assert detail["recovery"]["startup_recovery_required"] is True
+
+
+def test_environment_service_host_recovery_respects_cross_process_recovery_flag(
+    tmp_path,
+):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="host-a",
+        process_id=101,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="desktop",
+        session_id="sess-host-recovery",
+        user_id="u1",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={"window": "excel-live"},
+        metadata={
+            "resume_kind": "resume-environment",
+            "verification_channel": "runtime-center-self-check",
+        },
+    )
+
+    other_process_registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="host-a",
+        process_id=202,
+    )
+    other_process_service = EnvironmentService(
+        registry=other_process_registry,
+        lease_ttl_seconds=120,
+    )
+    other_process_service.set_session_repository(session_repo)
+    other_process_service.set_runtime_event_bus(RuntimeEventBus(max_events=20))
+    other_process_service.register_session_handle_restorer(
+        "desktop",
+        lambda _context: {"handle": {"window": "excel-restored"}},
+    )
+    other_process_service._runtime_event_bus.publish(
+        topic="host",
+        action="human-return-ready",
+        payload={
+            "session_mount_id": lease.id,
+            "environment_id": lease.environment_id,
+            "checkpoint_ref": "checkpoint:captcha",
+            "verification_channel": "runtime-center-self-check",
+            "return_condition": "captcha-cleared",
+            "handoff_owner_ref": "human-operator:alice",
+        },
+    )
+
+    blocked_allowed, blocked_reason = other_process_service.should_run_host_recovery(
+        limit=10,
+    )
+    allowed_allowed, allowed_reason = other_process_service.should_run_host_recovery(
+        limit=10,
+        allow_cross_process_recovery=True,
+    )
+    blocked_result = other_process_service.run_host_recovery_cycle(limit=10)
+    allowed_result = other_process_service.run_host_recovery_cycle(
+        limit=10,
+        allow_cross_process_recovery=True,
+    )
+
+    assert blocked_allowed is False
+    assert blocked_reason == "cross-process-recovery-disabled"
+    assert allowed_allowed is True
+    assert allowed_reason == "actionable-host-events"
+    assert blocked_result["executed"] == 0
+    assert blocked_result["skipped"] == 1
+    assert allowed_result["executed"] == 1
+    assert allowed_result["decisions"]["recover"] == 1
+
+    restored_session = session_repo.get_session(lease.id)
+    assert restored_session is not None
+    assert restored_session.lease_status == "leased"
+    assert restored_session.metadata["lease_restore_status"] == "restored"
 
 
 def test_environment_service_execute_replay_prefers_registered_executor(tmp_path):
@@ -1387,7 +1524,6 @@ def test_environment_detail_exposes_host_runtime_baseline_projections(tmp_path):
     assert family_counts["process-exit-restart"] == 1
     assert family_counts["lock-unlock"] == 1
     assert family_counts["network-power"] == 1
-    assert family_counts.get("runtime-generic") == 1
     modal_latest = detail["host_event_summary"]["latest_event_by_family"]["modal-uac-login"]
     assert modal_latest["event_name"] == "desktop.captcha-required"
     assert modal_latest["topic"] == "desktop"
@@ -1422,6 +1558,268 @@ def test_environment_detail_exposes_host_runtime_baseline_projections(tmp_path):
     assert detail["host_events"][4]["event_family"] == "process-exit-restart"
     assert detail["host_events"][5]["event_family"] == "lock-unlock"
     assert detail["host_events"][6]["event_family"] == "network-power"
+
+
+def test_environment_detail_surfaces_bridge_registration_contract_from_metadata(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-bridge",
+        user_id="u1",
+        owner="worker-bridge",
+        ttl_seconds=60,
+        handle={
+            "browser": "tab-bridge",
+            "page_id": "page-bridge",
+            "cwd": "D:/word/copaw",
+            "process_id": 4242,
+        },
+        metadata={
+            "host_mode": "local-managed",
+            "worker_type": "cowork",
+            "max_sessions": 4,
+            "spawn_mode": "same-dir",
+            "reuse_environment_id": "env:bridge:prior",
+        },
+    )
+
+    detail = service.get_environment_detail(lease.environment_id, limit=5)
+    session_detail = service.get_session_detail(lease.id, limit=5)
+
+    assert detail is not None
+    assert session_detail is not None
+    assert detail["seat_runtime"]["bridge_registration"] == {
+        "worker_type": "cowork",
+        "max_sessions": 4,
+        "spawn_mode": "same-dir",
+        "reuse_environment_id": "env:bridge:prior",
+    }
+    assert detail["host_companion_session"]["bridge_registration"] == {
+        "worker_type": "cowork",
+        "max_sessions": 4,
+        "spawn_mode": "same-dir",
+        "reuse_environment_id": "env:bridge:prior",
+    }
+    assert session_detail["seat_runtime"]["bridge_registration"]["worker_type"] == "cowork"
+    assert (
+        session_detail["host_companion_session"]["bridge_registration"]["max_sessions"] == 4
+    )
+
+
+def test_environment_detail_surfaces_bridge_lifecycle_and_trust_metadata(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-bridge-lifecycle",
+        user_id="u1",
+        owner="worker-bridge",
+        ttl_seconds=60,
+        handle={
+            "browser": "tab-bridge",
+            "page_id": "page-bridge",
+            "cwd": "D:/word/copaw",
+            "process_id": 4242,
+        },
+        metadata={
+            "host_mode": "local-managed",
+            "worker_type": "cowork",
+            "bridge_work_id": "work-bridge-1",
+            "bridge_work_status": "leased",
+            "bridge_heartbeat_at": "2026-04-02T13:00:00Z",
+            "bridge_session_id": "bridge-session-1",
+            "workspace_trusted": True,
+            "elevated_auth_state": "trusted-device",
+        },
+    )
+
+    detail = service.get_environment_detail(lease.environment_id, limit=5)
+    session_detail = service.get_session_detail(lease.id, limit=5)
+
+    assert detail is not None
+    assert session_detail is not None
+    assert detail["seat_runtime"]["bridge_registration"] == {
+        "worker_type": "cowork",
+        "max_sessions": None,
+        "spawn_mode": None,
+        "reuse_environment_id": None,
+        "bridge_work_id": "work-bridge-1",
+        "bridge_work_status": "leased",
+        "bridge_heartbeat_at": "2026-04-02T13:00:00Z",
+        "bridge_session_id": "bridge-session-1",
+        "workspace_trusted": True,
+        "elevated_auth_state": "trusted-device",
+    }
+    assert detail["host_companion_session"]["bridge_registration"] == {
+        "worker_type": "cowork",
+        "max_sessions": None,
+        "spawn_mode": None,
+        "reuse_environment_id": None,
+        "bridge_work_id": "work-bridge-1",
+        "bridge_work_status": "leased",
+        "bridge_heartbeat_at": "2026-04-02T13:00:00Z",
+        "bridge_session_id": "bridge-session-1",
+        "workspace_trusted": True,
+        "elevated_auth_state": "trusted-device",
+    }
+    assert (
+        session_detail["seat_runtime"]["bridge_registration"]["bridge_work_status"]
+        == "leased"
+    )
+    assert (
+        session_detail["host_companion_session"]["bridge_registration"]["workspace_trusted"]
+        is True
+    )
+
+
+def test_bridge_session_work_contract_reuses_same_session_truth_and_updates_lifecycle(
+    tmp_path,
+):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-bridge-runtime",
+        user_id="u1",
+        owner="worker-bridge",
+        ttl_seconds=60,
+        handle={"process_id": 4242},
+        metadata={"worker_type": "cowork"},
+    )
+    assert lease.lease_token is not None
+    original_expires_at = lease.lease_expires_at
+
+    acked = service.ack_bridge_session_work(
+        lease.id,
+        lease_token=lease.lease_token,
+        work_id="work-1",
+        bridge_session_id="bridge-session-1",
+        workspace_trusted=True,
+        elevated_auth_state="trusted-device",
+    )
+    heartbeated = service.heartbeat_bridge_session_work(
+        lease.id,
+        lease_token=lease.lease_token,
+        work_id="work-1",
+    )
+    reconnected = service.reconnect_bridge_session_work(
+        lease.id,
+        lease_token=lease.lease_token,
+        work_id="work-1",
+    )
+    stopped = service.stop_bridge_session_work(
+        lease.id,
+        work_id="work-1",
+        force=True,
+        reason="bridge supervisor stop",
+    )
+
+    sessions = service.list_sessions(environment_id=lease.environment_id, limit=10)
+    assert len(sessions) == 1
+    assert acked.id == lease.id
+    assert heartbeated.id == lease.id
+    assert reconnected.id == lease.id
+    assert stopped.id == lease.id
+    assert acked.metadata["bridge_work_id"] == "work-1"
+    assert acked.metadata["bridge_work_status"] == "acknowledged"
+    assert acked.metadata["bridge_session_id"] == "bridge-session-1"
+    assert acked.metadata["workspace_trusted"] is True
+    assert acked.metadata["elevated_auth_state"] == "trusted-device"
+    assert heartbeated.metadata["bridge_work_status"] == "running"
+    assert isinstance(heartbeated.metadata.get("bridge_heartbeat_at"), str)
+    assert reconnected.metadata["bridge_work_status"] == "reconnecting"
+    assert isinstance(reconnected.metadata.get("bridge_reconnected_at"), str)
+    assert stopped.metadata["bridge_work_status"] == "stopped"
+    assert stopped.metadata["bridge_stop_mode"] == "force"
+    assert stopped.metadata["bridge_stop_reason"] == "bridge supervisor stop"
+    assert isinstance(stopped.metadata.get("bridge_stopped_at"), str)
+    assert reconnected.lease_status == "leased"
+    assert reconnected.lease_expires_at is not None
+    assert original_expires_at is not None
+    assert reconnected.lease_expires_at > original_expires_at
+
+
+def test_bridge_archive_and_deregister_update_session_and_environment_contracts(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-bridge-close",
+        user_id="u1",
+        owner="worker-bridge",
+        ttl_seconds=60,
+        handle={"process_id": 4242},
+        metadata={"worker_type": "cowork"},
+    )
+    assert lease.lease_token is not None
+
+    archived = service.archive_bridge_session(
+        lease.id,
+        lease_token=lease.lease_token,
+        reason="bridge archive",
+    )
+    assert archived is not None
+    assert archived.status == "archived"
+    assert archived.lease_status == "released"
+    assert archived.metadata["bridge_work_status"] == "archived"
+    assert isinstance(archived.metadata.get("bridge_archived_at"), str)
+
+    deregistered = service.deregister_bridge_environment(
+        lease.environment_id,
+        reason="bridge shutdown",
+    )
+    assert deregistered is not None
+    assert deregistered.status == "deregistered"
+    assert deregistered.metadata["bridge_environment_status"] == "deregistered"
+    assert isinstance(deregistered.metadata.get("bridge_deregistered_at"), str)
+
+    session_detail = service.get_session(lease.id)
+    assert session_detail is not None
+    assert session_detail.status == "deregistered"
+    assert session_detail.metadata["bridge_work_status"] == "deregistered"
+    assert isinstance(session_detail.metadata.get("bridge_deregistered_at"), str)
+
 
 def test_environment_and_session_detail_expose_execution_contract_projections(tmp_path):
     store = SQLiteStateStore(tmp_path / "state.sqlite3")

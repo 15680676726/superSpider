@@ -964,7 +964,10 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
       action: "approve" | "reject" | "review",
       payload?: Record<string, unknown>,
     ) => {
-      const route = `/runtime-center/decisions/${encodeURIComponent(decisionId)}/${action}`;
+      const route =
+        action === "review"
+          ? `/runtime-center/governed/decisions/${encodeURIComponent(decisionId)}/review`
+          : `/runtime-center/decisions/${encodeURIComponent(decisionId)}/${action}`;
       const actionKey = `decision:${action}:${decisionId}`;
       setCapabilityActionKey(actionKey);
       try {

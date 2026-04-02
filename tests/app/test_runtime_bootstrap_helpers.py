@@ -219,6 +219,8 @@ def test_build_runtime_query_services_returns_memory_activation_service_when_ava
     assert bootstrap[8] is not None
     assert created["derived_index_service"] is bootstrap[4]
     assert created["strategy_memory_service"] is bootstrap[2]
+    assert not hasattr(bootstrap[0], "_kernel_dispatcher")
+    assert not hasattr(bootstrap[0], "_runtime_event_bus")
 
 
 def test_attach_runtime_state_binds_bootstrap_and_manager_stack() -> None:
@@ -528,12 +530,7 @@ def test_build_kernel_runtime_threads_state_store_into_capability_service(
         agent_checkpoint_repository=object(),
         agent_thread_binding_repository=object(),
     )
-    state_query_service = SimpleNamespace(
-        set_kernel_dispatcher=lambda dispatcher: captured.setdefault(
-            "state_query_dispatcher",
-            dispatcher,
-        ),
-    )
+    state_query_service = SimpleNamespace()
 
     _build_kernel_runtime(
         mcp_manager=object(),
@@ -551,6 +548,7 @@ def test_build_kernel_runtime_threads_state_store_into_capability_service(
     capability_service_kwargs = captured["capability_service_kwargs"]
     assert isinstance(capability_service_kwargs, dict)
     assert capability_service_kwargs["state_store"] is state_store
+    assert "state_query_dispatcher" not in captured
 
 
 def test_runtime_manager_stack_from_app_state_reads_current_refs() -> None:

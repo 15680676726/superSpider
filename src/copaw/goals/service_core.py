@@ -44,6 +44,7 @@ class _GoalServiceCoreMixin:
         self._industry_instance_repository = industry_instance_repository
         self._runtime_event_bus = runtime_event_bus
         self._industry_service: object | None = None
+        self._assignment_planning_compiler = AssignmentPlanningCompiler()
         self._background_goal_execution_active_task_ids: set[str] = set()
         if dispatcher is not None:
             setter = getattr(dispatcher, "set_goal_service", None)

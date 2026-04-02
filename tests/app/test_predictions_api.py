@@ -11,6 +11,8 @@ from copaw.app.routers.predictions import router as predictions_router
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.capabilities import CapabilityService
 from copaw.capabilities.remote_skill_contract import RemoteSkillCandidate
+from copaw.config import load_config, save_config
+from copaw.config.config import MCPClientConfig
 from copaw.evidence import EvidenceLedger
 from copaw.evidence.models import EvidenceRecord
 from copaw.goals import GoalService
@@ -191,12 +193,23 @@ def _build_predictions_app(
         repository=strategy_memory_repository,
     )
     skill_service = _InMemorySkillService()
+    config_path = tmp_path / "copaw-config.json"
+    config = load_config(config_path)
+    config.mcp.clients["desktop_windows"] = MCPClientConfig(
+        name="Desktop Windows",
+        enabled=False,
+        command="npx",
+        args=["-y", "@jason.today/webmcp@latest"],
+    )
+    save_config(config, config_path)
 
     capability_service = CapabilityService(
         evidence_ledger=evidence_ledger,
         turn_executor=FakeTurnExecutor(),
         agent_profile_override_repository=agent_profile_override_repository,
         skill_service=skill_service,
+        load_config_fn=lambda: load_config(config_path),
+        save_config_fn=lambda config: save_config(config, config_path),
     )
     task_store = KernelTaskStore(
         task_repository=task_repository,
@@ -412,6 +425,7 @@ def _build_predictions_app(
     app.state.agent_profile_override_repository = agent_profile_override_repository
     app.state.evidence_ledger = evidence_ledger
     app.state.workflow_run_repository = workflow_run_repository
+    app.state.config_path = config_path
 
     return app
 
@@ -617,6 +631,144 @@ def test_prediction_cycle_case_deduplicates_same_operating_fingerprint(tmp_path)
     assert len(service.list_cases(case_kind="cycle")) == 1
 
 
+def test_prediction_cycle_case_exposes_light_formal_planning_context_in_detail(tmp_path) -> None:
+    app = _build_predictions_app(tmp_path)
+    service = app.state.prediction_service
+
+    detail = service.create_cycle_case(
+        industry_instance_id="industry-demo",
+        industry_label="Demo Industry",
+        owner_scope="industry-demo-scope",
+        owner_agent_id="copaw-agent-runner",
+        actor="system:operating-cycle",
+        cycle_id="cycle-1",
+        pending_report_ids=["report-a", "report-b"],
+        open_backlog_ids=["backlog-a"],
+        open_backlog_source_refs=["operator:backlog-a"],
+        goal_statuses={"goal-prediction": "active"},
+        meeting_window="morning",
+        participant_inputs=[
+            {
+                "assignment_id": "assignment-1",
+                "owner_agent_id": "industry-solution-lead-demo",
+                "summary": "Researcher returned the latest market blockers.",
+            }
+        ],
+        assignment_summaries=[
+            {
+                "assignment_id": "assignment-1",
+                "headline": "Need a governed desktop capability decision",
+            }
+        ],
+        lane_summaries=[
+            {
+                "lane_id": "lane-growth",
+                "title": "Growth lane still blocked by runtime friction",
+            }
+        ],
+        formal_planning_context={
+            "review_ref": "formal-review:industry-demo:cycle-1",
+            "review_window": "morning-review",
+            "summary": "Formal planner wants the main brain to review report pressure.",
+            "planning_policy": ["prefer-followup-before-net-new"],
+            "selected_lane_ids": ["lane-growth"],
+            "selected_backlog_item_ids": ["backlog-a"],
+            "metadata": {
+                "pending_report_count": 2,
+                "open_backlog_count": 1,
+            },
+        },
+        report_synthesis={
+            "recommended_actions": [{"action_id": "follow-up:1"}],
+            "replan_directives": [{"directive_id": "dir-1"}],
+            "activation": {"top_constraints": ["Need validated weekend cause."]},
+            "replan_decision": {
+                "decision_id": "report-synthesis:needs-replan:failed-report:1",
+                "status": "needs-replan",
+                "summary": "1 unresolved report synthesis signal requires main-brain judgment.",
+                "reason_ids": ["failed-report:1"],
+                "source_report_ids": ["report-a"],
+                "topic_keys": ["weekend-variance"],
+            },
+        },
+    )
+
+    assert detail is not None
+    planning = detail.case["planning"]
+    assert planning["is_truth_store"] is False
+    assert planning["source"] == "formal-cycle-review-overlap"
+    assert planning["review_ref"] == "formal-review:industry-demo:cycle-1"
+    assert planning["review_window"] == "morning-review"
+    assert planning["planning_policy"] == ["prefer-followup-before-net-new"]
+    assert planning["selected_lane_ids"] == ["lane-growth"]
+    assert planning["selected_backlog_item_ids"] == ["backlog-a"]
+    assert planning["participant_count"] == 1
+    assert planning["assignment_count"] == 1
+    assert planning["lane_count"] == 1
+    assert planning["pending_report_count"] == 2
+    assert planning["open_backlog_count"] == 1
+    assert planning["replan"]["status"] == "needs-replan"
+    assert planning["replan"]["decision_id"] == (
+        "report-synthesis:needs-replan:failed-report:1"
+    )
+    assert planning["replan"]["reason_ids"] == ["failed-report:1"]
+    assert planning["replan"]["directive_count"] == 1
+    assert planning["replan"]["recommended_action_count"] == 1
+    assert planning["replan"]["activation_keys"] == ["top_constraints"]
+    assert detail.case["input_payload"]["planning"]["review_ref"] == (
+        "formal-review:industry-demo:cycle-1"
+    )
+    assert detail.case["metadata"]["planning_snapshot"]["replan"]["status"] == (
+        "needs-replan"
+    )
+    assert detail.stats["planning_overlap"] is True
+    assert detail.stats["planning_replan_status"] == "needs-replan"
+
+
+def test_prediction_cycle_case_reuses_formal_planning_review_identity_for_dedupe(
+    tmp_path,
+) -> None:
+    app = _build_predictions_app(tmp_path)
+    service = app.state.prediction_service
+
+    first = service.create_cycle_case(
+        industry_instance_id="industry-demo",
+        industry_label="Demo Industry",
+        owner_scope="industry-demo-scope",
+        owner_agent_id="copaw-agent-runner",
+        actor="system:operating-cycle",
+        cycle_id="cycle-1",
+        pending_report_ids=["report-a"],
+        open_backlog_ids=["backlog-a"],
+        meeting_window="morning",
+        formal_planning_context={
+            "review_ref": "formal-review:industry-demo:cycle-1",
+            "review_window": "morning-review",
+        },
+    )
+    second = service.create_cycle_case(
+        industry_instance_id="industry-demo",
+        industry_label="Demo Industry",
+        owner_scope="industry-demo-scope",
+        owner_agent_id="copaw-agent-runner",
+        actor="system:planning-review",
+        cycle_id="cycle-1",
+        pending_report_ids=["report-b"],
+        open_backlog_ids=["backlog-b"],
+        meeting_window="cycle-review",
+        formal_planning_context={
+            "review_ref": "formal-review:industry-demo:cycle-1",
+            "review_window": "morning-review",
+        },
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first.case["planning"]["review_ref"] == "formal-review:industry-demo:cycle-1"
+    assert second.case["case_id"] == first.case["case_id"]
+    assert len(service.list_cases(case_kind="cycle")) == 1
+
+
 def test_prediction_recommendation_executes_through_kernel(tmp_path) -> None:
     app = _build_predictions_app(tmp_path)
     client = TestClient(app)
@@ -635,6 +787,7 @@ def test_prediction_recommendation_executes_through_kernel(tmp_path) -> None:
         recommendation_id=recommendation_id,
     )
     assert payload["execution"]["phase"] == "completed"
+    assert load_config(app.state.config_path).mcp.clients["desktop_windows"].enabled is True
     assert payload["detail"]["case"]["case_id"] == case_id
     refreshed = next(
         item
