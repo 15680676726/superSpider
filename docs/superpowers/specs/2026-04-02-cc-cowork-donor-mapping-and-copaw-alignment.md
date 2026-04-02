@@ -152,21 +152,27 @@ Canonical operations now exist on one formal chain:
 Status:
 
 - landed as formal CoPaw read/write contract
-- still not proof that an external bridge producer is emitting the full lifecycle end to end
+- external bridge producers can now drive the same lifecycle end to end through the canonical Runtime Center bridge surface
+- browser-attach transport facts now ride that same session/environment truth instead of a side channel
 
 ### 5.2 Accepted persistence boundary and truthful commit tail
 
 Landed shape:
 
 - pre-stream accepted persistence checkpoint
+- bound execution-core chat turns now force a durable snapshot save before model execution starts
+- bound execution-core chat turns now force a second snapshot save after the reply is materialized and before commit handling
 - accepted persistence recorded into runtime context
 - `commit_failed` emitted explicitly
 - optimistic `committed` suppressed when runtime context already knows writeback failed
+- downstream writeback failure returned from `MainBrainResultCommitter` no longer gets flattened into optimistic `committed`
 
 Status:
 
-- materially better than the old CoPaw behavior
-- still weaker than the donor's stricter flush discipline before long execution and before final handoff
+- landed on the current runtime chat and session-backed main-brain chat front doors
+- session-backed pure chat turns now use the same accepted-first durability discipline
+- attached-intake writeback and kickoff outcomes now normalize onto the same `accepted_persistence / commit_outcome` contract
+- future chat producers must stay on this contract instead of inventing parallel commit semantics
 
 ### 5.3 Hidden tail split and first-class reply lifecycle visibility
 
@@ -185,7 +191,8 @@ Landed shape:
 Status:
 
 - reply/commit separation is now visible on the chat page
-- strict donor-grade durability semantics are still not complete
+- the current runtime chat surfaces now expose the durable lifecycle on the same thread/control-thread contract
+- future chat surfaces must continue to emit the same lifecycle contract instead of a parallel tail protocol
 
 ### 5.4 Prompt-safe app/window labels on the read model
 
@@ -222,31 +229,88 @@ Landed shape:
 Status:
 
 - landed for the Windows app execution boundary
-- still not the same as donor-complete global ESC hotkey plumbing
-- browser/document execution paths do not yet have equivalent execution-time guardrails
+- shared operator-abort truth is covered separately in `5.7`; Windows actions stay on that same canonical guardrail chain
 
-## 6. Remaining Alignment Work
+### 5.6 Execution-time browser/document guardrails
 
-1. Complete donor-grade chat durability
-   - persist and flush accepted input before long execution
-   - make `committed` a strict proof of durable writeback success across the whole chat pipeline
+Landed shape:
 
-2. Complete external bridge producer/runtime wiring
-   - the formal lifecycle surface exists
-   - external bridge workers still need to drive it end to end
+- `surface_control_service.execute_document_action(...)` now enforces:
+  - operator abort
+  - host exclusion
+  - frontmost verification
+  - clipboard round-trip verification
+- `surface_control_service.execute_browser_action(...)` now enforces the same guardrail set on the current live browser companion execution boundary
+- runtime-level guardrails now flow from canonical adapter metadata:
+  - `document_bridge.execution_guardrails`
+  - `browser_companion.execution_guardrails`
+- per-call `contract.guardrails` can still override or extend runtime guardrails
+- guardrail blocks publish surface-specific runtime events:
+  - `document.guardrail-blocked`
+  - `browser.guardrail-blocked`
 
-3. Harden remote-session transport reliability where that transport shape exists
+Status:
+
+- landed for the current document/browser live execution boundaries
+- future browser/document executor variants must stay on this same guardrail contract instead of inventing parallel checks
+
+### 5.7 Canonical global operator abort truth and live execution enforcement
+
+Landed shape:
+
+- shared operator-abort state now lives on the canonical session/environment truth
+- formal write/clear surfaces exist on the same Runtime Center lifecycle plane
+- read models expose the same operator-abort truth through:
+  - `cooperative_adapter_availability.operator_abort_state`
+  - `desktop_app_contract.operator_abort_state`
+  - downstream execution guardrails on browser/document/windows surfaces
+- browser/document/windows live execution boundaries all merge the shared operator-abort truth before action dispatch
+- blocked actions emit surface-specific guardrail events and browser tool execution respects the same operator-abort truth
+
+Status:
+
+- landed for the current canonical runtime and live execution surfaces
+- donor-style OS-specific ESC capture is now an adapter-side producer concern, not a missing core-runtime truth path
+
+### 5.8 Stable host-scoped memory continuity
+
+Landed shape:
+
+- `work_context_id` now flows through canonical host/session/workspace projections
+- browser companion and other cooperative session truth can carry the same `work_context_id`
+- truth-first memory recall already prefers `work_context` scope over broader fallbacks when present
+- runtime chat media retain/adopt and main-brain scope snapshots now share the same `work_context / industry / agent` dirty-marking chain
+- scope snapshot refresh is incremental on that formal chain instead of donor-style file-backed memory heuristics
+
+Status:
+
+- landed on the formal `work_context_id` truth chain
+- no donor-style file memory, repo/worktree heuristics, or second memory truth has been introduced
+
+### 5.9 Current-host acceptance evidence
+
+Fresh evidence on the current host:
+
+- focused regression:
+  - `PYTHONPATH=src python -m pytest tests/kernel/test_query_execution_runtime.py tests/environments/test_cooperative_browser_attach_runtime.py tests/environments/test_environment_registry.py tests/environments/test_cooperative_windows_apps.py tests/agents/test_browser_tool_evidence.py tests/app/runtime_center_api_parts/detail_environment.py -q`
+  - result: `107 passed`
+- live browser/desktop smoke:
+  - `COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 PYTHONPATH=src python -m pytest tests/routines/test_live_routine_smoke.py -q -k "authenticated_continuation_cross_tab_save_reopen_smoke or live_desktop_routine_replay_round_trip"`
+  - result: `1 passed, 1 skipped`
+
+Interpretation:
+
+- the browser smoke passed on the real browser routine chain and proved authenticated continuation, cross-tab reuse, save-and-reopen, download initiation, and screenshot evidence on one canonical runtime path
+- the desktop smoke remained host-gated on this machine because the host session could not provide a resolvable foreground window; that is a live-host precondition failure, not a missing second runtime truth or missing canonical abort chain
+- donor parity is therefore stronger on the browser continuation/runtime-discipline side than on this machine's current desktop live smoke preconditions
+
+## 6. Conditional Future Follow-ups
+
+1. Harden remote-session transport reliability where that transport shape exists
    - stall-timer clearing on inbound activity
    - reconnect behavior for stalled remote sessions
-   - only needed if CoPaw grows the same remote-session shape
-
-4. Extend execution-time guardrails beyond the Windows app boundary
-   - browser/document parity
-   - end-to-end global operator abort plumbing
-
-5. Formalize stable host-scoped memory continuity
-   - do it through `work_context_id` and formal mount/session truth
-   - do not add donor-style file memory or repo/worktree heuristics
+   - only needed if CoPaw grows the same remote-session transport shape as the donor
+   - this is not a reason to introduce a parallel remote-session subsystem preemptively
 
 ## 7. Acceptance Criteria
 
@@ -259,11 +323,15 @@ This donor alignment is real only if:
 5. Runtime Center and other read surfaces consume the same host continuity truth
 6. execution-time guardrails are enforced on live execution paths, not only projected on read models
 7. no second `cowork` store, config namespace, plugin namespace, or file-backed memory truth is introduced
+8. shared operator-abort truth blocks live browser/document/windows execution on the same canonical session/environment chain
+9. host/session continuity and truth-first memory continuity both resolve through `work_context_id` instead of repo/worktree/file heuristics
 
 ## 8. Testing Direction
 
 Targeted verification should continue to cover:
 
+- `tests/environments/test_cooperative_browser_companion.py`
+- `tests/environments/test_cooperative_document_bridge.py`
 - `tests/environments/test_environment_registry.py`
 - `tests/environments/test_cooperative_windows_apps.py`
 - `tests/app/runtime_center_api_parts/detail_environment.py`

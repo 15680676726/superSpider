@@ -1217,6 +1217,11 @@ def test_runtime_center_bridge_lifecycle_endpoints_drive_canonical_environment_c
             "bridge_session_id": "bridge-session-1",
             "workspace_trusted": True,
             "elevated_auth_state": "trusted-device",
+            "browser_attach_transport_ref": "transport:cdp:bridge-ack",
+            "browser_attach_status": "attached",
+            "browser_attach_session_ref": "browser-session:web:main",
+            "browser_attach_scope_ref": "site:jd:seller-center",
+            "browser_attach_reconnect_token": "reconnect-token-1",
         },
     )
     assert ack.status_code == 200
@@ -1238,6 +1243,11 @@ def test_runtime_center_bridge_lifecycle_endpoints_drive_canonical_environment_c
         json={
             "lease_token": lease.lease_token,
             "work_id": "work-1",
+            "browser_attach_transport_ref": "transport:cdp:bridge-reconnect",
+            "browser_attach_status": "reconnecting",
+            "browser_attach_session_ref": "browser-session:web:main",
+            "browser_attach_scope_ref": "site:jd:seller-center",
+            "browser_attach_reconnect_token": "reconnect-token-2",
         },
     )
     assert reconnect.status_code == 200
@@ -1279,6 +1289,20 @@ def test_runtime_center_bridge_lifecycle_endpoints_drive_canonical_environment_c
     assert detail_payload["seat_runtime"]["bridge_registration"][
         "bridge_work_status"
     ] == "stopped"
+    assert (
+        detail_payload["browser_site_contract"]["attach_transport_ref"]
+        == "transport:cdp:bridge-reconnect"
+    )
+    assert (
+        detail_payload["browser_site_contract"]["attach_reconnect_token"]
+        == "reconnect-token-2"
+    )
+    assert (
+        detail_payload["cooperative_adapter_availability"]["browser_companion"][
+            "transport_ref"
+        ]
+        == "transport:cdp:bridge-reconnect"
+    )
 
     archive = client.post(
         f"/runtime-center/sessions/{lease.id}/bridge/archive",
@@ -1317,6 +1341,129 @@ def test_runtime_center_bridge_lifecycle_endpoints_drive_canonical_environment_c
     assert "session.bridge-work-stopped" in event_names
     assert "session.bridge-session-archived" in event_names
     assert "session.bridge-environment-deregistered" in event_names
+
+
+def test_runtime_center_shared_operator_abort_endpoints_drive_canonical_environment_truth(
+    tmp_path,
+) -> None:
+    from copaw.environments import (
+        EnvironmentRegistry,
+        EnvironmentRepository,
+        EnvironmentService,
+        SessionMountRepository,
+    )
+
+    app = build_runtime_center_app()
+    state_store = SQLiteStateStore(tmp_path / "operator-abort-runtime-center.sqlite3")
+    environment_repository = EnvironmentRepository(state_store)
+    session_repository = SessionMountRepository(state_store)
+    registry = EnvironmentRegistry(
+        repository=environment_repository,
+        session_repository=session_repository,
+    )
+    environment_service = EnvironmentService(registry=registry)
+    environment_service.set_session_repository(session_repository)
+    app.state.environment_service = environment_service
+
+    lease = environment_service.acquire_session_lease(
+        channel="desktop",
+        session_id="main",
+        owner="ops-agent",
+        metadata={
+            "environment_ref": "session:web:main",
+            "host_mode": "local-managed",
+            "access_mode": "desktop-app",
+        },
+        handle={"bridge": "worker"},
+    )
+    environment_service.register_windows_app_adapter(
+        session_mount_id=lease.id,
+        adapter_refs=["app-adapter:excel"],
+        app_identity="excel",
+        control_channel="accessibility-tree",
+        execution_guardrails={
+            "operator_abort_channel": "browser",
+        },
+    )
+
+    client = TestClient(app)
+
+    request_abort = client.post(
+        f"/runtime-center/sessions/{lease.id}/operator-abort",
+        json={
+            "channel": "browser",
+            "reason": "operator emergency stop",
+        },
+    )
+    assert request_abort.status_code == 200
+    assert request_abort.json()["metadata"]["operator_abort_state"] == {
+        "channel": "browser",
+        "requested": True,
+        "reason": "operator emergency stop",
+        "requested_at": request_abort.json()["metadata"]["operator_abort_state"][
+            "requested_at"
+        ],
+    }
+
+    session_detail = client.get(f"/runtime-center/sessions/{lease.id}")
+    assert session_detail.status_code == 200
+    session_payload = session_detail.json()
+    assert session_payload["metadata"]["operator_abort_state"]["requested"] is True
+    assert session_payload["metadata"]["operator_abort_state"]["channel"] == "browser"
+    assert session_payload["cooperative_adapter_availability"]["operator_abort_state"] == {
+        "channel": "browser",
+        "requested": True,
+        "reason": "operator emergency stop",
+        "requested_at": session_payload["cooperative_adapter_availability"][
+            "operator_abort_state"
+        ]["requested_at"],
+    }
+    assert (
+        session_payload["cooperative_adapter_availability"]["windows_app_adapters"][
+            "execution_guardrails"
+        ]["operator_abort_requested"]
+        is True
+    )
+
+    environment_detail = client.get(f"/runtime-center/environments/{lease.environment_id}")
+    assert environment_detail.status_code == 200
+    environment_payload = environment_detail.json()
+    assert environment_payload["metadata"]["operator_abort_state"]["requested"] is True
+    assert environment_payload["metadata"]["operator_abort_state"]["channel"] == "browser"
+    assert environment_payload["desktop_app_contract"]["operator_abort_state"] == {
+        "channel": "browser",
+        "requested": True,
+        "reason": "operator emergency stop",
+        "requested_at": environment_payload["desktop_app_contract"][
+            "operator_abort_state"
+        ]["requested_at"],
+    }
+
+    clear_abort = client.post(
+        f"/runtime-center/sessions/{lease.id}/operator-abort/clear",
+        json={},
+    )
+    assert clear_abort.status_code == 200
+    assert clear_abort.json()["metadata"]["operator_abort_state"] == {
+        "channel": "browser",
+        "requested": False,
+        "reason": "operator abort cleared",
+        "requested_at": clear_abort.json()["metadata"]["operator_abort_state"][
+            "requested_at"
+        ],
+    }
+
+    session_detail = client.get(f"/runtime-center/sessions/{lease.id}")
+    assert session_detail.status_code == 200
+    cleared_payload = session_detail.json()
+    assert cleared_payload["metadata"]["operator_abort_state"]["requested"] is False
+    assert cleared_payload["metadata"]["operator_abort_state"]["channel"] == "browser"
+    assert (
+        cleared_payload["cooperative_adapter_availability"]["operator_abort_state"][
+            "requested"
+        ]
+        is False
+    )
 
 
 def test_runtime_center_patch_actions_are_first_class_routes(tmp_path) -> None:

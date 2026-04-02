@@ -33,9 +33,23 @@ class SurfaceControlService:
 
     def __init__(self, environment_service) -> None:
         self._service = environment_service
+        self._browser_companion_executors: dict[str, object] = {}
         self._document_bridge_executors: dict[str, object] = {}
         self._windows_app_executors: dict[str, object] = {}
         self._semantic_surface_executors: dict[str, object] = {}
+
+    def register_browser_companion_executor(
+        self,
+        companion_ref: str,
+        executor: object | None,
+    ) -> None:
+        normalized = self._normalize_string(companion_ref)
+        if normalized is None:
+            raise ValueError("companion_ref is required")
+        if executor is None:
+            self._browser_companion_executors.pop(normalized, None)
+            return
+        self._browser_companion_executors[normalized] = executor
 
     def register_document_bridge_executor(
         self,
@@ -76,6 +90,83 @@ class SurfaceControlService:
             return
         self._semantic_surface_executors[normalized] = executor
 
+    async def execute_browser_action(
+        self,
+        *,
+        session_mount_id: str,
+        action: str,
+        contract: dict[str, Any],
+        host_executor: object | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        snapshot = self._service.browser_companion_snapshot(
+            session_mount_id=session_mount_id,
+        )
+        detail = self._service.get_session_detail(session_mount_id, limit=limit) or {}
+        companion = self._mapping(snapshot.get("browser_companion"))
+        transport_ref = self._normalize_string(companion.get("transport_ref"))
+        provider_session_ref = self._normalize_string(
+            companion.get("provider_session_ref"),
+        )
+        cooperative_executor = self._resolve_browser_companion_executor(
+            transport_ref=transport_ref,
+            provider_session_ref=provider_session_ref,
+        )
+        blocker = self._normalize_string(snapshot.get("adapter_gap_or_blocker"))
+        if (
+            transport_ref is not None or provider_session_ref is not None
+        ) and cooperative_executor is None:
+            blocker = blocker or (
+                "Browser companion executor is not registered for the active transport."
+            )
+        cooperative_refs = [
+            ref
+            for ref in (transport_ref, provider_session_ref)
+            if ref is not None
+        ]
+        resolution = self._service.resolve_execution_path(
+            surface_kind="browser",
+            cooperative_available=bool(companion.get("available")) and callable(cooperative_executor),
+            cooperative_refs=cooperative_refs or None,
+            cooperative_blocker=blocker,
+            semantic_available=False,
+            ui_available=callable(host_executor),
+            ui_ref="browser-ui-host",
+        )
+        selected_executor = self._resolve_selected_executor(
+            resolution.selected_path,
+            cooperative_executor=cooperative_executor,
+            semantic_executor=None,
+            host_executor=host_executor,
+        )
+        browser_site_contract = self._mapping(detail.get("browser_site_contract"))
+        await self._enforce_browser_guardrails(
+            session_mount_id=session_mount_id,
+            action=action,
+            contract=contract,
+            snapshot=snapshot,
+            selected_executor=selected_executor,
+            transport_ref=transport_ref,
+            provider_session_ref=provider_session_ref,
+            default_expected_frontmost_ref=self._normalize_string(
+                browser_site_contract.get("active_tab_ref"),
+                browser_site_contract.get("site_contract_ref"),
+            ),
+        )
+        result = await self._execute_selected_path(
+            resolution.selected_path,
+            cooperative_executor=cooperative_executor,
+            semantic_executor=None,
+            host_executor=host_executor,
+            session_mount_id=session_mount_id,
+            action=action,
+            contract=contract,
+            snapshot=snapshot,
+            transport_ref=transport_ref,
+            provider_session_ref=provider_session_ref,
+        )
+        return self._decorate_result(result=result, resolution=resolution)
+
     async def execute_document_action(
         self,
         *,
@@ -110,6 +201,21 @@ class SurfaceControlService:
             semantic_available=False,
             ui_available=callable(host_executor),
             ui_ref="windows-desktop-host",
+        )
+        selected_executor = self._resolve_selected_executor(
+            resolution.selected_path,
+            cooperative_executor=cooperative_executor,
+            semantic_executor=None,
+            host_executor=host_executor,
+        )
+        await self._enforce_document_guardrails(
+            session_mount_id=session_mount_id,
+            action=action,
+            contract=contract,
+            snapshot=snapshot,
+            selected_executor=selected_executor,
+            bridge_ref=bridge_ref,
+            document_family=resolved_family,
         )
         result = await self._execute_selected_path(
             resolution.selected_path,
@@ -249,20 +355,110 @@ class SurfaceControlService:
         app_identity: str | None,
         control_channel: str | None,
     ) -> None:
-        runtime_guardrails = self._mapping(
-            self._mapping(snapshot.get("windows_app_adapters")).get("execution_guardrails"),
+        desktop_contract = self._mapping(snapshot.get("desktop_app_contract"))
+        await self._enforce_live_execution_guardrails(
+            session_mount_id=session_mount_id,
+            action=action,
+            contract=contract,
+            snapshot=snapshot,
+            selected_executor=selected_executor,
+            runtime_guardrails=self._mapping(
+                self._mapping(snapshot.get("windows_app_adapters")).get("execution_guardrails"),
+            ),
+            surface_label="Windows app",
+            event_topic="desktop",
+            default_expected_frontmost_ref=self._normalize_string(
+                desktop_contract.get("active_window_ref"),
+                desktop_contract.get("window_scope"),
+            ),
+            app_identity=app_identity,
+            control_channel=control_channel,
         )
+
+    async def _enforce_browser_guardrails(
+        self,
+        *,
+        session_mount_id: str,
+        action: str,
+        contract: dict[str, Any],
+        snapshot: dict[str, Any],
+        selected_executor: object | None,
+        transport_ref: str | None,
+        provider_session_ref: str | None,
+        default_expected_frontmost_ref: str | None,
+    ) -> None:
+        await self._enforce_live_execution_guardrails(
+            session_mount_id=session_mount_id,
+            action=action,
+            contract=contract,
+            snapshot=snapshot,
+            selected_executor=selected_executor,
+            runtime_guardrails=self._mapping(
+                self._mapping(snapshot.get("browser_companion")).get("execution_guardrails"),
+            ),
+            surface_label="Browser",
+            event_topic="browser",
+            default_expected_frontmost_ref=default_expected_frontmost_ref,
+            transport_ref=transport_ref,
+            provider_session_ref=provider_session_ref,
+        )
+
+    async def _enforce_document_guardrails(
+        self,
+        *,
+        session_mount_id: str,
+        action: str,
+        contract: dict[str, Any],
+        snapshot: dict[str, Any],
+        selected_executor: object | None,
+        bridge_ref: str | None,
+        document_family: str | None,
+    ) -> None:
+        await self._enforce_live_execution_guardrails(
+            session_mount_id=session_mount_id,
+            action=action,
+            contract=contract,
+            snapshot=snapshot,
+            selected_executor=selected_executor,
+            runtime_guardrails=self._mapping(
+                self._mapping(snapshot.get("document_bridge")).get("execution_guardrails"),
+            ),
+            surface_label="Document",
+            event_topic="document",
+            bridge_ref=bridge_ref,
+            document_family=document_family,
+        )
+
+    async def _enforce_live_execution_guardrails(
+        self,
+        *,
+        session_mount_id: str,
+        action: str,
+        contract: dict[str, Any],
+        snapshot: dict[str, Any],
+        selected_executor: object | None,
+        runtime_guardrails: dict[str, Any],
+        surface_label: str,
+        event_topic: str,
+        default_expected_frontmost_ref: str | None = None,
+        **executor_kwargs,
+    ) -> None:
         explicit_guardrails = self._mapping(contract.get("guardrails"))
         guardrails = {
             **runtime_guardrails,
             **explicit_guardrails,
         }
+        guardrails = self._merge_shared_operator_abort_guardrails(
+            session_mount_id=session_mount_id,
+            guardrails=guardrails,
+        )
         if "excluded_surface_refs" not in guardrails and "host_exclusion_refs" in guardrails:
             guardrails["excluded_surface_refs"] = guardrails.get("host_exclusion_refs")
         if not guardrails:
             return
         if bool(guardrails.get("operator_abort_requested")):
             self._publish_guardrail_event(
+                topic=event_topic,
                 session_mount_id=session_mount_id,
                 action=action,
                 guardrail_kind="operator-abort",
@@ -273,18 +469,15 @@ class SurfaceControlService:
                     ),
                 },
             )
-            raise RuntimeError("Windows app action blocked: operator abort is pending.")
+            raise RuntimeError(f"{surface_label} action blocked: operator abort is pending.")
 
-        desktop_contract = self._mapping(snapshot.get("desktop_app_contract"))
-        expected_frontmost_ref = self._normalize_string(guardrails.get("expected_frontmost_ref"))
+        expected_frontmost_ref = self._normalize_string(
+            guardrails.get("expected_frontmost_ref"),
+            default_expected_frontmost_ref,
+        )
         frontmost_verification_required = bool(
             guardrails.get("frontmost_verification_required"),
         ) or expected_frontmost_ref is not None
-        if expected_frontmost_ref is None and frontmost_verification_required:
-            expected_frontmost_ref = self._normalize_string(
-                desktop_contract.get("active_window_ref"),
-                desktop_contract.get("window_scope"),
-            )
         excluded_surface_refs = self._string_list(guardrails.get("excluded_surface_refs"))
         if not excluded_surface_refs:
             excluded_surface_refs = self._string_list(guardrails.get("host_exclusion_refs"))
@@ -296,25 +489,26 @@ class SurfaceControlService:
             action=action,
             contract=contract,
             snapshot=snapshot,
-            app_identity=app_identity,
-            control_channel=control_channel,
             frontmost_verification_required=frontmost_verification_required,
             clipboard_roundtrip_required=clipboard_roundtrip_required,
+            **executor_kwargs,
         )
-        frontmost_window_ref = self._normalize_string(
+        frontmost_surface_ref = self._normalize_string(
+            guardrail_snapshot.get("frontmost_surface_ref"),
             guardrail_snapshot.get("frontmost_window_ref"),
-            desktop_contract.get("active_window_ref"),
-            desktop_contract.get("window_scope"),
+            guardrail_snapshot.get("active_surface_ref"),
+            guardrail_snapshot.get("active_tab_ref"),
         )
         if (
-            frontmost_window_ref is None
+            frontmost_surface_ref is None
             and guardrail_snapshot.get("frontmost_verified") is True
             and expected_frontmost_ref is not None
         ):
-            frontmost_window_ref = expected_frontmost_ref
+            frontmost_surface_ref = expected_frontmost_ref
         if excluded_surface_refs:
-            if frontmost_window_ref is None:
+            if frontmost_surface_ref is None:
                 self._publish_guardrail_event(
+                    topic=event_topic,
                     session_mount_id=session_mount_id,
                     action=action,
                     guardrail_kind="host-exclusion-unverifiable",
@@ -323,71 +517,77 @@ class SurfaceControlService:
                 raise RuntimeError(
                     "Host exclusion guardrail blocked: current frontmost surface could not be verified.",
                 )
-            if frontmost_window_ref in excluded_surface_refs:
+            if frontmost_surface_ref in excluded_surface_refs:
                 self._publish_guardrail_event(
+                    topic=event_topic,
                     session_mount_id=session_mount_id,
                     action=action,
                     guardrail_kind="host-exclusion",
                     payload={
-                        "frontmost_window_ref": frontmost_window_ref,
+                        "frontmost_surface_ref": frontmost_surface_ref,
                         "excluded_surface_refs": excluded_surface_refs,
                     },
                 )
                 raise RuntimeError(
-                    f"Host exclusion guardrail blocked: frontmost surface '{frontmost_window_ref}' is excluded.",
+                    f"Host exclusion guardrail blocked: frontmost surface '{frontmost_surface_ref}' is excluded.",
                 )
 
         if frontmost_verification_required:
             if (
                 bool(guardrail_snapshot.get("frontmost_verifier_missing"))
                 and "frontmost_window_ref" not in guardrail_snapshot
+                and "frontmost_surface_ref" not in guardrail_snapshot
                 and guardrail_snapshot.get("frontmost_verified") is not True
             ):
                 self._publish_guardrail_event(
+                    topic=event_topic,
                     session_mount_id=session_mount_id,
                     action=action,
                     guardrail_kind="frontmost-verifier-missing",
                     payload={"expected_frontmost_ref": expected_frontmost_ref},
                 )
                 raise RuntimeError(
-                    "Windows app action blocked: frontmost verification requires a verifier before execution.",
+                    f"{surface_label} action blocked: frontmost verification requires a verifier before execution.",
                 )
             if guardrail_snapshot.get("frontmost_verified") is False:
                 self._publish_guardrail_event(
+                    topic=event_topic,
                     session_mount_id=session_mount_id,
                     action=action,
                     guardrail_kind="frontmost-failed",
                     payload={"expected_frontmost_ref": expected_frontmost_ref},
                 )
                 raise RuntimeError(
-                    "Windows app action blocked: frontmost verification failed.",
+                    f"{surface_label} action blocked: frontmost verification failed.",
                 )
-            if expected_frontmost_ref is not None and frontmost_window_ref is None:
+            if expected_frontmost_ref is not None and frontmost_surface_ref is None:
                 self._publish_guardrail_event(
+                    topic=event_topic,
                     session_mount_id=session_mount_id,
                     action=action,
                     guardrail_kind="frontmost-unverifiable",
                     payload={"expected_frontmost_ref": expected_frontmost_ref},
                 )
                 raise RuntimeError(
-                    "Windows app action blocked: frontmost verification could not determine the active window.",
+                    f"{surface_label} action blocked: frontmost verification could not determine the active surface.",
                 )
             if (
                 expected_frontmost_ref is not None
-                and frontmost_window_ref is not None
-                and frontmost_window_ref != expected_frontmost_ref
+                and frontmost_surface_ref is not None
+                and frontmost_surface_ref != expected_frontmost_ref
             ):
                 self._publish_guardrail_event(
+                    topic=event_topic,
                     session_mount_id=session_mount_id,
                     action=action,
                     guardrail_kind="frontmost-mismatch",
                     payload={
                         "expected_frontmost_ref": expected_frontmost_ref,
-                        "frontmost_window_ref": frontmost_window_ref,
+                        "frontmost_surface_ref": frontmost_surface_ref,
                     },
                 )
                 raise RuntimeError(
-                    f"Windows app action blocked: frontmost window '{frontmost_window_ref}' does not match expected '{expected_frontmost_ref}'.",
+                    f"{surface_label} action blocked: frontmost surface '{frontmost_surface_ref}' does not match expected '{expected_frontmost_ref}'.",
                 )
 
         if clipboard_roundtrip_required:
@@ -396,16 +596,18 @@ class SurfaceControlService:
                 and "clipboard_roundtrip_ok" not in guardrail_snapshot
             ):
                 self._publish_guardrail_event(
+                    topic=event_topic,
                     session_mount_id=session_mount_id,
                     action=action,
                     guardrail_kind="clipboard-verifier-missing",
                     payload={},
                 )
                 raise RuntimeError(
-                    "Windows app action blocked: clipboard roundtrip verification requires a verifier before execution.",
+                    f"{surface_label} action blocked: clipboard roundtrip verification requires a verifier before execution.",
                 )
             if guardrail_snapshot.get("clipboard_roundtrip_ok") is not True:
                 self._publish_guardrail_event(
+                    topic=event_topic,
                     session_mount_id=session_mount_id,
                     action=action,
                     guardrail_kind="clipboard-roundtrip",
@@ -416,8 +618,101 @@ class SurfaceControlService:
                     },
                 )
                 raise RuntimeError(
-                    "Windows app action blocked: clipboard roundtrip verification failed.",
+                    f"{surface_label} action blocked: clipboard roundtrip verification failed.",
                 )
+
+    def _merge_shared_operator_abort_guardrails(
+        self,
+        *,
+        session_mount_id: str,
+        guardrails: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not guardrails:
+            return {}
+        merged = dict(guardrails)
+        shared_abort_state = self._resolve_shared_operator_abort_state(
+            session_mount_id=session_mount_id,
+        )
+        if not shared_abort_state.get("requested"):
+            return merged
+        if not self._abort_channels_match(
+            guardrail_channel=merged.get("operator_abort_channel"),
+            shared_channel=shared_abort_state.get("channel"),
+        ):
+            return merged
+        if shared_abort_state.get("channel") is not None and self._normalize_string(
+            merged.get("operator_abort_channel"),
+        ) is None:
+            merged["operator_abort_channel"] = shared_abort_state["channel"]
+        merged["operator_abort_requested"] = True
+        reason = self._normalize_string(
+            merged.get("abort_reason"),
+            shared_abort_state.get("reason"),
+        )
+        if reason is not None:
+            merged["abort_reason"] = reason
+        if shared_abort_state.get("requested_at") is not None:
+            merged.setdefault("operator_abort_requested_at", shared_abort_state["requested_at"])
+        return merged
+
+    def _resolve_shared_operator_abort_state(
+        self,
+        *,
+        session_mount_id: str,
+    ) -> dict[str, Any]:
+        session = self._service.get_session(session_mount_id)
+        if session is None:
+            return {}
+        environment = None
+        environment_id = self._normalize_string(getattr(session, "environment_id", None))
+        if environment_id is not None:
+            environment = self._service.get_environment(environment_id)
+        session_metadata = self._mapping(getattr(session, "metadata", None))
+        environment_metadata = self._mapping(
+            getattr(environment, "metadata", None) if environment is not None else None,
+        )
+        raw = session_metadata.get("operator_abort_state")
+        if not isinstance(raw, dict):
+            raw = environment_metadata.get("operator_abort_state")
+        if not isinstance(raw, dict):
+            return {}
+        channel = self._normalize_string(
+            raw.get("channel"),
+            raw.get("operator_abort_channel"),
+        )
+        reason = self._normalize_string(
+            raw.get("reason"),
+            raw.get("abort_reason"),
+            channel,
+        )
+        requested_at = self._normalize_string(raw.get("requested_at"))
+        requested = bool(
+            raw.get("requested")
+            if "requested" in raw
+            else raw.get("operator_abort_requested"),
+        )
+        state: dict[str, Any] = {}
+        if channel is not None:
+            state["channel"] = channel
+        if requested:
+            state["requested"] = True
+        if reason is not None:
+            state["reason"] = reason
+        if requested_at is not None:
+            state["requested_at"] = requested_at
+        return state
+
+    def _abort_channels_match(
+        self,
+        *,
+        guardrail_channel: object,
+        shared_channel: object,
+    ) -> bool:
+        normalized_guardrail_channel = self._normalize_string(guardrail_channel)
+        normalized_shared_channel = self._normalize_string(shared_channel)
+        if normalized_guardrail_channel is None or normalized_shared_channel is None:
+            return True
+        return normalized_guardrail_channel == normalized_shared_channel
 
     async def _collect_guardrail_snapshot(
         self,
@@ -439,14 +734,20 @@ class SurfaceControlService:
                 result = self._mapping(await self._invoke(verifier, **kwargs))
                 if "verified" in result:
                     payload["frontmost_verified"] = bool(result.get("verified"))
-                frontmost_window_ref = self._normalize_string(
+                frontmost_surface_ref = self._normalize_string(
+                    result.get("frontmost_surface_ref"),
                     result.get("frontmost_window_ref"),
                     result.get("window_ref"),
                     result.get("active_window_ref"),
+                    result.get("active_surface_ref"),
+                    result.get("active_tab_ref"),
                 )
-                if frontmost_window_ref is not None:
-                    payload["frontmost_window_ref"] = frontmost_window_ref
-            elif "frontmost_window_ref" not in payload:
+                if frontmost_surface_ref is not None:
+                    payload["frontmost_surface_ref"] = frontmost_surface_ref
+            elif (
+                "frontmost_window_ref" not in payload
+                and "frontmost_surface_ref" not in payload
+            ):
                 payload["frontmost_verifier_missing"] = True
         if clipboard_roundtrip_required:
             verifier = getattr(executor, "verify_clipboard_roundtrip", None)
@@ -465,6 +766,7 @@ class SurfaceControlService:
     def _publish_guardrail_event(
         self,
         *,
+        topic: str = "desktop",
         session_mount_id: str,
         action: str,
         guardrail_kind: str,
@@ -480,7 +782,7 @@ class SurfaceControlService:
             "guardrail_kind": guardrail_kind,
             **{key: value for key, value in payload.items() if value is not None},
         }
-        publisher(topic="desktop", action="guardrail-blocked", payload=event_payload)
+        publisher(topic=topic, action="guardrail-blocked", payload=event_payload)
 
     @staticmethod
     def _resolve_selected_executor(
@@ -513,6 +815,21 @@ class SurfaceControlService:
             if normalized is None:
                 continue
             executor = self._windows_app_executors.get(normalized)
+            if executor is not None:
+                return executor
+        return None
+
+    def _resolve_browser_companion_executor(
+        self,
+        *,
+        transport_ref: str | None,
+        provider_session_ref: str | None,
+    ) -> object | None:
+        for ref in (transport_ref, provider_session_ref):
+            normalized = self._normalize_string(ref)
+            if normalized is None:
+                continue
+            executor = self._browser_companion_executors.get(normalized)
             if executor is not None:
                 return executor
         return None

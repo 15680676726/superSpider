@@ -381,6 +381,8 @@ def _build_activation_summary(
 ) -> tuple[dict[str, Any] | None, list[str], list[str]]:
     if activation_result is None:
         return None, [], []
+    top_entities = _unique_strings(getattr(activation_result, "top_entities", None))
+    top_opinions = _unique_strings(getattr(activation_result, "top_opinions", None))
     top_constraints = _unique_strings(getattr(activation_result, "top_constraints", None))
     top_next_actions = _unique_strings(getattr(activation_result, "top_next_actions", None))
     support_refs = _unique_strings(getattr(activation_result, "support_refs", None))
@@ -399,6 +401,8 @@ def _build_activation_summary(
         reason_ids.append(f"activation:constraint:{index}")
     return (
         {
+            "top_entities": top_entities,
+            "top_opinions": top_opinions,
             "top_constraints": top_constraints,
             "top_next_actions": top_next_actions,
             "support_refs": support_refs,

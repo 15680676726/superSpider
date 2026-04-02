@@ -7,6 +7,7 @@ from typing import Any
 from ..state import AgentLeaseRecord
 from .artifact_service import EnvironmentArtifactService
 from .cooperative import (
+    BrowserAttachRuntime,
     BrowserCompanionRuntime,
     DocumentBridgeRuntime,
     ExecutionPathResolution,
@@ -45,6 +46,7 @@ class EnvironmentService:
         self._agent_lease_repository = None
         self._kernel_dispatcher = None
         self._browser_companion_runtime: BrowserCompanionRuntime | None = None
+        self._browser_attach_runtime: BrowserAttachRuntime | None = None
         self._document_bridge_runtime: DocumentBridgeRuntime | None = None
         self._host_watcher_runtime: HostWatcherRuntime | None = None
         self._windows_app_adapter_runtime: WindowsAppAdapterRuntime | None = None
@@ -120,6 +122,16 @@ class EnvironmentService:
     ) -> None:
         self._surface_control_service.register_document_bridge_executor(
             bridge_ref,
+            executor,
+        )
+
+    def register_browser_companion_executor(
+        self,
+        companion_ref: str,
+        executor: object | None,
+    ) -> None:
+        self._surface_control_service.register_browser_companion_executor(
+            companion_ref,
             executor,
         )
 
@@ -293,8 +305,16 @@ class EnvironmentService:
         handle: object | None = None,
         workspace_trusted: bool | None = None,
         elevated_auth_state: str | None = None,
+        browser_attach_transport_ref: str | None = None,
+        browser_attach_status: str | None = None,
+        browser_attach_session_ref: str | None = None,
+        browser_attach_scope_ref: str | None = None,
+        browser_attach_reconnect_token: str | None = None,
+        preferred_execution_path: str | None = None,
+        ui_fallback_mode: str | None = None,
+        adapter_gap_or_blocker: str | None = None,
     ) -> SessionMount:
-        return self._lease_service.ack_bridge_session_work(
+        session = self._lease_service.ack_bridge_session_work(
             session_mount_id,
             lease_token=lease_token,
             work_id=work_id,
@@ -304,6 +324,17 @@ class EnvironmentService:
             workspace_trusted=workspace_trusted,
             elevated_auth_state=elevated_auth_state,
         )
+        return self._apply_bridge_browser_attach_transport(
+            session_mount_id=session_mount_id,
+            transport_ref=browser_attach_transport_ref,
+            status=browser_attach_status,
+            browser_session_ref=browser_attach_session_ref,
+            browser_scope_ref=browser_attach_scope_ref,
+            reconnect_token=browser_attach_reconnect_token,
+            preferred_execution_path=preferred_execution_path,
+            ui_fallback_mode=ui_fallback_mode,
+            adapter_gap_or_blocker=adapter_gap_or_blocker,
+        ) or session
 
     def heartbeat_bridge_session_work(
         self,
@@ -330,14 +361,33 @@ class EnvironmentService:
         work_id: str,
         ttl_seconds: int | None = None,
         handle: object | None = None,
+        browser_attach_transport_ref: str | None = None,
+        browser_attach_status: str | None = None,
+        browser_attach_session_ref: str | None = None,
+        browser_attach_scope_ref: str | None = None,
+        browser_attach_reconnect_token: str | None = None,
+        preferred_execution_path: str | None = None,
+        ui_fallback_mode: str | None = None,
+        adapter_gap_or_blocker: str | None = None,
     ) -> SessionMount:
-        return self._lease_service.reconnect_bridge_session_work(
+        session = self._lease_service.reconnect_bridge_session_work(
             session_mount_id,
             lease_token=lease_token,
             work_id=work_id,
             ttl_seconds=ttl_seconds,
             handle=handle,
         )
+        return self._apply_bridge_browser_attach_transport(
+            session_mount_id=session_mount_id,
+            transport_ref=browser_attach_transport_ref,
+            status=browser_attach_status,
+            browser_session_ref=browser_attach_session_ref,
+            browser_scope_ref=browser_attach_scope_ref,
+            reconnect_token=browser_attach_reconnect_token,
+            preferred_execution_path=preferred_execution_path,
+            ui_fallback_mode=ui_fallback_mode,
+            adapter_gap_or_blocker=adapter_gap_or_blocker,
+        ) or session
 
     def stop_bridge_session_work(
         self,
@@ -363,11 +413,15 @@ class EnvironmentService:
         lease_token: str | None = None,
         reason: str | None = None,
     ) -> SessionMount | None:
-        return self._lease_service.archive_bridge_session(
+        session = self._lease_service.archive_bridge_session(
             session_mount_id,
             lease_token=lease_token,
             reason=reason,
         )
+        return self._clear_bridge_browser_attach_transport(
+            session_mount_id=session_mount_id,
+            adapter_gap_or_blocker=reason,
+        ) or session
 
     def deregister_bridge_environment(
         self,
@@ -375,10 +429,22 @@ class EnvironmentService:
         *,
         reason: str | None = None,
     ) -> EnvironmentMount | None:
-        return self._lease_service.deregister_bridge_environment(
+        environment = self._lease_service.deregister_bridge_environment(
             environment_id,
             reason=reason,
         )
+        session_repository = self._session_repository
+        if session_repository is None or environment is None:
+            return environment
+        for session in session_repository.list_sessions(
+            environment_id=environment_id,
+            limit=None,
+        ):
+            self._clear_bridge_browser_attach_transport(
+                session_mount_id=session.id,
+                adapter_gap_or_blocker=reason,
+            )
+        return self.get_environment(environment_id) or environment
 
     def force_release_session_lease(
         self,
@@ -388,6 +454,32 @@ class EnvironmentService:
     ) -> SessionMount | None:
         return self._lease_service.force_release_session_lease(
             session_mount_id,
+            reason=reason,
+        )
+
+    def set_shared_operator_abort_state(
+        self,
+        *,
+        session_mount_id: str,
+        channel: str | None = None,
+        reason: str | None = None,
+    ) -> SessionMount:
+        return self._lease_service.set_shared_operator_abort_state(
+            session_mount_id,
+            channel=channel,
+            reason=reason,
+        )
+
+    def clear_shared_operator_abort_state(
+        self,
+        *,
+        session_mount_id: str,
+        channel: str | None = None,
+        reason: str | None = None,
+    ) -> SessionMount:
+        return self._lease_service.clear_shared_operator_abort_state(
+            session_mount_id,
+            channel=channel,
             reason=reason,
         )
 
@@ -717,6 +809,24 @@ class EnvironmentService:
         runtime = self._require_browser_companion_runtime()
         return runtime.register_companion(**kwargs)
 
+    def register_browser_attach_transport(self, **kwargs) -> dict[str, Any]:
+        runtime = self._require_browser_attach_runtime()
+        runtime.register_transport(**kwargs)
+        return self.browser_attach_snapshot(
+            session_mount_id=kwargs["session_mount_id"],
+        )
+
+    def clear_browser_attach_transport(self, **kwargs) -> dict[str, Any]:
+        runtime = self._require_browser_attach_runtime()
+        runtime.clear_transport(**kwargs)
+        return self.browser_attach_snapshot(
+            session_mount_id=kwargs["session_mount_id"],
+        )
+
+    def browser_attach_snapshot(self, **kwargs) -> dict[str, Any]:
+        runtime = self._require_browser_attach_runtime()
+        return runtime.snapshot(**kwargs)
+
     def clear_browser_companion(self, **kwargs) -> dict[str, Any]:
         runtime = self._require_browser_companion_runtime()
         return runtime.clear_companion(**kwargs)
@@ -733,6 +843,7 @@ class EnvironmentService:
         status: str | None = None,
         supported_families=None,
         available: bool | None = None,
+        execution_guardrails: dict[str, object] | None = None,
     ) -> dict[str, Any]:
         runtime = self._require_document_bridge_runtime()
         runtime.register_bridge(
@@ -741,6 +852,7 @@ class EnvironmentService:
             status=status,
             supported_families=supported_families,
             available=available,
+            execution_guardrails=execution_guardrails,
         )
         return self.document_bridge_snapshot(session_mount_id=session_mount_id)
 
@@ -791,6 +903,23 @@ class EnvironmentService:
                 }
             )
         return snapshot
+
+    async def execute_browser_action(
+        self,
+        *,
+        session_mount_id: str,
+        action: str,
+        contract: dict[str, Any],
+        host_executor: object | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        return await self._surface_control_service.execute_browser_action(
+            session_mount_id=session_mount_id,
+            action=action,
+            contract=contract,
+            host_executor=host_executor,
+            limit=limit,
+        )
 
     def register_host_watchers(
         self,
@@ -984,10 +1113,12 @@ class EnvironmentService:
         environment_repository = getattr(self._registry, "_repository", None)
         if environment_repository is None or self._session_repository is None:
             self._browser_companion_runtime = None
+            self._browser_attach_runtime = None
             self._document_bridge_runtime = None
             self._host_watcher_runtime = None
             self._windows_app_adapter_runtime = None
             return
+        self._browser_attach_runtime = BrowserAttachRuntime(self)
         self._browser_companion_runtime = BrowserCompanionRuntime(
             environment_repository=environment_repository,
             session_repository=self._session_repository,
@@ -1011,6 +1142,84 @@ class EnvironmentService:
                 "BrowserCompanionRuntime requires EnvironmentRegistry.repository and SessionMountRepository.",
             )
         return self._browser_companion_runtime
+
+    def _require_browser_attach_runtime(self) -> BrowserAttachRuntime:
+        self._rebind_cooperative_runtimes()
+        if self._browser_attach_runtime is None:
+            raise RuntimeError(
+                "BrowserAttachRuntime requires EnvironmentRegistry.repository and SessionMountRepository.",
+            )
+        return self._browser_attach_runtime
+
+    def _apply_bridge_browser_attach_transport(
+        self,
+        *,
+        session_mount_id: str,
+        transport_ref: str | None = None,
+        status: str | None = None,
+        browser_session_ref: str | None = None,
+        browser_scope_ref: str | None = None,
+        reconnect_token: str | None = None,
+        preferred_execution_path: str | None = None,
+        ui_fallback_mode: str | None = None,
+        adapter_gap_or_blocker: str | None = None,
+    ) -> SessionMount | None:
+        has_transport_update = any(
+            value is not None
+            for value in (
+                transport_ref,
+                status,
+                browser_session_ref,
+                browser_scope_ref,
+                reconnect_token,
+            )
+        )
+        if not has_transport_update:
+            return None
+        runtime = self._require_browser_attach_runtime()
+        return runtime.register_transport(
+            session_mount_id=session_mount_id,
+            transport_ref=transport_ref or "",
+            status=status,
+            browser_session_ref=browser_session_ref,
+            browser_scope_ref=browser_scope_ref,
+            reconnect_token=reconnect_token,
+            preferred_execution_path=preferred_execution_path,
+            ui_fallback_mode=ui_fallback_mode,
+            adapter_gap_or_blocker=adapter_gap_or_blocker,
+        )
+
+    def _clear_bridge_browser_attach_transport(
+        self,
+        *,
+        session_mount_id: str,
+        adapter_gap_or_blocker: str | None = None,
+    ) -> SessionMount | None:
+        runtime = self._browser_attach_runtime
+        if runtime is None:
+            self._rebind_cooperative_runtimes()
+            runtime = self._browser_attach_runtime
+        if runtime is None:
+            return None
+        snapshot = runtime.snapshot(session_mount_id=session_mount_id)
+        browser_attach = snapshot.get("browser_attach")
+        if not isinstance(browser_attach, dict):
+            return None
+        if not any(
+            browser_attach.get(key)
+            for key in (
+                "transport_ref",
+                "status",
+                "session_ref",
+                "scope_ref",
+                "reconnect_token",
+            )
+        ):
+            return None
+        return runtime.clear_transport(
+            session_mount_id=session_mount_id,
+            adapter_gap_or_blocker=adapter_gap_or_blocker,
+        )
 
     def _require_document_bridge_runtime(self) -> DocumentBridgeRuntime:
         self._rebind_cooperative_runtimes()

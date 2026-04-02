@@ -561,6 +561,9 @@ class _GoalServiceCompilerMixin:
         if envelope is None:
             return {}
         envelope_payload = envelope.model_dump(mode="json")
+        strategy_context = self._build_assignment_strategy_sidecar_context(
+            context=context,
+        )
         return {
             "assignment_plan_envelope": envelope_payload,
             "assignment_plan_checkpoints": list(envelope_payload.get("checkpoints") or []),
@@ -570,6 +573,48 @@ class _GoalServiceCompilerMixin:
             "assignment_sidecar_plan": dict(envelope_payload.get("sidecar_plan") or {}),
             "report_back_mode": _string(context.get("report_back_mode"))
             or envelope.report_back_mode,
+            **strategy_context,
+        }
+
+    def _build_assignment_strategy_sidecar_context(
+        self,
+        *,
+        context: dict[str, object],
+    ) -> dict[str, object]:
+        strategy_payload = (
+            dict(context.get("strategy_constraints"))
+            if isinstance(context.get("strategy_constraints"), dict)
+            else {}
+        )
+        strategic_uncertainties = [
+            dict(item)
+            for item in list(
+                context.get("strategy_strategic_uncertainties")
+                or strategy_payload.get("strategic_uncertainties")
+                or []
+            )
+            if isinstance(item, dict)
+        ]
+        lane_budgets = [
+            dict(item)
+            for item in list(
+                context.get("strategy_lane_budgets")
+                or strategy_payload.get("lane_budgets")
+                or []
+            )
+            if isinstance(item, dict)
+        ]
+        if not strategy_payload and not strategic_uncertainties and not lane_budgets:
+            return {}
+        payload = dict(strategy_payload)
+        if strategic_uncertainties:
+            payload["strategic_uncertainties"] = strategic_uncertainties
+        if lane_budgets:
+            payload["lane_budgets"] = lane_budgets
+        return {
+            "strategy_constraints": payload,
+            "strategy_strategic_uncertainties": strategic_uncertainties,
+            "strategy_lane_budgets": lane_budgets,
         }
 
     def _build_assignment_strategy_constraints(
@@ -577,13 +622,55 @@ class _GoalServiceCompilerMixin:
         *,
         context: dict[str, object],
     ) -> PlanningStrategyConstraints:
+        strategy_payload = (
+            dict(context.get("strategy_constraints"))
+            if isinstance(context.get("strategy_constraints"), dict)
+            else {}
+        )
+        raw_lane_weights = (
+            context.get("strategy_lane_weights")
+            if isinstance(context.get("strategy_lane_weights"), dict)
+            else strategy_payload.get("lane_weights")
+            if isinstance(strategy_payload.get("lane_weights"), dict)
+            else {}
+        )
+        lane_weights: dict[str, float] = {}
+        for key, value in dict(raw_lane_weights).items():
+            lane_id = str(key).strip()
+            if not lane_id:
+                continue
+            try:
+                lane_weights[lane_id] = float(value)
+            except (TypeError, ValueError):
+                continue
         return PlanningStrategyConstraints(
-            mission=_string(context.get("strategy_mission")) or "",
-            north_star=_string(context.get("strategy_north_star")) or "",
-            priority_order=_string_list(context.get("strategy_priority_order")),
-            planning_policy=_string_list(context.get("strategy_planning_policy")),
-            review_rules=_string_list(context.get("strategy_review_rules")),
-            current_focuses=_string_list(context.get("strategy_current_focuses")),
+            mission=_string(context.get("strategy_mission"))
+            or _string(strategy_payload.get("mission"))
+            or "",
+            north_star=_string(context.get("strategy_north_star"))
+            or _string(strategy_payload.get("north_star"))
+            or "",
+            priority_order=_string_list(
+                context.get("strategy_priority_order"),
+                strategy_payload.get("priority_order"),
+            ),
+            lane_weights=lane_weights,
+            planning_policy=_string_list(
+                context.get("strategy_planning_policy"),
+                strategy_payload.get("planning_policy"),
+            ),
+            review_rules=_string_list(
+                context.get("strategy_review_rules"),
+                strategy_payload.get("review_rules"),
+            ),
+            paused_lane_ids=_string_list(
+                context.get("strategy_paused_lane_ids"),
+                strategy_payload.get("paused_lane_ids"),
+            ),
+            current_focuses=_string_list(
+                context.get("strategy_current_focuses"),
+                strategy_payload.get("current_focuses"),
+            ),
         )
 
     def _build_knowledge_context(

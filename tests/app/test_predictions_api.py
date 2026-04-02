@@ -13,9 +13,11 @@ from copaw.capabilities import CapabilityService
 from copaw.capabilities.remote_skill_contract import RemoteSkillCandidate
 from copaw.config import load_config, save_config
 from copaw.config.config import MCPClientConfig
+from copaw.compiler.planning.assignment_planner import AssignmentPlanningCompiler
 from copaw.evidence import EvidenceLedger
 from copaw.evidence.models import EvidenceRecord
 from copaw.goals import GoalService
+from copaw.goals.service_compiler import _GoalServiceCompilerMixin
 from copaw.industry import IndustryService
 from copaw.industry.service_context import build_industry_service_runtime_bindings
 from copaw.kernel import AgentProfileService, KernelDispatcher, KernelTaskStore
@@ -671,6 +673,54 @@ def test_prediction_cycle_case_exposes_light_formal_planning_context_in_detail(t
             "review_window": "morning-review",
             "summary": "Formal planner wants the main brain to review report pressure.",
             "planning_policy": ["prefer-followup-before-net-new"],
+            "strategy_constraints": {
+                "mission": "Protect growth while validating the weekend anomaly.",
+                "graph_focus_entities": [
+                    "weekend-variance",
+                    "lane-growth",
+                ],
+                "graph_focus_opinions": [
+                    "staffing:caution:premature-change",
+                ],
+                "strategic_uncertainties": [
+                    {
+                        "uncertainty_id": "uncertainty-weekend-demand",
+                        "statement": "Weekend demand may be structurally weaker than the lane assumes.",
+                        "scope": "strategy",
+                        "impact_level": "high",
+                        "current_confidence": 0.34,
+                        "review_by_cycle": "cycle-weekly-1",
+                        "escalate_when": ["confidence-drop", "target-miss"],
+                    }
+                ],
+                "lane_budgets": [
+                    {
+                        "lane_id": "lane-growth",
+                        "budget_window": "next-2-cycles",
+                        "target_share": 0.55,
+                        "min_share": 0.4,
+                        "max_share": 0.7,
+                        "review_pressure": "high",
+                        "force_include_reason": "Protect validated growth experiments while uncertainty is open.",
+                    }
+                ],
+            },
+            "cycle_decision": {
+                "cycle_kind": "daily",
+                "selected_lane_ids": ["lane-growth"],
+                "selected_backlog_item_ids": ["backlog-a"],
+                "max_assignment_count": 1,
+                "summary": "Keep the cycle narrow while the growth uncertainty is unresolved.",
+                "metadata": {
+                    "graph_focus_entities": [
+                        "weekend-variance",
+                        "lane-growth",
+                    ],
+                    "graph_focus_opinions": [
+                        "staffing:caution:premature-change",
+                    ],
+                },
+            },
             "selected_lane_ids": ["lane-growth"],
             "selected_backlog_item_ids": ["backlog-a"],
             "metadata": {
@@ -681,14 +731,29 @@ def test_prediction_cycle_case_exposes_light_formal_planning_context_in_detail(t
         report_synthesis={
             "recommended_actions": [{"action_id": "follow-up:1"}],
             "replan_directives": [{"directive_id": "dir-1"}],
-            "activation": {"top_constraints": ["Need validated weekend cause."]},
+            "activation": {
+                "top_constraints": ["Need validated weekend cause."],
+                "top_entities": ["weekend-variance"],
+                "top_opinions": ["staffing:caution:premature-change"],
+            },
             "replan_decision": {
                 "decision_id": "report-synthesis:needs-replan:failed-report:1",
                 "status": "needs-replan",
+                "decision_kind": "strategy_review_required",
                 "summary": "1 unresolved report synthesis signal requires main-brain judgment.",
                 "reason_ids": ["failed-report:1"],
                 "source_report_ids": ["report-a"],
                 "topic_keys": ["weekend-variance"],
+                "trigger_context": {
+                    "trigger_families": [
+                        "confidence-collapse",
+                        "repeated-contradiction",
+                    ],
+                    "strategic_uncertainty_ids": ["uncertainty-weekend-demand"],
+                    "lane_budget_pressure": {
+                        "lane-growth": "over-target-share",
+                    },
+                },
             },
         },
     )
@@ -700,6 +765,24 @@ def test_prediction_cycle_case_exposes_light_formal_planning_context_in_detail(t
     assert planning["review_ref"] == "formal-review:industry-demo:cycle-1"
     assert planning["review_window"] == "morning-review"
     assert planning["planning_policy"] == ["prefer-followup-before-net-new"]
+    assert planning["strategy_constraints"]["mission"] == (
+        "Protect growth while validating the weekend anomaly."
+    )
+    assert planning["strategy_constraints"]["graph_focus_entities"] == [
+        "weekend-variance",
+        "lane-growth",
+    ]
+    assert planning["strategy_constraints"]["graph_focus_opinions"] == [
+        "staffing:caution:premature-change",
+    ]
+    assert planning["strategy_constraints"]["strategic_uncertainties"][0][
+        "uncertainty_id"
+    ] == "uncertainty-weekend-demand"
+    assert planning["strategy_constraints"]["lane_budgets"][0]["lane_id"] == (
+        "lane-growth"
+    )
+    assert planning["cycle_decision"]["cycle_kind"] == "daily"
+    assert planning["cycle_decision"]["selected_lane_ids"] == ["lane-growth"]
     assert planning["selected_lane_ids"] == ["lane-growth"]
     assert planning["selected_backlog_item_ids"] == ["backlog-a"]
     assert planning["participant_count"] == 1
@@ -711,18 +794,35 @@ def test_prediction_cycle_case_exposes_light_formal_planning_context_in_detail(t
     assert planning["replan"]["decision_id"] == (
         "report-synthesis:needs-replan:failed-report:1"
     )
+    assert planning["replan"]["decision_kind"] == "strategy_review_required"
     assert planning["replan"]["reason_ids"] == ["failed-report:1"]
     assert planning["replan"]["directive_count"] == 1
     assert planning["replan"]["recommended_action_count"] == 1
-    assert planning["replan"]["activation_keys"] == ["top_constraints"]
+    assert "top_constraints" in planning["replan"]["activation_keys"]
+    assert "top_entities" in planning["replan"]["activation_keys"]
+    assert "top_opinions" in planning["replan"]["activation_keys"]
+    assert planning["replan"]["trigger_context"]["trigger_families"] == [
+        "confidence-collapse",
+        "repeated-contradiction",
+    ]
+    assert planning["replan"]["trigger_context"]["strategic_uncertainty_ids"] == [
+        "uncertainty-weekend-demand"
+    ]
     assert detail.case["input_payload"]["planning"]["review_ref"] == (
         "formal-review:industry-demo:cycle-1"
     )
     assert detail.case["metadata"]["planning_snapshot"]["replan"]["status"] == (
         "needs-replan"
     )
+    assert detail.case["metadata"]["planning_snapshot"]["replan"]["decision_kind"] == (
+        "strategy_review_required"
+    )
     assert detail.stats["planning_overlap"] is True
     assert detail.stats["planning_replan_status"] == "needs-replan"
+    assert (
+        detail.stats["planning_replan_decision_kind"]
+        == "strategy_review_required"
+    )
 
 
 def test_prediction_cycle_case_reuses_formal_planning_review_identity_for_dedupe(
@@ -767,6 +867,75 @@ def test_prediction_cycle_case_reuses_formal_planning_review_identity_for_dedupe
     assert first.case["planning"]["review_ref"] == "formal-review:industry-demo:cycle-1"
     assert second.case["case_id"] == first.case["case_id"]
     assert len(service.list_cases(case_kind="cycle")) == 1
+
+
+def test_goal_compiler_assignment_context_keeps_uncertainty_and_budget_inputs() -> None:
+    class _Compiler(_GoalServiceCompilerMixin):
+        pass
+
+    compiler = _Compiler()
+    compiler._assignment_planning_compiler = AssignmentPlanningCompiler()
+
+    assignment_context = compiler._build_assignment_plan_context(
+        context={
+            "assignment_id": "assignment-live-9",
+            "backlog_item_id": "backlog-live-9",
+            "lane_id": "lane-growth",
+            "cycle_id": "cycle-daily-2",
+            "goal_title": "Stabilize weekend demand assumptions",
+            "goal_summary": "Keep growth work bounded while uncertainty remains open.",
+            "strategy_mission": "Protect growth quality before scaling.",
+            "strategy_lane_weights": {"lane-growth": 0.6},
+            "strategy_strategic_uncertainties": [
+                {
+                    "uncertainty_id": "uncertainty-weekend-demand",
+                    "statement": "Weekend demand model is still unverified.",
+                    "scope": "strategy",
+                    "impact_level": "high",
+                    "review_by_cycle": "cycle-weekly-1",
+                }
+            ],
+            "strategy_lane_budgets": [
+                {
+                    "lane_id": "lane-growth",
+                    "budget_window": "next-2-cycles",
+                    "target_share": 0.55,
+                    "min_share": 0.4,
+                    "max_share": 0.7,
+                    "review_pressure": "high",
+                    "force_include_reason": "Protect validated growth work while uncertainty is open.",
+                }
+            ],
+            "strategy_constraints": {
+                "strategic_uncertainties": [
+                    {
+                        "uncertainty_id": "uncertainty-weekend-demand",
+                        "statement": "Weekend demand model is still unverified.",
+                    }
+                ],
+                "lane_budgets": [
+                    {
+                        "lane_id": "lane-growth",
+                        "budget_window": "next-2-cycles",
+                        "force_include_reason": "Protect validated growth work while uncertainty is open.",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert assignment_context["strategy_constraints"]["strategic_uncertainties"][0][
+        "uncertainty_id"
+    ] == "uncertainty-weekend-demand"
+    assert assignment_context["strategy_constraints"]["lane_budgets"][0]["lane_id"] == (
+        "lane-growth"
+    )
+    assert assignment_context["strategy_strategic_uncertainties"][0][
+        "review_by_cycle"
+    ] == "cycle-weekly-1"
+    assert assignment_context["strategy_lane_budgets"][0]["force_include_reason"] == (
+        "Protect validated growth work while uncertainty is open."
+    )
 
 
 def test_prediction_recommendation_executes_through_kernel(tmp_path) -> None:

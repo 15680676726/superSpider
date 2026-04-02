@@ -3,12 +3,51 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 from .model_support import CreatedRecord, UpdatedRecord, _new_record_id, _normalize_text_list, _utc_now
 from .models_core import ReportScopeType, ReportWindow, StrategyMemoryStatus, StrategyScopeType
+
+
+class StrategicUncertaintyRecord(BaseModel):
+    """Typed strategic uncertainty that stays attached to strategy truth."""
+
+    uncertainty_id: str = Field(..., min_length=1)
+    statement: str = Field(..., min_length=1)
+    scope: Literal["strategy", "lane", "cycle"] = "strategy"
+    impact_level: Literal["low", "medium", "high"] = "medium"
+    current_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    evidence_for_refs: list[str] = Field(default_factory=list)
+    evidence_against_refs: list[str] = Field(default_factory=list)
+    review_by_cycle: str | None = None
+    escalate_when: list[Literal["repeated blocker", "confidence drop", "target miss"]] = Field(
+        default_factory=list,
+    )
+
+    @field_validator(
+        "evidence_for_refs",
+        "evidence_against_refs",
+        "escalate_when",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_reference_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+
+class LaneBudgetRecord(BaseModel):
+    """Typed multi-cycle lane budget persisted on strategy truth."""
+
+    lane_id: str = Field(..., min_length=1)
+    budget_window: str = Field(..., min_length=1)
+    target_share: float = Field(default=0.0, ge=0.0, le=1.0)
+    min_share: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_share: float = Field(default=1.0, ge=0.0, le=1.0)
+    review_pressure: str = ""
+    defer_reason: str | None = None
+    force_include_reason: str | None = None
 
 
 class StrategyMemoryRecord(UpdatedRecord):
@@ -37,6 +76,8 @@ class StrategyMemoryRecord(UpdatedRecord):
     planning_policy: list[str] = Field(default_factory=list)
     current_focuses: list[str] = Field(default_factory=list)
     paused_lane_ids: list[str] = Field(default_factory=list)
+    strategic_uncertainties: list[StrategicUncertaintyRecord] = Field(default_factory=list)
+    lane_budgets: list[LaneBudgetRecord] = Field(default_factory=list)
     review_rules: list[str] = Field(default_factory=list)
     source_ref: str | None = None
     status: StrategyMemoryStatus = "active"
@@ -76,6 +117,34 @@ class StrategyMemoryRecord(UpdatedRecord):
             except (TypeError, ValueError):
                 continue
         return normalized
+
+    @field_serializer("strategic_uncertainties", when_used="always")
+    def _serialize_strategic_uncertainties(
+        self,
+        value: list[StrategicUncertaintyRecord] | list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            (
+                item.model_dump(mode="python")
+                if isinstance(item, StrategicUncertaintyRecord)
+                else StrategicUncertaintyRecord.model_validate(item).model_dump(mode="python")
+            )
+            for item in list(value or [])
+        ]
+
+    @field_serializer("lane_budgets", when_used="always")
+    def _serialize_lane_budgets(
+        self,
+        value: list[LaneBudgetRecord] | list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            (
+                item.model_dump(mode="python")
+                if isinstance(item, LaneBudgetRecord)
+                else LaneBudgetRecord.model_validate(item).model_dump(mode="python")
+            )
+            for item in list(value or [])
+        ]
 
 
 class MetricRecord(CreatedRecord):
@@ -169,9 +238,11 @@ class ReportRecord(CreatedRecord):
 
 
 __all__ = [
+    "LaneBudgetRecord",
     "MetricRecord",
     "ReportEvidenceDigest",
     "ReportRecord",
     "ReportTaskDigest",
+    "StrategicUncertaintyRecord",
     "StrategyMemoryRecord",
 ]

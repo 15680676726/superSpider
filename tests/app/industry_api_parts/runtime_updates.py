@@ -1615,6 +1615,28 @@ def test_runtime_detail_exposes_stable_main_brain_planning_surface_from_formal_s
             "priority_order": ["governed follow-up", "steady execution"],
             "planning_policy": ["prefer-followup-before-net-new"],
             "review_rules": ["repeat-failure-needs-review"],
+            "strategic_uncertainties": [
+                {
+                    "uncertainty_id": "uncertainty-governed-followup",
+                    "statement": "Governed follow-up demand may outpace the current lane mix.",
+                    "scope": "strategy",
+                    "impact_level": "high",
+                    "current_confidence": 0.42,
+                    "review_by_cycle": "cycle-weekly-1",
+                    "escalate_when": ["confidence-drop", "target-miss"],
+                }
+            ],
+            "lane_budgets": [
+                {
+                    "lane_id": "lane-growth",
+                    "budget_window": "next-2-cycles",
+                    "target_share": 0.5,
+                    "min_share": 0.35,
+                    "max_share": 0.65,
+                    "review_pressure": "high",
+                    "force_include_reason": "Keep governed follow-up visible until uncertainty closes.",
+                }
+            ],
             "paused_lane_ids": [],
         },
         "cycle_decision": {
@@ -1630,6 +1652,24 @@ def test_runtime_detail_exposes_stable_main_brain_planning_surface_from_formal_s
                 "pending_report_count": 0,
                 "open_backlog_count": len(list(cycle_record.backlog_item_ids or [])),
             },
+        },
+        "report_replan": {
+            "decision_id": "report-synthesis:needs-replan:governed-followup",
+            "status": "needs-replan",
+            "decision_kind": "lane_reweight",
+            "summary": "Governed follow-up pressure should rebalance the active lane before more net-new work.",
+            "reason_ids": ["failed-report:governed-followup"],
+            "source_report_ids": ["report-governed-followup"],
+            "topic_keys": ["governed-followup"],
+            "trigger_context": {
+                "trigger_families": ["repeated-blocker", "confidence-collapse"],
+                "strategic_uncertainty_ids": ["uncertainty-governed-followup"],
+                "lane_budget_pressure": {
+                    "lane-growth": "over-target-share",
+                },
+            },
+            "directives": [{"directive_id": "directive-lane-reweight"}],
+            "recommended_actions": [{"action_id": "action-lane-reweight"}],
         },
     }
     app.state.operating_cycle_repository.upsert_cycle(
@@ -1647,6 +1687,9 @@ def test_runtime_detail_exposes_stable_main_brain_planning_surface_from_formal_s
     assignment_record = app.state.assignment_repository.get_assignment(assignment_id)
     assert assignment_record is not None
     assignment_planning = {
+        "strategy_constraints": cycle_planning["strategy_constraints"],
+        "cycle_decision": cycle_planning["cycle_decision"],
+        "report_replan": cycle_planning["report_replan"],
         "assignment_plan": {
             "assignment_id": assignment_record.id,
             "backlog_item_id": assignment_record.backlog_item_id,
@@ -1686,6 +1729,12 @@ def test_runtime_detail_exposes_stable_main_brain_planning_surface_from_formal_s
     assert planning_surface["is_truth_store"] is False
     assert planning_surface["source"] == "industry-runtime-read-model"
     assert planning_surface["strategy_constraints"] == cycle_planning["strategy_constraints"]
+    assert planning_surface["strategy_constraints"]["strategic_uncertainties"][0][
+        "uncertainty_id"
+    ] == "uncertainty-governed-followup"
+    assert planning_surface["strategy_constraints"]["lane_budgets"][0]["lane_id"] == (
+        "lane-growth"
+    )
     assert planning_surface["latest_cycle_decision"]["cycle_id"] == current_cycle_id
     assert planning_surface["latest_cycle_decision"]["selected_backlog_item_ids"] == (
         cycle_planning["cycle_decision"]["selected_backlog_item_ids"]
@@ -1696,7 +1745,11 @@ def test_runtime_detail_exposes_stable_main_brain_planning_surface_from_formal_s
     assert planning_surface["focused_assignment_plan"] == (
         assignment_planning["assignment_plan"]
     )
-    assert planning_surface["replan"]["status"] == "clear"
+    assert planning_surface["replan"]["status"] == "needs-replan"
+    assert planning_surface["replan"]["decision_kind"] == "lane_reweight"
+    assert planning_surface["replan"]["trigger_context"]["strategic_uncertainty_ids"] == [
+        "uncertainty-governed-followup"
+    ]
     assert detail.current_cycle["main_brain_planning"] == planning_surface
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()

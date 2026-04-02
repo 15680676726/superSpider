@@ -498,6 +498,7 @@ function consumeRuntimeSidecarEvent(
 
   const lifecycleState = resolveRuntimeLifecycleState(eventName, normalized);
   if (eventName === "accepted" || eventName === "turn_reply_done") {
+    setRuntimeWaitState(null);
     setRuntimeHealthNotice(null);
     setRuntimeLifecycleState?.(lifecycleState);
     if (eventName === "turn_reply_done") {

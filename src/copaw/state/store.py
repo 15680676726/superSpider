@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 23
+STATE_SCHEMA_VERSION = 24
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS goals (
@@ -1109,6 +1109,8 @@ CREATE TABLE IF NOT EXISTS strategy_memories (
     planning_policy_json TEXT NOT NULL DEFAULT '[]',
     current_focuses_json TEXT NOT NULL DEFAULT '[]',
     paused_lane_ids_json TEXT NOT NULL DEFAULT '[]',
+    strategic_uncertainties_json TEXT NOT NULL DEFAULT '[]',
+    lane_budgets_json TEXT NOT NULL DEFAULT '[]',
     review_rules_json TEXT NOT NULL DEFAULT '[]',
     source_ref TEXT,
     status TEXT NOT NULL DEFAULT 'active',
@@ -1520,6 +1522,8 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
             ("planning_policy_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("current_focuses_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("paused_lane_ids_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("strategic_uncertainties_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("lane_budgets_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("review_rules_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("metadata_json", "TEXT NOT NULL DEFAULT '{}'"),
             ("scope_type", "TEXT NOT NULL DEFAULT 'industry'"),

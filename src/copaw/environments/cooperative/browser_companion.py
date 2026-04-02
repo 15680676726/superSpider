@@ -14,6 +14,7 @@ _READY_STATUSES = {"ready", "attached", "available", "healthy"}
 _DEFAULT_COOPERATIVE_PATH = "cooperative-native-first"
 _DEFAULT_SEMANTIC_PATH = "semantic-operator-second"
 _DEFAULT_UI_FALLBACK = "ui-fallback-last"
+_SHARED_OPERATOR_ABORT_STATE_KEY = "operator_abort_state"
 
 
 def _utc_now() -> datetime:
@@ -47,6 +48,87 @@ def _resolve_execution_path(
     return _DEFAULT_SEMANTIC_PATH
 
 
+def _resolve_shared_operator_abort_state(
+    *,
+    session_metadata: dict[str, Any],
+    environment_metadata: dict[str, Any],
+) -> dict[str, object]:
+    raw = session_metadata.get(_SHARED_OPERATOR_ABORT_STATE_KEY)
+    if not isinstance(raw, dict):
+        raw = environment_metadata.get(_SHARED_OPERATOR_ABORT_STATE_KEY)
+    if not isinstance(raw, dict):
+        return {}
+    channel = _normalize_string(raw.get("channel")) or _normalize_string(
+        raw.get("operator_abort_channel"),
+    )
+    requested = bool(
+        raw.get("requested")
+        if "requested" in raw
+        else raw.get("operator_abort_requested"),
+    )
+    requested_at = _normalize_string(raw.get("requested_at"))
+    reason = (
+        _normalize_string(raw.get("reason"))
+        or _normalize_string(raw.get("abort_reason"))
+        or channel
+    )
+    state: dict[str, object] = {}
+    if channel is not None:
+        state["channel"] = channel
+    if requested:
+        state["requested"] = True
+    if reason is not None:
+        state["reason"] = reason
+    if requested_at is not None:
+        state["requested_at"] = requested_at
+    return state
+
+
+def _abort_channels_match(
+    *,
+    guardrail_channel: object,
+    shared_channel: object,
+) -> bool:
+    normalized_guardrail_channel = _normalize_string(guardrail_channel)
+    normalized_shared_channel = _normalize_string(shared_channel)
+    if normalized_guardrail_channel is None or normalized_shared_channel is None:
+        return True
+    return normalized_guardrail_channel == normalized_shared_channel
+
+
+def _merge_execution_guardrails(
+    *,
+    guardrails: object,
+    session_metadata: dict[str, Any],
+    environment_metadata: dict[str, Any],
+) -> dict[str, object]:
+    merged = dict(guardrails) if isinstance(guardrails, dict) else {}
+    shared_abort_state = _resolve_shared_operator_abort_state(
+        session_metadata=session_metadata,
+        environment_metadata=environment_metadata,
+    )
+    if not shared_abort_state.get("requested"):
+        return merged
+    if not _abort_channels_match(
+        guardrail_channel=merged.get("operator_abort_channel"),
+        shared_channel=shared_abort_state.get("channel"),
+    ):
+        return merged
+    if shared_abort_state.get("channel") is not None and _normalize_string(
+        merged.get("operator_abort_channel"),
+    ) is None:
+        merged["operator_abort_channel"] = shared_abort_state["channel"]
+    merged["operator_abort_requested"] = True
+    reason = _normalize_string(merged.get("abort_reason")) or _normalize_string(
+        shared_abort_state.get("reason"),
+    )
+    if reason is not None:
+        merged["abort_reason"] = reason
+    if shared_abort_state.get("requested_at") is not None:
+        merged.setdefault("operator_abort_requested_at", shared_abort_state["requested_at"])
+    return merged
+
+
 class BrowserCompanionRuntime:
     """Persists browser companion facts on EnvironmentMount/SessionMount metadata."""
 
@@ -73,6 +155,7 @@ class BrowserCompanionRuntime:
         ui_fallback_mode: object = _UNSET,
         adapter_gap_or_blocker: object = _UNSET,
         provider_session_ref: object = _UNSET,
+        execution_guardrails: dict[str, object] | None = None,
     ) -> dict[str, Any]:
         environment, session = self._resolve_mounts(
             environment_id=environment_id,
@@ -106,6 +189,15 @@ class BrowserCompanionRuntime:
             "ui_fallback_mode": normalized_fallback,
             "adapter_gap_or_blocker": normalized_gap,
         }
+        existing_guardrails = None
+        if session is not None:
+            existing_guardrails = session.metadata.get("browser_execution_guardrails")
+        if not isinstance(existing_guardrails, dict) and environment is not None:
+            existing_guardrails = environment.metadata.get("browser_execution_guardrails")
+        if execution_guardrails is not None:
+            update_payload["browser_execution_guardrails"] = dict(execution_guardrails)
+        elif isinstance(existing_guardrails, dict):
+            update_payload["browser_execution_guardrails"] = dict(existing_guardrails)
         if provider_session_ref is not _UNSET:
             update_payload["provider_session_ref"] = normalized_provider_session_ref
 
@@ -153,6 +245,13 @@ class BrowserCompanionRuntime:
             ),
             "provider_session_ref": None,
         }
+        existing_guardrails = None
+        if session is not None:
+            existing_guardrails = session.metadata.get("browser_execution_guardrails")
+        if not isinstance(existing_guardrails, dict) and environment is not None:
+            existing_guardrails = environment.metadata.get("browser_execution_guardrails")
+        if isinstance(existing_guardrails, dict):
+            update_payload["browser_execution_guardrails"] = dict(existing_guardrails)
         if environment is not None:
             self._touch_environment(environment, metadata=update_payload)
         if session is not None:
@@ -228,10 +327,21 @@ class BrowserCompanionRuntime:
             environment_metadata,
             "provider_session_ref",
         )
+        execution_guardrails = self._first_present(
+            session_metadata,
+            environment_metadata,
+            "browser_execution_guardrails",
+        )
+        work_context_id = self._first_present(
+            session_metadata,
+            environment_metadata,
+            "work_context_id",
+        )
 
         normalized_transport_ref = _normalize_string(transport_ref)
         normalized_status = _normalize_string(status)
         normalized_provider_session_ref = _normalize_string(provider_session_ref)
+        normalized_work_context_id = _normalize_string(work_context_id)
         normalized_path = _resolve_execution_path(
             explicit=_normalize_string(preferred_execution_path),
             available=available if isinstance(available, bool) else None,
@@ -243,6 +353,7 @@ class BrowserCompanionRuntime:
         return {
             "environment_id": environment.id if environment is not None else None,
             "session_mount_id": session.id if session is not None else None,
+            "work_context_id": normalized_work_context_id,
             "preferred_execution_path": normalized_path,
             "ui_fallback_mode": normalized_fallback,
             "adapter_gap_or_blocker": _normalize_string(adapter_gap_or_blocker),
@@ -251,6 +362,12 @@ class BrowserCompanionRuntime:
                 "status": normalized_status,
                 "transport_ref": normalized_transport_ref,
                 "provider_session_ref": normalized_provider_session_ref,
+                "work_context_id": normalized_work_context_id,
+                "execution_guardrails": _merge_execution_guardrails(
+                    guardrails=execution_guardrails,
+                    session_metadata=session_metadata,
+                    environment_metadata=environment_metadata,
+                ),
             },
         }
 

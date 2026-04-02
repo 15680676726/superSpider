@@ -940,6 +940,94 @@ describe("runtimeTransport", () => {
     );
   });
 
+  it("keeps accepted reply_done and commit_failed as separate phases", () => {
+    const setRuntimeLifecycleState = vi.fn();
+    const setRuntimeWaitState = vi.fn();
+    const setRuntimeHealthNotice = vi.fn();
+
+    parseRuntimeResponseChunk(
+      JSON.stringify({
+        object: "runtime.sidecar",
+        event: "accepted",
+        payload: {
+          status: "accepted",
+          summary: "accepted boundary persisted",
+        },
+      }),
+      {
+        setRuntimeHealthNotice,
+        setRuntimeLifecycleState,
+        setRuntimeWaitState,
+        dispatchGovernanceDirty: vi.fn(),
+        dispatchHumanAssistDirty: vi.fn(),
+      },
+    );
+    parseRuntimeResponseChunk(
+      JSON.stringify({
+        object: "runtime.sidecar",
+        event: "turn_reply_done",
+        payload: {
+          summary: "reply complete",
+        },
+      }),
+      {
+        setRuntimeHealthNotice,
+        setRuntimeLifecycleState,
+        setRuntimeWaitState,
+        dispatchGovernanceDirty: vi.fn(),
+        dispatchHumanAssistDirty: vi.fn(),
+      },
+    );
+    parseRuntimeResponseChunk(
+      JSON.stringify({
+        object: "runtime.sidecar",
+        event: "commit_failed",
+        payload: {
+          code: "MODEL_RUNTIME_FAILED",
+          message: "db commit blew up",
+        },
+      }),
+      {
+        setRuntimeHealthNotice,
+        setRuntimeLifecycleState,
+        setRuntimeWaitState,
+        dispatchGovernanceDirty: vi.fn(),
+        dispatchHumanAssistDirty: vi.fn(),
+      },
+    );
+
+    expect(setRuntimeLifecycleState).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        phase: "accepted",
+        tone: "busy",
+      }),
+    );
+    expect(setRuntimeLifecycleState).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        phase: "reply_done",
+        tone: "busy",
+      }),
+    );
+    expect(setRuntimeLifecycleState).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        phase: "commit_failed",
+        tone: "error",
+      }),
+    );
+    expect(setRuntimeWaitState).toHaveBeenNthCalledWith(1, null);
+    expect(setRuntimeWaitState).toHaveBeenNthCalledWith(2, null);
+    expect(setRuntimeWaitState).toHaveBeenNthCalledWith(3, null);
+    expect(setRuntimeHealthNotice).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: "error",
+        description: "db commit blew up",
+      }),
+    );
+  });
+
   it("forwards hidden sidecar tail events to the runtime sidecar callback", async () => {
     vi.stubGlobal("BASE_URL", "http://testserver");
     vi.spyOn(providerApi, "getActiveModels").mockResolvedValue({

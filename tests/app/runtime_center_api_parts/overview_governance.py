@@ -1463,6 +1463,72 @@ def test_runtime_center_chat_run_keeps_commit_events_in_same_control_thread() ->
         assert event["payload"].get("thread_id") == control_thread_id
 
 
+def test_runtime_center_chat_run_emits_accepted_and_commit_sidecars_from_runtime_durability_metadata() -> None:
+    app = build_runtime_center_app()
+    control_thread_id = "industry-chat:industry-v1-ops:thread-durable"
+    app.state.turn_executor = _CommitAwareTurnExecutor(
+        runtime_context={
+            "kernel_task_id": "ktask-durable",
+            "execution_intent": "execute-task",
+            "execution_mode": "environment-bound",
+            "environment_ref": "desktop:session-1",
+            "writeback_requested": True,
+            "should_kickoff": True,
+            "accepted_persistence": {
+                "status": "accepted",
+                "source": "query_execution_runtime",
+                "boundary": "execution_runtime_intake",
+                "control_thread_id": control_thread_id,
+                "session_id": "session-durable",
+            },
+            "commit_outcome": {
+                "status": "commit_failed",
+                "action_type": "writeback_and_kickoff",
+                "reason": "durable_kickoff_failed",
+                "message": "kickoff pipeline did not confirm durable persistence",
+                "control_thread_id": control_thread_id,
+                "session_id": "session-durable",
+            },
+        },
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-durable",
+            "session_id": "session-durable",
+            "user_id": "ops-user",
+            "channel": "console",
+            "thread_id": control_thread_id,
+            "control_thread_id": control_thread_id,
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "Continue the same durable control thread."}],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    sidecar_events = [
+        event
+        for event in _parse_sse_events(response.text)
+        if event.get("object") == "runtime.sidecar"
+    ]
+    assert [event["event"] for event in sidecar_events] == [
+        "accepted",
+        "turn_reply_done",
+        "commit_started",
+        "commit_failed",
+    ]
+    assert sidecar_events[0]["payload"]["status"] == "accepted"
+    assert sidecar_events[2]["payload"]["reason"] == "durable_kickoff_failed"
+    assert sidecar_events[3]["payload"]["message"] == "kickoff pipeline did not confirm durable persistence"
+
+
 def test_runtime_center_chat_run_does_not_fabricate_terminal_sidecar_for_noop_deferred() -> None:
     app = build_runtime_center_app()
     control_thread_id = "industry-chat:industry-v1-ops:thread-noop"

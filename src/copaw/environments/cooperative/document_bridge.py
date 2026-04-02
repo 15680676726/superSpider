@@ -29,6 +29,95 @@ _KNOWN_FAMILY_ALIASES = {
     "tsv": "spreadsheets",
 }
 _KNOWN_DOCUMENT_FAMILIES = frozenset(_KNOWN_FAMILY_ALIASES.values())
+_SHARED_OPERATOR_ABORT_STATE_KEY = "operator_abort_state"
+
+
+def _normalize_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _resolve_shared_operator_abort_state(
+    *,
+    session_metadata: dict[str, object],
+    environment_metadata: dict[str, object],
+) -> dict[str, object]:
+    raw = session_metadata.get(_SHARED_OPERATOR_ABORT_STATE_KEY)
+    if not isinstance(raw, dict):
+        raw = environment_metadata.get(_SHARED_OPERATOR_ABORT_STATE_KEY)
+    if not isinstance(raw, dict):
+        return {}
+    channel = _normalize_string(
+        raw.get("channel"),
+    ) or _normalize_string(raw.get("operator_abort_channel"))
+    requested = bool(
+        raw.get("requested")
+        if "requested" in raw
+        else raw.get("operator_abort_requested"),
+    )
+    requested_at = _normalize_string(raw.get("requested_at"))
+    reason = (
+        _normalize_string(raw.get("reason"))
+        or _normalize_string(raw.get("abort_reason"))
+        or channel
+    )
+    state: dict[str, object] = {}
+    if channel is not None:
+        state["channel"] = channel
+    if requested:
+        state["requested"] = True
+    if reason is not None:
+        state["reason"] = reason
+    if requested_at is not None:
+        state["requested_at"] = requested_at
+    return state
+
+
+def _abort_channels_match(
+    *,
+    guardrail_channel: object,
+    shared_channel: object,
+) -> bool:
+    normalized_guardrail_channel = _normalize_string(guardrail_channel)
+    normalized_shared_channel = _normalize_string(shared_channel)
+    if normalized_guardrail_channel is None or normalized_shared_channel is None:
+        return True
+    return normalized_guardrail_channel == normalized_shared_channel
+
+
+def _merge_execution_guardrails(
+    *,
+    guardrails: object,
+    session_metadata: dict[str, object],
+    environment_metadata: dict[str, object],
+) -> dict[str, object]:
+    merged = dict(guardrails) if isinstance(guardrails, dict) else {}
+    shared_abort_state = _resolve_shared_operator_abort_state(
+        session_metadata=session_metadata,
+        environment_metadata=environment_metadata,
+    )
+    if not shared_abort_state.get("requested"):
+        return merged
+    if not _abort_channels_match(
+        guardrail_channel=merged.get("operator_abort_channel"),
+        shared_channel=shared_abort_state.get("channel"),
+    ):
+        return merged
+    if shared_abort_state.get("channel") is not None and _normalize_string(
+        merged.get("operator_abort_channel"),
+    ) is None:
+        merged["operator_abort_channel"] = shared_abort_state["channel"]
+    merged["operator_abort_requested"] = True
+    reason = _normalize_string(merged.get("abort_reason")) or _normalize_string(
+        shared_abort_state.get("reason"),
+    )
+    if reason is not None:
+        merged["abort_reason"] = reason
+    if shared_abort_state.get("requested_at") is not None:
+        merged.setdefault("operator_abort_requested_at", shared_abort_state["requested_at"])
+    return merged
 
 
 class DocumentBridgeRuntime:
@@ -51,6 +140,7 @@ class DocumentBridgeRuntime:
         status: str | None = None,
         supported_families: Iterable[str] | None = None,
         available: bool | None = None,
+        execution_guardrails: dict[str, object] | None = None,
     ) -> SessionMount:
         session = self._require_session(session_mount_id)
         families = self._merge_supported_families(
@@ -70,6 +160,14 @@ class DocumentBridgeRuntime:
             "ui_fallback_mode": "ui-fallback-last",
             "adapter_gap_or_blocker": None,
         }
+        environment = self._environment_repository.get_environment(session.environment_id)
+        existing_guardrails = session.metadata.get("document_execution_guardrails")
+        if not isinstance(existing_guardrails, dict) and environment is not None:
+            existing_guardrails = environment.metadata.get("document_execution_guardrails")
+        if execution_guardrails is not None:
+            patch["document_execution_guardrails"] = dict(execution_guardrails)
+        elif isinstance(existing_guardrails, dict):
+            patch["document_execution_guardrails"] = dict(existing_guardrails)
         return self._persist_metadata_patch(session=session, patch=patch)
 
     def clear_bridge(
@@ -85,6 +183,12 @@ class DocumentBridgeRuntime:
             "document_bridge_supported_families": [],
             "adapter_gap_or_blocker": "Document bridge runtime is not registered.",
         }
+        environment = self._environment_repository.get_environment(session.environment_id)
+        existing_guardrails = session.metadata.get("document_execution_guardrails")
+        if not isinstance(existing_guardrails, dict) and environment is not None:
+            existing_guardrails = environment.metadata.get("document_execution_guardrails")
+        if isinstance(existing_guardrails, dict):
+            patch["document_execution_guardrails"] = dict(existing_guardrails)
         return self._persist_metadata_patch(session=session, patch=patch)
 
     def snapshot(
@@ -94,6 +198,12 @@ class DocumentBridgeRuntime:
         document_family: str | None,
     ) -> dict[str, object]:
         session = self._require_session(session_mount_id)
+        environment = self._environment_repository.get_environment(session.environment_id)
+        environment_metadata = (
+            dict(environment.metadata)
+            if environment is not None and isinstance(environment.metadata, dict)
+            else {}
+        )
         resolved_family = self._normalize_family(document_family)
         supported = self._current_supported_families(session)
         bridge_ready = self._bridge_is_ready(session)
@@ -125,6 +235,13 @@ class DocumentBridgeRuntime:
             "preferred_execution_path": preferred_execution_path,
             "ui_fallback_mode": ui_fallback_mode,
             "adapter_gap_or_blocker": blocker,
+            "execution_guardrails": (
+                _merge_execution_guardrails(
+                    guardrails=session.metadata.get("document_execution_guardrails"),
+                    session_metadata=dict(session.metadata),
+                    environment_metadata=environment_metadata,
+                )
+            ),
         }
 
     def _persist_metadata_patch(

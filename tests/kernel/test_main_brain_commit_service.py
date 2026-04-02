@@ -4,6 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from copaw.kernel.main_brain_commit_service import MainBrainCommitService
+from copaw.kernel.main_brain_result_committer import MainBrainResultCommitter
 from copaw.kernel.main_brain_turn_result import MainBrainActionEnvelope, MainBrainTurnResult
 
 
@@ -250,3 +251,94 @@ def test_main_brain_commit_service_deduplicates_by_commit_key() -> None:
     assert second.status == "committed"
     assert second.idempotent_replay is True
     assert len(calls) == 1
+
+
+def test_main_brain_commit_service_respects_downstream_writeback_failure_from_result_committer() -> None:
+    backend = _FakeSessionBackend()
+
+    class _IndustryService:
+        async def apply_execution_chat_writeback(self, **kwargs):
+            _ = kwargs
+            return {
+                "status": "commit_failed",
+                "reason": "durable_writeback_failed",
+                "message": "writeback pipeline did not confirm durable persistence",
+            }
+
+    service = MainBrainCommitService(
+        session_backend=backend,
+        action_handlers={
+            "create_backlog_item": lambda envelope, request, commit_key: MainBrainResultCommitter(
+                industry_service=_IndustryService(),
+            ).commit_action(
+                action_envelope=envelope,
+                request=request,
+                commit_key=commit_key,
+            ),
+        },
+    )
+    result = service.commit_turn_result(
+        turn_result=MainBrainTurnResult(
+            reply_text="reply",
+            action_envelope=MainBrainActionEnvelope(
+                kind="commit_action",
+                action_type="create_backlog_item",
+                payload={
+                    "lane_hint": "growth",
+                    "title": "Track operator request",
+                    "summary": "Persist the latest operator request",
+                    "acceptance_hint": "Operator confirms backlog wording",
+                    "source_refs": ["chat:1"],
+                },
+            ),
+        ),
+        request=_request(),
+    )
+
+    assert result.status == "commit_failed"
+    assert result.reason == "durable_writeback_failed"
+    assert result.message == "writeback pipeline did not confirm durable persistence"
+
+
+def test_main_brain_result_committer_requires_durable_kickoff_proof() -> None:
+    backend = _FakeSessionBackend()
+
+    class _IndustryService:
+        async def kickoff_execution_from_chat(self, **kwargs):
+            _ = kwargs
+            return {
+                "summary": "Kickoff tail completed but durable execution proof never arrived.",
+            }
+
+    service = MainBrainCommitService(
+        session_backend=backend,
+        action_handlers={
+            "orchestrate_execution": lambda envelope, request, commit_key: MainBrainResultCommitter(
+                industry_service=_IndustryService(),
+            ).commit_action(
+                action_envelope=envelope,
+                request=request,
+                commit_key=commit_key,
+            ),
+        },
+    )
+    result = service.commit_turn_result(
+        turn_result=MainBrainTurnResult(
+            reply_text="reply",
+            action_envelope=MainBrainActionEnvelope(
+                kind="commit_action",
+                action_type="orchestrate_execution",
+                payload={
+                    "goal_summary": "Continue the current workstream",
+                    "requested_surfaces": ["browser"],
+                    "operator_intent_summary": "Resume execution from the same control thread",
+                    "continuity_ref": "continuity-1",
+                },
+            ),
+        ),
+        request=_request(),
+    )
+
+    assert result.status == "commit_failed"
+    assert result.reason == "durable_kickoff_failed"
+    assert result.message == "kickoff pipeline did not confirm durable persistence"

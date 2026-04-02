@@ -476,6 +476,12 @@ class EnvironmentHealthService:
                 runtime_descriptor.get("session_scope"),
                 live_descriptor.get("session_scope"),
             ),
+            "work_context_id": self._first_string(
+                session_metadata.get("work_context_id"),
+                mount_metadata.get("work_context_id"),
+                runtime_descriptor.get("work_context_id"),
+                live_descriptor.get("work_context_id"),
+            ),
             "account_scope_ref": self._first_string(
                 session_metadata.get("account_scope_ref"),
                 mount_metadata.get("account_scope_ref"),
@@ -744,9 +750,31 @@ class EnvironmentHealthService:
             ),
             "attach_transport_ref": self._first_string(
                 session_metadata.get("attach_transport_ref"),
+                session_metadata.get("browser_attach_transport_ref"),
                 mount_metadata.get("attach_transport_ref"),
+                mount_metadata.get("browser_attach_transport_ref"),
                 runtime_descriptor.get("attach_transport_ref"),
+                runtime_descriptor.get("browser_attach_transport_ref"),
                 live_descriptor.get("attach_transport_ref"),
+                live_descriptor.get("browser_attach_transport_ref"),
+            ),
+            "attach_session_ref": self._first_string(
+                session_metadata.get("browser_attach_session_ref"),
+                mount_metadata.get("browser_attach_session_ref"),
+                runtime_descriptor.get("browser_attach_session_ref"),
+                live_descriptor.get("browser_attach_session_ref"),
+            ),
+            "attach_scope_ref": self._first_string(
+                session_metadata.get("browser_attach_scope_ref"),
+                mount_metadata.get("browser_attach_scope_ref"),
+                runtime_descriptor.get("browser_attach_scope_ref"),
+                live_descriptor.get("browser_attach_scope_ref"),
+            ),
+            "attach_reconnect_token": self._first_string(
+                session_metadata.get("browser_attach_reconnect_token"),
+                mount_metadata.get("browser_attach_reconnect_token"),
+                runtime_descriptor.get("browser_attach_reconnect_token"),
+                live_descriptor.get("browser_attach_reconnect_token"),
             ),
             "provider_kind": self._first_string(
                 session_metadata.get("provider_kind"),
@@ -971,6 +999,16 @@ class EnvironmentHealthService:
             **self._mapping(live_descriptor.get("execution_guardrails")),
             **self._mapping(session_metadata.get("execution_guardrails")),
         }
+        operator_abort_state = self._build_operator_abort_state_projection(
+            session_metadata.get("operator_abort_state"),
+            mount_metadata.get("operator_abort_state"),
+            runtime_descriptor.get("operator_abort_state"),
+            live_descriptor.get("operator_abort_state"),
+        )
+        execution_guardrails = self._merge_operator_abort_guardrails_projection(
+            execution_guardrails,
+            operator_abort_state,
+        )
         current_gap_or_blocker = self._first_string(
             session_metadata.get("current_gap_or_blocker"),
             mount_metadata.get("current_gap_or_blocker"),
@@ -1032,6 +1070,7 @@ class EnvironmentHealthService:
                 window_anchor_summary,
             ),
             "execution_guardrails": execution_guardrails,
+            "operator_abort_state": operator_abort_state,
             "account_scope_ref": self._first_string(
                 session_metadata.get("account_scope_ref"),
                 mount_metadata.get("account_scope_ref"),
@@ -1143,6 +1182,22 @@ class EnvironmentHealthService:
                 and browser_companion_status.strip().lower()
                 in {"ready", "attached", "available", "healthy"}
             )
+        operator_abort_state = self._build_operator_abort_state_projection(
+            session_metadata.get("operator_abort_state"),
+            mount_metadata.get("operator_abort_state"),
+            runtime_descriptor.get("operator_abort_state"),
+            live_descriptor.get("operator_abort_state"),
+        )
+        browser_execution_guardrails = {
+            **self._mapping(mount_metadata.get("browser_execution_guardrails")),
+            **self._mapping(runtime_descriptor.get("browser_execution_guardrails")),
+            **self._mapping(live_descriptor.get("browser_execution_guardrails")),
+            **self._mapping(session_metadata.get("browser_execution_guardrails")),
+        }
+        browser_execution_guardrails = self._merge_operator_abort_guardrails_projection(
+            browser_execution_guardrails,
+            operator_abort_state,
+        )
 
         document_bridge_ref = self._first_string(
             session_metadata.get("document_bridge_ref"),
@@ -1168,6 +1223,16 @@ class EnvironmentHealthService:
                 and document_bridge_status.strip().lower()
                 in {"ready", "available", "healthy"}
             )
+        document_execution_guardrails = {
+            **self._mapping(mount_metadata.get("document_execution_guardrails")),
+            **self._mapping(runtime_descriptor.get("document_execution_guardrails")),
+            **self._mapping(live_descriptor.get("document_execution_guardrails")),
+            **self._mapping(session_metadata.get("document_execution_guardrails")),
+        }
+        document_execution_guardrails = self._merge_operator_abort_guardrails_projection(
+            document_execution_guardrails,
+            operator_abort_state,
+        )
 
         filesystem_watcher_status = self._first_string(
             session_metadata.get("filesystem_watcher_status"),
@@ -1242,6 +1307,10 @@ class EnvironmentHealthService:
             **self._mapping(live_descriptor.get("execution_guardrails")),
             **self._mapping(session_metadata.get("execution_guardrails")),
         }
+        execution_guardrails = self._merge_operator_abort_guardrails_projection(
+            execution_guardrails,
+            operator_abort_state,
+        )
         preferred_path = self._first_string(
             session_metadata.get("preferred_execution_path"),
             mount_metadata.get("preferred_execution_path"),
@@ -1282,11 +1351,13 @@ class EnvironmentHealthService:
             "session_mount_id": session.id if session is not None else None,
             "preferred_execution_path": preferred_path,
             "fallback_mode": fallback_mode,
+            "operator_abort_state": operator_abort_state,
             "browser_companion": {
                 "available": browser_companion_available,
                 "status": browser_companion_status,
                 "transport_ref": browser_transport_ref,
                 "provider_session_ref": browser_site_contract.get("provider_session_ref"),
+                "execution_guardrails": browser_execution_guardrails,
             },
             "document_bridge": {
                 "available": document_bridge_available,
@@ -1298,6 +1369,7 @@ class EnvironmentHealthService:
                     runtime_descriptor.get("document_bridge_supported_families"),
                     live_descriptor.get("document_bridge_supported_families"),
                 ),
+                "execution_guardrails": document_execution_guardrails,
             },
             "watchers": {
                 "filesystem": {
@@ -1399,6 +1471,11 @@ class EnvironmentHealthService:
                 session_metadata.get("workspace_scope"),
                 mount_metadata.get("workspace_scope"),
             ),
+            "work_context_id": self._first_string(
+                session_metadata.get("work_context_id"),
+                mount_metadata.get("work_context_id"),
+                host_contract.get("work_context_id"),
+            ),
             "session_scope": host_contract.get("session_scope"),
             "host_mode": host_contract.get("host_mode"),
             "lease_status": host_contract.get("lease_status"),
@@ -1453,6 +1530,11 @@ class EnvironmentHealthService:
         mount_metadata = self._mapping(getattr(mount, "metadata", None))
         session_metadata = self._mapping(session.metadata if session is not None else None)
         scope = {
+            "work_context_id": self._first_string(
+                session_metadata.get("work_context_id"),
+                mount_metadata.get("work_context_id"),
+                host_contract.get("work_context_id"),
+            ),
             "workspace_scope": self._first_string(
                 session_metadata.get("workspace_scope"),
                 mount_metadata.get("workspace_scope"),
@@ -1608,6 +1690,13 @@ class EnvironmentHealthService:
             candidate_session_metadata.get("writer_lock_scope"),
             candidate_mount_metadata.get("writer_lock_scope"),
         )
+        candidate_work_context_id = self._first_string(
+            candidate_session_metadata.get("work_context_id"),
+            candidate_mount_metadata.get("work_context_id"),
+        )
+        work_context_id = self._first_string(scope.get("work_context_id"))
+        if work_context_id is not None:
+            return candidate_work_context_id == work_context_id
         workspace_scope = self._first_string(scope.get("workspace_scope"))
         account_scope_ref = self._first_string(scope.get("account_scope_ref"))
         writer_lock_scope = self._first_string(scope.get("writer_lock_scope"))
@@ -1681,6 +1770,10 @@ class EnvironmentHealthService:
             "workspace_scope": self._first_string(
                 session_metadata.get("workspace_scope"),
                 mount_metadata.get("workspace_scope"),
+            ),
+            "work_context_id": self._first_string(
+                session_metadata.get("work_context_id"),
+                mount_metadata.get("work_context_id"),
             ),
             "account_scope_ref": self._first_string(
                 session_metadata.get("account_scope_ref"),
@@ -1981,6 +2074,11 @@ class EnvironmentHealthService:
             "handoff_owner_ref": host_contract.get("handoff_owner_ref"),
             "account_scope_ref": account_scope_ref,
             "workspace_scope": workspace_scope,
+            "work_context_id": self._first_string(
+                session_metadata.get("work_context_id"),
+                mount_metadata.get("work_context_id"),
+                host_contract.get("work_context_id"),
+            ),
             "session_scope": host_contract.get("session_scope"),
             "lease_class": host_contract.get("lease_class"),
             "access_mode": host_contract.get("access_mode"),
@@ -2019,6 +2117,11 @@ class EnvironmentHealthService:
                 session_metadata.get("workspace_id"),
                 mount_metadata.get("workspace_id"),
                 getattr(mount, "id", None) if mount is not None else None,
+            ),
+            "work_context_id": self._first_string(
+                session_metadata.get("work_context_id"),
+                mount_metadata.get("work_context_id"),
+                host_contract.get("work_context_id"),
             ),
             "seat_ref": getattr(mount, "id", None) if mount is not None else None,
             "session_mount_id": session.id if session is not None else None,
@@ -3471,6 +3574,70 @@ class EnvironmentHealthService:
             if value is not None:
                 projection[key] = value
         return projection
+
+    def _build_operator_abort_state_projection(
+        self,
+        *sources: object,
+    ) -> dict[str, object]:
+        mappings = [self._mapping(source) for source in sources]
+        channel = self._first_string(
+            *(mapping.get("channel") for mapping in mappings),
+            *(mapping.get("operator_abort_channel") for mapping in mappings),
+        )
+        requested = self._first_bool(
+            *(mapping.get("requested") for mapping in mappings),
+            *(mapping.get("operator_abort_requested") for mapping in mappings),
+        )
+        reason = self._first_string(
+            *(mapping.get("reason") for mapping in mappings),
+            *(mapping.get("abort_reason") for mapping in mappings),
+        )
+        requested_at = self._first_string(
+            *(mapping.get("requested_at") for mapping in mappings),
+            *(mapping.get("operator_abort_requested_at") for mapping in mappings),
+        )
+        projection: dict[str, object] = {}
+        if channel is not None:
+            projection["channel"] = channel
+        if requested is not None:
+            projection["requested"] = requested
+        if reason is not None:
+            projection["reason"] = reason
+        if requested_at is not None:
+            projection["requested_at"] = requested_at
+        return projection
+
+    def _merge_operator_abort_guardrails_projection(
+        self,
+        guardrails: dict[str, object],
+        operator_abort_state: dict[str, object],
+    ) -> dict[str, object]:
+        merged = dict(guardrails)
+        channel = self._first_string(
+            merged.get("operator_abort_channel"),
+            operator_abort_state.get("channel"),
+        )
+        if channel is not None:
+            merged["operator_abort_channel"] = channel
+        requested = self._first_bool(
+            operator_abort_state.get("requested"),
+            merged.get("operator_abort_requested"),
+        )
+        if requested is not None:
+            merged["operator_abort_requested"] = requested
+        reason = self._first_string(
+            merged.get("abort_reason"),
+            operator_abort_state.get("reason"),
+        )
+        if reason is not None:
+            merged["abort_reason"] = reason
+        requested_at = self._first_string(
+            merged.get("operator_abort_requested_at"),
+            operator_abort_state.get("requested_at"),
+        )
+        if requested_at is not None:
+            merged["operator_abort_requested_at"] = requested_at
+        return merged
 
     def _sanitize_prompt_facing_host_label(
         self,

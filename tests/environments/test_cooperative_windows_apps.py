@@ -84,6 +84,23 @@ def _patch_session_environment_metadata(
     )
 
 
+def _patch_operator_abort_state(
+    *,
+    env_repo,
+    session_repo,
+    session_mount_id: str,
+    operator_abort_state: dict[str, object],
+) -> None:
+    _patch_session_environment_metadata(
+        env_repo=env_repo,
+        session_repo=session_repo,
+        session_mount_id=session_mount_id,
+        patch={
+            "operator_abort_state": dict(operator_abort_state),
+        },
+    )
+
+
 def test_windows_app_adapter_runtime_registers_projection_metadata(tmp_path) -> None:
     service, env_repo, session_repo = _build_environment_service(tmp_path)
     lease = _acquire_desktop_session(service)
@@ -321,6 +338,91 @@ async def test_windows_app_action_blocks_when_operator_abort_guardrail_is_reques
             action="focus_window",
             contract={"app_identity": "excel"},
         )
+
+
+@pytest.mark.asyncio
+async def test_windows_app_action_blocks_when_global_operator_abort_channel_matches(
+    tmp_path,
+) -> None:
+    service, env_repo, session_repo = _build_environment_service(tmp_path)
+    lease = _acquire_desktop_session(service)
+
+    service.register_windows_app_adapter(
+        session_mount_id=lease.id,
+        adapter_refs=["app-adapter:excel"],
+        app_identity="excel",
+        control_channel="accessibility-tree",
+        execution_guardrails={
+            "operator_abort_channel": "global-esc",
+        },
+    )
+    _patch_operator_abort_state(
+        env_repo=env_repo,
+        session_repo=session_repo,
+        session_mount_id=lease.id,
+        operator_abort_state={
+            "channel": "global-esc",
+            "requested": True,
+            "reason": "global-esc",
+        },
+    )
+
+    class _Executor:
+        async def __call__(self, **_kwargs):
+            raise AssertionError("executor should not run after global operator abort")
+
+    service.register_semantic_surface_executor("accessibility-tree", _Executor())
+
+    with pytest.raises(RuntimeError, match="operator abort"):
+        await service.execute_windows_app_action(
+            session_mount_id=lease.id,
+            action="focus_window",
+            contract={"app_identity": "excel"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_windows_app_action_blocks_when_shared_operator_abort_state_is_requested_without_explicit_runtime_guardrails(
+    tmp_path,
+) -> None:
+    service, _, _ = _build_environment_service(tmp_path)
+    service.set_runtime_event_bus(RuntimeEventBus(max_events=20))
+    lease = _acquire_desktop_session(service)
+
+    service.register_windows_app_adapter(
+        session_mount_id=lease.id,
+        adapter_refs=["app-adapter:excel"],
+        app_identity="excel",
+        control_channel="accessibility-tree",
+    )
+    service._lease_service.set_shared_operator_abort_state(
+        lease.id,
+        channel="global-esc",
+        reason="global-esc",
+    )
+
+    class _Executor:
+        async def __call__(self, **_kwargs):
+            raise AssertionError("executor should not run after shared operator abort")
+
+    service.register_semantic_surface_executor("accessibility-tree", _Executor())
+
+    with pytest.raises(RuntimeError, match="operator abort"):
+        await service.execute_windows_app_action(
+            session_mount_id=lease.id,
+            action="focus_window",
+            contract={"app_identity": "excel"},
+        )
+
+    assert service._runtime_event_bus is not None
+    blocked = [
+        event
+        for event in service._runtime_event_bus.list_events(limit=10)
+        if event.event_name == "desktop.guardrail-blocked"
+    ]
+    assert blocked
+    assert blocked[-1].payload["guardrail_kind"] == "operator-abort"
+    assert blocked[-1].payload["reason"] == "global-esc"
 
 
 @pytest.mark.asyncio

@@ -359,6 +359,81 @@ def test_activation_service_collects_support_and_contradiction_refs() -> None:
     assert result.contradictions
 
 
+def test_activation_service_activate_for_query_pulls_entity_and_opinion_views() -> None:
+    calls: dict[str, list[dict[str, object]]] = {
+        "fact": [],
+        "entity": [],
+        "opinion": [],
+    }
+
+    def _list_fact_entries(**kwargs: object) -> list[object]:
+        calls["fact"].append(dict(kwargs))
+        return [
+            _fact_entry(
+                "fact-1",
+                scope_type="industry",
+                scope_id="industry-1",
+                title="Outbound approval blocked",
+                summary="Approval is blocked pending outbound evidence review.",
+                entity_keys=["outbound", "approval"],
+                opinion_keys=["approval:caution:evidence-review"],
+                source_ref="chunk-1",
+            ),
+        ]
+
+    def _list_entity_views(**kwargs: object) -> list[object]:
+        calls["entity"].append(dict(kwargs))
+        return [
+            _entity_view(
+                "entity-1",
+                entity_key="outbound",
+                scope_type="industry",
+                scope_id="industry-1",
+                summary="Outbound is the constrained execution lane.",
+                supporting_refs=["fact-1", "chunk-1"],
+            ),
+        ]
+
+    def _list_opinion_views(**kwargs: object) -> list[object]:
+        calls["opinion"].append(dict(kwargs))
+        return [
+            _opinion_view(
+                "opinion-1",
+                subject_key="approval",
+                opinion_key="approval:caution:evidence-review",
+                scope_type="industry",
+                scope_id="industry-1",
+                summary="Approval should wait for evidence review.",
+                supporting_refs=["fact-1", "chunk-1"],
+                entity_keys=["approval", "outbound"],
+            ),
+        ]
+
+    service = MemoryActivationService(
+        derived_index_service=SimpleNamespace(
+            list_fact_entries=_list_fact_entries,
+            list_entity_views=_list_entity_views,
+            list_opinion_views=_list_opinion_views,
+        ),
+        strategy_memory_service=SimpleNamespace(),
+    )
+
+    result = service.activate_for_query(
+        query="blocked outbound approval",
+        industry_instance_id="industry-1",
+        owner_agent_id="agent-main-brain",
+        limit=6,
+    )
+
+    neuron_ids = {item.neuron_id for item in result.activated_neurons}
+    assert {"fact-1", "entity-1", "opinion-1"} <= neuron_ids
+    assert "outbound" in result.top_entities
+    assert "approval:caution:evidence-review" in result.top_opinions
+    assert calls["fact"][0]["scope_type"] == "industry"
+    assert calls["entity"][0]["scope_id"] == "industry-1"
+    assert calls["opinion"][0]["owner_agent_id"] == "agent-main-brain"
+
+
 def test_derived_index_service_persists_relation_views_from_fact_entity_links() -> None:
     fact_entries = [
         _fact_entry(

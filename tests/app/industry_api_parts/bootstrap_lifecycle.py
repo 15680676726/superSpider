@@ -8,6 +8,7 @@ from ..test_capability_market_api import FakeMcpRegistryCatalog
 from copaw.app.console_push_store import take_all
 from copaw.capabilities.system_team_handlers import SystemTeamCapabilityFacade
 from copaw.industry import IndustryBootstrapInstallItem
+from copaw.memory.activation_models import ActivationResult
 from copaw.state import AgentReportRecord, AssignmentRecord
 
 
@@ -902,6 +903,23 @@ def _build_support_role(
     )
 
 
+class _FakePlanningActivationService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def activate_for_query(self, **kwargs: object) -> ActivationResult:
+        self.calls.append(dict(kwargs))
+        return ActivationResult(
+            query=str(kwargs.get("query") or ""),
+            scope_type="industry",
+            scope_id=str(kwargs.get("industry_instance_id") or "industry-1"),
+            top_entities=["weekend-variance", "inventory"],
+            top_opinions=["staffing:caution:premature-change"],
+            top_constraints=["Do not expand staffing before the variance is explained."],
+            top_next_actions=["Review the weekend variance evidence before launching the next move."],
+        )
+
+
 def test_run_operating_cycle_dispatches_materialized_execution_assignment(tmp_path) -> None:
     app = _build_industry_app(tmp_path)
     client = TestClient(app)
@@ -1027,6 +1045,108 @@ def test_run_operating_cycle_dispatches_materialized_execution_assignment(tmp_pa
     assert override is not None
     assert override.status in {"waiting", "assigned", "queued", "claimed", "executing"}
     assert override.current_goal
+
+
+def test_run_operating_cycle_persists_graph_focus_into_formal_planning_sidecar(tmp_path) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    execution_core_agent_id = preview_payload["draft"]["team"]["agents"][0]["agent_id"]
+    support_role = _build_support_role(execution_core_agent_id)
+    facade = _build_team_capability_facade(app)
+    created = asyncio.run(
+        facade.handle_update_industry_team(
+            {
+                "instance_id": instance_id,
+                "operation": "add-role",
+                "role": support_role.model_dump(mode="json"),
+            },
+        ),
+    )
+    assert created["success"] is True
+
+    activation_service = _FakePlanningActivationService()
+    app.state.industry_service._memory_activation_service = activation_service
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    assert detail.lanes
+    app.state.industry_service._backlog_service.record_chat_writeback(
+        industry_instance_id=instance_id,
+        lane_id=str(detail.lanes[0]["lane_id"]),
+        title="Investigate weekend inventory variance",
+        summary="Review the variance evidence before changing support staffing.",
+        priority=5,
+        source_ref="test:formal-planning-graph-focus",
+        metadata={
+            "owner_agent_id": support_role.agent_id,
+            "industry_role_id": support_role.role_id,
+            "industry_role_name": support_role.role_name,
+            "role_name": support_role.role_name,
+            "role_summary": support_role.role_summary,
+            "mission": support_role.mission,
+            "goal_kind": support_role.goal_kind,
+            "task_mode": "autonomy-cycle",
+            "report_back_mode": "summary",
+            "plan_steps": ["Review the variance evidence before changing support staffing."],
+        },
+    )
+
+    cycle_result = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:formal-planning-graph-focus",
+            force=True,
+        ),
+    )
+    assert cycle_result["count"] == 1
+    processed_instance = cycle_result["processed_instances"][0]
+    started_cycle_id = processed_instance["started_cycle_id"]
+    assert started_cycle_id is not None
+    assert activation_service.calls
+    assert activation_service.calls[0]["industry_instance_id"] == instance_id
+    assert activation_service.calls[0]["current_phase"] == "operating-cycle-planning"
+
+    cycle = app.state.operating_cycle_repository.get_cycle(started_cycle_id)
+    assert cycle is not None
+    formal_planning = dict((cycle.metadata or {}).get("formal_planning") or {})
+    strategy_constraints = dict(formal_planning.get("strategy_constraints") or {})
+    cycle_decision = dict(formal_planning.get("cycle_decision") or {})
+
+    assert strategy_constraints["graph_focus_entities"] == [
+        "weekend-variance",
+        "inventory",
+    ]
+    assert strategy_constraints["graph_focus_opinions"] == [
+        "staffing:caution:premature-change",
+    ]
+    assert cycle_decision["metadata"]["graph_focus_entities"] == [
+        "weekend-variance",
+        "inventory",
+    ]
+    assert cycle_decision["metadata"]["graph_focus_opinions"] == [
+        "staffing:caution:premature-change",
+    ]
 
 
 def test_run_operating_cycle_skips_unresolved_chat_writeback_gap_backlog(tmp_path) -> None:
@@ -2201,6 +2321,8 @@ def test_activation_followup_backlog_carries_activation_metadata(tmp_path) -> No
         record=record,
         synthesis={
             "activation": {
+                "top_entities": ["weekend-variance", "staffing"],
+                "top_opinions": ["staffing:caution:premature-change"],
                 "top_constraints": [
                     "Weekend escalation root cause is still unvalidated.",
                 ],
@@ -2241,6 +2363,13 @@ def test_activation_followup_backlog_carries_activation_metadata(tmp_path) -> No
     )
     assert activation_followup["metadata"]["activation_top_constraints"] == [
         "Weekend escalation root cause is still unvalidated.",
+    ]
+    assert activation_followup["metadata"]["activation_top_entities"] == [
+        "weekend-variance",
+        "staffing",
+    ]
+    assert activation_followup["metadata"]["activation_top_opinions"] == [
+        "staffing:caution:premature-change",
     ]
     assert activation_followup["metadata"]["activation_top_next_actions"] == [
         "Pull the weekend audit trail before changing staffing.",
@@ -2285,6 +2414,8 @@ def test_activation_followup_materialized_assignment_keeps_activation_metadata(
         record=record,
         synthesis={
             "activation": {
+                "top_entities": ["weekend-variance", "staffing"],
+                "top_opinions": ["staffing:caution:premature-change"],
                 "top_constraints": [
                     "Weekend escalation root cause is still unvalidated.",
                 ],
@@ -2328,6 +2459,13 @@ def test_activation_followup_materialized_assignment_keeps_activation_metadata(
     assert assignment is not None
     assert assignment.metadata["activation_top_constraints"] == [
         "Weekend escalation root cause is still unvalidated.",
+    ]
+    assert assignment.metadata["activation_top_entities"] == [
+        "weekend-variance",
+        "staffing",
+    ]
+    assert assignment.metadata["activation_top_opinions"] == [
+        "staffing:caution:premature-change",
     ]
     assert assignment.metadata["activation_top_next_actions"] == [
         "Pull the weekend audit trail before changing staffing.",

@@ -13,8 +13,15 @@ from copaw.agents.tools import browser_control_actions_extended
 from copaw.agents.tools import browser_control_shared
 from copaw.agents.tools.browser_control import browser_use
 from copaw.agents.tools.evidence_runtime import bind_browser_evidence_sink
+from copaw.app.runtime_events import RuntimeEventBus
 from copaw.capabilities import browser_runtime as browser_runtime_module
 from copaw.capabilities.browser_runtime import BrowserRuntimeService, BrowserSessionStartOptions
+from copaw.environments import (
+    EnvironmentRegistry,
+    EnvironmentRepository,
+    EnvironmentService,
+    SessionMountRepository,
+)
 from copaw.state import SQLiteStateStore
 
 
@@ -31,6 +38,21 @@ def _json_response(payload: dict[str, object]) -> ToolResponse:
 
 def _response_payload(response: ToolResponse) -> dict[str, object]:
     return json.loads(response.content[0]["text"])
+
+
+def _build_environment_service(tmp_path):
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(state_store)
+    session_repo = SessionMountRepository(state_store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    environment_service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    environment_service.set_session_repository(session_repo)
+    return environment_service, env_repo, session_repo
 
 
 def test_browser_use_keeps_default_behavior_without_sink(monkeypatch) -> None:
@@ -402,6 +424,76 @@ def test_browser_use_emits_click_download_verification_payload(tmp_path, monkeyp
     assert payloads[0]["metadata"]["verification"]["kind"] == "download"
     assert payloads[0]["metadata"]["verification"]["channel"] == "playwright-download+filesystem"
     assert payloads[0]["metadata"]["verification"]["download"]["path"] == str(download_path)
+
+
+def test_browser_use_blocks_when_global_operator_abort_is_requested_for_bound_browser_session(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    payloads: list[dict[str, object]] = []
+    environment_service, _, _ = _build_environment_service(tmp_path)
+    event_bus = RuntimeEventBus(max_events=20)
+    environment_service.set_runtime_event_bus(event_bus)
+
+    lease = environment_service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-browser-abort",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        metadata={
+            "work_context_id": "ctx-browser-abort",
+            "workspace_scope": "task:task-1",
+        },
+    )
+    environment_service.register_browser_attach_transport(
+        session_mount_id=lease.id,
+        transport_ref="transport:cdp:local",
+        status="attached",
+        browser_session_ref="browser-session:web:abort",
+        browser_scope_ref="site:jd:seller-center",
+        reconnect_token="reconnect-abort",
+    )
+    environment_service._lease_service.set_shared_operator_abort_state(
+        lease.id,
+        channel="global-esc",
+        reason="global-esc",
+    )
+
+    async def fake_open(*args, **kwargs):
+        _ = args, kwargs
+        raise AssertionError("browser action should not run after operator abort")
+
+    monkeypatch.setattr("copaw.agents.tools.browser_control._action_open", fake_open)
+
+    async def run() -> ToolResponse:
+        with bind_browser_evidence_sink(payloads.append):
+            return await browser_use(
+                action="open",
+                url="https://example.com/abort",
+                page_id="page-abort",
+                session_id="browser-session:web:abort",
+            )
+
+    response = asyncio.run(run())
+    payload = _response_payload(response)
+
+    assert payload["ok"] is False
+    assert "operator abort" in str(payload["error"]).lower()
+    assert len(payloads) == 1
+    assert payloads[0]["status"] == "error"
+    assert payloads[0]["metadata"]["guardrail"]["kind"] == "operator-abort"
+    assert payloads[0]["metadata"]["guardrail"]["reason"] == "global-esc"
+    assert payloads[0]["metadata"]["session_mount_id"] == lease.id
+
+    blocked = [
+        event
+        for event in event_bus.list_events(limit=10)
+        if event.event_name == "browser.guardrail-blocked"
+    ]
+    assert blocked
+    assert blocked[-1].payload["guardrail_kind"] == "operator-abort"
+    assert blocked[-1].payload["reason"] == "global-esc"
 
 
 def test_attach_download_listener_accepts_property_filename(tmp_path, monkeypatch) -> None:
@@ -776,3 +868,109 @@ def test_browser_runtime_attach_does_not_fake_save_reopen_verification(tmp_path,
     assert result["status"] == "attached"
     assert result["continuity"]["save_reopen_verification"] is False
     assert result["continuity"]["verification"]["save_reopen"]["verified"] is False
+
+
+def test_browser_runtime_companion_snapshot_preserves_mount_truth_continuity_refs(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(state_store)
+    session_repo = SessionMountRepository(state_store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    environment_service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    environment_service.set_session_repository(session_repo)
+
+    lease = environment_service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-browser-companion",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={"page_id": "page:jd:seller-center:home"},
+        metadata={
+            "work_context_id": "ctx-browser-companion",
+            "workspace_scope": "task:task-1",
+        },
+    )
+    environment_service.register_browser_companion(
+        session_mount_id=lease.id,
+        transport_ref="transport:cdp:local",
+        status="attached",
+        available=True,
+        provider_session_ref="browser-session:web:main",
+    )
+
+    browser_runtime = BrowserRuntimeService(
+        SQLiteStateStore(tmp_path / "browser.sqlite3"),
+        browser_companion_runtime=environment_service._require_browser_companion_runtime(),
+    )
+
+    snapshot = browser_runtime.companion_snapshot(session_mount_id=lease.id)
+
+    assert snapshot["transport_ref"] == "transport:cdp:local"
+    assert snapshot["provider_session_ref"] == "browser-session:web:main"
+    assert snapshot["environment_id"] == lease.environment_id
+    assert snapshot["session_mount_id"] == lease.id
+    assert snapshot["work_context_id"] == "ctx-browser-companion"
+
+
+def test_browser_runtime_service_exposes_browser_attach_snapshot_and_registration_helper(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(state_store)
+    session_repo = SessionMountRepository(state_store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    environment_service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    environment_service.set_session_repository(session_repo)
+
+    lease = environment_service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-browser-attach-runtime",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={"page_id": "page:jd:seller-center:home"},
+        metadata={
+            "work_context_id": "ctx-browser-attach-runtime",
+            "workspace_scope": "task:task-1",
+        },
+    )
+
+    browser_runtime = BrowserRuntimeService(
+        SQLiteStateStore(tmp_path / "browser.sqlite3"),
+        browser_companion_runtime=environment_service._require_browser_companion_runtime(),
+        browser_attach_runtime=environment_service._require_browser_attach_runtime(),
+    )
+
+    result = browser_runtime.register_attach_transport(
+        session_mount_id=lease.id,
+        transport_ref="transport:cdp:local",
+        status="attached",
+        browser_session_ref="browser-session:web:main",
+        browser_scope_ref="site:jd:seller-center",
+        reconnect_token="reconnect-token-1",
+    )
+
+    assert result["browser_attach"]["transport_ref"] == "transport:cdp:local"
+    assert result["browser_attach"]["session_ref"] == "browser-session:web:main"
+    assert result["browser_attach"]["scope_ref"] == "site:jd:seller-center"
+    assert result["browser_attach"]["reconnect_token"] == "reconnect-token-1"
+
+    snapshot = browser_runtime.runtime_snapshot(
+        environment_id=lease.environment_id,
+        session_mount_id=lease.id,
+    )
+
+    assert snapshot["browser_attach"]["transport_ref"] == "transport:cdp:local"
+    assert snapshot["browser_attach"]["session_ref"] == "browser-session:web:main"

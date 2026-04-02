@@ -5,9 +5,14 @@ from . import browser_control_actions_core as browser_control_actions_core_modul
 from .browser_control_shared import *  # noqa: F401,F403
 from .browser_control_actions_core import *  # noqa: F401,F403
 from .browser_control_actions_extended import *  # noqa: F401,F403
+from ...environments.lease_service import (
+    publish_browser_operator_abort_guardrail_block,
+    resolve_operator_abort_binding_for_runtime_session,
+)
 
 
 _ORIGINAL_ATTACH_PAGE_LISTENERS = browser_control_actions_core_module._attach_page_listeners
+_OPERATOR_ABORT_EXEMPT_ACTIONS = frozenset({"stop"})
 
 
 def _attach_page_listeners_with_downloads(page, page_id: str, session_id: str) -> None:
@@ -201,6 +206,26 @@ async def browser_use(  # pylint: disable=R0911,R0912
 
     should_emit_evidence = action in _BROWSER_EVIDENCE_ACTIONS
     started_at = _utc_now() if should_emit_evidence else None
+    evidence_metadata = {
+        "session_id": resolved_session_id,
+        "ref": ref or None,
+        "selector": selector or None,
+        "path": (path or filename) or None,
+        "fields_count": (
+            len(_parse_json_param(fields_json, []))
+            if action == "fill_form"
+            else None
+        ),
+        "upload_paths": (
+            _parse_json_param(paths_json, [])
+            if action == "file_upload"
+            else None
+        ),
+        "tab_action": tab_action if action == "tabs" else None,
+        "tab_index": index if action == "tabs" else None,
+        "full_page": full_page if action in {"screenshot", "take_screenshot"} else None,
+        "button": button if action == "click" else None,
+    }
 
     async def _with_evidence(response: ToolResponse) -> ToolResponse:
         if not should_emit_evidence or started_at is None:
@@ -219,28 +244,51 @@ async def browser_use(  # pylint: disable=R0911,R0912
                     resolved_session_id,
                 )
             ),
-            metadata={
-                "session_id": resolved_session_id,
-                "ref": ref or None,
-                "selector": selector or None,
-                "path": (path or filename) or None,
-                "fields_count": (
-                    len(_parse_json_param(fields_json, []))
-                    if action == "fill_form"
-                    else None
-                ),
-                "upload_paths": (
-                    _parse_json_param(paths_json, [])
-                    if action == "file_upload"
-                    else None
-                ),
-                "tab_action": tab_action if action == "tabs" else None,
-                "tab_index": index if action == "tabs" else None,
-                "full_page": full_page if action in {"screenshot", "take_screenshot"} else None,
-                "button": button if action == "click" else None,
-            },
+            metadata=dict(evidence_metadata),
         )
         return response
+
+    if action not in _OPERATOR_ABORT_EXEMPT_ACTIONS:
+        abort_binding = resolve_operator_abort_binding_for_runtime_session(
+            resolved_session_id,
+        )
+        if bool(abort_binding.get("requested")):
+            reason = str(
+                abort_binding.get("reason")
+                or abort_binding.get("channel")
+                or "operator abort",
+            ).strip()
+            evidence_metadata["guardrail"] = {
+                "kind": "operator-abort",
+                "reason": reason,
+            }
+            if abort_binding.get("session_mount_id") is not None:
+                evidence_metadata["session_mount_id"] = abort_binding["session_mount_id"]
+            if abort_binding.get("environment_id") is not None:
+                evidence_metadata["environment_id"] = abort_binding["environment_id"]
+            publish_browser_operator_abort_guardrail_block(
+                resolved_session_id,
+                action=action,
+                reason=reason,
+            )
+            blocked_payload: dict[str, object] = {
+                "ok": False,
+                "error": "Browser action blocked: operator abort is pending.",
+                "guardrail": dict(evidence_metadata["guardrail"]),
+            }
+            if abort_binding.get("session_mount_id") is not None:
+                blocked_payload["session_mount_id"] = abort_binding["session_mount_id"]
+            if abort_binding.get("environment_id") is not None:
+                blocked_payload["environment_id"] = abort_binding["environment_id"]
+            return await _with_evidence(
+                _tool_response(
+                    json.dumps(
+                        blocked_payload,
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                ),
+            )
 
     try:
         if action == "start":

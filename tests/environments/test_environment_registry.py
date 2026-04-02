@@ -1793,6 +1793,14 @@ def test_bridge_archive_and_deregister_update_session_and_environment_contracts(
         metadata={"worker_type": "cowork"},
     )
     assert lease.lease_token is not None
+    service.register_browser_attach_transport(
+        session_mount_id=lease.id,
+        transport_ref="transport:cdp:bridge-close",
+        status="attached",
+        browser_session_ref="browser-session:bridge-close",
+        browser_scope_ref="site:jd:seller-center",
+        reconnect_token="reconnect-token-close",
+    )
 
     archived = service.archive_bridge_session(
         lease.id,
@@ -1803,6 +1811,7 @@ def test_bridge_archive_and_deregister_update_session_and_environment_contracts(
     assert archived.status == "archived"
     assert archived.lease_status == "released"
     assert archived.metadata["bridge_work_status"] == "archived"
+    assert archived.metadata["browser_attach_transport_ref"] is None
     assert isinstance(archived.metadata.get("bridge_archived_at"), str)
 
     deregistered = service.deregister_bridge_environment(
@@ -1818,7 +1827,90 @@ def test_bridge_archive_and_deregister_update_session_and_environment_contracts(
     assert session_detail is not None
     assert session_detail.status == "deregistered"
     assert session_detail.metadata["bridge_work_status"] == "deregistered"
+    assert session_detail.metadata["browser_attach_transport_ref"] is None
     assert isinstance(session_detail.metadata.get("bridge_deregistered_at"), str)
+
+
+def test_operator_abort_state_reuses_same_truth_and_surfaces_projection(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-operator-abort",
+        user_id="u1",
+        owner="worker-bridge",
+        ttl_seconds=60,
+        handle={"process_id": 4242},
+    )
+    service.register_windows_app_adapter(
+        session_mount_id=lease.id,
+        adapter_refs=["app-adapter:excel"],
+        app_identity="excel",
+        control_channel="accessibility-tree",
+        execution_guardrails={
+            "operator_abort_channel": "global-esc",
+        },
+    )
+
+    updated = service.set_shared_operator_abort_state(
+        session_mount_id=lease.id,
+        channel="global-esc",
+        reason="esc hotkey",
+    )
+
+    environment = env_repo.get_environment(lease.environment_id)
+    assert environment is not None
+    assert updated.metadata["operator_abort_state"] == {
+        "channel": "global-esc",
+        "requested": True,
+        "reason": "esc hotkey",
+        "requested_at": updated.metadata["operator_abort_state"]["requested_at"],
+    }
+    assert environment.metadata["operator_abort_state"] == {
+        "channel": "global-esc",
+        "requested": True,
+        "reason": "esc hotkey",
+        "requested_at": environment.metadata["operator_abort_state"]["requested_at"],
+    }
+
+    detail = service.get_session_detail(lease.id, limit=20)
+    assert detail is not None
+    assert detail["cooperative_adapter_availability"]["operator_abort_state"] == {
+        "channel": "global-esc",
+        "requested": True,
+        "reason": "esc hotkey",
+        "requested_at": detail["cooperative_adapter_availability"]["operator_abort_state"][
+            "requested_at"
+        ],
+    }
+    assert (
+        detail["cooperative_adapter_availability"]["windows_app_adapters"][
+            "execution_guardrails"
+        ]["operator_abort_requested"]
+        is True
+    )
+
+    cleared = service.clear_shared_operator_abort_state(
+        session_mount_id=lease.id,
+        channel="global-esc",
+        reason="resume",
+    )
+    refreshed_environment = env_repo.get_environment(lease.environment_id)
+    assert refreshed_environment is not None
+    assert cleared.metadata["operator_abort_state"]["requested"] is False
+    assert cleared.metadata["operator_abort_state"]["channel"] == "global-esc"
+    assert cleared.metadata["operator_abort_state"]["reason"] == "resume"
+    assert refreshed_environment.metadata["operator_abort_state"]["requested"] is False
 
 
 def test_environment_and_session_detail_expose_execution_contract_projections(tmp_path):
@@ -3073,3 +3165,261 @@ def test_host_twin_multi_agent_contention_blocks_shared_writer_scope_across_seat
     assert "worker-2" in str(
         detail["host_twin"]["coordination"]["contention_forecast"]["reason"],
     )
+
+
+def test_host_twin_multi_seat_prefers_same_work_context_over_shared_workspace_scope(
+    tmp_path,
+):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    current_seat = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-work-context-a",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={
+            "active_window_ref": "window:excel:a",
+            "window_scope": "window:excel:a",
+            "process_id": 4242,
+        },
+        metadata={
+            "host_mode": "local-managed",
+            "lease_class": "exclusive-writer",
+            "access_mode": "desktop-app",
+            "session_scope": "desktop-user-session",
+            "workspace_id": "workspace-main",
+            "workspace_scope": "task:task-1",
+            "work_context_id": "ctx-seat-a",
+            "account_scope_ref": "windows:user:alice",
+            "app_identity": "excel",
+            "app_contract_status": "verified-writer",
+            "writer_lock_scope": "workbook:weekly-report",
+            "handoff_state": "active",
+            "handoff_reason": "waiting-human",
+            "handoff_owner_ref": "human-operator:alice",
+            "current_gap_or_blocker": "awaiting operator return",
+            "active_surface_mix": ["desktop", "document"],
+        },
+    )
+    other_context_seat = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-work-context-b",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={
+            "active_window_ref": "window:excel:b",
+            "window_scope": "window:excel:b",
+            "process_id": 4343,
+        },
+        metadata={
+            "host_mode": "local-managed",
+            "lease_class": "exclusive-writer",
+            "access_mode": "desktop-app",
+            "session_scope": "desktop-user-session",
+            "workspace_id": "workspace-main",
+            "workspace_scope": "task:task-1",
+            "work_context_id": "ctx-seat-b",
+            "account_scope_ref": "windows:user:alice",
+            "app_identity": "excel",
+            "app_contract_status": "verified-writer",
+            "writer_lock_scope": "workbook:weekly-report",
+            "handoff_state": "agent-attached",
+            "active_surface_mix": ["desktop", "document"],
+        },
+    )
+
+    detail = service.get_environment_detail(current_seat.environment_id, limit=20)
+
+    assert detail is not None
+    assert detail["seat_runtime"]["selected_seat_ref"] == current_seat.environment_id
+    assert detail["seat_runtime"]["selected_session_mount_id"] == current_seat.id
+    assert sorted(detail["seat_runtime"]["candidate_seat_refs"]) == sorted(
+        [current_seat.environment_id],
+    )
+    assert other_context_seat.environment_id not in detail["seat_runtime"]["candidate_seat_refs"]
+
+
+def test_environment_detail_projects_work_context_from_mount_session_truth(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-work-context-detail",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={
+            "browser": "tab:web:jd:seller-center:main",
+            "page_id": "page:jd:seller-center:home",
+            "active_window_ref": "window:excel:main",
+            "window_scope": "window:excel:main",
+            "process_id": 4242,
+            "cwd": "D:/word/copaw",
+        },
+        metadata={
+            "host_mode": "local-managed",
+            "lease_class": "exclusive-writer",
+            "access_mode": "desktop-app",
+            "session_scope": "desktop-user-session",
+            "workspace_id": "workspace-main",
+            "workspace_scope": "task:task-1",
+            "work_context_id": "ctx-browser-desktop-1",
+            "account_scope_ref": "windows:user:alice",
+            "browser_mode": "tab-attached",
+            "profile_ref": "profile:copaw:main",
+            "attach_transport_ref": "transport:cdp:local",
+            "provider_session_ref": "browser-session:web:main",
+            "browser_companion_transport_ref": "transport:cdp:local",
+            "browser_companion_status": "attached",
+            "app_identity": "excel",
+            "app_contract_status": "verified-writer",
+            "writer_lock_scope": "workbook:weekly-report",
+            "handoff_state": "agent-attached",
+            "active_surface_mix": ["browser", "desktop", "document"],
+        },
+    )
+
+    detail = service.get_environment_detail(lease.environment_id, limit=20)
+
+    assert detail is not None
+    assert detail["host_contract"]["work_context_id"] == "ctx-browser-desktop-1"
+    assert detail["seat_runtime"]["work_context_id"] == "ctx-browser-desktop-1"
+    assert detail["workspace_graph"]["work_context_id"] == "ctx-browser-desktop-1"
+    assert (
+        detail["workspace_graph"]["ownership"]["work_context_id"]
+        == "ctx-browser-desktop-1"
+    )
+
+
+def test_environment_detail_projects_browser_attach_runtime_truth(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-browser-attach-detail",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={
+            "browser": "tab:web:jd:seller-center:main",
+            "page_id": "page:jd:seller-center:home",
+            "process_id": 4242,
+        },
+        metadata={
+            "host_mode": "local-managed",
+            "lease_class": "exclusive-writer",
+            "access_mode": "browser",
+            "session_scope": "desktop-user-session",
+            "workspace_id": "workspace-main",
+            "workspace_scope": "task:task-1",
+            "work_context_id": "ctx-browser-attach",
+            "browser_mode": "tab-attached",
+            "profile_ref": "profile:copaw:main",
+            "handoff_state": "agent-attached",
+        },
+    )
+    service.register_browser_attach_transport(
+        session_mount_id=lease.id,
+        transport_ref="transport:cdp:local",
+        status="attached",
+        browser_session_ref="browser-session:web:main",
+        browser_scope_ref="site:jd:seller-center",
+        reconnect_token="reconnect-token-1",
+    )
+
+    detail = service.get_environment_detail(lease.environment_id, limit=20)
+
+    assert detail is not None
+    assert detail["browser_site_contract"]["attach_transport_ref"] == "transport:cdp:local"
+    assert detail["browser_site_contract"]["attach_session_ref"] == "browser-session:web:main"
+    assert detail["browser_site_contract"]["attach_scope_ref"] == "site:jd:seller-center"
+    assert detail["browser_site_contract"]["attach_reconnect_token"] == "reconnect-token-1"
+
+
+def test_shared_operator_abort_state_uses_same_session_environment_truth(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-operator-abort",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        metadata={
+            "host_mode": "local-managed",
+            "lease_class": "exclusive-writer",
+            "access_mode": "desktop-app",
+            "session_scope": "desktop-user-session",
+        },
+    )
+
+    requested = service.set_shared_operator_abort_state(
+        session_mount_id=lease.id,
+        channel="browser",
+        reason="operator emergency stop",
+    )
+    session = session_repo.get_session(lease.id)
+    environment = env_repo.get_environment(lease.environment_id)
+    assert requested is not None
+    assert session is not None
+    assert environment is not None
+    assert session.metadata["operator_abort_state"]["requested"] is True
+    assert session.metadata["operator_abort_state"]["channel"] == "browser"
+    assert session.metadata["operator_abort_state"]["reason"] == "operator emergency stop"
+    assert isinstance(session.metadata["operator_abort_state"]["requested_at"], str)
+    assert environment.metadata["operator_abort_state"]["requested"] is True
+    assert environment.metadata["operator_abort_state"]["channel"] == "browser"
+
+    cleared = service.clear_shared_operator_abort_state(session_mount_id=lease.id)
+    session = session_repo.get_session(lease.id)
+    environment = env_repo.get_environment(lease.environment_id)
+    assert cleared is not None
+    assert session is not None
+    assert environment is not None
+    assert session.metadata["operator_abort_state"]["requested"] is False
+    assert session.metadata["operator_abort_state"]["channel"] == "browser"
+    assert session.metadata["operator_abort_state"]["reason"] == "operator abort cleared"
+    assert isinstance(session.metadata["operator_abort_state"]["requested_at"], str)
+    assert environment.metadata["operator_abort_state"]["requested"] is False

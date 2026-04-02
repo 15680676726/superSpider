@@ -80,6 +80,8 @@ def _summarize_runtime_context(runtime_context: dict[str, object] | None) -> dic
         "environment_session_id",
         "writeback_requested",
         "should_kickoff",
+        "accepted_persistence",
+        "commit_outcome",
     ):
         value = runtime_context.get(key)
         if value is not None:
@@ -243,6 +245,8 @@ def _build_sidecar_events(
     request_id = getattr(request_payload, "id", None)
     runtime_summary = _summarize_runtime_context(runtime_context)
     commit_state = getattr(request_payload, "_copaw_main_brain_commit_state", None)
+    if commit_state is None:
+        commit_state = runtime_summary.get("commit_outcome")
     timing_profile = _safe_get(request_payload, "_copaw_main_brain_timing")
     intent_shell = read_attached_main_brain_intent_shell(request=request_payload)
     sidecar_control_thread_id = _first_non_empty(
@@ -279,6 +283,23 @@ def _build_sidecar_events(
             "timing": timing_profile if isinstance(timing_profile, dict) and timing_profile else None,
         }
     )
+    accepted_persistence = runtime_summary.get("accepted_persistence")
+    if isinstance(accepted_persistence, dict) and accepted_persistence:
+        accepted_payload = _compact_payload(
+            {
+                **base_payload,
+                "status": _normalize_string(accepted_persistence.get("status")),
+                "source": _normalize_string(accepted_persistence.get("source")),
+                "boundary": _normalize_string(accepted_persistence.get("boundary")),
+                "work_context_id": _normalize_string(accepted_persistence.get("work_context_id")),
+            }
+        )
+        events.append(
+            _build_sidecar_event(
+                "accepted",
+                payload=accepted_payload,
+            )
+        )
     events.append(
         _build_sidecar_event(
             "turn_reply_done",

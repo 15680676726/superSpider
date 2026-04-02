@@ -21,7 +21,11 @@ from .main_brain_intake import (
 )
 from .main_brain_orchestrator import build_main_brain_cognitive_surface
 from .main_brain_commit_service import MainBrainCommitService
-from .main_brain_result_committer import MainBrainResultCommitter
+from .main_brain_result_committer import (
+    MainBrainResultCommitter,
+    build_accepted_persistence,
+    update_request_runtime_context,
+)
 from .main_brain_scope_snapshot_service import MainBrainScopeSnapshotService
 from .main_brain_turn_result import MainBrainCommitState, MainBrainTurnResult
 from ..providers.provider_manager import ProviderManager
@@ -811,6 +815,7 @@ class MainBrainChatService:
         session_id = str(getattr(request, "session_id", "") or "").strip()
         user_id = _resolve_snapshot_user_id(request)
         cache_key = (session_id, user_id) if session_id and user_id else None
+        has_session_snapshot = bool(session_id and user_id)
         now = time.time()
         cache_entry: _PureChatSessionCacheEntry | None = None
         if cache_key is not None:
@@ -851,7 +856,6 @@ class MainBrainChatService:
                 "_copaw_main_brain_commit_state",
                 persisted_commit_state,
             )
-
         prior_messages = await memory.get_memory(prepend_summary=False)
         prompt_messages, prompt_timing = self._build_prompt_message_bundle(
             request=request,
@@ -882,6 +886,24 @@ class MainBrainChatService:
                     cache_entry.memory = memory
                     cache_entry.last_used_at = now
                     cache_entry.dirty = True
+                if has_session_snapshot:
+                    persist_now = time.time()
+                    self._persist_cache_entry_if_needed(
+                        session_id=session_id,
+                        user_id=user_id,
+                        cache_entry=cache_entry,
+                        force=True,
+                        now=persist_now,
+                    )
+                    update_request_runtime_context(
+                        request,
+                        accepted_persistence=build_accepted_persistence(
+                            request=request,
+                            source="main_brain_chat_service",
+                            boundary="pre_model_snapshot",
+                        ),
+                    )
+                    now = persist_now
         except Exception:
             logger.exception("Failed to persist incoming main-brain chat messages")
         try:
@@ -1066,13 +1088,15 @@ class MainBrainChatService:
                 cache_entry.memory = memory
                 cache_entry.last_used_at = now
                 cache_entry.dirty = True
+            persist_now = time.time()
             self._persist_cache_entry_if_needed(
                 session_id=session_id,
                 user_id=user_id,
                 cache_entry=cache_entry,
-                force=cache_entry is None,
-                now=now,
+                force=has_session_snapshot or cache_entry is None,
+                now=persist_now,
             )
+            now = persist_now
         except Exception:
             logger.exception("Failed to persist main-brain chat snapshot")
         commit_state = await self._commit_service.commit_turn_result_async(
@@ -1103,6 +1127,10 @@ class MainBrainChatService:
             request,
             "_copaw_main_brain_commit_state",
             effective_commit_state,
+        )
+        update_request_runtime_context(
+            request,
+            commit_outcome=effective_commit_state.model_dump(mode="json"),
         )
         self._set_request_runtime_value(
             request,

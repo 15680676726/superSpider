@@ -534,6 +534,10 @@ Current hard boundary:
 - `service_lifecycle.py` now preserves activation metadata into the existing `synthesis -> follow-up backlog -> assignment` chain
 - `service_runtime_views.py` now exposes `synthesis.activation` on current-cycle runtime payloads when replan continuity points to that synthesis context
 - industry runtime wiring now makes `memory_activation_service` available to `IndustryService` via runtime bindings / explicit injection
+- `activation_service.activate_for_query(...)` now pulls scoped `entity/opinion` derived views in addition to fact recall
+- `service_lifecycle.py` now reuses one activation result across prediction cycle review, report synthesis, and cycle planner input
+- `PlanningStrategyConstraints` / `CyclePlanningDecision.metadata` now preserve `graph_focus_entities` and `graph_focus_opinions` as planner sidecar input/output
+- follow-up backlog and materialized assignment continuity now also carry `activation_top_entities` / `activation_top_opinions`
 
 Current hard boundary after phase 2:
 

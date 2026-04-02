@@ -11,6 +11,12 @@ def _mapping_dict(value: object | None) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _mapping_list(value: object | None) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
 def _int_value(value: object | None) -> int | None:
     if isinstance(value, bool):
         return int(value)
@@ -130,6 +136,9 @@ class _PredictionServiceCoreMixin:
                 "planning_overlap": bool(case_metadata.get("planning_overlap")),
                 "planning_review_ref": _string(planning_snapshot.get("review_ref")),
                 "planning_replan_status": _string(planning_replan.get("status")),
+                "planning_replan_decision_kind": _string(
+                    planning_replan.get("decision_kind"),
+                ),
             },
             routes={
                 "self": _route_prediction(case_id),
@@ -376,7 +385,11 @@ class _PredictionServiceCoreMixin:
         open_backlog_count = _int_value(planning_metadata.get("open_backlog_count"))
         if open_backlog_count is None:
             open_backlog_count = len(_string_list(open_backlog_ids))
+        strategy_constraints = _mapping_dict(planning_context.get("strategy_constraints"))
+        cycle_decision = _mapping_dict(planning_context.get("cycle_decision"))
         replan = ReportReplanEngine().compile(report_synthesis)
+        synthesis_payload = _mapping_dict(report_synthesis)
+        raw_replan = _mapping_dict(synthesis_payload.get("replan_decision"))
         return {
             "is_truth_store": False,
             "overlap_with_formal_review": overlap_with_formal_review,
@@ -391,6 +404,8 @@ class _PredictionServiceCoreMixin:
             "meeting_window": meeting_window,
             "summary": _string(planning_context.get("summary")),
             "planning_policy": _string_list(planning_context.get("planning_policy"))[:8],
+            "strategy_constraints": strategy_constraints,
+            "cycle_decision": cycle_decision,
             "selected_lane_ids": _string_list(planning_context.get("selected_lane_ids"))[:8],
             "selected_backlog_item_ids": _string_list(
                 planning_context.get("selected_backlog_item_ids"),
@@ -407,6 +422,13 @@ class _PredictionServiceCoreMixin:
                 "reason_ids": list(replan.reason_ids[:8]),
                 "source_report_ids": list(replan.source_report_ids[:8]),
                 "topic_keys": list(replan.topic_keys[:8]),
+                "decision_kind": _string(raw_replan.get("decision_kind")),
+                "trigger_context": _mapping_dict(raw_replan.get("trigger_context")),
+                "directives": _mapping_list(synthesis_payload.get("replan_directives"))[:8],
+                "recommended_actions": _mapping_list(
+                    synthesis_payload.get("recommended_actions"),
+                )[:8],
+                "activation": _mapping_dict(synthesis_payload.get("activation")),
                 "directive_count": len(replan.directives),
                 "recommended_action_count": len(replan.recommended_actions),
                 "activation_keys": sorted(replan.activation.keys())[:8],

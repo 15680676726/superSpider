@@ -72,19 +72,37 @@ class MemoryActivationService:
             include_reports=include_reports,
             limit=limit,
         )
+        resolved_scope_type = self._resolve_scope_type(activation_input)
+        resolved_scope_id = self._resolve_scope_id(activation_input)
         fact_entries = []
         list_fact_entries = getattr(self._derived_index_service, "list_fact_entries", None)
         if callable(list_fact_entries):
             fact_entries = list(
                 list_fact_entries(
-                    scope_type=self._resolve_scope_type(activation_input),
-                    scope_id=self._resolve_scope_id(activation_input),
+                    scope_type=resolved_scope_type,
+                    scope_id=resolved_scope_id,
                     owner_agent_id=owner_agent_id,
                     industry_instance_id=industry_instance_id,
                     limit=max(limit * 2, 12),
                 )
                 or [],
             )
+        entity_views = self._list_derived_views(
+            method_name="list_entity_views",
+            scope_type=resolved_scope_type,
+            scope_id=resolved_scope_id,
+            owner_agent_id=owner_agent_id,
+            industry_instance_id=industry_instance_id,
+            limit=max(limit, 12),
+        )
+        opinion_views = self._list_derived_views(
+            method_name="list_opinion_views",
+            scope_type=resolved_scope_type,
+            scope_id=resolved_scope_id,
+            owner_agent_id=owner_agent_id,
+            industry_instance_id=industry_instance_id,
+            limit=max(limit, 12),
+        )
         strategy_payload = self._resolve_strategy_payload(
             activation_input=activation_input,
             owner_agent_id=owner_agent_id,
@@ -93,8 +111,8 @@ class MemoryActivationService:
         return self.activate(
             activation_input,
             fact_entries=fact_entries,
-            entity_views=[],
-            opinion_views=[],
+            entity_views=entity_views,
+            opinion_views=opinion_views,
             profile_view=None,
             episode_views=[],
             strategy_payload=strategy_payload,
@@ -457,6 +475,30 @@ class MemoryActivationService:
             or activation_input.industry_instance_id
             or activation_input.agent_id
             or "runtime"
+        )
+
+    def _list_derived_views(
+        self,
+        *,
+        method_name: str,
+        scope_type: str,
+        scope_id: str,
+        owner_agent_id: str | None,
+        industry_instance_id: str | None,
+        limit: int,
+    ) -> list[object]:
+        getter = getattr(self._derived_index_service, method_name, None)
+        if not callable(getter):
+            return []
+        return list(
+            getter(
+                scope_type=scope_type,
+                scope_id=scope_id,
+                owner_agent_id=owner_agent_id,
+                industry_instance_id=industry_instance_id,
+                limit=limit,
+            )
+            or [],
         )
 
     def _collect_top_terms(

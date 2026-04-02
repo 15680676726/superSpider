@@ -50,6 +50,7 @@ import { resolveThreadRuntimePresentation } from "./pagePresentation";
 import {
   formatRuntimeWaitDescription,
   type RuntimeHealthNotice,
+  type RuntimeLifecycleState,
   type RuntimeWaitState,
 } from "./runtimeDiagnostics";
 import sessionApi from "./sessionApi";
@@ -309,6 +310,8 @@ export default function ChatPage() {
   const [autoBindingPending, setAutoBindingPending] = useState(!Boolean(requestedThreadId));
   const [runtimeWaitState, setRuntimeWaitState] = useState<RuntimeWaitState | null>(null);
   const [runtimeHealthNotice, setRuntimeHealthNotice] = useState<RuntimeHealthNotice | null>(null);
+  const [runtimeLifecycleState, setRuntimeLifecycleState] =
+    useState<RuntimeLifecycleState | null>(null);
   const [runtimeWaitClock, setRuntimeWaitClock] = useState(() => Date.now());
   const [governanceStatus, setGovernanceStatus] = useState<GovernanceStatus | null>(null);
   const recoveryAttemptsRef = useRef<Set<string>>(new Set());
@@ -361,6 +364,7 @@ export default function ChatPage() {
   useEffect(() => {
     setRuntimeWaitState(null);
     setRuntimeHealthNotice(null);
+    setRuntimeLifecycleState(null);
   }, [requestedThreadId]);
 
   useEffect(() => { void refreshActiveModels(); }, [refreshActiveModels]);
@@ -464,8 +468,8 @@ export default function ChatPage() {
     selectedMediaAnalysisIdsRef,
     setAutoBindingPending,
     setRuntimeHealthNotice,
+    setRuntimeLifecycleState,
     setRuntimeWaitState,
-    setShowModelPrompt,
     suggestedTeams,
     threadBootstrapError,
     threadBootstrapPending,
@@ -583,6 +587,7 @@ export default function ChatPage() {
             runtimeWaitSeconds={runtimeWaitSeconds}
             runtimeWaitDescription={runtimeWaitDescription}
             runtimeHealthNotice={runtimeHealthNotice}
+            runtimeLifecycleState={runtimeLifecycleState}
             approvalButtonLabel={approvalButtonLabel}
             onOpenGovernanceApprovals={openGovernanceApprovals}
           />

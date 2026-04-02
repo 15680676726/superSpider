@@ -7,6 +7,7 @@ import json
 from inspect import isawaitable
 from typing import Any, Awaitable, Callable
 
+from .main_brain_result_committer import normalize_durable_commit_result
 from .main_brain_turn_result import MainBrainCommitState, MainBrainTurnResult
 
 _REQUIRED_PAYLOAD_FIELDS: dict[str, tuple[str, ...]] = {
@@ -233,16 +234,14 @@ class MainBrainCommitService:
                     commit_key=commit_key,
                 ),
             )
-        handler_result = _mapping(await self._maybe_call(handler, envelope, request, commit_key))
-        status = _string(handler_result.get("status")) or "committed"
-        if status not in {
-            "committed",
-            "commit_deferred",
-            "commit_failed",
-            "governance_denied",
-            "confirm_required",
-        }:
-            status = "committed"
+        handler_result = normalize_durable_commit_result(
+            await self._maybe_call(handler, envelope, request, commit_key),
+            action_type=envelope.action_type,
+            commit_key=commit_key,
+            default_record_id=None,
+            empty_reason="commit_handler_returned_no_result",
+        )
+        status = _string(handler_result.get("status")) or "commit_failed"
         return self._persist_state(
             request=request,
             state=MainBrainCommitState(

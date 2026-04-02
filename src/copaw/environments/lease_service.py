@@ -6,12 +6,15 @@ import inspect
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from uuid import uuid4
+from weakref import WeakSet
 
 from ..state import AgentLeaseRecord
 from .models import SessionMount
 
 if TYPE_CHECKING:
     from .service import EnvironmentService
+
+_ACTIVE_LEASE_SERVICES: WeakSet = WeakSet()
 
 
 class EnvironmentLeaseService:
@@ -20,6 +23,7 @@ class EnvironmentLeaseService:
     def __init__(self, service: EnvironmentService) -> None:
         self._service = service
         self._session_handle_restorers: dict[str, object] = {}
+        _ACTIVE_LEASE_SERVICES.add(self)
 
     def register_session_handle_restorer(
         self,
@@ -240,6 +244,93 @@ class EnvironmentLeaseService:
             release_status="released",
             validate_token=False,
         )
+
+    def set_shared_operator_abort_state(
+        self,
+        session_mount_id: str,
+        *,
+        channel: str | None = None,
+        reason: str | None = None,
+    ) -> SessionMount:
+        now = _utc_now()
+        abort_state = {
+            "requested": True,
+            "requested_at": now.isoformat(),
+            **(
+                {"channel": str(channel).strip()}
+                if isinstance(channel, str) and channel.strip()
+                else {}
+            ),
+            **(
+                {"reason": str(reason).strip()}
+                if isinstance(reason, str) and reason.strip()
+                else {}
+            ),
+        }
+        updated = self._update_shared_session_environment_metadata(
+            session_mount_id,
+            metadata_patch={"operator_abort_state": abort_state},
+        )
+        self._publish_runtime_event(
+            topic="session",
+            action="operator-abort-requested",
+            payload={
+                "session_mount_id": updated.id,
+                "environment_id": updated.environment_id,
+                "operator_abort_state": abort_state,
+            },
+        )
+        return updated
+
+    def clear_shared_operator_abort_state(
+        self,
+        session_mount_id: str,
+        *,
+        channel: str | None = None,
+        reason: str | None = None,
+    ) -> SessionMount:
+        session_repository = self._service._session_repository
+        if session_repository is None:
+            raise RuntimeError("Session repository is not available")
+        existing = session_repository.get_session(session_mount_id)
+        if existing is None:
+            raise KeyError(f"Session '{session_mount_id}' not found")
+        existing_state = _mapping(dict(existing.metadata).get("operator_abort_state"))
+        now = _utc_now()
+        resolved_channel = (
+            str(channel).strip()
+            if isinstance(channel, str) and channel.strip()
+            else None
+        ) or (
+            str(existing_state.get("channel")).strip()
+            if isinstance(existing_state.get("channel"), str)
+            and str(existing_state.get("channel")).strip()
+            else None
+        )
+        abort_state = {
+            "requested": False,
+            "requested_at": now.isoformat(),
+            **({"channel": resolved_channel} if resolved_channel is not None else {}),
+            "reason": (
+                str(reason).strip()
+                if isinstance(reason, str) and reason.strip()
+                else "operator abort cleared"
+            ),
+        }
+        updated = self._update_shared_session_environment_metadata(
+            session_mount_id,
+            metadata_patch={"operator_abort_state": abort_state},
+        )
+        self._publish_runtime_event(
+            topic="session",
+            action="operator-abort-cleared",
+            payload={
+                "session_mount_id": updated.id,
+                "environment_id": updated.environment_id,
+                "operator_abort_state": abort_state,
+            },
+        )
+        return updated
 
     def ack_bridge_session_work(
         self,
@@ -813,6 +904,44 @@ class EnvironmentLeaseService:
         )
         return updated
 
+    def _update_shared_session_environment_metadata(
+        self,
+        session_mount_id: str,
+        *,
+        metadata_patch: dict[str, object],
+    ) -> SessionMount:
+        session_repository = self._service._session_repository
+        if session_repository is None:
+            raise RuntimeError("Session repository is not available")
+        session = session_repository.get_session(session_mount_id)
+        if session is None:
+            raise KeyError(f"Session '{session_mount_id}' not found")
+        mount = self._service._registry.get(session.environment_id)
+        if mount is None:
+            raise KeyError(f"Environment '{session.environment_id}' not found")
+        now = _utc_now()
+        updated_session = session.model_copy(
+            update={
+                "last_active_at": now,
+                "metadata": {
+                    **dict(session.metadata),
+                    **metadata_patch,
+                },
+            },
+        )
+        updated_mount = mount.model_copy(
+            update={
+                "last_active_at": now,
+                "metadata": {
+                    **dict(mount.metadata),
+                    **metadata_patch,
+                },
+            },
+        )
+        session_repository.upsert_session(updated_session)
+        self._service._registry.upsert(updated_mount)
+        return updated_session
+
     def acquire_actor_lease(
         self,
         *,
@@ -1067,7 +1196,16 @@ class EnvironmentLeaseService:
                 value = handle.get(key)
                 if value is not None:
                     descriptor[key] = value
-        for key in ("chat_id", "kernel_task_id"):
+        for key in (
+            "chat_id",
+            "kernel_task_id",
+            "work_context_id",
+            "workspace_id",
+            "workspace_scope",
+            "attach_transport_ref",
+            "provider_session_ref",
+            "browser_companion_transport_ref",
+        ):
             value = metadata.get(key)
             if value is not None:
                 descriptor[key] = value
@@ -1432,8 +1570,190 @@ def _session_mount_id(*, channel: str, session_id: str) -> str:
     return f"session:{channel}:{session_id}"
 
 
+def resolve_operator_abort_binding_for_runtime_session(
+    runtime_session_ref: str,
+) -> dict[str, object]:
+    resolved = _resolve_operator_abort_binding_record(runtime_session_ref)
+    if resolved is None:
+        return {}
+    _, binding = resolved
+    return dict(binding)
+
+
+def publish_browser_operator_abort_guardrail_block(
+    runtime_session_ref: str,
+    *,
+    action: str,
+    reason: str | None = None,
+) -> None:
+    resolved = _resolve_operator_abort_binding_record(runtime_session_ref)
+    if resolved is None:
+        return
+    service, binding = resolved
+    if not binding.get("requested"):
+        return
+    resolved_reason = _normalize_string(reason, binding.get("reason"), binding.get("channel"))
+    service._publish_runtime_event(
+        topic="browser",
+        action="guardrail-blocked",
+        payload={
+            "session_mount_id": binding.get("session_mount_id"),
+            "environment_id": binding.get("environment_id"),
+            "runtime_session_ref": _normalize_string(runtime_session_ref),
+            "action": _normalize_string(action),
+            "guardrail_kind": "operator-abort",
+            "reason": resolved_reason,
+        },
+    )
+
+
+def _resolve_operator_abort_binding_record(
+    runtime_session_ref: str,
+):
+    normalized_ref = _normalize_string(runtime_session_ref)
+    if normalized_ref is None:
+        return None
+    best_requested = None
+    best_fallback = None
+    for service in list(_ACTIVE_LEASE_SERVICES):
+        binding = _resolve_operator_abort_binding_for_service(
+            service,
+            runtime_session_ref=normalized_ref,
+        )
+        if not binding:
+            continue
+        match_rank = int(binding.get("_match_rank") or 0)
+        if binding.get("requested"):
+            if (
+                best_requested is None
+                or match_rank > int(best_requested[1].get("_match_rank") or 0)
+            ):
+                best_requested = (service, binding)
+            continue
+        if (
+            best_fallback is None
+            or match_rank > int(best_fallback[1].get("_match_rank") or 0)
+        ):
+            best_fallback = (service, binding)
+    resolved = best_requested or best_fallback
+    if resolved is None:
+        return None
+    service, binding = resolved
+    return service, {
+        key: value
+        for key, value in binding.items()
+        if key != "_match_rank"
+    }
+
+
+def _resolve_operator_abort_binding_for_service(
+    service: EnvironmentLeaseService,
+    *,
+    runtime_session_ref: str,
+) -> dict[str, object]:
+    session_repository = service._service._session_repository
+    if session_repository is None:
+        return {}
+    best_requested: dict[str, object] | None = None
+    best_requested_rank = 0
+    best_fallback: dict[str, object] | None = None
+    best_fallback_rank = 0
+    for session in session_repository.list_sessions(limit=None):
+        match_rank = _session_runtime_ref_match_rank(
+            session,
+            runtime_session_ref=runtime_session_ref,
+        )
+        if match_rank is None:
+            continue
+        environment = service._service._registry.get(session.environment_id)
+        state = _shared_operator_abort_state(
+            session_metadata=_mapping(session.metadata),
+            environment_metadata=_mapping(
+                environment.metadata if environment is not None else None,
+            ),
+        )
+        binding: dict[str, object] = {
+            "session_mount_id": session.id,
+            "environment_id": session.environment_id,
+            "runtime_session_ref": runtime_session_ref,
+            "_match_rank": match_rank,
+            **state,
+        }
+        if binding.get("requested"):
+            if match_rank > best_requested_rank:
+                best_requested = binding
+                best_requested_rank = match_rank
+            continue
+        if match_rank > best_fallback_rank:
+            best_fallback = binding
+            best_fallback_rank = match_rank
+    return best_requested or best_fallback or {}
+
+
+def _session_runtime_ref_match_rank(
+    session: SessionMount,
+    *,
+    runtime_session_ref: str,
+) -> int | None:
+    ranked_aliases = (
+        (_normalize_string(session.metadata.get("provider_session_ref")), 4),
+        (_normalize_string(session.metadata.get("browser_attach_session_ref")), 4),
+        (_normalize_string(session.metadata.get("browser_session_ref")), 4),
+        (_normalize_string(session.metadata.get("session_ref")), 4),
+        (_normalize_string(session.id), 3),
+        (_normalize_string(session.live_handle_ref), 2),
+        (_normalize_string(session.session_id), 1),
+    )
+    best_rank: int | None = None
+    for alias, rank in ranked_aliases:
+        if alias != runtime_session_ref:
+            continue
+        if best_rank is None or rank > best_rank:
+            best_rank = rank
+    return best_rank
+
+
+def _shared_operator_abort_state(
+    *,
+    session_metadata: dict[str, object],
+    environment_metadata: dict[str, object],
+) -> dict[str, object]:
+    raw = session_metadata.get("operator_abort_state")
+    if not isinstance(raw, dict):
+        raw = environment_metadata.get("operator_abort_state")
+    if not isinstance(raw, dict):
+        return {}
+    channel = _normalize_string(raw.get("channel"), raw.get("operator_abort_channel"))
+    reason = _normalize_string(raw.get("reason"), raw.get("abort_reason"), channel)
+    requested_at = _normalize_string(raw.get("requested_at"))
+    requested = bool(
+        raw.get("requested")
+        if "requested" in raw
+        else raw.get("operator_abort_requested"),
+    )
+    state: dict[str, object] = {}
+    if requested:
+        state["requested"] = True
+    if channel is not None:
+        state["channel"] = channel
+    if reason is not None:
+        state["reason"] = reason
+    if requested_at is not None:
+        state["requested_at"] = requested_at
+    return state
+
+
 def _mapping(value: object | None) -> dict[str, object]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _normalize_string(*values: object) -> str | None:
+    for value in values:
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized:
+                return normalized
+    return None
 
 
 def _lease_expired(expires_at: datetime | None, *, now: datetime) -> bool:

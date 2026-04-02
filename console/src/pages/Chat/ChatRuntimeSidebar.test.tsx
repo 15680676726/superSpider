@@ -10,12 +10,12 @@ describe("ChatRuntimeSidebar", () => {
   it("keeps chat chrome minimal while surfacing thread kind, focus, writeback, and shell mode", () => {
     render(
       <ChatRuntimeSidebar
-        approvalButtonLabel="审批(2)"
-        bindingLabel="Acme / 主脑"
+        approvalButtonLabel={"\u5ba1\u6279(2)"}
+        bindingLabel={"Acme / \u4e3b\u8111"}
         onOpenGovernanceApprovals={vi.fn()}
         runtimeFallbackLabel={null}
         runtimeHealthNotice={null}
-        runtimeModelHint="当前模型"
+        runtimeModelHint={"\u5f53\u524d\u6a21\u578b"}
         runtimeModelLabel="openai/gpt-5"
         runtimeIntentShell={{
           mode: "plan",
@@ -47,8 +47,8 @@ describe("ChatRuntimeSidebar", () => {
       />,
     );
 
-    expect(screen.getByText("Acme / 主脑")).toBeTruthy();
-    expect(screen.getByText("审批(2)")).toBeTruthy();
+    expect(screen.getByText("Acme / \u4e3b\u8111")).toBeTruthy();
+    expect(screen.getByText("\u5ba1\u6279(2)")).toBeTruthy();
     expect(screen.getByText("openai/gpt-5")).toBeTruthy();
     expect(screen.getByText("Shell: PLAN")).toBeTruthy();
     expect(screen.getByText("Thread: control-thread")).toBeTruthy();
@@ -62,12 +62,14 @@ describe("ChatRuntimeSidebar", () => {
   it("uses the formal top bar style classes and exposes full text on hover", () => {
     const { container } = render(
       <ChatRuntimeSidebar
-        approvalButtonLabel="审批"
-        bindingLabel="这是一个非常长的绑定标签，用来验证顶部状态条是否会省略显示并保留完整标题"
+        approvalButtonLabel={"\u5ba1\u6279"}
+        bindingLabel={
+          "\u8fd9\u662f\u4e00\u4e2a\u975e\u5e38\u957f\u7684\u7ed1\u5b9a\u6807\u7b7e\uff0c\u7528\u6765\u9a8c\u8bc1\u9876\u90e8\u72b6\u6001\u6761\u662f\u5426\u4f1a\u7701\u7565\u663e\u793a\u5e76\u4fdd\u7559\u5b8c\u6574\u6807\u9898"
+        }
         onOpenGovernanceApprovals={vi.fn()}
-        runtimeFallbackLabel="回退链路"
+        runtimeFallbackLabel={"\u56de\u9000\u94fe\u8def"}
         runtimeHealthNotice={null}
-        runtimeModelHint="当前模型说明"
+        runtimeModelHint={"\u5f53\u524d\u6a21\u578b\u8bf4\u660e"}
         runtimeModelLabel="openai/gpt-5.4-super-long-model-name-for-overflow-check"
         runtimeIntentShell={{
           mode: "review",
@@ -101,7 +103,7 @@ describe("ChatRuntimeSidebar", () => {
     expect(container.firstElementChild?.className).toContain(styles.topBar);
     expect(
       screen.getByTitle(
-        "这是一个非常长的绑定标签，用来验证顶部状态条是否会省略显示并保留完整标题",
+        "\u8fd9\u662f\u4e00\u4e2a\u975e\u5e38\u957f\u7684\u7ed1\u5b9a\u6807\u7b7e\uff0c\u7528\u6765\u9a8c\u8bc1\u9876\u90e8\u72b6\u6001\u6761\u662f\u5426\u4f1a\u7701\u7565\u663e\u793a\u5e76\u4fdd\u7559\u5b8c\u6574\u6807\u9898",
       ),
     ).toBeTruthy();
     expect(
@@ -124,5 +126,74 @@ describe("ChatRuntimeSidebar", () => {
         "targets=strategy,lane,backlog,immediate-goal | role=execution-core | match_signals=2",
       ),
     ).toBeTruthy();
+  });
+
+  it("renders lifecycle failure state instead of collapsing back to ready", () => {
+    const baseProps = {
+      approvalButtonLabel: "\u5ba1\u6279",
+      bindingLabel: "Acme / main-brain",
+      onOpenGovernanceApprovals: vi.fn(),
+      runtimeFallbackLabel: null,
+      runtimeHealthNotice: null,
+      runtimeModelHint: "current model",
+      runtimeModelLabel: "openai/gpt-5",
+      runtimeWaitDescription: null,
+      runtimeWaitSeconds: 0,
+      runtimeWaitState: null,
+    };
+
+    const { rerender } = render(
+      <ChatRuntimeSidebar
+        {...({
+          ...baseProps,
+          runtimeLifecycleState: {
+            phase: "accepted",
+            title: "\u5df2\u63a5\u6536",
+            description: "accepted boundary persisted",
+            tone: "busy",
+            updatedAt: 100,
+          },
+        } as any)}
+      />,
+    );
+
+    expect(screen.getByText("\u5df2\u63a5\u6536")).toBeTruthy();
+    expect(screen.queryByText("\u5c31\u7eea")).toBeNull();
+
+    rerender(
+      <ChatRuntimeSidebar
+        {...({
+          ...baseProps,
+          runtimeLifecycleState: {
+            phase: "reply_done",
+            title: "\u56de\u590d\u5b8c\u6210",
+            description: "reply complete",
+            tone: "busy",
+            updatedAt: 101,
+          },
+        } as any)}
+      />,
+    );
+
+    expect(screen.getByText("\u56de\u590d\u5b8c\u6210")).toBeTruthy();
+    expect(screen.queryByText("\u5c31\u7eea")).toBeNull();
+
+    rerender(
+      <ChatRuntimeSidebar
+        {...({
+          ...baseProps,
+          runtimeLifecycleState: {
+            phase: "commit_failed",
+            title: "\u63d0\u4ea4\u5931\u8d25",
+            description: "db commit blew up",
+            tone: "error",
+            updatedAt: 102,
+          },
+        } as any)}
+      />,
+    );
+
+    expect(screen.getByText("\u63d0\u4ea4\u5931\u8d25")).toBeTruthy();
+    expect(screen.queryByText("\u5c31\u7eea")).toBeNull();
   });
 });

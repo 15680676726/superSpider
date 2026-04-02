@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from copaw.compiler.planning import ReportReplanEngine
 from copaw.industry.report_synthesis import synthesize_reports
 from copaw.memory.activation_models import ActivationResult, KnowledgeNeuron
 from copaw.state import AgentReportRecord
@@ -50,6 +51,8 @@ def _activation(
     *,
     top_constraints: list[str] | None = None,
     top_next_actions: list[str] | None = None,
+    top_entities: list[str] | None = None,
+    top_opinions: list[str] | None = None,
     support_refs: list[str] | None = None,
     contradictions: list[KnowledgeNeuron] | None = None,
 ) -> ActivationResult:
@@ -57,11 +60,26 @@ def _activation(
         query="review report closure",
         scope_type="industry",
         scope_id="industry-1",
+        top_entities=top_entities or [],
+        top_opinions=top_opinions or [],
         top_constraints=top_constraints or [],
         top_next_actions=top_next_actions or [],
         support_refs=support_refs or [],
         contradictions=contradictions or [],
     )
+
+
+def _strategy_change(decision: object) -> dict[str, object]:
+    activation = getattr(decision, "activation", {})
+    if isinstance(activation, dict):
+        strategy_change = activation.get("strategy_change")
+        if isinstance(strategy_change, dict):
+            return strategy_change
+    return {}
+
+
+def _decision_kind(decision: object) -> str | None:
+    return getattr(decision, "decision_kind", None) or _strategy_change(decision).get("decision_kind")
 
 
 def test_synthesize_reports_returns_clean_close_for_agreeing_reports() -> None:
@@ -164,6 +182,25 @@ def test_synthesize_reports_turns_failed_report_into_replan_signal() -> None:
         },
     ]
     assert synthesis["needs_replan"] is True
+
+
+def test_report_replan_engine_defaults_failed_report_synthesis_to_follow_up_backlog() -> None:
+    report = _report(
+        headline="Customer interview wave failed",
+        owner_agent_id="agent-a",
+        result="failed",
+        lane_id="lane-research",
+        uncertainties=["The interview recruiting list was incomplete."],
+        recommendation="Rebuild the interview list before relaunching outreach.",
+    )
+
+    synthesis = synthesize_reports([report])
+    decision = ReportReplanEngine().compile(synthesis)
+
+    assert decision.status == "needs-replan"
+    assert _decision_kind(decision) == "follow_up_backlog"
+    assert _strategy_change(decision)["trigger_family"] == "local_follow_up_pressure"
+    assert decision.recommended_actions == synthesis["recommended_actions"]
 
 
 def test_synthesize_reports_keeps_needs_followup_visible() -> None:
@@ -474,6 +511,8 @@ def test_synthesize_reports_includes_activation_constraints_in_replan_surface() 
         findings=["Weekday response time stayed inside target."],
     )
     activation = _activation(
+        top_entities=["weekend-variance", "staffing"],
+        top_opinions=["staffing:caution:premature-change"],
         top_constraints=["Staffing changes still require validated weekend-cause evidence."],
         top_next_actions=["Validate the weekend-cause hypothesis before changing staffing."],
         support_refs=["activation:support:weekend-variance"],
@@ -486,6 +525,13 @@ def test_synthesize_reports_includes_activation_constraints_in_replan_surface() 
     ]
     assert synthesis["activation"]["top_next_actions"] == [
         "Validate the weekend-cause hypothesis before changing staffing.",
+    ]
+    assert synthesis["activation"]["top_entities"] == [
+        "weekend-variance",
+        "staffing",
+    ]
+    assert synthesis["activation"]["top_opinions"] == [
+        "staffing:caution:premature-change",
     ]
     assert synthesis["activation"]["support_refs"] == [
         "activation:support:weekend-variance",
@@ -518,3 +564,31 @@ def test_synthesize_reports_surfaces_activation_contradictions() -> None:
     assert synthesis["activation"]["contradiction_count"] == 1
     assert synthesis["replan_decision"]["status"] == "needs-replan"
     assert synthesis["needs_replan"] is True
+
+
+def test_report_replan_engine_turns_activation_report_contradictions_into_strategy_review() -> None:
+    report = _report(
+        headline="Warehouse issue resolved",
+        owner_agent_id="agent-a",
+        goal_id="goal-shared",
+        lane_id="lane-ops",
+        result="completed",
+        findings=["The warehouse issue is resolved."],
+    )
+    contradiction = KnowledgeNeuron(
+        neuron_id="fact:industry-1:warehouse-approval",
+        kind="fact",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Warehouse approval conflict",
+        summary="Recent memory says the missing approval blocker remains unresolved.",
+    )
+    activation = _activation(contradictions=[contradiction])
+
+    synthesis = synthesize_reports([report], activation_result=activation)
+    decision = ReportReplanEngine().compile(synthesis)
+
+    assert decision.status == "needs-replan"
+    assert _decision_kind(decision) == "strategy_review_required"
+    assert _strategy_change(decision)["trigger_family"] == "repeated_evidence_contradiction"
+    assert "strategy review" in decision.summary.lower()

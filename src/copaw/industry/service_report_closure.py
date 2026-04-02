@@ -49,6 +49,8 @@ def _activation_followup_metadata(synthesis: Mapping[str, Any] | None) -> dict[s
         return {}
     metadata: dict[str, Any] = {}
     for source_key, target_key in (
+        ("top_entities", "activation_top_entities"),
+        ("top_opinions", "activation_top_opinions"),
         ("top_constraints", "activation_top_constraints"),
         ("top_next_actions", "activation_top_next_actions"),
         ("support_refs", "activation_support_refs"),
@@ -67,6 +69,7 @@ def synthesize_agent_reports(
     list_agent_report_records: Callable[..., list[AgentReportRecord]],
     instance_id: str,
     cycle_id: str | None,
+    activation_result: object | None = None,
 ) -> dict[str, Any]:
     return synthesize_reports(
         list_agent_report_records(
@@ -74,6 +77,7 @@ def synthesize_agent_reports(
             cycle_id=cycle_id,
             limit=None,
         ),
+        activation_result=activation_result,
     )
 
 

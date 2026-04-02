@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Cooperative environment runtime helpers."""
+from .browser_attach_runtime import BrowserAttachRuntime
 from .browser_companion import BrowserCompanionRuntime
 from .document_bridge import DocumentBridgeRuntime
 from .execution_path import (
@@ -15,6 +16,7 @@ from .watchers import CooperativeWatcherRuntimeService, HostWatcherRuntime
 from .windows_apps import WindowsAppAdapterRuntime
 
 __all__ = [
+    "BrowserAttachRuntime",
     "BrowserCompanionRuntime",
     "COOPERATIVE_NATIVE_PATH",
     "CooperativeWatcherRuntimeService",

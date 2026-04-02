@@ -346,7 +346,7 @@ async def _snapshot_texts(
 
 
 @pytest.mark.asyncio
-async def test_main_brain_chat_service_keeps_incoming_turn_in_cache_until_reply_finishes():
+async def test_main_brain_chat_service_persists_unbound_session_turn_before_model_call():
     backend = _FakeSessionBackend()
     model = _SnapshotInspectingModel(
         backend,
@@ -370,7 +370,7 @@ async def test_main_brain_chat_service_keeps_incoming_turn_in_cache_until_reply_
 
     assert streamed[0][0].get_text_content() == "已收到，这轮先继续聊天。"
     assert model.snapshot_during_call is not None
-    assert await _snapshot_texts(service, model.snapshot_during_call) == []
+    assert await _snapshot_texts(service, model.snapshot_during_call) == ["先记住这条消息，再回复我。"]
     snapshot = backend.load_session_snapshot(
         session_id="sess-chat",
         user_id="user-chat",
@@ -380,7 +380,48 @@ async def test_main_brain_chat_service_keeps_incoming_turn_in_cache_until_reply_
         "先记住这条消息，再回复我。",
         "已收到，这轮先继续聊天。",
     ]
-    assert len(backend.save_calls) == 1
+    assert len(backend.save_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_persists_bound_execution_turn_before_model_call():
+    backend = _FakeSessionBackend()
+    model = _SnapshotInspectingModel(
+        backend,
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        user_id="execution-core-agent",
+    )
+    service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: model,
+    )
+    request = SimpleNamespace(
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        user_id="operator-user",
+        agent_id="execution-core-agent",
+        control_thread_id="industry-chat:industry-v1-demo:execution-core",
+        industry_instance_id="industry-v1-demo",
+        work_context_id="work-context-1",
+    )
+    msgs = [Msg(name="user", role="user", content="先把这条执行指令正式接住，再继续回答。")]
+
+    streamed = [item async for item in service.execute_stream(msgs=msgs, request=request)]
+
+    assert streamed[0][0].get_text_content() == "已收到，这轮先继续聊天。"
+    assert model.snapshot_during_call is not None
+    assert await _snapshot_texts(service, model.snapshot_during_call) == [
+        "先把这条执行指令正式接住，再继续回答。",
+    ]
+    snapshot = backend.load_session_snapshot(
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        user_id="execution-core-agent",
+        allow_not_exist=True,
+    )
+    assert await _snapshot_texts(service, snapshot) == [
+        "先把这条执行指令正式接住，再继续回答。",
+        "已收到，这轮先继续聊天。",
+    ]
+    assert len(backend.save_calls) == 2
 
 
 @pytest.mark.asyncio
@@ -404,11 +445,11 @@ async def test_main_brain_chat_service_throttles_snapshot_persistence_between_tu
         assert streamed[0][0].get_text_content() == "纯聊天回复"
 
         if turn == 0:
-            assert len(backend.save_calls) == 1
-        if turn == 1:
-            assert len(backend.save_calls) == 1
-        if turn == 2:
             assert len(backend.save_calls) == 2
+        if turn == 1:
+            assert len(backend.save_calls) == 4
+        if turn == 2:
+            assert len(backend.save_calls) == 6
 
 
 @pytest.mark.asyncio
@@ -457,7 +498,7 @@ async def test_main_brain_chat_service_does_not_duplicate_save_on_clean_ttl_evic
 
     first_turn = [Msg(name="user", role="user", content="turn one")]
     _ = [item async for item in service.execute_stream(msgs=first_turn, request=request)]
-    assert len(backend.save_calls) == 1
+    assert len(backend.save_calls) == 2
 
     cache_key = ("sess-ttl", "user-ttl")
     cache_entry = service._session_cache[cache_key]  # pylint: disable=protected-access
@@ -469,7 +510,7 @@ async def test_main_brain_chat_service_does_not_duplicate_save_on_clean_ttl_evic
     second_turn = [Msg(name="user", role="user", content="turn two")]
     _ = [item async for item in service.execute_stream(msgs=second_turn, request=request)]
 
-    assert len(backend.save_calls) == 2
+    assert len(backend.save_calls) == 4
 
 
 @pytest.mark.asyncio
@@ -681,7 +722,7 @@ async def test_main_brain_chat_service_interruption_forces_single_continuity_sav
             request=request,
         )
     ]
-    assert len(backend.save_calls) == 1
+    assert len(backend.save_calls) == 2
 
     _ = [
         item
@@ -690,7 +731,7 @@ async def test_main_brain_chat_service_interruption_forces_single_continuity_sav
             request=request,
         )
     ]
-    assert len(backend.save_calls) == 1
+    assert len(backend.save_calls) == 4
 
     with pytest.raises(asyncio.CancelledError):
         _ = [
@@ -701,7 +742,7 @@ async def test_main_brain_chat_service_interruption_forces_single_continuity_sav
             )
         ]
 
-    assert len(backend.save_calls) == 2
+    assert len(backend.save_calls) == 5
     snapshot = backend.load_session_snapshot(
         session_id="sess-cancelled-throttle",
         user_id="user-cancelled-throttle",
@@ -1531,6 +1572,10 @@ async def test_main_brain_chat_service_persists_commit_state_and_reloads_it_from
     phase2 = snapshot["main_brain"]["phase2_commit"]
     assert phase2["status"] == "committed"
     assert phase2["record_id"] == "backlog-1"
+    runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
+    assert runtime_context["accepted_persistence"]["status"] == "accepted"
+    assert runtime_context["commit_outcome"]["status"] == "committed"
+    assert runtime_context["commit_outcome"]["record_id"] == "backlog-1"
 
     reloaded_service = MainBrainChatService(
         session_backend=backend,

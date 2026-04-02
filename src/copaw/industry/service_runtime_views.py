@@ -1,11 +1,14 @@
 ﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from .service_context import *  # noqa: F401,F403
 from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
 from .main_brain_cognitive_surface import build_main_brain_cognitive_surface
 from .models import IndustryMainBrainPlanningSurface
+from ..state.strategy_memory_service import resolve_strategy_payload
 
 
 class _IndustryRuntimeViewsMixin:
@@ -391,6 +394,79 @@ class _IndustryRuntimeViewsMixin:
             return payload
         return _mapping(_mapping(entry.get("metadata")).get("formal_planning"))
 
+    def _mapping_list(self, value: object | None) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        return [dict(item) for item in value if isinstance(item, Mapping)]
+
+    def _strategy_constraints_surface_payload(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        planning_sidecar: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        strategy_constraints = _mapping(planning_sidecar.get("strategy_constraints"))
+        if not strategy_constraints:
+            strategy_constraints = self._planner_sidecar_payload(
+                self._compile_strategy_constraints(record=record),
+            )
+        strategy_payload = resolve_strategy_payload(
+            service=self._strategy_memory_service,
+            scope_type="industry",
+            scope_id=record.instance_id,
+            fallback_owner_agent_ids=(EXECUTION_CORE_AGENT_ID,),
+        )
+        raw_payload = dict(strategy_payload) if isinstance(strategy_payload, Mapping) else {}
+        metadata = _mapping(raw_payload.get("metadata"))
+        strategic_uncertainties = self._mapping_list(
+            strategy_constraints.get("strategic_uncertainties"),
+        ) or self._mapping_list(raw_payload.get("strategic_uncertainties")) or self._mapping_list(
+            metadata.get("strategic_uncertainties"),
+        )
+        lane_budgets = self._mapping_list(strategy_constraints.get("lane_budgets")) or self._mapping_list(
+            raw_payload.get("lane_budgets"),
+        ) or self._mapping_list(metadata.get("lane_budgets"))
+        payload = dict(strategy_constraints)
+        if strategic_uncertainties:
+            payload["strategic_uncertainties"] = strategic_uncertainties
+        if lane_budgets:
+            payload["lane_budgets"] = lane_budgets
+        return payload
+
+    def _report_replan_surface_payload(
+        self,
+        *,
+        planning_sidecar: Mapping[str, Any],
+        replan_synthesis: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        compiled = self._planner_sidecar_payload(
+            self._report_replan_engine.compile(replan_synthesis),
+        )
+        raw_decision = _mapping(_mapping(replan_synthesis).get("replan_decision"))
+        if raw_decision:
+            compiled.update(raw_decision)
+        sidecar_payload = _mapping(planning_sidecar.get("report_replan"))
+        if sidecar_payload:
+            compiled.update(sidecar_payload)
+        raw_trigger_context = dict(_mapping(raw_decision.get("trigger_context")))
+        sidecar_trigger_context = dict(_mapping(sidecar_payload.get("trigger_context")))
+        if raw_trigger_context and sidecar_trigger_context:
+            compiled["trigger_context"] = {
+                **raw_trigger_context,
+                **sidecar_trigger_context,
+            }
+        elif raw_trigger_context:
+            compiled["trigger_context"] = raw_trigger_context
+        elif sidecar_trigger_context:
+            compiled["trigger_context"] = sidecar_trigger_context
+        if sidecar_payload.get("directives"):
+            compiled["directives"] = self._mapping_list(sidecar_payload.get("directives"))
+        if sidecar_payload.get("recommended_actions"):
+            compiled["recommended_actions"] = self._mapping_list(
+                sidecar_payload.get("recommended_actions"),
+            )
+        return compiled
+
     def _resolve_latest_planning_cycle_entry(
         self,
         *,
@@ -521,11 +597,10 @@ class _IndustryRuntimeViewsMixin:
             cycles=cycles,
         )
         planning_sidecar = self._resolve_formal_planning_payload(planning_cycle)
-        strategy_constraints = _mapping(planning_sidecar.get("strategy_constraints"))
-        if not strategy_constraints:
-            strategy_constraints = self._planner_sidecar_payload(
-                self._compile_strategy_constraints(record=record),
-            )
+        strategy_constraints = self._strategy_constraints_surface_payload(
+            record=record,
+            planning_sidecar=planning_sidecar,
+        )
 
         cycle_decision = _mapping(planning_sidecar.get("cycle_decision"))
         if cycle_decision:
@@ -588,8 +663,9 @@ class _IndustryRuntimeViewsMixin:
             cycles=cycles,
         )
         replan_synthesis = self._resolve_cycle_synthesis_payload(replan_cycle)
-        replan = self._planner_sidecar_payload(
-            self._report_replan_engine.compile(replan_synthesis),
+        replan = self._report_replan_surface_payload(
+            planning_sidecar=planning_sidecar,
+            replan_synthesis=replan_synthesis,
         )
 
         return IndustryMainBrainPlanningSurface(

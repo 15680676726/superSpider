@@ -47,5 +47,64 @@ def test_strategy_constraints_and_replan_decision_default_to_sidecar_safe_empty_
 
     assert constraints.priority_order == []
     assert constraints.lane_weights == {}
+    assert constraints.strategic_uncertainties == []
+    assert constraints.lane_budgets == []
+    assert constraints.strategy_trigger_rules == []
     assert replan.status == "clear"
+    assert replan.strategy_change_decision is None
+    assert replan.trigger_rule_ids == []
     assert replan.directives == []
+
+
+def test_strategy_constraints_keep_typed_strategy_truth_and_trigger_contracts() -> None:
+    constraints = PlanningStrategyConstraints(
+        strategic_uncertainties=[
+            {
+                "uncertainty_id": "uncertainty-1",
+                "statement": "Retention signal is still noisy.",
+                "scope": "lane",
+                "impact_level": "high",
+                "current_confidence": 0.45,
+                "evidence_for_refs": ["evidence-for-1"],
+                "evidence_against_refs": ["evidence-against-1"],
+                "review_by_cycle": "cycle-2",
+                "escalate_when": ["confidence drop", "target miss"],
+            }
+        ],
+        lane_budgets=[
+            {
+                "lane_id": "lane-retention",
+                "budget_window": "next-3-cycles",
+                "target_share": 0.6,
+                "min_share": 0.4,
+                "max_share": 0.75,
+                "review_pressure": "protect-core-signal",
+                "defer_reason": "wait for cleaner churn baseline",
+                "force_include_reason": "current cycle is retention-critical",
+            }
+        ],
+        strategy_trigger_rules=[
+            {
+                "rule_id": "uncertainty:uncertainty-1:confidence-drop",
+                "source_type": "uncertainty_escalation",
+                "source_ref": "uncertainty-1",
+                "trigger_family": "confidence_collapse",
+                "summary": "Review strategy when retention confidence drops again.",
+                "decision_hint": "strategy_review_required",
+            }
+        ],
+    )
+    replan = ReportReplanDecision(
+        strategy_change_decision="lane_reweight",
+        trigger_rule_ids=["uncertainty:uncertainty-1:confidence-drop"],
+    )
+
+    assert constraints.strategic_uncertainties[0].uncertainty_id == "uncertainty-1"
+    assert constraints.strategic_uncertainties[0].escalate_when == [
+        "confidence drop",
+        "target miss",
+    ]
+    assert constraints.lane_budgets[0].lane_id == "lane-retention"
+    assert constraints.strategy_trigger_rules[0].trigger_family == "confidence_collapse"
+    assert replan.strategy_change_decision == "lane_reweight"
+    assert replan.trigger_rule_ids == ["uncertainty:uncertainty-1:confidence-drop"]

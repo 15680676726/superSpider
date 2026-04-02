@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 from .runtime_center_shared_ops import *  # noqa: F401,F403
+from .runtime_center_shared import (
+    SharedOperatorAbortClearRequest,
+    SharedOperatorAbortRequest,
+)
 
 
 @router.get("/conversations/{conversation_id}", response_model=RuntimeConversationPayload)
@@ -639,6 +643,57 @@ async def force_release_session_lease(
     return session_payload
 
 
+@router.post("/sessions/{session_mount_id}/operator-abort", response_model=dict[str, object])
+async def request_shared_operator_abort(
+    session_mount_id: str,
+    request: Request,
+    response: Response,
+    payload: SharedOperatorAbortRequest,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_environment_service(request)
+    try:
+        session = service.set_shared_operator_abort_state(
+            session_mount_id=session_mount_id,
+            channel=payload.channel,
+            reason=payload.reason,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, detail=str(exc).strip("'")) from exc
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    return _bridge_session_payload_or_404(session, session_mount_id)
+
+
+@router.post(
+    "/sessions/{session_mount_id}/operator-abort/clear",
+    response_model=dict[str, object],
+)
+async def clear_shared_operator_abort(
+    session_mount_id: str,
+    request: Request,
+    response: Response,
+    payload: SharedOperatorAbortClearRequest | None = None,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_environment_service(request)
+    try:
+        session = service.clear_shared_operator_abort_state(
+            session_mount_id=session_mount_id,
+            channel=payload.channel if payload is not None else None,
+            reason=payload.reason if payload is not None else None,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, detail=str(exc).strip("'")) from exc
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    return _bridge_session_payload_or_404(session, session_mount_id)
+
+
 def _bridge_service_method(service: object, method_name: str):
     method = getattr(service, method_name, None)
     if not callable(method):
@@ -685,6 +740,14 @@ async def ack_bridge_session_work(
             handle=payload.handle,
             workspace_trusted=payload.workspace_trusted,
             elevated_auth_state=payload.elevated_auth_state,
+            browser_attach_transport_ref=payload.browser_attach_transport_ref,
+            browser_attach_status=payload.browser_attach_status,
+            browser_attach_session_ref=payload.browser_attach_session_ref,
+            browser_attach_scope_ref=payload.browser_attach_scope_ref,
+            browser_attach_reconnect_token=payload.browser_attach_reconnect_token,
+            preferred_execution_path=payload.preferred_execution_path,
+            ui_fallback_mode=payload.ui_fallback_mode,
+            adapter_gap_or_blocker=payload.adapter_gap_or_blocker,
         )
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc).strip("'")) from exc
@@ -737,6 +800,14 @@ async def reconnect_bridge_session_work(
             work_id=payload.work_id,
             ttl_seconds=payload.ttl_seconds,
             handle=payload.handle,
+            browser_attach_transport_ref=payload.browser_attach_transport_ref,
+            browser_attach_status=payload.browser_attach_status,
+            browser_attach_session_ref=payload.browser_attach_session_ref,
+            browser_attach_scope_ref=payload.browser_attach_scope_ref,
+            browser_attach_reconnect_token=payload.browser_attach_reconnect_token,
+            preferred_execution_path=payload.preferred_execution_path,
+            ui_fallback_mode=payload.ui_fallback_mode,
+            adapter_gap_or_blocker=payload.adapter_gap_or_blocker,
         )
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc).strip("'")) from exc

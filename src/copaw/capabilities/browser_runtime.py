@@ -16,6 +16,7 @@ from ..agents.tools.browser_control import (
     get_browser_runtime_snapshot,
 )
 from ..constant import WORKING_DIR
+from ..environments.cooperative.browser_attach_runtime import BrowserAttachRuntime
 from ..environments.cooperative.browser_companion import BrowserCompanionRuntime
 from ..state import SQLiteStateStore
 
@@ -208,9 +209,11 @@ class BrowserRuntimeService:
         self,
         state_store: SQLiteStateStore,
         browser_companion_runtime: BrowserCompanionRuntime | None = None,
+        browser_attach_runtime: BrowserAttachRuntime | None = None,
     ) -> None:
         self._store = state_store
         self._browser_companion_runtime = browser_companion_runtime
+        self._browser_attach_runtime = browser_attach_runtime
         self._store.initialize()
         self._initialize_schema()
 
@@ -372,6 +375,14 @@ class BrowserRuntimeService:
                 environment_id=environment_id,
                 session_mount_id=session_mount_id,
             )
+        if (
+            self._browser_attach_runtime is not None
+            and (environment_id is not None or session_mount_id is not None)
+        ):
+            snapshot["browser_attach"] = self.attach_snapshot(
+                environment_id=environment_id,
+                session_mount_id=session_mount_id,
+            )
         return snapshot
 
     def register_companion(
@@ -386,6 +397,7 @@ class BrowserRuntimeService:
         ui_fallback_mode: str | None = None,
         adapter_gap_or_blocker: str | None = None,
         provider_session_ref: str | None = None,
+        execution_guardrails: dict[str, object] | None = None,
     ) -> dict[str, Any]:
         if self._browser_companion_runtime is None:
             raise RuntimeError("Browser companion runtime is not configured.")
@@ -399,6 +411,7 @@ class BrowserRuntimeService:
             ui_fallback_mode=ui_fallback_mode,
             adapter_gap_or_blocker=adapter_gap_or_blocker,
             provider_session_ref=provider_session_ref,
+            execution_guardrails=execution_guardrails,
         )
 
     def companion_snapshot(
@@ -425,8 +438,102 @@ class BrowserRuntimeService:
                 "status": None,
                 "transport_ref": None,
                 "provider_session_ref": None,
+                "environment_id": None,
+                "session_mount_id": None,
+                "work_context_id": None,
             }
-        return dict(browser_companion)
+        return {
+            **dict(browser_companion),
+            "environment_id": snapshot.get("environment_id"),
+            "session_mount_id": snapshot.get("session_mount_id"),
+            "work_context_id": snapshot.get("work_context_id"),
+        }
+
+    def register_attach_transport(
+        self,
+        *,
+        session_mount_id: str,
+        transport_ref: str | None = None,
+        status: str | None = None,
+        browser_session_ref: str | None = None,
+        browser_scope_ref: str | None = None,
+        reconnect_token: str | None = None,
+        preferred_execution_path: str | None = None,
+        ui_fallback_mode: str | None = None,
+        adapter_gap_or_blocker: str | None = None,
+    ) -> dict[str, Any]:
+        if self._browser_attach_runtime is None:
+            raise RuntimeError("Browser attach runtime is not configured.")
+        self._browser_attach_runtime.register_transport(
+            session_mount_id=session_mount_id,
+            transport_ref=transport_ref or "",
+            status=status,
+            browser_session_ref=browser_session_ref,
+            browser_scope_ref=browser_scope_ref,
+            reconnect_token=reconnect_token,
+            preferred_execution_path=preferred_execution_path,
+            ui_fallback_mode=ui_fallback_mode,
+            adapter_gap_or_blocker=adapter_gap_or_blocker,
+        )
+        return self._browser_attach_runtime.snapshot(
+            session_mount_id=session_mount_id,
+        )
+
+    def clear_attach_transport(
+        self,
+        *,
+        session_mount_id: str,
+        preferred_execution_path: str | None = None,
+        ui_fallback_mode: str | None = None,
+        adapter_gap_or_blocker: str | None = None,
+    ) -> dict[str, Any]:
+        if self._browser_attach_runtime is None:
+            raise RuntimeError("Browser attach runtime is not configured.")
+        self._browser_attach_runtime.clear_transport(
+            session_mount_id=session_mount_id,
+            preferred_execution_path=preferred_execution_path,
+            ui_fallback_mode=ui_fallback_mode,
+            adapter_gap_or_blocker=adapter_gap_or_blocker,
+        )
+        return self._browser_attach_runtime.snapshot(
+            session_mount_id=session_mount_id,
+        )
+
+    def attach_snapshot(
+        self,
+        *,
+        environment_id: str | None = None,
+        session_mount_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self._browser_attach_runtime is None:
+            return {
+                "transport_ref": None,
+                "status": None,
+                "session_ref": None,
+                "scope_ref": None,
+                "reconnect_token": None,
+                "environment_id": None,
+                "session_mount_id": None,
+            }
+        snapshot = self._browser_attach_runtime.snapshot(
+            session_mount_id=session_mount_id,
+        )
+        browser_attach = snapshot.get("browser_attach")
+        if not isinstance(browser_attach, dict):
+            return {
+                "transport_ref": None,
+                "status": None,
+                "session_ref": None,
+                "scope_ref": None,
+                "reconnect_token": None,
+                "environment_id": None,
+                "session_mount_id": None,
+            }
+        return {
+            **dict(browser_attach),
+            "environment_id": snapshot.get("environment_id"),
+            "session_mount_id": snapshot.get("session_mount_id"),
+        }
 
     async def start_session(
         self,

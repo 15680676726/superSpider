@@ -100,6 +100,14 @@ class BridgeSessionWorkAckRequest(BaseModel):
     ttl_seconds: int | None = Field(default=None, ge=1)
     workspace_trusted: bool | None = Field(default=None)
     elevated_auth_state: str | None = Field(default=None)
+    browser_attach_transport_ref: str | None = Field(default=None)
+    browser_attach_status: str | None = Field(default=None)
+    browser_attach_session_ref: str | None = Field(default=None)
+    browser_attach_scope_ref: str | None = Field(default=None)
+    browser_attach_reconnect_token: str | None = Field(default=None)
+    preferred_execution_path: str | None = Field(default=None)
+    ui_fallback_mode: str | None = Field(default=None)
+    adapter_gap_or_blocker: str | None = Field(default=None)
     handle: dict[str, object] | None = Field(default=None)
 
 
@@ -114,6 +122,14 @@ class BridgeSessionWorkReconnectRequest(BaseModel):
     lease_token: str = Field(min_length=1)
     work_id: str = Field(min_length=1)
     ttl_seconds: int | None = Field(default=None, ge=1)
+    browser_attach_transport_ref: str | None = Field(default=None)
+    browser_attach_status: str | None = Field(default=None)
+    browser_attach_session_ref: str | None = Field(default=None)
+    browser_attach_scope_ref: str | None = Field(default=None)
+    browser_attach_reconnect_token: str | None = Field(default=None)
+    preferred_execution_path: str | None = Field(default=None)
+    ui_fallback_mode: str | None = Field(default=None)
+    adapter_gap_or_blocker: str | None = Field(default=None)
     handle: dict[str, object] | None = Field(default=None)
 
 
@@ -131,6 +147,16 @@ class BridgeSessionArchiveRequest(BaseModel):
 
 class BridgeEnvironmentDeregisterRequest(BaseModel):
     reason: str | None = Field(default=None)
+
+
+class SharedOperatorAbortRequest(BaseModel):
+    channel: str | None = Field(default=None)
+    reason: str | None = Field(default=None)
+
+
+class SharedOperatorAbortClearRequest(BaseModel):
+    channel: str | None = Field(default=None)
+    reason: str | None = Field(default="operator abort cleared")
 
 
 class KnowledgeImportRequest(BaseModel):

@@ -353,6 +353,8 @@ class _IndustryLifecycleMixin:
             "source_report_id",
             "source_report_ids",
             "synthesis_kind",
+            "activation_top_entities",
+            "activation_top_opinions",
             "activation_top_constraints",
             "activation_top_next_actions",
             "activation_support_refs",
@@ -376,6 +378,163 @@ class _IndustryLifecycleMixin:
         if isinstance(value, Mapping):
             return dict(value)
         return {}
+
+    def _mapping_list(self, value: object | None) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        return [dict(item) for item in value if isinstance(item, Mapping)]
+
+    def _resolve_strategy_payload_mapping(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+    ) -> dict[str, Any]:
+        payload = resolve_strategy_payload(
+            service=self._strategy_memory_service,
+            scope_type="industry",
+            scope_id=record.instance_id,
+            fallback_owner_agent_ids=(EXECUTION_CORE_AGENT_ID,),
+        )
+        return dict(payload) if isinstance(payload, Mapping) else {}
+
+    def _strategy_constraints_sidecar_payload(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        strategy_constraints: PlanningStrategyConstraints | None = None,
+        strategy_payload: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        raw_payload = (
+            dict(strategy_payload)
+            if isinstance(strategy_payload, Mapping)
+            else self._resolve_strategy_payload_mapping(record=record)
+        )
+        payload = self._planner_sidecar_payload(
+            strategy_constraints or self._compile_strategy_constraints(record=record),
+        )
+        metadata = dict(raw_payload.get("metadata") or {})
+        strategic_uncertainties = self._mapping_list(
+            payload.get("strategic_uncertainties"),
+        ) or self._mapping_list(raw_payload.get("strategic_uncertainties")) or self._mapping_list(
+            metadata.get("strategic_uncertainties"),
+        )
+        lane_budgets = self._mapping_list(payload.get("lane_budgets")) or self._mapping_list(
+            raw_payload.get("lane_budgets"),
+        ) or self._mapping_list(metadata.get("lane_budgets"))
+        if strategic_uncertainties:
+            payload["strategic_uncertainties"] = strategic_uncertainties
+        if lane_budgets:
+            payload["lane_budgets"] = lane_budgets
+        return payload
+
+    def _report_replan_sidecar_payload(
+        self,
+        *,
+        synthesis: Mapping[str, Any] | None,
+        strategy_constraints_payload: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        resolved = dict(synthesis) if isinstance(synthesis, Mapping) else {}
+        payload = self._planner_sidecar_payload(
+            self._report_replan_engine.compile(resolved),
+        )
+        raw_decision = (
+            dict(resolved.get("replan_decision"))
+            if isinstance(resolved.get("replan_decision"), Mapping)
+            else {}
+        )
+        if raw_decision:
+            payload.update(raw_decision)
+        trigger_context = (
+            dict(raw_decision.get("trigger_context"))
+            if isinstance(raw_decision.get("trigger_context"), Mapping)
+            else {}
+        )
+        strategic_uncertainties = self._mapping_list(
+            _mapping(strategy_constraints_payload).get("strategic_uncertainties"),
+        )
+        lane_budgets = self._mapping_list(
+            _mapping(strategy_constraints_payload).get("lane_budgets"),
+        )
+        conflict_items = list(resolved.get("conflicts") or [])
+        hole_items = list(resolved.get("holes") or [])
+        replan_reasons = _unique_strings(
+            resolved.get("replan_reasons"),
+            payload.get("reason_ids"),
+        )
+        if payload.get("status") == "needs-replan":
+            conflict_count = len(conflict_items)
+            hole_count = len(hole_items)
+            preferred_decision_kind = None
+            if strategic_uncertainties and (
+                conflict_count or hole_count or replan_reasons
+            ):
+                preferred_decision_kind = "strategy_review_required"
+            elif lane_budgets and (conflict_count or hole_count):
+                preferred_decision_kind = "lane_reweight"
+            elif conflict_count or hole_count:
+                preferred_decision_kind = "cycle_rebalance"
+            else:
+                preferred_decision_kind = "follow_up_backlog"
+            if preferred_decision_kind is not None:
+                payload["decision_kind"] = preferred_decision_kind
+            if not trigger_context:
+                trigger_families: list[str] = []
+                if resolved.get("followup_backlog") or resolved.get("needs_followup"):
+                    trigger_families.append("repeated-blocker")
+                if conflict_items:
+                    trigger_families.append("repeated-contradiction")
+                if hole_items:
+                    trigger_families.append("target-miss")
+                if strategic_uncertainties:
+                    trigger_families.append("confidence-collapse")
+                trigger_context = {
+                    "trigger_families": trigger_families,
+                    "strategic_uncertainty_ids": [
+                        _string(item.get("uncertainty_id"))
+                        for item in strategic_uncertainties
+                        if _string(item.get("uncertainty_id")) is not None
+                    ],
+                    "lane_budget_pressure": {
+                        _string(item.get("lane_id")) or f"lane-{index}": _string(
+                            item.get("review_pressure"),
+                        )
+                        or "review-required"
+                        for index, item in enumerate(lane_budgets)
+                        if _string(item.get("lane_id")) is not None
+                    },
+                }
+            if strategic_uncertainties:
+                trigger_context["strategic_uncertainty_ids"] = [
+                    _string(item.get("uncertainty_id"))
+                    for item in strategic_uncertainties
+                    if _string(item.get("uncertainty_id")) is not None
+                ]
+                trigger_families = _unique_strings(
+                    trigger_context.get("trigger_families"),
+                    ["confidence-collapse"],
+                )
+                if trigger_families:
+                    trigger_context["trigger_families"] = trigger_families
+            if lane_budgets:
+                trigger_context["lane_budget_pressure"] = {
+                    _string(item.get("lane_id")) or f"lane-{index}": _string(
+                        item.get("review_pressure"),
+                    )
+                    or "review-required"
+                    for index, item in enumerate(lane_budgets)
+                    if _string(item.get("lane_id")) is not None
+                }
+            payload["trigger_context"] = trigger_context
+        directives = self._mapping_list(resolved.get("replan_directives"))
+        if directives:
+            payload["directives"] = directives
+        recommended_actions = self._mapping_list(resolved.get("recommended_actions"))
+        if recommended_actions:
+            payload["recommended_actions"] = recommended_actions
+        activation = _mapping(resolved.get("activation"))
+        if activation:
+            payload["activation"] = dict(activation)
+        return payload
 
     def _stable_assignment_id(
         self,
@@ -401,13 +560,8 @@ class _IndustryLifecycleMixin:
         *,
         record: IndustryInstanceRecord,
     ) -> PlanningStrategyConstraints:
-        payload = resolve_strategy_payload(
-            service=self._strategy_memory_service,
-            scope_type="industry",
-            scope_id=record.instance_id,
-            fallback_owner_agent_ids=(EXECUTION_CORE_AGENT_ID,),
-        )
-        if not isinstance(payload, dict):
+        payload = self._resolve_strategy_payload_mapping(record=record)
+        if not payload:
             return PlanningStrategyConstraints()
         try:
             strategy_record = StrategyMemoryRecord.model_validate(
@@ -443,18 +597,93 @@ class _IndustryLifecycleMixin:
             )
         return self._strategy_compiler.compile(strategy_record)
 
+    def _resolve_planning_activation_result(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        open_backlog: Sequence[BacklogItemRecord],
+        pending_reports: Sequence[AgentReportRecord],
+    ) -> object | None:
+        activation_service = getattr(self, "_memory_activation_service", None)
+        activate_for_query = getattr(activation_service, "activate_for_query", None)
+        if not callable(activate_for_query):
+            return None
+        query_parts = _unique_strings(
+            [
+                record.label,
+                record.summary,
+                *[
+                    item.title
+                    for item in list(open_backlog)[:3]
+                ],
+                *[
+                    item.summary
+                    for item in list(open_backlog)[:2]
+                ],
+                *[
+                    report.headline
+                    for report in list(pending_reports)[:3]
+                ],
+                *[
+                    report.summary
+                    for report in list(pending_reports)[:2]
+                ],
+            ],
+        )
+        query = " | ".join(query_parts[:6]).strip()
+        if not query:
+            query = record.label or record.summary or record.instance_id
+        try:
+            return activate_for_query(
+                query=query,
+                industry_instance_id=record.instance_id,
+                owner_agent_id=EXECUTION_CORE_AGENT_ID,
+                current_phase="operating-cycle-planning",
+                limit=12,
+            )
+        except Exception:
+            return None
+
+    def _apply_activation_to_strategy_constraints(
+        self,
+        *,
+        constraints: PlanningStrategyConstraints,
+        activation_result: object | None,
+    ) -> PlanningStrategyConstraints:
+        if activation_result is None:
+            return constraints
+        graph_focus_entities = _unique_strings(
+            getattr(activation_result, "top_entities", None),
+        )
+        graph_focus_opinions = _unique_strings(
+            getattr(activation_result, "top_opinions", None),
+        )
+        if not graph_focus_entities and not graph_focus_opinions:
+            return constraints
+        return constraints.model_copy(
+            update={
+                "current_focuses": _unique_strings(
+                    constraints.current_focuses,
+                    getattr(activation_result, "top_constraints", None),
+                    getattr(activation_result, "top_next_actions", None),
+                ),
+                "graph_focus_entities": graph_focus_entities,
+                "graph_focus_opinions": graph_focus_opinions,
+            },
+        )
+
     def _decorate_report_synthesis_with_replan(
         self,
         synthesis: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
         resolved = dict(synthesis) if isinstance(synthesis, Mapping) else {}
-        decision = self._report_replan_engine.compile(resolved)
-        decision_payload = self._planner_sidecar_payload(decision)
+        decision_payload = self._report_replan_sidecar_payload(synthesis=resolved)
         if decision_payload:
             resolved["replan_decision"] = decision_payload
             resolved["formal_replan"] = decision_payload
+            resolved["report_replan"] = decision_payload
             resolved["needs_replan"] = (
-                decision.status == "needs-replan"
+                _string(decision_payload.get("status")) == "needs-replan"
                 or bool(resolved.get("needs_replan"))
             )
         return resolved
@@ -478,6 +707,9 @@ class _IndustryLifecycleMixin:
         cycle: OperatingCycleRecord,
         selected_backlog: Sequence[BacklogItemRecord],
         strategy_constraints: PlanningStrategyConstraints,
+        strategy_constraints_sidecar: Mapping[str, Any] | None = None,
+        cycle_decision_sidecar: Mapping[str, Any] | None = None,
+        report_replan_sidecar: Mapping[str, Any] | None = None,
     ) -> tuple[OperatingCycleRecord, list[str]]:
         if (
             self._assignment_service is None
@@ -533,6 +765,11 @@ class _IndustryLifecycleMixin:
                         "routine_id": _string(item.metadata.get("routine_id")),
                         "routine_name": _string(item.metadata.get("routine_name")),
                         "formal_planning": {
+                            "strategy_constraints": dict(
+                                strategy_constraints_sidecar or {},
+                            ),
+                            "cycle_decision": dict(cycle_decision_sidecar or {}),
+                            "report_replan": dict(report_replan_sidecar or {}),
                             "assignment_plan": assignment_plan_payload,
                         },
                     },
@@ -654,11 +891,13 @@ class _IndustryLifecycleMixin:
         *,
         instance_id: str,
         cycle_id: str | None,
+        activation_result: object | None = None,
     ) -> dict[str, Any]:
         synthesis = _synthesize_agent_reports_helper(
             list_agent_report_records=self._list_agent_report_records,
             instance_id=instance_id,
             cycle_id=cycle_id,
+            activation_result=activation_result,
         )
         return self._decorate_report_synthesis_with_replan(synthesis)
 
@@ -2718,6 +2957,7 @@ class _IndustryLifecycleMixin:
         record: IndustryInstanceRecord,
         cycle_decision: CyclePlanningDecision,
         meeting_window: str,
+        strategy_constraints_sidecar: Mapping[str, Any] | None = None,
     ) -> dict[str, object]:
         metadata = dict(cycle_decision.metadata or {})
         review_anchor = cycle_decision.selected_backlog_item_ids or [
@@ -2738,6 +2978,8 @@ class _IndustryLifecycleMixin:
             "review_window": meeting_window,
             "summary": cycle_decision.summary,
             "planning_policy": list(cycle_decision.planning_policy or []),
+            "strategy_constraints": dict(strategy_constraints_sidecar or {}),
+            "cycle_decision": self._planner_sidecar_payload(cycle_decision),
             "selected_lane_ids": list(cycle_decision.selected_lane_ids or []),
             "selected_backlog_item_ids": list(
                 cycle_decision.selected_backlog_item_ids or []
@@ -2759,6 +3001,7 @@ class _IndustryLifecycleMixin:
         strategy_constraints: PlanningStrategyConstraints | None = None,
         formal_planning_context: Mapping[str, Any] | None = None,
         report_synthesis: Mapping[str, Any] | None = None,
+        activation_result: object | None = None,
     ) -> tuple[str | None, list[BacklogItemRecord]]:
         prediction_service = getattr(self, "_prediction_service", None)
         create_cycle_case = getattr(prediction_service, "create_cycle_case", None)
@@ -2778,6 +3021,7 @@ class _IndustryLifecycleMixin:
             report_synthesis = self._synthesize_agent_reports(
                 instance_id=record.instance_id,
                 cycle_id=current_cycle.id if current_cycle is not None else None,
+                activation_result=activation_result,
             )
         if formal_planning_context is None:
             cycle_decision = self._cycle_planner.plan(
@@ -2793,6 +3037,10 @@ class _IndustryLifecycleMixin:
                 record=record,
                 cycle_decision=cycle_decision,
                 meeting_window=meeting_window,
+                strategy_constraints_sidecar=self._strategy_constraints_sidecar_payload(
+                    record=record,
+                    strategy_constraints=strategy_constraints,
+                ),
             )
         goal_statuses: dict[str, str] = {}
         for goal_id in list(record.goal_ids or []):
@@ -3201,12 +3449,20 @@ class _IndustryLifecycleMixin:
             if scoped_backlog_ids
             else list(open_backlog)
         )
-        prediction_strategy_constraints = self._compile_strategy_constraints(record=record)
         pending_reports = self._list_agent_report_records(
             record.instance_id,
             cycle_id=current_cycle.id if current_cycle is not None else None,
             processed=False,
             limit=None,
+        )
+        planning_activation_result = self._resolve_planning_activation_result(
+            record=record,
+            open_backlog=prediction_open_backlog,
+            pending_reports=pending_reports,
+        )
+        prediction_strategy_constraints = self._apply_activation_to_strategy_constraints(
+            constraints=self._compile_strategy_constraints(record=record),
+            activation_result=planning_activation_result,
         )
         prediction_case_id, prediction_backlog_items = self._create_cycle_prediction_opportunities(
             record=record,
@@ -3218,6 +3474,7 @@ class _IndustryLifecycleMixin:
             created_reports=created_reports,
             processed_reports=processed_reports,
             strategy_constraints=prediction_strategy_constraints,
+            activation_result=planning_activation_result,
         )
         open_backlog = self._backlog_service.list_open_items(
             industry_instance_id=record.instance_id,
@@ -3274,6 +3531,7 @@ class _IndustryLifecycleMixin:
         report_synthesis = self._synthesize_agent_reports(
             instance_id=record.instance_id,
             cycle_id=current_cycle.id if current_cycle is not None else None,
+            activation_result=planning_activation_result,
         )
         if current_cycle is not None:
             current_cycle = self._operating_cycle_service.reconcile_cycle(
@@ -3298,6 +3556,10 @@ class _IndustryLifecycleMixin:
             )
         record = self._retire_completed_temporary_roles(record=record)
         strategy_constraints = self._compile_strategy_constraints(record=record)
+        strategy_constraints = self._apply_activation_to_strategy_constraints(
+            constraints=strategy_constraints,
+            activation_result=planning_activation_result,
+        )
         reason: str | None = None
         new_cycle: OperatingCycleRecord | None = None
         new_goal_ids: list[str] = []
@@ -3325,14 +3587,19 @@ class _IndustryLifecycleMixin:
                     if item_id in open_backlog_by_id
                 ]
                 if selected_backlog:
+                    strategy_constraints_payload = self._strategy_constraints_sidecar_payload(
+                        record=record,
+                        strategy_constraints=strategy_constraints,
+                    )
+                    cycle_decision_payload = self._planner_sidecar_payload(cycle_decision)
+                    report_replan_payload = self._report_replan_sidecar_payload(
+                        synthesis=report_synthesis,
+                        strategy_constraints_payload=strategy_constraints_payload,
+                    )
                     cycle_planning_metadata = {
-                        "strategy_constraints": self._planner_sidecar_payload(
-                            strategy_constraints,
-                        ),
-                        "cycle_decision": self._planner_sidecar_payload(cycle_decision),
-                        "report_replan": self._planner_sidecar_payload(
-                            self._report_replan_engine.compile(report_synthesis),
-                        ),
+                        "strategy_constraints": strategy_constraints_payload,
+                        "cycle_decision": cycle_decision_payload,
+                        "report_replan": report_replan_payload,
                     }
                     new_cycle = self._operating_cycle_service.start_cycle(
                         industry_instance_id=record.instance_id,
@@ -3353,6 +3620,9 @@ class _IndustryLifecycleMixin:
                         cycle=new_cycle,
                         selected_backlog=selected_backlog,
                         strategy_constraints=strategy_constraints,
+                        strategy_constraints_sidecar=strategy_constraints_payload,
+                        cycle_decision_sidecar=cycle_decision_payload,
+                        report_replan_sidecar=report_replan_payload,
                     )
                     record = self._industry_instance_repository.upsert_instance(
                         record.model_copy(

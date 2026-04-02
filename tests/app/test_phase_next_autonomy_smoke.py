@@ -750,6 +750,43 @@ def test_phase_next_same_thread_cognitive_closure_smoke_updates_visible_judgment
         "chat_writeback_requested_surfaces": ["browser"],
         "seat_requested_surfaces": ["browser"],
     }
+    strategy = app.state.strategy_memory_service.get_active_strategy(
+        scope_type="industry",
+        scope_id=instance_id,
+        owner_agent_id="copaw-agent-runner",
+    )
+    assert strategy is not None
+    app.state.strategy_memory_service.upsert_strategy(
+        strategy.model_copy(
+            update={
+                "metadata": {
+                    **dict(strategy.metadata or {}),
+                    "strategic_uncertainties": [
+                        {
+                            "uncertainty_id": "uncertainty-same-thread-publish",
+                            "statement": "Same-thread publish may still require governed browser follow-up.",
+                            "scope": "strategy",
+                            "impact_level": "high",
+                            "current_confidence": 0.38,
+                            "review_by_cycle": "cycle-weekly-1",
+                            "escalate_when": ["repeated-blocker", "target-miss"],
+                        }
+                    ],
+                    "lane_budgets": [
+                        {
+                            "lane_id": "lane-growth",
+                            "budget_window": "next-2-cycles",
+                            "target_share": 0.5,
+                            "min_share": 0.35,
+                            "max_share": 0.65,
+                            "review_pressure": "high",
+                            "force_include_reason": "Protect governed browser follow-up while the publish uncertainty is unresolved.",
+                        }
+                    ],
+                },
+            },
+        ),
+    )
 
     blocked_report = AgentReportRecord(
         industry_instance_id=instance_id,
@@ -814,8 +851,54 @@ def test_phase_next_same_thread_cognitive_closure_smoke_updates_visible_judgment
         blocked_report.id,
         ready_but_waiting_report.id,
     }
+    current_cycle_record = app.state.operating_cycle_repository.get_cycle(
+        detail.current_cycle["cycle_id"],
+    )
+    assert current_cycle_record is not None
+    cycle_formal_planning = (
+        (current_cycle_record.metadata or {}).get("formal_planning") or {}
+    )
+    assert cycle_formal_planning["strategy_constraints"]["strategic_uncertainties"][0][
+        "uncertainty_id"
+    ] == "uncertainty-same-thread-publish"
+    assert cycle_formal_planning["strategy_constraints"]["lane_budgets"][0]["lane_id"] == (
+        "lane-growth"
+    )
+    assert cycle_formal_planning["report_replan"]["decision_kind"] == (
+        "strategy_review_required"
+    )
+    assert cycle_formal_planning["report_replan"]["trigger_context"][
+        "strategic_uncertainty_ids"
+    ] == ["uncertainty-same-thread-publish"]
+    current_assignment_record = app.state.assignment_repository.get_assignment(
+        detail.current_cycle["assignment_ids"][0],
+    )
+    assert current_assignment_record is not None
+    assignment_formal_planning = (
+        (current_assignment_record.metadata or {}).get("formal_planning") or {}
+    )
+    assert assignment_formal_planning["strategy_constraints"]["lane_budgets"][0][
+        "force_include_reason"
+    ].startswith("Protect governed browser follow-up")
+    assert assignment_formal_planning["cycle_decision"]["cycle_kind"] == (
+        detail.current_cycle["cycle_kind"]
+    )
+    assert assignment_formal_planning["report_replan"]["decision_kind"] == (
+        "strategy_review_required"
+    )
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    planning_surface = runtime_payload["main_brain_planning"]
+    assert planning_surface["strategy_constraints"]["strategic_uncertainties"][0][
+        "uncertainty_id"
+    ] == "uncertainty-same-thread-publish"
+    assert planning_surface["strategy_constraints"]["lane_budgets"][0]["lane_id"] == (
+        "lane-growth"
+    )
+    assert planning_surface["replan"]["decision_kind"] == "strategy_review_required"
+    assert planning_surface["replan"]["trigger_context"]["strategic_uncertainty_ids"] == [
+        "uncertainty-same-thread-publish"
+    ]
     replan_node = next(
         node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
     )

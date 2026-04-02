@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import pytest
+
 from copaw.app.runtime_events import RuntimeEventBus
 from copaw.capabilities.browser_runtime import BrowserRuntimeService
 from copaw.environments.cooperative.browser_companion import BrowserCompanionRuntime
@@ -66,6 +68,40 @@ def _build_services(tmp_path):
     )
 
 
+def _patch_browser_abort_state(
+    *,
+    env_repo,
+    session_repo,
+    environment_id: str,
+    session_mount_id: str,
+    operator_abort_state: dict[str, object],
+) -> None:
+    environment = env_repo.get_environment(environment_id)
+    session = session_repo.get_session(session_mount_id)
+    assert environment is not None
+    assert session is not None
+    env_repo.upsert_environment(
+        environment.model_copy(
+            update={
+                "metadata": {
+                    **environment.metadata,
+                    "operator_abort_state": dict(operator_abort_state),
+                },
+            },
+        ),
+    )
+    session_repo.upsert_session(
+        session.model_copy(
+            update={
+                "metadata": {
+                    **session.metadata,
+                    "operator_abort_state": dict(operator_abort_state),
+                },
+            },
+        ),
+    )
+
+
 def test_browser_companion_registration_persists_metadata_and_projection(tmp_path) -> None:
     (
         environment_service,
@@ -110,6 +146,7 @@ def test_browser_companion_registration_persists_metadata_and_projection(tmp_pat
         "status": "attached",
         "transport_ref": "transport:browser-companion:localhost",
         "provider_session_ref": "browser-session:web:main",
+        "execution_guardrails": {},
     }
 
     events = event_bus.list_events(limit=10)
@@ -207,3 +244,208 @@ def test_browser_runtime_service_exposes_companion_snapshot_and_registration_hel
     )
     assert snapshot["browser_companion"]["status"] == "ready"
     assert companion_snapshot["transport_ref"] == "transport:browser-companion:localhost"
+
+
+def test_browser_companion_registration_persists_execution_guardrails(
+    tmp_path,
+) -> None:
+    (
+        environment_service,
+        env_repo,
+        session_repo,
+        _event_bus,
+        environment,
+        session,
+        companion_runtime,
+        _browser_runtime,
+    ) = _build_services(tmp_path)
+
+    snapshot = companion_runtime.register_companion(
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+        execution_guardrails={
+            "operator_abort_channel": "global-esc",
+            "host_exclusion_refs": ["browser:copaw:overlay"],
+            "frontmost_verification_required": True,
+            "clipboard_roundtrip_required": True,
+        },
+    )
+
+    stored_environment = env_repo.get_environment(environment.id)
+    stored_session = session_repo.get_session(session.id)
+    assert stored_environment is not None
+    assert stored_session is not None
+    expected_guardrails = {
+        "operator_abort_channel": "global-esc",
+        "host_exclusion_refs": ["browser:copaw:overlay"],
+        "frontmost_verification_required": True,
+        "clipboard_roundtrip_required": True,
+    }
+    assert stored_session.metadata["browser_execution_guardrails"] == expected_guardrails
+    assert stored_environment.metadata["browser_execution_guardrails"] == expected_guardrails
+
+    detail = environment_service.get_session_detail(session.id, limit=5)
+    assert detail is not None
+    assert (
+        detail["cooperative_adapter_availability"]["browser_companion"]["execution_guardrails"]
+        == expected_guardrails
+    )
+    assert snapshot["browser_companion"]["execution_guardrails"] == expected_guardrails
+
+
+@pytest.mark.asyncio
+async def test_browser_action_blocks_when_operator_abort_guardrail_is_requested(
+    tmp_path,
+) -> None:
+    (
+        environment_service,
+        _env_repo,
+        _session_repo,
+        _event_bus,
+        environment,
+        session,
+        companion_runtime,
+        _browser_runtime,
+    ) = _build_services(tmp_path)
+
+    companion_runtime.register_companion(
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+        execution_guardrails={
+            "operator_abort_channel": "global-esc",
+            "operator_abort_requested": True,
+        },
+    )
+
+    class _Executor:
+        async def __call__(self, **_kwargs):
+            raise AssertionError("browser executor should not run after operator abort")
+
+    environment_service.register_browser_companion_executor(
+        "transport:browser-companion:localhost",
+        _Executor(),
+    )
+
+    with pytest.raises(RuntimeError, match="operator abort"):
+        await environment_service.execute_browser_action(
+            session_mount_id=session.id,
+            action="click",
+            contract={},
+        )
+
+
+@pytest.mark.asyncio
+async def test_browser_action_blocks_when_global_operator_abort_channel_matches(
+    tmp_path,
+) -> None:
+    (
+        environment_service,
+        env_repo,
+        session_repo,
+        _event_bus,
+        environment,
+        session,
+        companion_runtime,
+        _browser_runtime,
+    ) = _build_services(tmp_path)
+
+    companion_runtime.register_companion(
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+        execution_guardrails={
+            "operator_abort_channel": "global-esc",
+        },
+    )
+    _patch_browser_abort_state(
+        env_repo=env_repo,
+        session_repo=session_repo,
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        operator_abort_state={
+            "channel": "global-esc",
+            "requested": True,
+            "reason": "global-esc",
+        },
+    )
+
+    class _Executor:
+        async def __call__(self, **_kwargs):
+            raise AssertionError("browser executor should not run after global operator abort")
+
+    environment_service.register_browser_companion_executor(
+        "transport:browser-companion:localhost",
+        _Executor(),
+    )
+
+    with pytest.raises(RuntimeError, match="operator abort"):
+        await environment_service.execute_browser_action(
+            session_mount_id=session.id,
+            action="click",
+            contract={},
+        )
+
+
+@pytest.mark.asyncio
+async def test_browser_action_runs_frontmost_and_clipboard_guardrails_before_execution(
+    tmp_path,
+) -> None:
+    (
+        environment_service,
+        _env_repo,
+        _session_repo,
+        _event_bus,
+        environment,
+        session,
+        companion_runtime,
+        _browser_runtime,
+    ) = _build_services(tmp_path)
+
+    companion_runtime.register_companion(
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+        execution_guardrails={
+            "frontmost_verification_required": True,
+            "clipboard_roundtrip_required": True,
+        },
+    )
+
+    call_order: list[str] = []
+
+    class _Executor:
+        async def verify_frontmost(self, **_kwargs):
+            call_order.append("frontmost")
+            return {"verified": True}
+
+        async def verify_clipboard_roundtrip(self, **_kwargs):
+            call_order.append("clipboard")
+            return {"verified": True}
+
+        async def __call__(self, **_kwargs):
+            call_order.append("execute")
+            return {"success": True, "message": "browser ok"}
+
+    environment_service.register_browser_companion_executor(
+        "transport:browser-companion:localhost",
+        _Executor(),
+    )
+
+    result = await environment_service.execute_browser_action(
+        session_mount_id=session.id,
+        action="click",
+        contract={},
+    )
+
+    assert result["success"] is True
+    assert call_order == ["frontmost", "clipboard", "execute"]

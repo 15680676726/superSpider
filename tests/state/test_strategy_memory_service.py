@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import json
+
 from copaw.state import SQLiteStateStore, StrategyMemoryRecord
 from copaw.state.repositories import SqliteStrategyMemoryRepository
 from copaw.state.strategy_memory_service import (
@@ -189,3 +191,92 @@ def test_strategy_memory_service_compacts_large_payloads(tmp_path) -> None:
     assert len(active.metadata["chat_writeback_history"][-1]["classification"]) == 6
     assert len(payload["priority_order"]) == 12
     assert len(payload["metadata"]["chat_writeback_history"]) == 10
+
+
+def test_strategy_memory_service_persists_typed_uncertainty_and_lane_budget_truth(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteStrategyMemoryRepository(store)
+    service = StateStrategyMemoryService(repository=repository)
+
+    strategy = service.upsert_strategy(
+        StrategyMemoryRecord(
+            strategy_id=service.canonical_strategy_id(
+                scope_type="industry",
+                scope_id="industry-budgeted",
+                owner_agent_id="copaw-agent-runner",
+            ),
+            scope_type="industry",
+            scope_id="industry-budgeted",
+            owner_agent_id="copaw-agent-runner",
+            title="Budgeted strategy",
+            summary="Keep uncertainty and lane budget truth on the formal strategy record.",
+            north_star="Fund the right lanes without losing review triggers.",
+            strategic_uncertainties=[
+                {
+                    "uncertainty_id": "uncertainty-1",
+                    "statement": "Retention signal is still noisy.",
+                    "scope": "lane",
+                    "impact_level": "high",
+                    "current_confidence": 0.45,
+                    "evidence_for_refs": ["evidence-for-1"],
+                    "evidence_against_refs": ["evidence-against-1"],
+                    "review_by_cycle": "cycle-2",
+                    "escalate_when": ["confidence drop", "target miss"],
+                }
+            ],
+            lane_budgets=[
+                {
+                    "lane_id": "lane-retention",
+                    "budget_window": "next-3-cycles",
+                    "target_share": 0.6,
+                    "min_share": 0.4,
+                    "max_share": 0.75,
+                    "review_pressure": "protect-core-signal",
+                    "defer_reason": "wait for cleaner churn baseline",
+                    "force_include_reason": "current cycle is retention-critical",
+                }
+            ],
+        ),
+    )
+
+    active = service.get_active_strategy(
+        scope_type="industry",
+        scope_id="industry-budgeted",
+        owner_agent_id="copaw-agent-runner",
+    )
+    payload = resolve_strategy_payload(
+        service=service,
+        scope_type="industry",
+        scope_id="industry-budgeted",
+        owner_agent_id="copaw-agent-runner",
+    )
+
+    with store.connection() as conn:
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(strategy_memories)").fetchall()
+        }
+        raw = conn.execute(
+            """
+            SELECT strategic_uncertainties_json, lane_budgets_json
+            FROM strategy_memories
+            WHERE strategy_id = ?
+            """,
+            (strategy.strategy_id,),
+        ).fetchone()
+
+    assert active is not None
+    assert payload is not None
+    assert "strategic_uncertainties_json" in columns
+    assert "lane_budgets_json" in columns
+    assert active.strategic_uncertainties[0].uncertainty_id == "uncertainty-1"
+    assert active.strategic_uncertainties[0].escalate_when == [
+        "confidence drop",
+        "target miss",
+    ]
+    assert active.lane_budgets[0].lane_id == "lane-retention"
+    assert payload["strategic_uncertainties"][0]["uncertainty_id"] == "uncertainty-1"
+    assert payload["lane_budgets"][0]["lane_id"] == "lane-retention"
+    assert raw is not None
+    assert json.loads(raw["strategic_uncertainties_json"])[0]["uncertainty_id"] == "uncertainty-1"
+    assert json.loads(raw["lane_budgets_json"])[0]["lane_id"] == "lane-retention"

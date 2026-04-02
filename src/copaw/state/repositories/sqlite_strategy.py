@@ -63,6 +63,7 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
         ]
 
     def upsert_strategy(self, record: StrategyMemoryRecord) -> StrategyMemoryRecord:
+        record = StrategyMemoryRecord.model_validate(record.model_dump(mode="python"))
         payload = _payload(record)
         payload["priority_order_json"] = json.dumps(record.priority_order, sort_keys=True)
         payload["thinking_axes_json"] = json.dumps(record.thinking_axes, sort_keys=True)
@@ -107,6 +108,12 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
             record.paused_lane_ids,
             sort_keys=True,
         )
+        payload["strategic_uncertainties_json"] = _encode_json(
+            payload.get("strategic_uncertainties", []),
+        )
+        payload["lane_budgets_json"] = _encode_json(
+            payload.get("lane_budgets", []),
+        )
         payload["review_rules_json"] = json.dumps(
             record.review_rules,
             sort_keys=True,
@@ -139,6 +146,8 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
                     planning_policy_json,
                     current_focuses_json,
                     paused_lane_ids_json,
+                    strategic_uncertainties_json,
+                    lane_budgets_json,
                     review_rules_json,
                     source_ref,
                     status,
@@ -169,6 +178,8 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
                     :planning_policy_json,
                     :current_focuses_json,
                     :paused_lane_ids_json,
+                    :strategic_uncertainties_json,
+                    :lane_budgets_json,
                     :review_rules_json,
                     :source_ref,
                     :status,
@@ -199,6 +210,8 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
                     planning_policy_json = excluded.planning_policy_json,
                     current_focuses_json = excluded.current_focuses_json,
                     paused_lane_ids_json = excluded.paused_lane_ids_json,
+                    strategic_uncertainties_json = excluded.strategic_uncertainties_json,
+                    lane_budgets_json = excluded.lane_budgets_json,
                     review_rules_json = excluded.review_rules_json,
                     source_ref = excluded.source_ref,
                     status = excluded.status,
@@ -260,6 +273,16 @@ def _strategy_memory_from_row(
     payload["paused_lane_ids"] = _decode_json_list(
         payload.pop("paused_lane_ids_json", None),
     ) or []
+    payload["strategic_uncertainties"] = _decode_any_json(
+        payload.pop("strategic_uncertainties_json", None),
+    )
+    if not isinstance(payload["strategic_uncertainties"], list):
+        payload["strategic_uncertainties"] = []
+    payload["lane_budgets"] = _decode_any_json(
+        payload.pop("lane_budgets_json", None),
+    )
+    if not isinstance(payload["lane_budgets"], list):
+        payload["lane_budgets"] = []
     payload["review_rules"] = _decode_json_list(
         payload.pop("review_rules_json", None),
     ) or []

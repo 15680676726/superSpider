@@ -4,6 +4,10 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
+from agentscope.message import Msg
+
 from copaw.agents.react_agent import (
     bind_reasoning_tool_choice_resolver,
     bind_tool_preflight,
@@ -14,6 +18,7 @@ from copaw.agents.tools.evidence_runtime import (
     bind_shell_evidence_sink,
 )
 from copaw.kernel import KernelTask
+from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.query_execution import KernelQueryExecutionService
 from copaw.state import AgentRuntimeRecord, SQLiteStateStore
 from copaw.state.repositories import SqliteAgentRuntimeRepository
@@ -160,3 +165,65 @@ def test_query_execution_runtime_marks_sidecar_memory_boundary_as_degraded_when_
     assert sidecar_memory["failure_source"] == "sidecar-memory"
     assert "private compaction memory sidecar" in sidecar_memory["remediation_summary"]
     assert "Restore the compaction sidecar" in sidecar_memory["blocked_next_step"]
+
+
+@pytest.mark.asyncio
+async def test_query_execution_runtime_requires_durable_kickoff_proof_before_marking_committed() -> None:
+    class _IndustryService:
+        async def apply_execution_chat_writeback(self, **kwargs):
+            _ = kwargs
+            return {
+                "applied": True,
+                "strategy_updated": True,
+                "created_goal_titles": ["Follow up on the latest operator request"],
+            }
+
+        async def kickoff_execution_from_chat(self, **kwargs):
+            _ = kwargs
+            return {
+                "summary": "Kickoff tail completed but durable execution proof never arrived.",
+            }
+
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        industry_service=_IndustryService(),
+    )
+    request = SimpleNamespace(
+        industry_instance_id="industry-v1-demo",
+        industry_role_id="execution-core",
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        control_thread_id="industry-chat:industry-v1-demo:execution-core",
+        channel="console",
+        work_context_id="work-context-1",
+        _copaw_main_brain_intake_contract=MainBrainIntakeContract(
+            message_text="Record this and continue execution.",
+            decision=SimpleNamespace(
+                intent_kind="execute-task",
+                should_writeback=True,
+                kickoff_allowed=True,
+                explicit_execution_confirmation=False,
+            ),
+            intent_kind="execute-task",
+            writeback_requested=True,
+            writeback_plan=SimpleNamespace(active=True, fingerprint="plan-1"),
+            should_kickoff=True,
+        ),
+    )
+
+    chat_writeback_summary, industry_kickoff_summary = (
+        await service._apply_requested_main_brain_intake(  # pylint: disable=protected-access
+            msgs=[Msg(name="user", role="user", content="Record this and continue execution.")],
+            request=request,
+            owner_agent_id="execution-core-agent",
+            agent_profile=None,
+        )
+    )
+
+    assert chat_writeback_summary["status"] == "committed"
+    assert industry_kickoff_summary["status"] == "commit_failed"
+    assert industry_kickoff_summary["reason"] == "durable_kickoff_failed"
+
+    runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
+    assert runtime_context["accepted_persistence"]["status"] == "accepted"
+    assert runtime_context["commit_outcome"]["status"] == "commit_failed"
+    assert runtime_context["commit_outcome"]["reason"] == "durable_kickoff_failed"

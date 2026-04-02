@@ -67,7 +67,6 @@ type UseChatRuntimeStateArgs = {
     SetStateAction<RuntimeLifecycleState | null>
   >;
   setRuntimeWaitState: Dispatch<SetStateAction<RuntimeWaitState | null>>;
-  setShowModelPrompt: Dispatch<SetStateAction<boolean>>;
   suggestedTeams: IndustryInstanceSummary[];
   threadBootstrapError: string | null;
   threadBootstrapPending: boolean;
@@ -125,7 +124,6 @@ export function useChatRuntimeState({
   setRuntimeHealthNotice,
   setRuntimeLifecycleState,
   setRuntimeWaitState,
-  setShowModelPrompt,
   suggestedTeams,
   threadBootstrapError,
   threadBootstrapPending,
@@ -197,6 +195,7 @@ export function useChatRuntimeState({
         refreshThreadMediaAnalysesRef.current?.(threadId),
       getSelectedMediaAnalysisIds: () => selectedMediaAnalysisIdsRef.current,
       setRuntimeHealthNotice,
+      setRuntimeLifecycleState,
       setRuntimeWaitState,
       dispatchGovernanceDirty: () =>
         window.dispatchEvent(new CustomEvent("copaw:governance-status-dirty")),
@@ -257,6 +256,7 @@ export function useChatRuntimeState({
     runtimeWindow,
     selectedMediaAnalysisIdsRef,
     setRuntimeHealthNotice,
+    setRuntimeLifecycleState,
     setRuntimeWaitState,
   ]);
 

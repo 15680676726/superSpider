@@ -10,6 +10,11 @@ from .main_brain_intake import (
     read_attached_main_brain_intake_contract,
     resolve_execution_core_industry_instance_id,
 )
+from .main_brain_result_committer import (
+    build_accepted_persistence,
+    normalize_durable_commit_result,
+    update_request_runtime_context,
+)
 from .query_execution_resident_runtime import _QueryExecutionResidentRuntimeMixin
 from .query_execution_shared import *  # noqa: F401,F403
 from .query_execution_usage_runtime import _QueryExecutionUsageRuntimeMixin
@@ -1769,6 +1774,14 @@ class _QueryExecutionRuntimeMixin(
         )
         if intake_contract is None:
             return None, None
+        update_request_runtime_context(
+            request,
+            accepted_persistence=build_accepted_persistence(
+                request=request,
+                source="query_execution_runtime",
+                boundary="execution_runtime_intake",
+            ),
+        )
         chat_writeback_summary = None
         if intake_contract.has_active_writeback_plan:
             applier = getattr(service, "apply_execution_chat_writeback", None)
@@ -1791,12 +1804,27 @@ class _QueryExecutionRuntimeMixin(
                         result = applier(**apply_kwargs)
                     if asyncio.iscoroutine(result):
                         result = await result
-                    chat_writeback_summary = result if isinstance(result, dict) else None
-                except Exception:
+                    chat_writeback_summary = normalize_durable_commit_result(
+                        result,
+                        action_type="writeback_operating_truth",
+                        commit_key="query_execution_runtime:writeback",
+                        default_record_id=None,
+                        empty_reason="writeback_handler_returned_no_result",
+                    )
+                    chat_writeback_summary["action_type"] = "writeback_operating_truth"
+                except Exception as exc:
                     logger.exception(
                         "Failed to persist execution-core chat writeback for industry '%s'",
                         industry_instance_id,
                     )
+                    chat_writeback_summary = {
+                        "status": "commit_failed",
+                        "action_type": "writeback_operating_truth",
+                        "reason": "writeback_handler_exception",
+                        "message": str(exc).strip()
+                        or "Execution-core chat writeback raised before durable persistence.",
+                        "commit_key": "query_execution_runtime:writeback",
+                    }
         industry_kickoff_summary = None
         if intake_contract.should_kickoff:
             kickoff = getattr(service, "kickoff_execution_from_chat", None)
@@ -1812,10 +1840,68 @@ class _QueryExecutionRuntimeMixin(
                     )
                     if asyncio.iscoroutine(result):
                         result = await result
-                    industry_kickoff_summary = result if isinstance(result, dict) else None
-                except Exception:
+                    industry_kickoff_summary = normalize_durable_commit_result(
+                        result,
+                        action_type="orchestrate_execution",
+                        commit_key="query_execution_runtime:kickoff",
+                        default_record_id=None,
+                        empty_reason="kickoff_handler_returned_no_result",
+                    )
+                    industry_kickoff_summary["action_type"] = "orchestrate_execution"
+                except Exception as exc:
                     logger.exception(
                         "Failed to kick off industry execution for '%s' from chat",
                         industry_instance_id,
                     )
+                    industry_kickoff_summary = {
+                        "status": "commit_failed",
+                        "action_type": "orchestrate_execution",
+                        "reason": "kickoff_handler_exception",
+                        "message": str(exc).strip()
+                        or "Execution kickoff raised before durable persistence.",
+                        "commit_key": "query_execution_runtime:kickoff",
+                    }
+        commit_outcome = self._combine_requested_main_brain_commit_outcome(
+            chat_writeback_summary=chat_writeback_summary,
+            industry_kickoff_summary=industry_kickoff_summary,
+        )
+        if commit_outcome is not None:
+            update_request_runtime_context(
+                request,
+                commit_outcome=commit_outcome,
+            )
         return chat_writeback_summary, industry_kickoff_summary
+
+    def _combine_requested_main_brain_commit_outcome(
+        self,
+        *,
+        chat_writeback_summary: dict[str, Any] | None,
+        industry_kickoff_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        outcomes = [
+            outcome
+            for outcome in (chat_writeback_summary, industry_kickoff_summary)
+            if isinstance(outcome, dict) and outcome
+        ]
+        if not outcomes:
+            return None
+        for status in ("commit_failed", "governance_denied", "confirm_required", "commit_deferred"):
+            for outcome in outcomes:
+                if str(outcome.get("status") or "").strip() == status:
+                    combined = dict(outcome)
+                    if len(outcomes) > 1:
+                        combined["action_type"] = "writeback_and_kickoff"
+                    return combined
+        if len(outcomes) == 1:
+            return dict(outcomes[0])
+        record_id = _first_non_empty(
+            outcomes[0].get("record_id"),
+            outcomes[1].get("record_id"),
+        )
+        return {
+            "status": "committed",
+            "action_type": "writeback_and_kickoff",
+            "summary": "Durably persisted requested main-brain intake writeback and kickoff.",
+            "record_id": record_id,
+            "commit_key": "query_execution_runtime:intake",
+        }

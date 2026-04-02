@@ -7,6 +7,59 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+StrategyChangeDecision = Literal[
+    "follow_up_backlog",
+    "cycle_rebalance",
+    "lane_reweight",
+    "strategy_review_required",
+]
+
+
+class PlanningStrategicUncertainty(BaseModel):
+    """Strategy uncertainty compiled into the planning constraint surface."""
+
+    uncertainty_id: str = Field(..., min_length=1)
+    statement: str = Field(..., min_length=1)
+    scope: Literal["strategy", "lane", "cycle"] = "strategy"
+    impact_level: Literal["low", "medium", "high"] = "medium"
+    current_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    evidence_for_refs: list[str] = Field(default_factory=list)
+    evidence_against_refs: list[str] = Field(default_factory=list)
+    review_by_cycle: str | None = None
+    escalate_when: list[Literal["repeated blocker", "confidence drop", "target miss"]] = Field(
+        default_factory=list,
+    )
+
+
+class PlanningLaneBudget(BaseModel):
+    """Typed multi-cycle lane budget constraint compiled from strategy truth."""
+
+    lane_id: str = Field(..., min_length=1)
+    budget_window: str = Field(..., min_length=1)
+    target_share: float = Field(default=0.0, ge=0.0, le=1.0)
+    min_share: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_share: float = Field(default=1.0, ge=0.0, le=1.0)
+    review_pressure: str = ""
+    defer_reason: str | None = None
+    force_include_reason: str | None = None
+
+
+class StrategyTriggerRule(BaseModel):
+    """Compiled strategy-change trigger hint derived from strategy truth."""
+
+    rule_id: str = Field(..., min_length=1)
+    source_type: Literal["review_rule", "uncertainty_escalation"] = "review_rule"
+    source_ref: str | None = None
+    trigger_family: Literal[
+        "review_rule",
+        "repeated_blocker",
+        "confidence_collapse",
+        "target_miss",
+    ] = "review_rule"
+    summary: str = ""
+    decision_hint: StrategyChangeDecision | None = None
+
+
 class PlanningStrategyConstraints(BaseModel):
     """Strategy-derived constraints that shape cycle and assignment planning."""
 
@@ -18,6 +71,11 @@ class PlanningStrategyConstraints(BaseModel):
     review_rules: list[str] = Field(default_factory=list)
     paused_lane_ids: list[str] = Field(default_factory=list)
     current_focuses: list[str] = Field(default_factory=list)
+    strategic_uncertainties: list[PlanningStrategicUncertainty] = Field(default_factory=list)
+    lane_budgets: list[PlanningLaneBudget] = Field(default_factory=list)
+    strategy_trigger_rules: list[StrategyTriggerRule] = Field(default_factory=list)
+    graph_focus_entities: list[str] = Field(default_factory=list)
+    graph_focus_opinions: list[str] = Field(default_factory=list)
 
 
 class CyclePlanningDecision(BaseModel):
@@ -59,6 +117,8 @@ class ReportReplanDecision(BaseModel):
     reason_ids: list[str] = Field(default_factory=list)
     source_report_ids: list[str] = Field(default_factory=list)
     topic_keys: list[str] = Field(default_factory=list)
+    strategy_change_decision: StrategyChangeDecision | None = None
+    trigger_rule_ids: list[str] = Field(default_factory=list)
     directives: list[dict[str, Any]] = Field(default_factory=list)
     recommended_actions: list[dict[str, Any]] = Field(default_factory=list)
     activation: dict[str, Any] = Field(default_factory=dict)
