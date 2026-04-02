@@ -123,7 +123,7 @@ class ReportReplanDecision(BaseModel):
         "cycle_rebalance",
         "lane_reweight",
         "strategy_review_required",
-    ] = "clear"
+    ] | None = None
     summary: str = "No unresolved report synthesis pressure."
     reason_ids: list[str] = Field(default_factory=list)
     source_report_ids: list[str] = Field(default_factory=list)

@@ -1109,6 +1109,16 @@ class _RuntimeCenterOverviewCardsSupport:
             if not getattr(heartbeat_config, "enabled", False)
             else (last_status or "scheduled")
         )
+        automation_tasks = list(getattr(app_state, "automation_tasks", []) or [])
+        supervisor_payload = self._build_main_brain_supervisor_payload(
+            getattr(app_state, "actor_supervisor", None),
+        )
+        loop_payloads = [self._build_automation_loop_payload(task) for task in automation_tasks]
+        active_loop_count = sum(
+            1
+            for payload in loop_payloads
+            if self._string(payload.get("status")) == "running"
+        )
         return {
             "status": "active" if schedule_count > 0 else "idle",
             "summary": (
@@ -1120,6 +1130,10 @@ class _RuntimeCenterOverviewCardsSupport:
             "active_schedule_count": active_schedule_count,
             "paused_schedule_count": paused_schedule_count,
             "schedules": normalized_schedule_entries,
+            "loop_count": len(loop_payloads),
+            "active_loop_count": active_loop_count,
+            "loops": loop_payloads,
+            "supervisor": supervisor_payload,
             "heartbeat": {
                 "route": "/api/runtime-center/heartbeat",
                 "status": heartbeat_status,
@@ -1136,6 +1150,80 @@ class _RuntimeCenterOverviewCardsSupport:
                 "last_error": getattr(heartbeat_state, "last_error", None),
                 "query_path": "system:run_operating_cycle",
             },
+        }
+
+    def _build_automation_loop_payload(self, task: object) -> dict[str, Any]:
+        name_getter = getattr(task, "get_name", None)
+        name = self._string(name_getter()) if callable(name_getter) else None
+        done_getter = getattr(task, "done", None)
+        cancelled_getter = getattr(task, "cancelled", None)
+        done = bool(done_getter()) if callable(done_getter) else False
+        cancelled = bool(cancelled_getter()) if callable(cancelled_getter) else False
+        status = "cancelled" if cancelled else ("completed" if done else "running")
+        return {
+            "name": name or "automation-task",
+            "status": status,
+        }
+
+    def _build_main_brain_supervisor_payload(self, supervisor: object | None) -> dict[str, Any]:
+        if supervisor is None:
+            return {
+                "status": "unavailable",
+                "running": False,
+                "poll_interval_seconds": None,
+                "active_agent_run_count": 0,
+                "blocked_runtime_count": 0,
+                "recent_failure_count": 0,
+                "last_failure_type": None,
+            }
+        loop_task = getattr(supervisor, "_loop_task", None)
+        loop_payload = self._build_automation_loop_payload(loop_task) if loop_task is not None else {}
+        running = self._string(loop_payload.get("status")) == "running"
+        agent_tasks = getattr(supervisor, "_agent_tasks", None)
+        active_agent_run_count = 0
+        if isinstance(agent_tasks, dict):
+            active_agent_run_count = sum(
+                1
+                for task in agent_tasks.values()
+                if self._string(self._build_automation_loop_payload(task).get("status")) == "running"
+            )
+        runtime_repository = getattr(supervisor, "_runtime_repository", None)
+        blocked_runtime_count = 0
+        recent_failure_count = 0
+        last_failure_at: str | None = None
+        last_failure_type: str | None = None
+        list_runtimes = getattr(runtime_repository, "list_runtimes", None)
+        if callable(list_runtimes):
+            try:
+                runtimes = list(list_runtimes(limit=None) or [])
+            except TypeError:
+                runtimes = list(list_runtimes() or [])
+            for runtime in runtimes:
+                runtime_status = (self._string(self._get_field(runtime, "runtime_status")) or "").lower()
+                if runtime_status == "blocked":
+                    blocked_runtime_count += 1
+                metadata = self._mapping(self._get_field(runtime, "metadata"))
+                failure_at = self._string(metadata.get("supervisor_last_failure_at"))
+                failure_type = self._string(metadata.get("supervisor_last_failure_type"))
+                if failure_at:
+                    recent_failure_count += 1
+                    if last_failure_at is None or failure_at >= last_failure_at:
+                        last_failure_at = failure_at
+                        last_failure_type = failure_type
+        status = "degraded" if blocked_runtime_count > 0 or recent_failure_count > 0 else ("running" if running else "idle")
+        poll_interval_seconds = getattr(supervisor, "_poll_interval_seconds", None)
+        return {
+            "status": status,
+            "running": running,
+            "poll_interval_seconds": (
+                float(poll_interval_seconds)
+                if isinstance(poll_interval_seconds, (int, float))
+                else None
+            ),
+            "active_agent_run_count": active_agent_run_count,
+            "blocked_runtime_count": blocked_runtime_count,
+            "recent_failure_count": recent_failure_count,
+            "last_failure_type": last_failure_type,
         }
 
     def _serialize_timestamp(self, value: object) -> str | None:
