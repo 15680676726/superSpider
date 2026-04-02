@@ -9,12 +9,30 @@ from typing import Literal
 MainBrainIntentShellMode = Literal["none", "plan", "review", "resume", "verify"]
 
 _VALID_MODE_HINTS = {"plan", "review", "resume", "verify"}
-_CODEISH_PATTERN = re.compile(
-    r"([\\/].+\.(?:ts|tsx|js|jsx|py|md|json|ya?ml)\b)"
-    r"|(\b[\w.-]+\.(?:ts|tsx|js|jsx|py|md|json|ya?ml)\b)"
-    r"|(\b[a-zA-Z_][\w]*\s*=)",
+_WORD_CHAR_PATTERN = re.compile(r"[\w]", re.UNICODE)
+_ASCII_PREFIX_PATTERN = re.compile(
+    r"^\s*(?:please[, ]*|can you\s+|could you\s+|help me\s+|need you to\s+)?$",
     re.IGNORECASE,
 )
+_NON_ASCII_LITERAL_SUFFIXES = (
+    "这句话",
+    "这几个字",
+    "这个词",
+    "这个短语",
+    "这句文案",
+    "这个标题",
+)
+_OPEN_TO_CLOSE = {
+    "`": "`",
+    '"': '"',
+    "'": "'",
+    "“": "”",
+    "‘": "’",
+    "(": ")",
+    "[": "]",
+    "{": "}",
+    "<": ">",
+}
 _SHELL_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "plan",
@@ -64,6 +82,104 @@ _SHELL_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
 )
+
+
+def _is_word_char(value: str | None) -> bool:
+    if not value:
+        return False
+    return bool(_WORD_CHAR_PATTERN.search(value))
+
+
+def _build_excluded_ranges(text: str) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    open_quote: str | None = None
+    open_at = 0
+
+    for index, ch in enumerate(text):
+        if open_quote is not None:
+            close_ch = _OPEN_TO_CLOSE[open_quote]
+            if ch != close_ch:
+                continue
+            if open_quote == "'" and _is_word_char(text[index + 1 : index + 2]):
+                continue
+            ranges.append((open_at, index + 1))
+            open_quote = None
+            continue
+
+        if ch == "'" and _is_word_char(text[index - 1 : index]):
+            continue
+        if ch == "<" and not re.match(r"[a-zA-Z/]", text[index + 1 : index + 2] or ""):
+            continue
+        if ch in _OPEN_TO_CLOSE:
+            open_quote = ch
+            open_at = index
+    return ranges
+
+
+def _is_in_excluded_range(index: int, ranges: list[tuple[int, int]]) -> bool:
+    return any(start <= index < end for start, end in ranges)
+
+
+def _iter_matches(text: str, term: str) -> list[tuple[int, int]]:
+    lowered_text = text.lower()
+    lowered_term = term.lower()
+    matches: list[tuple[int, int]] = []
+    start = 0
+    while True:
+        found = lowered_text.find(lowered_term, start)
+        if found < 0:
+            return matches
+        matches.append((found, found + len(term)))
+        start = found + len(term)
+
+
+def _ascii_prefix_allows_trigger(text: str, start: int) -> bool:
+    return bool(_ASCII_PREFIX_PATTERN.match(text[:start]))
+
+
+def _is_triggerable_match(
+    text: str,
+    term: str,
+    *,
+    start: int,
+    end: int,
+    excluded_ranges: list[tuple[int, int]],
+) -> bool:
+    if _is_in_excluded_range(start, excluded_ranges):
+        return False
+
+    before = text[start - 1] if start > 0 else ""
+    after = text[end] if end < len(text) else ""
+    after_next = text[end + 1] if end + 1 < len(text) else ""
+    is_ascii_term = term.isascii()
+    has_trailing_space = term.endswith(" ")
+
+    if term.startswith("/"):
+        if before and (_is_word_char(before) or before in "/\\-"):
+            return False
+        if after and after in "/\\-?":
+            return False
+        if after == "." and _is_word_char(after_next):
+            return False
+        return True
+
+    if is_ascii_term:
+        if before and _is_word_char(before):
+            return False
+        if not has_trailing_space and after and _is_word_char(after):
+            return False
+        if (before and before in "/\\-") or (after and after in "/\\-?"):
+            return False
+        if after == "." and _is_word_char(after_next):
+            return False
+        if not _ascii_prefix_allows_trigger(text, start):
+            return False
+    else:
+        suffix = text[end:].lstrip()
+        if any(suffix.startswith(marker) for marker in _NON_ASCII_LITERAL_SUFFIXES):
+            return False
+
+    return True
 
 
 @dataclass(slots=True)
@@ -149,12 +265,18 @@ def detect_main_brain_intent_shell(text: str | None) -> MainBrainIntentShell:
     normalized = str(text or "").strip()
     if not normalized:
         return MainBrainIntentShell()
-    lowered = normalized.lower()
-    if _CODEISH_PATTERN.search(normalized):
-        return MainBrainIntentShell()
+    excluded_ranges = _build_excluded_ranges(normalized)
     for mode_hint, terms in _SHELL_RULES:
         for term in terms:
-            if term.lower() in lowered:
+            for start, end in _iter_matches(normalized, term):
+                if not _is_triggerable_match(
+                    normalized,
+                    term,
+                    start=start,
+                    end=end,
+                    excluded_ranges=excluded_ranges,
+                ):
+                    continue
                 confidence = 0.98 if term.startswith("/") or term.isascii() else 0.88
                 return MainBrainIntentShell(
                     mode_hint=mode_hint,  # type: ignore[arg-type]

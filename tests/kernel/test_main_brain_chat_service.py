@@ -1100,6 +1100,55 @@ def test_main_brain_chat_service_prompt_adds_plan_shell_tail_without_claiming_ex
     assert "dispatch_query" not in joined_prompt
 
 
+@pytest.mark.parametrize(
+    ("mode_hint", "expected_lines"),
+    [
+        (
+            "review",
+            [
+                "Mode: REVIEW",
+                "Risk",
+                "Evidence gaps",
+                "Do not add extra sections",
+            ],
+        ),
+        (
+            "resume",
+            [
+                "Mode: RESUME",
+                "Continuity anchors",
+                "Blockers",
+                "Do not add extra sections",
+            ],
+        ),
+        (
+            "verify",
+            [
+                "Mode: VERIFY",
+                "Pass/fail",
+                "Unresolved risk",
+                "Do not add extra sections",
+            ],
+        ),
+    ],
+)
+def test_main_brain_chat_service_tightens_front_door_shell_structure(
+    mode_hint: str,
+    expected_lines: list[str],
+) -> None:
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+
+    tail = service._build_intent_shell_prompt_tail(  # pylint: disable=protected-access
+        mode_hint=mode_hint,
+    )
+
+    for expected in expected_lines:
+        assert expected in tail
+
+
 def test_main_brain_chat_service_prompt_does_not_expose_execution_only_tool_names():
     service = MainBrainChatService(
         session_backend=_FakeSessionBackend(),

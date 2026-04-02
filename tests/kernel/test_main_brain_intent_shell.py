@@ -45,3 +45,36 @@ def test_main_brain_intent_shell_ignores_goal_setting_start_language_and_codeish
     assert result.trigger_source == "none"
     assert result.confidence == 0.0
     assert result.matched_text == ""
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '"plan" is just a label here',
+        "what does review mean here?",
+        "`/plan` is only an example command",
+        "[/plan] is documentation, not an instruction",
+        "\u8bf7\u628a\u201c\u5148\u505a\u4e2a\u8ba1\u5212\u201d\u8fd9\u53e5\u8bdd\u653e\u5230\u6807\u9898\u91cc",
+        "\u8bf7\u628a\u5148\u505a\u4e2a\u8ba1\u5212\u8fd9\u51e0\u4e2a\u5b57\u653e\u5230\u6807\u9898\u91cc",
+    ],
+)
+def test_main_brain_intent_shell_ignores_quoted_or_feature_discussion_language(
+    text: str,
+) -> None:
+    result = detect_main_brain_intent_shell(text)
+
+    assert result.mode_hint == "none"
+    assert result.trigger_source == "none"
+    assert result.confidence == 0.0
+    assert result.matched_text == ""
+
+
+def test_main_brain_intent_shell_still_detects_real_intent_when_text_also_mentions_a_path() -> None:
+    result = detect_main_brain_intent_shell(
+        "\u5148\u505a\u4e2a\u8ba1\u5212\uff0c\u7136\u540e\u770b src/app.py",
+    )
+
+    assert result.mode_hint == "plan"
+    assert result.trigger_source == "keyword"
+    assert result.confidence > 0.0
+    assert result.matched_text
