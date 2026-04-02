@@ -2433,6 +2433,10 @@ def test_runtime_detail_exposes_first_class_main_brain_cognitive_surface_with_co
     assert cognitive_surface["continuity"]["work_context_ids"] == [report.work_context_id]
     assert cognitive_surface["continuity"]["control_thread_ids"] == [control_thread_id]
     assert cognitive_surface["continuity"]["environment_refs"] == [environment_ref]
+    planning_surface = detail.main_brain_planning.model_dump(mode="json")
+    assert planning_surface["replan"]["status"] == "needs-replan"
+    assert planning_surface["replan"]["source_report_ids"] == [report.id]
+    assert detail.current_cycle["main_brain_planning"] == planning_surface
 
     assert detail.strategy_memory is not None
     strategy_surface = detail.strategy_memory.metadata["main_brain_cognitive_surface"]

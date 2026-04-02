@@ -370,6 +370,7 @@ class SemanticCompiler:
                 "prompt_text": prompt_text[:280],
             },
         )
+        assignment_plan_payload = self._assignment_plan_payload(unit)
         compiler_meta = {
             "source_kind": "compiler",
             "unit_kind": unit.kind,
@@ -431,6 +432,8 @@ class SemanticCompiler:
             "task_segment": task_segment.model_dump(mode="json"),
             "resume_point": resume_point.model_dump(mode="json"),
         }
+        if assignment_plan_payload:
+            compiler_meta.update(assignment_plan_payload)
         request_payload = {
             "input": [
                 {
@@ -503,6 +506,8 @@ class SemanticCompiler:
             "task_segment": task_segment.model_dump(mode="json"),
             "resume_point": resume_point.model_dump(mode="json"),
         }
+        if assignment_plan_payload:
+            payload["task_seed"].update(self._assignment_plan_payload(unit))
         if payload_extras:
             payload.update(payload_extras)
         return CompiledTaskSpec(
@@ -561,6 +566,7 @@ class SemanticCompiler:
                 "session_id": session_id,
             },
         )
+        assignment_plan_payload = self._assignment_plan_payload(unit)
         compiler_meta = {
             "source_kind": "compiler",
             "unit_kind": unit.kind,
@@ -580,6 +586,8 @@ class SemanticCompiler:
             "task_segment": task_segment.model_dump(mode="json"),
             "resume_point": resume_point.model_dump(mode="json"),
         }
+        if assignment_plan_payload:
+            compiler_meta.update(assignment_plan_payload)
         payload = {
             "routine_id": routine_id,
             "source_type": _string_context_value(unit.context.get("routine_source_type")) or "goal-task",
@@ -614,6 +622,8 @@ class SemanticCompiler:
             "task_segment": task_segment.model_dump(mode="json"),
             "resume_point": resume_point.model_dump(mode="json"),
         }
+        if assignment_plan_payload:
+            payload["task_seed"].update(self._assignment_plan_payload(unit))
         return CompiledTaskSpec(
             title=f"Replay routine: {title[:60]}",
             capability_ref="system:replay_routine",
@@ -669,6 +679,7 @@ class SemanticCompiler:
                 "workflow_run_id": workflow_run_id,
             },
         )
+        assignment_plan_payload = self._assignment_plan_payload(unit)
         compiler_meta = {
             "source_kind": "compiler",
             "unit_kind": unit.kind,
@@ -689,6 +700,8 @@ class SemanticCompiler:
             "task_segment": task_segment.model_dump(mode="json"),
             "resume_point": resume_point.model_dump(mode="json"),
         }
+        if assignment_plan_payload:
+            compiler_meta.update(assignment_plan_payload)
         payload = {
             "binding_id": binding_id,
             "source_type": (
@@ -731,6 +744,8 @@ class SemanticCompiler:
             "task_segment": task_segment.model_dump(mode="json"),
             "resume_point": resume_point.model_dump(mode="json"),
         }
+        if assignment_plan_payload:
+            payload["task_seed"].update(self._assignment_plan_payload(unit))
         return CompiledTaskSpec(
             title=f"Run fixed SOP binding: {title[:60]}",
             capability_ref="system:run_fixed_sop",
@@ -811,6 +826,32 @@ class SemanticCompiler:
     def _compiled_task_id(self, unit: CompilationUnit, index: int) -> str:
         return f"ctask:{unit.id}:{index + 1}"
 
+    def _assignment_plan_payload(self, unit: CompilationUnit) -> dict[str, object]:
+        envelope = unit.context.get("assignment_plan_envelope")
+        if not isinstance(envelope, dict):
+            return {}
+        checkpoints = unit.context.get("assignment_plan_checkpoints")
+        acceptance_criteria = unit.context.get("assignment_plan_acceptance_criteria")
+        sidecar_plan = unit.context.get("assignment_sidecar_plan")
+        return {
+            "assignment_plan_envelope": dict(envelope),
+            "assignment_plan_checkpoints": _checkpoint_context_list(
+                checkpoints if isinstance(checkpoints, list) else envelope.get("checkpoints"),
+            ),
+            "assignment_plan_acceptance_criteria": _string_context_list(
+                acceptance_criteria
+                if isinstance(acceptance_criteria, list)
+                else envelope.get("acceptance_criteria"),
+            ),
+            "assignment_sidecar_plan": (
+                dict(sidecar_plan)
+                if isinstance(sidecar_plan, dict)
+                else dict(envelope.get("sidecar_plan"))
+                if isinstance(envelope.get("sidecar_plan"), dict)
+                else {}
+            ),
+        }
+
 
 def _string_context_list(value: object) -> list[str]:
     if not isinstance(value, list):
@@ -836,6 +877,17 @@ def _string_context_value(*values: object) -> str | None:
         if text:
             return text
     return None
+
+
+def _checkpoint_context_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    checkpoints: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        checkpoints.append(dict(item))
+    return checkpoints
 
 
 def _runtime_execution_prompt_lines(context: dict[str, object]) -> list[str]:

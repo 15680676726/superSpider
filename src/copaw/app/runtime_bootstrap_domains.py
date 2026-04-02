@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..capabilities import CapabilityService
+from ..compiler import (
+    AssignmentPlanningCompiler,
+    CyclePlanningCompiler,
+    ReportReplanEngine,
+    StrategyPlanningCompiler,
+)
 from ..evidence import EvidenceLedger
 from ..environments import EnvironmentService
 from ..goals import GoalService
@@ -77,6 +83,22 @@ class RuntimeDomainServices:
     main_brain_orchestrator: MainBrainOrchestrator
 
 
+def _build_goal_service(
+    *,
+    assignment_planner: AssignmentPlanningCompiler,
+    **kwargs: Any,
+) -> GoalService:
+    try:
+        return GoalService(
+            assignment_planner=assignment_planner,
+            **kwargs,
+        )
+    except TypeError as exc:
+        if "assignment_planner" not in str(exc):
+            raise
+        return GoalService(**kwargs)
+
+
 def build_runtime_domain_services(
     *,
     session_backend: Any,
@@ -105,7 +127,13 @@ def build_runtime_domain_services(
     actor_mailbox_service: ActorMailboxService,
     actor_supervisor: ActorSupervisor,
 ) -> RuntimeDomainServices:
-    goal_service = GoalService(
+    strategy_planning_compiler = StrategyPlanningCompiler()
+    cycle_planner = CyclePlanningCompiler()
+    assignment_planner = AssignmentPlanningCompiler()
+    report_replan_engine = ReportReplanEngine()
+
+    goal_service = _build_goal_service(
+        assignment_planner=assignment_planner,
         repository=repositories.goal_repository,
         override_repository=repositories.goal_override_repository,
         dispatcher=kernel_dispatcher,
@@ -215,6 +243,10 @@ def build_runtime_domain_services(
         operating_cycle_service=operating_cycle_service,
         assignment_service=assignment_service,
         agent_report_service=agent_report_service,
+        strategy_planning_compiler=strategy_planning_compiler,
+        cycle_planner=cycle_planner,
+        assignment_planner=assignment_planner,
+        report_replan_engine=report_replan_engine,
         state_store=state_store,
         memory_retain_service=memory_retain_service,
         memory_activation_service=memory_activation_service,
@@ -319,6 +351,7 @@ def build_runtime_domain_services(
         evidence_ledger=evidence_ledger,
         agent_profile_service=agent_profile_service,
         industry_service=industry_service,
+        environment_service=environment_service,
         actor_mailbox_service=actor_mailbox_service,
         actor_supervisor=actor_supervisor,
         runtime_event_bus=runtime_event_bus,

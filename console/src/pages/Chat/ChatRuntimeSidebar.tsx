@@ -9,6 +9,7 @@ import { Button, Tag, Tooltip } from "antd";
 
 import type {
   RuntimeHealthNotice,
+  RuntimeLifecycleState,
   RuntimeWaitState,
 } from "./runtimeDiagnostics";
 import styles from "./index.module.less";
@@ -21,6 +22,7 @@ export function ChatRuntimeSidebar({
   onOpenGovernanceApprovals,
   runtimeFallbackLabel,
   runtimeHealthNotice,
+  runtimeLifecycleState,
   runtimeModelHint,
   runtimeModelLabel,
   runtimeWaitDescription,
@@ -38,6 +40,7 @@ export function ChatRuntimeSidebar({
   onOpenGovernanceApprovals: () => void;
   runtimeFallbackLabel: string | null;
   runtimeHealthNotice: RuntimeHealthNotice | null;
+  runtimeLifecycleState: RuntimeLifecycleState | null;
   runtimeModelHint: string;
   runtimeModelLabel: string;
   runtimeWaitDescription: string | null;
@@ -102,6 +105,29 @@ export function ChatRuntimeSidebar({
             <div className={`${styles.topBarStatus} ${styles.topBarStatusBusy}`}>
               <LoadingOutlined spin />
               <span>{`等待响应 ${runtimeWaitSeconds}s`}</span>
+            </div>
+          </Tooltip>
+        ) : runtimeLifecycleState ? (
+          <Tooltip title={runtimeLifecycleState.description || undefined}>
+            <div
+              className={`${styles.topBarStatus} ${
+                runtimeLifecycleState.tone === "busy"
+                  ? styles.topBarStatusBusy
+                  : runtimeLifecycleState.tone === "success"
+                    ? styles.topBarStatusOk
+                    : runtimeLifecycleState.tone === "error"
+                      ? styles.topBarStatusError
+                      : styles.topBarStatusWarn
+              }`}
+            >
+              {runtimeLifecycleState.tone === "busy" ? (
+                <LoadingOutlined spin />
+              ) : runtimeLifecycleState.tone === "success" ? (
+                <CheckCircleOutlined />
+              ) : (
+                <WarningOutlined />
+              )}
+              <span>{runtimeLifecycleState.title}</span>
             </div>
           </Tooltip>
         ) : runtimeHealthNotice ? (

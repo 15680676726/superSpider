@@ -536,4 +536,239 @@ describe("runtimeTransport", () => {
     expect(dispatchHumanAssistDirty).toHaveBeenCalledTimes(1);
     expect(setRuntimeHealthNotice).not.toHaveBeenCalled();
   });
+
+  it("cuts off chat-visible SSE at terminal response and consumes sidecar tail locally", async () => {
+    vi.stubGlobal("BASE_URL", "http://testserver");
+    vi.spyOn(providerApi, "getActiveModels").mockResolvedValue({
+      resolved_llm: {
+        provider_id: "test-provider",
+        model: "test-model",
+      },
+    } as never);
+    const dispatchGovernanceDirty = vi.fn();
+    const dispatchHumanAssistDirty = vi.fn();
+    const setRuntimeHealthNotice = vi.fn();
+    const setRuntimeWaitState = vi.fn();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        [
+          'data: {"object":"message","type":"assistant","role":"assistant","status":"in_progress"}',
+          "",
+          'data: {"object":"response","status":"completed"}',
+          "",
+          'data: {"sidecar_event":"turn_reply_done","payload":{"details":{"phase":"reply"}}}',
+          "",
+          'data: {"sidecar_event":"commit_started","payload":{"details":{"phase":"commit_started"}}}',
+          "",
+          'data: {"sidecar_event":"committed","payload":{"details":{"phase":"committed"}}}',
+          "",
+        ].join("\n"),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/event-stream",
+          },
+        },
+      ),
+    );
+
+    const transport = createRuntimeTransport({
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      optionsBaseUrl: undefined,
+      getThreadMeta: () => ({
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      }),
+      getPendingMediaSources: () => [],
+      clearPendingMediaDrafts: vi.fn(),
+      refreshThreadMediaAnalyses: vi.fn(),
+      getSelectedMediaAnalysisIds: () => [],
+      setRuntimeHealthNotice,
+      setRuntimeWaitState,
+      setShowModelPrompt: vi.fn(),
+      dispatchGovernanceDirty,
+      dispatchHumanAssistDirty,
+    });
+
+    const response = await transport.fetch({
+      input: [
+        {
+          session: {
+            session_id: "session-thread",
+            user_id: "session-user",
+            channel: "session-channel",
+          },
+        },
+      ],
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const bodyText = await response.text();
+    expect(bodyText).toContain('"object":"response","status":"completed"');
+    expect(bodyText).not.toContain("sidecar_event");
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(dispatchGovernanceDirty).toHaveBeenCalled();
+    expect(dispatchHumanAssistDirty).toHaveBeenCalled();
+  });
+
+  it("surfaces commit_failed sidecar from the hidden tail as a runtime health notice", async () => {
+    vi.stubGlobal("BASE_URL", "http://testserver");
+    vi.spyOn(providerApi, "getActiveModels").mockResolvedValue({
+      resolved_llm: {
+        provider_id: "test-provider",
+        model: "test-model",
+      },
+    } as never);
+    const dispatchGovernanceDirty = vi.fn();
+    const dispatchHumanAssistDirty = vi.fn();
+    const setRuntimeHealthNotice = vi.fn();
+    const setRuntimeWaitState = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        [
+          'data: {"object":"response","status":"completed"}',
+          "",
+          'data: {"sidecar_event":"commit_failed","payload":{"details":{"phase":"commit_failed","code":"MODEL_RUNTIME_FAILED","message":"db commit blew up"}}}',
+          "",
+        ].join("\n"),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/event-stream",
+          },
+        },
+      ),
+    );
+
+    const transport = createRuntimeTransport({
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      optionsBaseUrl: undefined,
+      getThreadMeta: () => ({
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      }),
+      getPendingMediaSources: () => [],
+      clearPendingMediaDrafts: vi.fn(),
+      refreshThreadMediaAnalyses: vi.fn(),
+      getSelectedMediaAnalysisIds: () => [],
+      setRuntimeHealthNotice,
+      setRuntimeWaitState,
+      setShowModelPrompt: vi.fn(),
+      dispatchGovernanceDirty,
+      dispatchHumanAssistDirty,
+    });
+
+    const response = await transport.fetch({
+      input: [
+        {
+          session: {
+            session_id: "session-thread",
+            user_id: "session-user",
+            channel: "session-channel",
+          },
+        },
+      ],
+    });
+
+    const bodyText = await response.text();
+    expect(bodyText).toContain('"object":"response","status":"completed"');
+    expect(bodyText).not.toContain("commit_failed");
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(setRuntimeWaitState).toHaveBeenCalledWith(null);
+    expect(setRuntimeHealthNotice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "error",
+        description: "db commit blew up",
+      }),
+    );
+    expect(dispatchGovernanceDirty).toHaveBeenCalled();
+    expect(dispatchHumanAssistDirty).toHaveBeenCalled();
+  });
+
+  it("maps hidden sidecar lifecycle events into visible runtime lifecycle state", async () => {
+    vi.stubGlobal("BASE_URL", "http://testserver");
+    vi.spyOn(providerApi, "getActiveModels").mockResolvedValue({
+      resolved_llm: {
+        provider_id: "test-provider",
+        model: "test-model",
+      },
+    } as never);
+    const setRuntimeLifecycleState = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        [
+          'data: {"object":"response","status":"completed"}',
+          "",
+          'data: {"sidecar_event":"commit_started","payload":{"details":{"phase":"commit_started"}}}',
+          "",
+          'data: {"sidecar_event":"confirm_required","payload":{"details":{"phase":"confirm_required"}}}',
+          "",
+        ].join("\n"),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/event-stream",
+          },
+        },
+      ),
+    );
+
+    const transport = createRuntimeTransport({
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      optionsBaseUrl: undefined,
+      getThreadMeta: () => ({
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      }),
+      getPendingMediaSources: () => [],
+      clearPendingMediaDrafts: vi.fn(),
+      refreshThreadMediaAnalyses: vi.fn(),
+      getSelectedMediaAnalysisIds: () => [],
+      setRuntimeHealthNotice: vi.fn(),
+      setRuntimeWaitState: vi.fn(),
+      setRuntimeLifecycleState,
+      setShowModelPrompt: vi.fn(),
+      dispatchGovernanceDirty: vi.fn(),
+      dispatchHumanAssistDirty: vi.fn(),
+    });
+
+    const response = await transport.fetch({
+      input: [
+        {
+          session: {
+            session_id: "session-thread",
+            user_id: "session-user",
+            channel: "session-channel",
+          },
+        },
+      ],
+    });
+
+    await response.text();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(setRuntimeLifecycleState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "commit_started",
+        tone: "busy",
+      }),
+    );
+    expect(setRuntimeLifecycleState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "confirm_required",
+        tone: "warning",
+      }),
+    );
+  });
 });

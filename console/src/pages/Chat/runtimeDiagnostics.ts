@@ -5,6 +5,19 @@ export interface RuntimeWaitState {
   resolutionReason?: string | null;
 }
 
+export interface RuntimeLifecycleState {
+  phase:
+    | "accepted"
+    | "commit_started"
+    | "confirm_required"
+    | "committed"
+    | "commit_failed";
+  title: string;
+  description?: string | null;
+  tone: "busy" | "warning" | "success" | "error";
+  updatedAt: number;
+}
+
 export interface RuntimeHealthNotice {
   type: "warning" | "error";
   title: string;

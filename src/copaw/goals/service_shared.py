@@ -8,9 +8,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..compiler import (
+    AssignmentPlanningCompiler,
     CompilationUnit,
     CompiledTaskSegment,
     CompiledTaskSpec,
+    PlanningStrategyConstraints,
     ResumePoint,
     SemanticCompiler,
 )
@@ -243,6 +245,15 @@ def _task_compilation_snapshot(
         "plan_step_number",
         "plan_step_total",
         "feedback_summary",
+        "assignment_id",
+        "backlog_item_id",
+        "lane_id",
+        "cycle_id",
+        "report_back_mode",
+        "assignment_plan_envelope",
+        "assignment_plan_checkpoints",
+        "assignment_plan_acceptance_criteria",
+        "assignment_sidecar_plan",
     ):
         value = compiler.get(key)
         if value is not None:

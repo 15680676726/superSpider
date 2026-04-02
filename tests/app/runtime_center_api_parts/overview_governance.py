@@ -717,6 +717,24 @@ def test_runtime_center_work_context_detail_endpoint() -> None:
     assert payload["tasks"][0]["work_context"]["id"] == "ctx-1"
 
 
+def test_runtime_center_work_contexts_list_endpoint() -> None:
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/work-contexts")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["id"] == "ctx-1"
+    assert payload[0]["context_key"] == (
+        "control-thread:industry-chat:industry-v1-ops:execution-core"
+    )
+    assert payload[0]["task_count"] == 3
+    assert payload[0]["active_task_count"] == 1
+
+
 def test_runtime_center_capability_optimizations_endpoint() -> None:
     app = build_runtime_center_app()
     app.state.prediction_service = FakePredictionService()
@@ -1109,6 +1127,30 @@ class _CommitAwareTurnExecutor:
         }
 
 
+class _FailingTurnExecutor:
+    def __init__(self, *, runtime_context: dict[str, object] | None = None) -> None:
+        self.runtime_context = dict(runtime_context or {})
+
+    async def stream_request(
+        self,
+        request_payload,
+        *,
+        kernel_task_id: str | None = None,
+        skip_kernel_admission: bool = False,
+    ):
+        _ = kernel_task_id, skip_kernel_admission
+        if self.runtime_context:
+            setattr(request_payload, "_copaw_main_brain_runtime_context", self.runtime_context)
+        yield {
+            "object": "message",
+            "role": "assistant",
+            "type": "text",
+            "status": "in_progress",
+            "sequence_number": 0,
+        }
+        raise RuntimeError("synthetic runtime failure")
+
+
 def _parse_sse_events(raw_text: str) -> list[dict[str, object]]:
     events: list[dict[str, object]] = []
     for chunk in raw_text.strip().split("\n\n"):
@@ -1172,12 +1214,113 @@ def test_runtime_center_chat_run_streams_reply_then_sidecar_commit_events() -> N
         if event.get("sidecar_event")
     ]
     assert [event["sidecar_event"] for event in sidecar_events] == [
+        "accepted",
         "turn_reply_done",
         "commit_started",
         "confirm_required",
         "committed",
     ]
     assert sidecar_events[0]["control_thread_id"] == control_thread_id
+    assert sidecar_events[0]["thread_id"] == control_thread_id
+    assert sidecar_events[0]["payload"]["details"]["phase"] == "accepted"
+
+
+def test_runtime_center_chat_run_emits_commit_failed_without_committed_when_runtime_context_reports_commit_failure() -> None:
+    app = build_runtime_center_app()
+    runtime_context = {
+        "kernel_task_id": "ktask-commit-failed",
+        "execution_intent": "execute-task",
+        "environment_ref": "desktop:session-1",
+        "writeback_requested": True,
+        "should_kickoff": False,
+        "commit_outcome": {
+            "status": "failed",
+            "code": "WRITEBACK_FAILED",
+            "message": "writeback persistence failed",
+        },
+        "intake_contract": SimpleNamespace(
+            intent_kind="execute-task",
+            writeback_requested=True,
+            should_kickoff=False,
+            decision=SimpleNamespace(intention="execute-task", id="decision-commit-failed"),
+        ),
+    }
+    app.state.turn_executor = _CommitAwareTurnExecutor(runtime_context=runtime_context)
+
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-commit-failed",
+            "session_id": "session-commit-failed",
+            "user_id": "ops-user",
+            "channel": "console",
+            "thread_id": "industry-chat:industry-v1-ops:commit-failed",
+            "control_thread_id": "industry-chat:industry-v1-ops:commit-failed",
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "测试失败写回不能再发 committed"}],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    sidecar_events = [
+        event
+        for event in _parse_sse_events(response.text)
+        if event.get("sidecar_event")
+    ]
+    assert [event["sidecar_event"] for event in sidecar_events] == [
+        "accepted",
+        "turn_reply_done",
+        "commit_started",
+        "commit_failed",
+    ]
+    assert sidecar_events[-1]["payload"]["details"]["code"] == "WRITEBACK_FAILED"
+    assert sidecar_events[-1]["payload"]["details"]["message"] == "writeback persistence failed"
+
+
+def test_runtime_center_chat_run_emits_accepted_before_first_response_event() -> None:
+    app = build_runtime_center_app()
+    app.state.turn_executor = _CommitAwareTurnExecutor(
+        runtime_context={
+            "kernel_task_id": "ktask-accepted",
+            "execution_intent": "execute-task",
+            "environment_ref": "desktop:session-1",
+            "writeback_requested": True,
+            "should_kickoff": True,
+        }
+    )
+
+    control_thread_id = "industry-chat:industry-v1-ops:accepted-first"
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-accepted",
+            "session_id": "session-accepted",
+            "user_id": "ops-user",
+            "channel": "console",
+            "thread_id": control_thread_id,
+            "control_thread_id": control_thread_id,
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "accepted should arrive first"}],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    events = _parse_sse_events(response.text)
+    assert events[0]["sidecar_event"] == "accepted"
+    assert events[0]["control_thread_id"] == control_thread_id
+    assert events[1]["object"] == "response"
 
 
 def test_runtime_center_chat_run_keeps_commit_events_in_same_control_thread() -> None:
@@ -1224,6 +1367,51 @@ def test_runtime_center_chat_run_keeps_commit_events_in_same_control_thread() ->
             continue
         assert event.get("control_thread_id") == control_thread_id
         assert event.get("thread_id") == control_thread_id
+
+
+def test_runtime_center_chat_run_surfaces_failed_response_and_commit_failed_sidecar() -> None:
+    app = build_runtime_center_app()
+    app.state.turn_executor = _FailingTurnExecutor(
+        runtime_context={
+            "kernel_task_id": "ktask-failed",
+            "execution_intent": "execute-task",
+            "environment_ref": "desktop:session-1",
+            "writeback_requested": True,
+            "should_kickoff": True,
+        }
+    )
+
+    control_thread_id = "industry-chat:industry-v1-ops:failed-sidecar"
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-failed",
+            "session_id": "session-failed",
+            "user_id": "ops-user",
+            "channel": "console",
+            "thread_id": control_thread_id,
+            "control_thread_id": control_thread_id,
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "fail after first chunk"}],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    events = _parse_sse_events(response.text)
+    assert events[0]["sidecar_event"] == "accepted"
+    assert events[1]["object"] == "message"
+    assert events[2]["object"] == "response"
+    assert events[2]["status"] == "failed"
+    assert events[2]["error"]["code"] == "AGENT_UNKNOWN_ERROR"
+    assert events[3]["sidecar_event"] == "commit_failed"
+    assert events[3]["payload"]["details"]["phase"] == "commit_failed"
+    assert events[3]["payload"]["details"]["code"] == "AGENT_UNKNOWN_ERROR"
 
 
 def test_runtime_center_chat_run_collects_requested_actions_and_enriches_media_inputs(

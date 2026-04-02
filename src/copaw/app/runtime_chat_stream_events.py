@@ -79,6 +79,24 @@ def _summarize_runtime_context(runtime_context: dict[str, object] | None) -> dic
         value = runtime_context.get(key)
         if value is not None:
             summary[key] = value
+    commit_outcome = runtime_context.get("commit_outcome")
+    if isinstance(commit_outcome, dict) and commit_outcome:
+        summarized_commit_outcome: dict[str, object] = {}
+        for key in ("status", "code", "message"):
+            value = commit_outcome.get(key)
+            if value is not None:
+                summarized_commit_outcome[key] = value
+        if summarized_commit_outcome:
+            summary["commit_outcome"] = summarized_commit_outcome
+    accepted_persistence = runtime_context.get("accepted_persistence")
+    if isinstance(accepted_persistence, dict) and accepted_persistence:
+        summarized_accepted: dict[str, object] = {}
+        for key in ("status", "checkpoint_id", "session_state_saved", "message"):
+            value = accepted_persistence.get(key)
+            if value is not None:
+                summarized_accepted[key] = value
+        if summarized_accepted:
+            summary["accepted_persistence"] = summarized_accepted
     intake_contract = runtime_context.get("intake_contract")
     if intake_contract is not None:
         intake_summary = _summarize_intake_contract(intake_contract)
@@ -151,6 +169,27 @@ def _build_sidecar_events(
             extra_payload={"phase": "commit_started"},
         )
     )
+    commit_outcome = runtime_summary.get("commit_outcome")
+    if isinstance(commit_outcome, dict) and str(commit_outcome.get("status") or "").strip().lower() == "failed":
+        events.append(
+            _build_sidecar_event(
+                "commit_failed",
+                request_id=request_id,
+                control_thread_id=control_thread_id,
+                thread_id=thread_id,
+                session_id=session_id,
+                runtime_context_summary=runtime_summary,
+                extra_payload={
+                    "phase": "commit_failed",
+                    "code": _first_non_empty(commit_outcome.get("code"), "RUNTIME_COMMIT_FAILED"),
+                    "message": _first_non_empty(
+                        commit_outcome.get("message"),
+                        "Runtime commit failed before durable writeback completed.",
+                    ),
+                },
+            )
+        )
+        return events
     if _should_emit_confirm_required(runtime_summary):
         events.append(
             _build_sidecar_event(
@@ -197,14 +236,58 @@ async def stream_runtime_chat_events(
     if not callable(stream_request):
         raise RuntimeError("Kernel turn executor does not support streaming chat execution")
 
-    max_sequence = -1
-    async for event in stream_request(request_payload):
-        seq = _extract_sequence_number(event)
-        if seq is not None:
-            max_sequence = max(max_sequence, seq)
-        yield _encode_sse_event(event)
-
     control_thread_id, thread_id, session_id = _resolve_thread_info(request_payload)
+    accepted_event = _build_sidecar_event(
+        "accepted",
+        request_id=getattr(request_payload, "id", None),
+        control_thread_id=control_thread_id,
+        thread_id=thread_id,
+        session_id=session_id,
+        runtime_context_summary={},
+        extra_payload={"phase": "accepted"},
+    )
+    yield _encode_sse_event(accepted_event)
+
+    max_sequence = -1
+    try:
+        async for event in stream_request(request_payload):
+            seq = _extract_sequence_number(event)
+            if seq is not None:
+                max_sequence = max(max_sequence, seq)
+            yield _encode_sse_event(event)
+    except Exception as error:
+        runtime_context = getattr(request_payload, "_copaw_main_brain_runtime_context", None)
+        runtime_summary = _summarize_runtime_context(runtime_context)
+        seq_gen = SequenceNumberGenerator(start=max_sequence + 1 if max_sequence >= 0 else 0)
+        error_message = str(error).strip() or "Runtime chat stream failed."
+        yield _encode_sse_event(
+            {
+                "object": "response",
+                "status": "failed",
+                "error": {
+                    "code": "AGENT_UNKNOWN_ERROR",
+                    "message": error_message,
+                },
+                "sequence_number": seq_gen.next(),
+            }
+        )
+        failed_sidecar = _build_sidecar_event(
+            "commit_failed",
+            request_id=getattr(request_payload, "id", None),
+            control_thread_id=control_thread_id,
+            thread_id=thread_id,
+            session_id=session_id,
+            runtime_context_summary=runtime_summary,
+            extra_payload={
+                "phase": "commit_failed",
+                "code": "AGENT_UNKNOWN_ERROR",
+                "message": error_message,
+            },
+        )
+        failed_sidecar["sequence_number"] = seq_gen.next()
+        yield _encode_sse_event(failed_sidecar)
+        return
+
     start_sequence = max_sequence + 1 if max_sequence >= 0 else 0
     seq_gen = SequenceNumberGenerator(start=start_sequence)
     for sidecar_event in _build_sidecar_events(

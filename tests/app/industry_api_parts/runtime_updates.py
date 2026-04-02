@@ -1572,6 +1572,138 @@ def test_staffed_assignment_failure_keeps_supervisor_chain_and_replan_truth(
     assert replan_node["metrics"]["recommended_action"] is not None
 
 
+def test_runtime_detail_exposes_stable_main_brain_planning_surface_from_formal_sidecars(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+            "goals": ["keep the operating loop governed and visible"],
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    current_cycle_id = record.current_cycle_id
+    assert current_cycle_id is not None
+
+    cycle_record = app.state.operating_cycle_repository.get_cycle(current_cycle_id)
+    assert cycle_record is not None
+    cycle_planning = {
+        "strategy_constraints": {
+            "mission": "Keep the operating loop governed and visible.",
+            "priority_order": ["governed follow-up", "steady execution"],
+            "planning_policy": ["prefer-followup-before-net-new"],
+            "review_rules": ["repeat-failure-needs-review"],
+            "paused_lane_ids": [],
+        },
+        "cycle_decision": {
+            "should_start": True,
+            "reason": "planned-open-backlog",
+            "cycle_kind": cycle_record.cycle_kind,
+            "selected_backlog_item_ids": list(cycle_record.backlog_item_ids or []),
+            "selected_lane_ids": list(cycle_record.focus_lane_ids or []),
+            "max_assignment_count": len(list(cycle_record.assignment_ids or [])),
+            "summary": "Persisted planning sidecar for runtime exposure.",
+            "planning_policy": ["prefer-followup-before-net-new"],
+            "metadata": {
+                "pending_report_count": 0,
+                "open_backlog_count": len(list(cycle_record.backlog_item_ids or [])),
+            },
+        },
+    }
+    app.state.operating_cycle_repository.upsert_cycle(
+        cycle_record.model_copy(
+            update={
+                "metadata": {
+                    **dict(cycle_record.metadata or {}),
+                    "formal_planning": cycle_planning,
+                },
+            },
+        ),
+    )
+
+    assignment_id = list(cycle_record.assignment_ids or [])[0]
+    assignment_record = app.state.assignment_repository.get_assignment(assignment_id)
+    assert assignment_record is not None
+    assignment_planning = {
+        "assignment_plan": {
+            "assignment_id": assignment_record.id,
+            "backlog_item_id": assignment_record.backlog_item_id,
+            "cycle_id": assignment_record.cycle_id,
+            "owner_agent_id": assignment_record.owner_agent_id,
+            "owner_role_id": assignment_record.owner_role_id,
+            "report_back_mode": assignment_record.report_back_mode,
+            "checkpoints": [
+                {"kind": "plan-step", "label": "Clarify the governed move."},
+                {"kind": "verify", "label": "Verify the result and evidence."},
+            ],
+            "acceptance_criteria": [
+                "Capture governed evidence before reporting complete.",
+            ],
+            "sidecar_plan": {
+                "checklist": ["Clarify the governed move.", "Verify the result."],
+            },
+        },
+    }
+    app.state.assignment_repository.upsert_assignment(
+        assignment_record.model_copy(
+            update={
+                "metadata": {
+                    **dict(assignment_record.metadata or {}),
+                    "formal_planning": assignment_planning,
+                },
+            },
+        ),
+    )
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    assert detail.current_cycle is not None
+    assert detail.main_brain_planning is not None
+
+    planning_surface = detail.main_brain_planning.model_dump(mode="json")
+    assert planning_surface["is_truth_store"] is False
+    assert planning_surface["source"] == "industry-runtime-read-model"
+    assert planning_surface["strategy_constraints"] == cycle_planning["strategy_constraints"]
+    assert planning_surface["latest_cycle_decision"]["cycle_id"] == current_cycle_id
+    assert planning_surface["latest_cycle_decision"]["selected_backlog_item_ids"] == (
+        cycle_planning["cycle_decision"]["selected_backlog_item_ids"]
+    )
+    assert planning_surface["latest_cycle_decision"]["selected_lane_ids"] == (
+        cycle_planning["cycle_decision"]["selected_lane_ids"]
+    )
+    assert planning_surface["focused_assignment_plan"] == (
+        assignment_planning["assignment_plan"]
+    )
+    assert planning_surface["replan"]["status"] == "clear"
+    assert detail.current_cycle["main_brain_planning"] == planning_surface
+
+    runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    assert runtime_payload["main_brain_planning"] == planning_surface
+    assert runtime_payload["current_cycle"]["main_brain_planning"] == planning_surface
+
+
 def test_governance_blocks_dispatch_when_pending_staffing_proposal_is_not_top_active_gap(
     tmp_path,
 ) -> None:
@@ -2595,6 +2727,7 @@ def test_main_brain_cognitive_surface_persists_across_rollover_and_clears_after_
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
     cognitive_surface = runtime_payload["current_cycle"]["main_brain_cognitive_surface"]
+    planning_surface = runtime_payload["main_brain_planning"]
     assert cognitive_surface["needs_replan"] is True
     assert cognitive_surface["latest_reports"][0]["report_id"] == failed_report.id
     assert cognitive_surface["followup_backlog"][0]["backlog_item_id"] == followup_backlog["backlog_item_id"]
@@ -2602,6 +2735,9 @@ def test_main_brain_cognitive_surface_persists_across_rollover_and_clears_after_
     assert cognitive_surface["continuity"]["work_context_ids"] == [failed_report.work_context_id]
     assert cognitive_surface["continuity"]["control_thread_ids"] == [control_thread_id]
     assert cognitive_surface["continuity"]["environment_refs"] == [environment_ref]
+    assert planning_surface["replan"]["status"] == "needs-replan"
+    assert planning_surface["replan"]["source_report_ids"] == [failed_report.id]
+    assert runtime_payload["current_cycle"]["main_brain_planning"] == planning_surface
 
     followup_assignment = AssignmentRecord(
         industry_instance_id=instance_id,
@@ -2649,11 +2785,14 @@ def test_main_brain_cognitive_surface_persists_across_rollover_and_clears_after_
 
     cleared_runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
     cleared_surface = cleared_runtime_payload["current_cycle"]["main_brain_cognitive_surface"]
+    cleared_planning = cleared_runtime_payload["main_brain_planning"]
     assert cleared_surface["needs_replan"] is False
     assert cleared_surface["replan_reasons"] == []
     assert cleared_surface["followup_backlog"] == []
     assert cleared_surface["judgment"]["status"] == "stable"
     assert cleared_surface["next_action"]["kind"] == "continue-cycle"
+    assert cleared_planning["replan"]["status"] == "clear"
+    assert cleared_runtime_payload["current_cycle"]["main_brain_planning"] == cleared_planning
 
     strategy = app.state.strategy_memory_service.get_active_strategy(
         scope_type="industry",

@@ -720,6 +720,9 @@
 - 说明：
   - MCP provider 应承担“外部能力接入点”，而不是继续在核心层扩散 host-specific tool 语义
   - 当前 Windows desktop control 已通过 `src/copaw/adapters/desktop/` 以 stdio MCP adapter 形式接入，证明“控整机”主链可以走外部 provider 挂载而不是平行内建工具
+  - `2026-04-02` `runtime complete tail closure / Stage 2` 补充：`MCPClientManager` 与 `MCPConfigWatcher` 现已共享同一 typed lifecycle contract；`reload_state` 会显式记录 `dirty / pending_reload / pending_spec / last_outcome / overlay_scope / overlay_mode`，replace connect failure 现保留 steady client 并回写 pending 状态，old-client close failure 也会进入同一 runtime record，不再只靠日志诊断
+  - `2026-04-02` 补充：manager 现已提供 scope-local additive overlay 边界，后续 `Stage 3` child-run shell 应消费这套 overlay/lifecycle API，而不是再造第二套 scoped MCP lifecycle contract
+  - `2026-04-02` `runtime complete tail closure / Stage 3` 补充：shared writer serialization 已正式落在 `EnvironmentService / EnvironmentLeaseService` 的 `shared-writer` lease front-door；`TaskDelegationService` 在 writer delegation 上会显式 consult 该 lease，而 `ActorWorker` 与 direct delegation execute path 则统一走 `kernel/child_run_shell.py` 做 acquire / heartbeat / release，不再各自维护第二套 writer cleanup 分支
 
 ---
 
@@ -851,7 +854,10 @@
 - `/skills` 与 `/mcp` 最终不应继续作为平行一级能力接口
 - `/capabilities` 已成为统一能力读面，并已承接 `tool / skill / MCP / system` execute；toggle/delete 也已进入 kernel-governed write，confirm-risk admission 会返回 `decision_request_id`
 - `SRK` 当前已经拥有持久化 admit/risk/decision/evidence 闭环，并已接管 channels / cron / heartbeat 的 ingress；`system:dispatch_query` / `system:dispatch_command` 已改为 `CapabilityService -> KernelTurnExecutor -> KernelQueryExecutionService` 的 kernel-owned 执行链，direct `/api/agent/process` 也已直连本地 kernel ingress，`AgentRunner` 宿主壳已在 `V3-B4` 删除
-- `EnvironmentService` 已持久化 `EnvironmentMount / SessionMount` 的 `lease_status / lease_owner / lease_token / lease_acquired_at / lease_expires_at / live_handle_ref`，并具备 `acquire / heartbeat / release / reap` 生命周期；当前下一正式补齐项已明确为 shared `Surface Host Contract`、browser `Site Contract`、Windows `Desktop App Contract`、`Seat Runtime / Host Companion Session / Workspace Graph / Host Event`，以及对应的宿主恢复/交接策略
+- `EnvironmentService` 已持久化 `EnvironmentMount / SessionMount` 的 `lease_status / lease_owner / lease_token / lease_acquired_at / lease_expires_at / live_handle_ref`，并具备 `acquire / heartbeat / release / reap` 生命周期；`2026-04-02` 起 shared writer serialization 也已正式收口到同一 lease plane（`shared-writer` front-door + child-run shell），不再只靠 delegation/runtime heuristics 猜测冲突；当前下一正式补齐项已明确为 shared `Surface Host Contract`、browser `Site Contract`、Windows `Desktop App Contract`、`Seat Runtime / Host Companion Session / Workspace Graph / Host Event`，以及对应的宿主恢复/交接策略
+- `2026-04-02` 起 `src/copaw/compiler/planning/` 已成为正式 planning sidecar slice；`GoalService / IndustryService / PredictionService` 现统一消费 `strategy compiler -> cycle planner -> assignment planner -> report replan` 链路，`assignment_plan_envelope / cycle formal_planning / prediction planning overlap / runtime main_brain_planning` 都落在同一条 sidecar 可见链上，而不再由各自服务维护一套 shallow local planning 壳
+- `2026-04-02` 补充：`run_operating_cycle(force=True, backlog_item_ids=...)` 现在会绕过 active-cycle gate，开启 dedicated formal-planned cycle，而不是把 scoped backlog 偷塞回当前 active cycle；这条规则用于保持 report/cognitive continuity 干净，同时不改变 `StrategyMemory -> OperatingLane -> BacklogItem -> OperatingCycle -> Assignment -> AgentReport` 的真相链
+- `2026-04-02` 补充：`CapabilityService` 的 config front-door 仍默认经 `load_config/save_config` 收口，但现在也允许显式注入 config I/O，用于隔离 runtime/test shell，不再把所有 system config mutation 强绑到同一进程级路径
 - `/goals` 已成为后端一级对象接口，Goal detail 正式只通过 `/goals/{id}/detail` 落地；`/api/runtime-center/goals/{id}` alias 已退役，Agent Workbench 与 Runtime Center 都已接入稳定对象深链路；compiler 也已把 `compiler/task_seed/evidence_refs` 与 learning feedback metadata 持久化到 state-backed tasks
 - `/runtime-center/decisions/*` 已成为统一的 DecisionRequest 读写治理面；detail 已纯读，review/approve/reject 为显式动作，且 Runtime Center 已补齐 governance / recovery / automation 正式工作面
 - `/runtime-center/learning/*` 已经成为当前 proposal/patch/growth 读面，且读取已统一走共享 `LearningService`；`capability / profile / role / plan` patch 已可通过持久化 override executor 产生真实副作用，patch/growth detail 也已显式挂上 `goal/task/agent/evidence` 关联，并会反哺下一轮 compile feedback context

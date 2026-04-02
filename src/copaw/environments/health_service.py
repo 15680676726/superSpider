@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import TYPE_CHECKING
 
 from .models import SessionMount
@@ -13,6 +14,9 @@ if TYPE_CHECKING:
 
 class EnvironmentHealthService:
     """Focused collaborator for environment/session detail surfaces."""
+
+    _HOST_LABEL_WHITESPACE_RE = re.compile(r"\s+")
+    _HOST_LABEL_CONTROL_RE = re.compile(r"[\r\n\t]+")
 
     _HOST_EVENT_TOPICS = {
         "session",
@@ -942,11 +946,29 @@ class EnvironmentHealthService:
             host_companion_session.get("continuity_status"),
         )
         blocker_event = self._blocking_host_event(host_event_summary)
-        window_anchor_summary = self._first_string(
-            session_metadata.get("window_anchor_summary"),
-            mount_metadata.get("window_anchor_summary"),
-            runtime_descriptor.get("window_anchor_summary"),
-            live_descriptor.get("window_anchor_summary"),
+        window_anchor_summary = self._sanitize_window_anchor_summary(
+            self._first_string(
+                session_metadata.get("window_anchor_summary"),
+                mount_metadata.get("window_anchor_summary"),
+                runtime_descriptor.get("window_anchor_summary"),
+                live_descriptor.get("window_anchor_summary"),
+            ),
+        )
+        app_identity = self._sanitize_prompt_facing_host_label(
+            self._first_string(
+                session_metadata.get("app_identity"),
+                mount_metadata.get("app_identity"),
+                runtime_descriptor.get("app_identity"),
+                live_descriptor.get("app_identity"),
+                session_metadata.get("app_id"),
+                mount_metadata.get("app_id"),
+                runtime_descriptor.get("app_id"),
+                live_descriptor.get("app_id"),
+                session_metadata.get("app_name"),
+                mount_metadata.get("app_name"),
+                runtime_descriptor.get("app_name"),
+                live_descriptor.get("app_name"),
+            ),
         )
         current_gap_or_blocker = self._first_string(
             session_metadata.get("current_gap_or_blocker"),
@@ -972,20 +994,7 @@ class EnvironmentHealthService:
             "is_projection": True,
             "environment_id": getattr(mount, "id", None) if mount is not None else None,
             "session_mount_id": session.id if session is not None else None,
-            "app_identity": self._first_string(
-                session_metadata.get("app_identity"),
-                mount_metadata.get("app_identity"),
-                runtime_descriptor.get("app_identity"),
-                live_descriptor.get("app_identity"),
-                session_metadata.get("app_id"),
-                mount_metadata.get("app_id"),
-                runtime_descriptor.get("app_id"),
-                live_descriptor.get("app_id"),
-                session_metadata.get("app_name"),
-                mount_metadata.get("app_name"),
-                runtime_descriptor.get("app_name"),
-                live_descriptor.get("app_name"),
-            ),
+            "app_identity": app_identity,
             "window_scope": self._first_string(
                 session_metadata.get("window_scope"),
                 mount_metadata.get("window_scope"),
@@ -1325,6 +1334,10 @@ class EnvironmentHealthService:
     ) -> dict[str, object]:
         mount_metadata = self._mapping(getattr(mount, "metadata", None))
         session_metadata = self._mapping(session.metadata if session is not None else None)
+        bridge_registration = self._build_bridge_registration_projection(
+            session_metadata,
+            mount_metadata,
+        )
         active_surface_mix = self._string_list(
             session_metadata.get("active_surface_mix"),
         ) or self._string_list(mount_metadata.get("active_surface_mix"))
@@ -1383,6 +1396,7 @@ class EnvironmentHealthService:
             "active_surface_mix": active_surface_mix,
             "status": status,
             "occupancy_state": occupancy_state,
+            "bridge_registration": bridge_registration,
             "candidate_seat_refs": candidate_seat_refs,
             "candidate_seats": candidate_seats,
             "selected_seat_ref": selected_seat_ref,
@@ -1680,6 +1694,16 @@ class EnvironmentHealthService:
         recovery: dict[str, object],
         host_contract: dict[str, object],
     ) -> dict[str, object]:
+        mount_metadata = self._mapping(getattr(mount, "metadata", None))
+        session_metadata = self._mapping(session.metadata if session is not None else None)
+        live_handle_mapping = self._mapping(live_handle)
+        live_descriptor = self._mapping(live_handle_mapping.get("descriptor"))
+        bridge_registration = self._build_bridge_registration_projection(
+            session_metadata,
+            mount_metadata,
+            live_handle_mapping,
+            live_descriptor,
+        )
         if session is None:
             return {
                 "projection_kind": "host_companion_session_projection",
@@ -1688,6 +1712,7 @@ class EnvironmentHealthService:
                 "environment_id": getattr(mount, "id", None) if mount is not None else None,
                 "continuity_status": "no-session",
                 "continuity_source": "none",
+                "bridge_registration": bridge_registration,
                 "lease_runtime": {},
                 "locality": {
                     "same_host": False,
@@ -1729,6 +1754,7 @@ class EnvironmentHealthService:
             "user_id": session.user_id,
             "continuity_status": status,
             "continuity_source": continuity_source,
+            "bridge_registration": bridge_registration,
             "lease_status": session.lease_status,
             "lease_owner": session.lease_owner,
             "lease_runtime": {
@@ -3373,6 +3399,57 @@ class EnvironmentHealthService:
                 return value
         return None
 
+    def _first_int(self, *values: object) -> int | None:
+        for value in values:
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str):
+                normalized = value.strip()
+                if normalized.isdigit():
+                    return int(normalized)
+        return None
+
+    def _sanitize_prompt_facing_host_label(
+        self,
+        value: object,
+        *,
+        max_length: int = 80,
+    ) -> str | None:
+        normalized = self._first_string(value)
+        if normalized is None:
+            return None
+        sanitized = self._HOST_LABEL_CONTROL_RE.sub(" ", normalized)
+        sanitized = sanitized.replace("`", " ")
+        sanitized = sanitized.replace("<", " ")
+        sanitized = sanitized.replace(">", " ")
+        sanitized = sanitized.replace("|", " ")
+        sanitized = self._HOST_LABEL_WHITESPACE_RE.sub(" ", sanitized).strip()
+        if not sanitized:
+            return None
+        if len(sanitized) > max_length:
+            sanitized = sanitized[:max_length].rstrip()
+        return sanitized or None
+
+    def _sanitize_window_anchor_summary(self, value: object) -> str | None:
+        normalized = self._first_string(value)
+        if normalized is None:
+            return None
+        preserved = normalized.replace(" > ", "\u0000gt\u0000")
+        preserved = self._HOST_LABEL_CONTROL_RE.sub(" ", preserved)
+        preserved = preserved.replace("`", " ")
+        preserved = preserved.replace("<", " ")
+        preserved = preserved.replace(">", " ")
+        preserved = preserved.replace("|", " ")
+        preserved = preserved.replace("\u0000gt\u0000", " > ")
+        sanitized = self._HOST_LABEL_WHITESPACE_RE.sub(" ", preserved).strip()
+        if not sanitized:
+            return None
+        if len(sanitized) > 160:
+            sanitized = sanitized[:160].rstrip()
+        return sanitized or None
+
     def _normalize_process_id(self, value: object) -> int | None:
         return self._service._lease_service.normalize_process_id(value)
 
@@ -3412,6 +3489,56 @@ class EnvironmentHealthService:
         if merged:
             return merged
         return self._merge_string_lists(*fallback_sources)
+
+    def _build_bridge_registration_projection(
+        self,
+        *sources: object,
+    ) -> dict[str, object]:
+        mappings = [self._mapping(source) for source in sources]
+        projection: dict[str, object] = {
+            "worker_type": self._first_string(
+                *(mapping.get("worker_type") for mapping in mappings),
+            ),
+            "max_sessions": self._first_int(
+                *(mapping.get("max_sessions") for mapping in mappings),
+            ),
+            "spawn_mode": self._first_string(
+                *(mapping.get("spawn_mode") for mapping in mappings),
+            ),
+            "reuse_environment_id": self._first_string(
+                *(mapping.get("reuse_environment_id") for mapping in mappings),
+            ),
+        }
+        optional_values = {
+            "bridge_work_id": self._first_string(
+                *(mapping.get("bridge_work_id") for mapping in mappings),
+            ),
+            "bridge_work_status": self._first_string(
+                *(mapping.get("bridge_work_status") for mapping in mappings),
+            ),
+            "bridge_heartbeat_at": self._first_string(
+                *(mapping.get("bridge_heartbeat_at") for mapping in mappings),
+            ),
+            "bridge_session_id": self._first_string(
+                *(mapping.get("bridge_session_id") for mapping in mappings),
+            ),
+            "bridge_stopped_at": self._first_string(
+                *(mapping.get("bridge_stopped_at") for mapping in mappings),
+            ),
+            "bridge_stop_mode": self._first_string(
+                *(mapping.get("bridge_stop_mode") for mapping in mappings),
+            ),
+            "workspace_trusted": self._first_bool(
+                *(mapping.get("workspace_trusted") for mapping in mappings),
+            ),
+            "elevated_auth_state": self._first_string(
+                *(mapping.get("elevated_auth_state") for mapping in mappings),
+            ),
+        }
+        for key, value in optional_values.items():
+            if value is not None:
+                projection[key] = value
+        return projection
 
     def _host_event_latest(
         self,

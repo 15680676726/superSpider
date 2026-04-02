@@ -101,6 +101,99 @@ class _QueryExecutionRuntimeMixin(
         self._resident_agent_cache_lock = asyncio.Lock()
         self._interactive_actor_locks: dict[str, asyncio.Lock] = {}
 
+    @staticmethod
+    def _set_request_runtime_value(request: Any, name: str, value: Any) -> None:
+        try:
+            object.__setattr__(request, name, value)
+            return
+        except Exception:
+            pass
+        try:
+            setattr(request, name, value)
+        except Exception:
+            logger.debug("Failed to set runtime request attribute '%s'", name)
+
+    def _update_request_main_brain_runtime_context(
+        self,
+        *,
+        request: Any,
+        **patch: Any,
+    ) -> dict[str, Any]:
+        existing = getattr(request, "_copaw_main_brain_runtime_context", None)
+        merged: dict[str, Any]
+        if isinstance(existing, dict):
+            merged = dict(existing)
+        else:
+            merged = {}
+        for key, value in patch.items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+        self._set_request_runtime_value(
+            request,
+            "_copaw_main_brain_runtime_context",
+            merged,
+        )
+        return merged
+
+    async def _persist_pre_stream_acceptance_boundary(
+        self,
+        *,
+        request: Any,
+        agent: Any,
+        owner_agent_id: str,
+        kernel_task_id: str | None,
+        session_id: str,
+        user_id: str,
+        channel: str,
+        execution_context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        accepted_persistence: dict[str, Any] = {
+            "status": "pending",
+            "session_state_saved": False,
+        }
+        checkpoint = self._record_query_checkpoint(
+            agent_id=owner_agent_id,
+            task_id=kernel_task_id,
+            session_id=session_id,
+            user_id=user_id,
+            conversation_thread_id=session_id,
+            channel=channel,
+            phase="query-accepted",
+            checkpoint_kind="worker-step",
+            status="ready",
+            summary="已持久化 accepted 边界，准备进入长执行",
+            execution_context=execution_context,
+            snapshot_payload={
+                "accepted_boundary": True,
+            },
+        )
+        checkpoint_id = getattr(checkpoint, "id", None)
+        if checkpoint_id is not None:
+            accepted_persistence["checkpoint_id"] = checkpoint_id
+        try:
+            await self._session_backend.save_session_state(
+                session_id=session_id,
+                user_id=user_id,
+                agent=agent,
+            )
+        except Exception as exc:
+            accepted_persistence["status"] = "failed"
+            accepted_persistence["message"] = str(exc).strip() or "Failed to persist accepted session state."
+            logger.exception(
+                "Failed to persist accepted session state for '%s'",
+                session_id,
+            )
+        else:
+            accepted_persistence["status"] = "persisted"
+            accepted_persistence["session_state_saved"] = True
+        self._update_request_main_brain_runtime_context(
+            request=request,
+            accepted_persistence=accepted_persistence,
+        )
+        return accepted_persistence
+
     def resolve_request_owner_agent_id(self, *, request: Any) -> str:
         owner_agent_id, _profile = self._resolve_query_agent_profile(request=request)
         return owner_agent_id
@@ -509,6 +602,16 @@ class _QueryExecutionRuntimeMixin(
                 },
             )
             agent.rebuild_sys_prompt()
+            await self._persist_pre_stream_acceptance_boundary(
+                request=request,
+                agent=agent,
+                owner_agent_id=owner_agent_id,
+                kernel_task_id=kernel_task_id,
+                session_id=session_id,
+                user_id=user_id,
+                channel=channel,
+                execution_context=execution_context,
+            )
 
             heartbeat = self._build_query_lease_heartbeat(
                 session_lease=lease,
@@ -1769,6 +1872,9 @@ class _QueryExecutionRuntimeMixin(
         )
         if intake_contract is None:
             return None, None
+        commit_outcome: dict[str, Any] = {
+            "status": "not_required",
+        }
         chat_writeback_summary = None
         if intake_contract.has_active_writeback_plan:
             applier = getattr(service, "apply_execution_chat_writeback", None)
@@ -1792,11 +1898,29 @@ class _QueryExecutionRuntimeMixin(
                     if asyncio.iscoroutine(result):
                         result = await result
                     chat_writeback_summary = result if isinstance(result, dict) else None
+                    commit_outcome = {
+                        "status": "committed",
+                    }
                 except Exception:
+                    commit_outcome = {
+                        "status": "failed",
+                        "code": "WRITEBACK_FAILED",
+                        "message": "Failed to persist execution-core chat writeback.",
+                    }
                     logger.exception(
                         "Failed to persist execution-core chat writeback for industry '%s'",
                         industry_instance_id,
                     )
+            else:
+                commit_outcome = {
+                    "status": "failed",
+                    "code": "WRITEBACK_UNAVAILABLE",
+                    "message": "Structured chat writeback is unavailable in the current runtime.",
+                }
+        self._update_request_main_brain_runtime_context(
+            request=request,
+            commit_outcome=commit_outcome,
+        )
         industry_kickoff_summary = None
         if intake_contract.should_kickoff:
             kickoff = getattr(service, "kickoff_execution_from_chat", None)

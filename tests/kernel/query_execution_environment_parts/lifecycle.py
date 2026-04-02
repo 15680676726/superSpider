@@ -74,7 +74,10 @@ def test_query_execution_service_manages_environment_lease_lifecycle(
 
     assert len(messages) == 2
     assert session_backend.loaded == [("sess-1", "user-1")]
-    assert session_backend.saved == [("sess-1", "user-1")]
+    assert session_backend.saved == [
+        ("sess-1", "user-1"),
+        ("sess-1", "user-1"),
+    ]
     assert heartbeat_calls == ["session:console:sess-1", "session:console:sess-1"]
     assert release_calls == ["session:console:sess-1"]
 
@@ -83,6 +86,62 @@ def test_query_execution_service_manages_environment_lease_lifecycle(
     assert session_mount.lease_status == "released"
     assert session_mount.live_handle_ref is None
     assert session_mount.lease_owner == "copaw-agent-runner"
+
+
+def test_query_execution_service_persists_session_state_before_streaming_begins(
+    monkeypatch,
+) -> None:
+    _FakeAgent.created.clear()
+    monkeypatch.setattr(query_execution_module, "CoPawAgent", _FakeAgent)
+    monkeypatch.setattr(
+        query_execution_module,
+        "load_config",
+        lambda: SimpleNamespace(
+            agents=SimpleNamespace(
+                running=SimpleNamespace(max_iters=1, max_input_length=512),
+            ),
+        ),
+    )
+
+    session_backend = _FakeSessionBackend()
+
+    async def _asserting_stream_printing_messages(*, agents, coroutine_task):
+        _ = agents, coroutine_task
+        assert session_backend.saved == [("sess-preaccept", "user-preaccept")]
+        yield SimpleNamespace(id="msg-accepted"), True
+
+    monkeypatch.setattr(
+        query_execution_module,
+        "stream_printing_messages",
+        _asserting_stream_printing_messages,
+    )
+
+    service = KernelQueryExecutionService(
+        session_backend=session_backend,
+    )
+
+    async def _run():
+        payload = []
+        async for item in service.execute_stream(
+            msgs=[SimpleNamespace(get_text_content=lambda: "hello")],
+            request=SimpleNamespace(
+                session_id="sess-preaccept",
+                user_id="user-preaccept",
+                channel="console",
+            ),
+            kernel_task_id="chat:preaccept",
+        ):
+            payload.append(item)
+        return payload
+
+    messages = asyncio.run(_run())
+
+    assert len(messages) == 1
+    assert session_backend.loaded == [("sess-preaccept", "user-preaccept")]
+    assert session_backend.saved == [
+        ("sess-preaccept", "user-preaccept"),
+        ("sess-preaccept", "user-preaccept"),
+    ]
 
 
 def test_query_execution_service_returns_busy_message_when_actor_runtime_is_already_leased(
@@ -270,6 +329,8 @@ def test_query_execution_service_reuses_resident_agent_for_same_session(
     assert len(_FakeAgent.created) == 1
     assert session_backend.loaded == [("resident-sess", "resident-user")]
     assert session_backend.saved == [
+        ("resident-sess", "resident-user"),
+        ("resident-sess", "resident-user"),
         ("resident-sess", "resident-user"),
         ("resident-sess", "resident-user"),
     ]

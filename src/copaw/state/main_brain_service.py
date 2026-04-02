@@ -862,13 +862,12 @@ class AgentReportService:
             recommendation=None,
             needs_followup=needs_followup,
             followup_reason=followup_reason,
-            status="recorded",
             result=result,
             risk_level=_string(runtime.risk_level if runtime is not None else None) or task.current_risk_level,
             evidence_ids=list(dict.fromkeys(evidence_ids)),
             decision_ids=list(dict.fromkeys(decision_ids)),
-            processed=False,
-            processed_at=None,
+            processed=bool(existing.processed) if existing is not None else False,
+            processed_at=existing.processed_at if existing is not None else None,
             metadata={
                 "task_type": task.task_type,
                 "report_back_mode": task.report_back_mode,
@@ -877,6 +876,11 @@ class AgentReportService:
             },
             created_at=existing.created_at if existing is not None else _utc_now(),
             updated_at=_utc_now(),
+            status=(
+                existing.status
+                if existing is not None and existing.processed
+                else "recorded"
+            ),
         )
         stored = self._repository.upsert_report(report)
         retain = getattr(self._memory_retain_service, "retain_agent_report", None)

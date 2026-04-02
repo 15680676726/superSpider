@@ -7,6 +7,12 @@ from ...config.config import HeartbeatConfig
 from ..crons.models import CronJobSpec
 from ..runtime_center import RuntimeConversationPayload, apply_runtime_center_surface_headers
 from .runtime_center_shared import (
+    BridgeEnvironmentDeregisterRequest,
+    BridgeSessionArchiveRequest,
+    BridgeSessionWorkAckRequest,
+    BridgeSessionWorkHeartbeatRequest,
+    BridgeSessionWorkReconnectRequest,
+    BridgeSessionWorkStopRequest,
     GoalCompileActionRequest,
     SessionForceReleaseRequest,
     _call_runtime_query_method,
@@ -24,6 +30,12 @@ from .runtime_center_shared import (
 )
 
 __all__ = [
+    "BridgeEnvironmentDeregisterRequest",
+    "BridgeSessionArchiveRequest",
+    "BridgeSessionWorkAckRequest",
+    "BridgeSessionWorkHeartbeatRequest",
+    "BridgeSessionWorkReconnectRequest",
+    "BridgeSessionWorkStopRequest",
     "CronJobSpec",
     "GoalCompileActionRequest",
     "HTTPException",

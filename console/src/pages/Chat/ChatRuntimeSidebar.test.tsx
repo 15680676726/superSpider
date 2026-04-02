@@ -26,6 +26,7 @@ describe("ChatRuntimeSidebar", () => {
         runtimeWaitDescription={null}
         runtimeWaitSeconds={0}
         runtimeWaitState={null}
+        runtimeLifecycleState={null}
       />,
     );
 
@@ -58,6 +59,7 @@ describe("ChatRuntimeSidebar", () => {
         runtimeWaitDescription={null}
         runtimeWaitSeconds={0}
         runtimeWaitState={null}
+        runtimeLifecycleState={null}
       />,
     );
 
@@ -81,5 +83,37 @@ describe("ChatRuntimeSidebar", () => {
         "targets=strategy,lane,backlog,immediate-goal | role=execution-core | match_signals=2",
       ),
     ).toBeTruthy();
+  });
+
+  it("shows runtime lifecycle tail state after the reply stream completes", () => {
+    render(
+      <ChatRuntimeSidebar
+        approvalButtonLabel="瀹℃壒"
+        bindingLabel="Acme / 主脑"
+        onOpenGovernanceApprovals={vi.fn()}
+        runtimeFallbackLabel={null}
+        runtimeHealthNotice={null}
+        runtimeModelHint="当前模型"
+        runtimeModelLabel="openai/gpt-5"
+        threadKindLabel="Thread: control-thread"
+        threadKindHint="session_kind=industry-control-thread"
+        focusLabel="Focus: Launch runtime center"
+        focusHint="kind=goal | id=goal-1"
+        writebackLabel="Writeback: strategy/backlog"
+        writebackHint="targets=strategy,backlog"
+        runtimeWaitDescription={null}
+        runtimeWaitSeconds={0}
+        runtimeWaitState={null}
+        runtimeLifecycleState={{
+          phase: "commit_started",
+          title: "提交中",
+          description: "主脑回复已结束，正在提交执行结果。",
+          tone: "busy",
+          updatedAt: Date.now(),
+        }}
+      />,
+    );
+
+    expect(screen.getByText("提交中")).toBeTruthy();
   });
 });

@@ -282,6 +282,104 @@ class EnvironmentService:
             validate_token=validate_token,
         )
 
+    def ack_bridge_session_work(
+        self,
+        session_mount_id: str,
+        *,
+        lease_token: str,
+        work_id: str,
+        bridge_session_id: str | None = None,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+        workspace_trusted: bool | None = None,
+        elevated_auth_state: str | None = None,
+    ) -> SessionMount:
+        return self._lease_service.ack_bridge_session_work(
+            session_mount_id,
+            lease_token=lease_token,
+            work_id=work_id,
+            bridge_session_id=bridge_session_id,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+            workspace_trusted=workspace_trusted,
+            elevated_auth_state=elevated_auth_state,
+        )
+
+    def heartbeat_bridge_session_work(
+        self,
+        session_mount_id: str,
+        *,
+        lease_token: str,
+        work_id: str,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+    ) -> SessionMount:
+        return self._lease_service.heartbeat_bridge_session_work(
+            session_mount_id,
+            lease_token=lease_token,
+            work_id=work_id,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+        )
+
+    def reconnect_bridge_session_work(
+        self,
+        session_mount_id: str,
+        *,
+        lease_token: str,
+        work_id: str,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+    ) -> SessionMount:
+        return self._lease_service.reconnect_bridge_session_work(
+            session_mount_id,
+            lease_token=lease_token,
+            work_id=work_id,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+        )
+
+    def stop_bridge_session_work(
+        self,
+        session_mount_id: str,
+        *,
+        work_id: str,
+        force: bool = False,
+        lease_token: str | None = None,
+        reason: str | None = None,
+    ) -> SessionMount:
+        return self._lease_service.stop_bridge_session_work(
+            session_mount_id,
+            work_id=work_id,
+            force=force,
+            lease_token=lease_token,
+            reason=reason,
+        )
+
+    def archive_bridge_session(
+        self,
+        session_mount_id: str,
+        *,
+        lease_token: str | None = None,
+        reason: str | None = None,
+    ) -> SessionMount | None:
+        return self._lease_service.archive_bridge_session(
+            session_mount_id,
+            lease_token=lease_token,
+            reason=reason,
+        )
+
+    def deregister_bridge_environment(
+        self,
+        environment_id: str,
+        *,
+        reason: str | None = None,
+    ) -> EnvironmentMount | None:
+        return self._lease_service.deregister_bridge_environment(
+            environment_id,
+            reason=reason,
+        )
+
     def force_release_session_lease(
         self,
         session_mount_id: str,
@@ -329,6 +427,40 @@ class EnvironmentService:
             metadata=metadata,
         )
 
+    def acquire_shared_writer_lease(
+        self,
+        *,
+        writer_lock_scope: str,
+        owner: str,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> SessionMount:
+        return self._lease_service.acquire_shared_writer_lease(
+            writer_lock_scope=writer_lock_scope,
+            owner=owner,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+            metadata=metadata,
+        )
+
+    def heartbeat_shared_writer_lease(
+        self,
+        lease_id: str,
+        *,
+        lease_token: str,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> SessionMount:
+        return self._lease_service.heartbeat_shared_writer_lease(
+            lease_id,
+            lease_token=lease_token,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+            metadata=metadata,
+        )
+
     def release_resource_slot_lease(
         self,
         *,
@@ -339,6 +471,23 @@ class EnvironmentService:
         validate_token: bool = True,
     ) -> SessionMount | None:
         return self._lease_service.release_resource_slot_lease(
+            lease_id=lease_id,
+            lease_token=lease_token,
+            reason=reason,
+            release_status=release_status,
+            validate_token=validate_token,
+        )
+
+    def release_shared_writer_lease(
+        self,
+        *,
+        lease_id: str,
+        lease_token: str | None = None,
+        reason: str | None = None,
+        release_status: str = "released",
+        validate_token: bool = True,
+    ) -> SessionMount | None:
+        return self._lease_service.release_shared_writer_lease(
             lease_id=lease_id,
             lease_token=lease_token,
             reason=reason,
@@ -366,6 +515,22 @@ class EnvironmentService:
         return self._lease_service.get_resource_slot_lease(
             scope_type=scope_type,
             scope_value=scope_value,
+        )
+
+    def list_shared_writer_leases(
+        self,
+        *,
+        limit: int | None = None,
+    ) -> list[SessionMount]:
+        return self._lease_service.list_shared_writer_leases(limit=limit)
+
+    def get_shared_writer_lease(
+        self,
+        *,
+        writer_lock_scope: str,
+    ) -> SessionMount | None:
+        return self._lease_service.get_shared_writer_lease(
+            writer_lock_scope=writer_lock_scope,
         )
 
     def reap_expired_leases(

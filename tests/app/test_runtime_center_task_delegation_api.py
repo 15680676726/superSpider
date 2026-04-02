@@ -5,9 +5,16 @@ import asyncio
 from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.app.runtime_center.state_query import RuntimeCenterStateQueryService
+from copaw.environments import (
+    EnvironmentRegistry,
+    EnvironmentRepository,
+    EnvironmentService,
+    SessionMountRepository,
+)
 from copaw.evidence import EvidenceLedger
 from copaw.kernel import (
     ActorMailboxService,
@@ -16,6 +23,7 @@ from copaw.kernel import (
     KernelResult,
     TaskDelegationService,
 )
+from copaw.kernel.delegation_service import DelegationError
 from copaw.kernel.persistence import decode_kernel_task_metadata
 from copaw.kernel.persistence import KernelTaskStore
 from copaw.state.agent_experience_service import AgentExperienceMemoryService
@@ -351,6 +359,91 @@ def test_delegation_service_execute_true_still_lands_mailbox(tmp_path) -> None:
     )
     assert len(task_memory) == 1
     assert task_memory[0].document_id == f"memory:task:{result['child_task_id']}"
+
+
+def test_delegation_service_blocks_shared_writer_scope_held_by_other_agent(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    evidence_ledger = EvidenceLedger(tmp_path / "evidence.db")
+    task_repository = SqliteTaskRepository(store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(store)
+    runtime_frame_repository = SqliteRuntimeFrameRepository(store)
+    decision_repository = SqliteDecisionRequestRepository(store)
+    env_repository = EnvironmentRepository(store)
+    session_repository = SessionMountRepository(store)
+    environment_service = EnvironmentService(
+        registry=EnvironmentRegistry(
+            repository=env_repository,
+            session_repository=session_repository,
+        ),
+        lease_ttl_seconds=120,
+    )
+    environment_service.set_session_repository(session_repository)
+
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-parent",
+            goal_id="goal-1",
+            title="Parent task",
+            summary="Delegate the work.",
+            task_type="system:dispatch_query",
+            status="running",
+            owner_agent_id="execution-core-agent",
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-parent",
+            runtime_status="active",
+            current_phase="executing",
+            active_environment_id="desktop-app:excel:weekly-report",
+            last_owner_agent_id="execution-core-agent",
+        ),
+    )
+
+    task_store = KernelTaskStore(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        runtime_frame_repository=runtime_frame_repository,
+        decision_request_repository=decision_repository,
+        evidence_ledger=evidence_ledger,
+    )
+    dispatcher = KernelDispatcher(
+        task_store=task_store,
+        capability_service=_FakeCapabilityService(),
+    )
+    environment_service.acquire_shared_writer_lease(
+        writer_lock_scope="workbook:weekly-report",
+        owner="other-worker",
+        metadata={"environment_ref": "desktop-app:excel:weekly-report"},
+    )
+    service = TaskDelegationService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        kernel_dispatcher=dispatcher,
+        evidence_ledger=evidence_ledger,
+        environment_service=environment_service,
+    )
+
+    with pytest.raises(DelegationError) as exc_info:
+        asyncio.run(
+            service.delegate_task(
+                "task-parent",
+                title="Writer follow-up",
+                owner_agent_id="execution-core-agent",
+                target_agent_id="worker",
+                prompt_text="Continue the Excel writer step.",
+                execute=False,
+                channel="console",
+                access_mode="writer",
+                lease_class="exclusive-writer",
+                writer_lock_scope="workbook:weekly-report",
+            ),
+        )
+
+    assert exc_info.value.code == "environment_conflict"
+    assert "workbook:weekly-report" in str(exc_info.value)
 
 
 def test_delegation_service_execute_true_uses_supervisor_owned_completion_cleanup(

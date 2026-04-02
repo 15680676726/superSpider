@@ -1167,6 +1167,158 @@ def test_runtime_center_environment_action_endpoints() -> None:
     assert execute_replay.status_code == 404
 
 
+def test_runtime_center_bridge_lifecycle_endpoints_drive_canonical_environment_contract(
+    tmp_path,
+) -> None:
+    from copaw.app.runtime_events import RuntimeEventBus
+    from copaw.environments import (
+        EnvironmentRegistry,
+        EnvironmentRepository,
+        EnvironmentService,
+        SessionMountRepository,
+    )
+
+    app = build_runtime_center_app()
+    state_store = SQLiteStateStore(tmp_path / "bridge-runtime-center.sqlite3")
+    environment_repository = EnvironmentRepository(state_store)
+    session_repository = SessionMountRepository(state_store)
+    registry = EnvironmentRegistry(
+        repository=environment_repository,
+        session_repository=session_repository,
+    )
+    environment_service = EnvironmentService(registry=registry)
+    environment_service.set_session_repository(session_repository)
+    runtime_event_bus = RuntimeEventBus(max_events=20)
+    environment_service.set_runtime_event_bus(runtime_event_bus)
+    app.state.environment_service = environment_service
+    app.state.runtime_event_bus = runtime_event_bus
+
+    lease = environment_service.acquire_session_lease(
+        channel="web",
+        session_id="main",
+        owner="ops-agent",
+        metadata={
+            "environment_ref": "session:web:main",
+            "worker_type": "cowork",
+            "max_sessions": 4,
+            "spawn_mode": "same-dir",
+            "reuse_environment_id": "env:bridge:prior",
+        },
+        handle={"bridge": "worker"},
+    )
+
+    client = TestClient(app)
+
+    ack = client.post(
+        f"/runtime-center/sessions/{lease.id}/bridge/ack",
+        json={
+            "lease_token": lease.lease_token,
+            "work_id": "work-1",
+            "bridge_session_id": "bridge-session-1",
+            "workspace_trusted": True,
+            "elevated_auth_state": "trusted-device",
+        },
+    )
+    assert ack.status_code == 200
+    assert ack.json()["metadata"]["bridge_work_status"] == "acknowledged"
+    assert ack.json()["metadata"]["bridge_session_id"] == "bridge-session-1"
+
+    heartbeat = client.post(
+        f"/runtime-center/sessions/{lease.id}/bridge/heartbeat",
+        json={
+            "lease_token": lease.lease_token,
+            "work_id": "work-1",
+        },
+    )
+    assert heartbeat.status_code == 200
+    assert heartbeat.json()["metadata"]["bridge_work_status"] == "running"
+
+    reconnect = client.post(
+        f"/runtime-center/sessions/{lease.id}/bridge/reconnect",
+        json={
+            "lease_token": lease.lease_token,
+            "work_id": "work-1",
+        },
+    )
+    assert reconnect.status_code == 200
+    assert reconnect.json()["metadata"]["bridge_work_status"] == "reconnecting"
+
+    stop = client.post(
+        f"/runtime-center/sessions/{lease.id}/bridge/stop",
+        json={
+            "work_id": "work-1",
+            "force": True,
+            "reason": "bridge supervisor stop",
+        },
+    )
+    assert stop.status_code == 200
+    assert stop.json()["metadata"]["bridge_work_status"] == "stopped"
+    assert stop.json()["metadata"]["bridge_stop_mode"] == "force"
+
+    session_detail = client.get(f"/runtime-center/sessions/{lease.id}")
+    assert session_detail.status_code == 200
+    detail_payload = session_detail.json()
+    assert detail_payload["host_companion_session"]["bridge_registration"] == {
+        "worker_type": "cowork",
+        "max_sessions": 4,
+        "spawn_mode": "same-dir",
+        "reuse_environment_id": "env:bridge:prior",
+        "bridge_work_id": "work-1",
+        "bridge_work_status": "stopped",
+        "bridge_heartbeat_at": detail_payload["host_companion_session"][
+            "bridge_registration"
+        ]["bridge_heartbeat_at"],
+        "bridge_session_id": "bridge-session-1",
+        "workspace_trusted": True,
+        "elevated_auth_state": "trusted-device",
+        "bridge_stopped_at": detail_payload["host_companion_session"][
+            "bridge_registration"
+        ]["bridge_stopped_at"],
+        "bridge_stop_mode": "force",
+    }
+    assert detail_payload["seat_runtime"]["bridge_registration"][
+        "bridge_work_status"
+    ] == "stopped"
+
+    archive = client.post(
+        f"/runtime-center/sessions/{lease.id}/bridge/archive",
+        json={
+            "lease_token": lease.lease_token,
+            "reason": "worker archived after completion",
+        },
+    )
+    assert archive.status_code == 200
+    assert archive.json()["status"] == "archived"
+    assert archive.json()["metadata"]["bridge_work_status"] == "archived"
+
+    deregister = client.post(
+        f"/runtime-center/environments/{lease.environment_id}/bridge/deregister",
+        json={"reason": "bridge worker stopped"},
+    )
+    assert deregister.status_code == 200
+    deregister_payload = deregister.json()
+    assert deregister_payload["status"] == "deregistered"
+    assert deregister_payload["metadata"]["bridge_environment_status"] == "deregistered"
+
+    session_after = client.get(f"/runtime-center/sessions/{lease.id}")
+    assert session_after.status_code == 200
+    assert session_after.json()["status"] == "deregistered"
+    assert (
+        session_after.json()["host_companion_session"]["bridge_registration"][
+            "bridge_work_status"
+        ]
+        == "deregistered"
+    )
+
+    event_names = [event.event_name for event in runtime_event_bus.list_events(limit=20)]
+    assert "session.bridge-work-acknowledged" in event_names
+    assert "session.bridge-work-heartbeat" in event_names
+    assert "session.bridge-work-reconnecting" in event_names
+    assert "session.bridge-work-stopped" in event_names
+    assert "session.bridge-session-archived" in event_names
+    assert "session.bridge-environment-deregistered" in event_names
+
+
 def test_runtime_center_patch_actions_are_first_class_routes(tmp_path) -> None:
     app = build_runtime_center_app()
     app.state.learning_service = FakeLearningService(

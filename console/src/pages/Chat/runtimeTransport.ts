@@ -9,6 +9,7 @@ import {
   localizeRuntimeChunk,
   localizeRuntimeError,
   type RuntimeHealthNotice,
+  type RuntimeLifecycleState,
   type RuntimeWaitState,
 } from "./runtimeDiagnostics";
 import {
@@ -49,6 +50,9 @@ interface CreateRuntimeTransportArgs {
   refreshThreadMediaAnalyses: (threadId?: string | null) => Promise<void> | void;
   getSelectedMediaAnalysisIds: () => string[];
   setRuntimeHealthNotice: (notice: RuntimeHealthNotice | null) => void;
+  setRuntimeLifecycleState?: (
+    state: RuntimeLifecycleState | null,
+  ) => void;
   setRuntimeWaitState: (state: RuntimeWaitState | null) => void;
   setShowModelPrompt: (show: boolean) => void;
   dispatchGovernanceDirty?: () => void;
@@ -57,6 +61,9 @@ interface CreateRuntimeTransportArgs {
 
 interface ParseRuntimeResponseChunkArgs {
   setRuntimeHealthNotice: (notice: RuntimeHealthNotice | null) => void;
+  setRuntimeLifecycleState?: (
+    state: RuntimeLifecycleState | null,
+  ) => void;
   setRuntimeWaitState: (state: RuntimeWaitState | null) => void;
   dispatchGovernanceDirty?: () => void;
   dispatchHumanAssistDirty?: () => void;
@@ -74,6 +81,13 @@ interface SessionAbortState {
 }
 
 const ACTIVE_MODELS_CACHE_TTL_MS = 30_000;
+const TERMINAL_RUNTIME_RESPONSE_STATUSES = new Set([
+  "completed",
+  "failed",
+  "canceled",
+  "rejected",
+  "incomplete",
+]);
 
 const RUNTIME_BIZ_PARAM_ALLOWLIST = new Set<string>([
   "requested_actions",
@@ -170,9 +184,13 @@ function beginRuntimeWait(
 
 function handleModelError(
   setRuntimeWaitState: (state: RuntimeWaitState | null) => void,
+  setRuntimeLifecycleState:
+    | ((state: RuntimeLifecycleState | null) => void)
+    | undefined,
   setShowModelPrompt: (show: boolean) => void,
 ): Response {
   setRuntimeWaitState(null);
+  setRuntimeLifecycleState?.(null);
   setShowModelPrompt(true);
   return new Response(
     JSON.stringify({
@@ -260,6 +278,7 @@ export function parseRuntimeResponseChunk(
   rawChunk: string,
   {
     setRuntimeHealthNotice,
+    setRuntimeLifecycleState,
     setRuntimeWaitState,
     dispatchGovernanceDirty,
     dispatchHumanAssistDirty,
@@ -269,12 +288,14 @@ export function parseRuntimeResponseChunk(
   const healthNotice = extractRuntimeHealthNotice(parsed);
   if (healthNotice) {
     setRuntimeWaitState(null);
+    setRuntimeLifecycleState?.(null);
     setRuntimeHealthNotice(healthNotice);
     return parsed;
   }
 
   if (hasRuntimeStartedResponding(parsed)) {
     setRuntimeWaitState(null);
+    setRuntimeLifecycleState?.(null);
     setRuntimeHealthNotice(null);
     return parsed;
   }
@@ -293,12 +314,299 @@ export function parseRuntimeResponseChunk(
       )
     ) {
       setRuntimeWaitState(null);
+      setRuntimeLifecycleState?.(null);
       dispatchGovernanceDirty?.();
       dispatchHumanAssistDirty?.();
     }
   }
 
   return parsed;
+}
+
+function resolveRuntimeLifecycleState(
+  eventName: string,
+  event: Record<string, unknown>,
+): RuntimeLifecycleState | null {
+  const payload =
+    event.payload && typeof event.payload === "object"
+      ? (event.payload as Record<string, unknown>)
+      : {};
+  const details =
+    payload.details && typeof payload.details === "object"
+      ? (payload.details as Record<string, unknown>)
+      : {};
+  const message =
+    typeof details.message === "string" && details.message.trim().length > 0
+      ? details.message.trim()
+      : typeof payload.message === "string" && payload.message.trim().length > 0
+        ? payload.message.trim()
+        : null;
+  switch (eventName) {
+    case "accepted":
+      return {
+        phase: "accepted",
+        title: "已接受",
+        description: "请求已进入运行主链，等待主脑开始响应。",
+        tone: "busy",
+        updatedAt: Date.now(),
+      };
+    case "commit_started":
+      return {
+        phase: "commit_started",
+        title: "提交中",
+        description: "主脑回复已结束，正在提交执行结果。",
+        tone: "busy",
+        updatedAt: Date.now(),
+      };
+    case "confirm_required":
+      return {
+        phase: "confirm_required",
+        title: "待确认",
+        description: message || "执行结果需要人工确认后才能继续提交。",
+        tone: "warning",
+        updatedAt: Date.now(),
+      };
+    case "committed":
+      return {
+        phase: "committed",
+        title: "已提交",
+        description: "执行结果已经写回运行主链。",
+        tone: "success",
+        updatedAt: Date.now(),
+      };
+    case "commit_failed": {
+      const localized = localizeRuntimeError(
+        details.raw_code ||
+          details.code ||
+          payload.code ||
+          "MODEL_RUNTIME_FAILED",
+        message || "Execution commit failed.",
+      );
+      return {
+        phase: "commit_failed",
+        title: "提交失败",
+        description: localized.description,
+        tone: "error",
+        updatedAt: Date.now(),
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+function extractSsePayload(block: string): string | null {
+  const lines = block
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.startsWith("data:"));
+  if (lines.length === 0) {
+    return null;
+  }
+  return lines.map((line) => line.slice(5).trimStart()).join("\n");
+}
+
+function parseSseJsonBlock(block: string): Record<string, unknown> | null {
+  const payload = extractSsePayload(block);
+  if (!payload) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(payload);
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isTerminalRuntimeResponseEvent(event: Record<string, unknown> | null): boolean {
+  if (!event || event.object !== "response") {
+    return false;
+  }
+  const status = String(event.status || "").toLowerCase();
+  return TERMINAL_RUNTIME_RESPONSE_STATUSES.has(status);
+}
+
+function isRuntimeSidecarEvent(event: Record<string, unknown> | null): boolean {
+  return Boolean(
+    event &&
+      typeof event.sidecar_event === "string" &&
+      event.sidecar_event.trim().length > 0,
+  );
+}
+
+async function forEachSseBlock(
+  stream: ReadableStream<Uint8Array>,
+  onBlock: (block: string) => Promise<boolean> | boolean,
+): Promise<void> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const pumpBuffer = async (): Promise<boolean> => {
+    while (true) {
+      const boundary = buffer.indexOf("\n\n");
+      if (boundary < 0) {
+        return true;
+      }
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const shouldContinue = await onBlock(block);
+      if (!shouldContinue) {
+        return false;
+      }
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        buffer += decoder.decode();
+        buffer = buffer.replace(/\r\n/g, "\n");
+        if (buffer.trim().length > 0) {
+          await onBlock(buffer);
+        }
+        return;
+      }
+      if (!value || value.byteLength <= 0) {
+        continue;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, "\n");
+      const shouldContinue = await pumpBuffer();
+      if (!shouldContinue) {
+        await reader.cancel();
+        return;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function consumeRuntimeSidecarEvent(
+  event: Record<string, unknown>,
+  {
+    setRuntimeHealthNotice,
+    setRuntimeLifecycleState,
+    setRuntimeWaitState,
+    dispatchGovernanceDirty,
+    dispatchHumanAssistDirty,
+  }: ParseRuntimeResponseChunkArgs,
+): void {
+  const eventName =
+    typeof event.sidecar_event === "string" ? event.sidecar_event.trim() : "";
+  if (!eventName) {
+    return;
+  }
+  const lifecycleState = resolveRuntimeLifecycleState(eventName, event);
+  if (eventName === "accepted") {
+    setRuntimeHealthNotice(null);
+    setRuntimeLifecycleState?.(lifecycleState);
+    return;
+  }
+  if (
+    eventName === "commit_started" ||
+    eventName === "committed" ||
+    eventName === "confirm_required" ||
+    eventName === "commit_failed"
+  ) {
+    setRuntimeWaitState(null);
+    setRuntimeLifecycleState?.(lifecycleState);
+    dispatchGovernanceDirty?.();
+    dispatchHumanAssistDirty?.();
+  }
+  if (eventName === "commit_failed") {
+    setRuntimeWaitState(null);
+    const payload =
+      event.payload && typeof event.payload === "object"
+        ? (event.payload as Record<string, unknown>)
+        : {};
+    const details =
+      payload.details && typeof payload.details === "object"
+        ? (payload.details as Record<string, unknown>)
+        : {};
+    const localized = localizeRuntimeError(
+      details.raw_code || details.code || payload.code || "MODEL_RUNTIME_FAILED",
+      details.message || payload.message || "Execution commit failed.",
+    );
+    setRuntimeHealthNotice({
+      type: localized.type,
+      title: localized.title,
+      description: localized.description,
+    });
+    return;
+  }
+}
+
+function splitRuntimeChatEventStream(
+  response: Response,
+  parserArgs: ParseRuntimeResponseChunkArgs,
+): Response {
+  const body = response.body;
+  if (
+    !body ||
+    typeof ReadableStream === "undefined" ||
+    typeof body.tee !== "function"
+  ) {
+    return response;
+  }
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("text/event-stream")) {
+    return response;
+  }
+
+  const [visibleStream, sidecarStream] = body.tee();
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+
+  void forEachSseBlock(sidecarStream, async (block) => {
+    const parsed = parseSseJsonBlock(block);
+    if (isRuntimeSidecarEvent(parsed)) {
+      consumeRuntimeSidecarEvent(parsed as Record<string, unknown>, parserArgs);
+    }
+    return true;
+  }).catch((error) => {
+    console.warn("Failed to consume runtime sidecar tail:", error);
+  });
+
+  const encoder = new TextEncoder();
+  const filtered = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let closed = false;
+      void forEachSseBlock(visibleStream, async (block) => {
+        const parsed = parseSseJsonBlock(block);
+        if (isRuntimeSidecarEvent(parsed)) {
+          return true;
+        }
+        controller.enqueue(encoder.encode(`${block}\n\n`));
+        if (isTerminalRuntimeResponseEvent(parsed)) {
+          closed = true;
+          controller.close();
+          return false;
+        }
+        return true;
+      })
+        .then(() => {
+          if (!closed) {
+            closed = true;
+            controller.close();
+          }
+        })
+        .catch((error) => {
+          controller.error(error);
+        });
+    },
+  });
+
+  return new Response(filtered, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 export function createRuntimeTransport({
@@ -311,6 +619,7 @@ export function createRuntimeTransport({
   refreshThreadMediaAnalyses,
   getSelectedMediaAnalysisIds,
   setRuntimeHealthNotice,
+  setRuntimeLifecycleState,
   setRuntimeWaitState,
   setShowModelPrompt,
   dispatchGovernanceDirty,
@@ -374,13 +683,19 @@ export function createRuntimeTransport({
 
         const resolvedSlot = activeModels?.resolved_llm || activeModels?.active_llm;
         if (!resolvedSlot?.provider_id || !resolvedSlot?.model) {
-          return handleModelError(setRuntimeWaitState, setShowModelPrompt);
+          return handleModelError(
+            setRuntimeWaitState,
+            setRuntimeLifecycleState,
+            setShowModelPrompt,
+          );
         }
 
+        setRuntimeLifecycleState?.(null);
         beginRuntimeWait(activeModels, setRuntimeHealthNotice, setRuntimeWaitState);
       } catch (error) {
         if (isAbortRuntimeError(error)) {
           setRuntimeWaitState(null);
+          setRuntimeLifecycleState?.(null);
           setRuntimeHealthNotice(null);
           throw error;
         }
@@ -388,7 +703,11 @@ export function createRuntimeTransport({
         activeModelsCache.fetchedAt = 0;
         activeModelsCache.value = null;
         console.error("Failed to check model configuration:", error);
-        return handleModelError(setRuntimeWaitState, setShowModelPrompt);
+        return handleModelError(
+          setRuntimeWaitState,
+          setRuntimeLifecycleState,
+          setShowModelPrompt,
+        );
       }
 
       const requestBody = trimRuntimeRequestBody(
@@ -450,6 +769,7 @@ export function createRuntimeTransport({
         }
       } catch (error) {
         setRuntimeWaitState(null);
+        setRuntimeLifecycleState?.(null);
         if (isAbortRuntimeError(error)) {
           setRuntimeHealthNotice(null);
           throw error;
@@ -469,6 +789,7 @@ export function createRuntimeTransport({
 
       if (!response.ok) {
         setRuntimeWaitState(null);
+        setRuntimeLifecycleState?.(null);
         const responseClone = response.clone();
         void responseClone
           .json()
@@ -500,7 +821,13 @@ export function createRuntimeTransport({
           });
       }
 
-      return response;
+      return splitRuntimeChatEventStream(response, {
+        setRuntimeHealthNotice,
+        setRuntimeLifecycleState,
+        setRuntimeWaitState,
+        dispatchGovernanceDirty,
+        dispatchHumanAssistDirty,
+      });
     } finally {
       linkedAbortController.cleanup();
       if (
@@ -515,6 +842,7 @@ export function createRuntimeTransport({
   const responseParser = (rawChunk: string): unknown =>
     parseRuntimeResponseChunk(rawChunk, {
       setRuntimeHealthNotice,
+      setRuntimeLifecycleState,
       setRuntimeWaitState,
       dispatchGovernanceDirty,
       dispatchHumanAssistDirty,
@@ -533,6 +861,7 @@ export function createRuntimeTransport({
       }
     }
     setRuntimeWaitState(null);
+    setRuntimeLifecycleState?.(null);
     setRuntimeHealthNotice(null);
   };
 

@@ -50,6 +50,7 @@ import { resolveThreadRuntimePresentation } from "./pagePresentation";
 import {
   formatRuntimeWaitDescription,
   type RuntimeHealthNotice,
+  type RuntimeLifecycleState,
   type RuntimeWaitState,
 } from "./runtimeDiagnostics";
 import sessionApi from "./sessionApi";
@@ -306,6 +307,8 @@ export default function ChatPage() {
 
   const [autoBindingPending, setAutoBindingPending] = useState(!Boolean(requestedThreadId));
   const [runtimeWaitState, setRuntimeWaitState] = useState<RuntimeWaitState | null>(null);
+  const [runtimeLifecycleState, setRuntimeLifecycleState] =
+    useState<RuntimeLifecycleState | null>(null);
   const [runtimeHealthNotice, setRuntimeHealthNotice] = useState<RuntimeHealthNotice | null>(null);
   const [runtimeWaitClock, setRuntimeWaitClock] = useState(() => Date.now());
   const [governanceStatus, setGovernanceStatus] = useState<GovernanceStatus | null>(null);
@@ -358,6 +361,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     setRuntimeWaitState(null);
+    setRuntimeLifecycleState(null);
     setRuntimeHealthNotice(null);
   }, [requestedThreadId]);
 
@@ -462,6 +466,7 @@ export default function ChatPage() {
     selectedMediaAnalysisIdsRef,
     setAutoBindingPending,
     setRuntimeHealthNotice,
+    setRuntimeLifecycleState,
     setRuntimeWaitState,
     setShowModelPrompt,
     suggestedTeams,
@@ -571,6 +576,7 @@ export default function ChatPage() {
             runtimeModelHint={runtimeModelHint}
             runtimeFallbackLabel={runtimeFallbackLabel}
             runtimeWaitState={runtimeWaitState}
+            runtimeLifecycleState={runtimeLifecycleState}
             runtimeWaitSeconds={runtimeWaitSeconds}
             runtimeWaitDescription={runtimeWaitDescription}
             runtimeHealthNotice={runtimeHealthNotice}

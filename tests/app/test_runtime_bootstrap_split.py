@@ -9,12 +9,19 @@ from copaw.app import runtime_service_graph as runtime_service_graph_module
 from copaw.app import runtime_bootstrap_execution as runtime_bootstrap_execution_module
 from copaw.app.runtime_service_graph import build_runtime_bootstrap
 from copaw.app.runtime_events import RuntimeEventBus
+from copaw.compiler import (
+    AssignmentPlanningCompiler,
+    CyclePlanningCompiler,
+    ReportReplanEngine,
+    StrategyPlanningCompiler,
+)
 from copaw.environments import (
     EnvironmentRegistry,
     EnvironmentRepository,
     EnvironmentService,
     SessionMountRepository,
 )
+from copaw.industry.service_context import build_industry_service_runtime_bindings
 from copaw.kernel.query_execution_runtime import _QueryExecutionRuntimeMixin
 from copaw.state import SQLiteStateStore
 
@@ -51,6 +58,25 @@ def test_query_execution_runtime_mixin_inherits_split_runtime_seams() -> None:
     base_modules = {base.__module__ for base in _QueryExecutionRuntimeMixin.__bases__}
     assert "copaw.kernel.query_execution_resident_runtime" in base_modules
     assert "copaw.kernel.query_execution_usage_runtime" in base_modules
+
+
+def test_industry_runtime_bindings_preserve_formal_planning_services() -> None:
+    strategy_planning_compiler = StrategyPlanningCompiler()
+    cycle_planner = CyclePlanningCompiler()
+    assignment_planner = AssignmentPlanningCompiler()
+    report_replan_engine = ReportReplanEngine()
+
+    bindings = build_industry_service_runtime_bindings(
+        strategy_planning_compiler=strategy_planning_compiler,
+        cycle_planner=cycle_planner,
+        assignment_planner=assignment_planner,
+        report_replan_engine=report_replan_engine,
+    )
+
+    assert bindings.strategy_planning_compiler is strategy_planning_compiler
+    assert bindings.cycle_planner is cycle_planner
+    assert bindings.assignment_planner is assignment_planner
+    assert bindings.report_replan_engine is report_replan_engine
 
 
 def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
@@ -359,6 +385,9 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
         def set_agent_profile_service(self, value) -> None:
             captured["goal_agent_profile_service"] = value
 
+        def set_industry_service(self, value) -> None:
+            captured["goal_industry_service"] = value
+
     class _DerivedMemoryIndexService(SimpleNamespace):
         def set_reporting_service(self, value) -> None:
             captured["derived_reporting_service"] = value
@@ -386,10 +415,14 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
         def set_routine_service(self, value) -> None:
             captured["fixed_sop_routine_service"] = value
 
+    def _fake_goal_service(**kwargs):
+        captured["goal_service_kwargs"] = kwargs
+        return _GoalService()
+
     monkeypatch.setattr(
         runtime_bootstrap_domains_module,
         "GoalService",
-        lambda **kwargs: _GoalService(),
+        _fake_goal_service,
     )
     monkeypatch.setattr(
         runtime_bootstrap_domains_module,
@@ -439,7 +472,8 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
     monkeypatch.setattr(
         runtime_bootstrap_domains_module,
         "build_industry_service_runtime_bindings",
-        lambda **kwargs: SimpleNamespace(),
+        lambda **kwargs: captured.setdefault("industry_runtime_bindings_kwargs", kwargs)
+        or SimpleNamespace(),
     )
     monkeypatch.setattr(
         runtime_bootstrap_domains_module,
@@ -516,3 +550,13 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
 
     assert captured["fixed_sop_init_kwargs"]["environment_service"] is environment_service
     assert captured["environment_kernel_dispatcher"] is not None
+    assert "assignment_planner" in captured["goal_service_kwargs"]
+    assert captured["goal_service_kwargs"]["assignment_planner"] is not None
+    assert "strategy_planning_compiler" in captured["industry_runtime_bindings_kwargs"]
+    assert captured["industry_runtime_bindings_kwargs"]["strategy_planning_compiler"] is not None
+    assert "cycle_planner" in captured["industry_runtime_bindings_kwargs"]
+    assert captured["industry_runtime_bindings_kwargs"]["cycle_planner"] is not None
+    assert "assignment_planner" in captured["industry_runtime_bindings_kwargs"]
+    assert captured["industry_runtime_bindings_kwargs"]["assignment_planner"] is not None
+    assert "report_replan_engine" in captured["industry_runtime_bindings_kwargs"]
+    assert captured["industry_runtime_bindings_kwargs"]["report_replan_engine"] is not None

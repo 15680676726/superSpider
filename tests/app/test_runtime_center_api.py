@@ -9,12 +9,13 @@ from copaw.app.runtime_center.state_query import RuntimeCenterStateQueryService
 from copaw.app.runtime_center.task_review_projection import build_task_review_payload
 from copaw.evidence import EvidenceRecord, ReplayPointer
 from copaw.memory import ActivationResult, KnowledgeNeuron
-from copaw.state import SQLiteStateStore, TaskRecord, TaskRuntimeRecord
+from copaw.state import SQLiteStateStore, TaskRecord, TaskRuntimeRecord, WorkContextRecord
 from copaw.state.repositories import (
     SqliteDecisionRequestRepository,
     SqliteScheduleRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
+    SqliteWorkContextRepository,
 )
 from copaw.utils.runtime_routes import task_route
 
@@ -651,6 +652,65 @@ def _build_runtime_center_activation_client(tmp_path):
     return TestClient(app), activation_service
 
 
+def _build_runtime_center_work_context_client(tmp_path) -> TestClient:
+    app = build_runtime_center_app()
+    state_store = SQLiteStateStore(tmp_path / "runtime-center-work-context.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    schedule_repository = SqliteScheduleRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    work_context_repository = SqliteWorkContextRepository(state_store)
+
+    timestamp = datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc)
+    work_context_repository.upsert_context(
+        WorkContextRecord(
+            id="ctx-api-1",
+            title="API-backed work context",
+            summary="Work-context route should read directly from projector-backed state.",
+            context_type="control-thread",
+            status="active",
+            context_key="control-thread:runtime-center-api",
+            owner_scope="ops-scope",
+            owner_agent_id="task-owner",
+            primary_thread_id="industry-chat:runtime-center-api",
+            updated_at=timestamp,
+        ),
+    )
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-api-1",
+            title="Project runtime owner in API detail",
+            summary="Route payload should follow runtime owner instead of stale task owner.",
+            task_type="analysis",
+            status="running",
+            owner_agent_id="task-owner",
+            work_context_id="ctx-api-1",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-api-1",
+            runtime_status="active",
+            current_phase="executing",
+            risk_level="guarded",
+            last_result_summary="Runtime owner has already taken over this work context.",
+            last_owner_agent_id="runtime-owner",
+            updated_at=timestamp,
+        ),
+    )
+
+    app.state.state_query_service = RuntimeCenterStateQueryService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        schedule_repository=schedule_repository,
+        decision_request_repository=decision_request_repository,
+        work_context_repository=work_context_repository,
+    )
+    return TestClient(app)
+
+
 def test_runtime_center_task_detail_includes_activation_summary_when_available(tmp_path) -> None:
     client, activation_service = _build_runtime_center_activation_client(tmp_path)
 
@@ -696,3 +756,76 @@ def test_runtime_center_tasks_overview_includes_activation_hint_for_current_focu
         "finance-queue",
     ]
     assert payload[0]["activation"]["activated_count"] == 2
+
+
+def test_runtime_center_work_contexts_list_reads_projector_backed_state(tmp_path) -> None:
+    client = _build_runtime_center_work_context_client(tmp_path)
+
+    response = client.get("/runtime-center/work-contexts")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0] == {
+        "id": "ctx-api-1",
+        "title": "API-backed work context",
+        "kind": "work-context",
+        "status": "active",
+        "owner_scope": "ops-scope",
+        "summary": "Work-context route should read directly from projector-backed state.",
+        "updated_at": "2026-04-02T12:00:00Z",
+        "route": "/api/runtime-center/work-contexts/ctx-api-1",
+        "context_type": "control-thread",
+        "context_key": "control-thread:runtime-center-api",
+        "owner_agent_id": "task-owner",
+        "industry_instance_id": None,
+        "primary_thread_id": "industry-chat:runtime-center-api",
+        "parent_work_context_id": None,
+        "task_count": 1,
+        "active_task_count": 1,
+        "latest_task_id": "task-api-1",
+        "latest_task_title": "Project runtime owner in API detail",
+    }
+
+
+def test_runtime_center_work_context_detail_reads_runtime_owner_from_state(tmp_path) -> None:
+    client = _build_runtime_center_work_context_client(tmp_path)
+
+    response = client.get("/runtime-center/work-contexts/ctx-api-1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["work_context"]["id"] == "ctx-api-1"
+    assert payload["route"] == "/api/runtime-center/work-contexts/ctx-api-1"
+    assert payload["threads"] == ["industry-chat:runtime-center-api"]
+    assert payload["stats"]["task_count"] == 1
+    assert payload["stats"]["owner_agent_count"] == 1
+    assert payload["agents"] == [
+        {
+            "agent_id": "runtime-owner",
+            "name": "runtime-owner",
+            "status": "unknown",
+            "route": "/api/runtime-center/agents/runtime-owner",
+        },
+    ]
+    assert payload["tasks"] == [
+        {
+            "id": "task-api-1",
+            "title": "Project runtime owner in API detail",
+            "status": "active",
+            "phase": "executing",
+            "summary": "Runtime owner has already taken over this work context.",
+            "owner_agent_id": "runtime-owner",
+            "owner_agent_name": "runtime-owner",
+            "updated_at": "2026-04-02T12:00:00Z",
+            "context_key": "control-thread:runtime-center-api",
+            "work_context": {
+                "id": "ctx-api-1",
+                "title": "API-backed work context",
+                "context_type": "control-thread",
+                "status": "active",
+                "context_key": "control-thread:runtime-center-api",
+            },
+            "route": "/api/runtime-center/tasks/task-api-1",
+        },
+    ]

@@ -22,7 +22,6 @@ from ...utils.runtime_routes import (
     human_assist_task_route,
     schedule_route,
     task_route,
-    work_context_route,
 )
 from ...utils.runtime_action_links import build_decision_actions
 from ...state.execution_feedback import collect_recent_execution_feedback
@@ -50,6 +49,7 @@ from .task_review_projection import (
     string_list_from_values,
     trace_id_from_kernel_meta,
 )
+from .work_context_projection import RuntimeCenterWorkContextProjector
 
 
 class RuntimeCenterStateQueryService:
@@ -87,10 +87,16 @@ class RuntimeCenterStateQueryService:
         self._human_assist_task_service = human_assist_task_service
         self._environment_service = environment_service
         self._memory_activation_service = memory_activation_service
+        self._work_context_projector = RuntimeCenterWorkContextProjector(
+            task_repository=self._task_repository,
+            task_runtime_repository=self._task_runtime_repository,
+            work_context_repository=self._work_context_repository,
+            related_agents_loader=self._collect_related_agents,
+        )
         self._task_list_projector = RuntimeCenterTaskListProjector(
             task_repository=self._task_repository,
             task_runtime_repository=self._task_runtime_repository,
-            work_context_loader=self._serialize_work_context,
+            work_context_loader=self._work_context_projector.serialize_work_context,
             activation_summary_builder=self._build_task_activation_summary,
         )
 
@@ -182,7 +188,9 @@ class RuntimeCenterStateQueryService:
                 child,
                 self._task_runtime_repository.get_runtime(child.id),
                 owner_agent=related_agents_by_id.get(str(child.owner_agent_id or "").strip()),
-                work_context=self._serialize_work_context(child.work_context_id),
+                work_context=self._work_context_projector.serialize_work_context(
+                    child.work_context_id,
+                ),
             )
             for child in sorted(child_tasks, key=lambda item: item.updated_at, reverse=True)
         ]
@@ -228,7 +236,9 @@ class RuntimeCenterStateQueryService:
             "decisions": [self._serialize_decision_request(decision) for decision in decisions],
             "evidence": [serialize_evidence_record(record) for record in evidence],
             "agents": related_agents,
-            "work_context": self._serialize_work_context(task.work_context_id),
+            "work_context": self._work_context_projector.serialize_work_context(
+                task.work_context_id,
+            ),
             "kernel": serialize_kernel_meta(task_id, kernel_metadata),
             "knowledge": serialize_task_knowledge_context(
                 kernel_metadata,
@@ -403,26 +413,6 @@ class RuntimeCenterStateQueryService:
             },
         }
 
-    def _serialize_work_context(
-        self,
-        work_context_id: str | None,
-    ) -> dict[str, object] | None:
-        if not isinstance(work_context_id, str) or not work_context_id.strip():
-            return None
-        repository = self._work_context_repository
-        if repository is None:
-            return {"id": work_context_id}
-        record = repository.get_context(work_context_id)
-        if record is None:
-            return {"id": work_context_id}
-        return {
-            "id": record.id,
-            "title": record.title,
-            "context_type": record.context_type,
-            "status": record.status,
-            "context_key": record.context_key,
-        }
-
     def _serialize_human_assist_task(self, task: object) -> dict[str, object]:
         model_dump = getattr(task, "model_dump", None)
         payload = model_dump(mode="json") if callable(model_dump) else {}
@@ -455,128 +445,13 @@ class RuntimeCenterStateQueryService:
         }
 
     def list_work_contexts(self, limit: int | None = 5) -> list[dict[str, object]]:
-        repository = self._work_context_repository
-        if repository is None:
-            return []
-        contexts = repository.list_contexts(limit=limit)
-        payload: list[dict[str, object]] = []
-        for context in contexts:
-            tasks = self._task_repository.list_tasks(work_context_id=context.id)
-            tasks.sort(key=lambda item: item.updated_at, reverse=True)
-            active_task_count = sum(
-                1
-                for task in tasks
-                if str(getattr(task, "status", "") or "")
-                not in {"completed", "failed", "cancelled"}
-            )
-            latest_task = tasks[0] if tasks else None
-            payload.append(
-                {
-                    "id": context.id,
-                    "title": context.title,
-                    "kind": "work-context",
-                    "status": context.status,
-                    "owner_scope": context.owner_scope,
-                    "summary": context.summary,
-                    "updated_at": context.updated_at,
-                    "route": work_context_route(context.id),
-                    "context_type": context.context_type,
-                    "context_key": context.context_key,
-                    "owner_agent_id": context.owner_agent_id,
-                    "industry_instance_id": context.industry_instance_id,
-                    "primary_thread_id": context.primary_thread_id,
-                    "parent_work_context_id": context.parent_work_context_id,
-                    "task_count": len(tasks),
-                    "active_task_count": active_task_count,
-                    "latest_task_id": getattr(latest_task, "id", None),
-                    "latest_task_title": getattr(latest_task, "title", None),
-                },
-            )
-        return payload
+        return self._work_context_projector.list_work_contexts(limit=limit)
 
     def count_work_contexts(self) -> int:
-        repository = self._work_context_repository
-        if repository is None:
-            return 0
-        return len(repository.list_contexts())
+        return self._work_context_projector.count_work_contexts()
 
     def get_work_context_detail(self, context_id: str) -> dict[str, object] | None:
-        repository = self._work_context_repository
-        if repository is None:
-            return None
-        record = repository.get_context(context_id)
-        if record is None:
-            return None
-        tasks = self._task_repository.list_tasks(work_context_id=context_id)
-        tasks.sort(key=lambda item: item.updated_at, reverse=True)
-        owner_agent_ids = {
-            str(getattr(task, "owner_agent_id", "") or "").strip()
-            for task in tasks
-            if str(getattr(task, "owner_agent_id", "") or "").strip()
-        }
-        related_agents = self._collect_related_agents(owner_agent_ids)
-        related_agents_by_id = {
-            str(agent.get("agent_id")).strip(): agent
-            for agent in related_agents
-            if isinstance(agent, dict) and str(agent.get("agent_id")).strip()
-        }
-        child_contexts = repository.list_contexts(parent_work_context_id=context_id)
-        task_rollups = [
-            serialize_child_rollup(
-                task,
-                self._task_runtime_repository.get_runtime(task.id),
-                owner_agent=related_agents_by_id.get(
-                    str(getattr(task, "owner_agent_id", "") or "").strip(),
-                ),
-                work_context=self._serialize_work_context(getattr(task, "work_context_id", None)),
-            )
-            for task in tasks[:20]
-        ]
-        thread_ids = list(
-            dict.fromkeys(
-                item
-                for item in (
-                    record.primary_thread_id,
-                    *[
-                        first_non_empty(
-                            extract_chat_thread_payload(
-                                decode_kernel_task_metadata(
-                                    getattr(task, "acceptance_criteria", None),
-                                ),
-                            ).get("control_thread_id"),
-                        )
-                        for task in tasks
-                    ],
-                )
-                if isinstance(item, str) and item.strip()
-            ),
-        )
-        terminal_task_count = sum(
-            1
-            for task in tasks
-            if str(getattr(task, "status", "") or "")
-            in {"completed", "failed", "cancelled"}
-        )
-        return {
-            "work_context": record.model_dump(mode="json"),
-            "parent_work_context": self._serialize_work_context(record.parent_work_context_id),
-            "child_contexts": [
-                self._serialize_work_context(child.id)
-                for child in child_contexts
-                if self._serialize_work_context(child.id) is not None
-            ],
-            "tasks": task_rollups,
-            "agents": related_agents,
-            "threads": thread_ids,
-            "stats": {
-                "task_count": len(tasks),
-                "active_task_count": len(tasks) - terminal_task_count,
-                "terminal_task_count": terminal_task_count,
-                "owner_agent_count": len(owner_agent_ids),
-                "child_context_count": len(child_contexts),
-            },
-            "route": work_context_route(context_id),
-        }
+        return self._work_context_projector.get_work_context_detail(context_id)
 
     def _collect_task_execution_feedback(
         self,

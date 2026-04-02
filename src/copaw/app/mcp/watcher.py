@@ -181,6 +181,7 @@ class MCPConfigWatcher:
                 "MCPConfigWatcher: skipping reload, "
                 "previous reload still in progress",
             )
+            await self._mark_pending_reload(new_mcp)
             return
 
         # 4) Trigger non-blocking reload in background task
@@ -251,6 +252,31 @@ class MCPConfigWatcher:
                 )
 
         return reload_succeeded
+
+    async def _mark_pending_reload(self, new_mcp: "MCPConfig") -> None:
+        """Surface dirty/pending reload state without mutating clients."""
+        old_mcp = self._last_mcp
+        old_clients = old_mcp.clients if old_mcp else {}
+        note_reload_pending = getattr(self._mcp_manager, "note_reload_pending", None)
+        if not callable(note_reload_pending):
+            return
+
+        for key, new_cfg in new_mcp.clients.items():
+            old_cfg = old_clients.get(key)
+            if not new_cfg.enabled or old_cfg == new_cfg:
+                continue
+            try:
+                await note_reload_pending(
+                    key,
+                    new_cfg,
+                    reason="reload-in-progress",
+                )
+            except Exception:
+                logger.debug(
+                    "MCPConfigWatcher: failed to mark pending reload for '%s'",
+                    key,
+                    exc_info=True,
+                )
 
     async def _handle_client_update(
         self,

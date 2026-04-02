@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from typing import Any, Callable
 from typing import TYPE_CHECKING
 
 from ..config import load_config, save_config
@@ -54,6 +55,8 @@ class CapabilityService:
         state_store: "SQLiteStateStore | None" = None,
         environment_service: object | None = None,
         cron_manager: object | None = None,
+        load_config_fn: Callable[[], Any] | None = None,
+        save_config_fn: Callable[[Any], None] | None = None,
     ) -> None:
         self._registry = registry or CapabilityRegistry()
         self._evidence_ledger = evidence_ledger
@@ -76,11 +79,13 @@ class CapabilityService:
         self._state_store = state_store
         self._environment_service = environment_service
         self._cron_manager = cron_manager
+        self._load_config_fn = load_config_fn or (lambda: load_config())
+        self._save_config_fn = save_config_fn or (lambda config: save_config(config))
 
         self._catalog = CapabilityCatalogFacade(
             registry=self._registry,
-            load_config_fn=lambda: load_config(),
-            save_config_fn=lambda config: save_config(config),
+            load_config_fn=self._load_config_fn,
+            save_config_fn=self._save_config_fn,
             skill_service=self._skill_service,
             override_repository=self._override_repository,
             agent_profile_service=self._agent_profile_service,
@@ -96,8 +101,8 @@ class CapabilityService:
             set_capability_enabled_fn=self.set_capability_enabled,
             delete_capability_fn=self.delete_capability,
             resolve_agent_profile_fn=self._resolve_agent_profile,
-            load_config_fn=lambda: load_config(),
-            save_config_fn=lambda config: save_config(config),
+            load_config_fn=self._load_config_fn,
+            save_config_fn=self._save_config_fn,
             skill_service=self._skill_service,
             channel_manager=self._channel_manager,
             turn_executor=self._turn_executor,

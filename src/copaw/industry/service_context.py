@@ -20,6 +20,12 @@ from ..capabilities.remote_skill_catalog import (
     CuratedSkillCatalogEntry,
     search_curated_skill_catalog,
 )
+from ..compiler import (
+    AssignmentPlanningCompiler,
+    CyclePlanningCompiler,
+    ReportReplanEngine,
+    StrategyPlanningCompiler,
+)
 from ..config import load_config
 from ..config.config import MCPClientConfig
 from ..evidence import EvidenceLedger
@@ -162,6 +168,10 @@ class IndustryServiceRuntimeBindings:
     assignment_service: AssignmentService | None = None
     agent_report_service: AgentReportService | None = None
     browser_runtime_service: BrowserRuntimeService | None = None
+    strategy_planning_compiler: StrategyPlanningCompiler | None = None
+    cycle_planner: CyclePlanningCompiler | None = None
+    assignment_planner: AssignmentPlanningCompiler | None = None
+    report_replan_engine: ReportReplanEngine | None = None
     memory_activation_service: object | None = None
 
 
@@ -192,6 +202,10 @@ def build_industry_service_runtime_bindings(
     assignment_service: AssignmentService | None = None,
     agent_report_service: AgentReportService | None = None,
     browser_runtime_service: BrowserRuntimeService | None = None,
+    strategy_planning_compiler: StrategyPlanningCompiler | None = None,
+    cycle_planner: CyclePlanningCompiler | None = None,
+    assignment_planner: AssignmentPlanningCompiler | None = None,
+    report_replan_engine: ReportReplanEngine | None = None,
     memory_retain_service: object | None = None,
     memory_activation_service: object | None = None,
 ) -> IndustryServiceRuntimeBindings:
@@ -273,6 +287,10 @@ def build_industry_service_runtime_bindings(
         assignment_service=assignment_runtime_service,
         agent_report_service=report_service,
         browser_runtime_service=browser_service,
+        strategy_planning_compiler=strategy_planning_compiler,
+        cycle_planner=cycle_planner,
+        assignment_planner=assignment_planner,
+        report_replan_engine=report_replan_engine,
         memory_activation_service=memory_activation_service,
     )
 

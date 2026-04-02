@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=protected-access,unused-argument
+import contextlib
 import asyncio
 import os
 from pathlib import Path
@@ -73,6 +74,7 @@ class _FakeWatcherManager:
     def __init__(self) -> None:
         self.replace_attempts: list[str] = []
         self.remove_attempts: list[str] = []
+        self.pending_reload_attempts: list[str] = []
         self.fail_replace_keys: set[str] = set()
 
     async def replace_client(self, key: str, new_cfg) -> None:
@@ -82,6 +84,9 @@ class _FakeWatcherManager:
 
     async def remove_client(self, key: str) -> None:
         self.remove_attempts.append(key)
+
+    async def note_reload_pending(self, key: str, new_cfg, **kwargs) -> None:  # noqa: ARG002
+        self.pending_reload_attempts.append(key)
 
 
 def _build_watcher_mcp_config(*, alpha_command: str, beta_command: str) -> MCPConfig:
@@ -199,6 +204,47 @@ async def test_mcp_watcher_retries_same_snapshot_after_partial_reload_failure(
     assert watcher._last_mcp_hash == watcher._mcp_hash(changed_mcp)
     assert watcher._last_mcp is not None
     assert watcher._last_mcp.clients["beta"].command == "python3"
+
+
+@pytest.mark.asyncio
+async def test_mcp_watcher_marks_pending_reload_when_reload_task_is_busy(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "mcp.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    initial_mcp = _build_watcher_mcp_config(
+        alpha_command="python",
+        beta_command="python",
+    )
+    changed_mcp = _build_watcher_mcp_config(
+        alpha_command="python3",
+        beta_command="python3",
+    )
+    current_mcp = initial_mcp
+
+    manager = _FakeWatcherManager()
+    watcher = MCPConfigWatcher(
+        mcp_manager=manager,  # type: ignore[arg-type]
+        config_loader=lambda: current_mcp,
+        config_path=config_path,
+    )
+    watcher._snapshot()
+    original_mtime = watcher._last_mtime
+
+    current_mcp = changed_mcp
+    os.utime(config_path, (original_mtime + 1, original_mtime + 1))
+    watcher._reload_task = asyncio.create_task(asyncio.sleep(30))
+
+    try:
+        await watcher._check()
+    finally:
+        watcher._reload_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher._reload_task
+
+    assert manager.replace_attempts == []
+    assert manager.pending_reload_attempts == ["alpha", "beta"]
 
 
 @pytest.mark.asyncio

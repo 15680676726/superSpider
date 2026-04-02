@@ -87,6 +87,46 @@ class SessionForceReleaseRequest(BaseModel):
     reason: str = Field(default="forced release from runtime center")
 
 
+class BridgeSessionWorkAckRequest(BaseModel):
+    lease_token: str = Field(min_length=1)
+    work_id: str = Field(min_length=1)
+    bridge_session_id: str | None = Field(default=None)
+    ttl_seconds: int | None = Field(default=None, ge=1)
+    workspace_trusted: bool | None = Field(default=None)
+    elevated_auth_state: str | None = Field(default=None)
+    handle: dict[str, object] | None = Field(default=None)
+
+
+class BridgeSessionWorkHeartbeatRequest(BaseModel):
+    lease_token: str = Field(min_length=1)
+    work_id: str = Field(min_length=1)
+    ttl_seconds: int | None = Field(default=None, ge=1)
+    handle: dict[str, object] | None = Field(default=None)
+
+
+class BridgeSessionWorkReconnectRequest(BaseModel):
+    lease_token: str = Field(min_length=1)
+    work_id: str = Field(min_length=1)
+    ttl_seconds: int | None = Field(default=None, ge=1)
+    handle: dict[str, object] | None = Field(default=None)
+
+
+class BridgeSessionWorkStopRequest(BaseModel):
+    work_id: str = Field(min_length=1)
+    force: bool = Field(default=False)
+    lease_token: str | None = Field(default=None)
+    reason: str | None = Field(default=None)
+
+
+class BridgeSessionArchiveRequest(BaseModel):
+    lease_token: str | None = Field(default=None)
+    reason: str | None = Field(default=None)
+
+
+class BridgeEnvironmentDeregisterRequest(BaseModel):
+    reason: str | None = Field(default=None)
+
+
 class KnowledgeImportRequest(BaseModel):
     title: str = Field(min_length=1)
     content: str = Field(min_length=1)

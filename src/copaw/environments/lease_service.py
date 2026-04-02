@@ -241,6 +241,263 @@ class EnvironmentLeaseService:
             validate_token=False,
         )
 
+    def ack_bridge_session_work(
+        self,
+        session_mount_id: str,
+        *,
+        lease_token: str,
+        work_id: str,
+        bridge_session_id: str | None = None,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+        workspace_trusted: bool | None = None,
+        elevated_auth_state: str | None = None,
+    ) -> SessionMount:
+        now = _utc_now()
+        return self._update_bridge_session_work(
+            session_mount_id,
+            lease_token=lease_token,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+            bridge_updates={
+                "bridge_work_id": str(work_id).strip(),
+                "bridge_work_status": "acknowledged",
+                "bridge_session_id": (
+                    str(bridge_session_id).strip()
+                    if isinstance(bridge_session_id, str) and bridge_session_id.strip()
+                    else None
+                ),
+                "bridge_acknowledged_at": now.isoformat(),
+                "workspace_trusted": workspace_trusted,
+                "elevated_auth_state": (
+                    str(elevated_auth_state).strip()
+                    if isinstance(elevated_auth_state, str) and elevated_auth_state.strip()
+                    else None
+                ),
+            },
+            event_action="bridge-work-acknowledged",
+        )
+
+    def heartbeat_bridge_session_work(
+        self,
+        session_mount_id: str,
+        *,
+        lease_token: str,
+        work_id: str,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+    ) -> SessionMount:
+        now = _utc_now()
+        return self._update_bridge_session_work(
+            session_mount_id,
+            lease_token=lease_token,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+            bridge_updates={
+                "bridge_work_id": str(work_id).strip(),
+                "bridge_work_status": "running",
+                "bridge_heartbeat_at": now.isoformat(),
+            },
+            event_action="bridge-work-heartbeat",
+        )
+
+    def reconnect_bridge_session_work(
+        self,
+        session_mount_id: str,
+        *,
+        lease_token: str,
+        work_id: str,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+    ) -> SessionMount:
+        now = _utc_now()
+        return self._update_bridge_session_work(
+            session_mount_id,
+            lease_token=lease_token,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+            bridge_updates={
+                "bridge_work_id": str(work_id).strip(),
+                "bridge_work_status": "reconnecting",
+                "bridge_reconnected_at": now.isoformat(),
+                "bridge_heartbeat_at": now.isoformat(),
+            },
+            event_action="bridge-work-reconnecting",
+        )
+
+    def stop_bridge_session_work(
+        self,
+        session_mount_id: str,
+        *,
+        work_id: str,
+        force: bool = False,
+        lease_token: str | None = None,
+        reason: str | None = None,
+    ) -> SessionMount:
+        session_repository = self._service._session_repository
+        if session_repository is None:
+            raise RuntimeError("Session repository is not available")
+        now = _utc_now()
+        session = session_repository.get_session(session_mount_id)
+        if session is None:
+            raise KeyError(f"Session '{session_mount_id}' not found")
+        if (
+            lease_token is not None
+            and session.lease_token
+            and session.lease_token != lease_token
+        ):
+            raise ValueError(f"Lease token mismatch for session '{session_mount_id}'")
+        metadata = {
+            **dict(session.metadata),
+            "bridge_work_id": str(work_id).strip(),
+            "bridge_work_status": "stopped",
+            "bridge_stopped_at": now.isoformat(),
+            "bridge_stop_mode": "force" if force else "graceful",
+        }
+        if reason:
+            metadata["bridge_stop_reason"] = reason
+        updated = session.model_copy(
+            update={
+                "last_active_at": now,
+                "metadata": metadata,
+            },
+        )
+        session_repository.upsert_session(updated)
+        self._publish_runtime_event(
+            topic="session",
+            action="bridge-work-stopped",
+            payload={
+                "session_mount_id": updated.id,
+                "environment_id": updated.environment_id,
+                "bridge_work_id": updated.metadata.get("bridge_work_id"),
+                "bridge_work_status": updated.metadata.get("bridge_work_status"),
+                "force": force,
+                "reason": reason,
+            },
+        )
+        return updated
+
+    def archive_bridge_session(
+        self,
+        session_mount_id: str,
+        *,
+        lease_token: str | None = None,
+        reason: str | None = None,
+    ) -> SessionMount | None:
+        session_repository = self._service._session_repository
+        if session_repository is None:
+            return None
+        now = _utc_now()
+        released = self.release_session_lease(
+            session_mount_id,
+            lease_token=lease_token,
+            reason=reason or "bridge session archived",
+            release_status="released",
+            validate_token=lease_token is not None,
+        )
+        current = released or session_repository.get_session(session_mount_id)
+        if current is None:
+            return None
+        metadata = {
+            **dict(current.metadata),
+            "bridge_work_status": "archived",
+            "bridge_archived_at": now.isoformat(),
+        }
+        if reason:
+            metadata["bridge_archive_reason"] = reason
+        updated = current.model_copy(
+            update={
+                "status": "archived",
+                "last_active_at": now,
+                "metadata": metadata,
+            },
+        )
+        session_repository.upsert_session(updated)
+        self._publish_runtime_event(
+            topic="session",
+            action="bridge-session-archived",
+            payload={
+                "session_mount_id": updated.id,
+                "environment_id": updated.environment_id,
+                "bridge_work_status": "archived",
+                "reason": reason,
+            },
+        )
+        return updated
+
+    def deregister_bridge_environment(
+        self,
+        environment_id: str,
+        *,
+        reason: str | None = None,
+    ):
+        session_repository = self._service._session_repository
+        mount = self._service._registry.get(environment_id)
+        if mount is None:
+            return None
+        now = _utc_now()
+        if session_repository is not None:
+            sessions = session_repository.list_sessions(environment_id=environment_id, limit=None)
+            for session in sessions:
+                released = self.release_session_lease(
+                    session.id,
+                    lease_token=session.lease_token,
+                    reason=reason or "bridge environment deregistered",
+                    release_status="released",
+                    validate_token=False,
+                )
+                current = released or session_repository.get_session(session.id)
+                if current is None:
+                    continue
+                metadata = {
+                    **dict(current.metadata),
+                    "bridge_work_status": "deregistered",
+                    "bridge_deregistered_at": now.isoformat(),
+                }
+                if reason:
+                    metadata["bridge_deregister_reason"] = reason
+                session_repository.upsert_session(
+                    current.model_copy(
+                        update={
+                            "status": "deregistered",
+                            "last_active_at": now,
+                            "metadata": metadata,
+                        },
+                    ),
+                )
+        self._service._registry.detach_live_handle(environment_id)
+        updated_mount = mount.model_copy(
+            update={
+                "status": "deregistered",
+                "last_active_at": now,
+                "metadata": {
+                    **dict(mount.metadata),
+                    "bridge_environment_status": "deregistered",
+                    "bridge_deregistered_at": now.isoformat(),
+                    **(
+                        {"bridge_deregister_reason": reason}
+                        if isinstance(reason, str) and reason.strip()
+                        else {}
+                    ),
+                },
+                "lease_status": "released",
+                "lease_owner": None,
+                "lease_token": None,
+                "lease_expires_at": now,
+                "live_handle_ref": None,
+            },
+        )
+        self._service._registry.upsert(updated_mount)
+        self._publish_runtime_event(
+            topic="session",
+            action="bridge-environment-deregistered",
+            payload={
+                "environment_id": environment_id,
+                "reason": reason,
+            },
+        )
+        return updated_mount
+
     def acquire_resource_slot_lease(
         self,
         *,
@@ -282,6 +539,38 @@ class EnvironmentLeaseService:
             },
         )
 
+    def acquire_shared_writer_lease(
+        self,
+        *,
+        writer_lock_scope: str,
+        owner: str,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> SessionMount:
+        normalized_scope = str(writer_lock_scope or "").strip()
+        if not normalized_scope:
+            raise ValueError("writer_lock_scope is required")
+        metadata_mapping = _mapping(metadata)
+        merged_metadata = {
+            "access_mode": "writer",
+            "lease_class": "exclusive-writer",
+            "writer_lock_scope": normalized_scope,
+            "environment_ref": (
+                metadata_mapping.get("environment_ref")
+                or f"resource-slot:shared-writer:{normalized_scope}"
+            ),
+            **metadata_mapping,
+        }
+        return self.acquire_resource_slot_lease(
+            scope_type="shared-writer",
+            scope_value=normalized_scope,
+            owner=owner,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+            metadata=merged_metadata,
+        )
+
     def heartbeat_resource_slot_lease(
         self,
         lease_id: str,
@@ -299,6 +588,27 @@ class EnvironmentLeaseService:
             metadata=metadata,
         )
 
+    def heartbeat_shared_writer_lease(
+        self,
+        lease_id: str,
+        *,
+        lease_token: str,
+        ttl_seconds: int | None = None,
+        handle: object | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> SessionMount:
+        return self.heartbeat_resource_slot_lease(
+            lease_id,
+            lease_token=lease_token,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+            metadata={
+                "access_mode": "writer",
+                "lease_class": "exclusive-writer",
+                **_mapping(metadata),
+            },
+        )
+
     def release_resource_slot_lease(
         self,
         *,
@@ -310,6 +620,23 @@ class EnvironmentLeaseService:
     ) -> SessionMount | None:
         return self.release_session_lease(
             lease_id,
+            lease_token=lease_token,
+            reason=reason,
+            release_status=release_status,
+            validate_token=validate_token,
+        )
+
+    def release_shared_writer_lease(
+        self,
+        *,
+        lease_id: str,
+        lease_token: str | None = None,
+        reason: str | None = None,
+        release_status: str = "released",
+        validate_token: bool = True,
+    ) -> SessionMount | None:
+        return self.release_resource_slot_lease(
+            lease_id=lease_id,
             lease_token=lease_token,
             reason=reason,
             release_status=release_status,
@@ -354,6 +681,26 @@ class EnvironmentLeaseService:
                 channel=f"resource-slot:{scope_type}",
                 session_id=scope_value,
             ),
+        )
+
+    def list_shared_writer_leases(
+        self,
+        *,
+        limit: int | None = None,
+    ) -> list[SessionMount]:
+        return self.list_resource_slot_leases(scope_type="shared-writer", limit=limit)
+
+    def get_shared_writer_lease(
+        self,
+        *,
+        writer_lock_scope: str,
+    ) -> SessionMount | None:
+        normalized_scope = str(writer_lock_scope or "").strip()
+        if not normalized_scope:
+            return None
+        return self.get_resource_slot_lease(
+            scope_type="shared-writer",
+            scope_value=normalized_scope,
         )
 
     def reap_expired_leases(
@@ -425,6 +772,46 @@ class EnvironmentLeaseService:
             )
             recovered += 1
         return recovered
+
+    def _update_bridge_session_work(
+        self,
+        session_mount_id: str,
+        *,
+        lease_token: str,
+        bridge_updates: dict[str, object],
+        ttl_seconds: int | None,
+        handle: object | None,
+        event_action: str,
+    ) -> SessionMount:
+        session_repository = self._service._session_repository
+        if session_repository is None:
+            raise RuntimeError("Session repository is not available")
+        session = session_repository.get_session(session_mount_id)
+        if session is None:
+            raise KeyError(f"Session '{session_mount_id}' not found")
+        metadata_patch = {
+            key: value
+            for key, value in bridge_updates.items()
+            if value is not None
+        }
+        updated = self.heartbeat_session_lease(
+            session_mount_id,
+            lease_token=lease_token,
+            ttl_seconds=ttl_seconds,
+            handle=handle,
+            metadata=metadata_patch,
+        )
+        self._publish_runtime_event(
+            topic="session",
+            action=event_action,
+            payload={
+                "session_mount_id": updated.id,
+                "environment_id": updated.environment_id,
+                "bridge_work_id": updated.metadata.get("bridge_work_id"),
+                "bridge_work_status": updated.metadata.get("bridge_work_status"),
+            },
+        )
+        return updated
 
     def acquire_actor_lease(
         self,
@@ -1043,6 +1430,10 @@ class EnvironmentLeaseService:
 
 def _session_mount_id(*, channel: str, session_id: str) -> str:
     return f"session:{channel}:{session_id}"
+
+
+def _mapping(value: object | None) -> dict[str, object]:
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _lease_expired(expires_at: datetime | None, *, now: datetime) -> bool:

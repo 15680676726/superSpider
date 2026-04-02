@@ -1,12 +1,21 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import json
+from collections.abc import Mapping
 from hashlib import sha1
 from .service_context import *  # noqa: F401,F403
 from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
+from ..compiler.planning import (
+    AssignmentPlanningCompiler,
+    CyclePlanningCompiler,
+    PlanningStrategyConstraints,
+    ReportReplanEngine,
+    StrategyPlanningCompiler,
+)
 from ..compiler.models import CompilationUnit
 from ..kernel import KernelTask
+from ..state.strategy_memory_service import resolve_strategy_payload
 from .service_report_closure import (
     build_agent_report_control_thread_message as _build_agent_report_control_thread_message_helper,
     build_report_followup_metadata as _build_report_followup_metadata_helper,
@@ -108,6 +117,23 @@ class _IndustryLifecycleMixin:
         self._memory_retain_service = memory_retain_service
         self._work_context_service = work_context_service
         self._session_backend = session_backend
+        self._strategy_compiler = (
+            getattr(bindings, "strategy_planning_compiler", None)
+            or getattr(bindings, "strategy_compiler", None)
+            or StrategyPlanningCompiler()
+        )
+        self._cycle_planner = (
+            getattr(bindings, "cycle_planner", None)
+            or CyclePlanningCompiler()
+        )
+        self._assignment_planner = (
+            getattr(bindings, "assignment_planner", None)
+            or AssignmentPlanningCompiler()
+        )
+        self._report_replan_engine = (
+            getattr(bindings, "report_replan_engine", None)
+            or ReportReplanEngine()
+        )
         report_retain_setter = getattr(
             self._agent_report_service,
             "set_memory_retain_service",
@@ -338,6 +364,220 @@ class _IndustryLifecycleMixin:
             carried[key] = self._clone_materialization_metadata_value(value)
         return carried
 
+    def _planner_sidecar_payload(self, value: object) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if hasattr(value, "model_dump"):
+            try:
+                payload = value.model_dump(mode="json", exclude_none=True)  # type: ignore[call-arg]
+            except TypeError:
+                payload = value.model_dump(mode="json")  # type: ignore[call-arg]
+            return dict(payload) if isinstance(payload, dict) else {}
+        if isinstance(value, Mapping):
+            return dict(value)
+        return {}
+
+    def _stable_assignment_id(
+        self,
+        *,
+        cycle_id: str,
+        goal_id: str | None,
+        backlog_item_id: str | None,
+        title: str | None,
+    ) -> str:
+        normalized = "|".join(
+            str(part).strip()
+            for part in (
+                cycle_id,
+                goal_id or backlog_item_id or title or "",
+            )
+            if str(part).strip()
+        )
+        digest = sha1(normalized.encode("utf-8")).hexdigest()[:16]
+        return f"assignment:{digest}"
+
+    def _compile_strategy_constraints(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+    ) -> PlanningStrategyConstraints:
+        payload = resolve_strategy_payload(
+            service=self._strategy_memory_service,
+            scope_type="industry",
+            scope_id=record.instance_id,
+            fallback_owner_agent_ids=(EXECUTION_CORE_AGENT_ID,),
+        )
+        if not isinstance(payload, dict):
+            return PlanningStrategyConstraints()
+        try:
+            strategy_record = StrategyMemoryRecord.model_validate(
+                {
+                    "scope_type": payload.get("scope_type") or "industry",
+                    "scope_id": payload.get("scope_id") or record.instance_id,
+                    "industry_instance_id": (
+                        payload.get("industry_instance_id") or record.instance_id
+                    ),
+                    "title": payload.get("title") or "Strategy Memory",
+                    **payload,
+                },
+            )
+        except Exception:
+            lane_weights: dict[str, float] = {}
+            for lane_id, weight in dict(payload.get("lane_weights") or {}).items():
+                normalized_lane_id = str(lane_id).strip()
+                if not normalized_lane_id:
+                    continue
+                try:
+                    lane_weights[normalized_lane_id] = float(weight)
+                except (TypeError, ValueError):
+                    continue
+            return PlanningStrategyConstraints(
+                mission=_string(payload.get("mission")) or "",
+                north_star=_string(payload.get("north_star")) or "",
+                priority_order=_unique_strings(payload.get("priority_order")),
+                lane_weights=lane_weights,
+                planning_policy=_unique_strings(payload.get("planning_policy")),
+                review_rules=_unique_strings(payload.get("review_rules")),
+                paused_lane_ids=_unique_strings(payload.get("paused_lane_ids")),
+                current_focuses=_unique_strings(payload.get("current_focuses")),
+            )
+        return self._strategy_compiler.compile(strategy_record)
+
+    def _decorate_report_synthesis_with_replan(
+        self,
+        synthesis: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        resolved = dict(synthesis) if isinstance(synthesis, Mapping) else {}
+        decision = self._report_replan_engine.compile(resolved)
+        decision_payload = self._planner_sidecar_payload(decision)
+        if decision_payload:
+            resolved["replan_decision"] = decision_payload
+            resolved["formal_replan"] = decision_payload
+            resolved["needs_replan"] = (
+                decision.status == "needs-replan"
+                or bool(resolved.get("needs_replan"))
+            )
+        return resolved
+
+    def _compat_cycle_reason(
+        self,
+        reason: str | None,
+    ) -> str | None:
+        normalized = _string(reason)
+        if normalized is None:
+            return None
+        return {
+            "planned-open-backlog": "open-backlog",
+            "planner-no-open-backlog": "no-open-backlog",
+        }.get(normalized, normalized)
+
+    def _materialize_backlog_into_cycle(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        cycle: OperatingCycleRecord,
+        selected_backlog: Sequence[BacklogItemRecord],
+        strategy_constraints: PlanningStrategyConstraints,
+    ) -> tuple[OperatingCycleRecord, list[str]]:
+        if (
+            self._assignment_service is None
+            or self._operating_cycle_service is None
+            or self._backlog_service is None
+        ):
+            return cycle, []
+        assignment_specs: list[dict[str, object]] = []
+        for item in selected_backlog:
+            lane = (
+                self._operating_lane_service.get_lane(item.lane_id)
+                if self._operating_lane_service is not None and item.lane_id is not None
+                else None
+            )
+            assignment_plan = self._assignment_planner.plan(
+                assignment_id=self._stable_assignment_id(
+                    cycle_id=cycle.id,
+                    goal_id=item.goal_id,
+                    backlog_item_id=item.id,
+                    title=item.title,
+                ),
+                cycle_id=cycle.id,
+                backlog_item=item,
+                lane=lane,
+                strategy_constraints=strategy_constraints,
+            )
+            assignment_plan_payload = self._planner_sidecar_payload(assignment_plan)
+            assignment_specs.append(
+                {
+                    "backlog_item_id": item.id,
+                    "lane_id": item.lane_id,
+                    "owner_agent_id": assignment_plan.owner_agent_id,
+                    "owner_role_id": assignment_plan.owner_role_id,
+                    "title": item.title,
+                    "summary": item.summary,
+                    "status": (
+                        "planned"
+                        if _string(record.autonomy_status) == "waiting-confirm"
+                        else "queued"
+                    ),
+                    "report_back_mode": assignment_plan.report_back_mode,
+                    "metadata": {
+                        **self._materialized_assignment_continuity_metadata(item.metadata),
+                        **dict(assignment_plan.metadata or {}),
+                        "source_ref": item.source_ref,
+                        "source_kind": item.source_kind,
+                        "fixed_sop_binding_id": _string(
+                            item.metadata.get("fixed_sop_binding_id"),
+                        ),
+                        "fixed_sop_binding_name": _string(
+                            item.metadata.get("fixed_sop_binding_name"),
+                        ),
+                        "routine_id": _string(item.metadata.get("routine_id")),
+                        "routine_name": _string(item.metadata.get("routine_name")),
+                        "formal_planning": {
+                            "assignment_plan": assignment_plan_payload,
+                        },
+                    },
+                },
+            )
+        created_assignments = self._assignment_service.ensure_assignments(
+            industry_instance_id=record.instance_id,
+            cycle_id=cycle.id,
+            specs=assignment_specs,
+        )
+        assignment_ids = [assignment.id for assignment in created_assignments]
+        cycle = self._operating_cycle_service.update_cycle_links(
+            cycle,
+            assignment_ids=_unique_strings(
+                list(cycle.assignment_ids or []),
+                assignment_ids,
+            ),
+            backlog_item_ids=_unique_strings(
+                list(cycle.backlog_item_ids or []),
+                [item.id for item in selected_backlog],
+            ),
+            focus_lane_ids=_unique_strings(
+                list(cycle.focus_lane_ids or []),
+                [
+                    item.lane_id
+                    for item in selected_backlog
+                    if item.lane_id is not None
+                ],
+            ),
+        )
+        assignment_map = {
+            assignment.backlog_item_id: assignment
+            for assignment in created_assignments
+            if assignment.backlog_item_id
+        }
+        for item in selected_backlog:
+            assignment = assignment_map.get(item.id)
+            self._backlog_service.mark_item_materialized(
+                item,
+                cycle_id=cycle.id,
+                goal_id=None,
+                assignment_id=assignment.id if assignment is not None else None,
+            )
+        return cycle, assignment_ids
+
     def _rank_materializable_backlog_items(
         self,
         items: list[Any],
@@ -415,11 +655,12 @@ class _IndustryLifecycleMixin:
         instance_id: str,
         cycle_id: str | None,
     ) -> dict[str, Any]:
-        return _synthesize_agent_reports_helper(
+        synthesis = _synthesize_agent_reports_helper(
             list_agent_report_records=self._list_agent_report_records,
             instance_id=instance_id,
             cycle_id=cycle_id,
         )
+        return self._decorate_report_synthesis_with_replan(synthesis)
 
     def _record_report_synthesis_backlog(
         self,
@@ -1151,12 +1392,14 @@ class _IndustryLifecycleMixin:
         *,
         override: GoalOverrideRecord | None = None,
         record: IndustryInstanceRecord | None = None,
+        team: IndustryTeamBlueprint | None = None,
     ) -> str:
         kickoff_stage = _string(
             self._resolve_goal_runtime_context(
                 goal,
                 override=override,
                 record=record,
+                team=team,
             ).get("kickoff_stage"),
         )
         if kickoff_stage in {"learning", "execution"}:
@@ -1402,6 +1645,7 @@ class _IndustryLifecycleMixin:
         record = self._industry_instance_repository.get_instance(industry_instance_id)
         if record is None:
             return None
+        team = self._materialize_team_blueprint(record)
         acquisition_runner = getattr(
             self._learning_service,
             "run_industry_acquisition_cycle",
@@ -1429,7 +1673,7 @@ class _IndustryLifecycleMixin:
                     "onboarding_runs": [],
                     "warnings": ["acquisition-cycle-exception"],
                 }
-        pending_goals = self._list_pending_chat_kickoff_goals(record)
+        pending_goals = self._list_pending_chat_kickoff_goals(record, team=team)
         pending_schedule_ids = self._list_pending_chat_kickoff_schedule_ids(
             instance_id=record.instance_id,
             schedule_ids=list(record.schedule_ids or []),
@@ -1442,6 +1686,7 @@ class _IndustryLifecycleMixin:
                     goal,
                     override=override,
                     record=record,
+                    team=team,
                 ),
             )
             for goal, override in pending_goals
@@ -1529,6 +1774,7 @@ class _IndustryLifecycleMixin:
                 goal,
                 override=override,
                 record=record,
+                team=team,
             )
             goal_owner_agent_id = _string(goal_context.get("owner_agent_id"))
             assignment = assignment_by_goal_id.get(goal.id)
@@ -1591,8 +1837,7 @@ class _IndustryLifecycleMixin:
             any(stage == "execution" for _goal, _override, stage in pending_goal_entries)
             or any(stage == "execution" for _schedule_id, stage in pending_schedule_entries)
         )
-        team = self._materialize_team_blueprint(record)
-        goal_links = self._list_active_goal_links_for_instance(record)
+        goal_links = self._list_active_goal_links_for_instance(record, team=team)
         for agent in team.agents:
             goal_link = goal_links.get(agent.agent_id)
             status = (
@@ -2466,6 +2711,40 @@ class _IndustryLifecycleMixin:
             }
             for lane in lanes[:8]
         ]
+
+    def _build_prediction_formal_planning_context(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        cycle_decision: CyclePlanningDecision,
+        meeting_window: str,
+    ) -> dict[str, object]:
+        metadata = dict(cycle_decision.metadata or {})
+        review_anchor = cycle_decision.selected_backlog_item_ids or [
+            cycle_decision.reason,
+            meeting_window,
+        ]
+        review_ref = "|".join(
+            str(part).strip()
+            for part in (
+                "formal-cycle-review",
+                record.instance_id,
+                *review_anchor[:4],
+            )
+            if str(part).strip()
+        )
+        return {
+            "review_ref": review_ref,
+            "review_window": meeting_window,
+            "summary": cycle_decision.summary,
+            "planning_policy": list(cycle_decision.planning_policy or []),
+            "selected_lane_ids": list(cycle_decision.selected_lane_ids or []),
+            "selected_backlog_item_ids": list(
+                cycle_decision.selected_backlog_item_ids or []
+            ),
+            "metadata": metadata,
+        }
+
     def _create_cycle_prediction_opportunities(
         self,
         *,
@@ -2477,6 +2756,9 @@ class _IndustryLifecycleMixin:
         pending_reports: list[AgentReportRecord],
         created_reports: list[AgentReportRecord],
         processed_reports: list[AgentReportRecord],
+        strategy_constraints: PlanningStrategyConstraints | None = None,
+        formal_planning_context: Mapping[str, Any] | None = None,
+        report_synthesis: Mapping[str, Any] | None = None,
     ) -> tuple[str | None, list[BacklogItemRecord]]:
         prediction_service = getattr(self, "_prediction_service", None)
         create_cycle_case = getattr(prediction_service, "create_cycle_case", None)
@@ -2492,6 +2774,26 @@ class _IndustryLifecycleMixin:
         )
         if meeting_window is None:
             return (None, [])
+        if report_synthesis is None:
+            report_synthesis = self._synthesize_agent_reports(
+                instance_id=record.instance_id,
+                cycle_id=current_cycle.id if current_cycle is not None else None,
+            )
+        if formal_planning_context is None:
+            cycle_decision = self._cycle_planner.plan(
+                record=record,
+                current_cycle=current_cycle,
+                next_cycle_due_at=record.next_cycle_due_at,
+                open_backlog=self._materializable_backlog_items(planning_backlog),
+                pending_reports=pending_reports,
+                force=force,
+                strategy_constraints=strategy_constraints,
+            )
+            formal_planning_context = self._build_prediction_formal_planning_context(
+                record=record,
+                cycle_decision=cycle_decision,
+                meeting_window=meeting_window,
+            )
         goal_statuses: dict[str, str] = {}
         for goal_id in list(record.goal_ids or []):
             goal = self._goal_service.get_goal(goal_id)
@@ -2529,6 +2831,8 @@ class _IndustryLifecycleMixin:
                 industry_instance_id=record.instance_id,
                 planning_backlog=planning_backlog,
             ),
+            formal_planning_context=formal_planning_context,
+            report_synthesis=report_synthesis,
             force=force,
         )
         if case_detail is None:
@@ -2887,6 +3191,17 @@ class _IndustryLifecycleMixin:
             industry_instance_id=record.instance_id,
             limit=None,
         )
+        scoped_backlog_ids = {
+            item_id
+            for item_id in list(backlog_item_ids or [])
+            if isinstance(item_id, str) and item_id
+        }
+        prediction_open_backlog = (
+            [item for item in open_backlog if item.id in scoped_backlog_ids]
+            if scoped_backlog_ids
+            else list(open_backlog)
+        )
+        prediction_strategy_constraints = self._compile_strategy_constraints(record=record)
         pending_reports = self._list_agent_report_records(
             record.instance_id,
             cycle_id=current_cycle.id if current_cycle is not None else None,
@@ -2898,27 +3213,21 @@ class _IndustryLifecycleMixin:
             actor=actor,
             force=force,
             current_cycle=current_cycle,
-            open_backlog=open_backlog,
+            open_backlog=prediction_open_backlog,
             pending_reports=pending_reports,
             created_reports=created_reports,
             processed_reports=processed_reports,
+            strategy_constraints=prediction_strategy_constraints,
         )
         open_backlog = self._backlog_service.list_open_items(
             industry_instance_id=record.instance_id,
             limit=None,
         )
-        if backlog_item_ids:
-            scoped_backlog_ids = {
-                item_id
-                for item_id in backlog_item_ids
-                if isinstance(item_id, str) and item_id
-            }
+        if scoped_backlog_ids:
             open_backlog = [
                 item for item in open_backlog if item.id in scoped_backlog_ids
             ]
-        open_backlog = self._rank_materializable_backlog_items(
-            self._materializable_backlog_items(open_backlog),
-        )
+        open_backlog = self._materializable_backlog_items(open_backlog)
         pending_reports = self._list_agent_report_records(
             record.instance_id,
             cycle_id=current_cycle.id if current_cycle is not None else None,
@@ -2988,124 +3297,88 @@ class _IndustryLifecycleMixin:
                 synthesis=report_synthesis,
             )
         record = self._retire_completed_temporary_roles(record=record)
-        should_start, reason = self._operating_cycle_service.should_start_new_cycle(
-            current_cycle=current_cycle,
-            next_cycle_due_at=record.next_cycle_due_at,
-            open_backlog_count=len(open_backlog),
-            pending_report_count=len(pending_reports),
-            force=force,
-        )
+        strategy_constraints = self._compile_strategy_constraints(record=record)
+        reason: str | None = None
         new_cycle: OperatingCycleRecord | None = None
         new_goal_ids: list[str] = []
         new_assignment_ids: list[str] = []
-        if should_start and open_backlog:
-            selected_backlog = list(open_backlog[:3])
-            new_cycle = self._operating_cycle_service.start_cycle(
-                industry_instance_id=record.instance_id,
-                label=record.label,
-                cycle_kind="daily",
-                status="active",
-                focus_lane_ids=[
-                    item.lane_id for item in selected_backlog if item.lane_id is not None
-                ],
-                backlog_item_ids=[item.id for item in selected_backlog],
-                source_ref=actor,
-                summary="Autonomous operating cycle materialized from backlog.",
-                metadata={"report_synthesis": report_synthesis},
+        planner_current_cycle = None if force and backlog_item_ids else current_cycle
+        if new_cycle is None:
+            cycle_decision = self._cycle_planner.plan(
+                record=record,
+                current_cycle=planner_current_cycle,
+                next_cycle_due_at=record.next_cycle_due_at,
+                open_backlog=open_backlog,
+                pending_reports=pending_reports,
+                force=force,
+                strategy_constraints=strategy_constraints,
             )
-            assignment_specs: list[dict[str, object]] = []
-            for item in selected_backlog:
-                lane = (
-                    self._operating_lane_service.get_lane(item.lane_id)
-                    if self._operating_lane_service is not None and item.lane_id is not None
-                    else None
-                )
-                assignment_specs.append(
-                    {
-                        "backlog_item_id": item.id,
-                        "lane_id": item.lane_id,
-                        "owner_agent_id": (
-                            _string(item.metadata.get("owner_agent_id"))
-                            or (lane.owner_agent_id if lane is not None else None)
+            reason = cycle_decision.reason
+            if cycle_decision.should_start and cycle_decision.selected_backlog_item_ids:
+                open_backlog_by_id = {
+                    item.id: item
+                    for item in open_backlog
+                }
+                selected_backlog = [
+                    open_backlog_by_id[item_id]
+                    for item_id in cycle_decision.selected_backlog_item_ids
+                    if item_id in open_backlog_by_id
+                ]
+                if selected_backlog:
+                    cycle_planning_metadata = {
+                        "strategy_constraints": self._planner_sidecar_payload(
+                            strategy_constraints,
                         ),
-                        "owner_role_id": (
-                            _string(item.metadata.get("industry_role_id"))
-                            or (lane.owner_role_id if lane is not None else None)
+                        "cycle_decision": self._planner_sidecar_payload(cycle_decision),
+                        "report_replan": self._planner_sidecar_payload(
+                            self._report_replan_engine.compile(report_synthesis),
                         ),
-                        "title": item.title,
-                        "summary": item.summary,
-                        "status": (
-                            "planned"
-                            if _string(record.autonomy_status) == "waiting-confirm"
-                            else "queued"
-                        ),
-                        "report_back_mode": _string(item.metadata.get("report_back_mode")) or "summary",
-                        "metadata": {
-                            **self._materialized_assignment_continuity_metadata(
-                                item.metadata,
-                            ),
-                            "source_ref": item.source_ref,
-                            "source_kind": item.source_kind,
-                            "fixed_sop_binding_id": _string(
-                                item.metadata.get("fixed_sop_binding_id"),
-                            ),
-                            "fixed_sop_binding_name": _string(
-                                item.metadata.get("fixed_sop_binding_name"),
-                            ),
-                            "routine_id": _string(item.metadata.get("routine_id")),
-                            "routine_name": _string(item.metadata.get("routine_name")),
+                    }
+                    new_cycle = self._operating_cycle_service.start_cycle(
+                        industry_instance_id=record.instance_id,
+                        label=record.label,
+                        cycle_kind=cycle_decision.cycle_kind,
+                        status="active",
+                        focus_lane_ids=list(cycle_decision.selected_lane_ids),
+                        backlog_item_ids=[item.id for item in selected_backlog],
+                        source_ref=actor,
+                        summary=cycle_decision.summary or "Autonomous operating cycle materialized from backlog.",
+                        metadata={
+                            "report_synthesis": report_synthesis,
+                            "formal_planning": cycle_planning_metadata,
                         },
-                    },
+                    )
+                    new_cycle, new_assignment_ids = self._materialize_backlog_into_cycle(
+                        record=record,
+                        cycle=new_cycle,
+                        selected_backlog=selected_backlog,
+                        strategy_constraints=strategy_constraints,
+                    )
+                    record = self._industry_instance_repository.upsert_instance(
+                        record.model_copy(
+                            update={
+                                "current_cycle_id": new_cycle.id,
+                                "next_cycle_due_at": new_cycle.due_at,
+                                "last_cycle_started_at": new_cycle.started_at,
+                                "autonomy_status": "coordinating",
+                                "lifecycle_status": "running",
+                                "updated_at": _utc_now(),
+                            },
+                        ),
+                    )
+                else:
+                    reason = "planner-selected-missing-backlog"
+            elif current_cycle is not None:
+                record = self._industry_instance_repository.upsert_instance(
+                    record.model_copy(
+                        update={
+                            "current_cycle_id": current_cycle.id,
+                            "next_cycle_due_at": current_cycle.due_at,
+                            "last_cycle_started_at": current_cycle.started_at,
+                            "updated_at": _utc_now(),
+                        },
+                    ),
                 )
-            created_assignments = self._assignment_service.ensure_assignments(
-                industry_instance_id=record.instance_id,
-                cycle_id=new_cycle.id,
-                specs=assignment_specs,
-            )
-            new_assignment_ids = [assignment.id for assignment in created_assignments]
-            new_cycle = self._operating_cycle_service.update_cycle_links(
-                new_cycle,
-                assignment_ids=_unique_strings(
-                    list(new_cycle.assignment_ids or []),
-                    new_assignment_ids,
-                ),
-            )
-            assignment_map = {
-                assignment.backlog_item_id: assignment
-                for assignment in created_assignments
-                if assignment.backlog_item_id
-            }
-            for item in selected_backlog:
-                assignment = assignment_map.get(item.id)
-                self._backlog_service.mark_item_materialized(
-                    item,
-                    cycle_id=new_cycle.id,
-                    goal_id=None,
-                    assignment_id=assignment.id if assignment is not None else None,
-                )
-            record = self._industry_instance_repository.upsert_instance(
-                record.model_copy(
-                    update={
-                        "current_cycle_id": new_cycle.id,
-                        "next_cycle_due_at": new_cycle.due_at,
-                        "last_cycle_started_at": new_cycle.started_at,
-                        "autonomy_status": "coordinating",
-                        "lifecycle_status": "running",
-                        "updated_at": _utc_now(),
-                    },
-                ),
-            )
-        elif current_cycle is not None:
-            record = self._industry_instance_repository.upsert_instance(
-                record.model_copy(
-                    update={
-                        "current_cycle_id": current_cycle.id,
-                        "next_cycle_due_at": current_cycle.due_at,
-                        "last_cycle_started_at": current_cycle.started_at,
-                        "updated_at": _utc_now(),
-                    },
-                ),
-            )
         reconciled = self.reconcile_instance_status(record.instance_id) or record
         self._sync_role_runtime_surfaces_for_record(record=reconciled)
         self._sync_strategy_memory_for_instance(reconciled)
@@ -3120,7 +3393,7 @@ class _IndustryLifecycleMixin:
             "processed_report_ids": [report.id for report in processed_reports],
             "created_prediction_case_id": prediction_case_id,
             "created_prediction_backlog_ids": [item.id for item in prediction_backlog_items],
-            "reason": reason,
+            "reason": self._compat_cycle_reason(reason),
         }
     def _enabled_schedule_records_for_instance(
         self,
