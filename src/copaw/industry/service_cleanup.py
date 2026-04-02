@@ -339,12 +339,14 @@ class _IndustryCleanupMixin:
         *,
         record: IndustryInstanceRecord,
         override: GoalOverrideRecord | None = None,
+        team: IndustryTeamBlueprint | None = None,
     ) -> bool:
         return _string(
             self._resolve_goal_runtime_context(
                 goal,
                 override=override,
                 record=record,
+                team=team,
             ).get("industry_instance_id"),
         ) == _string(record.instance_id)
 
@@ -354,12 +356,14 @@ class _IndustryCleanupMixin:
         *,
         override: GoalOverrideRecord | None = None,
         record: IndustryInstanceRecord | None = None,
+        team: IndustryTeamBlueprint | None = None,
     ) -> str | None:
         return _string(
             self._resolve_goal_runtime_context(
                 goal,
                 override=override,
                 record=record,
+                team=team,
             ).get("owner_agent_id"),
         )
 
@@ -454,6 +458,8 @@ class _IndustryCleanupMixin:
     def _list_pending_chat_kickoff_goals(
         self,
         record: IndustryInstanceRecord,
+        *,
+        team: IndustryTeamBlueprint | None = None,
     ) -> list[tuple[Any, GoalOverrideRecord | None]]:
         pending: list[tuple[Any, GoalOverrideRecord | None]] = []
         seen_goal_ids: set[str] = set()
@@ -470,6 +476,7 @@ class _IndustryCleanupMixin:
                 goal,
                 record=record,
                 override=override,
+                team=team,
             ):
                 continue
             pending.append((goal, override))
@@ -478,6 +485,8 @@ class _IndustryCleanupMixin:
     def _list_active_goal_links_for_instance(
         self,
         record: IndustryInstanceRecord,
+        *,
+        team: IndustryTeamBlueprint | None = None,
     ) -> dict[str, tuple[str, str]]:
         goal_links: dict[str, tuple[str, str]] = {}
         seen_goal_ids: set[str] = set()
@@ -494,12 +503,14 @@ class _IndustryCleanupMixin:
                 goal,
                 record=record,
                 override=override,
+                team=team,
             ):
                 continue
             owner_agent_id = self._resolve_goal_owner_agent_id(
                 goal,
                 override=override,
                 record=record,
+                team=team,
             )
             if owner_agent_id is None or owner_agent_id in goal_links:
                 continue

@@ -25,6 +25,7 @@ class WindowsAppAdapterRuntime:
         adapter_refs: str | Sequence[str],
         app_identity: str | None = None,
         control_channel: str | None = None,
+        execution_guardrails: dict[str, object] | None = None,
         preferred_execution_path: str | None = None,
         ui_fallback_mode: str | None = None,
         adapter_gap_or_blocker: str | None = None,
@@ -81,6 +82,13 @@ class WindowsAppAdapterRuntime:
                 environment.metadata,
                 "control_channel",
             )
+        existing_guardrails = session.metadata.get("execution_guardrails")
+        if not isinstance(existing_guardrails, dict):
+            existing_guardrails = environment.metadata.get("execution_guardrails")
+        if execution_guardrails is not None:
+            updates["execution_guardrails"] = dict(execution_guardrails)
+        elif isinstance(existing_guardrails, dict):
+            updates["execution_guardrails"] = dict(existing_guardrails)
         return self._persist(session=session, environment=environment, updates=updates)
 
     def clear_adapter(
@@ -141,6 +149,11 @@ class WindowsAppAdapterRuntime:
         )
         if existing_channel is not None:
             updates["control_channel"] = existing_channel
+        existing_guardrails = session.metadata.get("execution_guardrails")
+        if not isinstance(existing_guardrails, dict):
+            existing_guardrails = environment.metadata.get("execution_guardrails")
+        if isinstance(existing_guardrails, dict):
+            updates["execution_guardrails"] = dict(existing_guardrails)
         return self._persist(session=session, environment=environment, updates=updates)
 
     def snapshot(

@@ -11,6 +11,14 @@ export interface RuntimeHealthNotice {
   description: string;
 }
 
+export interface RuntimeLifecycleState {
+  phase: string;
+  title: string;
+  description: string;
+  tone: "busy" | "warning" | "success" | "error";
+  updatedAt: number;
+}
+
 interface RuntimeErrorText {
   title: string;
   summary: string;

@@ -170,6 +170,21 @@ class SurfaceControlService:
             ui_available=callable(host_executor),
             ui_ref="windows-desktop-host",
         )
+        selected_executor = self._resolve_selected_executor(
+            resolution.selected_path,
+            cooperative_executor=cooperative_executor,
+            semantic_executor=semantic_executor,
+            host_executor=host_executor,
+        )
+        await self._enforce_windows_app_guardrails(
+            session_mount_id=session_mount_id,
+            action=action,
+            contract=contract,
+            snapshot=snapshot,
+            selected_executor=selected_executor,
+            app_identity=app_identity,
+            control_channel=control_channel,
+        )
         result = await self._execute_selected_path(
             resolution.selected_path,
             cooperative_executor=cooperative_executor,
@@ -222,6 +237,266 @@ class SurfaceControlService:
         payload = dict(result)
         payload["execution_path"] = asdict(resolution)
         return payload
+
+    async def _enforce_windows_app_guardrails(
+        self,
+        *,
+        session_mount_id: str,
+        action: str,
+        contract: dict[str, Any],
+        snapshot: dict[str, Any],
+        selected_executor: object | None,
+        app_identity: str | None,
+        control_channel: str | None,
+    ) -> None:
+        runtime_guardrails = self._mapping(
+            self._mapping(snapshot.get("windows_app_adapters")).get("execution_guardrails"),
+        )
+        explicit_guardrails = self._mapping(contract.get("guardrails"))
+        guardrails = {
+            **runtime_guardrails,
+            **explicit_guardrails,
+        }
+        if "excluded_surface_refs" not in guardrails and "host_exclusion_refs" in guardrails:
+            guardrails["excluded_surface_refs"] = guardrails.get("host_exclusion_refs")
+        if not guardrails:
+            return
+        if bool(guardrails.get("operator_abort_requested")):
+            self._publish_guardrail_event(
+                session_mount_id=session_mount_id,
+                action=action,
+                guardrail_kind="operator-abort",
+                payload={
+                    "reason": self._normalize_string(
+                        guardrails.get("abort_reason"),
+                        guardrails.get("operator_abort_channel"),
+                    ),
+                },
+            )
+            raise RuntimeError("Windows app action blocked: operator abort is pending.")
+
+        desktop_contract = self._mapping(snapshot.get("desktop_app_contract"))
+        expected_frontmost_ref = self._normalize_string(guardrails.get("expected_frontmost_ref"))
+        frontmost_verification_required = bool(
+            guardrails.get("frontmost_verification_required"),
+        ) or expected_frontmost_ref is not None
+        if expected_frontmost_ref is None and frontmost_verification_required:
+            expected_frontmost_ref = self._normalize_string(
+                desktop_contract.get("active_window_ref"),
+                desktop_contract.get("window_scope"),
+            )
+        excluded_surface_refs = self._string_list(guardrails.get("excluded_surface_refs"))
+        if not excluded_surface_refs:
+            excluded_surface_refs = self._string_list(guardrails.get("host_exclusion_refs"))
+        clipboard_roundtrip_required = bool(guardrails.get("clipboard_roundtrip_required"))
+
+        guardrail_snapshot = await self._collect_guardrail_snapshot(
+            selected_executor,
+            session_mount_id=session_mount_id,
+            action=action,
+            contract=contract,
+            snapshot=snapshot,
+            app_identity=app_identity,
+            control_channel=control_channel,
+            frontmost_verification_required=frontmost_verification_required,
+            clipboard_roundtrip_required=clipboard_roundtrip_required,
+        )
+        frontmost_window_ref = self._normalize_string(
+            guardrail_snapshot.get("frontmost_window_ref"),
+            desktop_contract.get("active_window_ref"),
+            desktop_contract.get("window_scope"),
+        )
+        if (
+            frontmost_window_ref is None
+            and guardrail_snapshot.get("frontmost_verified") is True
+            and expected_frontmost_ref is not None
+        ):
+            frontmost_window_ref = expected_frontmost_ref
+        if excluded_surface_refs:
+            if frontmost_window_ref is None:
+                self._publish_guardrail_event(
+                    session_mount_id=session_mount_id,
+                    action=action,
+                    guardrail_kind="host-exclusion-unverifiable",
+                    payload={"excluded_surface_refs": excluded_surface_refs},
+                )
+                raise RuntimeError(
+                    "Host exclusion guardrail blocked: current frontmost surface could not be verified.",
+                )
+            if frontmost_window_ref in excluded_surface_refs:
+                self._publish_guardrail_event(
+                    session_mount_id=session_mount_id,
+                    action=action,
+                    guardrail_kind="host-exclusion",
+                    payload={
+                        "frontmost_window_ref": frontmost_window_ref,
+                        "excluded_surface_refs": excluded_surface_refs,
+                    },
+                )
+                raise RuntimeError(
+                    f"Host exclusion guardrail blocked: frontmost surface '{frontmost_window_ref}' is excluded.",
+                )
+
+        if frontmost_verification_required:
+            if (
+                bool(guardrail_snapshot.get("frontmost_verifier_missing"))
+                and "frontmost_window_ref" not in guardrail_snapshot
+                and guardrail_snapshot.get("frontmost_verified") is not True
+            ):
+                self._publish_guardrail_event(
+                    session_mount_id=session_mount_id,
+                    action=action,
+                    guardrail_kind="frontmost-verifier-missing",
+                    payload={"expected_frontmost_ref": expected_frontmost_ref},
+                )
+                raise RuntimeError(
+                    "Windows app action blocked: frontmost verification requires a verifier before execution.",
+                )
+            if guardrail_snapshot.get("frontmost_verified") is False:
+                self._publish_guardrail_event(
+                    session_mount_id=session_mount_id,
+                    action=action,
+                    guardrail_kind="frontmost-failed",
+                    payload={"expected_frontmost_ref": expected_frontmost_ref},
+                )
+                raise RuntimeError(
+                    "Windows app action blocked: frontmost verification failed.",
+                )
+            if expected_frontmost_ref is not None and frontmost_window_ref is None:
+                self._publish_guardrail_event(
+                    session_mount_id=session_mount_id,
+                    action=action,
+                    guardrail_kind="frontmost-unverifiable",
+                    payload={"expected_frontmost_ref": expected_frontmost_ref},
+                )
+                raise RuntimeError(
+                    "Windows app action blocked: frontmost verification could not determine the active window.",
+                )
+            if (
+                expected_frontmost_ref is not None
+                and frontmost_window_ref is not None
+                and frontmost_window_ref != expected_frontmost_ref
+            ):
+                self._publish_guardrail_event(
+                    session_mount_id=session_mount_id,
+                    action=action,
+                    guardrail_kind="frontmost-mismatch",
+                    payload={
+                        "expected_frontmost_ref": expected_frontmost_ref,
+                        "frontmost_window_ref": frontmost_window_ref,
+                    },
+                )
+                raise RuntimeError(
+                    f"Windows app action blocked: frontmost window '{frontmost_window_ref}' does not match expected '{expected_frontmost_ref}'.",
+                )
+
+        if clipboard_roundtrip_required:
+            if (
+                bool(guardrail_snapshot.get("clipboard_verifier_missing"))
+                and "clipboard_roundtrip_ok" not in guardrail_snapshot
+            ):
+                self._publish_guardrail_event(
+                    session_mount_id=session_mount_id,
+                    action=action,
+                    guardrail_kind="clipboard-verifier-missing",
+                    payload={},
+                )
+                raise RuntimeError(
+                    "Windows app action blocked: clipboard roundtrip verification requires a verifier before execution.",
+                )
+            if guardrail_snapshot.get("clipboard_roundtrip_ok") is not True:
+                self._publish_guardrail_event(
+                    session_mount_id=session_mount_id,
+                    action=action,
+                    guardrail_kind="clipboard-roundtrip",
+                    payload={
+                        "clipboard_roundtrip_ok": bool(
+                            guardrail_snapshot.get("clipboard_roundtrip_ok"),
+                        ),
+                    },
+                )
+                raise RuntimeError(
+                    "Windows app action blocked: clipboard roundtrip verification failed.",
+                )
+
+    async def _collect_guardrail_snapshot(
+        self,
+        executor: object | None,
+        *,
+        frontmost_verification_required: bool = False,
+        clipboard_roundtrip_required: bool = False,
+        **kwargs,
+    ) -> dict[str, Any]:
+        if executor is None:
+            return {}
+        payload: dict[str, Any] = {}
+        provider = getattr(executor, "guardrail_snapshot", None)
+        if callable(provider):
+            payload.update(self._mapping(await self._invoke(provider, **kwargs)))
+        if frontmost_verification_required:
+            verifier = getattr(executor, "verify_frontmost", None)
+            if callable(verifier):
+                result = self._mapping(await self._invoke(verifier, **kwargs))
+                if "verified" in result:
+                    payload["frontmost_verified"] = bool(result.get("verified"))
+                frontmost_window_ref = self._normalize_string(
+                    result.get("frontmost_window_ref"),
+                    result.get("window_ref"),
+                    result.get("active_window_ref"),
+                )
+                if frontmost_window_ref is not None:
+                    payload["frontmost_window_ref"] = frontmost_window_ref
+            elif "frontmost_window_ref" not in payload:
+                payload["frontmost_verifier_missing"] = True
+        if clipboard_roundtrip_required:
+            verifier = getattr(executor, "verify_clipboard_roundtrip", None)
+            if callable(verifier):
+                result = self._mapping(await self._invoke(verifier, **kwargs))
+                if "verified" in result:
+                    payload["clipboard_roundtrip_ok"] = bool(result.get("verified"))
+                elif "clipboard_roundtrip_ok" in result:
+                    payload["clipboard_roundtrip_ok"] = bool(
+                        result.get("clipboard_roundtrip_ok"),
+                    )
+            elif "clipboard_roundtrip_ok" not in payload:
+                payload["clipboard_verifier_missing"] = True
+        return payload
+
+    def _publish_guardrail_event(
+        self,
+        *,
+        session_mount_id: str,
+        action: str,
+        guardrail_kind: str,
+        payload: dict[str, Any],
+    ) -> None:
+        bus = getattr(self._service, "_runtime_event_bus", None)
+        publisher = getattr(bus, "publish", None) if bus is not None else None
+        if not callable(publisher):
+            return
+        event_payload = {
+            "session_mount_id": session_mount_id,
+            "action_name": action,
+            "guardrail_kind": guardrail_kind,
+            **{key: value for key, value in payload.items() if value is not None},
+        }
+        publisher(topic="desktop", action="guardrail-blocked", payload=event_payload)
+
+    @staticmethod
+    def _resolve_selected_executor(
+        selected_path: str | None,
+        *,
+        cooperative_executor: object | None,
+        semantic_executor: object | None,
+        host_executor: object | None,
+    ) -> object | None:
+        if selected_path == COOPERATIVE_NATIVE_PATH:
+            return cooperative_executor
+        if selected_path == SEMANTIC_OPERATOR_PATH:
+            return semantic_executor
+        if selected_path == UI_FALLBACK_PATH:
+            return host_executor
+        return None
 
     def _resolve_windows_app_executor(
         self,

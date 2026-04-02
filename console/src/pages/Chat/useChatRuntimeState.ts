@@ -24,6 +24,7 @@ import {
 import { normalizeSpiderMeshBrand } from "../../utils/brand";
 import {
   type RuntimeHealthNotice,
+  type RuntimeLifecycleState,
   type RuntimeWaitState,
 } from "./runtimeDiagnostics";
 import {
@@ -62,7 +63,11 @@ type UseChatRuntimeStateArgs = {
   selectedMediaAnalysisIdsRef: MutableRefObject<string[]>;
   setAutoBindingPending: Dispatch<SetStateAction<boolean>>;
   setRuntimeHealthNotice: Dispatch<SetStateAction<RuntimeHealthNotice | null>>;
+  setRuntimeLifecycleState?: Dispatch<
+    SetStateAction<RuntimeLifecycleState | null>
+  >;
   setRuntimeWaitState: Dispatch<SetStateAction<RuntimeWaitState | null>>;
+  setShowModelPrompt: Dispatch<SetStateAction<boolean>>;
   suggestedTeams: IndustryInstanceSummary[];
   threadBootstrapError: string | null;
   threadBootstrapPending: boolean;
@@ -118,7 +123,9 @@ export function useChatRuntimeState({
   selectedMediaAnalysisIdsRef,
   setAutoBindingPending,
   setRuntimeHealthNotice,
+  setRuntimeLifecycleState,
   setRuntimeWaitState,
+  setShowModelPrompt,
   suggestedTeams,
   threadBootstrapError,
   threadBootstrapPending,

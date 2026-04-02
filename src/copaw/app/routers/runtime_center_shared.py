@@ -76,6 +76,11 @@ class GovernanceDecisionBatchRequest(BaseModel):
     actor: str = Field(default="runtime-center")
     resolution: str | None = Field(default=None)
     execute: bool | None = Field(default=None)
+    control_thread_id: str | None = Field(default=None)
+    session_id: str | None = Field(default=None)
+    user_id: str | None = Field(default=None)
+    agent_id: str | None = Field(default=None)
+    work_context_id: str | None = Field(default=None)
 
 
 class GovernancePatchBatchRequest(BaseModel):
