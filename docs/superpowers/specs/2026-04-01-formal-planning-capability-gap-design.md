@@ -513,11 +513,24 @@ This means the current gap closure should be read as:
 - mid-horizon cycle/replan shaping is no longer only thin local rule glue
 - Claude-derived planning shell remains bounded sidecar discipline
 
-What is still follow-up, not silently claimed as solved:
+What is now explicitly closed by the `2026-04-02` implementation round:
 
-- richer cycle kinds beyond the current `daily` baseline
-- stronger lane investment / budget allocation over multiple cycles
-- explicit strategic uncertainty register and long-range strategy-change triggers
+- `FP-6 Strategic Uncertainty Register`
+  - now lands as typed `StrategicUncertaintyRecord` truth on strategy memory
+  - compiles through `StrategyPlanningCompiler`
+  - stays visible in goal compile context, prediction planning overlap, and runtime `main_brain_planning`
+- `FP-7 Strategy-Change Trigger Engine`
+  - now lands as typed `ReportReplanDecision.decision_kind`
+  - emits governed `follow_up_backlog / cycle_rebalance / lane_reweight / strategy_review_required`
+  - stays visible in prediction snapshots, runtime cognition, runtime replan nodes, and prompt/runtime context
+- `FP-8 Multi-Cycle Lane Budget Compiler`
+  - now lands as typed `LaneBudgetRecord` truth on strategy memory
+  - compiles through `StrategyPlanningCompiler`
+  - is consumed by `CyclePlanningCompiler` before local lane-weight tie-breaking
+
+This design line no longer carries an open FP-6/7/8 tail.
+
+If future work wants richer horizon logic beyond this closure, it must start a new dated spec instead of silently reopening this gap document with vague “follow-up” language.
 
 ---
 

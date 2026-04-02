@@ -399,9 +399,12 @@ def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
         "Reports disagree on whether the handoff is cleared.",
         "Supervisor review is still missing for the handoff return.",
     ]
+    assert cognition["decision_kind"] == "follow_up_backlog"
     assert cognition["judgment"]["status"] == "attention"
+    assert cognition["judgment"]["decision_kind"] == "follow_up_backlog"
     assert "decide whether to dispatch follow-up work" in cognition["judgment"]["summary"]
     assert cognition["next_action"]["kind"] == "followup-backlog"
+    assert cognition["next_action"]["decision_kind"] == "follow_up_backlog"
     assert cognition["next_action"]["title"] == "Resolve handoff return evidence gap"
     assert cognition["next_action"]["route"] == (
         "/api/runtime-center/industry/industry-v1-ops?backlog_item_id=backlog-followup-1"
@@ -421,6 +424,7 @@ def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
     )
     assert payload["reports"][0]["report_consumed"] is False
     assert payload["signals"]["report_cognition"]["status"] == "attention"
+    assert payload["signals"]["report_cognition"]["decision_kind"] == "follow_up_backlog"
     assert payload["signals"]["report_cognition"]["count"] == 4
     assert payload["meta"]["agent_reports"]["unconsumed_count"] == 1
     assert payload["meta"]["report_cognition"]["needs_replan"] is True

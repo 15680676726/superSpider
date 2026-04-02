@@ -15,6 +15,28 @@ def test_strategy_compiler_emits_lane_and_review_constraints() -> None:
         north_star="Grow retained revenue",
         priority_order=["retain", "grow", "expand"],
         lane_weights={"lane-retention": 0.7, "lane-growth": 0.3},
+        strategic_uncertainties=[
+            {
+                "uncertainty_id": "uncertainty:weekend-variance",
+                "statement": "Weekend variance cause remains uncertain.",
+                "scope": "lane",
+                "impact_level": "high",
+                "current_confidence": 0.35,
+                "review_by_cycle": "next-cycle",
+                "escalate_when": ["confidence-drop", "target-miss"],
+            }
+        ],
+        lane_budgets=[
+            {
+                "lane_id": "lane-retention",
+                "budget_window": "next-3-cycles",
+                "target_share": 0.6,
+                "min_share": 0.4,
+                "max_share": 0.7,
+                "review_pressure": "high",
+                "force_include_reason": "retention-lane-underfunded",
+            }
+        ],
         planning_policy=["prefer-followup-before-net-new"],
         review_rules=["repeat-failure-needs-review"],
         paused_lane_ids=["lane-experimental"],
@@ -24,8 +46,16 @@ def test_strategy_compiler_emits_lane_and_review_constraints() -> None:
 
     assert constraints.north_star == "Grow retained revenue"
     assert constraints.lane_weights["lane-retention"] == 0.7
+    assert constraints.strategic_uncertainties[0].uncertainty_id == (
+        "uncertainty:weekend-variance"
+    )
+    assert constraints.lane_budgets[0].lane_id == "lane-retention"
     assert constraints.planning_policy == ["prefer-followup-before-net-new"]
     assert "repeat-failure-needs-review" in constraints.review_rules
+    assert any(
+        rule.decision_kind == "strategy_review_required"
+        for rule in constraints.strategy_trigger_rules
+    )
     assert constraints.paused_lane_ids == ["lane-experimental"]
 
 
@@ -37,3 +67,5 @@ def test_strategy_compiler_returns_empty_constraints_without_strategy() -> None:
     assert constraints.mission == ""
     assert constraints.priority_order == []
     assert constraints.review_rules == []
+    assert constraints.strategic_uncertainties == []
+    assert constraints.lane_budgets == []

@@ -57,6 +57,20 @@ def _mapping_list(value: object, *, limit: int = 4) -> list[dict[str, Any]]:
     return items
 
 
+def _unique_strings(value: object, *, limit: int = 8) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for raw in list(value or []):
+        text = str(raw or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        values.append(text)
+        if len(values) >= max(1, limit):
+            break
+    return values
+
+
 def _normalize_cognitive_surface(value: object) -> dict[str, Any] | None:
     payload = _safe_mapping(value)
     if not payload:
@@ -69,9 +83,63 @@ def _normalize_cognitive_surface(value: object) -> dict[str, Any] | None:
     holes = _mapping_list(synthesis.get("holes"))
     replan_reasons = _string_list(synthesis.get("replan_reasons"))
     recommended_actions = _mapping_list(synthesis.get("recommended_actions"))
+    replan = _safe_mapping(payload.get("replan"))
+    if not replan:
+        activation = _safe_mapping(synthesis.get("activation"))
+        strategy_change = _safe_mapping(activation.get("strategy_change"))
+        raw_decision = _safe_mapping(synthesis.get("replan_decision"))
+        trigger_families = _unique_strings(
+            raw_decision.get("trigger_families") or strategy_change.get("trigger_families"),
+        )
+        trigger_rule_ids = _unique_strings(
+            raw_decision.get("trigger_rule_ids") or strategy_change.get("trigger_rule_ids"),
+        )
+        affected_lane_ids = _unique_strings(
+            raw_decision.get("affected_lane_ids") or strategy_change.get("affected_lane_ids"),
+        )
+        affected_uncertainty_ids = _unique_strings(
+            raw_decision.get("affected_uncertainty_ids")
+            or strategy_change.get("affected_uncertainty_ids"),
+        )
+        has_synthesis_pressure = bool(
+            synthesis.get("needs_replan")
+            or conflicts
+            or holes
+            or replan_reasons
+            or recommended_actions
+        )
+        decision_kind = (
+            str(
+                raw_decision.get("decision_kind")
+                or strategy_change.get("decision_kind")
+                or ("follow_up_backlog" if (raw_decision or strategy_change or has_synthesis_pressure) else "clear")
+            )
+            .strip()
+        )
+        replan = {
+            "status": (
+                str(raw_decision.get("status") or ("needs-replan" if decision_kind != "clear" else "clear"))
+                .strip()
+            ),
+            "decision_kind": decision_kind or "clear",
+            "summary": str(raw_decision.get("summary") or "").strip() or None,
+            "trigger_families": trigger_families,
+            "trigger_rule_ids": trigger_rule_ids,
+            "affected_lane_ids": affected_lane_ids,
+            "affected_uncertainty_ids": affected_uncertainty_ids,
+            "trigger_context": {
+                "trigger_families": trigger_families,
+                "trigger_rule_ids": trigger_rule_ids,
+                "affected_lane_ids": affected_lane_ids,
+                "affected_uncertainty_ids": affected_uncertainty_ids,
+            },
+        }
+    decision_kind = str(replan.get("decision_kind") or payload.get("decision_kind") or "clear").strip() or "clear"
     needs_replan = bool(
         payload.get("needs_replan")
         or synthesis.get("needs_replan")
+        or _safe_mapping(replan).get("status") == "needs-replan"
+        or decision_kind != "clear"
         or conflicts
         or holes
         or replan_reasons
@@ -93,6 +161,8 @@ def _normalize_cognitive_surface(value: object) -> dict[str, Any] | None:
         "holes": holes,
         "replan_reasons": replan_reasons,
         "recommended_actions": recommended_actions,
+        "replan": replan,
+        "decision_kind": decision_kind,
         "needs_replan": needs_replan,
         "has_unresolved_conflicts": bool(conflicts),
         "has_unresolved_holes": bool(holes),
@@ -124,8 +194,28 @@ def build_main_brain_cognitive_surface(
         current_cycle = _safe_mapping(getattr(detail, "current_cycle", None))
         if not current_cycle:
             current_cycle = _safe_mapping(detail_payload.get("current_cycle"))
+        from_current_surface = _normalize_cognitive_surface(
+            current_cycle.get("main_brain_cognitive_surface"),
+        )
+        if from_current_surface is not None:
+            return from_current_surface
         from_cycle = _normalize_cognitive_surface(current_cycle.get("synthesis"))
         if from_cycle is not None:
+            planning = _safe_mapping(getattr(detail, "main_brain_planning", None))
+            if not planning:
+                planning = _safe_mapping(detail_payload.get("main_brain_planning"))
+            replan = _safe_mapping(planning.get("replan"))
+            if replan:
+                return {
+                    **from_cycle,
+                    "replan": replan,
+                    "decision_kind": str(replan.get("decision_kind") or from_cycle.get("decision_kind") or "clear").strip() or "clear",
+                    "needs_replan": bool(
+                        from_cycle.get("needs_replan")
+                        or str(replan.get("status") or "").strip() == "needs-replan"
+                        or str(replan.get("decision_kind") or "").strip() not in {"", "clear"}
+                    ),
+                }
             return from_cycle
     if request is not None:
         return read_attached_main_brain_cognitive_surface(request=request)

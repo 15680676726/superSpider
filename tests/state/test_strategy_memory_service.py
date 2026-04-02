@@ -189,3 +189,64 @@ def test_strategy_memory_service_compacts_large_payloads(tmp_path) -> None:
     assert len(active.metadata["chat_writeback_history"][-1]["classification"]) == 6
     assert len(payload["priority_order"]) == 12
     assert len(payload["metadata"]["chat_writeback_history"]) == 10
+
+
+def test_strategy_memory_service_persists_uncertainty_register_and_lane_budgets(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteStrategyMemoryRepository(store)
+    service = StateStrategyMemoryService(repository=repository)
+
+    strategy = service.upsert_strategy(
+        StrategyMemoryRecord(
+            strategy_id="strategy:industry:industry-uncertainty:copaw-agent-runner",
+            scope_type="industry",
+            scope_id="industry-uncertainty",
+            owner_agent_id="copaw-agent-runner",
+            title="Uncertainty-aware strategy",
+            summary="Keep strategic unknowns and lane budgets typed.",
+            north_star="Route cycle pressure through typed strategy constraints.",
+            strategic_uncertainties=[
+                {
+                    "uncertainty_id": "uncertainty:weekend-variance",
+                    "statement": "Weekend variance cause remains uncertain.",
+                    "scope": "lane",
+                    "impact_level": "high",
+                    "current_confidence": 0.35,
+                    "evidence_for_refs": ["evidence:ops:1"],
+                    "evidence_against_refs": ["evidence:ops:2"],
+                    "review_by_cycle": "next-cycle",
+                    "escalate_when": ["confidence-drop", "target-miss"],
+                }
+            ],
+            lane_budgets=[
+                {
+                    "lane_id": "lane-growth",
+                    "budget_window": "next-3-cycles",
+                    "target_share": 0.5,
+                    "min_share": 0.25,
+                    "max_share": 0.75,
+                    "review_pressure": "medium",
+                    "defer_reason": "growth-lane-over-budget",
+                    "force_include_reason": "growth-lane-needs-capacity",
+                }
+            ],
+        ),
+    )
+
+    active = service.get_active_strategy(
+        scope_type="industry",
+        scope_id="industry-uncertainty",
+        owner_agent_id="copaw-agent-runner",
+    )
+
+    assert active is not None
+    assert active.strategy_id == strategy.strategy_id
+    assert active.strategic_uncertainties[0].uncertainty_id == (
+        "uncertainty:weekend-variance"
+    )
+    assert active.strategic_uncertainties[0].escalate_when == [
+        "confidence-drop",
+        "target-miss",
+    ]
+    assert active.lane_budgets[0].lane_id == "lane-growth"
+    assert active.lane_budgets[0].budget_window == "next-3-cycles"

@@ -2031,6 +2031,23 @@ class _IndustryStrategyMixin:
 
         )
 
+        report_synthesis = self._resolve_report_synthesis_payload(
+            cycle_record=current_cycle,
+            agent_report_records=agent_report_records,
+        )
+        strategic_uncertainties = self._build_strategy_uncertainties(
+            pending_reports=pending_reports,
+            report_synthesis=report_synthesis,
+        )
+        lane_budgets = self._build_strategy_lane_budgets(
+            lane_records=lane_records,
+            lane_weights=lane_weights,
+            cycle_records=cycle_records,
+            open_backlog=open_backlog,
+            pending_reports=pending_reports,
+            strategic_uncertainties=strategic_uncertainties,
+        )
+
         strategy_id = (
 
             getattr(service, "canonical_strategy_id", None)(
@@ -2092,6 +2109,10 @@ class _IndustryStrategyMixin:
             teammate_contracts=self._build_strategy_teammate_contracts(resolved_team),
 
             lane_weights=lane_weights,
+
+            strategic_uncertainties=strategic_uncertainties,
+
+            lane_budgets=lane_budgets,
 
             planning_policy=planning_policy,
 
@@ -2176,6 +2197,163 @@ class _IndustryStrategyMixin:
                 titles.append(title)
 
         return titles
+
+    def _build_strategy_uncertainties(
+        self,
+        *,
+        pending_reports: list[AgentReportRecord],
+        report_synthesis: dict[str, Any],
+    ) -> list[StrategicUncertaintyRecord]:
+        uncertainties: list[StrategicUncertaintyRecord] = []
+        seen_ids: set[str] = set()
+        reports_by_id = {
+            report.id: report
+            for report in pending_reports
+            if report.id
+        }
+        holes = list(report_synthesis.get("holes") or [])
+        for hole in holes:
+            if not isinstance(hole, dict):
+                continue
+            hole_id = _string(hole.get("hole_id"))
+            hole_kind = _string(hole.get("kind"))
+            if hole_id is None or hole_kind not in {"uncertainty", "evidence-insufficient"}:
+                continue
+            if hole_id in seen_ids:
+                continue
+            seen_ids.add(hole_id)
+            report = reports_by_id.get(_string(hole.get("report_id")) or "")
+            uncertainties.append(
+                StrategicUncertaintyRecord(
+                    uncertainty_id=hole_id,
+                    statement=_string(hole.get("summary")) or hole_id,
+                    scope="lane" if report is not None and report.lane_id else "strategy",
+                    impact_level="high" if hole_kind == "evidence-insufficient" else "medium",
+                    current_confidence=0.25 if hole_kind == "evidence-insufficient" else 0.35,
+                    evidence_against_refs=(
+                        [f"agent-report:{report.id}"] if report is not None else []
+                    ),
+                    review_by_cycle="next-cycle",
+                    escalate_when=["confidence-drop", "target-miss"],
+                    lane_id=report.lane_id if report is not None else None,
+                ),
+            )
+        for report in pending_reports:
+            for index, item in enumerate(list(report.uncertainties or [])):
+                summary = _string(item)
+                if summary is None:
+                    continue
+                uncertainty_id = f"uncertainty:{report.id}:{index}"
+                if uncertainty_id in seen_ids:
+                    continue
+                seen_ids.add(uncertainty_id)
+                uncertainties.append(
+                    StrategicUncertaintyRecord(
+                        uncertainty_id=uncertainty_id,
+                        statement=summary,
+                        scope="lane" if report.lane_id else "strategy",
+                        impact_level="high" if bool(report.needs_followup) else "medium",
+                        current_confidence=0.4 if bool(report.needs_followup) else 0.5,
+                        evidence_for_refs=[f"agent-report:{report.id}"],
+                        review_by_cycle="next-cycle",
+                        escalate_when=(
+                            ["repeated-blocker", "confidence-drop"]
+                            if bool(report.needs_followup)
+                            else ["confidence-drop", "target-miss"]
+                        ),
+                        lane_id=report.lane_id,
+                    ),
+                )
+        return uncertainties
+
+    def _build_strategy_lane_budgets(
+        self,
+        *,
+        lane_records: list[OperatingLaneRecord],
+        lane_weights: dict[str, float],
+        cycle_records: list[OperatingCycleRecord],
+        open_backlog: list[BacklogItemRecord],
+        pending_reports: list[AgentReportRecord],
+        strategic_uncertainties: list[StrategicUncertaintyRecord],
+    ) -> list[LaneBudgetRecord]:
+        recent_cycles = list(cycle_records[:3])
+        total_recent_cycles = max(1, len(recent_cycles))
+        lane_cycle_counts: dict[str, int] = {}
+        for cycle in recent_cycles:
+            for lane_id in list(cycle.focus_lane_ids or []):
+                normalized_lane_id = _string(lane_id)
+                if normalized_lane_id is None:
+                    continue
+                lane_cycle_counts[normalized_lane_id] = (
+                    lane_cycle_counts.get(normalized_lane_id, 0) + 1
+                )
+        open_backlog_counts: dict[str, int] = {}
+        for item in open_backlog:
+            lane_id = _string(item.lane_id)
+            if lane_id is None:
+                continue
+            open_backlog_counts[lane_id] = open_backlog_counts.get(lane_id, 0) + 1
+        pending_report_counts: dict[str, int] = {}
+        for report in pending_reports:
+            lane_id = _string(report.lane_id)
+            if lane_id is None:
+                continue
+            pending_report_counts[lane_id] = pending_report_counts.get(lane_id, 0) + 1
+        uncertainty_counts: dict[str, int] = {}
+        for uncertainty in strategic_uncertainties:
+            lane_id = _string(uncertainty.lane_id)
+            if lane_id is None:
+                continue
+            uncertainty_counts[lane_id] = uncertainty_counts.get(lane_id, 0) + 1
+        total_weight = sum(max(float(weight), 0.0) for weight in lane_weights.values()) or 1.0
+        budgets: list[LaneBudgetRecord] = []
+        for lane in lane_records:
+            if not lane.id:
+                continue
+            target_share = max(float(lane_weights.get(lane.id, max(1, lane.priority))), 0.0)
+            target_share = round(target_share / total_weight, 4)
+            min_share = round(max(0.0, target_share * 0.5), 4)
+            max_share = round(min(1.0, max(target_share, target_share * 1.5)), 4)
+            current_share = round(
+                float(lane_cycle_counts.get(lane.id, 0)) / float(total_recent_cycles),
+                4,
+            )
+            pressure_count = (
+                open_backlog_counts.get(lane.id, 0)
+                + pending_report_counts.get(lane.id, 0)
+                + uncertainty_counts.get(lane.id, 0)
+            )
+            review_pressure = (
+                "high"
+                if pressure_count >= 2
+                else ("medium" if pressure_count == 1 else "low")
+            )
+            defer_reason = (
+                f"{lane.title} lane is already over the current budget window."
+                if current_share > max_share and open_backlog_counts.get(lane.id, 0) > 0
+                else ""
+            )
+            force_include_reason = (
+                f"{lane.title} lane is underfunded relative to current operating pressure."
+                if current_share < min_share and pressure_count > 0
+                else ""
+            )
+            budgets.append(
+                LaneBudgetRecord(
+                    lane_id=lane.id,
+                    budget_window="next-3-cycles",
+                    target_share=target_share,
+                    min_share=min_share,
+                    max_share=max_share,
+                    current_share=current_share,
+                    review_pressure=review_pressure,
+                    defer_reason=defer_reason,
+                    force_include_reason=force_include_reason,
+                    completed_cycles=total_recent_cycles,
+                    consumed_cycles=lane_cycle_counts.get(lane.id, 0),
+                ),
+            )
+        return budgets
 
 
 

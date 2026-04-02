@@ -816,11 +816,20 @@ def test_phase_next_same_thread_cognitive_closure_smoke_updates_visible_judgment
     }
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    planning_surface = runtime_payload["main_brain_planning"]
+    assert planning_surface["strategy_constraints"]["lane_budgets"]
+    assert planning_surface["replan"]["decision_kind"] in {
+        "follow_up_backlog",
+        "cycle_rebalance",
+        "lane_reweight",
+        "strategy_review_required",
+    }
     replan_node = next(
         node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
     )
     assert replan_node["status"] == "active"
     assert replan_node["metrics"]["needs_replan"] is True
+    assert replan_node["metrics"]["decision_kind"] == planning_surface["replan"]["decision_kind"]
     assert replan_node["metrics"]["conflict_count"] >= 1
     assert replan_node["metrics"]["hole_count"] >= 1
     assert control_thread_id in replan_node["metrics"]["followup_control_thread_ids"]

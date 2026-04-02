@@ -860,6 +860,12 @@
 - `SRK` 当前已经拥有持久化 admit/risk/decision/evidence 闭环，并已接管 channels / cron / heartbeat 的 ingress；`system:dispatch_query` / `system:dispatch_command` 已改为 `CapabilityService -> KernelTurnExecutor -> KernelQueryExecutionService` 的 kernel-owned 执行链，direct `/api/agent/process` 也已直连本地 kernel ingress，`AgentRunner` 宿主壳已在 `V3-B4` 删除
 - `EnvironmentService` 已持久化 `EnvironmentMount / SessionMount` 的 `lease_status / lease_owner / lease_token / lease_acquired_at / lease_expires_at / live_handle_ref`，并具备 `acquire / heartbeat / release / reap` 生命周期；`2026-04-02` 起 shared writer serialization 也已正式收口到同一 lease plane（`shared-writer` front-door + child-run shell），不再只靠 delegation/runtime heuristics 猜测冲突；当前下一正式补齐项已明确为 shared `Surface Host Contract`、browser `Site Contract`、Windows `Desktop App Contract`、`Seat Runtime / Host Companion Session / Workspace Graph / Host Event`，以及对应的宿主恢复/交接策略
 - `2026-04-02` 起 `src/copaw/compiler/planning/` 已成为正式 planning sidecar slice；`GoalService / IndustryService / PredictionService` 现统一消费 `strategy compiler -> cycle planner -> assignment planner -> report replan` 链路，`assignment_plan_envelope / cycle formal_planning / prediction planning overlap / runtime main_brain_planning` 都落在同一条 sidecar 可见链上，而不再由各自服务维护一套 shallow local planning 壳
+- `2026-04-02` 补充：该 planning slice 现在已经正式承接 `FP-6 / FP-7 / FP-8`，不再把 `uncertainty register / strategy-change trigger / multi-cycle lane budget` 留在文档 follow-up 里。当前稳定边界是：
+  - `StrategyMemoryRecord.strategic_uncertainties / lane_budgets` 是正式 truth
+  - `StrategyPlanningCompiler` 负责把上述 truth 编译成 `strategy_constraints`
+  - `CyclePlanningCompiler` 会消费 `lane_budgets`
+  - `ReportReplanEngine` 会输出 typed `decision_kind`
+  - `GoalService / IndustryService / PredictionService / Runtime Center / main-brain runtime context` 统一消费同一套 typed sidecar，而不是再各自推导本地浅字段
 - `2026-04-02` 补充：`run_operating_cycle(force=True, backlog_item_ids=...)` 现在会绕过 active-cycle gate，开启 dedicated formal-planned cycle，而不是把 scoped backlog 偷塞回当前 active cycle；这条规则用于保持 report/cognitive continuity 干净，同时不改变 `StrategyMemory -> OperatingLane -> BacklogItem -> OperatingCycle -> Assignment -> AgentReport` 的真相链
 - `2026-04-02` 补充：`CapabilityService` 的 config front-door 仍默认经 `load_config/save_config` 收口，但现在也允许显式注入 config I/O，用于隔离 runtime/test shell，不再把所有 system config mutation 强绑到同一进程级路径
 - `/goals` 已成为后端一级对象接口，Goal detail 正式只通过 `/goals/{id}/detail` 落地；`/api/runtime-center/goals/{id}` alias 已退役，Agent Workbench 与 Runtime Center 都已接入稳定对象深链路；compiler 也已把 `compiler/task_seed/evidence_refs` 与 learning feedback metadata 持久化到 state-backed tasks

@@ -1108,6 +1108,7 @@ async def test_main_brain_orchestrator_runtime_context_carries_cognitive_surface
     assert len(streamed) == 1
     runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
     assert runtime_context["cognitive"]["needs_replan"] is True
+    assert runtime_context["cognitive"]["decision_kind"] == "follow_up_backlog"
     assert runtime_context["cognitive"]["has_unresolved_conflicts"] is True
     assert runtime_context["cognitive"]["replan_reasons"] == [
         "Reports disagree on assignment-shared.",

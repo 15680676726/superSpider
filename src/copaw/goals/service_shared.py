@@ -240,6 +240,10 @@ def _task_compilation_snapshot(
         "goal_summary",
         "owner_agent_id",
         "actor_owner_id",
+        "strategy_id",
+        "strategy_summary",
+        "strategy_mission",
+        "strategy_north_star",
         "step_index",
         "step_text",
         "plan_step_number",
@@ -258,6 +262,18 @@ def _task_compilation_snapshot(
         value = compiler.get(key)
         if value is not None:
             context[key] = value
+    for key in (
+        "strategy_items",
+        "strategy_priority_order",
+        "strategy_planning_policy",
+        "strategy_review_rules",
+        "strategy_current_focuses",
+        "strategy_strategic_uncertainties",
+        "strategy_lane_budgets",
+    ):
+        value = compiler.get(key)
+        if isinstance(value, list) and value:
+            context[key] = list(value)
     evidence_refs = _string_list(
         compiler.get("evidence_refs"),
         _mapping(payload.get("task_seed")).get("evidence_refs"),

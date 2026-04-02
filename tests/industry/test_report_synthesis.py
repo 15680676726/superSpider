@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from copaw.compiler.planning import ReportReplanEngine
 from copaw.industry.report_synthesis import synthesize_reports
 from copaw.memory.activation_models import ActivationResult, KnowledgeNeuron
 from copaw.state import AgentReportRecord
@@ -518,3 +519,29 @@ def test_synthesize_reports_surfaces_activation_contradictions() -> None:
     assert synthesis["activation"]["contradiction_count"] == 1
     assert synthesis["replan_decision"]["status"] == "needs-replan"
     assert synthesis["needs_replan"] is True
+
+
+def test_synthesize_reports_output_stays_compatible_with_typed_replan_engine() -> None:
+    report = _report(
+        headline="Weekend variance review completed",
+        owner_agent_id="agent-a",
+        lane_id="lane-support",
+        result="completed",
+        uncertainties=["Weekend variance still lacks a validated cause."],
+        metadata={
+            "evidence_status": "insufficient",
+            "cycle_id": "cycle-2",
+            "assignment_id": "assignment-2",
+            "lane_objective_missed": True,
+        },
+    )
+
+    synthesis = synthesize_reports([report])
+    decision = ReportReplanEngine().compile(synthesis)
+
+    assert decision.status == "needs-replan"
+    assert decision.decision_kind in {
+        "follow_up_backlog",
+        "lane_reweight",
+        "strategy_review_required",
+    }

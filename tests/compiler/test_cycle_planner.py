@@ -175,3 +175,141 @@ def test_cycle_planner_force_keeps_high_priority_operator_item_ahead_of_lower_pr
 
     assert decision.should_start is True
     assert decision.selected_backlog_item_ids[0] == "operator-sop"
+
+
+def test_cycle_planner_uses_lane_budgets_to_defer_and_force_include_lanes() -> None:
+    planner = CyclePlanningCompiler()
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind",
+        summary="Northwind execution shell",
+        owner_scope="industry:northwind",
+    )
+    constraints = PlanningStrategyConstraints.model_validate(
+        {
+            "lane_weights": {"lane-growth": 0.9, "lane-ops": 0.4},
+            "lane_budgets": [
+                {
+                    "lane_id": "lane-growth",
+                    "budget_window": "next-3-cycles",
+                    "target_share": 0.2,
+                    "min_share": 0.0,
+                    "max_share": 0.25,
+                    "current_share": 0.5,
+                    "defer_reason": "growth-lane-is-over-budget",
+                },
+                {
+                    "lane_id": "lane-ops",
+                    "budget_window": "next-3-cycles",
+                    "target_share": 0.5,
+                    "min_share": 0.4,
+                    "max_share": 0.75,
+                    "current_share": 0.1,
+                    "force_include_reason": "ops-lane-needs-recovery-capacity",
+                },
+            ],
+        },
+    )
+
+    decision = planner.plan(
+        record=record,
+        current_cycle=None,
+        next_cycle_due_at=None,
+        open_backlog=[
+            _backlog_item("growth-1", lane_id="lane-growth", priority=4),
+            _backlog_item("ops-1", lane_id="lane-ops", priority=1),
+        ],
+        pending_reports=[],
+        force=False,
+        strategy_constraints=constraints,
+    )
+
+    assert decision.should_start is True
+    assert decision.selected_backlog_item_ids[0] == "ops-1"
+    assert "growth-1" not in decision.selected_backlog_item_ids
+    lane_outcomes = {
+        item["lane_id"]: item["status"]
+        for item in decision.metadata["lane_budget_outcomes"]
+    }
+    assert lane_outcomes["lane-growth"] == "deferred"
+    assert lane_outcomes["lane-ops"] == "force-included"
+
+
+def test_cycle_planner_can_suppress_a_lane_when_budget_cap_is_exhausted() -> None:
+    planner = CyclePlanningCompiler()
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind",
+        summary="Northwind execution shell",
+        owner_scope="industry:northwind",
+    )
+    constraints = PlanningStrategyConstraints.model_validate(
+        {
+            "lane_budgets": [
+                {
+                    "lane_id": "lane-growth",
+                    "budget_window": "next-3-cycles",
+                    "target_share": 0.2,
+                    "min_share": 0.0,
+                    "max_share": 0.25,
+                    "current_share": 0.9,
+                }
+            ],
+        },
+    )
+
+    decision = planner.plan(
+        record=record,
+        current_cycle=None,
+        next_cycle_due_at=None,
+        open_backlog=[_backlog_item("growth-1", lane_id="lane-growth", priority=4)],
+        pending_reports=[],
+        force=False,
+        strategy_constraints=constraints,
+    )
+
+    assert decision.should_start is False
+    assert decision.reason == "planner-no-open-backlog"
+    assert decision.metadata["lane_budget_outcomes"][0]["status"] == "suppressed"
+
+
+def test_cycle_planner_force_scoped_backlog_overrides_lane_budget_deferral() -> None:
+    planner = CyclePlanningCompiler()
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind",
+        summary="Northwind execution shell",
+        owner_scope="industry:northwind",
+    )
+    constraints = PlanningStrategyConstraints.model_validate(
+        {
+            "lane_budgets": [
+                {
+                    "lane_id": "lane-growth",
+                    "budget_window": "next-3-cycles",
+                    "target_share": 0.2,
+                    "min_share": 0.0,
+                    "max_share": 0.25,
+                    "current_share": 0.9,
+                    "defer_reason": "growth-lane-is-over-budget",
+                }
+            ],
+        },
+    )
+
+    decision = planner.plan(
+        record=record,
+        current_cycle=None,
+        next_cycle_due_at=None,
+        open_backlog=[_backlog_item("growth-1", lane_id="lane-growth", priority=4)],
+        pending_reports=[],
+        force=True,
+        force_scoped_backlog=True,
+        strategy_constraints=constraints,
+    )
+
+    assert decision.should_start is True
+    assert decision.reason == "forced"
+    assert decision.selected_backlog_item_ids == ["growth-1"]
+    assert decision.metadata["force_scoped_backlog"] is True
+    assert decision.metadata["lane_budget_outcomes"][0]["status"] == "force-included"

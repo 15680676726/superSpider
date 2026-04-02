@@ -536,6 +536,10 @@ class _GoalServiceCompilerMixin:
             "strategy_mission": _string(strategy_payload.get("mission")),
             "strategy_north_star": _string(strategy_payload.get("north_star")),
             "strategy_priority_order": _string_list(strategy_payload.get("priority_order")),
+            "strategy_strategic_uncertainties": list(
+                strategy_payload.get("strategic_uncertainties") or []
+            ),
+            "strategy_lane_budgets": list(strategy_payload.get("lane_budgets") or []),
             "strategy_planning_policy": _string_list(
                 strategy_payload.get("planning_policy"),
             ),
@@ -581,6 +585,10 @@ class _GoalServiceCompilerMixin:
             mission=_string(context.get("strategy_mission")) or "",
             north_star=_string(context.get("strategy_north_star")) or "",
             priority_order=_string_list(context.get("strategy_priority_order")),
+            strategic_uncertainties=list(
+                context.get("strategy_strategic_uncertainties") or []
+            ),
+            lane_budgets=list(context.get("strategy_lane_budgets") or []),
             planning_policy=_string_list(context.get("strategy_planning_policy")),
             review_rules=_string_list(context.get("strategy_review_rules")),
             current_focuses=_string_list(context.get("strategy_current_focuses")),

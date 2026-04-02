@@ -801,16 +801,37 @@ class _QueryExecutionPromptMixin:
                 lines.append(f"- {title}: {', '.join(items[:6])}")
         current_cycle = _mapping_value(_field_value(instance, "current_cycle"))
         synthesis = _mapping_value(current_cycle.get("synthesis")) if current_cycle else {}
-        if synthesis:
+        cognitive = (
+            _mapping_value(current_cycle.get("main_brain_cognitive_surface"))
+            if current_cycle
+            else {}
+        )
+        planning = _mapping_value(_field_value(instance, "main_brain_planning"))
+        replan = _mapping_value(cognitive.get("replan")) or _mapping_value(planning.get("replan"))
+        if synthesis or replan:
             conflicts = list(synthesis.get("conflicts") or [])
             holes = list(synthesis.get("holes") or [])
-            needs_replan = bool(synthesis.get("needs_replan"))
+            has_synthesis_pressure = bool(
+                synthesis.get("needs_replan")
+                or conflicts
+                or holes
+                or list(synthesis.get("replan_reasons") or [])
+                or list(synthesis.get("recommended_actions") or [])
+            )
+            decision_kind = _first_non_empty(
+                replan.get("decision_kind"),
+                cognitive.get("decision_kind"),
+            ) or ("follow_up_backlog" if has_synthesis_pressure else "clear")
+            needs_replan = bool(synthesis.get("needs_replan")) or decision_kind != "clear"
             lines.append(
                 "- Control-core synthesis focus: compare reports, detect conflicts and holes, then own the final operator-facing conclusion before more delegation.",
             )
             lines.append(
-                f"- Current synthesis status: conflicts={len(conflicts)}, holes={len(holes)}, needs_replan={'yes' if needs_replan else 'no'}",
+                f"- Current synthesis status: conflicts={len(conflicts)}, holes={len(holes)}, needs_replan={'yes' if needs_replan else 'no'}, decision_kind={decision_kind}",
             )
+            trigger_families = _string_list(replan.get("trigger_families"))
+            if trigger_families:
+                lines.append(f"- Replan trigger families: {', '.join(trigger_families[:6])}")
         staffing = _mapping_value(_field_value(instance, "staffing"))
         active_gap = _mapping_value(staffing.get("active_gap")) if staffing else {}
         if active_gap:

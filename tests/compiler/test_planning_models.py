@@ -4,8 +4,11 @@ from __future__ import annotations
 from copaw.compiler.planning.models import (
     AssignmentPlanEnvelope,
     CyclePlanningDecision,
+    PlanningLaneBudget,
     PlanningStrategyConstraints,
+    PlanningStrategicUncertainty,
     ReportReplanDecision,
+    StrategyTriggerRule,
 )
 
 
@@ -47,5 +50,54 @@ def test_strategy_constraints_and_replan_decision_default_to_sidecar_safe_empty_
 
     assert constraints.priority_order == []
     assert constraints.lane_weights == {}
+    assert constraints.strategic_uncertainties == []
+    assert constraints.lane_budgets == []
+    assert constraints.strategy_trigger_rules == []
     assert replan.status == "clear"
+    assert replan.decision_kind == "clear"
     assert replan.directives == []
+
+
+def test_strategy_constraints_keep_uncertainties_budgets_and_trigger_rules() -> None:
+    constraints = PlanningStrategyConstraints(
+        strategic_uncertainties=[
+            PlanningStrategicUncertainty(
+                uncertainty_id="uncertainty:weekend-variance",
+                statement="Weekend variance cause remains uncertain.",
+                scope="lane",
+                impact_level="high",
+                current_confidence=0.35,
+                review_by_cycle="next-cycle",
+                escalate_when=["confidence-drop", "target-miss"],
+            )
+        ],
+        lane_budgets=[
+            PlanningLaneBudget(
+                lane_id="lane-growth",
+                budget_window="next-3-cycles",
+                target_share=0.5,
+                min_share=0.25,
+                max_share=0.75,
+                review_pressure="medium",
+                force_include_reason="growth-lane-underfunded",
+            )
+        ],
+        strategy_trigger_rules=[
+            StrategyTriggerRule(
+                rule_id="uncertainty:weekend-variance:confidence-drop",
+                source="uncertainty-register",
+                decision_kind="strategy_review_required",
+                summary="Escalate when confidence drops on weekend variance.",
+                trigger_signals=["confidence-drop"],
+                uncertainty_ids=["uncertainty:weekend-variance"],
+            )
+        ],
+    )
+
+    assert constraints.strategic_uncertainties[0].uncertainty_id == (
+        "uncertainty:weekend-variance"
+    )
+    assert constraints.lane_budgets[0].lane_id == "lane-growth"
+    assert constraints.strategy_trigger_rules[0].decision_kind == (
+        "strategy_review_required"
+    )

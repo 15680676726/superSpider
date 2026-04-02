@@ -89,6 +89,96 @@ def _resolve_synthesis(current_cycle: object | None, synthesis: Mapping[str, Any
     return _mapping(cycle_payload.get("synthesis")) or _mapping(_mapping(cycle_payload.get("metadata")).get("report_synthesis"))
 
 
+def _resolve_formal_planning(current_cycle: Mapping[str, Any]) -> dict[str, Any]:
+    return (
+        _mapping(current_cycle.get("formal_planning"))
+        or _mapping(_mapping(current_cycle.get("metadata")).get("formal_planning"))
+        or _mapping(current_cycle.get("main_brain_planning"))
+    )
+
+
+def _resolve_report_replan(
+    current_cycle: Mapping[str, Any],
+    synthesis: Mapping[str, Any],
+) -> dict[str, Any]:
+    planning = _resolve_formal_planning(current_cycle)
+    persisted = _mapping(planning.get("report_replan")) or _mapping(_mapping(planning.get("replan")))
+    raw_decision = _mapping(synthesis.get("replan_decision"))
+    activation = _mapping(synthesis.get("activation"))
+    strategy_change = _mapping(activation.get("strategy_change"))
+    trigger_families = _unique_strings(
+        persisted.get("trigger_families"),
+        raw_decision.get("trigger_families"),
+        strategy_change.get("trigger_families"),
+    )
+    trigger_rule_ids = _unique_strings(
+        persisted.get("trigger_rule_ids"),
+        raw_decision.get("trigger_rule_ids"),
+        strategy_change.get("trigger_rule_ids"),
+    )
+    affected_lane_ids = _unique_strings(
+        persisted.get("affected_lane_ids"),
+        raw_decision.get("affected_lane_ids"),
+        strategy_change.get("affected_lane_ids"),
+    )
+    affected_uncertainty_ids = _unique_strings(
+        persisted.get("affected_uncertainty_ids"),
+        raw_decision.get("affected_uncertainty_ids"),
+        strategy_change.get("affected_uncertainty_ids"),
+    )
+    reason_ids = _unique_strings(
+        persisted.get("reason_ids"),
+        raw_decision.get("reason_ids"),
+    )
+    source_report_ids = _unique_strings(
+        persisted.get("source_report_ids"),
+        raw_decision.get("source_report_ids"),
+    )
+    topic_keys = _unique_strings(
+        persisted.get("topic_keys"),
+        raw_decision.get("topic_keys"),
+    )
+    decision_kind = (
+        _string(persisted.get("decision_kind"))
+        or _string(raw_decision.get("decision_kind"))
+        or _string(strategy_change.get("decision_kind"))
+        or ("follow_up_backlog" if _synthesis_has_pressure(synthesis) else "clear")
+    )
+    status = (
+        _string(persisted.get("status"))
+        or _string(raw_decision.get("status"))
+        or ("needs-replan" if decision_kind != "clear" else "clear")
+    )
+    summary = (
+        _string(persisted.get("summary"))
+        or _string(raw_decision.get("summary"))
+        or (
+            "No unresolved report synthesis pressure."
+            if decision_kind == "clear"
+            else "Report synthesis requires main-brain replan."
+        )
+    )
+    return {
+        **persisted,
+        "status": status,
+        "decision_kind": decision_kind,
+        "summary": summary,
+        "reason_ids": reason_ids,
+        "source_report_ids": source_report_ids,
+        "topic_keys": topic_keys,
+        "trigger_families": trigger_families,
+        "trigger_rule_ids": trigger_rule_ids,
+        "affected_lane_ids": affected_lane_ids,
+        "affected_uncertainty_ids": affected_uncertainty_ids,
+        "trigger_context": {
+            "trigger_families": trigger_families,
+            "trigger_rule_ids": trigger_rule_ids,
+            "affected_lane_ids": affected_lane_ids,
+            "affected_uncertainty_ids": affected_uncertainty_ids,
+        },
+    }
+
+
 def _synthesis_has_pressure(synthesis: Mapping[str, Any]) -> bool:
     return bool(
         synthesis.get("needs_replan")
@@ -183,6 +273,7 @@ def build_main_brain_cognitive_surface(
     )
     anchor_cycle_id = _cycle_id(anchor_cycle)
     normalized_synthesis = _resolve_synthesis(anchor_cycle, synthesis)
+    replan = _resolve_report_replan(anchor_cycle, normalized_synthesis)
 
     latest_findings = _mapping_list(normalized_synthesis.get("latest_findings"), limit=4)
     conflicts = _mapping_list(normalized_synthesis.get("conflicts"), limit=4)
@@ -214,6 +305,8 @@ def build_main_brain_cognitive_surface(
 
     needs_replan = bool(
         backlog_payload
+        or _string(replan.get("status")) == "needs-replan"
+        or _string(replan.get("decision_kind")) not in {None, "", "clear"}
         or normalized_synthesis.get("needs_replan")
         or conflicts
         or holes
@@ -223,6 +316,12 @@ def build_main_brain_cognitive_surface(
     if resolved_action is None:
         if backlog_payload:
             resolved_action = "dispatch-followup"
+        elif _string(replan.get("decision_kind")) == "strategy_review_required":
+            resolved_action = "request-strategy-review"
+        elif _string(replan.get("decision_kind")) == "cycle_rebalance":
+            resolved_action = "rebalance-cycle"
+        elif _string(replan.get("decision_kind")) == "lane_reweight":
+            resolved_action = "reweight-lanes"
         elif needs_replan:
             resolved_action = "review-reports-and-materialize-next-followup-cycle"
         else:
@@ -230,13 +329,21 @@ def build_main_brain_cognitive_surface(
     judgment = {
         "cycle_id": anchor_cycle_id,
         "status": "replan-required" if backlog_payload else ("review-required" if needs_replan else "stable"),
+        "decision_kind": _string(replan.get("decision_kind")) or "clear",
         "summary": (
             replan_reasons[0]
             if replan_reasons
             else (
                 f"{len(backlog_payload)} follow-up backlog item(s) still need main-brain closure."
                 if backlog_payload
-                else ("Main-brain should replan before dispatching more work." if needs_replan else "Main-brain closure is currently stable.")
+                else (
+                    _string(replan.get("summary"))
+                    or (
+                        "Main-brain should replan before dispatching more work."
+                        if needs_replan
+                        else "Main-brain closure is currently stable."
+                    )
+                )
             )
         ),
     }
@@ -250,11 +357,14 @@ def build_main_brain_cognitive_surface(
             "replan_reasons": replan_reasons,
             "needs_replan": needs_replan,
         },
+        "replan": replan,
+        "decision_kind": _string(replan.get("decision_kind")) or "clear",
         "needs_replan": needs_replan,
         "replan_reasons": replan_reasons,
         "judgment": judgment,
         "next_action": {
             "kind": resolved_action,
+            "decision_kind": _string(replan.get("decision_kind")) or "clear",
             "summary": resolved_action.replace("-", " "),
         },
         "followup_backlog": backlog_payload,

@@ -2718,6 +2718,8 @@ class _IndustryLifecycleMixin:
         record: IndustryInstanceRecord,
         cycle_decision: CyclePlanningDecision,
         meeting_window: str,
+        strategy_constraints: PlanningStrategyConstraints | None = None,
+        report_replan: object | None = None,
     ) -> dict[str, object]:
         metadata = dict(cycle_decision.metadata or {})
         review_anchor = cycle_decision.selected_backlog_item_ids or [
@@ -2742,6 +2744,9 @@ class _IndustryLifecycleMixin:
             "selected_backlog_item_ids": list(
                 cycle_decision.selected_backlog_item_ids or []
             ),
+            "strategy_constraints": self._planner_sidecar_payload(strategy_constraints),
+            "cycle_decision": self._planner_sidecar_payload(cycle_decision),
+            "report_replan": self._planner_sidecar_payload(report_replan),
             "metadata": metadata,
         }
 
@@ -2793,6 +2798,8 @@ class _IndustryLifecycleMixin:
                 record=record,
                 cycle_decision=cycle_decision,
                 meeting_window=meeting_window,
+                strategy_constraints=strategy_constraints,
+                report_replan=self._report_replan_engine.compile(report_synthesis),
             )
         goal_statuses: dict[str, str] = {}
         for goal_id in list(record.goal_ids or []):
@@ -3311,6 +3318,7 @@ class _IndustryLifecycleMixin:
                 open_backlog=open_backlog,
                 pending_reports=pending_reports,
                 force=force,
+                force_scoped_backlog=bool(scoped_backlog_ids),
                 strategy_constraints=strategy_constraints,
             )
             reason = cycle_decision.reason

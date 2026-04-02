@@ -3,12 +3,63 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .model_support import CreatedRecord, UpdatedRecord, _new_record_id, _normalize_text_list, _utc_now
 from .models_core import ReportScopeType, ReportWindow, StrategyMemoryStatus, StrategyScopeType
+
+
+class StrategicUncertaintyRecord(BaseModel):
+    """Typed strategic uncertainty tracked on strategy truth."""
+
+    uncertainty_id: str = Field(..., min_length=1)
+    statement: str = ""
+    scope: Literal["strategy", "lane", "cycle"] = "strategy"
+    impact_level: Literal["low", "medium", "high"] = "medium"
+    current_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    evidence_for_refs: list[str] = Field(default_factory=list)
+    evidence_against_refs: list[str] = Field(default_factory=list)
+    review_by_cycle: str = ""
+    escalate_when: list[str] = Field(default_factory=list)
+    lane_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator(
+        "evidence_for_refs",
+        "evidence_against_refs",
+        "escalate_when",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_uncertainty_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+
+class LaneBudgetRecord(BaseModel):
+    """Typed lane budget policy tracked on strategy truth."""
+
+    lane_id: str = Field(..., min_length=1)
+    budget_window: str = "next-cycle"
+    target_share: float = Field(default=0.0, ge=0.0, le=1.0)
+    min_share: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_share: float = Field(default=1.0, ge=0.0, le=1.0)
+    current_share: float | None = Field(default=None, ge=0.0, le=1.0)
+    review_pressure: str = ""
+    defer_reason: str = ""
+    force_include_reason: str = ""
+    completed_cycles: int = Field(default=0, ge=0)
+    consumed_cycles: int = Field(default=0, ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_budget_shares(self) -> "LaneBudgetRecord":
+        if self.min_share > self.max_share:
+            raise ValueError("Lane budget min_share cannot exceed max_share")
+        if self.target_share < self.min_share or self.target_share > self.max_share:
+            raise ValueError("Lane budget target_share must stay within min_share and max_share")
+        return self
 
 
 class StrategyMemoryRecord(UpdatedRecord):
@@ -34,6 +85,8 @@ class StrategyMemoryRecord(UpdatedRecord):
     active_goal_titles: list[str] = Field(default_factory=list)
     teammate_contracts: list[dict[str, Any]] = Field(default_factory=list)
     lane_weights: dict[str, float] = Field(default_factory=dict)
+    strategic_uncertainties: list[StrategicUncertaintyRecord] = Field(default_factory=list)
+    lane_budgets: list[LaneBudgetRecord] = Field(default_factory=list)
     planning_policy: list[str] = Field(default_factory=list)
     current_focuses: list[str] = Field(default_factory=list)
     paused_lane_ids: list[str] = Field(default_factory=list)
@@ -169,9 +222,11 @@ class ReportRecord(CreatedRecord):
 
 
 __all__ = [
+    "LaneBudgetRecord",
     "MetricRecord",
     "ReportEvidenceDigest",
     "ReportRecord",
     "ReportTaskDigest",
+    "StrategicUncertaintyRecord",
     "StrategyMemoryRecord",
 ]

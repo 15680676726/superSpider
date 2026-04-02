@@ -1613,6 +1613,24 @@ def test_runtime_detail_exposes_stable_main_brain_planning_surface_from_formal_s
         "strategy_constraints": {
             "mission": "Keep the operating loop governed and visible.",
             "priority_order": ["governed follow-up", "steady execution"],
+            "strategic_uncertainties": [
+                {
+                    "uncertainty_id": "uncertainty:governed-move",
+                    "statement": "The governed move still needs operator validation.",
+                    "scope": "lane",
+                    "impact_level": "high",
+                }
+            ],
+            "lane_budgets": [
+                {
+                    "lane_id": list(cycle_record.focus_lane_ids or ["lane-governed"])[0],
+                    "budget_window": "next-3-cycles",
+                    "target_share": 0.5,
+                    "min_share": 0.25,
+                    "max_share": 0.75,
+                    "force_include_reason": "governed-followup-is-underfunded",
+                }
+            ],
             "planning_policy": ["prefer-followup-before-net-new"],
             "review_rules": ["repeat-failure-needs-review"],
             "paused_lane_ids": [],
@@ -1686,6 +1704,12 @@ def test_runtime_detail_exposes_stable_main_brain_planning_surface_from_formal_s
     assert planning_surface["is_truth_store"] is False
     assert planning_surface["source"] == "industry-runtime-read-model"
     assert planning_surface["strategy_constraints"] == cycle_planning["strategy_constraints"]
+    assert planning_surface["strategy_constraints"]["strategic_uncertainties"][0]["uncertainty_id"] == (
+        "uncertainty:governed-move"
+    )
+    assert planning_surface["strategy_constraints"]["lane_budgets"][0]["budget_window"] == (
+        "next-3-cycles"
+    )
     assert planning_surface["latest_cycle_decision"]["cycle_id"] == current_cycle_id
     assert planning_surface["latest_cycle_decision"]["selected_backlog_item_ids"] == (
         cycle_planning["cycle_decision"]["selected_backlog_item_ids"]
@@ -1697,6 +1721,13 @@ def test_runtime_detail_exposes_stable_main_brain_planning_surface_from_formal_s
         assignment_planning["assignment_plan"]
     )
     assert planning_surface["replan"]["status"] == "clear"
+    assert planning_surface["replan"]["decision_kind"] == "clear"
+    assert planning_surface["replan"]["trigger_context"] == {
+        "trigger_families": [],
+        "trigger_rule_ids": [],
+        "affected_lane_ids": [],
+        "affected_uncertainty_ids": [],
+    }
     assert detail.current_cycle["main_brain_planning"] == planning_surface
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()

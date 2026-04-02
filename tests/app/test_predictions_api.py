@@ -673,6 +673,23 @@ def test_prediction_cycle_case_exposes_light_formal_planning_context_in_detail(t
             "planning_policy": ["prefer-followup-before-net-new"],
             "selected_lane_ids": ["lane-growth"],
             "selected_backlog_item_ids": ["backlog-a"],
+            "strategy_constraints": {
+                "strategic_uncertainties": [
+                    {
+                        "uncertainty_id": "uncertainty:weekend-variance",
+                        "statement": "Weekend variance cause remains uncertain.",
+                    }
+                ],
+                "lane_budgets": [
+                    {
+                        "lane_id": "lane-growth",
+                        "budget_window": "next-3-cycles",
+                        "target_share": 0.5,
+                        "min_share": 0.25,
+                        "max_share": 0.75,
+                    }
+                ],
+            },
             "metadata": {
                 "pending_report_count": 2,
                 "open_backlog_count": 1,
@@ -685,6 +702,9 @@ def test_prediction_cycle_case_exposes_light_formal_planning_context_in_detail(t
             "replan_decision": {
                 "decision_id": "report-synthesis:needs-replan:failed-report:1",
                 "status": "needs-replan",
+                "decision_kind": "lane_reweight",
+                "trigger_families": ["target-miss"],
+                "affected_lane_ids": ["lane-growth"],
                 "summary": "1 unresolved report synthesis signal requires main-brain judgment.",
                 "reason_ids": ["failed-report:1"],
                 "source_report_ids": ["report-a"],
@@ -702,19 +722,32 @@ def test_prediction_cycle_case_exposes_light_formal_planning_context_in_detail(t
     assert planning["planning_policy"] == ["prefer-followup-before-net-new"]
     assert planning["selected_lane_ids"] == ["lane-growth"]
     assert planning["selected_backlog_item_ids"] == ["backlog-a"]
+    assert planning["strategy_constraints"]["strategic_uncertainties"][0]["uncertainty_id"] == (
+        "uncertainty:weekend-variance"
+    )
+    assert planning["strategy_constraints"]["lane_budgets"][0]["lane_id"] == (
+        "lane-growth"
+    )
     assert planning["participant_count"] == 1
     assert planning["assignment_count"] == 1
     assert planning["lane_count"] == 1
     assert planning["pending_report_count"] == 2
     assert planning["open_backlog_count"] == 1
+    assert planning["cycle_decision"]["selected_backlog_item_ids"] == ["backlog-a"]
+    assert planning["cycle_decision"]["selected_lane_ids"] == ["lane-growth"]
     assert planning["replan"]["status"] == "needs-replan"
+    assert planning["replan"]["decision_kind"] == "lane_reweight"
+    assert planning["replan"]["trigger_families"] == ["target-miss"]
+    assert planning["replan"]["affected_lane_ids"] == ["lane-growth"]
+    assert planning["replan"]["trigger_context"]["affected_lane_ids"] == ["lane-growth"]
     assert planning["replan"]["decision_id"] == (
         "report-synthesis:needs-replan:failed-report:1"
     )
     assert planning["replan"]["reason_ids"] == ["failed-report:1"]
     assert planning["replan"]["directive_count"] == 1
     assert planning["replan"]["recommended_action_count"] == 1
-    assert planning["replan"]["activation_keys"] == ["top_constraints"]
+    assert "top_constraints" in planning["replan"]["activation_keys"]
+    assert "strategy_change" in planning["replan"]["activation_keys"]
     assert detail.case["input_payload"]["planning"]["review_ref"] == (
         "formal-review:industry-demo:cycle-1"
     )
