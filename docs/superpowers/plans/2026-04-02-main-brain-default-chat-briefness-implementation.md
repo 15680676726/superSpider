@@ -4,7 +4,7 @@
 
 **Goal:** Tighten CoPaw main-brain ordinary chat replies so the default `CHAT` shell is shorter and more direct without adding new routing layers.
 
-**Architecture:** Keep the change inside the existing default shell tail in `main_brain_chat_service.py`. Do not introduce new classifiers, new shell modes, or any second truth source; strengthen only the prompt contract for ordinary chat turns.
+**Architecture:** Keep the change inside the existing default shell tail text in `main_brain_chat_service.py`. Do not introduce new classifiers, new shell modes, token-limit tweaks, post-processing layers, or any second truth source; strengthen only the prompt contract for ordinary chat turns.
 
 **Tech Stack:** Python 3.12, pytest, existing main-brain chat prompt builder
 
@@ -25,6 +25,7 @@ Add or tighten assertions so the default `CHAT` shell tail explicitly requires:
 - no request restatement unless needed
 - no bullets/sections for simple asks
 - one decisive clarification question at most
+- no donor-specific `cc` wording, labels, or shell names being introduced as part of this change
 
 - [ ] **Step 2: Run the focused test to verify failure**
 
@@ -44,7 +45,9 @@ Do not:
 
 - change the shell-mode set
 - add a local reply-classification layer
+- import donor-specific `cc` wording or labels into CoPaw replies
 - modify `plan / review / resume / verify`
+- change token limits or add response post-processing
 - change formal truth or orchestration behavior
 
 - [ ] **Step 4: Re-run the focused test**
@@ -65,7 +68,7 @@ Run:
 PYTHONPATH=src python -m pytest tests/kernel/test_main_brain_chat_service.py -k "default_shell_tail or tightens_front_door_shell_structure or prompt_adds_plan_shell_tail" -q
 ```
 
-Expected: PASS.
+Expected: PASS, including the existing `review / resume / verify` shell-tail assertions covered by `tightens_front_door_shell_structure`.
 
 - [ ] **Step 6: Commit**
 

@@ -27,6 +27,8 @@ Out of scope:
 - Keep `/api/runtime-center/chat/run` as the only chat front door.
 - Do not add a second planning center or another intent-routing layer.
 - Avoid editing the large Chinese system prompt body unless necessary; prefer tightening the existing default shell tail in `main_brain_chat_service.py`.
+- Borrow `cc` front-door discipline only. Do not transplant `cc`-specific labels, slash-command semantics, donor wording, or any donor-only shell names into CoPaw `CHAT` replies.
+- Keep this change to prompt-tail text only. Do not widen scope into token-limit tuning, response post-processing, or any other behavioral layer.
 
 ## Approaches Considered
 
@@ -52,6 +54,7 @@ This is the closest donor-boundary move:
 - no new truth
 - no new mode
 - direct impact on ordinary chat tone and length
+- no donor-language transplant into CoPaw reply text
 
 ## Design
 
@@ -65,9 +68,10 @@ The default `Mode: CHAT` shell tail should add stronger front-door rules:
 - if clarification is required, ask only one decisive question
 
 The existing `plan / review / resume / verify` shell tails remain unchanged.
+This change must not modify their wording, structure, or verification behavior.
 
 ## Verification
 
 - add failing tests around the default `CHAT` tail text
 - run focused `pytest` for `test_main_brain_chat_service.py`
-- confirm no regression to other shell-tail tests
+- confirm no regression to `plan / review / resume / verify` shell-tail tests
