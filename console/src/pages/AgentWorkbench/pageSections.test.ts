@@ -5,7 +5,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { buildGoalTaskGroups } from "./sections/taskPanels";
-import { ProfileCard } from "./pageSections";
+import { ProfileCard, TAB_KEYS } from "./pageSections";
 
 if (!window.matchMedia) {
   Object.defineProperty(window, "matchMedia", {
@@ -24,6 +24,19 @@ if (!window.matchMedia) {
 }
 
 describe("pageSections decomposition", () => {
+  it("keeps the new canonical tabs and legacy aliases in the shared tab key set", () => {
+    expect(Array.from(TAB_KEYS).sort()).toEqual([
+      "daily",
+      "weekly",
+      "profile",
+      "performance",
+      "evidence",
+      "workbench",
+      "workspace",
+      "growth",
+    ].sort());
+  });
+
   it("groups parent tasks, standalone tasks, and orphan children via the extracted task panel module", () => {
     const grouped = buildGoalTaskGroups([
       {
@@ -88,6 +101,7 @@ describe("pageSections decomposition", () => {
       }),
     );
 
+    expect(screen.getByText("当前焦点:")).toBeTruthy();
     expect(screen.getByText("Focused Goal Summary")).toBeTruthy();
     expect(screen.queryByText("Legacy Goal Summary")).toBeNull();
   });

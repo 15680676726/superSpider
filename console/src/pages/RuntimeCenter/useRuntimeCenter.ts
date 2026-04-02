@@ -6,6 +6,7 @@ import { subscribe } from "../../runtime/eventBus";
 import type { RuntimeMainBrainResponse } from "../../api/modules/runtimeCenter";
 import {
   normalizeRuntimePath,
+  requestRuntimeBusinessAgents,
   requestRuntimeMainBrain,
   requestRuntimeOverview,
   requestRuntimeRecord,
@@ -56,6 +57,24 @@ export interface RuntimeCenterOverviewPayload {
   cards: RuntimeOverviewCard[];
 }
 
+export interface RuntimeCenterAgentSummary {
+  agent_id: string;
+  name?: string | null;
+  role_name?: string | null;
+  role_summary?: string | null;
+  agent_class?: string | null;
+  status?: string | null;
+  current_focus?: string | null;
+  current_focus_kind?: string | null;
+  current_focus_id?: string | null;
+  reports_to?: string | null;
+  industry_role_id?: string | null;
+}
+
+const MAIN_BRAIN_AGENT_IDS = new Set(["copaw-agent-runner"]);
+const MAIN_BRAIN_AGENT_CLASSES = new Set(["system"]);
+const MAIN_BRAIN_ROLE_IDS = new Set(["execution-core"]);
+
 interface RuntimeActionResult {
   success?: boolean;
   summary?: string;
@@ -85,7 +104,10 @@ function normalizeOverview(
   payload: RuntimeCenterOverviewPayload,
 ): RuntimeCenterOverviewPayload {
   const visibleCards = (payload.cards ?? []).filter(
-    (card) => card.key !== "goals" && card.key !== "schedules",
+    (card) =>
+      card.key !== "goals" &&
+      card.key !== "schedules" &&
+      card.key !== "main-brain",
   );
   return {
     ...payload,
@@ -141,6 +163,17 @@ function actionMethod(actionKey: string): "POST" | "DELETE" {
   return actionKey === "delete" ? "DELETE" : "POST";
 }
 
+function isMainBrainAgent(agent: RuntimeCenterAgentSummary | null | undefined): boolean {
+  if (!agent) {
+    return false;
+  }
+  return (
+    MAIN_BRAIN_AGENT_IDS.has(agent.agent_id) ||
+    MAIN_BRAIN_AGENT_CLASSES.has(agent.agent_class ?? "") ||
+    MAIN_BRAIN_ROLE_IDS.has(agent.industry_role_id ?? "")
+  );
+}
+
 export function useRuntimeCenter() {
   const [data, setData] = useState<RuntimeCenterOverviewPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -151,6 +184,9 @@ export function useRuntimeCenter() {
   const [mainBrainLoading, setMainBrainLoading] = useState(true);
   const [mainBrainError, setMainBrainError] = useState<string | null>(null);
   const [mainBrainUnavailable, setMainBrainUnavailable] = useState(false);
+  const [businessAgents, setBusinessAgents] = useState<RuntimeCenterAgentSummary[]>([]);
+  const [businessAgentsLoading, setBusinessAgentsLoading] = useState(true);
+  const [businessAgentsError, setBusinessAgentsError] = useState<string | null>(null);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [detail, setDetail] = useState<RuntimeCenterDetailState | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -166,9 +202,13 @@ export function useRuntimeCenter() {
     setMainBrainLoading(true);
     setMainBrainError(null);
     setMainBrainUnavailable(false);
+    setBusinessAgentsLoading(true);
+    setBusinessAgentsError(null);
     const overviewPromise =
       requestRuntimeOverview<RuntimeCenterOverviewPayload>();
     const mainBrainPromise = requestRuntimeMainBrain<RuntimeMainBrainResponse>();
+    const businessAgentsPromise =
+      requestRuntimeBusinessAgents<RuntimeCenterAgentSummary[]>();
 
     try {
       const payload = await overviewPromise;
@@ -205,6 +245,21 @@ export function useRuntimeCenter() {
       }
     } finally {
       setMainBrainLoading(false);
+    }
+
+    try {
+      const payload = await businessAgentsPromise;
+      setBusinessAgents(
+        Array.isArray(payload) ? payload.filter((agent) => !isMainBrainAgent(agent)) : [],
+      );
+      setBusinessAgentsError(null);
+    } catch (err) {
+      setBusinessAgents([]);
+      setBusinessAgentsError(
+        localizeRuntimeText(err instanceof Error ? err.message : String(err)),
+      );
+    } finally {
+      setBusinessAgentsLoading(false);
     }
   }, []);
 
@@ -334,6 +389,9 @@ export function useRuntimeCenter() {
     mainBrainError,
     mainBrainLoading,
     mainBrainUnavailable,
+    businessAgents,
+    businessAgentsLoading,
+    businessAgentsError,
     busyActionId,
     detail,
     detailLoading,

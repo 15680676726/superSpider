@@ -30,7 +30,6 @@ import {
   agentWorkbenchText,
   getIndustryRuntimeStatusLabel,
   runtimeCenterText,
-  workspaceText,
 } from "./copy";
 import { localizeWorkbenchText } from "./localize";
 import WorkspaceTab from "./WorkspaceTab";
@@ -56,6 +55,39 @@ import {
 } from "./pageSections";
 
 const { Paragraph, Text } = Typography;
+
+const AGENT_WORKBENCH_TAB_ALIASES: Record<string, string> = {
+  workbench: "profile",
+  workspace: "evidence",
+  growth: "performance",
+};
+
+function normalizeAgentWorkbenchTab(rawTab: string | null): string {
+  if (!rawTab) {
+    return "daily";
+  }
+  const aliased = AGENT_WORKBENCH_TAB_ALIASES[rawTab] ?? rawTab;
+  return TAB_KEYS.has(aliased) ? aliased : "daily";
+}
+
+function resolveExecutionSeatAgent(
+  agents: AgentProfile[],
+  candidate: AgentProfile | null | undefined,
+): AgentProfile | null {
+  if (!candidate || isExecutionCoreAgent(candidate)) {
+    return null;
+  }
+  return agents.find((agent) => agent.agent_id === candidate.agent_id) || candidate;
+}
+
+function renderTabLabel(icon: React.ReactNode, label: string) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      {icon}
+      <span>{label}</span>
+    </span>
+  );
+}
 
 export default function AgentWorkbenchPage() {
   const navigate = useNavigate();
@@ -92,49 +124,59 @@ export default function AgentWorkbenchPage() {
   });
 
   const requestedTab = searchParams.get("tab");
-  const activeTab = TAB_KEYS.has(requestedTab ?? "") ? requestedTab ?? "workbench" : "workbench";
+  const activeTab = normalizeAgentWorkbenchTab(requestedTab);
   const executionCoreAgent = useMemo(
-    () =>
-      agents.find((agent) => isExecutionCoreAgent(agent)) ||
-      selectedAgent ||
-      agents[0] ||
-      null,
-    [agents, selectedAgent],
+    () => agents.find((agent) => isExecutionCoreAgent(agent)) || null,
+    [agents],
   );
   const executionSeatAgents = useMemo(
+    () => agents.filter((agent) => !isExecutionCoreAgent(agent)),
+    [agents],
+  );
+  const requestedExecutionSeat = useMemo(
     () =>
-      executionCoreAgent
-        ? agents.filter((agent) => agent.agent_id !== executionCoreAgent.agent_id)
-        : agents,
-    [agents, executionCoreAgent],
+      requestedAgentId
+        ? executionSeatAgents.find((agent) => agent.agent_id === requestedAgentId) || null
+        : null,
+    [executionSeatAgents, requestedAgentId],
+  );
+  const selectedExecutionSeat = useMemo(
+    () => resolveExecutionSeatAgent(executionSeatAgents, selectedAgent),
+    [executionSeatAgents, selectedAgent],
   );
   const defaultFocusedAgent = useMemo(
-    () => executionSeatAgents[0] || executionCoreAgent || agents[0] || null,
-    [agents, executionCoreAgent, executionSeatAgents],
+    () => requestedExecutionSeat || selectedExecutionSeat || executionSeatAgents[0] || null,
+    [executionSeatAgents, requestedExecutionSeat, selectedExecutionSeat],
   );
-  const displayedAgent = agentDetail?.agent ?? selectedAgent ?? defaultFocusedAgent;
-  const displayedEvidence = agentDetail ? agentDetail.evidence : evidence;
+  const displayedAgent = defaultFocusedAgent;
+  const displayedAgentDetail = useMemo(
+    () => {
+      if (!displayedAgent || !agentDetail?.agent) {
+        return null;
+      }
+      if (isExecutionCoreAgent(agentDetail.agent)) {
+        return null;
+      }
+      return agentDetail.agent.agent_id === displayedAgent.agent_id ? agentDetail : null;
+    },
+    [agentDetail, displayedAgent],
+  );
+  const displayedEvidence = displayedAgentDetail ? displayedAgentDetail.evidence : evidence;
 
   React.useEffect(() => {
     if (agents.length === 0) {
       return;
     }
-    const matchedAgent = requestedAgentId
-      ? agents.find((item) => item.agent_id === requestedAgentId) || null
-      : null;
-    const persistedSelection = selectedAgent
-      ? agents.find((item) => item.agent_id === selectedAgent.agent_id) || null
-      : null;
-    const nextAgent = matchedAgent || persistedSelection || defaultFocusedAgent;
+    const nextAgent = requestedExecutionSeat || selectedExecutionSeat || executionSeatAgents[0] || null;
     if (!nextAgent || selectedAgent?.agent_id === nextAgent.agent_id) {
       return;
     }
     setSelectedAgent(nextAgent);
   }, [
-    agents,
-    defaultFocusedAgent,
-    requestedAgentId,
+    executionSeatAgents,
+    requestedExecutionSeat,
     selectedAgent?.agent_id,
+    selectedExecutionSeat,
     setSelectedAgent,
   ]);
 
@@ -159,13 +201,9 @@ export default function AgentWorkbenchPage() {
 
   const handleTabChange = (nextTab: string) => {
     const nextParams = new URLSearchParams(searchParams);
-    if (nextTab === "workbench") {
-      nextParams.delete("tab");
-    } else {
-      nextParams.set("tab", nextTab);
-    }
-    if (selectedAgent?.agent_id) {
-      nextParams.set("agent", selectedAgent.agent_id);
+    nextParams.set("tab", nextTab);
+    if (displayedAgent?.agent_id) {
+      nextParams.set("agent", displayedAgent.agent_id);
     }
     setSearchParams(nextParams, { replace: true });
   };
@@ -191,8 +229,12 @@ export default function AgentWorkbenchPage() {
       message.error(
         err instanceof Error ? err.message : agentWorkbenchText.chatOpenFailed,
       );
-    }
+      }
   };
+
+  const handleOpenRuntimeCenter = React.useCallback(() => {
+    navigate("/runtime-center");
+  }, [navigate]);
 
   if (loading) {
     return (
@@ -236,7 +278,7 @@ export default function AgentWorkbenchPage() {
         <div className="baize-page-header-content">
           <div>
             <h1 className="baize-page-header-title">{agentWorkbenchText.pageTitle}</h1>
-            <p className="baize-page-header-description">管理智能体职责、任务执行与成长轨迹。</p>
+            <p className="baize-page-header-description">{agentWorkbenchText.pageDescription}</p>
           </div>
           <div className="baize-page-header-actions">
             <Button
@@ -265,21 +307,18 @@ export default function AgentWorkbenchPage() {
               ) : null}
             </Space>
             <Paragraph style={{ marginBottom: 0 }}>
-              Spider Mesh 主脑保留长期使命与派工权；下方面板聚焦当前所选执行位的
-              assignment、report、escalation 与回主脑确认事项。
+              Spider Mesh 主脑保留长期使命与派工权；下方面板只聚焦当前所选执行位的
+              执行、回流、升级与待主脑裁决事项。
             </Paragraph>
             <div className={styles.agentSwitcherGrid}>
               <Card
                 className={[
                   "baize-card",
                   styles.agentSwitcherCard,
-                  displayedAgent?.agent_id === executionCoreAgent.agent_id
-                    ? styles.agentSwitcherCardSelected
-                    : "",
                 ].filter(Boolean).join(" ")}
                 hoverable
                 size="small"
-                onClick={() => handleSelectAgent(executionCoreAgent)}
+                onClick={handleOpenRuntimeCenter}
               >
                 <div className={styles.agentSwitcherHeader}>
                   <UserOutlined className={styles.agentSwitcherIcon} />
@@ -305,12 +344,12 @@ export default function AgentWorkbenchPage() {
                     <Tag>{`执行位 ${executionSeatAgents.length}`}</Tag>
                   ) : null}
                 </Space>
-                <Paragraph hidden type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+                <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
                   {localizeWorkbenchText(
                     executionCoreAgent.role_summary ||
                       executionCoreAgent.current_focus ||
                       executionCoreAgent.mission,
-                  ) || "负责拆解目标、分派执行位、回收证据并监督结果。"}
+                  ) || "负责拆解目标、分派执行位、回收证据并监督结果。点击返回 Runtime Center 查看主脑驾驶舱。"}
                 </Paragraph>
               </Card>
               {executionSeatAgents.map((agent) => (
@@ -386,12 +425,28 @@ export default function AgentWorkbenchPage() {
         onChange={handleTabChange}
         items={[
           {
-            key: "workbench",
-            label: (
-              <span>
-                <UserOutlined /> {agentWorkbenchText.tabWorkbench}
-              </span>
+            key: "daily",
+            label: renderTabLabel(<CalendarOutlined />, agentWorkbenchText.tabDaily),
+            children: (
+              <AgentDailyReport
+                agentId={displayedAgent?.agent_id ?? null}
+                agentName={displayedAgent?.name ?? null}
+              />
             ),
+          },
+          {
+            key: "weekly",
+            label: renderTabLabel(<BarChartOutlined />, agentWorkbenchText.tabWeekly),
+            children: (
+              <AgentWeeklyReport
+                agentId={displayedAgent?.agent_id ?? null}
+                agentName={displayedAgent?.name ?? null}
+              />
+            ),
+          },
+          {
+            key: "profile",
+            label: renderTabLabel(<UserOutlined />, agentWorkbenchText.tabProfile),
             children: (
               <>
                 {displayedAgent ? (
@@ -407,7 +462,7 @@ export default function AgentWorkbenchPage() {
                   <V7ExecutionSeatPanel
                     agent={displayedAgent}
                     agents={agents}
-                    agentDetail={agentDetail}
+                    agentDetail={displayedAgentDetail}
                     industryDetail={industryDetail}
                     industryDetailLoading={industryDetailLoading}
                     industryDetailError={industryDetailError}
@@ -416,7 +471,7 @@ export default function AgentWorkbenchPage() {
                 {displayedAgent ? (
                   <CapabilityGovernancePanel
                     agent={displayedAgent}
-                    detail={agentDetail}
+                    detail={displayedAgentDetail}
                     capabilityCatalog={capabilityCatalog}
                     capabilityCatalogLoading={capabilityCatalogLoading}
                     capabilityActionKey={capabilityActionKey}
@@ -426,71 +481,35 @@ export default function AgentWorkbenchPage() {
                   />
                 ) : null}
                 <ActorRuntimePanel
-                  detail={agentDetail}
+                  detail={displayedAgentDetail}
                   actorActionKey={actorActionKey}
                   onPauseActor={pauseActorRuntime}
                   onResumeActor={resumeActorRuntime}
                   onRetryMailbox={retryActorMailboxRuntime}
                   onCancelActor={cancelActorRuntime}
                 />
-                <EvidencePanel evidence={displayedEvidence} agents={agents} />
               </>
             ),
           },
           {
-            key: "workspace",
-            label: (
-              <span>
-                <FolderOpenOutlined /> {workspaceText.tabTitle}
-              </span>
-            ),
+            key: "performance",
+            label: renderTabLabel(<RiseOutlined />, agentWorkbenchText.tabPerformance),
+            children: <AgentGrowthTrajectory />,
+          },
+          {
+            key: "evidence",
+            label: renderTabLabel(<FolderOpenOutlined />, agentWorkbenchText.tabEvidence),
             children: (
               <>
                 <WorkspaceTab
                   agent={displayedAgent}
-                  agentDetail={agentDetail}
+                  agentDetail={displayedAgentDetail}
                   loading={agentDetailLoading}
                   error={agentDetailError}
                 />
+                <EvidencePanel evidence={displayedEvidence} agents={agents} />
               </>
             ),
-          },
-          {
-            key: "daily",
-            label: (
-              <span>
-                <CalendarOutlined /> {agentWorkbenchText.tabDaily}
-              </span>
-            ),
-            children: (
-              <AgentDailyReport
-                agentId={displayedAgent?.agent_id ?? null}
-                agentName={displayedAgent?.name ?? null}
-              />
-            ),
-          },
-          {
-            key: "weekly",
-            label: (
-              <span>
-                <BarChartOutlined /> {agentWorkbenchText.tabWeekly}
-              </span>
-            ),
-            children: (
-              <AgentWeeklyReport
-                agentId={displayedAgent?.agent_id ?? null}
-                agentName={displayedAgent?.name ?? null}
-              />
-            ),
-          },
-          {
-            key: "growth",
-            label: (
-              <span>
-                <RiseOutlined /> {agentWorkbenchText.tabGrowth}
-              </span>
-            ),
-            children: <AgentGrowthTrajectory />,
           },
         ]}
       />

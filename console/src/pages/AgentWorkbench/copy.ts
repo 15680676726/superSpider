@@ -137,8 +137,8 @@ export const runtimeCenterText = {
 export const workspaceText = {
   tabTitle: "环境 / 文件",
   title: "环境 / 文件工作区",
-  description: "这里显示这个执行位挂载的环境、回放、产物和文件，不展示任务汇总。",
-  taskProgressHint: "任务进展请看任务 / 汇报、日报和周报。",
+  description: "这里显示这个执行位挂载的环境、回放、产物和文件，不展示主脑驾驶舱读面。",
+  taskProgressHint: "执行进展请看今日简报、周报和证据产物。",
   filePanelTitle: "工作文件",
   currentEnvironment: "当前环境",
   environmentRef: "环境引用",
@@ -226,9 +226,9 @@ export const agentReportsText = {
 } as const;
 
 export const agentWorkbenchText = {
-  pageTitle: "智能体任务中心",
-  pageDescription: "查看智能体职责、当前任务、正式汇报与成长轨迹。",
-  loading: "正在加载智能体任务中心...",
+  pageTitle: "执行位工作台",
+  pageDescription: "查看职业执行位职责、当前派工、正式回流与成长轨迹。",
+  loading: "正在加载执行位工作台...",
   noAgents: "暂无智能体",
   unassignedRole: "未分配角色",
   goalsTitle: "关联目标",
@@ -309,10 +309,11 @@ export const agentWorkbenchText = {
   dataUnavailable: "数据不可用",
   scopeMessage: "当前按身份过滤",
   clearScope: "显示全部智能体",
-  tabWorkbench: "任务 / 汇报",
-  tabDaily: "日报",
+  tabDaily: "今日简报",
   tabWeekly: "周报",
-  tabGrowth: "成长",
+  tabProfile: "简历",
+  tabPerformance: "绩效",
+  tabEvidence: "证据产物",
   ownerLabel: "负责人",
   planStepsLabel: "计划步骤",
   industryContextLabel: "行业上下文",

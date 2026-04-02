@@ -307,6 +307,86 @@ function extractTimestamp(value: unknown): string | null {
   return null;
 }
 
+function extractRecordTimestamp(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (isRecord(value)) {
+    return firstString(
+      value.completed_at,
+      value.recorded_at,
+      value.decided_at,
+      value.applied_at,
+      value.closed_at,
+      value.resolved_at,
+      value.finished_at,
+      value.verified_at,
+      value.submitted_at,
+      value.started_at,
+      value.updated_at,
+      value.created_at,
+      value.generated_at,
+    );
+  }
+  return null;
+}
+
+function utcDayKey(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toISOString().slice(0, 10);
+}
+
+function sliceRecordsForGeneratedDay(
+  records: Record<string, unknown>[],
+  generatedAt: string | null,
+): { records: Record<string, unknown>[]; hasTimestampEvidence: boolean } {
+  const anchorDay = utcDayKey(generatedAt);
+  if (!anchorDay) {
+    return { records: [], hasTimestampEvidence: false };
+  }
+  let hasTimestampEvidence = false;
+  const scopedRecords = records.filter((record) => {
+    const recordDay = utcDayKey(extractRecordTimestamp(record));
+    if (!recordDay) {
+      return false;
+    }
+    hasTimestampEvidence = true;
+    return recordDay === anchorDay;
+  });
+  return { records: scopedRecords, hasTimestampEvidence };
+}
+
+function scopeTraceSectionToGeneratedDay(
+  section: Record<string, unknown> | null,
+  generatedAt: string | null,
+  emptySummary: string,
+): Record<string, unknown> | null {
+  if (!section) {
+    return null;
+  }
+  const entries = recordList(section.entries);
+  const scoped = sliceRecordsForGeneratedDay(entries, generatedAt);
+  if (scoped.records.length === 0) {
+    return {
+      ...section,
+      count: 0,
+      summary: emptySummary,
+      entries: [],
+    };
+  }
+  return {
+    ...section,
+    count: scoped.records.length,
+    entries: scoped.records,
+  };
+}
+
 function formatUtcMinute(value: string | null): string {
   if (!value) {
     return RUNTIME_CENTER_TEXT.emptyValue;
@@ -404,6 +484,23 @@ function deriveUnconsumedReportCount(
     return false;
   });
   return unconsumed.length;
+}
+
+function coordinationFallback(value: Record<string, unknown> | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const hostTwinSummary = isRecord(value.host_twin_summary)
+    ? (value.host_twin_summary as Record<string, unknown>)
+    : null;
+  if (!hostTwinSummary) {
+    return null;
+  }
+  return firstString(
+    hostTwinSummary.recommended_scheduler_action,
+    hostTwinSummary.continuity_state,
+    hostTwinSummary.active_app_family_keys,
+  );
 }
 
 export default function MainBrainCockpitPanel({
@@ -517,6 +614,128 @@ export default function MainBrainCockpitPanel({
   const patchesSection = isRecord(mainBrainData?.patches)
     ? (mainBrainData?.patches as Record<string, unknown>)
     : null;
+  const todayTraceEmptyCopy = "今天暂无新增记录。";
+  const todayCompletedEmptyCopy = "今天暂无新完成记录。";
+  const generatedDayAnchor = generatedAt ?? null;
+  const scopedReportRecords = sliceRecordsForGeneratedDay(
+    reportRecords,
+    generatedDayAnchor,
+  ).records;
+  const scopedEvidenceSection = scopeTraceSectionToGeneratedDay(
+    evidenceSection,
+    generatedDayAnchor,
+    todayTraceEmptyCopy,
+  );
+  const scopedDecisionsSection = scopeTraceSectionToGeneratedDay(
+    decisionsSection,
+    generatedDayAnchor,
+    todayTraceEmptyCopy,
+  );
+  const scopedPatchesSection = scopeTraceSectionToGeneratedDay(
+    patchesSection,
+    generatedDayAnchor,
+    todayTraceEmptyCopy,
+  );
+  const scopedDecisionRecords = recordList(scopedDecisionsSection?.entries);
+  const scopedPatchRecords = recordList(scopedPatchesSection?.entries);
+  const staffingPendingCount =
+    isRecord(environmentPayload?.staffing) &&
+    typeof environmentPayload.staffing.pending_confirmation_count === "number"
+      ? environmentPayload.staffing.pending_confirmation_count
+      : 0;
+  const humanAssistBlockedCount =
+    isRecord(environmentPayload?.human_assist) &&
+    typeof environmentPayload.human_assist.blocked_count === "number"
+      ? environmentPayload.human_assist.blocked_count
+      : 0;
+  const todayGoalItems = [
+    firstString(cycleSignal?.title, mainBrainData?.strategy?.title, strategySignal?.value),
+    firstString(cycleSignal?.summary, mainBrainData?.strategy?.summary, strategySignal?.detail),
+  ].filter((item): item is string => Boolean(item));
+  const completedItems = [
+    ...scopedReportRecords
+      .slice(0, 2)
+      .map((record) => firstString(record.title, record.headline, record.summary))
+      .filter((item): item is string => Boolean(item)),
+    scopedEvidenceSection && typeof scopedEvidenceSection.count === "number" && scopedEvidenceSection.count > 0
+      ? `今日新增 ${scopedEvidenceSection.count} 条证据`
+      : null,
+  ].filter((item): item is string => Boolean(item));
+  const inProgressItems = [
+    ...assignmentRecords
+      .slice(0, 2)
+      .map((record) => firstString(record.title, record.summary))
+      .filter((item): item is string => Boolean(item)),
+    ...backlogRecords
+      .slice(0, 1)
+      .map((record) => firstString(record.title, record.summary))
+      .filter((item): item is string => Boolean(item)),
+  ];
+  const blockedItems = [
+    firstString(governancePayload?.summary),
+    conflictRecords.length > 0 ? `存在 ${conflictRecords.length} 项冲突待主脑收口` : null,
+    humanAssistBlockedCount > 0 ? `存在 ${humanAssistBlockedCount} 项人工协作阻塞` : null,
+  ].filter((item): item is string => Boolean(item));
+  const confirmItems = [
+    ...scopedDecisionRecords
+      .slice(0, 2)
+      .map((record) => firstString(record.title, record.headline, record.summary))
+      .filter((item): item is string => Boolean(item)),
+    staffingPendingCount > 0 ? `待处理 ${staffingPendingCount} 项岗位/接手确认` : null,
+    ...scopedPatchRecords
+      .slice(0, 2)
+      .map((record) => firstString(record.title, record.headline, record.summary))
+      .filter((item): item is string => Boolean(item)),
+  ].filter((item): item is string => Boolean(item));
+  const nextStepMode =
+    confirmItems.length > 0
+      ? "等待确认"
+      : blockedItems.length > 0 || humanAssistBlockedCount > 0
+        ? "等待外部条件"
+        : "自动执行";
+  const nextStepTitle =
+    firstString(cognitionNextAction?.title, followupBacklogRecords[0]?.title, backlogRecords[0]?.title) ||
+    "继续推进当前周期";
+  const nextStepSummary =
+    firstString(
+      cognitionNextAction?.summary,
+      followupBacklogRecords[0]?.summary,
+      backlogRecords[0]?.summary,
+      coordinationFallback(environmentPayload),
+    );
+  const dailyBriefSections = [
+    {
+      key: "today-goal",
+      label: "今日目标",
+      items: todayGoalItems.length > 0 ? todayGoalItems : ["收口当前周期与主脑派工回流"],
+    },
+    {
+      key: "completed",
+      label: "已完成",
+      items: completedItems.length > 0 ? completedItems : [todayCompletedEmptyCopy],
+    },
+    {
+      key: "in-progress",
+      label: "进行中",
+      items: inProgressItems.length > 0 ? inProgressItems : ["今天暂无进行中的任务。"],
+    },
+    {
+      key: "blocked",
+      label: "当前阻塞",
+      items: blockedItems.length > 0 ? blockedItems : ["今天暂无明显阻塞。"],
+    },
+    {
+      key: "confirm",
+      label: "待确认",
+      items: confirmItems.length > 0 ? confirmItems : ["今天暂无待确认事项。"],
+    },
+    {
+      key: "next-step",
+      label: "下一步",
+      items: [`${nextStepMode} · ${localizeRuntimeText(nextStepTitle)}`, nextStepSummary]
+        .filter((item): item is string => Boolean(item)),
+    },
+  ];
   const industryRoute =
     firstString(mainBrainData?.carrier?.route) ?? firstString(mainBrainMeta.industry_route);
 
@@ -567,7 +786,7 @@ export default function MainBrainCockpitPanel({
         <Alert
           showIcon
           type="error"
-          message="主脑驾驶舱加载失败"
+          message="主脑今日运行简报加载失败"
           description={errorMessage}
           style={{ marginBottom: 20 }}
         />
@@ -580,6 +799,23 @@ export default function MainBrainCockpitPanel({
           <Tag>{RUNTIME_CENTER_TEXT.generatedAt(formatCnTimestamp(generatedAt))}</Tag>
         ) : null}
       </Space>
+
+      <Card size="small" title="主脑今日运行简报" style={{ marginBottom: 16 }}>
+        <div className={styles.briefGrid}>
+          {dailyBriefSections.map((section) => (
+            <div key={section.key} className={styles.briefCard}>
+              <div className={styles.briefTitle}>{section.label}</div>
+              <div className={styles.briefList}>
+                {section.items.map((item, index) => (
+                  <div key={`${section.key}:${index}`} className={styles.briefItem}>
+                    {localizeRuntimeText(item)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
 
       <Descriptions
         size="small"
@@ -877,8 +1113,8 @@ export default function MainBrainCockpitPanel({
                     </p>
                   </div>
                 </div>
-                {renderCompactRecordList(reportRecords, {
-                  emptyLabel: "当前没有可见汇报。",
+                {renderCompactRecordList(scopedReportRecords, {
+                  emptyLabel: todayCompletedEmptyCopy,
                   fallbackRoute: industryRoute,
                   fallbackRouteTitle: "汇报",
                   onOpenRoute,
@@ -1023,20 +1259,20 @@ export default function MainBrainCockpitPanel({
             <div className={styles.metaGrid}>
               {renderTraceBlock({
                 title: "证据",
-                section: evidenceSection,
-                emptyLabel: "当前没有可见证据。",
+                section: scopedEvidenceSection,
+                emptyLabel: todayTraceEmptyCopy,
                 onOpenRoute,
               })}
               {renderTraceBlock({
                 title: "决策",
-                section: decisionsSection,
-                emptyLabel: "当前没有可见决策。",
+                section: scopedDecisionsSection,
+                emptyLabel: todayTraceEmptyCopy,
                 onOpenRoute,
               })}
               {renderTraceBlock({
                 title: "补丁",
-                section: patchesSection,
-                emptyLabel: "当前没有可见补丁。",
+                section: scopedPatchesSection,
+                emptyLabel: todayTraceEmptyCopy,
                 onOpenRoute,
               })}
             </div>

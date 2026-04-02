@@ -883,9 +883,9 @@ export const CAPABILITY_SURFACE_TEXT = {
 } as const;
 
 export const MAIN_BRAIN_COCKPIT_TEXT = {
-  title: "主脑驾驶舱",
+  title: "主脑今日运行简报",
   description:
-    "在同一个驾驶舱操作面里统一查看载体、策略、泳道、周期、派工、汇报、治理、恢复、自动化、环境、证据、决策与补丁。",
+    "先看主脑今天要完成什么、做到哪里、卡在哪里，再决定是否进入治理、恢复和更深的运行细节。",
 } as const;
 
 export function humanizeToken(value: string): string {

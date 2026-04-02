@@ -67,74 +67,9 @@ function createRuntimeCenterState() {
           source: "state_query_service",
           status: "state-service",
           count: 1,
-          summary: "Main brain cockpit",
-          entries: [
-            {
-              id: "main-brain-1",
-              title: "Main-Brain cockpit",
-              kind: "runtime",
-              status: "active",
-              owner: null,
-              summary: "Open the cockpit detail",
-              updated_at: "2026-03-29T09:00:00Z",
-              route: "/api/runtime-center/governance/status",
-              actions: {},
-              meta: {},
-            },
-          ],
-          meta: {
-            carrier: {
-              status: "state-service",
-              summary: "Carrier ready",
-              route: "/api/runtime-center/governance/status",
-            },
-            strategy: {
-              summary: "North star: weekly alignment",
-            },
-            lanes: {
-              count: 4,
-              summary: "4 lanes active",
-            },
-            backlog: {
-              count: 6,
-              summary: "6 backlog items",
-              route: "/api/runtime-center/industry/industry-1?backlog_item_id=backlog-1",
-            },
-            current_cycle: {
-              title: "Cycle 12",
-              summary: "Weekly cadence",
-              status: "active",
-              next_cycle_due_at: "2026-03-31T23:59:59Z",
-              focus_count: 9,
-              route: "/api/runtime-center/industry/industry-1?cycle_id=cycle-12",
-            },
-            assignments: {
-              count: 3,
-              summary: "3 active assignments",
-            },
-            agent_reports: {
-              count: 8,
-              unconsumed_count: 5,
-              summary: "8 agent reports",
-            },
-            evidence: {
-              count: 5,
-              summary: "5 evidence records",
-            },
-            decisions: {
-              count: 1,
-              summary: "1 decision pending",
-            },
-            patches: {
-              count: 2,
-              summary: "2 patches pending",
-            },
-            environment: {
-              summary: "Host twin ready",
-              detail: "Workspace bound",
-              route: "/api/runtime-center/governance/status",
-            },
-          },
+          summary: "Legacy generic main-brain overview card",
+          entries: [],
+          meta: {},
         },
         {
           key: "decisions",
@@ -161,10 +96,150 @@ function createRuntimeCenterState() {
     loading: false,
     refreshing: false,
     error: null,
-    mainBrainData: null,
+    mainBrainData: {
+      generated_at: "2026-03-29T09:05:00Z",
+      surface: {
+        version: "runtime-center-v1",
+        mode: "operator-surface",
+        status: "state-service",
+        read_only: true,
+        source: "state_query_service,governance_service",
+        note: "Shared runtime surface",
+      },
+      strategy: {
+        title: "Northwind field operations strategy",
+        summary: "Keep the staffed handoff loop stable and evidence-backed.",
+      },
+      carrier: {
+        industry_instance_id: "industry-1",
+        label: "Northwind Ops",
+        route: "/api/runtime-center/industry/industry-1",
+      },
+      lanes: [],
+      cycles: [],
+      backlog: [
+        {
+          backlog_item_id: "backlog-followup-1",
+          title: "Resolve handoff return evidence gap",
+          summary: "Dispatch a governed browser follow-up on the same control thread.",
+          route: "/api/runtime-center/industry/industry-1?backlog_item_id=backlog-followup-1",
+          status: "open",
+        },
+      ],
+      current_cycle: {
+        cycle_id: "cycle-12",
+        title: "Cycle 12",
+        status: "active",
+        focus_count: 2,
+        next_cycle_due_at: "2026-03-31T23:59:59Z",
+      },
+      assignments: [
+        {
+          assignment_id: "assignment-1",
+          title: "Review handoff blockers",
+          status: "active",
+          route: "/api/runtime-center/industry/industry-1",
+        },
+      ],
+      reports: [
+        {
+          report_id: "report-1",
+          headline: "Need supervisor decision",
+          summary: "Operator must compare the evidence gap before dispatching the next cycle.",
+          status: "recorded",
+          needs_followup: true,
+          report_consumed: false,
+          updated_at: "2026-03-29T08:30:00Z",
+          route: "/api/runtime-center/industry/industry-1",
+        },
+      ],
+      report_cognition: {
+        next_action: {
+          kind: "followup-backlog",
+          title: "Resolve handoff return evidence gap",
+          summary: "Dispatch a governed browser follow-up on the same control thread.",
+        },
+      },
+      environment: {
+        route: "/api/runtime-center/governance/status",
+        summary: "Host twin ready on seat-b with multi-surface continuity.",
+        host_twin_summary: {
+          selected_seat_ref: "env:desktop:seat-b",
+          recommended_scheduler_action: "proceed",
+          continuity_state: "ready",
+          active_app_family_keys: ["browser_backoffice", "office_document"],
+        },
+      },
+      governance: {
+        route: "/api/runtime-center/governance/status",
+        status: "blocked",
+        summary: "Human handoff is active and runtime dispatch is gated.",
+        pending_decisions: 1,
+        pending_patches: 2,
+      },
+      recovery: {
+        route: "/api/runtime-center/recovery/latest",
+        available: true,
+        status: "ready",
+        summary: "Recovered expired decisions and runtime leases during startup.",
+      },
+      automation: {
+        route: "/api/runtime-center/schedules",
+        status: "active",
+        summary: "2 schedule(s) visible; heartbeat success every 6h.",
+      },
+      evidence: {
+        count: 1,
+        summary: "Evidence trace is ready.",
+        route: "/api/runtime-center/evidence",
+        entries: [{ id: "evidence-1", title: "Checkpoint evidence" }],
+        meta: {},
+      },
+      decisions: {
+        count: 1,
+        summary: "One decision pending.",
+        route: "/api/runtime-center/decisions",
+        entries: [{ id: "decision-1", title: "Approve host return" }],
+        meta: {},
+      },
+      patches: {
+        count: 1,
+        summary: "One patch pending.",
+        route: "/api/runtime-center/learning/patches",
+        entries: [{ id: "patch-1", title: "Apply continuity patch" }],
+        meta: {},
+      },
+      signals: {
+        carrier: {
+          key: "carrier",
+          value: "Northwind Ops",
+        },
+        strategy: {
+          key: "strategy",
+          value: "Northwind field operations strategy",
+        },
+      },
+      meta: {
+        control_chain: [],
+      },
+    },
     mainBrainLoading: false,
     mainBrainError: null,
-    mainBrainUnavailable: true,
+    mainBrainUnavailable: false,
+    businessAgents: [
+      {
+        agent_id: "agent-ops-1",
+        name: "运营执行位",
+        role_name: "运营",
+        role_summary: "负责跟进外部交付与证据整理。",
+        agent_class: "business",
+        status: "active",
+        current_focus: "整理交付阻塞与证据",
+        industry_role_id: "ops-seat",
+      },
+    ],
+    businessAgentsLoading: false,
+    businessAgentsError: null,
     busyActionId: null,
     detail: null,
     detailLoading: false,
@@ -193,7 +268,7 @@ function createAdminState() {
     recoveryBusyKey: null,
     operatorActor: "runtime-center",
     setOperatorActor: vi.fn(),
-    governanceResolution: "鎵瑰噯",
+    governanceResolution: "已审阅",
     setGovernanceResolution: vi.fn(),
     emergencyReason: "",
     setEmergencyReason: vi.fn(),
@@ -222,63 +297,95 @@ describe("RuntimeCenterPage", () => {
     mockSearchParams = new URLSearchParams();
   });
 
-  it("renders the main-brain cockpit surface before the legacy overview grid", () => {
+  it("renders the execution-first homepage with daily brief before the agent strip", () => {
     useRuntimeCenterMock.mockReturnValue(createRuntimeCenterState());
     useRuntimeCenterAdminStateMock.mockReturnValue(createAdminState());
 
     render(<RuntimeCenterPage />);
 
-    expect(screen.getByText("主脑驾驶舱")).toBeTruthy();
-    expect(screen.getAllByText("载体").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("策略").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("当前周期").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("智能体汇报").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("待办").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("周期截止时间").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("焦点数量").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("2026-03-31 23:59Z").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("9").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("6").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("5").length).toBeGreaterThan(0);
-    expect(screen.queryByText("当前目标")).toBeNull();
+    const briefTitle = screen.getAllByText("主脑今日运行简报")[0];
+    const stripTitle = screen.getByText("主脑与职业智能体");
 
-    fireEvent.click(screen.getByLabelText("打开当前周期详情"));
-
-    expect(mockOpenDetail).toHaveBeenCalledWith(
-      "/api/runtime-center/industry/industry-1?cycle_id=cycle-12",
-      expect.any(String),
+    expect(briefTitle.compareDocumentPosition(stripTitle)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
     );
+    expect(screen.getByText("今日目标")).toBeTruthy();
+    expect(screen.getByText("已完成")).toBeTruthy();
+    expect(screen.getByText("进行中")).toBeTruthy();
+    expect(screen.getByText("当前阻塞")).toBeTruthy();
+    expect(screen.getByText("待确认")).toBeTruthy();
+    expect(screen.getByText("下一步")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^主脑/ })).toBeTruthy();
+    expect(screen.getByText("运营执行位")).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText("打开待办详情"));
-    expect(mockOpenDetail).toHaveBeenCalledWith(
-      "/api/runtime-center/industry/industry-1?backlog_item_id=backlog-1",
-      expect.any(String),
+    fireEvent.click(screen.getByRole("button", { name: /运营执行位/i }));
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/agents?tab=daily&agent=agent-ops-1",
     );
+  });
+
+  it("does not render the legacy generic main-brain overview card", () => {
+    useRuntimeCenterMock.mockReturnValue(createRuntimeCenterState());
+    useRuntimeCenterAdminStateMock.mockReturnValue(createAdminState());
+
+    render(<RuntimeCenterPage />);
+
+    expect(
+      screen.queryByText("Legacy generic main-brain overview card"),
+    ).toBeNull();
+  });
+
+  it("does not render the main brain twice when the agent summary payload includes system identities", () => {
+    useRuntimeCenterMock.mockReturnValue({
+      ...createRuntimeCenterState(),
+      businessAgents: [
+        {
+          agent_id: "copaw-agent-runner",
+          name: "Spider Mesh",
+          role_name: "主脑",
+          agent_class: "system",
+          status: "active",
+          industry_role_id: "execution-core",
+        },
+        ...createRuntimeCenterState().businessAgents,
+      ],
+    });
+    useRuntimeCenterAdminStateMock.mockReturnValue(createAdminState());
+
+    render(<RuntimeCenterPage />);
+
+    expect(screen.getAllByRole("button", { name: /^主脑/ })).toHaveLength(1);
+    expect(screen.getByText("运营执行位")).toBeTruthy();
   });
 
   it("renders recovery self-check highlights when recovery tab is active", () => {
     mockSearchParams = new URLSearchParams("tab=recovery");
-    useRuntimeCenterMock.mockReturnValue(createRuntimeCenterState());
+    useRuntimeCenterMock.mockReturnValue({
+      ...createRuntimeCenterState(),
+      data: {
+        ...createRuntimeCenterState().data,
+      },
+    });
     useRuntimeCenterAdminStateMock.mockReturnValue({
       ...createAdminState(),
       recoverySummary: {
         reason: "startup",
-        phase: "restore",
       },
       selfCheck: {
-        overall_status: "active",
+        overall_status: "warn",
         checks: [
           {
-            name: "carrier",
-            status: "active",
-            summary: "Carrier healthy",
+            name: "workspace_drift",
+            status: "warn",
+            summary: "检测到工作区漂移",
             meta: {},
           },
           {
-            name: "environment",
-            status: "warning",
-            summary: "Workspace drift detected",
-            meta: { drift_count: 1 },
+            name: "evidence_ledger",
+            status: "pass",
+            summary: "Evidence ledger online",
+            meta: {},
           },
         ],
       },
@@ -286,7 +393,6 @@ describe("RuntimeCenterPage", () => {
 
     render(<RuntimeCenterPage />);
 
-    expect(screen.getAllByText("载体健康").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("检测到工作区漂移").length).toBeGreaterThan(0);
+    expect(screen.getByText("实时自检")).toBeTruthy();
   });
 });

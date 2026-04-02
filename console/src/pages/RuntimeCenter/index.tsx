@@ -29,7 +29,10 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import AutomationTab from "./AutomationTab";
 import CapabilityOptimizationPanel from "./CapabilityOptimizationPanel";
 import styles from "./index.module.less";
-import { useRuntimeCenter } from "./useRuntimeCenter";
+import {
+  type RuntimeCenterAgentSummary,
+  useRuntimeCenter,
+} from "./useRuntimeCenter";
 import { localizeRuntimeText, RUNTIME_CENTER_TEXT } from "./text";
 import {
   type RuntimeCenterTab,
@@ -56,9 +59,89 @@ import {
 } from "./viewHelpers";
 import MainBrainCockpitPanel from "./MainBrainCockpitPanel";
 import { runtimeStatusColor } from "../../runtime/tagSemantics";
+import { presentExecutionActorName } from "../../runtime/executionPresentation";
 
 const { Text } = Typography;
 const { TextArea } = Input;
+
+const LEGACY_OVERVIEW_CARD_KEYS = new Set(["goals", "schedules", "main-brain"]);
+const MAIN_BRAIN_AGENT_IDS = new Set(["copaw-agent-runner"]);
+const MAIN_BRAIN_AGENT_CLASSES = new Set(["system"]);
+const MAIN_BRAIN_ROLE_IDS = new Set(["execution-core"]);
+
+function agentHeadline(agent: RuntimeCenterAgentSummary | null | undefined): string {
+  if (!agent) {
+    return "当前还没有新的执行摘要。";
+  }
+  return (
+    localizeRuntimeText(
+      agent.current_focus || agent.role_summary || agent.role_name || agent.name || "",
+    ) || "当前还没有新的焦点摘要。"
+  );
+}
+
+function readRecordText(
+  record: Record<string, unknown> | null | undefined,
+  keys: string[],
+): string | null {
+  if (!record) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function mainBrainHeadline(
+  mainBrainData: ReturnType<typeof useRuntimeCenter>["mainBrainData"],
+  options: {
+    loading: boolean;
+    error: string | null;
+    unavailable: boolean;
+  },
+): string {
+  if (options.error) {
+    return options.error;
+  }
+  if (options.loading) {
+    return "正在汇总主脑今日运行简报。";
+  }
+  if (options.unavailable || !mainBrainData) {
+    return "主脑正在收口当前周期、派工与证据回流。";
+  }
+
+  const currentCycleTitle = readRecordText(mainBrainData.current_cycle, [
+    "title",
+    "cycle_title",
+  ]);
+  const nextAction = readRecordText(
+    mainBrainData.report_cognition?.next_action as Record<string, unknown> | undefined,
+    ["title", "summary"],
+  );
+  const fragments = [
+    currentCycleTitle
+      ? `当前周期：${localizeRuntimeText(currentCycleTitle)}`
+      : null,
+    nextAction ? `下一步：${localizeRuntimeText(nextAction)}` : null,
+    `派工 ${mainBrainData.assignments.length} / 汇报 ${mainBrainData.reports.length}`,
+  ];
+  return fragments.filter(Boolean).join(" · ");
+}
+
+function isProfessionalAgent(agent: RuntimeCenterAgentSummary | null | undefined): boolean {
+  if (!agent) {
+    return false;
+  }
+  return !(
+    MAIN_BRAIN_AGENT_IDS.has(agent.agent_id) ||
+    MAIN_BRAIN_AGENT_CLASSES.has(agent.agent_class ?? "") ||
+    MAIN_BRAIN_ROLE_IDS.has(agent.industry_role_id ?? "")
+  );
+}
 
 export default function RuntimeCenterPage() {
   const navigate = useNavigate();
@@ -72,6 +155,9 @@ export default function RuntimeCenterPage() {
     mainBrainError,
     mainBrainLoading,
     mainBrainUnavailable,
+    businessAgents,
+    businessAgentsLoading,
+    businessAgentsError,
     busyActionId,
     detail,
     detailLoading,
@@ -88,15 +174,30 @@ export default function RuntimeCenterPage() {
       ? rawTab
       : "overview";
   const focusScope = searchParams.get("scope");
-  const surface = data?.surface;
-
-  const decisionEntries = useMemo(
-    () => data?.cards.find((card) => card.key === "decisions")?.entries ?? [],
+  const overviewData = useMemo(
+    () =>
+      data
+        ? {
+            ...data,
+            cards: data.cards.filter((card) => !LEGACY_OVERVIEW_CARD_KEYS.has(card.key)),
+          }
+        : null,
     [data],
   );
+  const surface = overviewData?.surface;
+  const professionalAgents = useMemo(
+    () => businessAgents.filter((agent) => isProfessionalAgent(agent)),
+    [businessAgents],
+  );
+  const overviewCards = overviewData?.cards ?? [];
+
+  const decisionEntries = useMemo(
+    () => overviewData?.cards.find((card) => card.key === "decisions")?.entries ?? [],
+    [overviewData],
+  );
   const patchEntries = useMemo(
-    () => data?.cards.find((card) => card.key === "patches")?.entries ?? [],
-    [data],
+    () => overviewData?.cards.find((card) => card.key === "patches")?.entries ?? [],
+    [overviewData],
   );
   const {
     governanceStatus,
@@ -168,10 +269,29 @@ export default function RuntimeCenterPage() {
     [navigate, openDetail],
   );
 
+  const openAgentWorkbench = useCallback(
+    (agentId: string) => {
+      const nextParams = new URLSearchParams();
+      nextParams.set("tab", "daily");
+      nextParams.set("agent", agentId);
+      navigate(`/agents?${nextParams.toString()}`);
+    },
+    [navigate],
+  );
+
   const recoveryRows = summaryRows(recoverySummary);
   const healthHighlights = useMemo(
     () => (selfCheck?.checks ?? []).slice(0, 4),
     [selfCheck],
+  );
+  const mainBrainStripSummary = useMemo(
+    () =>
+      mainBrainHeadline(mainBrainData, {
+        loading: mainBrainLoading,
+        error: mainBrainError,
+        unavailable: mainBrainUnavailable,
+      }),
+    [mainBrainData, mainBrainError, mainBrainLoading, mainBrainUnavailable],
   );
 
   return (
@@ -235,7 +355,7 @@ export default function RuntimeCenterPage() {
         <>
           <Space direction="vertical" size={24} style={{ width: "100%", marginBottom: 32 }}>
           <MainBrainCockpitPanel
-            data={data}
+            data={overviewData}
             loading={loading}
             refreshing={refreshing}
             error={error}
@@ -250,10 +370,119 @@ export default function RuntimeCenterPage() {
                 void openSurfaceRoute(route, title);
               }}
             />
+          <Card className="baize-card">
+            <div className={styles.panelHeader}>
+              <div>
+                <h2 className={styles.cardTitle}>主脑与职业智能体</h2>
+                <p className={styles.cardSummary}>
+                  首页先看主脑今天要推进什么，再看职业执行位当前负责的具体工作。
+                </p>
+              </div>
+              <Space size={8} wrap>
+                {businessAgentsLoading ? <Tag>加载中</Tag> : null}
+                {businessAgentsError ? <Tag color="warning">智能体摘要暂不可用</Tag> : null}
+                <Tag color="blue">主脑</Tag>
+                {professionalAgents.length > 0 ? (
+                  <Tag>{`职业智能体 ${professionalAgents.length}`}</Tag>
+                ) : null}
+              </Space>
+            </div>
+            {businessAgentsError ? (
+              <Alert
+                showIcon
+                type="warning"
+                message={businessAgentsError}
+                style={{ marginBottom: 16 }}
+              />
+            ) : null}
+            <div className={styles.agentStrip}>
+              <Card
+                className={`${styles.agentStripCard} ${styles.agentStripCardPrimary}`}
+                hoverable
+                size="small"
+              >
+                <button
+                  type="button"
+                  className={styles.agentStripButton}
+                  onClick={() => {
+                    void openSurfaceRoute("/api/runtime-center/main-brain", "主脑驾驶舱");
+                  }}
+                >
+                  <div className={styles.agentStripHeader}>
+                    <div className={styles.agentStripTitleRow}>
+                      <Text strong className={styles.agentStripName}>
+                        主脑
+                      </Text>
+                      <Tag color="blue">主脑</Tag>
+                      <Tag
+                        color={
+                          mainBrainError
+                            ? "error"
+                            : mainBrainUnavailable
+                              ? "default"
+                              : mainBrainLoading
+                                ? "processing"
+                                : "success"
+                        }
+                      >
+                        {mainBrainError
+                          ? "异常"
+                          : mainBrainUnavailable
+                            ? "未接线"
+                            : mainBrainLoading
+                              ? "加载中"
+                              : "在线"}
+                      </Tag>
+                    </div>
+                    <p className={styles.selectionSummary}>{mainBrainStripSummary}</p>
+                  </div>
+                </button>
+              </Card>
+              {professionalAgents.map((agent) => (
+                <Card
+                  key={agent.agent_id}
+                  className={styles.agentStripCard}
+                  hoverable
+                  size="small"
+                >
+                  <button
+                    type="button"
+                    className={styles.agentStripButton}
+                    onClick={() => {
+                      openAgentWorkbench(agent.agent_id);
+                    }}
+                  >
+                    <div className={styles.agentStripHeader}>
+                      <div className={styles.agentStripTitleRow}>
+                        <Text strong className={styles.agentStripName}>
+                          {presentExecutionActorName(agent.agent_id, agent.name)}
+                        </Text>
+                        <Tag color="default">
+                          {localizeRuntimeText(agent.role_name || "职业智能体")}
+                        </Tag>
+                        <Tag color={runtimeStatusColor(agent.status ?? "unknown")}>
+                          {translateRuntimeStatus(agent.status ?? "unknown")}
+                        </Tag>
+                      </div>
+                      <p className={styles.selectionSummary}>{agentHeadline(agent)}</p>
+                    </div>
+                  </button>
+                </Card>
+              ))}
+            </div>
+            {!businessAgentsLoading && professionalAgents.length === 0 ? (
+              <div className={styles.emptyWrap}>
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="暂无职业智能体执行摘要"
+                />
+              </div>
+            ) : null}
+          </Card>
           </Space>
-          {data ? (
+          {overviewData ? (
             <section className={styles.grid}>
-              {data.cards.map((card) => (
+              {overviewCards.map((card) => (
                 <Card key={card.key} className="baize-card">
                   <div className={styles.cardHeader}>
                     <div>

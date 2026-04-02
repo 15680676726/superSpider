@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -248,21 +248,39 @@ const unifiedPayload = {
     count: 1,
     summary: "Evidence trace is ready.",
     route: "/api/runtime-center/evidence",
-    entries: [{ id: "evidence-1", title: "Checkpoint evidence" }],
+    entries: [
+      {
+        id: "evidence-1",
+        title: "Checkpoint evidence",
+        created_at: "2026-03-29T08:30:00Z",
+      },
+    ],
     meta: {},
   },
   decisions: {
     count: 1,
     summary: "One decision pending.",
     route: "/api/runtime-center/decisions",
-    entries: [{ id: "decision-1", title: "Approve host return" }],
+    entries: [
+      {
+        id: "decision-1",
+        title: "Approve host return",
+        created_at: "2026-03-29T08:45:00Z",
+      },
+    ],
     meta: {},
   },
   patches: {
     count: 1,
     summary: "One patch pending.",
     route: "/api/runtime-center/learning/patches",
-    entries: [{ id: "patch-1", title: "Apply continuity patch" }],
+    entries: [
+      {
+        id: "patch-1",
+        title: "Apply continuity patch",
+        applied_at: "2026-03-29T09:00:00Z",
+      },
+    ],
     meta: {},
   },
   signals: {
@@ -318,45 +336,41 @@ const unifiedPayload = {
   },
 } as unknown as RuntimeMainBrainResponse;
 
+function renderPanel(mainBrainData: RuntimeMainBrainResponse) {
+  return render(
+    <MainBrainCockpitPanel
+      data={overviewPayload}
+      loading={false}
+      refreshing={false}
+      error={null}
+      mainBrainData={mainBrainData}
+      mainBrainLoading={false}
+      mainBrainError={null}
+      mainBrainUnavailable={false}
+      onRefresh={vi.fn()}
+      onOpenRoute={vi.fn()}
+    />,
+  );
+}
+
+function findSectionBlock(title: string): HTMLElement {
+  const heading = screen.getByRole("heading", { level: 3, name: title });
+  return heading.parentElement?.parentElement?.parentElement?.parentElement as HTMLElement;
+}
+
 describe("MainBrainCockpitPanel", () => {
   it("renders dedicated payload signals when available", () => {
-    render(
-      <MainBrainCockpitPanel
-        data={overviewPayload}
-        loading={false}
-        refreshing={false}
-        error={null}
-        mainBrainData={dedicatedPayload}
-        mainBrainLoading={false}
-        mainBrainError={null}
-        mainBrainUnavailable={false}
-        onRefresh={vi.fn()}
-        onOpenRoute={vi.fn()}
-      />,
-    );
+    renderPanel(dedicatedPayload);
 
     expect(screen.getAllByText("Dedicated carrier value").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Dedicated strategy").length).toBeGreaterThan(0);
   });
 
   it("renders unified operator sections from the dedicated cockpit payload", () => {
-    render(
-      <MainBrainCockpitPanel
-        data={overviewPayload}
-        loading={false}
-        refreshing={false}
-        error={null}
-        mainBrainData={unifiedPayload}
-        mainBrainLoading={false}
-        mainBrainError={null}
-        mainBrainUnavailable={false}
-        onRefresh={vi.fn()}
-        onOpenRoute={vi.fn()}
-      />,
-    );
+    renderPanel(unifiedPayload);
 
     expect(screen.getByText("统一运行链")).toBeInTheDocument();
-    expect(screen.getByText("复核交接阻塞项")).toBeInTheDocument();
+    expect(screen.getAllByText("复核交接阻塞项").length).toBeGreaterThan(0);
     expect(screen.getAllByText("需要主管决策").length).toBeGreaterThan(0);
     expect(screen.getAllByText("运行治理").length).toBeGreaterThan(0);
     expect(screen.getAllByText("恢复").length).toBeGreaterThan(0);
@@ -372,25 +386,12 @@ describe("MainBrainCockpitPanel", () => {
     expect(screen.getByText("人工协作阻塞")).toBeInTheDocument();
     expect(screen.getAllByText("Resolve handoff return evidence gap").length).toBeGreaterThan(0);
     expect(screen.getByText("检查点证据")).toBeInTheDocument();
-    expect(screen.getByText("批准宿主返回")).toBeInTheDocument();
-    expect(screen.getByText("应用连续性补丁")).toBeInTheDocument();
+    expect(screen.getAllByText("批准宿主返回").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("应用连续性补丁").length).toBeGreaterThan(0);
   });
 
   it("renders report cognition and explicit replan visibility from the dedicated cockpit payload", () => {
-    render(
-      <MainBrainCockpitPanel
-        data={overviewPayload}
-        loading={false}
-        refreshing={false}
-        error={null}
-        mainBrainData={unifiedPayload}
-        mainBrainLoading={false}
-        mainBrainError={null}
-        mainBrainUnavailable={false}
-        onRefresh={vi.fn()}
-        onOpenRoute={vi.fn()}
-      />,
-    );
+    renderPanel(unifiedPayload);
 
     expect(screen.getAllByText("汇报认知").length).toBeGreaterThan(0);
     expect(
@@ -408,5 +409,135 @@ describe("MainBrainCockpitPanel", () => {
     expect(screen.getAllByText("需要重规划").length).toBeGreaterThan(0);
     expect(screen.getAllByText("待跟进").length).toBeGreaterThan(0);
     expect(screen.getAllByText("未消费汇报").length).toBeGreaterThan(0);
+  });
+
+  it("renders all six daily brief blocks", () => {
+    renderPanel(unifiedPayload);
+
+    expect(screen.getAllByText("主脑今日运行简报").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("今日目标").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("已完成").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("进行中").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("当前阻塞").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("待确认").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("下一步").length).toBeGreaterThan(0);
+  });
+
+  it("keeps only same-day report and trace records in the daily brief", () => {
+    const scopedPayload = {
+      ...unifiedPayload,
+      reports: [
+        {
+          report_id: "report-today",
+          title: "今日完成汇报",
+          summary: "same-day report",
+          status: "completed",
+          completed_at: "2026-03-29T12:00:00Z",
+          route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-today",
+        },
+        {
+          report_id: "report-old",
+          title: "历史完成汇报",
+          summary: "old report",
+          status: "completed",
+          completed_at: "2026-03-28T12:00:00Z",
+          route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-old",
+        },
+      ],
+      evidence: {
+        ...unifiedPayload.evidence,
+        count: 2,
+        entries: [
+          {
+            id: "evidence-today",
+            title: "今日证据条目",
+            created_at: "2026-03-29T08:00:00Z",
+            route: "/api/runtime-center/evidence?entry=evidence-today",
+          },
+          {
+            id: "evidence-old",
+            title: "历史证据条目",
+            created_at: "2026-03-27T08:00:00Z",
+            route: "/api/runtime-center/evidence?entry=evidence-old",
+          },
+        ],
+      },
+    } as unknown as RuntimeMainBrainResponse;
+
+    renderPanel(scopedPayload);
+
+    expect(screen.getAllByText("今日完成汇报").length).toBeGreaterThan(0);
+    expect(screen.queryByText("历史完成汇报")).not.toBeInTheDocument();
+    expect(screen.getByText("今日证据条目")).toBeInTheDocument();
+    expect(screen.queryByText("历史证据条目")).not.toBeInTheDocument();
+    expect(within(findSectionBlock("证据")).getByText("1")).toBeInTheDocument();
+  });
+
+  it("shows explicit empty daily copy when only older or untimestamped records exist", () => {
+    const scopedPayload = {
+      ...unifiedPayload,
+      reports: [
+        {
+          report_id: "report-old",
+          title: "历史完成汇报",
+          summary: "old report",
+          status: "completed",
+          completed_at: "2026-03-28T12:00:00Z",
+          route: "/api/runtime-center/industry/industry-v1-ops?report_id=report-old",
+        },
+      ],
+      evidence: {
+        ...unifiedPayload.evidence,
+        count: 1,
+        entries: [
+          {
+            id: "evidence-no-time",
+            title: "无时间证据条目",
+            route: "/api/runtime-center/evidence?entry=evidence-no-time",
+          },
+        ],
+      },
+      environment: {
+        ...unifiedPayload.environment,
+        staffing: {
+          pending_confirmation_count: 0,
+        },
+      },
+      decisions: {
+        ...unifiedPayload.decisions,
+        count: 1,
+        entries: [
+          {
+            id: "decision-old",
+            title: "历史决策条目",
+            created_at: "2026-03-27T12:00:00Z",
+            route: "/api/runtime-center/decisions?entry=decision-old",
+          },
+        ],
+      },
+      patches: {
+        ...unifiedPayload.patches,
+        count: 1,
+        entries: [
+          {
+            id: "patch-no-time",
+            title: "无时间补丁条目",
+            route: "/api/runtime-center/learning/patches?entry=patch-no-time",
+          },
+        ],
+      },
+    } as unknown as RuntimeMainBrainResponse;
+
+    renderPanel(scopedPayload);
+
+    expect(screen.getAllByText("今天暂无新完成记录。").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("今天暂无新增记录。").length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText("今天暂无待确认事项。")).toBeInTheDocument();
+    expect(screen.queryByText("历史完成汇报")).not.toBeInTheDocument();
+    expect(screen.queryByText("无时间证据条目")).not.toBeInTheDocument();
+    expect(screen.queryByText("历史决策条目")).not.toBeInTheDocument();
+    expect(screen.queryByText("无时间补丁条目")).not.toBeInTheDocument();
+    expect(within(findSectionBlock("决策")).getByText("0")).toBeInTheDocument();
+    expect(within(findSectionBlock("补丁")).getByText("0")).toBeInTheDocument();
   });
 });

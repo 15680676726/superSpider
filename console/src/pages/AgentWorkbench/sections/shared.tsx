@@ -9,7 +9,16 @@ import {
 import type { AgentProfile, EvidenceListItem } from "../useAgentWorkbench";
 import { runtimeRiskColor, runtimeStatusColor } from "../../../runtime/tagSemantics";
 
-export const TAB_KEYS = new Set(["workbench", "workspace", "daily", "weekly", "growth"]);
+export const TAB_KEYS = new Set([
+  "daily",
+  "weekly",
+  "profile",
+  "performance",
+  "evidence",
+  "workbench",
+  "workspace",
+  "growth",
+]);
 export const DELEGATE_TASK_CAPABILITY = "system:delegate_task";
 export const EXECUTION_CORE_ROLE_ID = "execution-core";
 

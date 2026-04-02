@@ -302,6 +302,52 @@
   flex-wrap: wrap;
 }
 
+.agentStrip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.agentStripCard {
+  height: 100%;
+  cursor: pointer;
+}
+
+.agentStripButton {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agentStripCardPrimary {
+  border-color: rgba(27, 79, 216, 0.36) !important;
+  box-shadow:
+    inset 0 0 18px rgba(27, 79, 216, 0.08),
+    var(--baize-shadow-sm) !important;
+}
+
+.agentStripHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 96px;
+}
+
+.agentStripTitleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.agentStripName {
+  color: var(--baize-text-main);
+}
+
 /* ---- Card sub-elements ---- */
 .card {
   /* skeleton loading card */
@@ -337,6 +383,40 @@
   font-size: 15px;
   font-weight: 700;
   line-height: 1.4;
+}
+
+.briefGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.briefCard {
+  padding: 14px 16px;
+  border: 1px solid var(--baize-border-color);
+  border-radius: 12px;
+  background: var(--baize-surface-subtle);
+}
+
+.briefTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--baize-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+}
+
+.briefList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.briefItem {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--baize-text-secondary);
 }
 
 /* ---- Entry internal layout ---- */
