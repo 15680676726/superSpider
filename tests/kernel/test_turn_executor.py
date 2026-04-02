@@ -775,6 +775,57 @@ async def test_kernel_turn_executor_auto_mode_keeps_plan_shell_queries_in_chat_o
 
 
 @pytest.mark.asyncio
+async def test_kernel_turn_executor_request_mode_hint_overrides_detected_shell_text(
+    monkeypatch,
+):
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+    )
+    request = AgentRequest(
+        id="req-request-mode-hint",
+        session_id="sess-request-mode-hint",
+        user_id="user-request-mode-hint",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "auto"
+    request.mode_hint = "verify"
+
+    def _detect_should_not_run(_text: str) -> MainBrainIntentShell:
+        raise AssertionError("detect_main_brain_intent_shell should not run")
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.detect_main_brain_intent_shell",
+        _detect_should_not_run,
+    )
+
+    streamed = [
+        item
+        async for item in executor.handle_query(
+            msgs=[
+                Msg(
+                    name="user",
+                    role="user",
+                    content="/review \u8fd9\u6b21\u6539\u52a8\uff0c\u4f46\u8bf7\u6309 verify shell \u56de\u7b54",
+                )
+            ],
+            request=request,
+        )
+    ]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "chat done"
+    assert len(main_brain_chat_service.calls) == 1
+    assert query_execution_service.calls == []
+    assert getattr(request, "_copaw_requested_mode_hint", None) == "verify"
+    assert getattr(request, "_copaw_resolved_mode_hint", None) == "verify"
+
+
+@pytest.mark.asyncio
 async def test_kernel_turn_executor_routes_orchestrate_mode_to_main_brain_orchestrator():
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()

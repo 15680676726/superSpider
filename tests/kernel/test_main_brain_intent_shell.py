@@ -78,3 +78,26 @@ def test_main_brain_intent_shell_still_detects_real_intent_when_text_also_mentio
     assert result.trigger_source == "keyword"
     assert result.confidence > 0.0
     assert result.matched_text
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_mode", "expected_match", "min_confidence"),
+    [
+        ("\u5148\u505a\u4e2a\u8ba1\u5212\uff0c\u7136\u540e /review \u8fd9\u6b21\u6539\u52a8", "review", "/review", 0.98),
+        ("review \u8fd9\u6b21\u6539\u52a8\uff0c\u6700\u540e /verify \u7ed3\u679c", "verify", "/verify", 0.98),
+        ("review \u8fd9\u6b21\u6539\u52a8\uff0c\u540e\u9762\u5982\u679c\u9700\u8981\u518d\u505a\u4e2a\u8ba1\u5212", "review", "review ", 0.93),
+        ("/review \u8fd9\u6b21\u6539\u52a8\uff0c\u7136\u540e /verify \u7ed3\u679c", "review", "/review", 0.98),
+    ],
+)
+def test_main_brain_intent_shell_prioritizes_stronger_and_earlier_matches(
+    text: str,
+    expected_mode: str,
+    expected_match: str,
+    min_confidence: float,
+) -> None:
+    result = detect_main_brain_intent_shell(text)
+
+    assert result.mode_hint == expected_mode
+    assert result.trigger_source == "keyword"
+    assert result.confidence >= min_confidence
+    assert result.matched_text == expected_match

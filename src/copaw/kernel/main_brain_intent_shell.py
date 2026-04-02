@@ -220,6 +220,31 @@ class MainBrainIntentShell:
         }
 
 
+@dataclass(slots=True)
+class _IntentShellCandidate:
+    mode_hint: MainBrainIntentShellMode
+    matched_text: str
+    start: int
+    strength: int
+    confidence: float
+
+
+def _candidate_strength(term: str) -> int:
+    if term.startswith("/"):
+        return 3
+    if term.isascii():
+        return 2
+    return 1
+
+
+def _candidate_confidence(term: str) -> float:
+    if term.startswith("/"):
+        return 0.98
+    if term.isascii():
+        return 0.93
+    return 0.88
+
+
 def normalize_main_brain_mode_hint(value: object | None) -> MainBrainIntentShellMode:
     text = str(value or "").strip().lower()
     if text in _VALID_MODE_HINTS:
@@ -266,6 +291,7 @@ def detect_main_brain_intent_shell(text: str | None) -> MainBrainIntentShell:
     if not normalized:
         return MainBrainIntentShell()
     excluded_ranges = _build_excluded_ranges(normalized)
+    candidates: list[_IntentShellCandidate] = []
     for mode_hint, terms in _SHELL_RULES:
         for term in terms:
             for start, end in _iter_matches(normalized, term):
@@ -277,13 +303,26 @@ def detect_main_brain_intent_shell(text: str | None) -> MainBrainIntentShell:
                     excluded_ranges=excluded_ranges,
                 ):
                     continue
-                confidence = 0.98 if term.startswith("/") or term.isascii() else 0.88
-                return MainBrainIntentShell(
-                    mode_hint=mode_hint,  # type: ignore[arg-type]
-                    trigger_source="keyword",
-                    matched_text=term,
-                    confidence=confidence,
+                candidates.append(
+                    _IntentShellCandidate(
+                        mode_hint=mode_hint,  # type: ignore[arg-type]
+                        matched_text=term,
+                        start=start,
+                        strength=_candidate_strength(term),
+                        confidence=_candidate_confidence(term),
+                    )
                 )
+    if candidates:
+        best = min(
+            candidates,
+            key=lambda item: (-item.strength, item.start, -len(item.matched_text)),
+        )
+        return MainBrainIntentShell(
+            mode_hint=best.mode_hint,
+            trigger_source="keyword",
+            matched_text=best.matched_text,
+            confidence=best.confidence,
+        )
     return MainBrainIntentShell()
 
 
