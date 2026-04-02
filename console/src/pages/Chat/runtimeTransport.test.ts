@@ -513,9 +513,9 @@ describe("runtimeTransport", () => {
       ],
     });
 
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy).toHaveBeenNthCalledWith(
-      2,
+      1,
       "http://testserver/api/runtime-center/chat/run",
       expect.objectContaining({
         method: "POST",
