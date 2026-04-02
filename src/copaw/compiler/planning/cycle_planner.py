@@ -2,6 +2,7 @@
 """Cycle planner that compiles runtime facts into a formal cycle launch decision."""
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -87,6 +88,18 @@ def _backlog_is_report_followup(item: BacklogItemRecord) -> bool:
     }
 
 
+def _backlog_followup_overdue_score(item: BacklogItemRecord) -> float:
+    if not _backlog_is_report_followup(item):
+        return 0.0
+    metadata = dict(item.metadata or {})
+    return max(
+        _number(metadata.get("followup_overdue_cycles")),
+        _number(metadata.get("overdue_cycles")),
+        _number(metadata.get("days_overdue")),
+        1.0 if metadata.get("followup_due_now") else 0.0,
+    )
+
+
 class CyclePlanningCompiler:
     """Pure planner for whether the next operating cycle should start."""
 
@@ -120,6 +133,9 @@ class CyclePlanningCompiler:
                 constraints=constraints,
             )
             selected = list(candidates[:selection_limit])
+        cycle_kind, cycle_kind_reason = self._resolve_cycle_kind(
+            constraints=constraints,
+        )
 
         if force:
             should_start = bool(selected or pending_reports)
@@ -129,7 +145,7 @@ class CyclePlanningCompiler:
                 cycle_kind=(
                     current_cycle.cycle_kind
                     if current_cycle is not None
-                    else "daily"
+                    else cycle_kind
                 ),
                 selected_backlog_item_ids=[item.id for item in selected],
                 selected_lane_ids=_unique_strings(
@@ -150,6 +166,11 @@ class CyclePlanningCompiler:
                     lane_budget_outcomes=lane_budget_outcomes,
                     lane_budget_mode="force-override" if lane_budgets else None,
                     force_scoped_backlog=force_scoped_backlog,
+                    cycle_kind_reason=(
+                        "forced-existing-cycle-kind"
+                        if current_cycle is not None
+                        else cycle_kind_reason
+                    ),
                 ),
             )
 
@@ -169,6 +190,7 @@ class CyclePlanningCompiler:
                     lane_budget_outcomes=lane_budget_outcomes,
                     lane_budget_mode="constrained" if lane_budgets else None,
                     force_scoped_backlog=force_scoped_backlog,
+                    cycle_kind_reason="cycle-inflight",
                 ),
             )
 
@@ -183,7 +205,7 @@ class CyclePlanningCompiler:
             reason = "pending-reports-without-materializable-backlog"
 
         summary = (
-            f"Plan a daily cycle for {len(selected)} backlog item(s) across "
+            f"Plan a {cycle_kind} cycle for {len(selected)} backlog item(s) across "
             f"{len(_unique_strings(item.lane_id for item in selected))} lane(s)."
             if should_start
             else "No materializable backlog items passed the formal cycle planner."
@@ -191,7 +213,7 @@ class CyclePlanningCompiler:
         return CyclePlanningDecision(
             should_start=should_start,
             reason=reason,
-            cycle_kind="daily",
+            cycle_kind=cycle_kind,
             selected_backlog_item_ids=[item.id for item in selected],
             selected_lane_ids=_unique_strings(
                 [item.lane_id for item in selected if item.lane_id is not None],
@@ -207,6 +229,7 @@ class CyclePlanningCompiler:
                 lane_budget_outcomes=lane_budget_outcomes,
                 lane_budget_mode="constrained" if lane_budgets else None,
                 force_scoped_backlog=force_scoped_backlog,
+                cycle_kind_reason=cycle_kind_reason,
             ),
         )
 
@@ -243,7 +266,26 @@ class CyclePlanningCompiler:
         lane_budget_outcomes: dict[str, dict[str, object]],
         lane_budget_mode: str | None,
         force_scoped_backlog: bool,
+        cycle_kind_reason: str | None,
+        force_scoped_backlog: bool,
+        cycle_kind_reason: str | None,
     ) -> dict[str, object]:
+        strategic_uncertainty_ids = [
+            uncertainty_id
+            for uncertainty_id in (
+                _string(_read_field(entry, "uncertainty_id"))
+                for entry in list(getattr(constraints, "strategic_uncertainties", []) or [])
+            )
+            if uncertainty_id is not None
+        ]
+        trigger_families = [
+            family
+            for family in (
+                _string(_read_field(entry, "trigger_family"))
+                for entry in list(getattr(constraints, "strategy_trigger_rules", []) or [])
+            )
+            if family is not None
+        ]
         metadata: dict[str, object] = {
             "industry_instance_id": record.instance_id,
             "pending_report_count": len(list(pending_reports)),
@@ -252,12 +294,81 @@ class CyclePlanningCompiler:
             "graph_focus_entities": list(constraints.graph_focus_entities or []),
             "graph_focus_opinions": list(constraints.graph_focus_opinions or []),
             "force_scoped_backlog": force_scoped_backlog,
+            "strategic_uncertainty_ids": strategic_uncertainty_ids,
+            "trigger_families": trigger_families,
+            "force_scoped_backlog": force_scoped_backlog,
+            "strategic_uncertainty_ids": strategic_uncertainty_ids,
+            "trigger_families": trigger_families,
         }
+        if cycle_kind_reason is not None:
+            metadata["cycle_kind_reason"] = cycle_kind_reason
         if lane_budget_mode is not None:
             metadata["lane_budget_mode"] = lane_budget_mode
         if lane_budget_outcomes:
             metadata["lane_budget_outcomes"] = lane_budget_outcomes
         return metadata
+
+    def _resolve_cycle_kind(
+        self,
+        *,
+        constraints: PlanningStrategyConstraints,
+    ) -> tuple[str, str]:
+        strategic_uncertainties = list(getattr(constraints, "strategic_uncertainties", []) or [])
+        trigger_rules = list(getattr(constraints, "strategy_trigger_rules", []) or [])
+        trigger_families = {
+            family
+            for family in (
+                _string(_read_field(entry, "trigger_family"))
+                for entry in trigger_rules
+            )
+            if family is not None
+        }
+        if self._has_event_cycle_signal(
+            strategic_uncertainties=strategic_uncertainties,
+            trigger_families=trigger_families,
+        ):
+            if "confidence_collapse" in trigger_families:
+                return ("event", "confidence-collapse")
+            if "repeated_blocker" in trigger_families:
+                return ("event", "repeated-blocker")
+            return ("event", "high-impact-uncertainty")
+        if self._has_weekly_cycle_signal(
+            strategic_uncertainties=strategic_uncertainties,
+            trigger_rules=trigger_rules,
+        ):
+            return ("weekly", "strategic-review-window")
+        return ("daily", "default-daily")
+
+    def _has_weekly_cycle_signal(
+        self,
+        *,
+        strategic_uncertainties: Sequence[object],
+        trigger_rules: Sequence[object],
+    ) -> bool:
+        for entry in strategic_uncertainties:
+            review_by_cycle = (_string(_read_field(entry, "review_by_cycle")) or "").casefold()
+            if "weekly" in review_by_cycle:
+                return True
+        for rule in trigger_rules:
+            decision_hint = _string(_read_field(rule, "decision_hint"))
+            if decision_hint == "strategy_review_required":
+                return True
+        return False
+
+    def _has_event_cycle_signal(
+        self,
+        *,
+        strategic_uncertainties: Sequence[object],
+        trigger_families: set[str],
+    ) -> bool:
+        if not trigger_families.intersection({"confidence_collapse", "repeated_blocker"}):
+            return False
+        for entry in strategic_uncertainties:
+            impact_level = (_string(_read_field(entry, "impact_level")) or "").casefold()
+            current_confidence = _number(_read_field(entry, "current_confidence"))
+            if impact_level == "high" and current_confidence <= 0.35:
+                return True
+        return False
 
     def _paused_lanes(self, constraints: PlanningStrategyConstraints) -> set[str]:
         return {
@@ -274,9 +385,11 @@ class CyclePlanningCompiler:
         lane_weights: dict[str, float],
     ) -> tuple[object, ...]:
         return (
+            _backlog_followup_overdue_score(item),
             1 if _backlog_is_report_followup(item) else 0,
             int(item.priority or 0),
             self._graph_focus_score(item=item, constraints=constraints),
+            self._strategy_priority_score(item=item, constraints=constraints),
             float(lane_weights.get(item.lane_id or "", 0.0)),
             _sort_timestamp(item.updated_at or item.created_at),
         )
@@ -299,6 +412,12 @@ class CyclePlanningCompiler:
             force_include_reason = _string(_read_field(entry, "force_include_reason"))
             if force_include_reason is None and min_share > 0.0 and current_share < min_share:
                 force_include_reason = "lane-below-min-share"
+            if force_include_reason is None and self._is_multi_cycle_underinvested(
+                budget_window=budget_window,
+                current_share=current_share,
+                target_share=target_share,
+            ):
+                force_include_reason = "multi-cycle-underinvestment"
             budgets[lane_id] = {
                 "lane_id": lane_id,
                 "budget_window": budget_window,
@@ -392,12 +511,16 @@ class CyclePlanningCompiler:
             current_share = _number((budget or {}).get("current_share"))
             target_share = _number((budget or {}).get("target_share"))
             max_share = _number((budget or {}).get("max_share"))
-            force_reason = _string((budget or {}).get("force_include_reason"))
+            overdue_reason = self._lane_force_include_reason_for_items(items)
+            force_reason = overdue_reason or _string((budget or {}).get("force_include_reason"))
             defer_reason = _string((budget or {}).get("defer_reason"))
+            budget_for_lane = dict(budget or {})
+            if force_reason is not None:
+                budget_for_lane["force_include_reason"] = force_reason
             if budget is not None and force_reason is None and max_share > 0.0 and current_share >= max_share:
                 lane_outcomes[lane_key] = self._lane_outcome(
                     lane_id=lane_id,
-                    budget=budget,
+                    budget=budget_for_lane,
                     items=items,
                     outcome="suppressed",
                     reason=defer_reason or "lane-max-share-reached",
@@ -406,51 +529,58 @@ class CyclePlanningCompiler:
             status = "selected"
             if force_reason is not None:
                 status = "force-included"
-            elif budget is not None and defer_reason is not None and current_share >= target_share:
+            elif (
+                budget is not None
+                and defer_reason is not None
+                and current_share >= target_share
+                and overdue_reason is None
+            ):
                 status = "deferred"
             cohorts[status].append(
                 {
                     "lane_id": lane_id,
                     "lane_key": lane_key,
-                    "budget": budget,
+                    "budget": budget_for_lane,
                     "items": list(items),
                     "available_items": list(items),
-                    "rank": (
-                        1 if any(_backlog_is_report_followup(item) for item in items) else 0,
-                        max(target_share - current_share, 0.0),
-                        self._review_pressure_score((budget or {}).get("review_pressure")),
-                        float(lane_weights.get(lane_id or "", 0.0)),
-                        self._item_sort_key(
-                            item=items[0],
-                            constraints=constraints,
-                            lane_weights=lane_weights,
-                        ),
-                    ),
+                    "selected_backlog_item_ids": [],
                 },
             )
 
         selected: list[BacklogItemRecord] = []
         for status in ("force-included", "selected", "deferred"):
-            queue = sorted(
-                cohorts[status],
-                key=lambda entry: entry["rank"],
-                reverse=True,
-            )
-            while queue and len(selected) < selection_limit:
-                progressed = False
-                next_queue: list[dict[str, object]] = []
-                for entry in queue:
-                    items = list(entry["items"])
-                    if not items or len(selected) >= selection_limit:
-                        continue
-                    selected.append(items[0])
-                    entry["items"] = items[1:]
-                    progressed = True
-                    if entry["items"]:
-                        next_queue.append(entry)
-                if not progressed:
+            while len(selected) < selection_limit:
+                candidates = [
+                    entry
+                    for entry in cohorts[status]
+                    if entry["items"]
+                    and self._lane_can_accept_another_selection(
+                        budget=entry["budget"] if isinstance(entry["budget"], dict) else None,
+                        planned_assignment_count=len(list(entry["selected_backlog_item_ids"])),
+                        selection_limit=selection_limit,
+                    )
+                ]
+                if not candidates:
                     break
-                queue = next_queue
+                entry = max(
+                    candidates,
+                    key=lambda candidate: self._lane_entry_rank(
+                        entry=candidate,
+                        constraints=constraints,
+                        lane_weights=lane_weights,
+                        selection_limit=selection_limit,
+                    ),
+                )
+                items = list(entry["items"])
+                if not items:
+                    break
+                item = items[0]
+                selected.append(item)
+                entry["items"] = items[1:]
+                entry["selected_backlog_item_ids"] = [
+                    *list(entry["selected_backlog_item_ids"]),
+                    item.id,
+                ]
 
         selected_by_lane: dict[str, list[str]] = {}
         for item in selected:
@@ -464,7 +594,16 @@ class CyclePlanningCompiler:
                 selected_ids = selected_by_lane.get(lane_key, [])
                 if selected_ids:
                     outcome = "force-included" if status == "force-included" else "selected"
-                    reason = _string((budget or {}).get("force_include_reason"))
+                    if status == "force-included":
+                        reason = _string((budget or {}).get("force_include_reason"))
+                    elif entry["items"] and not self._lane_can_accept_another_selection(
+                        budget=budget,
+                        planned_assignment_count=len(selected_ids),
+                        selection_limit=selection_limit,
+                    ):
+                        reason = _string((budget or {}).get("defer_reason")) or "lane-budget-consumed"
+                    else:
+                        reason = None
                 elif status == "deferred" or _string((budget or {}).get("defer_reason")) is not None:
                     outcome = "deferred"
                     reason = _string((budget or {}).get("defer_reason")) or "deferred-by-lane-budget"
@@ -478,8 +617,100 @@ class CyclePlanningCompiler:
                     outcome=outcome,
                     reason=reason,
                     selected_backlog_item_ids=selected_ids,
+                    selection_limit=selection_limit,
                 )
         return selected, lane_outcomes
+
+    def _lane_entry_rank(
+        self,
+        *,
+        entry: dict[str, object],
+        constraints: PlanningStrategyConstraints,
+        lane_weights: dict[str, float],
+        selection_limit: int,
+    ) -> tuple[object, ...]:
+        items = list(entry.get("items") or [])
+        lane_id = _string(entry.get("lane_id"))
+        budget = entry.get("budget") if isinstance(entry.get("budget"), dict) else None
+        current_planned = len(list(entry.get("selected_backlog_item_ids") or []))
+        projected_share = self._projected_lane_share(
+            budget=budget,
+            planned_assignment_count=current_planned,
+            selection_limit=selection_limit,
+        )
+        target_share = _number((budget or {}).get("target_share"))
+        return (
+            max(
+                (_backlog_followup_overdue_score(item) for item in items[:1]),
+                default=0.0,
+            ),
+            1 if items and any(_backlog_is_report_followup(item) for item in items[:1]) else 0,
+            max(target_share - projected_share, 0.0),
+            self._review_pressure_score((budget or {}).get("review_pressure")),
+            self._item_sort_key(
+                item=items[0],
+                constraints=constraints,
+                lane_weights=lane_weights,
+            )
+            if items
+            else (0, 0, 0, 0, 0, 0.0),
+            float(lane_weights.get(lane_id or "", 0.0)),
+        )
+
+    def _lane_can_accept_another_selection(
+        self,
+        *,
+        budget: dict[str, object] | None,
+        planned_assignment_count: int,
+        selection_limit: int,
+    ) -> bool:
+        if selection_limit <= 1:
+            return True
+        selection_cap = self._lane_selection_cap(
+            budget=budget,
+            selection_limit=selection_limit,
+        )
+        if selection_cap is not None and planned_assignment_count >= selection_cap:
+            return False
+        max_share = _number((budget or {}).get("max_share"))
+        if max_share <= 0.0:
+            return True
+        projected_share = self._projected_lane_share(
+            budget=budget,
+            planned_assignment_count=planned_assignment_count + 1,
+            selection_limit=selection_limit,
+        )
+        return projected_share <= max_share
+
+    def _projected_lane_share(
+        self,
+        *,
+        budget: dict[str, object] | None,
+        planned_assignment_count: int,
+        selection_limit: int,
+    ) -> float:
+        current_share = _number((budget or {}).get("current_share"))
+        if selection_limit <= 0 or planned_assignment_count <= 0:
+            return current_share
+        planned_share = planned_assignment_count / max(selection_limit, 1)
+        return max(current_share, planned_share)
+
+    def _lane_selection_cap(
+        self,
+        *,
+        budget: dict[str, object] | None,
+        selection_limit: int,
+    ) -> int | None:
+        max_share = _number((budget or {}).get("max_share"))
+        if max_share <= 0.0:
+            return None
+        current_share = _number((budget or {}).get("current_share"))
+        remaining_headroom = max(max_share - current_share, 0.0)
+        if remaining_headroom <= 0.0:
+            return 0
+        if selection_limit <= 1:
+            return 1
+        return max(1, math.ceil(remaining_headroom * selection_limit))
 
     def _lane_outcome(
         self,
@@ -490,17 +721,39 @@ class CyclePlanningCompiler:
         outcome: str,
         reason: str | None,
         selected_backlog_item_ids: Sequence[str] | None = None,
+        selection_limit: int | None = None,
     ) -> dict[str, object]:
+        selected_ids = list(selected_backlog_item_ids or [])
+        effective_selection_limit = selection_limit or 0
+        selection_cap = self._lane_selection_cap(
+            budget=budget,
+            selection_limit=effective_selection_limit,
+        )
+        projected_share = self._projected_lane_share(
+            budget=budget,
+            planned_assignment_count=len(selected_ids),
+            selection_limit=effective_selection_limit,
+        )
+        max_share = _number((budget or {}).get("max_share"))
+        if selection_cap is None:
+            remaining_headroom = max(max_share - projected_share, 0.0) if max_share > 0.0 else None
+        else:
+            remaining_slots = max(selection_cap - len(selected_ids), 0)
+            remaining_headroom = remaining_slots / max(effective_selection_limit, 1)
         return {
             "lane_id": lane_id,
             "outcome": outcome,
             "reason": reason,
             "backlog_item_ids": [item.id for item in items],
-            "selected_backlog_item_ids": list(selected_backlog_item_ids or []),
+            "selected_backlog_item_ids": selected_ids,
             "budget_window": (budget or {}).get("budget_window"),
+            "current_share": _number((budget or {}).get("current_share")),
+            "projected_share": projected_share,
+            "planned_assignment_count": len(selected_ids),
             "target_share": _number((budget or {}).get("target_share")),
             "min_share": _number((budget or {}).get("min_share")),
             "max_share": _number((budget or {}).get("max_share")),
+            "remaining_headroom": remaining_headroom,
             "review_pressure": (budget or {}).get("review_pressure"),
             "defer_reason": (budget or {}).get("defer_reason"),
             "force_include_reason": (budget or {}).get("force_include_reason"),
@@ -549,6 +802,62 @@ class CyclePlanningCompiler:
             ),
         )
         return len(item_tokens & focus_tokens)
+
+    def _strategy_priority_score(
+        self,
+        *,
+        item: BacklogItemRecord,
+        constraints: PlanningStrategyConstraints,
+    ) -> int:
+        priority_order = [_string(value) for value in list(constraints.priority_order or [])]
+        priority_order = [value for value in priority_order if value is not None]
+        if not priority_order:
+            return 0
+        metadata = dict(item.metadata or {})
+        item_text = " ".join(
+            [
+                item.id,
+                item.lane_id or "",
+                item.title,
+                item.summary,
+                *[str(value) for value in metadata.values() if value is not None],
+            ],
+        ).casefold()
+        item_tokens = set(_tokenize(item_text))
+        best_score = 0
+        total = len(priority_order)
+        for index, entry in enumerate(priority_order):
+            entry_text = entry.casefold()
+            if not entry_text:
+                continue
+            entry_tokens = set(_tokenize(entry_text))
+            if entry_text in item_text or (entry_tokens and item_tokens.intersection(entry_tokens)):
+                best_score = max(best_score, total - index)
+        return best_score
+
+    def _is_multi_cycle_underinvested(
+        self,
+        *,
+        budget_window: object | None,
+        current_share: float,
+        target_share: float,
+    ) -> bool:
+        if current_share >= target_share:
+            return False
+        missed_cycles = max(
+            _number(_read_field(budget_window or {}, "consecutive_missed_cycles")),
+            _number(_read_field(budget_window or {}, "missed_target_cycles")),
+            _number(_read_field(budget_window or {}, "underinvested_cycles")),
+        )
+        return missed_cycles >= 2
+
+    def _lane_force_include_reason_for_items(
+        self,
+        items: Sequence[BacklogItemRecord],
+    ) -> str | None:
+        if any(_backlog_followup_overdue_score(item) > 0.0 for item in items):
+            return "overdue-followup"
+        return None
 
     def _selection_limit(
         self,

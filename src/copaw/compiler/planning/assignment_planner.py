@@ -35,6 +35,32 @@ def _string_list(*values: object) -> list[str]:
     return items
 
 
+def _mapping(value: object | None) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _contract_entries(
+    value: object | None,
+    *,
+    string_key: str,
+) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        candidates = list(value)
+    else:
+        candidates = [value]
+    entries: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if isinstance(candidate, Mapping):
+            entries.append(dict(candidate))
+            continue
+        text = _string(candidate)
+        if text is not None:
+            entries.append({string_key: text})
+    return entries
+
+
 class AssignmentPlanningCompiler:
     """Compile a bounded assignment-local planning envelope."""
 
@@ -49,6 +75,20 @@ class AssignmentPlanningCompiler:
     ) -> AssignmentPlanEnvelope:
         constraints = strategy_constraints or PlanningStrategyConstraints()
         metadata = dict(backlog_item.metadata or {})
+        dependencies = _contract_entries(
+            metadata.get("dependencies"),
+            string_key="label",
+        )
+        resource_requirements = _contract_entries(
+            metadata.get("resource_requirements"),
+            string_key="resource_ref",
+        )
+        capacity_requirements = _contract_entries(
+            metadata.get("capacity_requirements"),
+            string_key="capacity_ref",
+        )
+        retry_policy = _mapping(metadata.get("retry_policy"))
+        local_replan_policy = _mapping(metadata.get("local_replan_policy"))
         plan_steps = _string_list(metadata.get("plan_steps"))
         if not plan_steps:
             plan_steps = [
@@ -56,9 +96,41 @@ class AssignmentPlanningCompiler:
                 "Execute the governed move and capture evidence.",
             ]
         checkpoints = [
+            {
+                "kind": "dependency",
+                "label": (
+                    _string(entry.get("label"))
+                    or _string(entry.get("dependency_id"))
+                    or "dependency"
+                ),
+            }
+            for entry in dependencies
+        ] + [
             {"kind": "plan-step", "label": step}
             for step in plan_steps
         ]
+        checkpoints.extend(
+            {
+                "kind": "resource-ready",
+                "label": (
+                    _string(entry.get("resource_ref"))
+                    or _string(entry.get("label"))
+                    or "resource"
+                ),
+            }
+            for entry in resource_requirements
+        )
+        checkpoints.extend(
+            {
+                "kind": "capacity-ready",
+                "label": (
+                    _string(entry.get("capacity_ref"))
+                    or _string(entry.get("label"))
+                    or "capacity"
+                ),
+            }
+            for entry in capacity_requirements
+        )
         if not any("verify" in step.lower() for step in plan_steps):
             checkpoints.append(
                 {"kind": "verify", "label": "Verify the result and supporting evidence."},
@@ -98,8 +170,18 @@ class AssignmentPlanningCompiler:
             report_back_mode=report_back_mode,
             checkpoints=checkpoints,
             acceptance_criteria=acceptance_criteria,
+            dependencies=dependencies,
+            resource_requirements=resource_requirements,
+            capacity_requirements=capacity_requirements,
+            retry_policy=retry_policy,
+            local_replan_policy=local_replan_policy,
             sidecar_plan={
                 "checklist": list(plan_steps),
+                "dependencies": dependencies,
+                "resource_requirements": resource_requirements,
+                "capacity_requirements": capacity_requirements,
+                "retry_policy": retry_policy,
+                "local_replan_policy": local_replan_policy,
                 "planning_policy": list(constraints.planning_policy or []),
             },
             metadata={
@@ -130,6 +212,42 @@ class AssignmentPlanningCompiler:
         ):
             assignment_metadata["acceptance_criteria"] = list(
                 _string_list(context.get("plan_acceptance_criteria")),
+            )
+        if (
+            "dependencies" not in assignment_metadata
+            and context.get("plan_dependencies") is not None
+        ):
+            assignment_metadata["dependencies"] = _contract_entries(
+                context.get("plan_dependencies"),
+                string_key="label",
+            )
+        if (
+            "resource_requirements" not in assignment_metadata
+            and context.get("plan_resource_requirements") is not None
+        ):
+            assignment_metadata["resource_requirements"] = _contract_entries(
+                context.get("plan_resource_requirements"),
+                string_key="resource_ref",
+            )
+        if (
+            "capacity_requirements" not in assignment_metadata
+            and context.get("plan_capacity_requirements") is not None
+        ):
+            assignment_metadata["capacity_requirements"] = _contract_entries(
+                context.get("plan_capacity_requirements"),
+                string_key="capacity_ref",
+            )
+        if (
+            "retry_policy" not in assignment_metadata
+            and isinstance(context.get("plan_retry_policy"), Mapping)
+        ):
+            assignment_metadata["retry_policy"] = dict(context.get("plan_retry_policy"))
+        if (
+            "local_replan_policy" not in assignment_metadata
+            and isinstance(context.get("plan_local_replan_policy"), Mapping)
+        ):
+            assignment_metadata["local_replan_policy"] = dict(
+                context.get("plan_local_replan_policy"),
             )
         if (
             "report_back_mode" not in assignment_metadata

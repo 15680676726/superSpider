@@ -96,3 +96,52 @@ def test_cron_manager_accepts_full_standard_weekday_range() -> None:
         now=datetime(2026, 3, 22, 8, 0, tzinfo=timezone.utc),
     )
     assert next_fire == datetime(2026, 3, 22, 9, 0, tzinfo=timezone.utc)
+
+
+def test_cron_manager_reuses_inflight_heartbeat_run(monkeypatch) -> None:
+    async def run() -> None:
+        manager = CronManager(
+            repo=InMemoryJobRepository(),
+            timezone="UTC",
+        )
+        started = asyncio.Event()
+        release = asyncio.Event()
+        call_count = 0
+
+        async def _fake_run_heartbeat_once(*, kernel_dispatcher=None, ignore_active_hours=False):
+            nonlocal call_count
+            _ = kernel_dispatcher
+            _ = ignore_active_hours
+            call_count += 1
+            started.set()
+            await release.wait()
+            return {
+                "status": "success",
+                "task_id": "ktask:heartbeat",
+                "query_path": "system:run_operating_cycle",
+            }
+
+        monkeypatch.setattr(
+            "copaw.app.crons.manager.run_heartbeat_once",
+            _fake_run_heartbeat_once,
+        )
+
+        first = asyncio.create_task(manager.run_heartbeat())
+        await started.wait()
+
+        second = asyncio.create_task(manager.run_heartbeat())
+        await asyncio.sleep(0)
+        assert call_count == 1
+
+        release.set()
+        first_result = await first
+        second_result = await second
+
+        assert call_count == 1
+        assert first_result == second_result
+
+        third_result = await manager.run_heartbeat()
+        assert call_count == 2
+        assert third_result["status"] == "success"
+
+    asyncio.run(run())

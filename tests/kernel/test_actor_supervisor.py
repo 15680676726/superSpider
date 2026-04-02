@@ -37,6 +37,26 @@ class _InterruptibleWorker:
             raise
 
 
+class _SelectiveFailingWorker:
+    def __init__(self) -> None:
+        self.started: list[str] = []
+
+    async def run_once(self, agent_id: str) -> bool:
+        self.started.append(agent_id)
+        await asyncio.sleep(0)
+        if agent_id == "agent-1":
+            raise RuntimeError("worker crashed")
+        return True
+
+
+class _RecordingEventBus:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, dict[str, object]]] = []
+
+    def publish(self, *, topic: str, action: str, payload: dict[str, object]) -> None:
+        self.events.append((topic, action, payload))
+
+
 def _build_runtime_repository(tmp_path) -> SqliteAgentRuntimeRepository:
     state_store = SQLiteStateStore(tmp_path / "actor-supervisor-state.db")
     repository = SqliteAgentRuntimeRepository(state_store)
@@ -116,3 +136,71 @@ def test_actor_supervisor_stop_cancels_inflight_agent_runs(tmp_path) -> None:
     asyncio.run(_run())
 
     assert worker.cancelled == ["agent-1"]
+
+
+def test_actor_supervisor_isolates_agent_failure_without_aborting_parallel_poll(
+    tmp_path,
+) -> None:
+    runtime_repository = _build_runtime_repository(tmp_path)
+    worker = _SelectiveFailingWorker()
+    event_bus = _RecordingEventBus()
+    supervisor = ActorSupervisor(
+        runtime_repository=runtime_repository,
+        mailbox_service=None,  # type: ignore[arg-type]
+        worker=worker,  # type: ignore[arg-type]
+        runtime_event_bus=event_bus,
+        poll_interval_seconds=0.01,
+    )
+
+    ran_any = asyncio.run(supervisor.run_poll_cycle())
+
+    assert ran_any is True
+    assert set(worker.started) == {"agent-1", "agent-2"}
+    failed_runtime = runtime_repository.get_runtime("agent-1")
+    assert failed_runtime is not None
+    assert failed_runtime.runtime_status == "blocked"
+    assert failed_runtime.last_error_summary == "worker crashed"
+    assert any(
+        topic == "actor-supervisor"
+        and action == "agent-failed"
+        and payload["agent_id"] == "agent-1"
+        for topic, action, payload in event_bus.events
+    )
+
+
+def test_actor_supervisor_run_loop_survives_poll_cycle_exception(tmp_path) -> None:
+    runtime_repository = _build_runtime_repository(tmp_path)
+    event_bus = _RecordingEventBus()
+    supervisor = ActorSupervisor(
+        runtime_repository=runtime_repository,
+        mailbox_service=None,  # type: ignore[arg-type]
+        worker=_RecordingWorker(),  # type: ignore[arg-type]
+        runtime_event_bus=event_bus,
+        poll_interval_seconds=0.01,
+    )
+    calls = 0
+
+    async def _flaky_poll_cycle() -> bool:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("poll exploded")
+        supervisor._stop_event.set()
+        return True
+
+    supervisor.run_poll_cycle = _flaky_poll_cycle  # type: ignore[method-assign]
+
+    async def _run() -> None:
+        await supervisor.start()
+        await asyncio.wait_for(supervisor._loop_task, timeout=0.7)
+        await supervisor.stop()
+
+    asyncio.run(_run())
+
+    assert calls >= 2
+    assert any(
+        topic == "actor-supervisor"
+        and action == "poll-failed"
+        and payload["error"] == "poll exploded"
+        for topic, action, payload in event_bus.events
+    )

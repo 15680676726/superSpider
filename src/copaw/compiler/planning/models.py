@@ -108,6 +108,11 @@ class AssignmentPlanEnvelope(BaseModel):
     report_back_mode: str = "summary"
     checkpoints: list[dict[str, Any]] = Field(default_factory=list)
     acceptance_criteria: list[str] = Field(default_factory=list)
+    dependencies: list[dict[str, Any]] = Field(default_factory=list)
+    resource_requirements: list[dict[str, Any]] = Field(default_factory=list)
+    capacity_requirements: list[dict[str, Any]] = Field(default_factory=list)
+    retry_policy: dict[str, Any] = Field(default_factory=dict)
+    local_replan_policy: dict[str, Any] = Field(default_factory=dict)
     sidecar_plan: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

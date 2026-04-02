@@ -5,6 +5,8 @@ from .runtime_center_shared_ops import *  # noqa: F401,F403
 from .runtime_center_shared import (
     SharedOperatorAbortClearRequest,
     SharedOperatorAbortRequest,
+    _runtime_operator_guard_key,
+    _runtime_operator_reentry_guard,
 )
 
 
@@ -89,7 +91,12 @@ async def run_runtime_heartbeat(
     runner = getattr(manager, "run_heartbeat", None)
     if not callable(runner):
         raise HTTPException(503, detail="Heartbeat runtime is not available")
-    result = await runner()
+    with _runtime_operator_reentry_guard(
+        request,
+        guard_key=_runtime_operator_guard_key("heartbeat", "run"),
+        conflict_detail="Heartbeat run is already in progress",
+    ):
+        result = await runner()
     detail = _serialize_heartbeat_surface(request)
     status = str(result.get("status") or "unknown")
     _maybe_publish_runtime_event(
@@ -269,15 +276,20 @@ async def run_schedule(
     manager = _get_cron_manager(request)
     if await manager.get_job(schedule_id) is None:
         raise HTTPException(404, detail=f"Schedule '{schedule_id}' not found")
-    result = await _dispatch_runtime_mutation(
+    with _runtime_operator_reentry_guard(
         request,
-        capability_ref="system:run_schedule",
-        title=f"Run schedule '{schedule_id}'",
-        payload={
-            "actor": "copaw-operator",
-            "schedule_id": schedule_id,
-        },
-    )
+        guard_key=_runtime_operator_guard_key("schedule", schedule_id, "run"),
+        conflict_detail=f"Schedule '{schedule_id}' run is already in progress",
+    ):
+        result = await _dispatch_runtime_mutation(
+            request,
+            capability_ref="system:run_schedule",
+            title=f"Run schedule '{schedule_id}'",
+            payload={
+                "actor": "copaw-operator",
+                "schedule_id": schedule_id,
+            },
+        )
     if not result.get("success"):
         if result.get("phase") == "waiting-confirm":
             return {"started": False, "result": result}
@@ -294,17 +306,31 @@ async def pause_schedule(
 ) -> dict[str, object]:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
     manager = _get_cron_manager(request)
-    if await manager.get_job(schedule_id) is None:
+    job = await manager.get_job(schedule_id)
+    if job is None:
         raise HTTPException(404, detail=f"Schedule '{schedule_id}' not found")
-    result = await _dispatch_runtime_mutation(
+    if getattr(job, "enabled", True) is False:
+        detail = await _get_schedule_surface(schedule_id, request, response)
+        return {
+            "paused": False,
+            "noop": True,
+            "reason": f"Schedule '{schedule_id}' is already paused",
+            "schedule": detail,
+        }
+    with _runtime_operator_reentry_guard(
         request,
-        capability_ref="system:pause_schedule",
-        title=f"Pause schedule '{schedule_id}'",
-        payload={
-            "actor": "copaw-operator",
-            "schedule_id": schedule_id,
-        },
-    )
+        guard_key=_runtime_operator_guard_key("schedule", schedule_id, "pause"),
+        conflict_detail=f"Schedule '{schedule_id}' pause is already in progress",
+    ):
+        result = await _dispatch_runtime_mutation(
+            request,
+            capability_ref="system:pause_schedule",
+            title=f"Pause schedule '{schedule_id}'",
+            payload={
+                "actor": "copaw-operator",
+                "schedule_id": schedule_id,
+            },
+        )
     if not result.get("success"):
         if result.get("phase") == "waiting-confirm":
             return {"paused": False, "result": result}
@@ -321,17 +347,31 @@ async def resume_schedule(
 ) -> dict[str, object]:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
     manager = _get_cron_manager(request)
-    if await manager.get_job(schedule_id) is None:
+    job = await manager.get_job(schedule_id)
+    if job is None:
         raise HTTPException(404, detail=f"Schedule '{schedule_id}' not found")
-    result = await _dispatch_runtime_mutation(
+    if getattr(job, "enabled", True) is True:
+        detail = await _get_schedule_surface(schedule_id, request, response)
+        return {
+            "resumed": False,
+            "noop": True,
+            "reason": f"Schedule '{schedule_id}' is already active",
+            "schedule": detail,
+        }
+    with _runtime_operator_reentry_guard(
         request,
-        capability_ref="system:resume_schedule",
-        title=f"Resume schedule '{schedule_id}'",
-        payload={
-            "actor": "copaw-operator",
-            "schedule_id": schedule_id,
-        },
-    )
+        guard_key=_runtime_operator_guard_key("schedule", schedule_id, "resume"),
+        conflict_detail=f"Schedule '{schedule_id}' resume is already in progress",
+    ):
+        result = await _dispatch_runtime_mutation(
+            request,
+            capability_ref="system:resume_schedule",
+            title=f"Resume schedule '{schedule_id}'",
+            payload={
+                "actor": "copaw-operator",
+                "schedule_id": schedule_id,
+            },
+        )
     if not result.get("success"):
         if result.get("phase") == "waiting-confirm":
             return {"resumed": False, "result": result}

@@ -32,7 +32,18 @@ Result:
 - `77 passed`
 
 This closeout does not claim that all future long-horizon planning work is finished.
-Remaining next-wave work still includes richer cycle kinds, deeper lane investment policy, and explicit strategic uncertainty / strategy-shift triggers.
+An initial horizon selector is now landed as follow-up work: `CyclePlanningCompiler` can promote `weekly / event` cycle kinds from strategic uncertainty + trigger inputs instead of hard-coding `daily`.
+The first deeper follow-up wave is also now landed:
+
+- lane investment no longer stops at a thin `lane_budget_outcomes` sidecar; it now includes `multi-cycle-underinvestment`, overdue follow-up override, and `remaining_headroom` as a real selection cap
+- `ReportReplanEngine` now promotes a top-level `strategy_change` surface instead of requiring downstream consumers to only inspect `activation["strategy_change"]`
+- `service_runtime_views.py` now exposes `strategy_trigger_rules + uncertainty_register` through `main_brain_planning.replan`, giving Runtime Center / industry detail a durable read-model for strategic uncertainty without mutating persisted sidecars
+
+Remaining next-wave work is therefore narrower:
+
+- deeper multi-cycle lane investment allocation beyond the current first hardening pass
+- more advanced assignment-local capacity/replan logic beyond the new dependency/resource/capacity/local-replan contract baseline
+- stronger persisted/projection-backed uncertainty-register durability beyond the current runtime-view surface
 
 ---
 

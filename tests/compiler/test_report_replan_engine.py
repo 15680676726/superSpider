@@ -4,6 +4,15 @@ from __future__ import annotations
 from copaw.compiler.planning import ReportReplanEngine
 
 
+def _payload(decision: object) -> dict[str, object]:
+    model_dump = getattr(decision, "model_dump", None)
+    if callable(model_dump):
+        payload = model_dump(mode="json", exclude_none=True)
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
 def _strategy_change(decision: object) -> dict[str, object]:
     activation = getattr(decision, "activation", {})
     if isinstance(activation, dict):
@@ -13,8 +22,13 @@ def _strategy_change(decision: object) -> dict[str, object]:
     return {}
 
 
-def _decision_kind(decision: object) -> str | None:
-    return getattr(decision, "decision_kind", None) or _strategy_change(decision).get("decision_kind")
+def _top_level_strategy_change(decision: object) -> dict[str, object]:
+    strategy_change = getattr(decision, "strategy_change", None)
+    if isinstance(strategy_change, dict):
+        return strategy_change
+    payload = _payload(decision)
+    nested = payload.get("strategy_change")
+    return nested if isinstance(nested, dict) else {}
 
 
 def _trigger_family(decision: object) -> str | None:
@@ -45,7 +59,7 @@ def test_report_replan_engine_translates_synthesis_surface_into_follow_up_backlo
     )
 
     assert decision.status == "needs-replan"
-    assert _decision_kind(decision) == "follow_up_backlog"
+    assert decision.strategy_change_decision == "follow_up_backlog"
     assert _trigger_family(decision) == "local_follow_up_pressure"
     assert decision.reason_ids == ["failed-report:1"]
     assert decision.source_report_ids == ["report-1"]
@@ -89,7 +103,7 @@ def test_report_replan_engine_escalates_repeated_blocker_across_cycles_to_cycle_
     )
 
     assert decision.status == "needs-replan"
-    assert _decision_kind(decision) == "cycle_rebalance"
+    assert decision.strategy_change_decision == "cycle_rebalance"
     assert _trigger_family(decision) == "repeated_blocker_across_cycles"
     assert "cycle rebalance" in decision.summary.lower()
     assert _strategy_change(decision)["trigger_evidence"] == [
@@ -132,7 +146,7 @@ def test_report_replan_engine_escalates_repeated_assignment_miss_to_lane_reweigh
     )
 
     assert decision.status == "needs-replan"
-    assert _decision_kind(decision) == "lane_reweight"
+    assert decision.strategy_change_decision == "lane_reweight"
     assert _trigger_family(decision) == "repeated_assignment_miss_same_lane_objective"
     assert "lane reweight" in decision.summary.lower()
     assert "conversion" in decision.topic_keys
@@ -167,7 +181,7 @@ def test_report_replan_engine_escalates_confidence_collapse_to_strategy_review()
     )
 
     assert decision.status == "needs-replan"
-    assert _decision_kind(decision) == "strategy_review_required"
+    assert decision.strategy_change_decision == "strategy_review_required"
     assert _trigger_family(decision) == "confidence_collapse_tracked_uncertainty"
     assert "strategy review" in decision.summary.lower()
     assert _strategy_change(decision)["trigger_evidence"][0]["current_confidence"] == 0.21
@@ -205,7 +219,7 @@ def test_report_replan_engine_escalates_repeated_contradictions_to_strategy_revi
     )
 
     assert decision.status == "needs-replan"
-    assert _decision_kind(decision) == "strategy_review_required"
+    assert decision.strategy_change_decision == "strategy_review_required"
     assert _trigger_family(decision) == "repeated_evidence_contradiction"
     assert "strategy review" in decision.summary.lower()
     assert _strategy_change(decision)["trigger_evidence"][0]["source_families"] == [
@@ -215,12 +229,136 @@ def test_report_replan_engine_escalates_repeated_contradictions_to_strategy_revi
     ]
 
 
+def test_report_replan_engine_promotes_trigger_consumption_into_formal_fields() -> None:
+    engine = ReportReplanEngine()
+
+    decision = engine.compile(
+        {
+            "replan_decision": {
+                "decision_id": "report-synthesis:needs-replan:compliance-signoff",
+                "status": "needs-replan",
+                "summary": "Repeated blocker requires main-brain judgment.",
+                "reason_ids": ["blocker:compliance-signoff"],
+                "source_report_ids": ["report-7", "report-8"],
+                "topic_keys": ["compliance-signoff"],
+                "trigger_context": {
+                    "review_window": "weekly",
+                    "source_scope": "industry-1",
+                },
+            },
+            "strategy_change_context": {
+                "trigger_rule_ids": [
+                    "review-rule:0",
+                    "uncertainty:uncertainty-1:confidence-drop",
+                ],
+                "trigger_context": {
+                    "strategic_uncertainty_ids": ["uncertainty-1"],
+                    "lane_budget_pressure": {"lane-ops": "protect-approval-path"},
+                },
+                "repeated_blockers": [
+                    {
+                        "blocker_key": "compliance-signoff",
+                        "lane_id": "lane-ops",
+                        "cycle_ids": ["cycle-4", "cycle-5"],
+                        "source_report_ids": ["report-7", "report-8"],
+                        "topic_key": "compliance-signoff",
+                        "summary": "Compliance signoff blocker repeated across cycles.",
+                    },
+                ],
+            },
+        },
+    )
+
+    payload = _payload(decision)
+
+    assert decision.strategy_change_decision == "cycle_rebalance"
+    assert decision.trigger_rule_ids == [
+        "review-rule:0",
+        "uncertainty:uncertainty-1:confidence-drop",
+    ]
+    assert "trigger_context" in payload
+    assert payload["trigger_context"]["review_window"] == "weekly"
+    assert payload["trigger_context"]["source_scope"] == "industry-1"
+    assert payload["trigger_context"]["strategic_uncertainty_ids"] == ["uncertainty-1"]
+    assert payload["trigger_context"]["lane_budget_pressure"] == {
+        "lane-ops": "protect-approval-path",
+    }
+
+
+def test_report_replan_engine_promotes_strategy_change_payload_into_top_level_surface() -> None:
+    engine = ReportReplanEngine()
+
+    decision = engine.compile(
+        {
+            "replan_decision": {
+                "decision_id": "report-synthesis:needs-replan:warehouse-approval",
+                "status": "needs-replan",
+                "summary": "Repeated contradiction requires main-brain judgment.",
+                "reason_ids": ["activation:contradictions", "failed-report:report-6"],
+                "source_report_ids": ["report-6"],
+                "topic_keys": ["warehouse-approval"],
+                "trigger_rule_ids": ["review-rule:warehouse-approval"],
+                "trigger_context": {
+                    "review_window": "weekly",
+                    "source_scope": "industry-1",
+                },
+            },
+            "activation": {
+                "contradiction_count": 2,
+            },
+            "strategy_change_context": {
+                "trigger_rule_ids": ["activation-rule:contradiction-repeat"],
+                "trigger_context": {
+                    "strategic_uncertainty_ids": ["uncertainty-warehouse-approval"],
+                },
+                "evidence_contradictions": [
+                    {
+                        "topic_key": "warehouse-approval",
+                        "source_families": ["synthesis", "activation", "report"],
+                        "repeat_count": 3,
+                        "source_report_ids": ["report-6"],
+                        "summary": "Repeated contradiction spans synthesis, activation, and report evidence.",
+                    },
+                ],
+            },
+        },
+    )
+
+    strategy_change = _top_level_strategy_change(decision)
+
+    assert strategy_change == {
+        "decision_kind": "strategy_review_required",
+        "trigger_family": "repeated_evidence_contradiction",
+        "trigger_rule_ids": [
+            "review-rule:warehouse-approval",
+            "activation-rule:contradiction-repeat",
+        ],
+        "trigger_context": {
+            "review_window": "weekly",
+            "source_scope": "industry-1",
+            "strategic_uncertainty_ids": ["uncertainty-warehouse-approval"],
+            "trigger_families": ["repeated_evidence_contradiction"],
+        },
+        "rationale": "Repeated contradiction spans synthesis, activation, and report evidence.",
+        "trigger_evidence": [
+            {
+                "topic_key": "warehouse-approval",
+                "source_families": ["synthesis", "activation", "report"],
+                "repeat_count": 3,
+                "source_report_ids": ["report-6"],
+                "summary": "Repeated contradiction spans synthesis, activation, and report evidence.",
+            },
+        ],
+    }
+    assert strategy_change == _strategy_change(decision)
+
+
 def test_report_replan_engine_returns_clear_when_synthesis_is_missing() -> None:
     engine = ReportReplanEngine()
 
     decision = engine.compile(None)
 
     assert decision.status == "clear"
-    assert _decision_kind(decision) is None
+    assert decision.strategy_change_decision is None
     assert decision.reason_ids == []
     assert decision.directives == []

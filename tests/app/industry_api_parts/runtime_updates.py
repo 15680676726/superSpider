@@ -1637,6 +1637,25 @@ def test_runtime_detail_exposes_stable_main_brain_planning_surface_from_formal_s
                     "force_include_reason": "Keep governed follow-up visible until uncertainty closes.",
                 }
             ],
+            "strategy_trigger_rules": [
+                {
+                    "rule_id": "review-rule:0",
+                    "source_type": "review_rule",
+                    "trigger_family": "review_rule",
+                    "summary": "repeat-failure-needs-review",
+                },
+                {
+                    "rule_id": "uncertainty:uncertainty-governed-followup:confidence-drop",
+                    "source_type": "uncertainty_escalation",
+                    "source_ref": "uncertainty-governed-followup",
+                    "trigger_family": "confidence_collapse",
+                    "summary": (
+                        "Governed follow-up demand may outpace the current lane mix. "
+                        "(confidence drop)"
+                    ),
+                    "decision_hint": "strategy_review_required",
+                },
+            ],
             "paused_lane_ids": [],
         },
         "cycle_decision": {
@@ -1750,6 +1769,37 @@ def test_runtime_detail_exposes_stable_main_brain_planning_surface_from_formal_s
     assert planning_surface["replan"]["trigger_context"]["strategic_uncertainty_ids"] == [
         "uncertainty-governed-followup"
     ]
+    assert [rule["rule_id"] for rule in planning_surface["replan"]["strategy_trigger_rules"]] == [
+        "review-rule:0",
+        "uncertainty:uncertainty-governed-followup:confidence-drop",
+    ]
+    assert planning_surface["replan"]["uncertainty_register"] == {
+        "is_truth_store": False,
+        "source": "industry-runtime-read-model",
+        "durable_source": "strategy-memory",
+        "summary": {
+            "uncertainty_count": 1,
+            "lane_budget_count": 1,
+            "trigger_rule_count": 2,
+            "review_cycle_ids": ["cycle-weekly-1"],
+            "trigger_families": ["confidence_collapse", "review_rule"],
+        },
+        "items": [
+            {
+                "uncertainty_id": "uncertainty-governed-followup",
+                "statement": "Governed follow-up demand may outpace the current lane mix.",
+                "scope": "strategy",
+                "impact_level": "high",
+                "current_confidence": 0.42,
+                "review_by_cycle": "cycle-weekly-1",
+                "escalate_when": ["confidence-drop", "target-miss"],
+                "trigger_rule_ids": [
+                    "uncertainty:uncertainty-governed-followup:confidence-drop",
+                ],
+                "trigger_families": ["confidence_collapse"],
+            },
+        ],
+    }
     assert detail.current_cycle["main_brain_planning"] == planning_surface
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()

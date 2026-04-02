@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..capabilities.install_templates import build_install_template_doctor
+from .runtime_center.overview_cards import _RuntimeCenterOverviewCardsSupport
 
 
 class RuntimeHealthService:
@@ -21,6 +22,7 @@ class RuntimeHealthService:
         governance_service: object | None = None,
         runtime_event_bus: object | None = None,
         browser_runtime_service: object | None = None,
+        app_state: Any | None = None,
     ) -> None:
         self._core_services = {
             "state_store": state_store,
@@ -33,6 +35,11 @@ class RuntimeHealthService:
         }
         self._capability_service = capability_service
         self._browser_runtime_service = browser_runtime_service
+        self._app_state = app_state
+
+    def bind_app_state(self, app_state: Any) -> "RuntimeHealthService":
+        self._app_state = app_state
+        return self
 
     @classmethod
     def from_app_state(cls, app_state: Any) -> "RuntimeHealthService":
@@ -49,6 +56,7 @@ class RuntimeHealthService:
                 "browser_runtime_service",
                 None,
             ),
+            app_state=app_state,
         )
 
     def build_checks(self) -> list[dict[str, object]]:
@@ -134,4 +142,49 @@ class RuntimeHealthService:
                 "doctor_status": doctor_status or "unknown",
                 **(report_payload if isinstance(report_payload, dict) else {}),
             },
+        }
+
+    async def build_runtime_summary(self) -> dict[str, object]:
+        app_state = self._app_state
+        if app_state is None:
+            return {
+                "status": "unavailable",
+                "summary": "Runtime health service is not bound to app.state.",
+                "automation": {
+                    "status": "unavailable",
+                    "summary": "Automation runtime summary is unavailable.",
+                },
+                "startup_recovery": {
+                    "available": False,
+                    "status": "unavailable",
+                    "summary": "Startup recovery summary is not available.",
+                },
+            }
+
+        support = _RuntimeCenterOverviewCardsSupport()
+        automation = await support._build_main_brain_automation_payload(app_state)
+        startup_recovery = support._build_main_brain_recovery_payload(app_state)
+        automation_status = str(automation.get("status") or "unavailable").strip().lower()
+        recovery_status = str(startup_recovery.get("status") or "unavailable").strip().lower()
+        summary_status = "idle"
+        if automation_status == "degraded":
+            summary_status = "degraded"
+        elif automation_status == "active":
+            summary_status = "active"
+        elif recovery_status == "ready":
+            summary_status = "ready"
+        elif automation_status == "unavailable" and recovery_status == "unavailable":
+            summary_status = "unavailable"
+        return {
+            "status": summary_status,
+            "summary": " ".join(
+                part
+                for part in (
+                    str(automation.get("summary") or "").strip(),
+                    str(startup_recovery.get("summary") or "").strip(),
+                )
+                if part
+            ),
+            "automation": automation,
+            "startup_recovery": startup_recovery,
         }

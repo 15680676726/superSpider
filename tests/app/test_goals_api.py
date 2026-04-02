@@ -862,6 +862,36 @@ def test_compile_goal_carries_assignment_local_planning_shell_as_sidecar(
                     "Operator brief ready for supervisor review.",
                     "Evidence packet attached to the assignment handoff.",
                 ],
+                "plan_dependencies": [
+                    {
+                        "dependency_id": "dep-operator-brief",
+                        "label": "Operator brief reviewed",
+                        "required_before": "Draft operator brief",
+                    }
+                ],
+                "plan_resource_requirements": [
+                    {
+                        "resource_ref": "browser:operator-console",
+                        "mode": "exclusive",
+                    }
+                ],
+                "plan_capacity_requirements": [
+                    {
+                        "capacity_ref": "seat:writer",
+                        "minimum_units": 1,
+                        "reason": "Need one exclusive writer seat before outbound publish.",
+                    }
+                ],
+                "plan_retry_policy": {
+                    "max_attempts": 2,
+                    "escalate_after": 1,
+                    "escalation_mode": "supervisor-review",
+                },
+                "plan_local_replan_policy": {
+                    "replan_after_blocked": 1,
+                    "replan_after_evidence_gap": 1,
+                    "replan_mode": "bounded-assignment-replan",
+                },
                 "assignment_metadata": {
                     "private_notes": "should stay out of bounded sidecar plan",
                 },
@@ -882,11 +912,67 @@ def test_compile_goal_carries_assignment_local_planning_shell_as_sidecar(
         assert envelope["lane_id"] == "lane-growth"
         assert envelope["cycle_id"] == "cycle-daily-1"
         assert envelope["report_back_mode"] == "detailed"
+        assert envelope["dependencies"] == [
+            {
+                "dependency_id": "dep-operator-brief",
+                "label": "Operator brief reviewed",
+                "required_before": "Draft operator brief",
+            }
+        ]
+        assert envelope["resource_requirements"] == [
+            {
+                "resource_ref": "browser:operator-console",
+                "mode": "exclusive",
+            }
+        ]
+        assert envelope["capacity_requirements"] == [
+            {
+                "capacity_ref": "seat:writer",
+                "minimum_units": 1,
+                "reason": "Need one exclusive writer seat before outbound publish.",
+            }
+        ]
+        assert envelope["retry_policy"] == {
+            "max_attempts": 2,
+            "escalate_after": 1,
+            "escalation_mode": "supervisor-review",
+        }
+        assert envelope["local_replan_policy"] == {
+            "replan_after_blocked": 1,
+            "replan_after_evidence_gap": 1,
+            "replan_mode": "bounded-assignment-replan",
+        }
         assert node["assignment_sidecar_plan"]["checklist"] == [
             "Draft operator brief",
             "Verify evidence packet",
         ]
+        assert node["assignment_sidecar_plan"]["dependencies"] == envelope["dependencies"]
+        assert node["assignment_sidecar_plan"]["resource_requirements"] == (
+            envelope["resource_requirements"]
+        )
+        assert node["assignment_sidecar_plan"]["capacity_requirements"] == (
+            envelope["capacity_requirements"]
+        )
+        assert node["assignment_sidecar_plan"]["retry_policy"] == envelope["retry_policy"]
+        assert node["assignment_sidecar_plan"]["local_replan_policy"] == (
+            envelope["local_replan_policy"]
+        )
         assert "private_notes" not in node["assignment_sidecar_plan"]
+        assert any(
+            checkpoint["kind"] == "dependency"
+            and checkpoint["label"] == "Operator brief reviewed"
+            for checkpoint in node["assignment_plan_checkpoints"]
+        )
+        assert any(
+            checkpoint["kind"] == "resource-ready"
+            and checkpoint["label"] == "browser:operator-console"
+            for checkpoint in node["assignment_plan_checkpoints"]
+        )
+        assert any(
+            checkpoint["kind"] == "capacity-ready"
+            and checkpoint["label"] == "seat:writer"
+            for checkpoint in node["assignment_plan_checkpoints"]
+        )
         assert any(
             checkpoint["label"] == "Draft operator brief"
             for checkpoint in node["assignment_plan_checkpoints"]

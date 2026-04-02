@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Iterable
 
@@ -25,6 +26,127 @@ from .runtime_bootstrap import (
 from .startup_recovery import run_startup_recovery
 
 logger = logging.getLogger(__name__)
+
+AUTOMATION_COORDINATOR_CONTRACT = "automation-coordinator/v1"
+
+
+@dataclass
+class _AutomationLoopState:
+    task_name: str
+    capability_ref: str
+    owner_agent_id: str
+    interval_seconds: int
+    automation_task_id: str
+    coordinator_contract: str = AUTOMATION_COORDINATOR_CONTRACT
+    loop_phase: str = "idle"
+    health_status: str = "idle"
+    last_gate_reason: str = "not-yet-evaluated"
+    last_result_phase: str | None = None
+    last_error_summary: str | None = None
+    submit_count: int = 0
+    consecutive_failures: int = 0
+
+    def with_contract_payload(self, payload: dict[str, object]) -> dict[str, object]:
+        enriched = dict(payload)
+        enriched.setdefault("automation_task_id", self.automation_task_id)
+        enriched.setdefault("coordinator_contract", self.coordinator_contract)
+        enriched.setdefault("automation_loop_name", self.task_name)
+        return enriched
+
+    def mark_blocked(self, reason: str) -> None:
+        self.loop_phase = "blocked"
+        self.health_status = "idle"
+        self.last_gate_reason = reason
+        self.last_error_summary = None
+
+    def mark_submitting(self, reason: str) -> None:
+        self.loop_phase = "submitting"
+        self.health_status = "active"
+        self.last_gate_reason = reason
+        self.last_error_summary = None
+        self.submit_count += 1
+
+    def record_result(self, result: object) -> None:
+        phase = str(getattr(result, "phase", "") or "").strip() or "unknown"
+        self.last_result_phase = phase
+        self.last_error_summary = None
+        if phase == "completed":
+            self.loop_phase = "completed"
+            self.health_status = "healthy"
+            self.consecutive_failures = 0
+            return
+        if phase == "skipped":
+            self.loop_phase = "skipped"
+            self.health_status = "idle"
+            return
+        if phase in {"waiting-confirm", "risk-check"}:
+            self.loop_phase = phase
+            self.health_status = "guarded"
+            return
+        self.loop_phase = phase
+        self.health_status = "degraded"
+
+    def record_failure(self, exc: Exception) -> None:
+        self.loop_phase = "failed"
+        self.health_status = "degraded"
+        self.last_result_phase = "failed"
+        summary = str(exc).strip()
+        self.last_error_summary = summary or exc.__class__.__name__
+        self.consecutive_failures += 1
+
+    def mark_stopped(self) -> None:
+        self.loop_phase = "stopped"
+        self.health_status = "stopped"
+
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "task_name": self.task_name,
+            "capability_ref": self.capability_ref,
+            "owner_agent_id": self.owner_agent_id,
+            "interval_seconds": self.interval_seconds,
+            "automation_task_id": self.automation_task_id,
+            "coordinator_contract": self.coordinator_contract,
+            "loop_phase": self.loop_phase,
+            "health_status": self.health_status,
+            "last_gate_reason": self.last_gate_reason,
+            "last_result_phase": self.last_result_phase,
+            "last_error_summary": self.last_error_summary,
+            "submit_count": self.submit_count,
+            "consecutive_failures": self.consecutive_failures,
+        }
+
+
+class AutomationTaskGroup(list[asyncio.Task[None]]):
+    def loop_snapshots(self) -> dict[str, dict[str, object]]:
+        snapshots: dict[str, dict[str, object]] = {}
+        for task in self:
+            state = getattr(task, "copaw_automation_state", None)
+            if isinstance(state, _AutomationLoopState):
+                snapshots[state.task_name] = state.snapshot()
+        return snapshots
+
+
+def _automation_task_id(
+    *,
+    task_name: str,
+    capability_ref: str,
+    owner_agent_id: str,
+) -> str:
+    return f"{owner_agent_id}:{task_name}:{capability_ref}"
+
+
+def _automation_loop_state_from_task(
+    task: asyncio.Task[Any],
+) -> _AutomationLoopState | None:
+    state = getattr(task, "copaw_automation_state", None)
+    return state if isinstance(state, _AutomationLoopState) else None
+
+
+def _mark_automation_tasks_stopped(tasks: Iterable[asyncio.Task[Any]]) -> None:
+    for task in tasks:
+        state = _automation_loop_state_from_task(task)
+        if state is not None:
+            state.mark_stopped()
 
 
 def _consume_current_task_cancellation() -> int:
@@ -141,6 +263,7 @@ async def _automation_loop(
     interval_seconds: int,
     capability_ref: str,
     owner_agent_id: str,
+    loop_state: _AutomationLoopState,
     payload_factory: Callable[[], dict[str, object]],
     should_run: Callable[[], object] | None,
     kernel_dispatcher: KernelDispatcher,
@@ -152,13 +275,15 @@ async def _automation_loop(
             await asyncio.sleep(interval_seconds)
             allowed, reason = _resolve_automation_gate(should_run)
             if not allowed:
+                loop_state.mark_blocked(reason)
                 logger.debug(
                     "Automation cycle '%s' skipped before submit: %s",
                     task_name,
                     reason,
                 )
                 continue
-            payload = payload_factory()
+            payload = loop_state.with_contract_payload(payload_factory())
+            loop_state.mark_submitting(reason)
             result = await submit_kernel_automation_task(
                 kernel_dispatcher,
                 capability_service,
@@ -167,6 +292,7 @@ async def _automation_loop(
                 owner_agent_id=owner_agent_id,
                 payload=payload,
             )
+            loop_state.record_result(result)
             logger.info(
                 "Automation cycle '%s' completed: capability=%s result=%s",
                 task_name,
@@ -174,8 +300,10 @@ async def _automation_loop(
                 getattr(result, "phase", None) or getattr(result, "summary", None),
             )
         except asyncio.CancelledError:
+            loop_state.mark_stopped()
             raise
-        except Exception:
+        except Exception as exc:
+            loop_state.record_failure(exc)
             logger.exception("Automation cycle '%s' failed", task_name)
 
 
@@ -187,7 +315,7 @@ def start_automation_tasks(
     industry_service: Any | None = None,
     learning_service: Any | None = None,
     logger: logging.Logger,
-) -> list[asyncio.Task[None]]:
+) -> AutomationTaskGroup:
     host_recovery_interval = automation_interval_seconds(
         "COPAW_HOST_RECOVERY_INTERVAL_SECONDS",
         120,
@@ -200,78 +328,90 @@ def start_automation_tasks(
         "COPAW_LEARNING_DAEMON_INTERVAL_SECONDS",
         900,
     )
-    return [
-        asyncio.create_task(
+    tasks: list[asyncio.Task[None]] = []
+    for task_name, interval_seconds, capability_ref, owner_agent_id, payload_factory, should_run in (
+        (
+            "host-recovery",
+            host_recovery_interval,
+            "system:run_host_recovery",
+            "copaw-main-brain",
+            lambda: {
+                "actor": "system:automation",
+                "source": "automation:host_recovery",
+                "limit": 25,
+                "allow_cross_process_recovery": True,
+            },
+            (
+                (lambda: _should_run_host_recovery(environment_service))
+                if environment_service is not None
+                else None
+            ),
+        ),
+        (
+            "operating-cycle",
+            operating_cycle_interval,
+            "system:run_operating_cycle",
+            "copaw-main-brain",
+            lambda: {
+                "actor": "system:automation",
+                "source": "automation:operating_cycle",
+                "force": False,
+            },
+            (
+                (lambda: _should_run_operating_cycle(industry_service))
+                if industry_service is not None
+                else None
+            ),
+        ),
+        (
+            "learning-strategy",
+            learning_daemon_interval,
+            "system:run_learning_strategy",
+            "copaw-main-brain",
+            lambda: {
+                "actor": "copaw-main-brain",
+                "auto_apply": True,
+                "auto_rollback": False,
+                "failure_threshold": 2,
+                "confirm_threshold": 6,
+                "max_proposals": 5,
+            },
+            (
+                (lambda: _should_run_learning_strategy(learning_service))
+                if learning_service is not None
+                else None
+            ),
+        ),
+    ):
+        loop_state = _AutomationLoopState(
+            task_name=task_name,
+            capability_ref=capability_ref,
+            owner_agent_id=owner_agent_id,
+            interval_seconds=interval_seconds,
+            automation_task_id=_automation_task_id(
+                task_name=task_name,
+                capability_ref=capability_ref,
+                owner_agent_id=owner_agent_id,
+            ),
+        )
+        task = asyncio.create_task(
             _automation_loop(
-                task_name="host-recovery",
-                interval_seconds=host_recovery_interval,
-                capability_ref="system:run_host_recovery",
-                owner_agent_id="copaw-main-brain",
-                payload_factory=lambda: {
-                    "actor": "system:automation",
-                    "source": "automation:host_recovery",
-                    "limit": 25,
-                    "allow_cross_process_recovery": True,
-                },
-                should_run=(
-                    (lambda: _should_run_host_recovery(environment_service))
-                    if environment_service is not None
-                    else None
-                ),
+                task_name=task_name,
+                interval_seconds=interval_seconds,
+                capability_ref=capability_ref,
+                owner_agent_id=owner_agent_id,
+                loop_state=loop_state,
+                payload_factory=payload_factory,
+                should_run=should_run,
                 kernel_dispatcher=kernel_dispatcher,
                 capability_service=capability_service,
                 logger=logger,
             ),
-            name="copaw-automation-host-recovery",
-        ),
-        asyncio.create_task(
-            _automation_loop(
-                task_name="operating-cycle",
-                interval_seconds=operating_cycle_interval,
-                capability_ref="system:run_operating_cycle",
-                owner_agent_id="copaw-main-brain",
-                payload_factory=lambda: {
-                    "actor": "system:automation",
-                    "source": "automation:operating_cycle",
-                    "force": False,
-                },
-                should_run=(
-                    (lambda: _should_run_operating_cycle(industry_service))
-                    if industry_service is not None
-                    else None
-                ),
-                kernel_dispatcher=kernel_dispatcher,
-                capability_service=capability_service,
-                logger=logger,
-            ),
-            name="copaw-automation-operating-cycle",
-        ),
-        asyncio.create_task(
-            _automation_loop(
-                task_name="learning-strategy",
-                interval_seconds=learning_daemon_interval,
-                capability_ref="system:run_learning_strategy",
-                owner_agent_id="copaw-main-brain",
-                payload_factory=lambda: {
-                    "actor": "copaw-main-brain",
-                    "auto_apply": True,
-                    "auto_rollback": False,
-                    "failure_threshold": 2,
-                    "confirm_threshold": 6,
-                    "max_proposals": 5,
-                },
-                should_run=(
-                    (lambda: _should_run_learning_strategy(learning_service))
-                    if learning_service is not None
-                    else None
-                ),
-                kernel_dispatcher=kernel_dispatcher,
-                capability_service=capability_service,
-                logger=logger,
-            ),
-            name="copaw-automation-learning-strategy",
-        ),
-    ]
+            name=f"copaw-automation-{task_name}",
+        )
+        setattr(task, "copaw_automation_state", loop_state)
+        tasks.append(task)
+    return AutomationTaskGroup(tasks)
 
 
 def _resolve_automation_gate(
@@ -347,6 +487,7 @@ async def stop_automation_tasks(tasks: Iterable[asyncio.Task[Any]]) -> None:
     while True:
         try:
             await asyncio.gather(*task_list, return_exceptions=True)
+            _mark_automation_tasks_stopped(task_list)
             return
         except asyncio.CancelledError:
             cleared = _consume_current_task_cancellation()

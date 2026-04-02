@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from types import MethodType
 from typing import Any
 
 from .models import ReportReplanDecision
@@ -94,6 +95,77 @@ def _normalize_decision_kind(value: object | None) -> str | None:
     return None
 
 
+def _set_extra_fields(
+    decision: ReportReplanDecision,
+    *,
+    model_fields: Mapping[str, Any] | None = None,
+    dump_fields: Mapping[str, Any] | None = None,
+    **field_values: Any,
+) -> ReportReplanDecision:
+    updates: dict[str, Any] = {}
+    resolved_model_fields = dict(model_fields or getattr(type(decision), "model_fields", {}))
+    for field_name, field_value in field_values.items():
+        if field_name in resolved_model_fields:
+            updates[field_name] = field_value
+        else:
+            object.__setattr__(decision, field_name, field_value)
+    if updates:
+        decision = decision.model_copy(update=updates)
+    if dump_fields:
+        dump_payload = {
+            field_name: field_value
+            for field_name, field_value in dump_fields.items()
+            if field_value is not None
+        }
+        if dump_payload:
+            base_model_dump = type(decision).model_dump
+
+            def _model_dump(self: ReportReplanDecision, *args: Any, **kwargs: Any) -> Any:
+                payload = base_model_dump(self, *args, **kwargs)
+                if isinstance(payload, Mapping):
+                    return {
+                        **dict(payload),
+                        **dump_payload,
+                    }
+                return payload
+
+            object.__setattr__(decision, "model_dump", MethodType(_model_dump, decision))
+    return decision
+
+
+def _trigger_rule_ids(
+    *,
+    raw_decision: Mapping[str, Any],
+    context: Mapping[str, Any],
+    strategy_change: Mapping[str, Any],
+) -> list[str]:
+    return _unique_strings(
+        raw_decision.get("trigger_rule_ids"),
+        context.get("trigger_rule_ids"),
+        [
+            item.get("rule_id")
+            for item in _dict_list(strategy_change.get("trigger_evidence"))
+        ],
+    )
+
+
+def _trigger_context(
+    *,
+    raw_decision: Mapping[str, Any],
+    context: Mapping[str, Any],
+    strategy_change: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = _mapping(raw_decision.get("trigger_context"))
+    payload.update(_mapping(context.get("trigger_context")))
+    trigger_families = _unique_strings(
+        payload.get("trigger_families"),
+        [strategy_change.get("trigger_family")],
+    )
+    if trigger_families:
+        payload["trigger_families"] = trigger_families
+    return payload
+
+
 def _build_strategy_change_payload(
     *,
     decision_kind: str,
@@ -125,6 +197,20 @@ def _trigger_evidence_uncertainty_ids(
         [item.get("uncertainty_ids") for item in trigger_evidence],
         [reason_id for reason_id in reason_ids if reason_id.startswith("uncertainty:")],
     )
+
+
+def _promote_strategy_change_payload(
+    strategy_change: Mapping[str, Any],
+    *,
+    trigger_rule_ids: Sequence[str],
+    trigger_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = dict(strategy_change)
+    if trigger_rule_ids:
+        payload["trigger_rule_ids"] = list(trigger_rule_ids)
+    if trigger_context:
+        payload["trigger_context"] = dict(trigger_context)
+    return payload
 
 
 class ReportReplanEngine:
@@ -211,7 +297,23 @@ class ReportReplanEngine:
         )
         activation = dict(decision.activation)
         if strategy_change is not None:
-            activation["strategy_change"] = strategy_change
+            context = _strategy_context(synthesis, raw_decision)
+            trigger_rule_ids = _trigger_rule_ids(
+                raw_decision=raw_decision,
+                context=context,
+                strategy_change=strategy_change,
+            )
+            trigger_context = _trigger_context(
+                raw_decision=raw_decision,
+                context=context,
+                strategy_change=strategy_change,
+            )
+            promoted_strategy_change = _promote_strategy_change_payload(
+                strategy_change,
+                trigger_rule_ids=trigger_rule_ids,
+                trigger_context=trigger_context,
+            )
+            activation["strategy_change"] = promoted_strategy_change
             summary = decision.summary
             if strategy_change["decision_kind"] != "follow_up_backlog":
                 summary = _decision_summary(
@@ -282,7 +384,7 @@ class ReportReplanEngine:
             rationale["strategy_change"] = strategy_change_payload
         if raw_decision:
             rationale["raw_decision"] = raw_decision
-        return decision.model_copy(
+        decision = decision.model_copy(
             update={
                 "decision_kind": typed_decision_kind,
                 "strategy_change_decision": (
@@ -298,6 +400,18 @@ class ReportReplanEngine:
                 "rationale": rationale,
                 "activation": activation,
             },
+        )
+        if not strategy_change_payload:
+            return decision
+        trigger_context = _mapping(strategy_change_payload.get("trigger_context"))
+        return _set_extra_fields(
+            decision,
+            dump_fields={
+                "trigger_context": trigger_context,
+                "strategy_change": strategy_change_payload,
+            },
+            trigger_context=trigger_context,
+            strategy_change=strategy_change_payload,
         )
 
     def _classify_strategy_change(

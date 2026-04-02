@@ -420,3 +420,364 @@ def test_cycle_planner_force_path_bypasses_lane_budget_suppression_for_scoped_ba
     assert decision.should_start is True
     assert decision.reason == "forced"
     assert decision.selected_backlog_item_ids == ["growth-1", "growth-2"]
+
+
+def test_cycle_planner_consumes_lane_budget_during_wide_cycle_selection() -> None:
+    planner = CyclePlanningCompiler()
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind",
+        summary="Northwind execution shell",
+        owner_scope="industry:northwind",
+    )
+
+    decision = planner.plan(
+        record=record,
+        current_cycle=None,
+        next_cycle_due_at=None,
+        open_backlog=[
+            _backlog_item("growth-1", lane_id="lane-growth", priority=5),
+            _backlog_item("growth-2", lane_id="lane-growth", priority=4),
+            _backlog_item("retention-1", lane_id="lane-retention", priority=1),
+        ],
+        pending_reports=[],
+        force=False,
+        strategy_constraints=_constraints(
+            lane_weights={"lane-growth": 0.9, "lane-retention": 0.1},
+            lane_budgets=[
+                _lane_budget(
+                    "lane-growth",
+                    current_share=0.0,
+                    target_share=0.5,
+                    min_share=0.0,
+                    max_share=0.5,
+                    review_pressure="steady",
+                ),
+                _lane_budget(
+                    "lane-retention",
+                    current_share=0.0,
+                    target_share=0.5,
+                    min_share=0.0,
+                    max_share=0.5,
+                    review_pressure="steady",
+                ),
+            ],
+        ),
+    )
+
+    assert decision.should_start is True
+    assert decision.selected_backlog_item_ids == ["growth-1", "retention-1"]
+    assert decision.metadata["lane_budget_outcomes"]["lane-growth"]["selected_backlog_item_ids"] == [
+        "growth-1",
+    ]
+
+
+def test_cycle_planner_uses_strategy_priority_order_when_budget_pressure_is_tied() -> None:
+    planner = CyclePlanningCompiler()
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind",
+        summary="Northwind execution shell",
+        owner_scope="industry:northwind",
+    )
+
+    decision = planner.plan(
+        record=record,
+        current_cycle=None,
+        next_cycle_due_at=None,
+        open_backlog=[
+            _backlog_item("growth-1", lane_id="lane-growth", priority=3),
+            _backlog_item("retention-1", lane_id="lane-retention", priority=3),
+        ],
+        pending_reports=[],
+        force=False,
+        strategy_constraints=_constraints(
+            priority_order=["retention", "growth"],
+            planning_policy=["single-assignment-cycle"],
+            lane_weights={"lane-growth": 0.4, "lane-retention": 0.4},
+            lane_budgets=[
+                _lane_budget(
+                    "lane-growth",
+                    current_share=0.2,
+                    target_share=0.5,
+                    min_share=0.0,
+                    max_share=0.8,
+                    review_pressure="steady",
+                ),
+                _lane_budget(
+                    "lane-retention",
+                    current_share=0.2,
+                    target_share=0.5,
+                    min_share=0.0,
+                    max_share=0.8,
+                    review_pressure="steady",
+                ),
+            ],
+        ),
+    )
+
+    assert decision.should_start is True
+    assert decision.selected_backlog_item_ids == ["retention-1"]
+
+
+def test_cycle_planner_promotes_weekly_cycle_when_uncertainty_requests_weekly_review() -> None:
+    planner = CyclePlanningCompiler()
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind",
+        summary="Northwind execution shell",
+        owner_scope="industry:northwind",
+    )
+
+    decision = planner.plan(
+        record=record,
+        current_cycle=None,
+        next_cycle_due_at=None,
+        open_backlog=[_backlog_item("growth-1", lane_id="lane-growth", priority=4)],
+        pending_reports=[],
+        force=False,
+        strategy_constraints=_constraints(
+            strategic_uncertainties=[
+                {
+                    "uncertainty_id": "uncertainty-weekly-review",
+                    "statement": "Weekend demand shape still needs multi-cycle review.",
+                    "impact_level": "medium",
+                    "current_confidence": 0.55,
+                    "review_by_cycle": "cycle-weekly-1",
+                },
+            ],
+        ),
+    )
+
+    assert decision.should_start is True
+    assert decision.cycle_kind == "weekly"
+    assert decision.metadata["cycle_kind_reason"] == "strategic-review-window"
+    assert decision.metadata["strategic_uncertainty_ids"] == [
+        "uncertainty-weekly-review",
+    ]
+
+
+def test_cycle_planner_promotes_event_cycle_on_high_impact_confidence_collapse() -> None:
+    planner = CyclePlanningCompiler()
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind",
+        summary="Northwind execution shell",
+        owner_scope="industry:northwind",
+    )
+
+    decision = planner.plan(
+        record=record,
+        current_cycle=None,
+        next_cycle_due_at=None,
+        open_backlog=[_backlog_item("growth-1", lane_id="lane-growth", priority=4)],
+        pending_reports=[],
+        force=False,
+        strategy_constraints=_constraints(
+            strategic_uncertainties=[
+                {
+                    "uncertainty_id": "uncertainty-demand-collapse",
+                    "statement": "Demand assumptions have collapsed after the last campaign.",
+                    "impact_level": "high",
+                    "current_confidence": 0.15,
+                    "review_by_cycle": "cycle-weekly-1",
+                    "escalate_when": ["confidence drop"],
+                },
+            ],
+            strategy_trigger_rules=[
+                {
+                    "rule_id": "uncertainty:uncertainty-demand-collapse:confidence-drop",
+                    "source_type": "uncertainty_escalation",
+                    "source_ref": "uncertainty-demand-collapse",
+                    "trigger_family": "confidence_collapse",
+                    "summary": "Demand assumptions collapsed.",
+                    "decision_hint": "strategy_review_required",
+                },
+            ],
+        ),
+    )
+
+    assert decision.should_start is True
+    assert decision.cycle_kind == "event"
+    assert decision.metadata["cycle_kind_reason"] == "confidence-collapse"
+    assert decision.metadata["trigger_families"] == ["confidence_collapse"]
+
+
+def test_cycle_planner_force_includes_multi_cycle_underinvested_lane() -> None:
+    planner = CyclePlanningCompiler()
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind",
+        summary="Northwind execution shell",
+        owner_scope="industry:northwind",
+    )
+
+    decision = planner.plan(
+        record=record,
+        current_cycle=None,
+        next_cycle_due_at=None,
+        open_backlog=[
+            _backlog_item("growth-1", lane_id="lane-growth", priority=5),
+            _backlog_item("retention-1", lane_id="lane-retention", priority=2),
+        ],
+        pending_reports=[],
+        force=False,
+        strategy_constraints=_constraints(
+            planning_policy=["single-assignment-cycle"],
+            lane_weights={"lane-growth": 0.9, "lane-retention": 0.1},
+            lane_budgets=[
+                _lane_budget(
+                    "lane-growth",
+                    current_share=0.45,
+                    target_share=0.4,
+                    min_share=0.0,
+                    max_share=0.8,
+                    review_pressure="steady",
+                ),
+                _lane_budget(
+                    "lane-retention",
+                    current_share=0.2,
+                    target_share=0.45,
+                    min_share=0.0,
+                    max_share=0.8,
+                    review_pressure="steady",
+                    completed_cycles=4,
+                )
+                | {
+                    "budget_window": {
+                        "completed_cycles": 4,
+                        "current_share": 0.2,
+                        "consecutive_missed_cycles": 3,
+                    },
+                },
+            ],
+        ),
+    )
+
+    assert decision.should_start is True
+    assert decision.selected_backlog_item_ids == ["retention-1"]
+    assert decision.metadata["lane_budget_outcomes"]["lane-retention"]["outcome"] == "force-included"
+    assert decision.metadata["lane_budget_outcomes"]["lane-retention"]["reason"] == (
+        "multi-cycle-underinvestment"
+    )
+
+
+def test_cycle_planner_force_includes_overdue_followup_even_when_lane_is_throttled() -> None:
+    planner = CyclePlanningCompiler()
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind",
+        summary="Northwind execution shell",
+        owner_scope="industry:northwind",
+    )
+
+    decision = planner.plan(
+        record=record,
+        current_cycle=None,
+        next_cycle_due_at=None,
+        open_backlog=[
+            _backlog_item(
+                "growth-overdue-followup",
+                lane_id="lane-growth",
+                priority=1,
+                metadata={
+                    "source_report_id": "report-9",
+                    "synthesis_kind": "followup-needed",
+                    "followup_overdue_cycles": 2,
+                },
+            ),
+            _backlog_item("retention-net-new", lane_id="lane-retention", priority=5),
+        ],
+        pending_reports=[],
+        force=False,
+        strategy_constraints=_constraints(
+            planning_policy=["single-assignment-cycle"],
+            lane_weights={"lane-growth": 0.2, "lane-retention": 0.9},
+            lane_budgets=[
+                _lane_budget(
+                    "lane-growth",
+                    current_share=1.0,
+                    target_share=0.4,
+                    min_share=0.0,
+                    max_share=0.6,
+                    review_pressure="throttle",
+                    defer_reason="lane-max-share-reached",
+                ),
+                _lane_budget(
+                    "lane-retention",
+                    current_share=0.0,
+                    target_share=0.4,
+                    min_share=0.0,
+                    max_share=0.8,
+                    review_pressure="steady",
+                ),
+            ],
+        ),
+    )
+
+    assert decision.should_start is True
+    assert decision.selected_backlog_item_ids == ["growth-overdue-followup"]
+    assert decision.metadata["lane_budget_outcomes"]["lane-growth"]["outcome"] == "force-included"
+    assert decision.metadata["lane_budget_outcomes"]["lane-growth"]["reason"] == "overdue-followup"
+
+
+def test_cycle_planner_enforces_lane_headroom_as_a_hard_selection_cap() -> None:
+    planner = CyclePlanningCompiler()
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind",
+        summary="Northwind execution shell",
+        owner_scope="industry:northwind",
+    )
+
+    decision = planner.plan(
+        record=record,
+        current_cycle=None,
+        next_cycle_due_at=None,
+        open_backlog=[
+            _backlog_item("growth-1", lane_id="lane-growth", priority=5),
+            _backlog_item("growth-2", lane_id="lane-growth", priority=4),
+            _backlog_item("growth-3", lane_id="lane-growth", priority=3),
+            _backlog_item("retention-1", lane_id="lane-retention", priority=2),
+            _backlog_item("ops-1", lane_id="lane-ops", priority=1),
+        ],
+        pending_reports=[],
+        force=False,
+        strategy_constraints=_constraints(
+            planning_policy=["allow-broad-cycle"],
+            lane_weights={"lane-growth": 0.9, "lane-retention": 0.3, "lane-ops": 0.2},
+            lane_budgets=[
+                _lane_budget(
+                    "lane-growth",
+                    current_share=0.62,
+                    target_share=0.7,
+                    min_share=0.0,
+                    max_share=0.7,
+                    review_pressure="steady",
+                ),
+                _lane_budget(
+                    "lane-retention",
+                    current_share=0.1,
+                    target_share=0.4,
+                    min_share=0.0,
+                    max_share=0.8,
+                    review_pressure="steady",
+                ),
+                _lane_budget(
+                    "lane-ops",
+                    current_share=0.1,
+                    target_share=0.3,
+                    min_share=0.0,
+                    max_share=0.8,
+                    review_pressure="steady",
+                ),
+            ],
+        ),
+    )
+
+    assert decision.should_start is True
+    assert decision.metadata["lane_budget_outcomes"]["lane-growth"]["selected_backlog_item_ids"] == [
+        "growth-1",
+    ]
+    assert decision.metadata["lane_budget_outcomes"]["lane-growth"]["remaining_headroom"] == 0.0
+    assert set(decision.selected_backlog_item_ids) == {"growth-1", "retention-1", "ops-1"}

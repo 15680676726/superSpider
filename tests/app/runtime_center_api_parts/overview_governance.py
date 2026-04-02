@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 
 from .shared import *  # noqa: F401,F403
 
 from agentscope.message import Msg
+import pytest
 from pydantic import BaseModel
 from pydantic_core import PydanticSerializationError
 
@@ -598,6 +600,114 @@ def test_runtime_center_main_brain_route_exposes_automation_loop_and_supervisor_
     assert payload["automation"]["supervisor"]["blocked_runtime_count"] == 1
     assert payload["automation"]["supervisor"]["recent_failure_count"] == 1
     assert payload["automation"]["supervisor"]["last_failure_type"] == "RuntimeError"
+
+
+def test_runtime_center_main_brain_route_exposes_automation_loop_snapshots():
+    class _FakeLoopTask:
+        def __init__(
+            self,
+            *,
+            name: str,
+            done: bool = False,
+            cancelled: bool = False,
+        ) -> None:
+            self._name = name
+            self._done = done
+            self._cancelled = cancelled
+
+        def get_name(self) -> str:
+            return self._name
+
+        def done(self) -> bool:
+            return self._done
+
+        def cancelled(self) -> bool:
+            return self._cancelled
+
+    class _FakeAutomationTasks(list):
+        def loop_snapshots(self) -> dict[str, dict[str, object]]:
+            return {
+                "host-recovery": {
+                    "task_name": "host-recovery",
+                    "capability_ref": "system:run_host_recovery",
+                    "owner_agent_id": "copaw-main-brain",
+                    "interval_seconds": 300,
+                    "automation_task_id": (
+                        "copaw-main-brain:host-recovery:system:run_host_recovery"
+                    ),
+                    "coordinator_contract": "automation-coordinator/v1",
+                    "loop_phase": "blocked",
+                    "health_status": "idle",
+                    "last_gate_reason": "no-actionable-host-events",
+                    "last_result_phase": None,
+                    "last_error_summary": None,
+                    "submit_count": 0,
+                    "consecutive_failures": 0,
+                },
+                "operating-cycle": {
+                    "task_name": "operating-cycle",
+                    "capability_ref": "system:run_operating_cycle",
+                    "owner_agent_id": "copaw-main-brain",
+                    "interval_seconds": 180,
+                    "automation_task_id": (
+                        "copaw-main-brain:operating-cycle:system:run_operating_cycle"
+                    ),
+                    "coordinator_contract": "automation-coordinator/v1",
+                    "loop_phase": "failed",
+                    "health_status": "degraded",
+                    "last_gate_reason": "active-industry",
+                    "last_result_phase": "failed",
+                    "last_error_summary": "planner timeout",
+                    "submit_count": 3,
+                    "consecutive_failures": 2,
+                },
+            }
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.cron_manager = FakeCronManager([make_job("sched-1")])
+    app.state.automation_tasks = _FakeAutomationTasks(
+        [
+            _FakeLoopTask(name="copaw-automation-host-recovery", done=False),
+            _FakeLoopTask(name="copaw-automation-operating-cycle", done=False),
+        ],
+    )
+
+    client = TestClient(app)
+    with patch(
+        "copaw.app.runtime_center.overview_cards.get_heartbeat_config",
+        return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
+        create=True,
+    ):
+        response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    host_recovery = payload["automation"]["loops"][0]
+    operating_cycle = payload["automation"]["loops"][1]
+
+    assert host_recovery["automation_task_id"] == (
+        "copaw-main-brain:host-recovery:system:run_host_recovery"
+    )
+    assert host_recovery["coordinator_contract"] == "automation-coordinator/v1"
+    assert host_recovery["loop_phase"] == "blocked"
+    assert host_recovery["health_status"] == "idle"
+    assert host_recovery["last_gate_reason"] == "no-actionable-host-events"
+
+    assert operating_cycle["loop_phase"] == "failed"
+    assert operating_cycle["health_status"] == "degraded"
+    assert operating_cycle["last_result_phase"] == "failed"
+    assert operating_cycle["last_error_summary"] == "planner timeout"
+    assert operating_cycle["submit_count"] == 3
+    assert operating_cycle["consecutive_failures"] == 2
 
 
 def test_runtime_center_main_brain_route_handles_object_schedule_summaries():
@@ -2108,6 +2218,92 @@ def test_runtime_center_schedule_control_endpoints(tmp_path) -> None:
     assert run_response.json()["schedule"]["runtime"]["status"] == "running"
 
 
+@pytest.mark.parametrize("action", ["run", "pause", "resume"])
+def test_runtime_center_schedule_control_returns_404_for_missing_schedule(action: str) -> None:
+    app = build_runtime_center_app()
+    app.state.cron_manager = FakeCronManager([])
+
+    client = TestClient(app)
+    response = client.post(f"/runtime-center/schedules/missing/{action}")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Schedule 'missing' not found"
+
+
+@pytest.mark.parametrize(
+    ("action", "enabled"),
+    [("run", True), ("pause", True), ("resume", False)],
+)
+def test_runtime_center_schedule_control_returns_400_on_dispatch_failure(
+    action: str,
+    enabled: bool,
+) -> None:
+    app = build_runtime_center_app()
+    app.state.cron_manager = FakeCronManager([make_job("sched-1", enabled=enabled)])
+    app.state.capability_service = FakeCapabilityService()
+
+    class _ErrorDispatcher:
+        def __init__(self) -> None:
+            self._tasks: dict[str, object] = {}
+
+        def submit(self, task) -> KernelResult:
+            self._tasks[task.id] = task
+            return KernelResult(
+                task_id=task.id,
+                success=True,
+                phase="executing",
+                summary="Admitted",
+            )
+
+        async def execute_task(self, task_id: str) -> KernelResult:
+            return KernelResult(
+                task_id=task_id,
+                success=False,
+                phase="failed",
+                summary="Failed",
+                error=f"schedule {action} failed",
+            )
+
+    app.state.kernel_dispatcher = _ErrorDispatcher()
+
+    client = TestClient(app)
+    response = client.post(f"/runtime-center/schedules/sched-1/{action}")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == f"schedule {action} failed"
+
+
+@pytest.mark.parametrize(
+    ("action", "enabled", "result_field", "expected_reason"),
+    [
+        ("pause", False, "paused", "Schedule 'sched-1' is already paused"),
+        ("resume", True, "resumed", "Schedule 'sched-1' is already active"),
+    ],
+)
+def test_runtime_center_schedule_control_returns_typed_noop_when_already_at_target_state(
+    action: str,
+    enabled: bool,
+    result_field: str,
+    expected_reason: str,
+    tmp_path,
+) -> None:
+    app = build_runtime_center_app()
+    manager = FakeCronManager([make_job("sched-1", enabled=enabled)])
+    app.state.cron_manager = manager
+    app.state.state_query_service = FakeScheduleStateQueryService(manager)
+    _wire_governed_schedule_runtime(app, manager, tmp_path)
+
+    client = TestClient(app)
+    response = client.post(f"/runtime-center/schedules/sched-1/{action}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload[result_field] is False
+    assert payload["noop"] is True
+    assert payload["reason"] == expected_reason
+    assert payload["schedule"]["schedule"]["enabled"] is enabled
+
+
 def test_runtime_center_schedule_write_endpoints_enter_governed_confirm_flow(
     tmp_path,
 ) -> None:
@@ -2153,6 +2349,13 @@ def test_runtime_center_schedule_write_endpoints_enter_governed_confirm_flow(
     assert update_result["result"]["phase"] == "waiting-confirm"
     update_decision_id = update_result["result"]["decision_request_id"]
     assert update_decision_id
+
+    update_retry_response = client.put("/runtime-center/schedules/sched-2", json=update_payload)
+    assert update_retry_response.status_code == 200
+    update_retry_result = update_retry_response.json()
+    assert update_retry_result["updated"] is False
+    assert update_retry_result["result"]["phase"] == "waiting-confirm"
+    assert update_retry_result["result"]["decision_request_id"] == update_decision_id
 
     update_approval = client.post(
         f"/runtime-center/decisions/{update_decision_id}/approve",
@@ -2300,6 +2503,191 @@ def test_runtime_center_heartbeat_endpoints() -> None:
         assert run_response.json()["started"] is True
         assert run_response.json()["result"]["status"] == "success"
         assert run_response.json()["heartbeat"]["runtime"]["status"] == "success"
+
+
+def test_runtime_center_heartbeat_update_returns_400_and_does_not_reschedule_on_dispatch_failure() -> None:
+    app = build_runtime_center_app()
+    manager = FakeCronManager([])
+    heartbeat_state = {
+        "config": HeartbeatConfig(
+            enabled=True,
+            every="6h",
+            target="main",
+            activeHours={"start": "08:00", "end": "22:00"},
+        ),
+    }
+    app.state.cron_manager = manager
+    app.state.capability_service = FakeCapabilityService()
+
+    class _ErrorDispatcher:
+        def __init__(self) -> None:
+            self._tasks: dict[str, object] = {}
+
+        def submit(self, task) -> KernelResult:
+            self._tasks[task.id] = task
+            return KernelResult(
+                task_id=task.id,
+                success=True,
+                phase="executing",
+                summary="Admitted",
+            )
+
+        async def execute_task(self, task_id: str) -> KernelResult:
+            return KernelResult(
+                task_id=task_id,
+                success=False,
+                phase="failed",
+                summary="Failed",
+                error="heartbeat update failed",
+            )
+
+    app.state.kernel_dispatcher = _ErrorDispatcher()
+
+    def _get_heartbeat_config() -> HeartbeatConfig:
+        return heartbeat_state["config"]
+
+    client = TestClient(app)
+
+    with patch(
+        "copaw.app.routers.runtime_center.get_heartbeat_config",
+        side_effect=_get_heartbeat_config,
+    ):
+        response = client.put(
+            "/runtime-center/heartbeat",
+            json={
+                "enabled": True,
+                "every": "4h",
+                "target": "last",
+                "activeHours": {"start": "09:00", "end": "18:00"},
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "heartbeat update failed"
+    assert manager.heartbeat_rescheduled is False
+
+
+def test_runtime_center_heartbeat_run_returns_started_false_on_failed_result() -> None:
+    app = build_runtime_center_app()
+
+    class _FailingHeartbeatManager(FakeCronManager):
+        async def run_heartbeat(self, *, ignore_active_hours: bool = True) -> dict[str, object]:
+            _ = ignore_active_hours
+            self._heartbeat_state = self._heartbeat_state.model_copy(
+                update={
+                    "last_status": "error",
+                    "last_run_at": datetime(2026, 3, 9, 9, 0, tzinfo=timezone.utc),
+                    "next_run_at": datetime(2026, 3, 10, 9, 0, tzinfo=timezone.utc),
+                    "last_error": "manual failure",
+                },
+            )
+            return {
+                "status": "failed",
+                "task_id": "ktask:heartbeat",
+                "error": "manual failure",
+            }
+
+    manager = _FailingHeartbeatManager([])
+    heartbeat_state = {
+        "config": HeartbeatConfig(
+            enabled=True,
+            every="6h",
+            target="main",
+            activeHours={"start": "08:00", "end": "22:00"},
+        ),
+    }
+    app.state.cron_manager = manager
+    app.state.capability_service = FakeCapabilityService()
+    app.state.kernel_dispatcher = FakeMutationDispatcher(heartbeat_state)
+
+    def _get_heartbeat_config() -> HeartbeatConfig:
+        return heartbeat_state["config"]
+
+    client = TestClient(app)
+
+    with patch(
+        "copaw.app.routers.runtime_center.get_heartbeat_config",
+        side_effect=_get_heartbeat_config,
+    ):
+        response = client.post("/runtime-center/heartbeat/run")
+
+    assert response.status_code == 200
+    assert response.json()["started"] is False
+    assert response.json()["result"]["status"] == "failed"
+    assert response.json()["heartbeat"]["runtime"]["status"] == "error"
+    assert response.json()["heartbeat"]["runtime"]["last_error"] == "manual failure"
+
+
+def test_runtime_center_heartbeat_run_rejects_duplicate_inflight_submission() -> None:
+    app = build_runtime_center_app()
+    manager = FakeCronManager(
+        [],
+        heartbeat_state=CronJobState(
+            last_status="success",
+            next_run_at=datetime(2026, 3, 10, 8, 0, tzinfo=timezone.utc),
+        ),
+    )
+    heartbeat_state = {
+        "config": HeartbeatConfig(
+            enabled=True,
+            every="6h",
+            target="main",
+            activeHours={"start": "08:00", "end": "22:00"},
+        ),
+    }
+    app.state.cron_manager = manager
+    app.state.capability_service = FakeCapabilityService()
+    app.state.kernel_dispatcher = FakeMutationDispatcher(heartbeat_state)
+    app.state.runtime_center_operator_frontdoor_guard = {
+        "lock": threading.Lock(),
+        "inflight": {"heartbeat:run"},
+    }
+
+    def _get_heartbeat_config() -> HeartbeatConfig:
+        return heartbeat_state["config"]
+
+    client = TestClient(app)
+
+    with patch(
+        "copaw.app.routers.runtime_center.get_heartbeat_config",
+        side_effect=_get_heartbeat_config,
+    ):
+        response = client.post("/runtime-center/heartbeat/run")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Heartbeat run is already in progress"
+
+
+@pytest.mark.parametrize(
+    ("action", "enabled", "guard_key", "expected_detail"),
+    [
+        ("run", True, "schedule:sched-1:run", "Schedule 'sched-1' run is already in progress"),
+        ("pause", True, "schedule:sched-1:pause", "Schedule 'sched-1' pause is already in progress"),
+        ("resume", False, "schedule:sched-1:resume", "Schedule 'sched-1' resume is already in progress"),
+    ],
+)
+def test_runtime_center_schedule_control_rejects_duplicate_inflight_submission(
+    action: str,
+    enabled: bool,
+    guard_key: str,
+    expected_detail: str,
+    tmp_path,
+) -> None:
+    app = build_runtime_center_app()
+    manager = FakeCronManager([make_job("sched-1", enabled=enabled)])
+    app.state.cron_manager = manager
+    app.state.state_query_service = FakeScheduleStateQueryService(manager)
+    app.state.runtime_center_operator_frontdoor_guard = {
+        "lock": threading.Lock(),
+        "inflight": {guard_key},
+    }
+    _wire_governed_schedule_runtime(app, manager, tmp_path)
+
+    client = TestClient(app)
+    response = client.post(f"/runtime-center/schedules/sched-1/{action}")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == expected_detail
 
 
 def test_runtime_center_decision_list_and_detail_endpoints() -> None:

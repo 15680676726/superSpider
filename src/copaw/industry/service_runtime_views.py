@@ -416,17 +416,79 @@ class _IndustryRuntimeViewsMixin:
             return []
         return [dict(item) for item in value if isinstance(item, Mapping)]
 
+    def _build_uncertainty_register_surface_payload(
+        self,
+        *,
+        strategic_uncertainties: Sequence[dict[str, Any]],
+        lane_budgets: Sequence[dict[str, Any]],
+        strategy_trigger_rules: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not strategic_uncertainties and not lane_budgets and not strategy_trigger_rules:
+            return {}
+        trigger_rules_by_source: dict[str, list[dict[str, Any]]] = {}
+        for rule in strategy_trigger_rules:
+            source_ref = _string(rule.get("source_ref"))
+            if source_ref is None:
+                continue
+            trigger_rules_by_source.setdefault(source_ref, []).append(dict(rule))
+        items: list[dict[str, Any]] = []
+        for uncertainty in strategic_uncertainties:
+            uncertainty_id = _string(uncertainty.get("uncertainty_id"))
+            matched_rules = trigger_rules_by_source.get(uncertainty_id or "", [])
+            items.append(
+                {
+                    "uncertainty_id": uncertainty_id,
+                    "statement": _string(uncertainty.get("statement")) or "",
+                    "scope": _string(uncertainty.get("scope")) or "strategy",
+                    "impact_level": _string(uncertainty.get("impact_level")) or "medium",
+                    "current_confidence": float(uncertainty.get("current_confidence") or 0.0),
+                    "review_by_cycle": _string(uncertainty.get("review_by_cycle")),
+                    "escalate_when": _unique_strings(uncertainty.get("escalate_when")),
+                    "trigger_rule_ids": _unique_strings(
+                        [rule.get("rule_id") for rule in matched_rules],
+                    ),
+                    "trigger_families": sorted(
+                        _unique_strings([rule.get("trigger_family") for rule in matched_rules]),
+                    ),
+                },
+            )
+        return {
+            "is_truth_store": False,
+            "source": "industry-runtime-read-model",
+            "durable_source": "strategy-memory",
+            "summary": {
+                "uncertainty_count": len(strategic_uncertainties),
+                "lane_budget_count": len(lane_budgets),
+                "trigger_rule_count": len(strategy_trigger_rules),
+                "review_cycle_ids": sorted(
+                    _unique_strings(
+                        [
+                            item.get("review_by_cycle")
+                            for item in strategic_uncertainties
+                        ],
+                    ),
+                ),
+                "trigger_families": sorted(
+                    _unique_strings(
+                        [rule.get("trigger_family") for rule in strategy_trigger_rules],
+                    ),
+                ),
+            },
+            "items": items,
+        }
+
     def _strategy_constraints_surface_payload(
         self,
         *,
         record: IndustryInstanceRecord,
         planning_sidecar: Mapping[str, Any],
     ) -> dict[str, Any]:
+        compiled_constraints = self._planner_sidecar_payload(
+            self._compile_strategy_constraints(record=record),
+        )
         strategy_constraints = _mapping(planning_sidecar.get("strategy_constraints"))
         if not strategy_constraints:
-            strategy_constraints = self._planner_sidecar_payload(
-                self._compile_strategy_constraints(record=record),
-            )
+            strategy_constraints = compiled_constraints
         strategy_payload = resolve_strategy_payload(
             service=self._strategy_memory_service,
             scope_type="industry",
@@ -437,18 +499,49 @@ class _IndustryRuntimeViewsMixin:
         metadata = _mapping(raw_payload.get("metadata"))
         strategic_uncertainties = self._mapping_list(
             strategy_constraints.get("strategic_uncertainties"),
-        ) or self._mapping_list(raw_payload.get("strategic_uncertainties")) or self._mapping_list(
+        ) or self._mapping_list(compiled_constraints.get("strategic_uncertainties")) or self._mapping_list(raw_payload.get("strategic_uncertainties")) or self._mapping_list(
             metadata.get("strategic_uncertainties"),
         )
         lane_budgets = self._mapping_list(strategy_constraints.get("lane_budgets")) or self._mapping_list(
+            compiled_constraints.get("lane_budgets")
+        ) or self._mapping_list(
             raw_payload.get("lane_budgets"),
         ) or self._mapping_list(metadata.get("lane_budgets"))
-        payload = dict(strategy_constraints)
+        payload = (
+            dict(strategy_constraints)
+            if strategy_constraints
+            else dict(compiled_constraints)
+        )
         if strategic_uncertainties:
             payload["strategic_uncertainties"] = strategic_uncertainties
         if lane_budgets:
             payload["lane_budgets"] = lane_budgets
         return payload
+
+    def _resolve_report_replan_payload(
+    def _strategy_trigger_rules_surface_payload(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        planning_sidecar: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        strategy_constraints = _mapping(planning_sidecar.get("strategy_constraints"))
+        compiled_constraints = self._planner_sidecar_payload(
+            self._compile_strategy_constraints(record=record),
+        )
+        strategy_payload = resolve_strategy_payload(
+            service=self._strategy_memory_service,
+            scope_type="industry",
+            scope_id=record.instance_id,
+            fallback_owner_agent_ids=(EXECUTION_CORE_AGENT_ID,),
+        )
+        raw_payload = dict(strategy_payload) if isinstance(strategy_payload, Mapping) else {}
+        metadata = _mapping(raw_payload.get("metadata"))
+        return self._mapping_list(
+            strategy_constraints.get("strategy_trigger_rules"),
+        ) or self._mapping_list(compiled_constraints.get("strategy_trigger_rules")) or self._mapping_list(
+            raw_payload.get("strategy_trigger_rules"),
+        ) or self._mapping_list(metadata.get("strategy_trigger_rules"))
 
     def _resolve_report_replan_payload(
         self,
@@ -766,6 +859,27 @@ class _IndustryRuntimeViewsMixin:
             cycle_entry=replan_cycle,
             synthesis=replan_synthesis,
         )
+        strategy_trigger_rules = self._strategy_trigger_rules_surface_payload(
+            record=record,
+            planning_sidecar=planning_sidecar,
+        )
+        uncertainty_register = self._build_uncertainty_register_surface_payload(
+            strategic_uncertainties=self._mapping_list(
+                strategy_constraints.get("strategic_uncertainties"),
+            ),
+            lane_budgets=self._mapping_list(strategy_constraints.get("lane_budgets")),
+            strategy_trigger_rules=strategy_trigger_rules,
+        )
+        if strategy_trigger_rules:
+            replan = {
+                **replan,
+                "strategy_trigger_rules": strategy_trigger_rules,
+            }
+        if uncertainty_register:
+            replan = {
+                **replan,
+                "uncertainty_register": uncertainty_register,
+            }
 
         return IndustryMainBrainPlanningSurface(
             is_truth_store=False,

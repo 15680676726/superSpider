@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from .actor_mailbox import ActorMailboxService
 from .actor_worker import ActorWorker
+from .runtime_outcome import normalize_runtime_summary, should_block_runtime_error
+from ..state import AgentRuntimeRecord
 from ..state.repositories import BaseAgentRuntimeRepository
+
+logger = logging.getLogger(__name__)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class ActorSupervisor:
@@ -75,7 +85,13 @@ class ActorSupervisor:
             )
             self._agent_tasks[agent_id] = task
             try:
-                return await task
+                try:
+                    return await task
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # pylint: disable=broad-except
+                    self._record_agent_failure(agent_id, exc)
+                    return False
             finally:
                 if self._agent_tasks.get(agent_id) is task:
                     self._agent_tasks.pop(agent_id, None)
@@ -101,11 +117,74 @@ class ActorSupervisor:
     async def _run_loop(self) -> None:
         try:
             while not self._stop_event.is_set():
-                ran_any = await self.run_poll_cycle()
+                try:
+                    ran_any = await self.run_poll_cycle()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # pylint: disable=broad-except
+                    logger.exception("Actor supervisor poll cycle failed")
+                    self._publish_runtime_event(
+                        topic="actor-supervisor",
+                        action="poll-failed",
+                        payload={
+                            "error": str(exc),
+                            "error_type": type(exc).__name__,
+                        },
+                    )
+                    await asyncio.sleep(self._poll_interval_seconds)
+                    continue
                 if not ran_any:
                     await asyncio.sleep(self._poll_interval_seconds)
         except asyncio.CancelledError:
             raise
+
+    def _record_agent_failure(self, agent_id: str, exc: Exception) -> None:
+        logger.exception("Actor supervisor run failed for %s", agent_id)
+        now = _utc_now()
+        runtime = self._runtime_repository.get_runtime(agent_id)
+        if runtime is None:
+            runtime = AgentRuntimeRecord(
+                agent_id=agent_id,
+                actor_key=agent_id,
+                actor_class="agent",
+                desired_state="active",
+                runtime_status="idle",
+            )
+        error_summary = normalize_runtime_summary(str(exc)) or type(exc).__name__
+        metadata = dict(runtime.metadata or {})
+        metadata["supervisor_last_failure_at"] = now.isoformat()
+        metadata["supervisor_last_failure_type"] = type(exc).__name__
+        runtime_status = runtime.runtime_status
+        if runtime.desired_state == "retired":
+            runtime_status = "retired"
+        elif runtime.desired_state == "paused":
+            runtime_status = "paused"
+        elif should_block_runtime_error(error_summary):
+            runtime_status = "blocked"
+        elif runtime.queue_depth > 0:
+            runtime_status = "queued"
+        else:
+            runtime_status = "idle"
+        self._runtime_repository.upsert_runtime(
+            runtime.model_copy(
+                update={
+                    "runtime_status": runtime_status,
+                    "last_error_summary": error_summary,
+                    "last_heartbeat_at": now,
+                    "updated_at": now,
+                    "metadata": metadata,
+                },
+            ),
+        )
+        self._publish_runtime_event(
+            topic="actor-supervisor",
+            action="agent-failed",
+            payload={
+                "agent_id": agent_id,
+                "error": error_summary,
+                "error_type": type(exc).__name__,
+            },
+        )
 
     def _publish_runtime_event(
         self,

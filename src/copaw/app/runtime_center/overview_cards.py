@@ -1109,31 +1109,33 @@ class _RuntimeCenterOverviewCardsSupport:
             if not getattr(heartbeat_config, "enabled", False)
             else (last_status or "scheduled")
         )
-        automation_tasks = list(getattr(app_state, "automation_tasks", []) or [])
-        supervisor_payload = self._build_main_brain_supervisor_payload(
-            getattr(app_state, "actor_supervisor", None),
-        )
-        loop_payloads = [self._build_automation_loop_payload(task) for task in automation_tasks]
+        automation_loops = self._build_automation_loop_payloads(app_state)
         active_loop_count = sum(
-            1
-            for payload in loop_payloads
-            if self._string(payload.get("status")) == "running"
+            1 for loop in automation_loops if self._string(loop.get("status")) == "running"
         )
+        supervisor = self._build_actor_supervisor_payload(app_state)
+        automation_status = "idle"
+        if self._string(supervisor.get("status")) == "degraded":
+            automation_status = "degraded"
+        elif schedule_count > 0 or active_loop_count > 0 or bool(supervisor.get("running")):
+            automation_status = "active"
         return {
-            "status": "active" if schedule_count > 0 else "idle",
+            "status": automation_status,
             "summary": (
-                f"{schedule_count} schedule(s) visible; heartbeat {heartbeat_status} every "
-                f"{heartbeat_config.every}."
+                f"{schedule_count} schedule(s) visible; "
+                f"{active_loop_count}/{len(automation_loops)} automation loops running; "
+                f"supervisor {self._string(supervisor.get('status')) or 'unavailable'}; "
+                f"heartbeat {heartbeat_status} every {heartbeat_config.every}."
             ),
             "route": "/api/runtime-center/schedules",
             "schedule_count": schedule_count,
             "active_schedule_count": active_schedule_count,
             "paused_schedule_count": paused_schedule_count,
             "schedules": normalized_schedule_entries,
-            "loop_count": len(loop_payloads),
+            "loop_count": len(automation_loops),
             "active_loop_count": active_loop_count,
-            "loops": loop_payloads,
-            "supervisor": supervisor_payload,
+            "loops": automation_loops,
+            "supervisor": supervisor,
             "heartbeat": {
                 "route": "/api/runtime-center/heartbeat",
                 "status": heartbeat_status,
@@ -1152,77 +1154,154 @@ class _RuntimeCenterOverviewCardsSupport:
             },
         }
 
-    def _build_automation_loop_payload(self, task: object) -> dict[str, Any]:
-        name_getter = getattr(task, "get_name", None)
-        name = self._string(name_getter()) if callable(name_getter) else None
-        done_getter = getattr(task, "done", None)
-        cancelled_getter = getattr(task, "cancelled", None)
-        done = bool(done_getter()) if callable(done_getter) else False
-        cancelled = bool(cancelled_getter()) if callable(cancelled_getter) else False
-        status = "cancelled" if cancelled else ("completed" if done else "running")
-        return {
-            "name": name or "automation-task",
-            "status": status,
-        }
+    def _runtime_task_name(self, task: Any, *, fallback: str) -> str:
+        getter = getattr(task, "get_name", None)
+        if callable(getter):
+            resolved = self._string(getter())
+            if resolved is not None:
+                return resolved
+        return self._string(getattr(task, "name", None)) or fallback
 
-    def _build_main_brain_supervisor_payload(self, supervisor: object | None) -> dict[str, Any]:
+    def _runtime_task_done(self, task: Any) -> bool:
+        checker = getattr(task, "done", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                logger.debug("runtime_center task.done() failed", exc_info=True)
+        return bool(getattr(task, "done", False))
+
+    def _runtime_task_cancelled(self, task: Any) -> bool:
+        checker = getattr(task, "cancelled", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                logger.debug("runtime_center task.cancelled() failed", exc_info=True)
+        return bool(getattr(task, "cancelled", False))
+
+    def _runtime_task_status(self, task: Any) -> str:
+        if self._runtime_task_cancelled(task):
+            return "cancelled"
+        if self._runtime_task_done(task):
+            return "completed"
+        return "running"
+
+    def _build_automation_loop_payloads(self, app_state: Any) -> list[dict[str, Any]]:
+        tasks = list(getattr(app_state, "automation_tasks", []) or [])
+        snapshot_map: dict[str, dict[str, Any]] = {}
+        loop_snapshots = getattr(getattr(app_state, "automation_tasks", None), "loop_snapshots", None)
+        if callable(loop_snapshots):
+            try:
+                raw_snapshots = loop_snapshots()
+            except Exception:
+                logger.debug("runtime_center automation snapshot read failed", exc_info=True)
+                raw_snapshots = {}
+            if isinstance(raw_snapshots, Mapping):
+                for key, value in raw_snapshots.items():
+                    if not isinstance(value, Mapping):
+                        continue
+                    payload = dict(value)
+                    task_name = self._string(payload.get("task_name"))
+                    if task_name is not None:
+                        snapshot_map[task_name] = payload
+                    key_text = self._string(key)
+                    if key_text is not None:
+                        snapshot_map[key_text] = payload
+        payloads: list[dict[str, Any]] = []
+        for index, task in enumerate(tasks, start=1):
+            name = self._runtime_task_name(
+                task,
+                fallback=f"automation-loop-{index}",
+            )
+            lookup_keys = [
+                name,
+                name.removeprefix("copaw-automation-"),
+            ]
+            snapshot: dict[str, Any] = {}
+            for key in lookup_keys:
+                if key in snapshot_map:
+                    snapshot = dict(snapshot_map[key])
+                    break
+            payloads.append(
+                {
+                    "name": name,
+                    "status": self._runtime_task_status(task),
+                    **snapshot,
+                },
+            )
+        return payloads
+
+    def _build_actor_supervisor_payload(self, app_state: Any) -> dict[str, Any]:
+        supervisor = getattr(app_state, "actor_supervisor", None)
         if supervisor is None:
             return {
+                "available": False,
                 "status": "unavailable",
                 "running": False,
                 "poll_interval_seconds": None,
                 "active_agent_run_count": 0,
                 "blocked_runtime_count": 0,
                 "recent_failure_count": 0,
+                "last_failure_at": None,
                 "last_failure_type": None,
             }
+
         loop_task = getattr(supervisor, "_loop_task", None)
-        loop_payload = self._build_automation_loop_payload(loop_task) if loop_task is not None else {}
-        running = self._string(loop_payload.get("status")) == "running"
+        running = loop_task is not None and self._runtime_task_status(loop_task) == "running"
         agent_tasks = getattr(supervisor, "_agent_tasks", None)
         active_agent_run_count = 0
         if isinstance(agent_tasks, dict):
             active_agent_run_count = sum(
                 1
                 for task in agent_tasks.values()
-                if self._string(self._build_automation_loop_payload(task).get("status")) == "running"
+                if self._runtime_task_status(task) == "running"
             )
-        runtime_repository = getattr(supervisor, "_runtime_repository", None)
         blocked_runtime_count = 0
         recent_failure_count = 0
         last_failure_at: str | None = None
         last_failure_type: str | None = None
+        runtime_repository = getattr(supervisor, "_runtime_repository", None)
         list_runtimes = getattr(runtime_repository, "list_runtimes", None)
         if callable(list_runtimes):
             try:
-                runtimes = list(list_runtimes(limit=None) or [])
-            except TypeError:
-                runtimes = list(list_runtimes() or [])
+                runtimes = list(list_runtimes(limit=None))
+            except Exception:
+                logger.debug("runtime_center actor supervisor runtime scan failed", exc_info=True)
+                runtimes = []
             for runtime in runtimes:
-                runtime_status = (self._string(self._get_field(runtime, "runtime_status")) or "").lower()
-                if runtime_status == "blocked":
+                if self._string(getattr(runtime, "runtime_status", None)) == "blocked":
                     blocked_runtime_count += 1
-                metadata = self._mapping(self._get_field(runtime, "metadata"))
+                metadata = self._mapping(getattr(runtime, "metadata", None))
                 failure_at = self._string(metadata.get("supervisor_last_failure_at"))
-                failure_type = self._string(metadata.get("supervisor_last_failure_type"))
-                if failure_at:
+                if failure_at is not None:
                     recent_failure_count += 1
-                    if last_failure_at is None or failure_at >= last_failure_at:
+                    if last_failure_at is None or failure_at > last_failure_at:
                         last_failure_at = failure_at
-                        last_failure_type = failure_type
-        status = "degraded" if blocked_runtime_count > 0 or recent_failure_count > 0 else ("running" if running else "idle")
-        poll_interval_seconds = getattr(supervisor, "_poll_interval_seconds", None)
+                        last_failure_type = self._string(
+                            metadata.get("supervisor_last_failure_type"),
+                        )
+
+        status = "idle"
+        if recent_failure_count > 0 or blocked_runtime_count > 0:
+            status = "degraded"
+        elif running or active_agent_run_count > 0:
+            status = "active"
+
         return {
+            "available": True,
             "status": status,
             "running": running,
-            "poll_interval_seconds": (
-                float(poll_interval_seconds)
-                if isinstance(poll_interval_seconds, (int, float))
+            "poll_interval_seconds": getattr(supervisor, "_poll_interval_seconds", None),
+            "loop_task_name": (
+                self._runtime_task_name(loop_task, fallback="copaw-actor-supervisor")
+                if loop_task is not None
                 else None
             ),
             "active_agent_run_count": active_agent_run_count,
             "blocked_runtime_count": blocked_runtime_count,
             "recent_failure_count": recent_failure_count,
+            "last_failure_at": last_failure_at,
             "last_failure_type": last_failure_type,
         }
 

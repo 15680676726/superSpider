@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 
+from copaw.app import runtime_lifecycle as runtime_lifecycle_module
 from copaw.app.crons.heartbeat import run_heartbeat_once
 from copaw.app.runtime_lifecycle import (
     RuntimeRestartCoordinator,
@@ -57,6 +58,368 @@ async def test_start_automation_tasks_creates_named_tasks() -> None:
     await stop_automation_tasks(tasks)
 
     assert all(task.done() for task in tasks)
+
+
+@pytest.mark.asyncio
+async def test_start_automation_tasks_exposes_durable_loop_contract_snapshots() -> None:
+    tasks = start_automation_tasks(
+        kernel_dispatcher=SimpleNamespace(),
+        capability_service=SimpleNamespace(get_capability=lambda *_args, **_kwargs: None),
+        logger=logging.getLogger(__name__),
+    )
+
+    try:
+        snapshots = tasks.loop_snapshots()
+    finally:
+        await stop_automation_tasks(tasks)
+
+    assert set(snapshots) == {
+        "host-recovery",
+        "operating-cycle",
+        "learning-strategy",
+    }
+    assert snapshots["operating-cycle"] == {
+        "task_name": "operating-cycle",
+        "capability_ref": "system:run_operating_cycle",
+        "owner_agent_id": "copaw-main-brain",
+        "interval_seconds": 180,
+        "automation_task_id": (
+            "copaw-main-brain:operating-cycle:system:run_operating_cycle"
+        ),
+        "coordinator_contract": "automation-coordinator/v1",
+        "loop_phase": "idle",
+        "health_status": "idle",
+        "last_gate_reason": "not-yet-evaluated",
+        "last_result_phase": None,
+        "last_error_summary": None,
+        "submit_count": 0,
+        "consecutive_failures": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_start_automation_tasks_tracks_blocked_and_submitting_loop_health(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submissions: list[dict[str, object]] = []
+    submitted = asyncio.Event()
+
+    async def _record_submit(
+        dispatcher,
+        capability_service,
+        *,
+        capability_ref,
+        title,
+        owner_agent_id,
+        payload,
+    ):
+        _ = dispatcher
+        _ = capability_service
+        submissions.append(
+            {
+                "capability_ref": capability_ref,
+                "title": title,
+                "owner_agent_id": owner_agent_id,
+                "payload": dict(payload),
+            },
+        )
+        submitted.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "automation_interval_seconds",
+        lambda *_args, **_kwargs: 0,
+    )
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "submit_kernel_automation_task",
+        _record_submit,
+    )
+
+    tasks = start_automation_tasks(
+        kernel_dispatcher=SimpleNamespace(),
+        capability_service=SimpleNamespace(get_capability=lambda *_args, **_kwargs: None),
+        environment_service=SimpleNamespace(
+            should_run_host_recovery=lambda **_kwargs: (
+                False,
+                "no-actionable-host-events",
+            ),
+        ),
+        industry_service=SimpleNamespace(
+            should_run_operating_cycle=lambda: (True, "active-industry"),
+        ),
+        learning_service=SimpleNamespace(
+            should_run_strategy_cycle=lambda **_kwargs: (
+                False,
+                "no-actionable-failure-pattern",
+            ),
+        ),
+        logger=logging.getLogger(__name__),
+    )
+
+    try:
+        await asyncio.wait_for(submitted.wait(), timeout=0.2)
+        snapshots = tasks.loop_snapshots()
+    finally:
+        await stop_automation_tasks(tasks)
+
+    assert submissions == [
+        {
+            "capability_ref": "system:run_operating_cycle",
+            "title": "Automation: operating-cycle",
+            "owner_agent_id": "copaw-main-brain",
+            "payload": {
+                "actor": "system:automation",
+                "source": "automation:operating_cycle",
+                "force": False,
+                "automation_task_id": (
+                    "copaw-main-brain:operating-cycle:system:run_operating_cycle"
+                ),
+                "coordinator_contract": "automation-coordinator/v1",
+                "automation_loop_name": "operating-cycle",
+            },
+        },
+    ]
+    assert snapshots["host-recovery"]["loop_phase"] == "blocked"
+    assert snapshots["host-recovery"]["health_status"] == "idle"
+    assert snapshots["host-recovery"]["last_gate_reason"] == "no-actionable-host-events"
+    assert snapshots["operating-cycle"]["loop_phase"] == "submitting"
+    assert snapshots["operating-cycle"]["health_status"] == "active"
+    assert snapshots["operating-cycle"]["last_gate_reason"] == "active-industry"
+    assert snapshots["operating-cycle"]["submit_count"] == 1
+
+    stopped = tasks.loop_snapshots()
+    assert stopped["host-recovery"]["loop_phase"] == "stopped"
+    assert stopped["host-recovery"]["health_status"] == "stopped"
+    assert stopped["operating-cycle"]["loop_phase"] == "stopped"
+    assert stopped["operating-cycle"]["health_status"] == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_start_automation_tasks_dispatches_operating_cycle_when_gate_allows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submissions: list[dict[str, object]] = []
+    submitted = asyncio.Event()
+
+    async def _record_submit(
+        dispatcher,
+        capability_service,
+        *,
+        capability_ref,
+        title,
+        owner_agent_id,
+        payload,
+    ):
+        _ = dispatcher
+        _ = capability_service
+        submissions.append(
+            {
+                "capability_ref": capability_ref,
+                "title": title,
+                "owner_agent_id": owner_agent_id,
+                "payload": dict(payload),
+            },
+        )
+        submitted.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "automation_interval_seconds",
+        lambda *_args, **_kwargs: 0,
+    )
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "submit_kernel_automation_task",
+        _record_submit,
+    )
+
+    tasks = start_automation_tasks(
+        kernel_dispatcher=SimpleNamespace(),
+        capability_service=SimpleNamespace(get_capability=lambda *_args, **_kwargs: None),
+        environment_service=SimpleNamespace(
+            should_run_host_recovery=lambda **_kwargs: (
+                False,
+                "no-actionable-host-events",
+            ),
+        ),
+        industry_service=SimpleNamespace(
+            should_run_operating_cycle=lambda: (True, "active-industry"),
+        ),
+        learning_service=SimpleNamespace(
+            should_run_strategy_cycle=lambda **_kwargs: (
+                False,
+                "no-actionable-failure-pattern",
+            ),
+        ),
+        logger=logging.getLogger(__name__),
+    )
+
+    try:
+        await asyncio.wait_for(submitted.wait(), timeout=0.2)
+    finally:
+        await stop_automation_tasks(tasks)
+
+    assert len(submissions) == 1
+    assert submissions[0]["capability_ref"] == "system:run_operating_cycle"
+    assert submissions[0]["owner_agent_id"] == "copaw-main-brain"
+    assert submissions[0]["payload"] == {
+        "actor": "system:automation",
+        "source": "automation:operating_cycle",
+        "force": False,
+        "automation_task_id": (
+            "copaw-main-brain:operating-cycle:system:run_operating_cycle"
+        ),
+        "coordinator_contract": "automation-coordinator/v1",
+        "automation_loop_name": "operating-cycle",
+    }
+
+
+@pytest.mark.asyncio
+async def test_start_automation_tasks_skips_dispatch_when_preflight_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submissions: list[dict[str, object]] = []
+
+    async def _record_submit(
+        dispatcher,
+        capability_service,
+        *,
+        capability_ref,
+        title,
+        owner_agent_id,
+        payload,
+    ):
+        _ = dispatcher
+        _ = capability_service
+        submissions.append(
+            {
+                "capability_ref": capability_ref,
+                "title": title,
+                "owner_agent_id": owner_agent_id,
+                "payload": dict(payload),
+            },
+        )
+        return SimpleNamespace(phase="completed")
+
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "automation_interval_seconds",
+        lambda *_args, **_kwargs: 0,
+    )
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "submit_kernel_automation_task",
+        _record_submit,
+    )
+
+    tasks = start_automation_tasks(
+        kernel_dispatcher=SimpleNamespace(),
+        capability_service=SimpleNamespace(get_capability=lambda *_args, **_kwargs: None),
+        environment_service=SimpleNamespace(
+            should_run_host_recovery=lambda **_kwargs: (
+                False,
+                "no-actionable-host-events",
+            ),
+        ),
+        industry_service=SimpleNamespace(
+            should_run_operating_cycle=lambda: (False, "open-backlog-drained"),
+        ),
+        learning_service=SimpleNamespace(
+            should_run_strategy_cycle=lambda **_kwargs: (
+                False,
+                "no-actionable-failure-pattern",
+            ),
+        ),
+        logger=logging.getLogger(__name__),
+    )
+
+    try:
+        await asyncio.sleep(0.05)
+    finally:
+        await stop_automation_tasks(tasks)
+
+    assert submissions == []
+
+
+@pytest.mark.asyncio
+async def test_start_automation_tasks_dispatches_host_recovery_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    submissions: list[dict[str, object]] = []
+    submitted = asyncio.Event()
+
+    async def _record_submit(
+        dispatcher,
+        capability_service,
+        *,
+        capability_ref,
+        title,
+        owner_agent_id,
+        payload,
+    ):
+        _ = dispatcher
+        _ = capability_service
+        submissions.append(
+            {
+                "capability_ref": capability_ref,
+                "title": title,
+                "owner_agent_id": owner_agent_id,
+                "payload": dict(payload),
+            },
+        )
+        submitted.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "automation_interval_seconds",
+        lambda *_args, **_kwargs: 0,
+    )
+    monkeypatch.setattr(
+        runtime_lifecycle_module,
+        "submit_kernel_automation_task",
+        _record_submit,
+    )
+
+    tasks = start_automation_tasks(
+        kernel_dispatcher=SimpleNamespace(),
+        capability_service=SimpleNamespace(get_capability=lambda *_args, **_kwargs: None),
+        environment_service=SimpleNamespace(
+            should_run_host_recovery=lambda **_kwargs: (True, "host-events-pending"),
+        ),
+        industry_service=SimpleNamespace(
+            should_run_operating_cycle=lambda: (False, "open-backlog-drained"),
+        ),
+        learning_service=SimpleNamespace(
+            should_run_strategy_cycle=lambda **_kwargs: (
+                False,
+                "no-actionable-failure-pattern",
+            ),
+        ),
+        logger=logging.getLogger(__name__),
+    )
+
+    try:
+        await asyncio.wait_for(submitted.wait(), timeout=0.2)
+    finally:
+        await stop_automation_tasks(tasks)
+
+    assert len(submissions) == 1
+    assert submissions[0]["capability_ref"] == "system:run_host_recovery"
+    assert submissions[0]["payload"] == {
+        "actor": "system:automation",
+        "source": "automation:host_recovery",
+        "limit": 25,
+        "allow_cross_process_recovery": True,
+        "automation_task_id": (
+            "copaw-main-brain:host-recovery:system:run_host_recovery"
+        ),
+        "coordinator_contract": "automation-coordinator/v1",
+        "automation_loop_name": "host-recovery",
+    }
 
 
 @pytest.mark.asyncio

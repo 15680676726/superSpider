@@ -149,9 +149,11 @@ class CronManager:
         self._kernel_dispatcher = kernel_dispatcher
 
         self._lock = asyncio.Lock()
+        self._heartbeat_run_lock = asyncio.Lock()
         self._states: Dict[str, CronJobState] = {}
         self._rt: Dict[str, _Runtime] = {}
         self._heartbeat_state = CronJobState()
+        self._heartbeat_run_task: asyncio.Task | None = None
         self._started = False
 
     def set_kernel_dispatcher(self, kernel_dispatcher) -> None:
@@ -471,6 +473,23 @@ class CronManager:
         return job.next_run_time if job is not None else None
 
     async def _run_heartbeat(self, *, ignore_active_hours: bool) -> dict[str, Any]:
+        async with self._heartbeat_run_lock:
+            task = self._heartbeat_run_task
+            if task is None or task.done():
+                task = asyncio.create_task(
+                    self._execute_heartbeat_run(ignore_active_hours=ignore_active_hours),
+                    name="cron-heartbeat-run",
+                )
+                self._heartbeat_run_task = task
+        try:
+            return await task
+        finally:
+            if task.done():
+                async with self._heartbeat_run_lock:
+                    if self._heartbeat_run_task is task:
+                        self._heartbeat_run_task = None
+
+    async def _execute_heartbeat_run(self, *, ignore_active_hours: bool) -> dict[str, Any]:
         self._heartbeat_state = self._heartbeat_state.model_copy(
             update={
                 "last_status": "running",

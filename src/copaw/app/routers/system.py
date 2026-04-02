@@ -46,7 +46,7 @@ def _workspace_stats(root: Path) -> tuple[int, int]:
 def _get_runtime_health_service(app_state: Any) -> RuntimeHealthService:
     service = getattr(app_state, "runtime_health_service", None)
     if isinstance(service, RuntimeHealthService):
-        return service
+        return service.bind_app_state(app_state)
     return RuntimeHealthService.from_app_state(app_state)
 
 
@@ -109,6 +109,7 @@ async def get_system_overview(request: Request) -> dict[str, object]:
 async def run_system_self_check(request: Request) -> dict[str, object]:
     app_state = request.app.state
     runtime_health_service = _get_runtime_health_service(app_state)
+    runtime_summary = await runtime_health_service.build_runtime_summary()
     provider_manager = getattr(app_state, "provider_manager", None)
     if provider_manager is None:
         provider_manager = ProviderManager.get_instance()
@@ -218,6 +219,7 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
     return {
         "generated_at": _utc_now_iso(),
         "overall_status": overall_status,
+        "runtime_summary": runtime_summary,
         "checks": checks,
     }
 
