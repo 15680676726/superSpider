@@ -741,12 +741,18 @@ def test_kickoff_execution_from_chat_records_trigger_message_context(tmp_path) -
         owner_scope="industry-demo",
     )
 
-    industry_service._list_pending_chat_kickoff_goals = lambda record: [(goal, None)]
+    industry_service._list_pending_chat_kickoff_goals = lambda record, team=None: [
+        (goal, None)
+    ]
     industry_service._list_pending_chat_kickoff_schedule_ids = (
         lambda instance_id, schedule_ids: []
     )
-    industry_service._resolve_goal_kickoff_stage = lambda goal, override, record: "execution"
-    industry_service._resolve_goal_runtime_context = lambda goal, override, record: {}
+    industry_service._resolve_goal_kickoff_stage = (
+        lambda goal, override, record, team=None: "execution"
+    )
+    industry_service._resolve_goal_runtime_context = (
+        lambda goal, override, record, team=None: {}
+    )
     industry_service._current_operating_cycle_record = lambda instance_id: None
     industry_service._list_assignment_records = lambda *args, **kwargs: []
 
