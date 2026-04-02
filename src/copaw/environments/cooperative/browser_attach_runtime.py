@@ -21,7 +21,7 @@ class BrowserAttachRuntime:
         self,
         *,
         session_mount_id: str,
-        transport_ref: str,
+        transport_ref: str | None,
         status: str | None = None,
         browser_session_ref: str | None = None,
         browser_scope_ref: str | None = None,
@@ -33,11 +33,62 @@ class BrowserAttachRuntime:
         session = self._require_session(session_mount_id)
         environment = self._require_environment(session.environment_id)
         updates = {
-            "browser_attach_transport_ref": self._normalized(transport_ref),
-            "browser_attach_status": self._normalized(status),
-            "browser_attach_session_ref": self._normalized(browser_session_ref),
-            "browser_attach_scope_ref": self._normalized(browser_scope_ref),
-            "browser_attach_reconnect_token": self._normalized(reconnect_token),
+            "browser_attach_transport_ref": self._normalized(transport_ref)
+            or self._existing_string(
+                session.metadata,
+                environment.metadata,
+                "browser_attach_transport_ref",
+            ),
+            # Keep legacy projection keys aligned until all read paths stop
+            # consulting the pre-browser_attach continuity metadata.
+            "attach_transport_ref": self._normalized(transport_ref)
+            or self._existing_string(
+                session.metadata,
+                environment.metadata,
+                "browser_attach_transport_ref",
+            ),
+            "browser_attach_status": self._normalized(status)
+            or self._existing_string(
+                session.metadata,
+                environment.metadata,
+                "browser_attach_status",
+            ),
+            "browser_attach_session_ref": self._normalized(browser_session_ref)
+            or self._existing_string(
+                session.metadata,
+                environment.metadata,
+                "browser_attach_session_ref",
+            ),
+            "attach_session_ref": self._normalized(browser_session_ref)
+            or self._existing_string(
+                session.metadata,
+                environment.metadata,
+                "browser_attach_session_ref",
+            ),
+            "browser_attach_scope_ref": self._normalized(browser_scope_ref)
+            or self._existing_string(
+                session.metadata,
+                environment.metadata,
+                "browser_attach_scope_ref",
+            ),
+            "attach_scope_ref": self._normalized(browser_scope_ref)
+            or self._existing_string(
+                session.metadata,
+                environment.metadata,
+                "browser_attach_scope_ref",
+            ),
+            "browser_attach_reconnect_token": self._normalized(reconnect_token)
+            or self._existing_string(
+                session.metadata,
+                environment.metadata,
+                "browser_attach_reconnect_token",
+            ),
+            "attach_reconnect_token": self._normalized(reconnect_token)
+            or self._existing_string(
+                session.metadata,
+                environment.metadata,
+                "browser_attach_reconnect_token",
+            ),
             "preferred_execution_path": (
                 self._normalized(preferred_execution_path)
                 or self._existing_string(
@@ -57,11 +108,6 @@ class BrowserAttachRuntime:
                 or DEFAULT_UI_FALLBACK_MODE
             ),
             "adapter_gap_or_blocker": self._normalized(adapter_gap_or_blocker),
-            # Mirror the active transport into the existing browser companion path
-            # so current read models can see real attach transport without a second truth.
-            "browser_companion_transport_ref": self._normalized(transport_ref),
-            "browser_companion_status": self._normalized(status),
-            "browser_companion_available": True,
         }
         return self._persist(session=session, environment=environment, updates=updates)
 
@@ -77,10 +123,14 @@ class BrowserAttachRuntime:
         environment = self._require_environment(session.environment_id)
         updates = {
             "browser_attach_transport_ref": None,
+            "attach_transport_ref": None,
             "browser_attach_status": None,
             "browser_attach_session_ref": None,
+            "attach_session_ref": None,
             "browser_attach_scope_ref": None,
+            "attach_scope_ref": None,
             "browser_attach_reconnect_token": None,
+            "attach_reconnect_token": None,
             "preferred_execution_path": (
                 self._normalized(preferred_execution_path)
                 or self._existing_string(
@@ -100,18 +150,19 @@ class BrowserAttachRuntime:
                 or DEFAULT_UI_FALLBACK_MODE
             ),
             "adapter_gap_or_blocker": self._normalized(adapter_gap_or_blocker),
-            "browser_companion_transport_ref": None,
-            "browser_companion_status": None,
-            "browser_companion_available": False,
         }
         return self._persist(session=session, environment=environment, updates=updates)
 
     def snapshot(
         self,
         *,
-        session_mount_id: str,
+        session_mount_id: str | None = None,
+        environment_id: str | None = None,
     ) -> dict[str, object]:
-        session = self._require_session(session_mount_id)
+        session = self._resolve_session(
+            session_mount_id=session_mount_id,
+            environment_id=environment_id,
+        )
         environment = self._require_environment(session.environment_id)
         session_metadata = dict(session.metadata)
         environment_metadata = dict(environment.metadata)
@@ -210,6 +261,24 @@ class BrowserAttachRuntime:
         if environment is None:
             raise KeyError(f"Unknown environment mount: {environment_id}")
         return environment
+
+    def _resolve_session(
+        self,
+        *,
+        session_mount_id: str | None,
+        environment_id: str | None,
+    ) -> SessionMount:
+        if session_mount_id is not None:
+            return self._require_session(session_mount_id)
+        if environment_id is not None:
+            sessions = self._service.list_sessions(
+                environment_id=environment_id,
+                limit=1,
+            )
+            if sessions:
+                return sessions[0]
+            raise KeyError(f"Unknown environment mount: {environment_id}")
+        raise KeyError("Unknown session mount: None")
 
     def _existing_string(
         self,

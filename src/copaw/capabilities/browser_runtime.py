@@ -516,6 +516,7 @@ class BrowserRuntimeService:
                 "session_mount_id": None,
             }
         snapshot = self._browser_attach_runtime.snapshot(
+            environment_id=environment_id,
             session_mount_id=session_mount_id,
         )
         browser_attach = snapshot.get("browser_attach")

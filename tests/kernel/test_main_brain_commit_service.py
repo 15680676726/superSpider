@@ -4,7 +4,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from copaw.kernel.main_brain_commit_service import MainBrainCommitService
-from copaw.kernel.main_brain_result_committer import MainBrainResultCommitter
+from copaw.kernel.main_brain_result_committer import (
+    MainBrainResultCommitter,
+    normalize_durable_commit_result,
+)
 from copaw.kernel.main_brain_turn_result import MainBrainActionEnvelope, MainBrainTurnResult
 
 
@@ -168,6 +171,26 @@ def test_main_brain_commit_service_reports_governance_denied() -> None:
 
     assert result.status == "governance_denied"
     assert result.reason == "governance_denied"
+
+
+def test_normalize_durable_commit_result_preserves_deferred_kickoff_returns() -> None:
+    result = normalize_durable_commit_result(
+        {
+            "activated": False,
+            "blocked_reason": "Industry learning stage is still in progress.",
+            "message": "Kickoff accepted, but the execution stage is not active yet.",
+        },
+        action_type="orchestrate_execution",
+        commit_key="kickoff-1",
+        default_record_id=None,
+        empty_reason="kickoff_handler_returned_no_result",
+    )
+
+    assert result["status"] == "commit_deferred"
+    assert result["blocked_reason"] == "Industry learning stage is still in progress."
+    assert result["message"] == "Kickoff accepted, but the execution stage is not active yet."
+    assert result["commit_key"] == "kickoff-1"
+    assert result.get("reason") != "durable_kickoff_failed"
 
 
 def test_main_brain_commit_service_persists_bound_thread_state_under_agent_id() -> None:

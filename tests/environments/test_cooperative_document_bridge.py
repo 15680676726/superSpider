@@ -331,6 +331,91 @@ async def test_document_action_blocks_when_global_operator_abort_channel_matches
 
 
 @pytest.mark.asyncio
+async def test_document_action_blocks_when_shared_operator_abort_state_is_requested_without_any_execution_guardrails(
+    tmp_path,
+) -> None:
+    service, environment_repository, session_repository, _event_bus = _build_environment_service(
+        tmp_path,
+    )
+    lease = _acquire_document_session(service)
+    service.register_document_bridge(
+        session_mount_id=lease.id,
+        bridge_ref="document-bridge:office",
+        status="ready",
+        supported_families=["documents"],
+    )
+    _patch_document_abort_state(
+        environment_repository=environment_repository,
+        session_repository=session_repository,
+        session_mount_id=lease.id,
+        operator_abort_state={
+            "channel": "global-esc",
+            "requested": True,
+            "reason": "global-esc",
+        },
+    )
+
+    class _Executor:
+        async def __call__(self, **_kwargs):
+            raise AssertionError("document executor should not run after shared operator abort")
+
+    service.register_document_bridge_executor("document-bridge:office", _Executor())
+
+    with pytest.raises(RuntimeError, match="operator abort"):
+        await service.execute_document_action(
+            session_mount_id=lease.id,
+            action="write_document",
+            document_family="documents",
+            contract={},
+        )
+
+
+@pytest.mark.asyncio
+async def test_document_action_blocks_when_caller_guardrails_try_to_override_shared_operator_abort_state(
+    tmp_path,
+) -> None:
+    service, environment_repository, session_repository, _event_bus = _build_environment_service(
+        tmp_path,
+    )
+    lease = _acquire_document_session(service)
+    service.register_document_bridge(
+        session_mount_id=lease.id,
+        bridge_ref="document-bridge:office",
+        status="ready",
+        supported_families=["documents"],
+    )
+    _patch_document_abort_state(
+        environment_repository=environment_repository,
+        session_repository=session_repository,
+        session_mount_id=lease.id,
+        operator_abort_state={
+            "channel": "global-esc",
+            "requested": True,
+            "reason": "global-esc",
+        },
+    )
+
+    class _Executor:
+        async def __call__(self, **_kwargs):
+            raise AssertionError("document executor should not run after shared operator abort")
+
+    service.register_document_bridge_executor("document-bridge:office", _Executor())
+
+    with pytest.raises(RuntimeError, match="operator abort"):
+        await service.execute_document_action(
+            session_mount_id=lease.id,
+            action="write_document",
+            document_family="documents",
+            contract={
+                "guardrails": {
+                    "operator_abort_channel": "local-esc",
+                    "operator_abort_requested": False,
+                },
+            },
+        )
+
+
+@pytest.mark.asyncio
 async def test_document_action_enforces_host_exclusion_before_execution(
     tmp_path,
 ) -> None:

@@ -748,15 +748,32 @@ class EnvironmentHealthService:
                 runtime_descriptor.get("profile_ref"),
                 live_descriptor.get("profile_ref"),
             ),
-            "attach_transport_ref": self._first_string(
-                session_metadata.get("attach_transport_ref"),
-                session_metadata.get("browser_attach_transport_ref"),
-                mount_metadata.get("attach_transport_ref"),
-                mount_metadata.get("browser_attach_transport_ref"),
-                runtime_descriptor.get("attach_transport_ref"),
-                runtime_descriptor.get("browser_attach_transport_ref"),
-                live_descriptor.get("attach_transport_ref"),
-                live_descriptor.get("browser_attach_transport_ref"),
+            "attach_transport_ref": (
+                self._first_string(
+                    session_metadata.get("browser_attach_transport_ref"),
+                    mount_metadata.get("browser_attach_transport_ref"),
+                    runtime_descriptor.get("browser_attach_transport_ref"),
+                    live_descriptor.get("browser_attach_transport_ref"),
+                )
+                if any(
+                    "browser_attach_transport_ref" in payload
+                    for payload in (
+                        session_metadata,
+                        mount_metadata,
+                        runtime_descriptor,
+                        live_descriptor,
+                    )
+                )
+                else self._first_string(
+                    session_metadata.get("attach_transport_ref"),
+                    session_metadata.get("browser_attach_transport_ref"),
+                    mount_metadata.get("attach_transport_ref"),
+                    mount_metadata.get("browser_attach_transport_ref"),
+                    runtime_descriptor.get("attach_transport_ref"),
+                    runtime_descriptor.get("browser_attach_transport_ref"),
+                    live_descriptor.get("attach_transport_ref"),
+                    live_descriptor.get("browser_attach_transport_ref"),
+                )
             ),
             "attach_session_ref": self._first_string(
                 session_metadata.get("browser_attach_session_ref"),
@@ -3619,10 +3636,11 @@ class EnvironmentHealthService:
         )
         if channel is not None:
             merged["operator_abort_channel"] = channel
-        requested = self._first_bool(
-            operator_abort_state.get("requested"),
-            merged.get("operator_abort_requested"),
-        )
+        requested = merged.get("operator_abort_requested")
+        if requested is not True:
+            state_requested = operator_abort_state.get("requested")
+            if state_requested is not None:
+                requested = state_requested
         if requested is not None:
             merged["operator_abort_requested"] = requested
         reason = self._first_string(

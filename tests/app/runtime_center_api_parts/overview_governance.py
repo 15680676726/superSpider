@@ -498,6 +498,104 @@ def test_runtime_center_main_brain_route_exposes_unified_operator_sections():
     assert payload["signals"]["recovery"]["count"] == 1
 
 
+def test_runtime_center_main_brain_route_exposes_automation_loop_and_supervisor_health():
+    class _FakeLoopTask:
+        def __init__(
+            self,
+            *,
+            name: str,
+            done: bool = False,
+            cancelled: bool = False,
+        ) -> None:
+            self._name = name
+            self._done = done
+            self._cancelled = cancelled
+
+        def get_name(self) -> str:
+            return self._name
+
+        def done(self) -> bool:
+            return self._done
+
+        def cancelled(self) -> bool:
+            return self._cancelled
+
+    class _FakeRuntimeRepository:
+        def list_runtimes(self, limit=None):
+            assert limit is None
+            return [
+                SimpleNamespace(
+                    agent_id="agent-1",
+                    runtime_status="blocked",
+                    metadata={
+                        "supervisor_last_failure_at": "2026-04-02T10:00:00+00:00",
+                        "supervisor_last_failure_type": "RuntimeError",
+                    },
+                ),
+                SimpleNamespace(
+                    agent_id="agent-2",
+                    runtime_status="queued",
+                    metadata={},
+                ),
+            ]
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.startup_recovery_summary = StartupRecoverySummary(
+        reason="Recovered leases after restart.",
+        expired_decisions=0,
+        pending_decisions=1,
+        active_schedules=2,
+        notes=["Recovered canonical scheduler ownership after restart."],
+    )
+    app.state.cron_manager = FakeCronManager([make_job("sched-1")])
+    app.state.automation_tasks = [
+        _FakeLoopTask(name="copaw-automation-host-recovery", done=False),
+        _FakeLoopTask(name="copaw-automation-operating-cycle", done=True),
+    ]
+    app.state.actor_supervisor = SimpleNamespace(
+        _loop_task=_FakeLoopTask(name="copaw-actor-supervisor", done=False),
+        _poll_interval_seconds=1.25,
+        _agent_tasks={
+            "agent-1": _FakeLoopTask(name="copaw-actor:agent-1", done=False),
+            "agent-2": _FakeLoopTask(name="copaw-actor:agent-2", done=True),
+        },
+        _runtime_repository=_FakeRuntimeRepository(),
+    )
+
+    client = TestClient(app)
+    with patch(
+        "copaw.app.runtime_center.overview_cards.get_heartbeat_config",
+        return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
+        create=True,
+    ):
+        response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["automation"]["loop_count"] == 2
+    assert payload["automation"]["active_loop_count"] == 1
+    assert payload["automation"]["loops"][0]["name"] == "copaw-automation-host-recovery"
+    assert payload["automation"]["loops"][0]["status"] == "running"
+    assert payload["automation"]["loops"][1]["status"] == "completed"
+    assert payload["automation"]["supervisor"]["status"] == "degraded"
+    assert payload["automation"]["supervisor"]["running"] is True
+    assert payload["automation"]["supervisor"]["poll_interval_seconds"] == 1.25
+    assert payload["automation"]["supervisor"]["active_agent_run_count"] == 1
+    assert payload["automation"]["supervisor"]["blocked_runtime_count"] == 1
+    assert payload["automation"]["supervisor"]["recent_failure_count"] == 1
+    assert payload["automation"]["supervisor"]["last_failure_type"] == "RuntimeError"
+
+
 def test_runtime_center_main_brain_route_handles_object_schedule_summaries():
     app = build_runtime_center_app()
     app.state.state_query_service = _ObjectScheduleStateQueryService()
@@ -1527,6 +1625,73 @@ def test_runtime_center_chat_run_emits_accepted_and_commit_sidecars_from_runtime
     assert sidecar_events[0]["payload"]["status"] == "accepted"
     assert sidecar_events[2]["payload"]["reason"] == "durable_kickoff_failed"
     assert sidecar_events[3]["payload"]["message"] == "kickoff pipeline did not confirm durable persistence"
+
+
+def test_runtime_center_chat_run_emits_durable_sidecars_from_nested_query_runtime_state() -> None:
+    app = build_runtime_center_app()
+    control_thread_id = "industry-chat:industry-v1-ops:thread-nested-durable"
+    app.state.turn_executor = _CommitAwareTurnExecutor(
+        runtime_context={
+            "kernel_task_id": "ktask-nested-durable",
+            "execution_intent": "execute-task",
+            "execution_mode": "environment-bound",
+            "environment_ref": "desktop:session-1",
+            "writeback_requested": True,
+            "should_kickoff": True,
+            "query_runtime_state": {
+                "accepted_persistence": {
+                    "status": "accepted",
+                    "source": "query_execution_runtime",
+                    "boundary": "execution_runtime_intake",
+                    "control_thread_id": control_thread_id,
+                    "session_id": "session-nested-durable",
+                },
+                "commit_outcome": {
+                    "status": "committed",
+                    "action_type": "writeback_and_kickoff",
+                    "summary": "Durably persisted requested main-brain intake writeback and kickoff.",
+                    "record_id": "backlog-durable-1",
+                    "control_thread_id": control_thread_id,
+                    "session_id": "session-nested-durable",
+                },
+            },
+        },
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-nested-durable",
+            "session_id": "session-nested-durable",
+            "user_id": "ops-user",
+            "channel": "console",
+            "thread_id": control_thread_id,
+            "control_thread_id": control_thread_id,
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "Continue from the durable runtime state."}],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    sidecar_events = [
+        event
+        for event in _parse_sse_events(response.text)
+        if event.get("object") == "runtime.sidecar"
+    ]
+    assert [event["event"] for event in sidecar_events] == [
+        "accepted",
+        "turn_reply_done",
+        "commit_started",
+        "committed",
+    ]
+    assert sidecar_events[0]["payload"]["boundary"] == "execution_runtime_intake"
+    assert sidecar_events[3]["payload"]["record_id"] == "backlog-durable-1"
 
 
 def test_runtime_center_chat_run_does_not_fabricate_terminal_sidecar_for_noop_deferred() -> None:
