@@ -35,6 +35,7 @@ import {
   hydrateRuntimeSidecarState,
   parseRuntimeSidecarEvent,
   reduceRuntimeSidecarEvent,
+  type RuntimeIntentShellSurface,
   type RuntimeSidecarState,
 } from "./runtimeSidecarEvents";
 import { useChatBindingRecovery } from "./chatBindingRecovery";
@@ -88,6 +89,7 @@ type UseChatRuntimeStateResult = {
   rejectCommitDecisions: (decisionIds: string[]) => Promise<void>;
   roleLabel: string;
   runtimeCommitState: RuntimeSidecarState;
+  runtimeIntentShell: RuntimeIntentShellSurface | null;
   sessionKind: string;
 };
 
@@ -503,6 +505,7 @@ export function useChatRuntimeState({
     rejectCommitDecisions,
     roleLabel,
     runtimeCommitState,
+    runtimeIntentShell: runtimeCommitState.currentIntentShell,
     sessionKind,
   };
 }

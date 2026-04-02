@@ -1057,6 +1057,49 @@ def test_main_brain_chat_service_prompt_guides_structured_goal_and_auto_progress
     assert "结构化执行目标" in system_prompt
 
 
+def test_main_brain_chat_service_default_shell_tail_reinforces_short_direct_replies():
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+
+    tail = service._build_intent_shell_prompt_tail()  # pylint: disable=protected-access
+
+    assert "Mode: CHAT" in tail
+    assert "short direct reply" in tail.lower()
+    assert "do not ask for start or confirmation again" in tail.lower()
+
+
+def test_main_brain_chat_service_prompt_adds_plan_shell_tail_without_claiming_execution():
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-plan-shell",
+        user_id="user-plan-shell",
+        industry_instance_id=None,
+        work_context_id=None,
+        agent_id=None,
+        _copaw_main_brain_intent_shell=SimpleNamespace(mode_hint="plan"),
+    )
+
+    prompt_messages = service._build_prompt_messages(  # pylint: disable=protected-access
+        request=request,
+        query="先做个计划，再动手。",
+        prior_messages=[],
+        current_messages=[],
+    )
+
+    joined_prompt = "\n".join(message["content"] for message in prompt_messages)
+    assert "Mode: PLAN" in joined_prompt
+    assert "Affected scope/files" in joined_prompt
+    assert "Checklist" in joined_prompt
+    assert "Acceptance criteria" in joined_prompt
+    assert "Verification steps" in joined_prompt
+    assert "dispatch_query" not in joined_prompt
+
+
 def test_main_brain_chat_service_prompt_does_not_expose_execution_only_tool_names():
     service = MainBrainChatService(
         session_backend=_FakeSessionBackend(),

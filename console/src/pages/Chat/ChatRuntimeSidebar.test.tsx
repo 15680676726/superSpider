@@ -7,7 +7,7 @@ import { ChatRuntimeSidebar } from "./ChatRuntimeSidebar";
 import styles from "./index.module.less";
 
 describe("ChatRuntimeSidebar", () => {
-  it("keeps chat chrome minimal while surfacing thread kind, focus, and writeback", () => {
+  it("keeps chat chrome minimal while surfacing thread kind, focus, writeback, and shell mode", () => {
     render(
       <ChatRuntimeSidebar
         approvalButtonLabel="审批(2)"
@@ -17,6 +17,8 @@ describe("ChatRuntimeSidebar", () => {
         runtimeHealthNotice={null}
         runtimeModelHint="当前模型"
         runtimeModelLabel="openai/gpt-5"
+        shellModeLabel="Shell: PLAN"
+        shellModeHint="Mode: PLAN | trigger=keyword"
         threadKindLabel="Thread: control-thread"
         threadKindHint="session_kind=industry-control-thread"
         focusLabel="Focus: Launch runtime center"
@@ -32,6 +34,7 @@ describe("ChatRuntimeSidebar", () => {
     expect(screen.getByText("Acme / 主脑")).toBeTruthy();
     expect(screen.getByText("审批(2)")).toBeTruthy();
     expect(screen.getByText("openai/gpt-5")).toBeTruthy();
+    expect(screen.getByText("Shell: PLAN")).toBeTruthy();
     expect(screen.getByText("Thread: control-thread")).toBeTruthy();
     expect(screen.getByText("Focus: Launch runtime center")).toBeTruthy();
     expect(screen.getByText("Writeback: strategy/backlog")).toBeTruthy();
@@ -49,6 +52,8 @@ describe("ChatRuntimeSidebar", () => {
         runtimeHealthNotice={null}
         runtimeModelHint="当前模型说明"
         runtimeModelLabel="openai/gpt-5.4-super-long-model-name-for-overflow-check"
+        shellModeLabel="Shell: REVIEW"
+        shellModeHint="Mode: REVIEW | trigger=keyword"
         threadKindLabel="Thread: control-thread"
         threadKindHint="session_kind=industry-control-thread | thread_binding_kind=control | owner_scope=operator"
         focusLabel="Focus: This is a super long focus label to check truncation and title preservation"
@@ -70,6 +75,7 @@ describe("ChatRuntimeSidebar", () => {
     expect(
       screen.getByTitle("openai/gpt-5.4-super-long-model-name-for-overflow-check"),
     ).toBeTruthy();
+    expect(screen.getByTitle("Mode: REVIEW | trigger=keyword")).toBeTruthy();
     expect(
       screen.getByTitle(
         "session_kind=industry-control-thread | thread_binding_kind=control | owner_scope=operator",

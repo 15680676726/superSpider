@@ -178,4 +178,53 @@ describe("runtimeSidecarEvents", () => {
       },
     });
   });
+
+  it("captures intent shell payload from turn_reply_done sidecars", () => {
+    const initialState = createInitialRuntimeSidecarState(
+      "industry-chat:industry-1:execution-core",
+    );
+
+    const nextState = reduceRuntimeSidecarEvent(
+      initialState,
+      {
+        event: "turn_reply_done",
+        payload: {
+          intent_shell: {
+            mode_hint: "plan",
+            label: "PLAN",
+            summary: "Use a compact planning shell for this reply.",
+            hint:
+              "Goal, constraints, affected scope/files, checklist, acceptance criteria, verification steps.",
+            trigger_source: "keyword",
+            matched_text: "计划",
+            confidence: 0.95,
+          },
+        },
+      },
+      500,
+    );
+
+    expect(nextState.lastReplyDoneAt).toBe(500);
+    expect(nextState.currentIntentShell).toEqual({
+      mode: "plan",
+      label: "PLAN",
+      summary: "Use a compact planning shell for this reply.",
+      hint:
+        "Goal, constraints, affected scope/files, checklist, acceptance criteria, verification steps.",
+      triggerSource: "keyword",
+      matchedText: "计划",
+      confidence: 0.95,
+      updatedAt: 500,
+      payload: {
+        mode_hint: "plan",
+        label: "PLAN",
+        summary: "Use a compact planning shell for this reply.",
+        hint:
+          "Goal, constraints, affected scope/files, checklist, acceptance criteria, verification steps.",
+        trigger_source: "keyword",
+        matched_text: "计划",
+        confidence: 0.95,
+      },
+    });
+  });
 });

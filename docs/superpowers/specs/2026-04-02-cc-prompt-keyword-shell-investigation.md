@@ -835,3 +835,34 @@ sidecar shell 只能：
 一句话收口：
 
 **CoPaw 应该借 `cc` 的前门表达壳、触发纪律和 planning shell discipline，但正式真相必须继续收敛在 `StrategyMemory -> Lane -> Backlog -> Cycle -> Assignment -> Report`，不能退回 Claude 式 session-first planning center。**
+
+## 11. 2026-04-02 实现落点
+
+本轮在 `feature/main-brain-single-loop-chat` 上已经按上面的边界落了一版最小实现，具体形态如下：
+
+- 新增 `src/copaw/kernel/main_brain_intent_shell.py`
+  - 只做轻量 `mode_hint` 检测，当前覆盖 `plan / review / resume / verify`
+  - 结果是 request-scoped advisory shell，不是正式对象
+- `src/copaw/kernel/turn_executor.py`
+  - 在单环主链里直接解析 shell hint
+  - `plan / review` 默认留在 chat
+  - `resume / verify` 只有在已有 continuity / confirmation 上下文时才会偏向 orchestrate
+  - 不再因为这类前门 shell 触发额外 intake 判定
+- `src/copaw/kernel/main_brain_chat_service.py`
+  - 保留稳定主脑前缀
+  - 增加动态 shell prompt tail
+  - 让主脑在当前轮直接切入对应的 compact shell，而不是再做一轮人格化追问
+- `src/copaw/app/runtime_chat_stream_events.py`
+  - 不新增第二 transport
+  - 通过 `turn_reply_done.payload.intent_shell` 输出同轮 advisory shell surface
+- 前端同窗口接线
+  - `runtimeSidecarEvents.ts` 解析 `intent_shell`
+  - `ChatRuntimeSidebar.tsx` 增加 shell chip
+  - `ChatIntentShellCard.tsx` 在当前聊天窗口中展示 shell card
+
+当前实现仍然遵守本调查报告的主结论：
+
+- shell 是前门表达壳，不是正式 truth
+- shell 不写入 `main_brain_runtime_context`
+- shell 不持久化为 `StrategyMemory / Lane / Backlog / Cycle / Assignment / Report`
+- shell 只能帮助主脑更快进入更合适的前门表达结构

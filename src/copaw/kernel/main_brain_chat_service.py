@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from agentscope.message import Msg, TextBlock, ThinkingBlock
 from reme.memory.file_based.reme_in_memory_memory import ReMeInMemoryMemory
 
+from .main_brain_intent_shell import read_attached_main_brain_intent_shell
 from .main_brain_intake import (
     extract_main_brain_intake_text,
 )
@@ -1316,10 +1317,12 @@ class MainBrainChatService:
             prior_messages=prior_messages,
             current_messages=current_messages,
         )
+        shell_tail = self._build_intent_shell_prompt_tail(request=request)
         history_build_ms = round((time.perf_counter() - history_started_at) * 1000, 3)
         prompt_messages = [
             {"role": "system", "content": _PURE_CHAT_SYSTEM_PROMPT},
             {"role": "system", "content": context_body},
+            {"role": "system", "content": shell_tail},
             *history_messages,
         ]
         timing = {
@@ -1329,6 +1332,86 @@ class MainBrainChatService:
             **context_timing,
         }
         return prompt_messages, timing
+
+    def _build_intent_shell_prompt_tail(
+        self,
+        *,
+        request: Any | None = None,
+        mode_hint: str | None = None,
+    ) -> str:
+        resolved_mode = str(mode_hint or "").strip().lower()
+        if not resolved_mode and request is not None:
+            shell = read_attached_main_brain_intent_shell(request=request)
+            resolved_mode = shell.mode_hint if shell is not None else ""
+        if resolved_mode == "plan":
+            return "\n".join(
+                [
+                    "## Front-Door Reply Shell",
+                    "Mode: PLAN",
+                    "- Start with one short direct framing sentence.",
+                    "- Then use this compact shell:",
+                    "  - Goal",
+                    "  - Constraints",
+                    "  - Known facts",
+                    "  - Affected scope/files",
+                    "  - Checklist",
+                    "  - Acceptance criteria",
+                    "  - Verification steps",
+                    "- Do not claim execution, writeback, or completion unless the context already contains those results.",
+                ],
+            )
+        if resolved_mode == "review":
+            return "\n".join(
+                [
+                    "## Front-Door Reply Shell",
+                    "Mode: REVIEW",
+                    "- Start with the conclusion first.",
+                    "- Then use this compact shell:",
+                    "  - Findings",
+                    "  - Severity",
+                    "  - Evidence gaps",
+                    "  - Recommended next step",
+                    "- Do not invent defects or completed fixes.",
+                ],
+            )
+        if resolved_mode == "resume":
+            return "\n".join(
+                [
+                    "## Front-Door Reply Shell",
+                    "Mode: RESUME",
+                    "- Start with the current continuity state.",
+                    "- Then use this compact shell:",
+                    "  - Current state",
+                    "  - Continuity anchors",
+                    "  - Blockers",
+                    "  - Next action",
+                    "- Do not imply resumed execution unless the continuity context is real.",
+                ],
+            )
+        if resolved_mode == "verify":
+            return "\n".join(
+                [
+                    "## Front-Door Reply Shell",
+                    "Mode: VERIFY",
+                    "- Start with the pass/fail judgment first.",
+                    "- Then use this compact shell:",
+                    "  - Check target",
+                    "  - Evidence",
+                    "  - Pass/fail",
+                    "  - Unresolved risk",
+                    "  - Next step",
+                    "- Do not claim validation evidence that does not exist in context.",
+                ],
+            )
+        return "\n".join(
+            [
+                "## Front-Door Reply Shell",
+                "Mode: CHAT",
+                "- Start with a short direct reply.",
+                "- Do not ask for start or confirmation again when the request is already clear.",
+                "- Ask only the minimum missing inputs that change direction, risk, or acceptance.",
+            ],
+        )
 
     def _build_prompt_context_body(
         self,

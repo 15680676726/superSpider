@@ -32,9 +32,24 @@ export type RuntimeCommitStatus = {
   payload: Record<string, unknown>;
 };
 
+export type RuntimeIntentShellMode = "plan" | "review" | "resume" | "verify";
+
+export type RuntimeIntentShellSurface = {
+  mode: RuntimeIntentShellMode;
+  label: string;
+  summary: string | null;
+  hint: string | null;
+  triggerSource: string | null;
+  matchedText: string | null;
+  confidence: number | null;
+  updatedAt: number;
+  payload: Record<string, unknown>;
+};
+
 export type RuntimeSidecarState = {
   controlThreadId: string | null;
   currentCommitStatus: RuntimeCommitStatus | null;
+  currentIntentShell: RuntimeIntentShellSurface | null;
   history: RuntimeCommitStatus[];
   lastReplyDoneAt: number | null;
 };
@@ -112,6 +127,10 @@ function collectDecisionIds(payload: Record<string, unknown>): string[] {
     }
   }
   return Array.from(ids);
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function resolveControlThreadId(
@@ -205,8 +224,39 @@ export function createInitialRuntimeSidecarState(
   return {
     controlThreadId,
     currentCommitStatus: null,
+    currentIntentShell: null,
     history: [],
     lastReplyDoneAt: null,
+  };
+}
+
+function resolveIntentShellSurface(
+  payload: Record<string, unknown>,
+  now: number,
+): RuntimeIntentShellSurface | null {
+  const shell = asRecord(payload.intent_shell);
+  if (!shell) {
+    return null;
+  }
+  const mode = asNonEmptyString(shell.mode_hint);
+  if (
+    mode !== "plan" &&
+    mode !== "review" &&
+    mode !== "resume" &&
+    mode !== "verify"
+  ) {
+    return null;
+  }
+  return {
+    mode,
+    label: asNonEmptyString(shell.label) ?? mode.toUpperCase(),
+    summary: asNonEmptyString(shell.summary),
+    hint: asNonEmptyString(shell.hint),
+    triggerSource: asNonEmptyString(shell.trigger_source),
+    matchedText: asNonEmptyString(shell.matched_text),
+    confidence: asNumber(shell.confidence),
+    updatedAt: now,
+    payload: compactPayload({ ...shell }),
   };
 }
 
@@ -245,6 +295,7 @@ export function reduceRuntimeSidecarEvent(
   if (sidecarEvent.event === "turn_reply_done") {
     return {
       ...state,
+      currentIntentShell: resolveIntentShellSurface(sidecarEvent.payload, now),
       lastReplyDoneAt: now,
     };
   }
@@ -277,6 +328,7 @@ export function reduceRuntimeSidecarEvent(
   return {
     controlThreadId,
     currentCommitStatus: status,
+    currentIntentShell: state.currentIntentShell,
     history: trimHistory([...state.history, status]),
     lastReplyDoneAt: state.lastReplyDoneAt,
   };

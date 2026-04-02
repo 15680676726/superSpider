@@ -26,6 +26,8 @@ export function ChatRuntimeSidebar({
   runtimeWaitDescription,
   runtimeWaitSeconds,
   runtimeWaitState,
+  shellModeHint,
+  shellModeLabel,
   threadKindHint,
   threadKindLabel,
   writebackHint,
@@ -43,6 +45,8 @@ export function ChatRuntimeSidebar({
   runtimeWaitDescription: string | null;
   runtimeWaitSeconds: number;
   runtimeWaitState: RuntimeWaitState | null;
+  shellModeHint?: string | null;
+  shellModeLabel?: string | null;
   threadKindHint?: string | null;
   threadKindLabel?: string | null;
   writebackHint?: string | null;
@@ -66,19 +70,18 @@ export function ChatRuntimeSidebar({
 
   return (
     <div className={styles.topBar}>
-      {/* 左侧：绑定信息 */}
       <div className={styles.topBarLeft}>
         <div className={styles.topBarLogo}>
           <AppstoreOutlined className={styles.topBarLogoIcon} />
           <span className={styles.topBarLogoText}>主脑对话</span>
         </div>
         {renderMetaChip(bindingLabel, bindingLabel)}
+        {renderMetaChip(shellModeLabel, shellModeHint)}
         {renderMetaChip(threadKindLabel, threadKindHint)}
         {renderMetaChip(focusLabel, focusHint)}
         {renderMetaChip(writebackLabel, writebackHint)}
       </div>
 
-      {/* 中间：运行状态 */}
       <div className={styles.topBarCenter}>
         <Tooltip title={runtimeModelHint}>
           <div className={styles.topBarModel}>
@@ -95,7 +98,6 @@ export function ChatRuntimeSidebar({
         </Tooltip>
       </div>
 
-      {/* 右侧：状态 + 审批 */}
       <div className={styles.topBarRight}>
         {runtimeWaitState ? (
           <Tooltip title={runtimeWaitDescription || undefined}>

@@ -15,6 +15,7 @@ from copaw.environments.models import SessionMount
 from copaw.kernel import KernelResult, KernelTurnExecutor
 from copaw.kernel.main_brain_chat_service import MainBrainChatService
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
+from copaw.kernel.main_brain_intent_shell import MainBrainIntentShell
 from copaw.kernel.main_brain_orchestrator import MainBrainOrchestrator
 from copaw.kernel.query_execution import KernelQueryExecutionService
 
@@ -714,6 +715,63 @@ async def test_kernel_turn_executor_auto_mode_prefers_model_chat_resolution_over
     assert streamed[0][0].get_text_content() == "chat done"
     assert query_execution_service.calls == []
     assert len(main_brain_chat_service.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_auto_mode_keeps_plan_shell_queries_in_chat_on_control_thread(
+    monkeypatch,
+):
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+    )
+    request = AgentRequest(
+        id="req-auto-plan-shell",
+        session_id="sess-auto-plan-shell",
+        user_id="user-auto-plan-shell",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "auto"
+    request.industry_instance_id = "industry-v1-demo"
+    request.industry_role_id = "execution-core"
+    request.control_thread_id = "industry-chat:industry-v1-demo:execution-core"
+    resolver_calls = 0
+
+    async def _counting_resolver(**_kwargs):
+        nonlocal resolver_calls
+        resolver_calls += 1
+        return _make_main_brain_intake_contract(
+            intent_kind="execute-task",
+            kickoff_allowed=True,
+        )
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _counting_resolver,
+    )
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.detect_main_brain_intent_shell",
+        lambda _text: MainBrainIntentShell(
+            mode_hint="plan",
+            trigger_source="keyword",
+            matched_text="计划",
+            confidence=0.95,
+        ),
+    )
+    msgs = [Msg(name="user", role="user", content="先做个计划，再动手。")]
+
+    streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "chat done"
+    assert query_execution_service.calls == []
+    assert len(main_brain_chat_service.calls) == 1
+    assert resolver_calls == 0
+    assert getattr(request, "_copaw_requested_mode_hint", None) == "plan"
 
 
 @pytest.mark.asyncio

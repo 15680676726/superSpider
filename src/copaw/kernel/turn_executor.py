@@ -47,6 +47,11 @@ from .main_brain_orchestrator import (
     MainBrainOrchestrator,
     read_attached_main_brain_cognitive_surface,
 )
+from .main_brain_intent_shell import (
+    MainBrainIntentShell,
+    build_requested_main_brain_intent_shell,
+    detect_main_brain_intent_shell,
+)
 from .query_error_dump import write_query_error_dump
 from .models import KernelTask
 from .query_execution import KernelQueryExecutionService
@@ -209,6 +214,9 @@ def _interaction_mode_cache_key(
 ) -> str:
     text = str(extract_main_brain_intake_text(msgs) or query or "").strip().lower()
     requested_actions = ",".join(_normalized_requested_actions(request))
+    requested_mode_hint = str(
+        getattr(request, "_copaw_requested_mode_hint", "") or "",
+    ).strip().lower()
     has_cognitive_pressure = _request_has_unresolved_cognitive_pressure(
         request=request,
     )
@@ -218,10 +226,38 @@ def _interaction_mode_cache_key(
     )
     return (
         f"text:{text}|actions:{requested_actions}|"
+        f"mode_hint:{requested_mode_hint}|"
         f"pressure:{'1' if has_cognitive_pressure else '0'}|"
         f"attached:{'1' if attached_intake_contract is not None else '0'}|"
         f"continuity:{'1' if has_continuity_contract else '0'}"
     )
+
+
+def _prepare_request_intent_shell(
+    *,
+    request: AgentRequest,
+    msgs: list[Any],
+    query: str | None,
+) -> MainBrainIntentShell:
+    requested_shell = build_requested_main_brain_intent_shell(
+        getattr(request, "mode_hint", None),
+    )
+    resolved_shell = requested_shell
+    if resolved_shell is None:
+        text = str(extract_main_brain_intake_text(msgs) or query or "").strip()
+        resolved_shell = detect_main_brain_intent_shell(text)
+    _set_request_runtime_value(request, "_copaw_main_brain_intent_shell", resolved_shell)
+    _set_request_runtime_value(
+        request,
+        "_copaw_requested_mode_hint",
+        resolved_shell.mode_hint if resolved_shell.active else "",
+    )
+    _set_request_runtime_value(
+        request,
+        "_copaw_resolved_mode_hint",
+        resolved_shell.mode_hint if resolved_shell.active else "",
+    )
+    return resolved_shell
 
 
 def _extract_response_usage(response: AgentResponse) -> Any | None:
@@ -386,6 +422,7 @@ async def _resolve_auto_chat_mode(
     query: str | None,
     request: AgentRequest,
     msgs: list[Any],
+    intent_shell: MainBrainIntentShell | None = None,
 ) -> str:
     """Return the effective interaction mode for chat surface."""
     requested_actions = _normalized_requested_actions(request)
@@ -403,6 +440,12 @@ async def _resolve_auto_chat_mode(
     if not text:
         return "chat"
     if _is_hypothetical_control_text(text):
+        return "chat"
+    if intent_shell is not None and intent_shell.mode_hint in {"plan", "review"}:
+        return "chat"
+    if intent_shell is not None and intent_shell.mode_hint in {"resume", "verify"}:
+        if _request_has_active_confirmation_or_continuity(request=request):
+            return "orchestrate"
         return "chat"
     has_cognitive_pressure = _request_has_unresolved_cognitive_pressure(request=request)
     if not has_cognitive_pressure and _is_plain_acknowledgement(text):
@@ -443,6 +486,7 @@ async def _resolve_effective_interaction_mode(
     request: AgentRequest,
     msgs: list[Any],
     query: str | None,
+    intent_shell: MainBrainIntentShell | None = None,
 ) -> str:
     interaction_mode = _resolve_interaction_mode(request)
     if interaction_mode != "auto":
@@ -451,6 +495,7 @@ async def _resolve_effective_interaction_mode(
         query=query,
         request=request,
         msgs=msgs,
+        intent_shell=intent_shell,
     )
 
 
@@ -460,6 +505,11 @@ async def _prepare_request_interaction_mode(
     msgs: list[Any],
     query: str | None,
 ) -> tuple[str, str]:
+    intent_shell = _prepare_request_intent_shell(
+        request=request,
+        msgs=msgs,
+        query=query,
+    )
     current_requested_interaction_mode = _resolve_interaction_mode(request)
     current_cache_key = _interaction_mode_cache_key(
         request=request,
@@ -494,6 +544,7 @@ async def _prepare_request_interaction_mode(
         request=request,
         msgs=msgs,
         query=query,
+        intent_shell=intent_shell,
     )
     _set_request_runtime_value(
         request,

@@ -5,6 +5,7 @@ from typing import AsyncIterator
 
 from agentscope_runtime.engine.schemas.agent_schemas import AgentRequest, SequenceNumberGenerator
 
+from ..kernel.main_brain_intent_shell import read_attached_main_brain_intent_shell
 from .routers.runtime_center_shared import _encode_sse_event
 
 
@@ -243,6 +244,7 @@ def _build_sidecar_events(
     runtime_summary = _summarize_runtime_context(runtime_context)
     commit_state = getattr(request_payload, "_copaw_main_brain_commit_state", None)
     timing_profile = _safe_get(request_payload, "_copaw_main_brain_timing")
+    intent_shell = read_attached_main_brain_intent_shell(request=request_payload)
     sidecar_control_thread_id = _first_non_empty(
         _safe_get(commit_state, "control_thread_id"),
         control_thread_id,
@@ -273,6 +275,7 @@ def _build_sidecar_events(
             "environment_session_id": runtime_summary.get("environment_session_id"),
             "writeback_requested": runtime_summary.get("writeback_requested"),
             "should_kickoff": runtime_summary.get("should_kickoff"),
+            "intent_shell": intent_shell.to_payload() if intent_shell is not None else None,
             "timing": timing_profile if isinstance(timing_profile, dict) and timing_profile else None,
         }
     )

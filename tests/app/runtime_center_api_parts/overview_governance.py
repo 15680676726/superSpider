@@ -1122,10 +1122,12 @@ class _CommitAwareTurnExecutor:
         *,
         runtime_context: dict[str, object] | None = None,
         commit_state: MainBrainCommitState | None = None,
+        intent_shell_payload: dict[str, object] | None = None,
         timing_profile: dict[str, object] | None = None,
     ) -> None:
         self.runtime_context = dict(runtime_context or {})
         self.commit_state = commit_state
+        self.intent_shell_payload = dict(intent_shell_payload or {})
         self.timing_profile = dict(timing_profile or {})
 
     async def stream_request(
@@ -1139,6 +1141,8 @@ class _CommitAwareTurnExecutor:
             setattr(request_payload, "_copaw_main_brain_runtime_context", self.runtime_context)
         if self.commit_state is not None:
             setattr(request_payload, "_copaw_main_brain_commit_state", self.commit_state)
+        if self.intent_shell_payload:
+            setattr(request_payload, "_copaw_main_brain_intent_shell", self.intent_shell_payload)
         if self.timing_profile:
             setattr(request_payload, "_copaw_main_brain_timing", self.timing_profile)
         yield {
@@ -1337,6 +1341,59 @@ def test_runtime_center_chat_run_turn_reply_done_includes_main_brain_timing_prof
         "first_output_ms": 146.4,
         "prompt_context_cache_hit": True,
         "lexical_recall_mode": "skip_short_followup",
+    }
+
+
+def test_runtime_center_chat_run_turn_reply_done_includes_intent_shell_payload() -> None:
+    app = build_runtime_center_app()
+    control_thread_id = "industry-chat:industry-v1-ops:intent-shell"
+    app.state.turn_executor = _CommitAwareTurnExecutor(
+        intent_shell_payload={
+            "mode_hint": "plan",
+            "trigger_source": "keyword",
+            "matched_text": "计划",
+            "confidence": 0.95,
+        }
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-intent-shell",
+            "session_id": "session-intent-shell",
+            "user_id": "ops-user",
+            "channel": "console",
+            "thread_id": control_thread_id,
+            "control_thread_id": control_thread_id,
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "先做个计划，再动手。"}],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    sidecar_events = [
+        event
+        for event in _parse_sse_events(response.text)
+        if event.get("object") == "runtime.sidecar"
+    ]
+    assert sidecar_events[0]["event"] == "turn_reply_done"
+    assert sidecar_events[0]["payload"]["intent_shell"] == {
+        "mode_hint": "plan",
+        "label": "PLAN",
+        "summary": "Use a compact planning shell for this reply.",
+        "hint": (
+            "Goal, constraints, affected scope/files, checklist, acceptance criteria, "
+            "verification steps."
+        ),
+        "trigger_source": "keyword",
+        "matched_text": "计划",
+        "confidence": 0.95,
     }
 
 

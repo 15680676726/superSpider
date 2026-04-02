@@ -56,6 +56,7 @@ import sessionApi from "./sessionApi";
 import { ChatComposerAdapter } from "./ChatComposerAdapter";
 import { ChatCommitConfirmationCard } from "./ChatCommitConfirmationCard";
 import { ChatHumanAssistPanel } from "./ChatHumanAssistPanel";
+import { ChatIntentShellCard } from "./ChatIntentShellCard";
 import { ChatRuntimeSidebar } from "./ChatRuntimeSidebar";
 import { useChatMedia } from "./useChatMedia";
 import { useChatRuntimeState } from "./useChatRuntimeState";
@@ -484,6 +485,7 @@ export default function ChatPage() {
     rejectCommitDecisions,
     sessionKind,
     runtimeCommitState,
+    runtimeIntentShell,
   } = runtimeState;
 
   const {
@@ -566,6 +568,14 @@ export default function ChatPage() {
           {/* 顶部状态条 */}
           <ChatRuntimeSidebar
             bindingLabel={bindingLabel}
+            shellModeLabel={
+              runtimeIntentShell ? `Shell: ${runtimeIntentShell.label}` : null
+            }
+            shellModeHint={
+              runtimeIntentShell
+                ? `Mode: ${runtimeIntentShell.label} | trigger=${runtimeIntentShell.triggerSource ?? "unknown"}`
+                : null
+            }
             threadKindLabel={threadKindLabel}
             threadKindHint={threadKindHint}
             focusLabel={focusLabel}
@@ -586,6 +596,7 @@ export default function ChatPage() {
             activeChatThreadId={activeChatThreadId}
             threadMeta={threadMeta}
           />
+          <ChatIntentShellCard shell={runtimeIntentShell} />
           <ChatCommitConfirmationCard
             state={runtimeCommitState}
             approveBusy={approveCommitBusy}
