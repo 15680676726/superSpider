@@ -54,6 +54,33 @@ _TOOL_EXECUTORS = {
     "tool:write_file": write_file,
 }
 
+_READ_ONLY_EVIDENCE_CONTRACTS = frozenset(
+    {
+        "call-record",
+        "file-read",
+        "screenshot-artifact",
+    },
+)
+_WRITE_EVIDENCE_CONTRACTS = frozenset(
+    {
+        "browser-action",
+        "browser-artifact",
+        "file-edit",
+        "file-transfer",
+        "file-write",
+        "shell-command",
+    },
+)
+_TOOL_BRIDGE_EVIDENCE_CONTRACTS = frozenset(
+    {
+        "browser-action",
+        "browser-artifact",
+        "file-edit",
+        "file-write",
+        "shell-command",
+    },
+)
+
 
 class CapabilityExecutionFacade:
     def __init__(
@@ -167,9 +194,12 @@ class CapabilityExecutionFacade:
             payload.setdefault("owner_agent_id", task.owner_agent_id)
             payload.setdefault("goal_id", task.goal_id)
             payload.setdefault("environment_ref", task.environment_ref)
-        execution_context = self._build_execution_context(task, payload=payload)
-
         mount = self._get_capability(capability_id)
+        execution_context = self._build_execution_context(
+            task,
+            payload=payload,
+            mount=mount,
+        )
         if mount is None:
             summary = f"Capability '{capability_id}' not found"
             return self._build_execution_result(
@@ -296,12 +326,10 @@ class CapabilityExecutionFacade:
             candidate = output_dict.get("evidence_metadata")
             if isinstance(candidate, dict):
                 extra_evidence_metadata = _json_safe(candidate)
-        handled_by_tool_bridge = self._tool_bridge is not None and capability_id in {
-            "tool:browser_use",
-            "tool:edit_file",
-            "tool:execute_shell_command",
-            "tool:write_file",
-        }
+        handled_by_tool_bridge = (
+            self._tool_bridge is not None
+            and self._resolve_evidence_owner(mount) == "tool-bridge"
+        )
         if not handled_by_tool_bridge:
             evidence_id = self._append_execution_evidence(
                 task=task,
@@ -335,29 +363,58 @@ class CapabilityExecutionFacade:
         task: "KernelTask",
         *,
         payload: dict[str, object],
+        mount: "CapabilityMount | None",
     ) -> CapabilityExecutionContext:
         return CapabilityExecutionContext.from_kernel_task(
             task,
-            action_mode=self._resolve_action_mode(task.capability_ref),
+            action_mode=self._resolve_action_mode(mount),
             payload=payload,
         )
 
     @staticmethod
-    def _resolve_action_mode(capability_ref: str | None) -> str | None:
-        if capability_ref in {
-            "tool:desktop_screenshot",
-            "tool:get_current_time",
-            "tool:read_file",
-        }:
+    def _resolve_action_mode(mount: "CapabilityMount | None") -> str | None:
+        if mount is None:
+            return None
+        declared = CapabilityExecutionFacade._execution_policy_value(
+            mount,
+            "action_mode",
+        )
+        if declared in {"read", "write"}:
+            return declared
+        contracts = set(mount.evidence_contract)
+        if contracts & _READ_ONLY_EVIDENCE_CONTRACTS:
             return "read"
-        if capability_ref in {
-            "tool:browser_use",
-            "tool:edit_file",
-            "tool:execute_shell_command",
-            "tool:send_file_to_user",
-            "tool:write_file",
-        }:
+        if contracts & _WRITE_EVIDENCE_CONTRACTS:
             return "write"
+        return None
+
+    @staticmethod
+    def _resolve_evidence_owner(mount: "CapabilityMount | None") -> str:
+        if mount is None:
+            return "execution-facade"
+        declared = CapabilityExecutionFacade._execution_policy_value(
+            mount,
+            "evidence_owner",
+        )
+        if declared in {"execution-facade", "tool-bridge"}:
+            return declared
+        contracts = set(mount.evidence_contract)
+        if mount.source_kind == "tool" and contracts & _TOOL_BRIDGE_EVIDENCE_CONTRACTS:
+            return "tool-bridge"
+        return "execution-facade"
+
+    @staticmethod
+    def _execution_policy_value(
+        mount: "CapabilityMount",
+        key: str,
+    ) -> str | None:
+        policy = mount.metadata.get("execution_policy")
+        if not isinstance(policy, dict):
+            return None
+        value = policy.get(key)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return normalized or None
         return None
 
     @staticmethod

@@ -9,6 +9,8 @@ from typing import Any
 from ..industry.identity import is_execution_core_agent_id
 from .actor_mailbox import ActorMailboxService
 from .child_run_shell import (
+    resolve_child_run_mcp_manager,
+    resolve_child_run_mcp_overlay_contract,
     resolve_child_run_writer_contract,
     run_child_task_with_writer_lease,
 )
@@ -31,6 +33,7 @@ class ActorWorker:
         mailbox_service: ActorMailboxService,
         kernel_dispatcher: object | None = None,
         environment_service: object | None = None,
+        mcp_manager: object | None = None,
         agent_runtime_repository: object | None = None,
         experience_memory_service: object | None = None,
         lease_ttl_seconds: int = 180,
@@ -40,6 +43,7 @@ class ActorWorker:
         self._mailbox_service = mailbox_service
         self._kernel_dispatcher = kernel_dispatcher
         self._environment_service = environment_service
+        self._mcp_manager = mcp_manager
         self._agent_runtime_repository = agent_runtime_repository
         self._experience_memory_service = experience_memory_service
         self._lease_ttl_seconds = max(30, lease_ttl_seconds)
@@ -195,6 +199,13 @@ class ActorWorker:
     ) -> Any:
         heartbeat = self._build_actor_lease_heartbeat(lease)
         contract = resolve_child_run_writer_contract(mailbox_item=mailbox_item)
+        mcp_overlay_contract = resolve_child_run_mcp_overlay_contract(
+            mailbox_item=mailbox_item,
+        )
+        mcp_manager = resolve_child_run_mcp_manager(
+            kernel_dispatcher=self._kernel_dispatcher,
+            mcp_manager=self._mcp_manager,
+        )
 
         async def _execute() -> Any:
             if heartbeat is None:
@@ -209,6 +220,8 @@ class ActorWorker:
             owner_agent_id=agent_id,
             worker_id=self._worker_id,
             contract=contract,
+            mcp_manager=mcp_manager,
+            mcp_overlay_contract=mcp_overlay_contract,
             ttl_seconds=self._lease_ttl_seconds,
             heartbeat_interval_seconds=self._lease_heartbeat_interval_seconds,
         )

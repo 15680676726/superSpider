@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from copaw.skill_service import SkillService
+
+
+def _patch_skill_dirs(monkeypatch, tmp_path) -> tuple[Path, Path, Path]:
+    builtin_dir = tmp_path / "builtin"
+    customized_dir = tmp_path / "customized"
+    active_dir = tmp_path / "active"
+    builtin_dir.mkdir()
+    customized_dir.mkdir()
+    active_dir.mkdir()
+    monkeypatch.setattr("copaw.skill_service.get_builtin_skills_dir", lambda: builtin_dir)
+    monkeypatch.setattr("copaw.skill_service.get_customized_skills_dir", lambda: customized_dir)
+    monkeypatch.setattr("copaw.skill_service.get_active_skills_dir", lambda: active_dir)
+    return builtin_dir, customized_dir, active_dir
+
+
+def test_skill_service_create_skill_rejects_path_traversal_in_tree_keys(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _, customized_dir, _ = _patch_skill_dirs(monkeypatch, tmp_path)
+
+    created = SkillService.create_skill(
+        name="research",
+        content="---\nname: research\ndescription: Research skill\n---\n# Research\n",
+        references={"..": {"escape.md": "bad"}},
+    )
+
+    assert created is False
+    assert not (customized_dir / "escape.md").exists()
+    assert not (customized_dir / "research" / "references" / "escape.md").exists()
+
+
+def test_skill_service_create_skill_rejects_duplicate_package_identity(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _, customized_dir, _ = _patch_skill_dirs(monkeypatch, tmp_path)
+    existing_dir = customized_dir / "existing"
+    existing_dir.mkdir()
+    (existing_dir / "SKILL.md").write_text(
+        """---
+name: existing
+description: Existing skill
+package_ref: https://github.com/acme/skills/tree/main/research
+package_kind: hub-bundle
+package_version: 1.0.0
+---
+# Existing
+""",
+        encoding="utf-8",
+    )
+
+    created = SkillService.create_skill(
+        name="research",
+        content="""---
+name: research
+description: Research skill
+package_ref: https://github.com/acme/skills/tree/main/research
+package_kind: hub-bundle
+package_version: 1.0.0
+---
+# Research
+""",
+    )
+
+    assert created is False
+    assert not (customized_dir / "research").exists()

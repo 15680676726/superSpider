@@ -9,7 +9,10 @@ import frontmatter
 from ..agents.skills_hub import install_skill_from_hub as _install_skill_from_hub
 from ..skill_service import (
     SkillService,
+    SkillFrontmatterError,
+    find_skill_package_identity_conflict,
     list_available_skills,
+    parse_skill_frontmatter,
     sync_skills_to_working_dir as sync_skills_to_working_dir_fn,
 )
 
@@ -82,6 +85,36 @@ class CapabilitySkillService:
                 return skill
         return None
 
+    def _has_package_identity_conflict(
+        self,
+        *,
+        skill_name: str,
+        package_ref: str,
+        package_kind: str,
+        package_version: str,
+    ) -> bool:
+        candidate_identity = (
+            package_ref,
+            package_kind or None,
+            package_version or None,
+        )
+        for existing_skill in self.list_all_skills():
+            existing_name = _normalize_text(getattr(existing_skill, "name", None))
+            if not existing_name or existing_name == skill_name:
+                continue
+            binding = self.read_skill_package_binding(existing_skill)
+            existing_identity = (
+                _normalize_package_ref(
+                    binding.get("package_ref"),
+                    package_kind=binding.get("package_kind"),
+                ),
+                _normalize_package_kind(binding.get("package_kind")) or None,
+                _normalize_package_version(binding.get("package_version")) or None,
+            )
+            if existing_identity == candidate_identity:
+                return True
+        return False
+
     def read_skill_package_binding(self, skill: Any) -> dict[str, str | None]:
         content = getattr(skill, "content", "")
         package_ref = ""
@@ -89,16 +122,15 @@ class CapabilitySkillService:
         package_version = ""
         if isinstance(content, str) and content.strip():
             try:
-                post = frontmatter.loads(content)
-            except Exception:
-                post = None
-            if post is not None:
-                package_kind = _normalize_package_kind(post.get("package_kind"))
-                package_ref = _normalize_package_ref(
-                    post.get("package_ref"),
-                    package_kind=package_kind,
-                )
-                package_version = _normalize_package_version(post.get("package_version"))
+                post = parse_skill_frontmatter(content)
+            except SkillFrontmatterError as exc:
+                raise ValueError(str(exc)) from exc
+            package_kind = _normalize_package_kind(post.get("package_kind"))
+            package_ref = _normalize_package_ref(
+                post.get("package_ref"),
+                package_kind=package_kind,
+            )
+            package_version = _normalize_package_version(post.get("package_version"))
         if not package_ref:
             package_ref = _normalize_package_ref(
                 getattr(skill, "path", None),
@@ -129,7 +161,7 @@ class CapabilitySkillService:
             return False
         try:
             content = skill_md_path.read_text(encoding="utf-8")
-            post = frontmatter.loads(content)
+            post = parse_skill_frontmatter(content)
         except Exception:
             return False
         normalized_package_kind = _normalize_package_kind(package_kind)
@@ -139,6 +171,21 @@ class CapabilitySkillService:
         )
         if not normalized_package_kind:
             normalized_package_kind = _skill_package_kind_from_ref(normalized_package_ref)
+        conflict = find_skill_package_identity_conflict(
+            skill_name=skill_name,
+            package_identity=(
+                normalized_package_ref,
+                normalized_package_kind or None,
+                _normalize_package_version(package_version) or None,
+            ),
+        )
+        if conflict is not None or self._has_package_identity_conflict(
+            skill_name=skill_name,
+            package_ref=normalized_package_ref,
+            package_kind=normalized_package_kind,
+            package_version=_normalize_package_version(package_version),
+        ):
+            return False
         package_fields = {
             "package_ref": normalized_package_ref,
             "package_kind": normalized_package_kind,
@@ -168,17 +215,21 @@ class CapabilitySkillService:
         result = install_skill_from_hub(**kwargs)
         skill_name = _normalize_text(getattr(result, "name", None))
         package_ref = _normalize_text(
-            getattr(result, "source_url", None) or kwargs.get("bundle_url"),
+            kwargs.get("bundle_url") or getattr(result, "source_url", None),
         )
         package_kind = _skill_package_kind_from_ref(package_ref)
         package_version = _normalize_text(kwargs.get("version"))
         if skill_name and package_ref:
-            self.bind_skill_package_metadata(
+            bound = self.bind_skill_package_metadata(
                 skill_name=skill_name,
                 package_ref=package_ref,
                 package_kind=package_kind,
                 package_version=package_version,
             )
+            if not bound:
+                raise RuntimeError(
+                    f"Failed to bind package metadata for skill '{skill_name}'.",
+                )
             for key, value in (
                 ("package_ref", package_ref),
                 ("package_kind", package_kind),

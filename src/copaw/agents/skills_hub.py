@@ -509,6 +509,43 @@ def _is_http_url(text: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
+def _is_supported_bundle_source(url: str) -> bool:
+    return bool(
+        is_skillhub_url(url)
+        or _extract_skills_sh_spec(url) is not None
+        or _extract_github_spec(url) is not None
+        or _extract_skillsmp_spec(url) is not None
+    )
+
+
+def _inject_package_metadata(
+    content: str,
+    *,
+    package_ref: str,
+    package_version: str,
+) -> str:
+    try:
+        post = frontmatter.loads(content)
+    except Exception as exc:
+        raise ValueError(
+            "Hub bundle SKILL.md must contain valid YAML Front Matter.",
+        ) from exc
+    skill_name = str(post.get("name") or "").strip()
+    description = str(post.get("description") or "").strip()
+    if not skill_name or not description:
+        raise ValueError(
+            "Hub bundle SKILL.md front matter must include non-empty 'name' and 'description'.",
+        )
+    post["package_ref"] = package_ref
+    post["package_kind"] = "hub-bundle"
+    normalized_version = str(package_version or "").strip()
+    if normalized_version:
+        post["package_version"] = normalized_version
+    else:
+        post.metadata.pop("package_version", None)
+    return frontmatter.dumps(post)
+
+
 def _extract_clawhub_slug_from_url(url: str) -> str:
     parsed = urlparse(url)
     host = (parsed.netloc or "").lower()
@@ -1157,6 +1194,10 @@ def install_skill_from_hub(
 
     if not bundle_url or not _is_http_url(bundle_url):
         raise ValueError("bundle_url must be a valid http(s) URL")
+    if not _is_supported_bundle_source(bundle_url):
+        raise ValueError(
+            "Unsupported skill bundle source. Use a validated SkillHub, GitHub, skills.sh, or skillsmp URL.",
+        )
 
     skills_spec = _extract_skills_sh_spec(bundle_url)
     if skills_spec is not None:
@@ -1187,14 +1228,19 @@ def install_skill_from_hub(
                         raise ValueError(
                             "该远程技能地址已不在当前支持列表，请改用 SkillHub 商店链接。",
                         )
-                    else:
-                        # Backward-compatible fallback for direct bundle JSON URLs
-                        data = _http_json_get(bundle_url)
+                    raise ValueError(
+                        "Unsupported skill bundle source. Use a validated SkillHub, GitHub, skills.sh, or skillsmp URL.",
+                    )
 
     name, content, references, scripts, extra_files = _normalize_bundle(data)
     if not name:
         fallback = urlparse(bundle_url).path.strip("/").split("/")[-1]
         name = _safe_fallback_name(fallback)
+    content = _inject_package_metadata(
+        content,
+        package_ref=bundle_url,
+        package_version=version,
+    )
 
     created = SkillService.create_skill(
         name=name,

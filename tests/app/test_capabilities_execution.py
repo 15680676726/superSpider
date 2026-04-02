@@ -1012,6 +1012,161 @@ def test_file_execution_builds_internal_execution_context(tmp_path) -> None:
     assert result["action_mode"] == "read"
 
 
+def test_mount_declared_action_mode_overrides_capability_id_fallback(
+    tmp_path,
+) -> None:
+    target = tmp_path / "notes.txt"
+    target.write_text("hello world", encoding="utf-8")
+    capability_service = CapabilityService(
+        registry=StaticCapabilityRegistry(
+            CapabilityMount(
+                id="tool:read_file",
+                name="read_file",
+                summary="Read a file.",
+                kind="local-tool",
+                source_kind="tool",
+                risk_level="auto",
+                environment_requirements=["workspace", "file-view"],
+                evidence_contract=["file-read"],
+                role_access_policy=["all"],
+                enabled=True,
+                metadata={
+                    "execution_policy": {
+                        "action_mode": "write",
+                        "evidence_owner": "execution-facade",
+                    },
+                },
+            ),
+        ),
+        evidence_ledger=EvidenceLedger(),
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                title="Read file with mount-declared policy",
+                capability_ref="tool:read_file",
+                owner_agent_id="copaw-operator",
+                environment_ref="session:console:test",
+                payload={"file_path": str(target)},
+            ),
+        ),
+    )
+
+    assert result["success"] is True
+    assert result["action_mode"] == "write"
+
+
+def test_mount_declared_action_mode_falls_back_when_metadata_missing(
+    tmp_path,
+) -> None:
+    target = tmp_path / "notes.txt"
+    target.write_text("hello world", encoding="utf-8")
+    capability_service = CapabilityService(
+        registry=StaticCapabilityRegistry(
+            CapabilityMount(
+                id="tool:read_file",
+                name="read_file",
+                summary="Read a file.",
+                kind="local-tool",
+                source_kind="tool",
+                risk_level="auto",
+                environment_requirements=["workspace", "file-view"],
+                evidence_contract=["file-read"],
+                role_access_policy=["all"],
+                enabled=True,
+            ),
+        ),
+        evidence_ledger=EvidenceLedger(),
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                title="Read file with fallback policy",
+                capability_ref="tool:read_file",
+                owner_agent_id="copaw-operator",
+                environment_ref="session:console:test",
+                payload={"file_path": str(target)},
+            ),
+        ),
+    )
+
+    assert result["success"] is True
+    assert result["action_mode"] == "read"
+
+
+def test_mount_declared_evidence_owner_can_prefer_execution_facade_over_tool_bridge(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(
+        "copaw.agents.tools.shell._execute_subprocess_sync",
+        lambda cmd, cwd, timeout: (0, "hello world", ""),
+    )
+    state_store = SQLiteStateStore(tmp_path / "tool-bridge-policy-state.db")
+    evidence_ledger = EvidenceLedger(tmp_path / "tool-bridge-policy-evidence.db")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    runtime_frame_repository = SqliteRuntimeFrameRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    task_store = KernelTaskStore(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        runtime_frame_repository=runtime_frame_repository,
+        decision_request_repository=decision_request_repository,
+        evidence_ledger=evidence_ledger,
+    )
+    tool_bridge = KernelToolBridge(task_store=task_store)
+    capability_service = CapabilityService(
+        registry=StaticCapabilityRegistry(
+            CapabilityMount(
+                id="tool:execute_shell_command",
+                name="execute_shell_command",
+                summary="Execute a shell command.",
+                kind="local-tool",
+                source_kind="tool",
+                risk_level="guarded",
+                environment_requirements=["workspace"],
+                evidence_contract=["shell-command", "stdout", "stderr"],
+                role_access_policy=["all"],
+                enabled=True,
+                metadata={
+                    "execution_policy": {
+                        "action_mode": "write",
+                        "evidence_owner": "execution-facade",
+                    },
+                },
+            ),
+        ),
+        evidence_ledger=evidence_ledger,
+        tool_bridge=tool_bridge,
+    )
+    dispatcher = KernelDispatcher(
+        task_store=task_store,
+        capability_service=capability_service,
+    )
+
+    task = KernelTask(
+        title="Shell command with mount-declared evidence owner",
+        capability_ref="tool:execute_shell_command",
+        owner_agent_id="copaw-operator",
+        environment_ref="session:console:test",
+        payload={"command": "echo hello", "cwd": str(tmp_path)},
+    )
+    admitted = dispatcher.submit(task)
+    assert admitted.phase == "executing"
+
+    payload = asyncio.run(
+        capability_service.execute_task(task_store.get(admitted.task_id)),
+    )
+
+    assert payload["success"] is True
+    assert payload["evidence_id"] is not None
+    records = evidence_ledger.list_by_task(admitted.task_id)
+    assert any(record.id == payload["evidence_id"] for record in records)
+
+
 def test_shell_execution_writes_evidence_via_unified_contract(
     monkeypatch,
     tmp_path,

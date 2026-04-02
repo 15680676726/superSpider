@@ -1507,6 +1507,19 @@ def build_task_review_payload(
             "latest_anchor": latest_anchor,
         },
     }
+    typed_verification_truth = bool(
+        first_non_empty(
+            handoff_checkpoint.get("verification_status") if handoff_checkpoint is not None else None,
+            handoff_checkpoint.get("reason") if handoff_checkpoint is not None else None,
+            browser_site_contract.get("verification_status") if browser_site_contract is not None else None,
+            browser_site_contract.get("verification_reason") if browser_site_contract is not None else None,
+            desktop_app_contract.get("verification_status") if desktop_app_contract is not None else None,
+            desktop_app_contract.get("verification_reason") if desktop_app_contract is not None else None,
+            latest_evidence_closeout.get("verification_status"),
+            latest_evidence_closeout.get("verification_reason"),
+            handoff_state,
+        )
+    ) or recovery_active
     evidence_status = summarize_evidence_status(getattr(task, "id", ""), evidence)
     execution_state, blocked_reason, stuck_reason = derive_review_execution_state(
         status=status,
@@ -1522,6 +1535,12 @@ def build_task_review_payload(
             if runtime is not None
             else getattr(task, "updated_at", None)
         ),
+        continuity=continuity,
+        host_blocked=host_blocked,
+        host_blocker_reason=host_blocker_reason,
+        recovery_active=recovery_active,
+        latest_evidence_closeout=latest_evidence_closeout,
+        typed_verification_truth=typed_verification_truth,
     )
 
     if pending_decision_count:
@@ -1841,12 +1860,58 @@ def derive_review_execution_state(
     latest_evidence_summary: str | None,
     latest_error_summary: str | None,
     updated_at: datetime | None,
+    continuity: dict[str, object] | None = None,
+    host_blocked: bool = False,
+    host_blocker_reason: str | None = None,
+    recovery_active: bool = False,
+    latest_evidence_closeout: dict[str, str | None] | None = None,
+    typed_verification_truth: bool = False,
 ) -> tuple[str, str | None, str | None]:
     detail_text = first_non_empty(
         latest_error_summary,
         latest_result_summary,
         latest_evidence_summary,
     )
+    continuity_payload = dict_from_value(continuity) or {}
+    handoff_payload = dict_from_value(continuity_payload.get("handoff")) or {}
+    verification_payload = dict_from_value(continuity_payload.get("verification")) or {}
+    typed_verification_status = _canonicalize_verification_status(
+        first_non_empty(
+            verification_payload.get("status"),
+            latest_evidence_closeout.get("verification_status")
+            if latest_evidence_closeout is not None
+            else None,
+        ),
+    )
+    typed_verification_reason = first_non_empty(
+        verification_payload.get("reason"),
+        latest_evidence_closeout.get("verification_reason")
+        if latest_evidence_closeout is not None
+        else None,
+    )
+    typed_handoff_state = first_non_empty(handoff_payload.get("state"))
+    explicit_verification_truth = (
+        typed_verification_truth
+        or typed_handoff_state is not None
+        or recovery_active
+    )
+    typed_verification_blockers = {
+        "awaiting",
+        "blocked",
+        "failed",
+        "need-more-evidence",
+        "pending",
+        "required",
+        "unverified",
+        "waiting",
+    }
+    typed_verification_success = {
+        "completed",
+        "passed",
+        "ready",
+        "success",
+        "verified",
+    }
     verification_markers = (
         "验证码",
         "短信",
@@ -1869,6 +1934,41 @@ def derive_review_execution_state(
 
     if pending_decision_count:
         return "awaiting-decision", "pending-decision", None
+    if typed_verification_status is not None:
+        verification_key = typed_verification_status.strip().lower()
+        if verification_key in typed_verification_blockers:
+            if host_blocked and not explicit_verification_truth:
+                return (
+                    "blocked",
+                    "runtime-blocked",
+                    first_non_empty(host_blocker_reason, detail_text),
+                )
+            return (
+                "awaiting-verification",
+                "verification-gate",
+                first_non_empty(typed_verification_reason, host_blocker_reason, detail_text),
+            )
+        if (
+            verification_key not in typed_verification_success
+            and (typed_handoff_state is not None or recovery_active)
+        ):
+            return (
+                "awaiting-verification",
+                "verification-gate",
+                first_non_empty(typed_verification_reason, host_blocker_reason, detail_text),
+            )
+    elif typed_handoff_state is not None or recovery_active:
+        return (
+            "awaiting-verification",
+            "verification-gate",
+            first_non_empty(typed_verification_reason, host_blocker_reason, detail_text),
+        )
+    if host_blocked:
+        return (
+            "blocked",
+            "runtime-blocked",
+            first_non_empty(host_blocker_reason, detail_text),
+        )
     if status in {"blocked", "waiting-confirm"}:
         if matches_checkpoint_text(detail_text, verification_markers):
             return "awaiting-verification", "verification-gate", detail_text

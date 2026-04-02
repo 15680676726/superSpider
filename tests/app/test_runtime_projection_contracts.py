@@ -862,3 +862,114 @@ def test_build_task_review_payload_prefers_canonical_host_twin_summary_for_reent
     )
     assert not any("Handoff is active" in risk for risk in payload["risks"])
     assert not any("Host blocker detected" in risk for risk in payload["risks"])
+
+
+def test_build_task_review_payload_typed_review_state_prefers_verification_truth() -> None:
+    now = datetime(2026, 4, 2, 9, 0, tzinfo=timezone.utc)
+    task = SimpleNamespace(
+        id="task-typed-review-verification-1",
+        title="Resume after typed verification closeout",
+        summary="Typed verification state should drive review projection.",
+        owner_agent_id="ops-agent",
+        status="running",
+        acceptance_criteria='{"kind":"kernel-task-meta-v1"}',
+        updated_at=now,
+    )
+    runtime = SimpleNamespace(
+        current_phase="executing",
+        runtime_status="blocked",
+        last_result_summary="Execution is paused while the closeout checkpoint stays unresolved.",
+        last_error_summary=None,
+        updated_at=now,
+        risk_level="guarded",
+    )
+    evidence = [
+        EvidenceRecord(
+            id="evidence-typed-review-verification-1",
+            task_id="task-typed-review-verification-1",
+            actor_ref="ops-agent",
+            risk_level="guarded",
+            action_summary="Record closeout checkpoint",
+            result_summary="Closeout checkpoint is paused until fresh host proof arrives.",
+            created_at=now,
+            metadata={
+                "verification": {
+                    "status": "required",
+                    "reason": "fresh-host-proof-required",
+                    "checkpoint": {
+                        "checkpoint_id": "checkpoint:host-proof",
+                    },
+                },
+            },
+        ),
+    ]
+
+    payload = build_task_review_payload(
+        task=task,
+        runtime=runtime,
+        decisions=[],
+        evidence=evidence,
+        execution_feedback={},
+        child_results=[],
+        owner_agent={"name": "Ops Agent"},
+        task_route=task_route("task-typed-review-verification-1"),
+    )
+
+    assert payload["continuity"]["verification"]["status"] == "required"
+    assert payload["continuity"]["verification"]["reason"] == "fresh-host-proof-required"
+    assert payload["execution_state"] == "awaiting-verification"
+    assert payload["blocked_reason"] == "verification-gate"
+    assert payload["stuck_reason"] == "fresh-host-proof-required"
+
+
+def test_build_task_review_payload_typed_review_state_uses_host_blocker_truth() -> None:
+    now = datetime(2026, 4, 2, 9, 30, tzinfo=timezone.utc)
+    task = SimpleNamespace(
+        id="task-typed-review-host-blocker-1",
+        title="Pause on host blocker",
+        summary="Typed host blockers should override optimistic runtime text.",
+        owner_agent_id="ops-agent",
+        status="running",
+        acceptance_criteria='{"kind":"kernel-task-meta-v1"}',
+        updated_at=now,
+    )
+    runtime = SimpleNamespace(
+        current_phase="executing",
+        runtime_status="active",
+        last_result_summary="Writer flow is still open in the current runtime loop.",
+        last_error_summary=None,
+        updated_at=now,
+        risk_level="guarded",
+    )
+
+    payload = build_task_review_payload(
+        task=task,
+        runtime=runtime,
+        decisions=[],
+        evidence=[],
+        execution_feedback={
+            "host_twin": {
+                "blocked_surfaces": [
+                    {
+                        "surface_kind": "desktop_app",
+                        "surface_ref": "window:excel:orders",
+                        "reason": "uac-prompt",
+                        "event_family": "modal-uac-login",
+                    },
+                ],
+            },
+            "host_contract": {
+                "status": "blocked",
+                "blocked_reason": "uac-prompt",
+                "verification_channel": "runtime-center-self-check",
+            },
+        },
+        child_results=[],
+        owner_agent={"name": "Ops Agent"},
+        task_route=task_route("task-typed-review-host-blocker-1"),
+    )
+
+    assert payload["execution_runtime"]["host"]["blocked_reason"] == "uac-prompt"
+    assert payload["execution_state"] == "blocked"
+    assert payload["blocked_reason"] == "runtime-blocked"
+    assert payload["stuck_reason"] == "modal-uac-login"

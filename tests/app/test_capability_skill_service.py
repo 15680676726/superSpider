@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import frontmatter
+import pytest
 
 from copaw.capabilities import CapabilityMount, CapabilityService, CapabilityRegistry
 from copaw.capabilities.skill_service import CapabilitySkillService
@@ -242,3 +243,110 @@ description: Research skill
     assert updated["package_ref"] == str(Path(non_canonical_ref).resolve())
     assert updated["package_kind"] == "filesystem"
     assert str(updated["package_version"]) == "2026.04"
+
+
+def test_capability_skill_service_read_skill_package_binding_rejects_invalid_frontmatter() -> None:
+    service = CapabilitySkillService()
+    skill = SimpleNamespace(
+        name="broken",
+        content="---\nname: [broken\n---\n# Broken\n",
+        source="customized",
+        path="/tmp/broken",
+        references={},
+        scripts={},
+    )
+
+    try:
+        service.read_skill_package_binding(skill)
+    except ValueError as exc:
+        assert "front matter" in str(exc).lower() or "frontmatter" in str(exc).lower()
+    else:
+        raise AssertionError("Expected invalid frontmatter to be rejected")
+
+
+def test_capability_skill_service_bind_skill_package_metadata_rejects_duplicate_identity(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    target_dir = tmp_path / "skills" / "target"
+    target_dir.mkdir(parents=True)
+    target_md = target_dir / "SKILL.md"
+    target_md.write_text(
+        """---
+name: target
+description: Target skill
+---
+# Target
+""",
+        encoding="utf-8",
+    )
+    existing_dir = tmp_path / "skills" / "existing"
+    existing_dir.mkdir(parents=True)
+    existing_md = existing_dir / "SKILL.md"
+    existing_md.write_text(
+        """---
+name: existing
+description: Existing skill
+package_ref: https://github.com/acme/skills/tree/main/research
+package_kind: hub-bundle
+package_version: 1.0.0
+---
+# Existing
+""",
+        encoding="utf-8",
+    )
+    target_skill = SimpleNamespace(
+        name="target",
+        content=target_md.read_text(encoding="utf-8"),
+        source="customized",
+        path=str(target_dir),
+        references={},
+        scripts={},
+    )
+    existing_skill = SimpleNamespace(
+        name="existing",
+        content=existing_md.read_text(encoding="utf-8"),
+        source="customized",
+        path=str(existing_dir),
+        references={},
+        scripts={},
+    )
+    service = CapabilitySkillService()
+    monkeypatch.setattr(
+        service,
+        "find_skill",
+        lambda skill_name: target_skill if skill_name == "target" else None,
+    )
+    monkeypatch.setattr(
+        service,
+        "list_all_skills",
+        lambda: [target_skill, existing_skill],
+    )
+
+    assert (
+        service.bind_skill_package_metadata(
+            skill_name="target",
+            package_ref="https://github.com/acme/skills/tree/main/research",
+            package_kind="hub-bundle",
+            package_version="1.0.0",
+        )
+        is False
+    )
+
+    updated = frontmatter.loads(target_md.read_text(encoding="utf-8"))
+    assert updated.get("package_ref") is None
+
+
+def test_capability_skill_service_read_binding_rejects_invalid_frontmatter() -> None:
+    service = CapabilitySkillService()
+    skill = SimpleNamespace(
+        name="broken",
+        content="---\nname: broken\n: broken\n---\nbody\n",
+        source="customized",
+        path="/tmp/broken",
+        references={},
+        scripts={},
+    )
+
+    with pytest.raises(ValueError, match="Front Matter|front matter|description"):
+        service.read_skill_package_binding(skill)

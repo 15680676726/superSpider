@@ -4,8 +4,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import TYPE_CHECKING, Any, Callable
 
-import frontmatter
-
+from ..skill_service import SkillFrontmatterError, parse_skill_frontmatter
 from ..industry.identity import normalize_industry_role_id
 from .mcp_registry import resolve_mcp_registry_package_binding
 from .models import CapabilityMount, CapabilitySummary
@@ -578,16 +577,15 @@ def _fallback_skill_package_binding(skill: Any) -> dict[str, str | None]:
     content = getattr(skill, "content", "")
     if isinstance(content, str) and content.strip():
         try:
-            post = frontmatter.loads(content)
-        except Exception:
-            post = None
-        if post is not None:
-            package_kind = _normalize_package_kind(post.get("package_kind")) or None
-            package_ref = _normalize_package_ref(
-                post.get("package_ref"),
-                package_kind=package_kind,
-            ) or None
-            package_version = _normalize_package_version(post.get("package_version")) or None
+            post = parse_skill_frontmatter(content)
+        except SkillFrontmatterError as exc:
+            raise ValueError(str(exc)) from exc
+        package_kind = _normalize_package_kind(post.get("package_kind")) or None
+        package_ref = _normalize_package_ref(
+            post.get("package_ref"),
+            package_kind=package_kind,
+        ) or None
+        package_version = _normalize_package_version(post.get("package_version")) or None
     if package_ref is None:
         package_ref = _normalize_package_ref(
             getattr(skill, "path", None),

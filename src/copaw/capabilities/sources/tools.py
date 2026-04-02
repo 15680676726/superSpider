@@ -29,6 +29,12 @@ def list_tool_capabilities() -> list[CapabilityMount]:
                 "evidence_description": "记录命令内容、标准输出和标准错误",
                 "replay_support": True,
                 "tags": ["shell", "execution", "workspace"],
+                "metadata": {
+                    "execution_policy": {
+                        "action_mode": "write",
+                        "evidence_owner": "tool-bridge",
+                    },
+                },
             },
         ),
         (
@@ -42,6 +48,12 @@ def list_tool_capabilities() -> list[CapabilityMount]:
                 "evidence_description": "记录读取的文件路径",
                 "replay_support": True,
                 "tags": ["file", "read-only"],
+                "metadata": {
+                    "execution_policy": {
+                        "action_mode": "read",
+                        "evidence_owner": "execution-facade",
+                    },
+                },
             },
         ),
         (
@@ -55,6 +67,12 @@ def list_tool_capabilities() -> list[CapabilityMount]:
                 "evidence_description": "记录写入的文件路径和内容摘要",
                 "replay_support": True,
                 "tags": ["file", "write"],
+                "metadata": {
+                    "execution_policy": {
+                        "action_mode": "write",
+                        "evidence_owner": "tool-bridge",
+                    },
+                },
             },
         ),
         (
@@ -68,6 +86,12 @@ def list_tool_capabilities() -> list[CapabilityMount]:
                 "evidence_description": "记录编辑的文件路径和变更差异",
                 "replay_support": True,
                 "tags": ["file", "edit"],
+                "metadata": {
+                    "execution_policy": {
+                        "action_mode": "write",
+                        "evidence_owner": "tool-bridge",
+                    },
+                },
             },
         ),
         (
@@ -81,6 +105,12 @@ def list_tool_capabilities() -> list[CapabilityMount]:
                 "evidence_description": "记录浏览器操作和截图等产物",
                 "replay_support": True,
                 "tags": ["browser", "network", "external"],
+                "metadata": {
+                    "execution_policy": {
+                        "action_mode": "write",
+                        "evidence_owner": "tool-bridge",
+                    },
+                },
             },
         ),
         (
@@ -94,6 +124,12 @@ def list_tool_capabilities() -> list[CapabilityMount]:
                 "evidence_description": "记录截图产物",
                 "replay_support": True,
                 "tags": ["desktop", "screenshot"],
+                "metadata": {
+                    "execution_policy": {
+                        "action_mode": "read",
+                        "evidence_owner": "execution-facade",
+                    },
+                },
             },
         ),
         (
@@ -107,6 +143,12 @@ def list_tool_capabilities() -> list[CapabilityMount]:
                 "evidence_description": "记录文件传输路径和目标渠道",
                 "replay_support": False,
                 "tags": ["file", "channel", "transfer"],
+                "metadata": {
+                    "execution_policy": {
+                        "action_mode": "write",
+                        "evidence_owner": "execution-facade",
+                    },
+                },
             },
         ),
         (
@@ -120,6 +162,12 @@ def list_tool_capabilities() -> list[CapabilityMount]:
                 "evidence_description": "记录调用事实",
                 "replay_support": False,
                 "tags": ["utility", "read-only"],
+                "metadata": {
+                    "execution_policy": {
+                        "action_mode": "read",
+                        "evidence_owner": "execution-facade",
+                    },
+                },
             },
         ),
     ]
@@ -143,6 +191,7 @@ def list_tool_capabilities() -> list[CapabilityMount]:
                 executor_ref=func.__module__,
                 replay_support=bool(meta["replay_support"]),
                 tags=list(meta.get("tags", [])),
+                metadata=dict(meta.get("metadata", {})),
             ),
         )
     mounts.sort(key=lambda item: item.id)

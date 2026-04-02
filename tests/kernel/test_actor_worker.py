@@ -87,6 +87,47 @@ class _InterruptibleDispatcher:
         await asyncio.Event().wait()
 
 
+class _RecordingMCPManager:
+    def __init__(self) -> None:
+        self.mount_calls: list[dict[str, object]] = []
+        self.clear_calls: list[str] = []
+
+    async def mount_scope_overlay(
+        self,
+        scope_ref: str,
+        config,
+        *,
+        additive: bool = True,
+        timeout: float = 60.0,
+    ) -> None:
+        self.mount_calls.append(
+            {
+                "scope_ref": scope_ref,
+                "config": config,
+                "additive": additive,
+                "timeout": timeout,
+            },
+        )
+
+    async def clear_scope_overlay(self, scope_ref: str) -> None:
+        self.clear_calls.append(scope_ref)
+
+
+def _mcp_overlay_payload(scope_ref: str) -> dict[str, object]:
+    return {
+        "scope_ref": scope_ref,
+        "clients": {
+            "scoped_worker": {
+                "name": "scoped_worker",
+                "enabled": True,
+                "transport": "stdio",
+                "command": "python",
+                "args": ["-m", "scoped_worker"],
+            },
+        },
+    }
+
+
 def _build_mailbox_runtime(tmp_path):
     state_store = SQLiteStateStore(tmp_path / "actor-worker-state.db")
     runtime_repository = SqliteAgentRuntimeRepository(state_store)
@@ -220,6 +261,96 @@ def test_actor_worker_heartbeats_actor_lease_during_long_execution(tmp_path, mon
     lease = lease_repository.get_lease("actor:agent-1")
     assert lease is not None
     assert lease.lease_status == "released"
+
+
+def test_actor_worker_mcp_overlay_mounts_and_clears_on_success(tmp_path) -> None:
+    mailbox_service, _runtime_repository, _checkpoint_repository, _state_store = _build_mailbox_runtime(
+        tmp_path,
+    )
+    overlay_payload = _mcp_overlay_payload("assignment:task-mcp-success")
+    mailbox_service.enqueue_item(
+        agent_id="agent-1",
+        task_id="task-mcp-success",
+        title="Scoped MCP task",
+        capability_ref="system:dispatch_query",
+        payload={
+            "payload": {
+                "meta": {
+                    "mcp_scope_overlay": overlay_payload,
+                },
+            },
+        },
+        metadata={
+            "mcp_scope_overlay": overlay_payload,
+        },
+    )
+    dispatcher = _SlowDispatcher()
+    mcp_manager = _RecordingMCPManager()
+    dispatcher._capability_service = SimpleNamespace(_mcp_manager=mcp_manager)
+    worker = ActorWorker(
+        worker_id="actor-worker-test",
+        mailbox_service=mailbox_service,
+        kernel_dispatcher=dispatcher,
+    )
+
+    handled = asyncio.run(worker.run_once("agent-1"))
+
+    assert handled is True
+    assert [call["scope_ref"] for call in mcp_manager.mount_calls] == [
+        "assignment:task-mcp-success",
+    ]
+    assert mcp_manager.mount_calls[0]["additive"] is True
+    mounted_config = mcp_manager.mount_calls[0]["config"]
+    assert mounted_config.clients["scoped_worker"].command == "python"
+    assert mcp_manager.clear_calls == ["assignment:task-mcp-success"]
+
+
+def test_actor_worker_mcp_overlay_clears_when_run_is_cancelled(tmp_path) -> None:
+    mailbox_service, _runtime_repository, _checkpoint_repository, _state_store = _build_mailbox_runtime(
+        tmp_path,
+    )
+    overlay_payload = _mcp_overlay_payload("assignment:task-mcp-cancel")
+    item = mailbox_service.enqueue_item(
+        agent_id="agent-1",
+        task_id="task-mcp-cancel",
+        title="Scoped MCP cancel task",
+        capability_ref="system:dispatch_query",
+        payload={
+            "payload": {
+                "meta": {
+                    "mcp_scope_overlay": overlay_payload,
+                },
+            },
+        },
+        metadata={
+            "mcp_scope_overlay": overlay_payload,
+        },
+    )
+    dispatcher = _InterruptibleDispatcher()
+    mcp_manager = _RecordingMCPManager()
+    dispatcher._capability_service = SimpleNamespace(_mcp_manager=mcp_manager)
+    worker = ActorWorker(
+        worker_id="actor-worker-test",
+        mailbox_service=mailbox_service,
+        kernel_dispatcher=dispatcher,
+    )
+
+    async def _run() -> bool:
+        task = asyncio.create_task(worker.run_once("agent-1"))
+        await dispatcher.started.wait()
+        task.cancel()
+        return await task
+
+    handled = asyncio.run(_run())
+
+    assert handled is True
+    stored = mailbox_service.get_item(item.id)
+    assert stored is not None
+    assert stored.status == "cancelled"
+    assert [call["scope_ref"] for call in mcp_manager.mount_calls] == [
+        "assignment:task-mcp-cancel",
+    ]
+    assert mcp_manager.clear_calls == ["assignment:task-mcp-cancel"]
 
 
 def test_actor_worker_releases_shared_writer_lease_when_run_is_cancelled(tmp_path) -> None:

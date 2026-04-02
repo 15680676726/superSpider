@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from types import SimpleNamespace
 
+import pytest
+
 from copaw.agents import skills_hub as skills_hub_module
 
 
@@ -100,3 +102,101 @@ def test_install_skill_from_hub_supports_skillhub_zip(monkeypatch) -> None:
     assert result.name == "find-skills"
     assert result.enabled is True
     assert result.source_url.endswith("/skills/find-skills.zip")
+
+
+def test_install_skill_from_hub_rejects_non_allowlisted_bundle_url() -> None:
+    try:
+        skills_hub_module.install_skill_from_hub(
+            bundle_url="https://example.com/bundle.json",
+        )
+    except ValueError as exc:
+        assert "supported" in str(exc).lower() or "allowlist" in str(exc).lower()
+    else:
+        raise AssertionError("Expected unsupported bundle URL to be rejected")
+
+
+def test_install_skill_from_hub_injects_package_metadata_into_skill_content(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        skills_hub_module,
+        "load_skillhub_bundle_from_url",
+        lambda url: (
+            {
+                "files": {
+                    "SKILL.md": "---\nname: find-skills\ndescription: test\n---\nbody\n",
+                }
+            },
+            url,
+        ),
+    )
+    monkeypatch.setattr(
+        skills_hub_module.SkillService,
+        "create_skill",
+        lambda name, content, overwrite=False, references=None, scripts=None, extra_files=None: captured.update(
+            {
+                "name": name,
+                "content": content,
+            }
+        )
+        or True,
+    )
+    monkeypatch.setattr(
+        skills_hub_module.SkillService,
+        "enable_skill",
+        lambda name, force=True: True,
+    )
+
+    bundle_url = "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/find-skills.zip"
+    skills_hub_module.install_skill_from_hub(
+        bundle_url=bundle_url,
+        version="2.0.0",
+    )
+
+    assert captured["name"] == "find-skills"
+    assert f"package_ref: {bundle_url}" in str(captured["content"])
+    assert "package_kind: hub-bundle" in str(captured["content"])
+    assert "package_version: 2.0.0" in str(captured["content"])
+
+
+def test_install_skill_from_hub_rejects_unvalidated_http_source(monkeypatch) -> None:
+    monkeypatch.setattr(
+        skills_hub_module,
+        "_http_json_get",
+        lambda _url: (_ for _ in ()).throw(
+            AssertionError("arbitrary JSON fallback must not run"),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Unsupported skill bundle source"):
+        skills_hub_module.install_skill_from_hub(
+            bundle_url="https://example.com/random-skill.json",
+        )
+
+
+def test_install_skill_from_hub_rejects_invalid_skill_frontmatter(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        skills_hub_module,
+        "load_skillhub_bundle_from_url",
+        lambda url: (
+            {
+                "name": "find-skills",
+                "files": {
+                    "SKILL.md": "---\nname: find-skills\n: broken\n---\nbody\n",
+                },
+            },
+            url,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Front Matter|front matter|description"):
+        skills_hub_module.install_skill_from_hub(
+            bundle_url=(
+                "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/"
+                "skills/find-skills.zip"
+            ),
+        )

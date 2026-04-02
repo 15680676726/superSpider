@@ -13,6 +13,10 @@ from .constant import ACTIVE_SKILLS_DIR, CUSTOMIZED_SKILLS_DIR
 logger = logging.getLogger(__name__)
 
 
+class SkillFrontmatterError(ValueError):
+    """Raised when a skill bundle violates formal frontmatter rules."""
+
+
 class SkillInfo(BaseModel):
     """Skill information structure.
 
@@ -71,6 +75,88 @@ def get_working_skills_dir() -> Path:
     return get_active_skills_dir()
 
 
+def _normalize_text(value: object | None) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _normalize_package_kind(value: object | None) -> str:
+    return _normalize_text(value).lower()
+
+
+def _normalize_package_version(value: object | None) -> str:
+    return _normalize_text(value)
+
+
+def _skill_package_kind_from_ref(package_ref: str) -> str:
+    normalized = _normalize_text(package_ref).lower()
+    if normalized.startswith("http://") or normalized.startswith("https://"):
+        return "hub-bundle"
+    if normalized:
+        return "filesystem"
+    return ""
+
+
+def _normalize_package_ref(
+    package_ref: object | None,
+    *,
+    package_kind: object | None = None,
+) -> str:
+    normalized = _normalize_text(package_ref)
+    if not normalized:
+        return ""
+    normalized_kind = _normalize_package_kind(package_kind)
+    if not normalized_kind:
+        normalized_kind = _skill_package_kind_from_ref(normalized)
+    if normalized_kind == "filesystem":
+        try:
+            return str(Path(normalized).expanduser().resolve())
+        except Exception:
+            return str(Path(normalized).expanduser())
+    return normalized
+
+
+def parse_skill_frontmatter(content: str) -> frontmatter.Post:
+    try:
+        post = frontmatter.loads(content)
+    except Exception as exc:
+        raise SkillFrontmatterError(
+            "SKILL.md must contain valid YAML Front Matter.",
+        ) from exc
+    skill_name = _normalize_text(post.get("name"))
+    skill_description = _normalize_text(post.get("description"))
+    if not skill_name or not skill_description:
+        raise SkillFrontmatterError(
+            "SKILL.md front matter must include non-empty 'name' and 'description'.",
+        )
+    return post
+
+
+def canonical_skill_package_identity_from_post(
+    post: frontmatter.Post,
+) -> tuple[str, str | None, str | None] | None:
+    package_kind = _normalize_package_kind(post.get("package_kind"))
+    package_ref = _normalize_package_ref(
+        post.get("package_ref"),
+        package_kind=package_kind,
+    )
+    if not package_ref:
+        return None
+    if not package_kind:
+        package_kind = _skill_package_kind_from_ref(package_ref)
+    package_version = _normalize_package_version(post.get("package_version")) or None
+    return (
+        package_ref,
+        package_kind or None,
+        package_version,
+    )
+
+
+def canonical_skill_package_identity_from_content(
+    content: str,
+) -> tuple[str, str | None, str | None] | None:
+    return canonical_skill_package_identity_from_post(parse_skill_frontmatter(content))
+
+
 def _build_directory_tree(directory: Path) -> dict[str, Any]:
     """
     Recursively build a directory tree structure.
@@ -124,6 +210,51 @@ def _collect_skills_from_dir(directory: Path) -> dict[str, Path]:
             if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists():
                 skills[skill_dir.name] = skill_dir
     return skills
+
+
+def find_skill_package_identity_conflict(
+    *,
+    skill_name: str,
+    package_identity: tuple[str, str | None, str | None] | None,
+) -> tuple[str, Path] | None:
+    if package_identity is None:
+        return None
+    for directory in (
+        get_builtin_skills_dir(),
+        get_customized_skills_dir(),
+        get_active_skills_dir(),
+    ):
+        for existing_name, skill_dir in _collect_skills_from_dir(directory).items():
+            if existing_name == skill_name:
+                continue
+            skill_md = skill_dir / "SKILL.md"
+            try:
+                existing_content = skill_md.read_text(encoding="utf-8")
+                existing_identity = canonical_skill_package_identity_from_content(
+                    existing_content,
+                )
+            except Exception:
+                continue
+            if existing_identity == package_identity:
+                return existing_name, skill_dir
+    return None
+
+
+def _resolve_tree_child_path(base_dir: Path, name: str) -> Path:
+    normalized_name = str(name or "").strip()
+    if not normalized_name:
+        raise ValueError("Tree entry name must be non-empty.")
+    if normalized_name in {".", ".."}:
+        raise ValueError("Tree entry name cannot be '.' or '..'.")
+    if "/" in normalized_name or "\\" in normalized_name:
+        raise ValueError("Tree entry names cannot contain path separators.")
+    resolved_base = base_dir.resolve()
+    candidate = (resolved_base / normalized_name).resolve()
+    try:
+        candidate.relative_to(resolved_base)
+    except ValueError as exc:
+        raise ValueError("Tree entry escapes the target directory.") from exc
+    return candidate
 
 
 def sync_skills_to_working_dir(
@@ -445,11 +576,12 @@ def _create_files_from_tree(
         return
 
     for name, value in tree.items():
-        item_path = base_dir / name
+        item_path = _resolve_tree_child_path(base_dir, name)
 
         if value is None or isinstance(value, str):
             # It's a file
             content = value if isinstance(value, str) else ""
+            item_path.parent.mkdir(parents=True, exist_ok=True)
             item_path.write_text(content, encoding="utf-8")
         elif isinstance(value, dict):
             # It's a directory
@@ -569,33 +701,45 @@ class SkillService:
         """
         # Validate SKILL.md content has required YAML Front Matter
         try:
-            post = frontmatter.loads(content)
-            skill_name = post.get("name", None)
-            skill_description = post.get("description", None)
-
-            if not skill_name or not skill_description:
-                logger.error(
-                    "SKILL.md content must have YAML Front Matter "
-                    "with 'name' and 'description' fields.",
-                )
-                return False
-
+            post = parse_skill_frontmatter(content)
+            skill_name = _normalize_text(post.get("name"))
             logger.debug(
                 "Validated SKILL.md: name='%s', description='%s'",
                 skill_name,
-                skill_description,
+                _normalize_text(post.get("description")),
             )
-        except Exception as e:
+        except SkillFrontmatterError as e:
             logger.error(
                 "Failed to parse SKILL.md YAML Front Matter: %s",
                 e,
+            )
+            return False
+        normalized_name = _normalize_text(name)
+        if skill_name != normalized_name:
+            logger.error(
+                "SKILL.md front matter name '%s' must match skill directory '%s'.",
+                skill_name,
+                normalized_name,
+            )
+            return False
+        package_identity = canonical_skill_package_identity_from_post(post)
+        conflict = find_skill_package_identity_conflict(
+            skill_name=normalized_name,
+            package_identity=package_identity,
+        )
+        if conflict is not None:
+            conflict_name, conflict_path = conflict
+            logger.error(
+                "Skill package identity already exists on '%s' (%s).",
+                conflict_name,
+                conflict_path,
             )
             return False
 
         customized_dir = get_customized_skills_dir()
         customized_dir.mkdir(parents=True, exist_ok=True)
 
-        skill_dir = customized_dir / name
+        skill_dir = customized_dir / normalized_name
         skill_md = skill_dir / "SKILL.md"
 
         # Check if skill already exists

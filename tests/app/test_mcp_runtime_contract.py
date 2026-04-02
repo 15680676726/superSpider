@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
 from copaw.app.mcp.manager import MCPClientManager
 from copaw.config.config import MCPClientConfig, MCPConfig
+from copaw.kernel import TaskDelegationService
+from copaw.kernel.models import KernelTask
 
 
 class _FakeClient:
@@ -32,6 +35,47 @@ class _FakeClient:
         self.close_calls += 1
         if self.fail_close:
             raise RuntimeError("close failed")
+
+
+class _RecordingMCPManager:
+    def __init__(self) -> None:
+        self.mount_calls: list[dict[str, object]] = []
+        self.clear_calls: list[str] = []
+
+    async def mount_scope_overlay(
+        self,
+        scope_ref: str,
+        config,
+        *,
+        additive: bool = True,
+        timeout: float = 60.0,
+    ) -> None:
+        self.mount_calls.append(
+            {
+                "scope_ref": scope_ref,
+                "config": config,
+                "additive": additive,
+                "timeout": timeout,
+            },
+        )
+
+    async def clear_scope_overlay(self, scope_ref: str) -> None:
+        self.clear_calls.append(scope_ref)
+
+
+def _child_run_overlay_payload(scope_ref: str) -> dict[str, object]:
+    return {
+        "scope_ref": scope_ref,
+        "clients": {
+            "scoped_worker": {
+                "name": "scoped_worker",
+                "enabled": True,
+                "transport": "stdio",
+                "command": "python",
+                "args": ["-m", "scoped_worker"],
+            },
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -481,3 +525,47 @@ async def test_mcp_manager_failed_overlay_mount_preserves_previous_scope_clients
     assert failed_record.reload_state.overlay_scope == "assignment:task-3"
     assert failed_record.reload_state.overlay_mode == "additive"
     assert failed_record.reload_state.last_outcome == "connect_failed"
+
+
+@pytest.mark.asyncio
+async def test_child_run_direct_delegation_mounts_and_clears_scoped_overlay_on_failure() -> None:
+    mcp_manager = _RecordingMCPManager()
+
+    class _FailingDispatcher:
+        def __init__(self) -> None:
+            self._capability_service = SimpleNamespace(_mcp_manager=mcp_manager)
+
+        async def execute_task(self, task_id: str):
+            raise RuntimeError(f"boom:{task_id}")
+
+    service = TaskDelegationService(
+        task_repository=SimpleNamespace(),
+        task_runtime_repository=SimpleNamespace(),
+        kernel_dispatcher=_FailingDispatcher(),
+    )
+    child_task = KernelTask(
+        title="Child run with scoped MCP",
+        capability_ref="system:dispatch_query",
+        owner_agent_id="agent-1",
+        payload={
+            "meta": {
+                "mcp_scope_overlay": _child_run_overlay_payload(
+                    "assignment:delegated-child-run",
+                ),
+            },
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="boom:"):
+        await service._execute_delegated_child_task(
+            child_task,
+            mailbox_item=None,
+        )
+
+    assert [call["scope_ref"] for call in mcp_manager.mount_calls] == [
+        "assignment:delegated-child-run",
+    ]
+    assert mcp_manager.mount_calls[0]["additive"] is True
+    mounted_config = mcp_manager.mount_calls[0]["config"]
+    assert mounted_config.clients["scoped_worker"].command == "python"
+    assert mcp_manager.clear_calls == ["assignment:delegated-child-run"]

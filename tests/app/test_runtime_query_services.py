@@ -804,7 +804,7 @@ def test_runtime_query_services_read_state_backed_surfaces(tmp_path) -> None:
     }
 
 
-def test_runtime_query_services_prefer_canonical_top_level_host_twin_summary(
+def test_runtime_query_services_canonical_host_twin_summary_ignores_stale_nested_summary(
     tmp_path,
 ) -> None:
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
@@ -865,9 +865,7 @@ def test_runtime_query_services_prefer_canonical_top_level_host_twin_summary(
                     "legal_recovery_mode": "resume-environment",
                     "contention_severity": "clear",
                     "contention_reason": "clean-reentry",
-                    "continuity_state": "ready",
                     "seat_owner_ref": "ops-agent",
-                    "active_app_family_keys": ["office_document"],
                 },
                 "host_twin": {
                     "continuity": {
@@ -896,9 +894,12 @@ def test_runtime_query_services_prefer_canonical_top_level_host_twin_summary(
                     "host_twin_summary": {
                         "recommended_scheduler_action": "handoff",
                         "blocked_surface_count": 1,
+                        "blocked_surface_refs": ["window:excel:orders"],
                         "legal_recovery_mode": "handoff",
                         "contention_severity": "blocked",
                         "contention_reason": "stale-captcha",
+                        "selected_session_mount_id": "session:desktop:stale-summary",
+                        "continuity_state": "blocked",
                     },
                 },
                 "host_contract": {
@@ -942,8 +943,91 @@ def test_runtime_query_services_prefer_canonical_top_level_host_twin_summary(
         review_payload["execution_runtime"]["host_twin_summary"]["continuity_state"]
         == "ready"
     )
+    assert (
+        review_payload["execution_runtime"]["host_twin_summary"].get("blocked_surface_refs")
+        is None
+    )
+    assert (
+        review_payload["execution_runtime"]["host_twin_summary"].get("selected_session_mount_id")
+        is None
+    )
     assert review_payload["continuity"]["handoff"]["state"] is None
     assert not any("Handoff:" in line for line in review_payload["summary_lines"])
+
+
+def test_runtime_query_services_typed_review_state_prefers_verification_truth(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    schedule_repository = SqliteScheduleRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    evidence_ledger = EvidenceLedger(database_path=tmp_path / "evidence.sqlite3")
+
+    timestamp = datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc)
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-typed-review-state-1",
+            title="Typed verification review state",
+            summary="Review state should come from typed verification truth.",
+            task_type="system:dispatch_query",
+            status="running",
+            owner_agent_id="ops-agent",
+            acceptance_criteria='{"kind":"kernel-task-meta-v1"}',
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-typed-review-state-1",
+            runtime_status="blocked",
+            current_phase="executing",
+            risk_level="guarded",
+            last_result_summary="Execution is paused while the closeout checkpoint stays unresolved.",
+            last_owner_agent_id="ops-agent",
+            updated_at=timestamp,
+        ),
+    )
+    evidence_ledger.append(
+        EvidenceRecord(
+            id="evidence-typed-review-state-1",
+            task_id="task-typed-review-state-1",
+            actor_ref="ops-agent",
+            capability_ref="browser_use",
+            risk_level="guarded",
+            action_summary="Record host closeout checkpoint",
+            result_summary="Closeout checkpoint is paused until fresh host proof arrives.",
+            created_at=timestamp,
+            metadata={
+                "verification": {
+                    "status": "required",
+                    "reason": "fresh-host-proof-required",
+                    "checkpoint": {
+                        "checkpoint_id": "checkpoint:host-proof",
+                    },
+                },
+            },
+        ),
+    )
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        schedule_repository=schedule_repository,
+        decision_request_repository=decision_request_repository,
+        evidence_ledger=evidence_ledger,
+    )
+
+    review = state_query.get_task_review("task-typed-review-state-1")
+    assert review is not None
+    review_payload = review["review"]
+    assert review_payload["continuity"]["verification"]["status"] == "required"
+    assert review_payload["continuity"]["verification"]["reason"] == "fresh-host-proof-required"
+    assert review_payload["execution_state"] == "awaiting-verification"
+    assert review_payload["blocked_reason"] == "verification-gate"
+    assert review_payload["stuck_reason"] == "fresh-host-proof-required"
 
 
 def test_runtime_query_services_list_kernel_tasks_from_state_with_phase_filter(

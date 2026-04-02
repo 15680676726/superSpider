@@ -10,6 +10,8 @@ from ..evidence import EvidenceLedger, EvidenceRecord
 from ..industry.identity import is_execution_core_agent_id
 from ..state.repositories import SqliteTaskRepository, SqliteTaskRuntimeRepository
 from .child_run_shell import (
+    resolve_child_run_mcp_manager,
+    resolve_child_run_mcp_overlay_contract,
     resolve_child_run_writer_contract,
     run_child_task_with_writer_lease,
 )
@@ -80,6 +82,7 @@ class TaskDelegationService:
         agent_profile_service: object | None = None,
         industry_service: object | None = None,
         environment_service: object | None = None,
+        mcp_manager: object | None = None,
         actor_mailbox_service: object | None = None,
         actor_supervisor: object | None = None,
         runtime_event_bus: object | None = None,
@@ -93,6 +96,7 @@ class TaskDelegationService:
         self._agent_profile_service = agent_profile_service
         self._industry_service = industry_service
         self._environment_service = environment_service
+        self._mcp_manager = mcp_manager
         self._actor_mailbox_service = actor_mailbox_service
         self._actor_supervisor = actor_supervisor
         self._runtime_event_bus = runtime_event_bus
@@ -364,6 +368,13 @@ class TaskDelegationService:
                 payload=child_task.payload,
                 environment_ref=child_task.environment_ref,
             )
+            mcp_overlay_contract = resolve_child_run_mcp_overlay_contract(
+                payload=child_task.payload,
+            )
+            mcp_manager = resolve_child_run_mcp_manager(
+                kernel_dispatcher=self._kernel_dispatcher,
+                mcp_manager=self._mcp_manager,
+            )
             result = await run_child_task_with_writer_lease(
                 label=f"delegation:{child_task.owner_agent_id}",
                 execute=lambda: self._kernel_dispatcher.execute_task(child_task.id),
@@ -371,6 +382,8 @@ class TaskDelegationService:
                 owner_agent_id=child_task.owner_agent_id,
                 worker_id=None,
                 contract=contract,
+                mcp_manager=mcp_manager,
+                mcp_overlay_contract=mcp_overlay_contract,
                 ttl_seconds=180,
                 heartbeat_interval_seconds=15.0,
             )
