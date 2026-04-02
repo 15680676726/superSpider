@@ -1079,6 +1079,7 @@ def test_main_brain_chat_service_default_shell_tail_keeps_simple_chat_answers_br
     tail = service._build_intent_shell_prompt_tail()  # pylint: disable=protected-access
 
     assert "clear/simple asks" in tail
+    assert "one sentence" in tail.lower()
     assert "1-2 sentences" in tail
     assert "do not restate the user's request" in tail.lower()
     assert "do not use bullets or sections for simple asks" in tail.lower()

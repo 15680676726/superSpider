@@ -1413,6 +1413,7 @@ class MainBrainChatService:
                 "## Front-Door Reply Shell",
                 "Mode: CHAT",
                 "- Start with a short direct reply.",
+                "- For yes/no or short factual asks, answer in one sentence.",
                 "- For clear/simple asks, answer directly in 1-2 sentences.",
                 "- Do not restate the user's request unless needed to resolve direction, risk, or acceptance.",
                 "- Do not use bullets or sections for simple asks.",
