@@ -518,7 +518,6 @@ class _IndustryRuntimeViewsMixin:
             payload["lane_budgets"] = lane_budgets
         return payload
 
-    def _resolve_report_replan_payload(
     def _strategy_trigger_rules_surface_payload(
         self,
         *,

@@ -267,8 +267,6 @@ class CyclePlanningCompiler:
         lane_budget_mode: str | None,
         force_scoped_backlog: bool,
         cycle_kind_reason: str | None,
-        force_scoped_backlog: bool,
-        cycle_kind_reason: str | None,
     ) -> dict[str, object]:
         strategic_uncertainty_ids = [
             uncertainty_id
