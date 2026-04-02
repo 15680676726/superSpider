@@ -1083,6 +1083,8 @@ def test_main_brain_chat_service_default_shell_tail_keeps_simple_chat_answers_br
     assert "1-2 sentences" in tail
     assert "do not restate the user's request" in tail.lower()
     assert "do not use bullets or sections for simple asks" in tail.lower()
+    assert "do not narrate your internal process" in tail.lower()
+    assert "do not add rapport or filler" in tail.lower()
     assert "ask one decisive question" in tail.lower()
 
 

@@ -1417,6 +1417,8 @@ class MainBrainChatService:
                 "- For clear/simple asks, answer directly in 1-2 sentences.",
                 "- Do not restate the user's request unless needed to resolve direction, risk, or acceptance.",
                 "- Do not use bullets or sections for simple asks.",
+                "- Do not narrate your internal process or what you are about to do.",
+                "- Do not add rapport or filler before the answer.",
                 "- Do not add background or implementation detail unless the user asks for depth.",
                 "- Do not ask for start or confirmation again when the request is already clear.",
                 "- If clarification is required, ask one decisive question.",
