@@ -7,6 +7,8 @@ import json
 from .shared import *  # noqa: F401,F403
 
 from agentscope.message import Msg
+from pydantic import BaseModel
+from pydantic_core import PydanticSerializationError
 
 from copaw.capabilities import CapabilityService
 from copaw.app.startup_recovery import StartupRecoverySummary
@@ -17,6 +19,7 @@ from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.main_brain_orchestrator import MainBrainOrchestrator
 from copaw.kernel.main_brain_turn_result import MainBrainCommitState
 from copaw.media import MediaService
+from copaw.app.routers.runtime_center_shared import _encode_sse_event
 from copaw.state import SQLiteStateStore
 from copaw.state import MediaAnalysisRecord
 from copaw.state.repositories import (
@@ -70,6 +73,29 @@ class _InMemoryMediaAnalysisRepository(BaseMediaAnalysisRepository):
 
     def delete_analysis(self, analysis_id: str) -> bool:
         return self._records.pop(analysis_id, None) is not None
+
+
+class _BrokenModelDumpEvent:
+    def model_dump_json(self) -> str:
+        raise PydanticSerializationError("mock serialization failure")
+
+    def model_dump(self, mode: str = "json") -> dict[str, object]:
+        _ = mode
+        return {
+            "object": "message",
+            "status": "completed",
+            "content": [{"type": "text", "text": "safe fallback"}],
+        }
+
+
+class _UnserializablePayload:
+    pass
+
+
+class _BrokenPydanticEvent(BaseModel):
+    object: str = "message"
+    status: str = "completed"
+    payload: object
 
 
 def _build_media_service() -> MediaService:
@@ -1136,6 +1162,21 @@ def _parse_sse_events(raw_text: str) -> list[dict[str, object]]:
                 continue
             events.append(json.loads(payload_text))
     return events
+
+
+def test_encode_sse_event_falls_back_when_model_dump_json_raises() -> None:
+    payload = _encode_sse_event(_BrokenModelDumpEvent())
+    assert payload.startswith("data: ")
+    assert "safe fallback" in payload
+
+
+def test_encode_sse_event_keeps_json_object_shape_for_pydantic_events() -> None:
+    payload = _encode_sse_event(_BrokenPydanticEvent(payload=_UnserializablePayload()))
+    decoded = json.loads(payload.removeprefix("data: ").strip())
+    assert isinstance(decoded, dict)
+    assert decoded["object"] == "message"
+    assert decoded["status"] == "completed"
+    assert isinstance(decoded["payload"], str)
 
 
 class _SnapshotSessionBackend:
