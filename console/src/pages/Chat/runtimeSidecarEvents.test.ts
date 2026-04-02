@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createInitialRuntimeSidecarState,
+  formatRuntimeIntentShellSidebarHint,
   hydrateRuntimeSidecarState,
   parseRuntimeSidecarEvent,
   reduceRuntimeSidecarEvent,
@@ -214,6 +215,11 @@ describe("runtimeSidecarEvents", () => {
       triggerSource: "keyword",
       matchedText: "计划",
       confidence: 0.95,
+      triggerSourceLabel: "\u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d",
+      matchedTextLabel: "\u547d\u4e2d\uff1a\u8ba1\u5212",
+      confidenceLabel: "\u7f6e\u4fe1\u5ea6 95%",
+      metaSummary:
+        "\u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d \u00b7 \u547d\u4e2d\uff1a\u8ba1\u5212 \u00b7 \u7f6e\u4fe1\u5ea6 95%",
       updatedAt: 500,
       payload: {
         mode_hint: "plan",
@@ -226,5 +232,54 @@ describe("runtimeSidecarEvents", () => {
         confidence: 0.95,
       },
     });
+  });
+
+  it("formats a human-readable sidebar hint without raw debug fragments", () => {
+    const hint = formatRuntimeIntentShellSidebarHint({
+      label: "PLAN",
+      summary: "Use a compact planning shell for this reply.",
+      metaSummary:
+        "\u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d \u00b7 \u547d\u4e2d\uff1a\u8ba1\u5212 \u00b7 \u7f6e\u4fe1\u5ea6 95%",
+    });
+
+    expect(hint).toBe(
+      "Use a compact planning shell for this reply. \u00b7 \u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d \u00b7 \u547d\u4e2d\uff1a\u8ba1\u5212 \u00b7 \u7f6e\u4fe1\u5ea6 95%",
+    );
+    expect(hint).not.toContain("trigger=");
+    expect(hint).not.toContain("match=");
+    expect(hint).not.toContain("confidence=");
+  });
+
+  it("collapses unknown trigger sources into a generic human label", () => {
+    const initialState = createInitialRuntimeSidecarState(
+      "industry-chat:industry-1:execution-core",
+    );
+
+    const nextState = reduceRuntimeSidecarEvent(
+      initialState,
+      {
+        event: "turn_reply_done",
+        payload: {
+          intent_shell: {
+            mode_hint: "review",
+            label: "REVIEW",
+            summary: "Use a focused review shell for this reply.",
+            trigger_source: "prediction:cycle",
+          },
+        },
+      },
+      501,
+    );
+
+    expect(nextState.currentIntentShell?.triggerSource).toBe("prediction:cycle");
+    expect(nextState.currentIntentShell?.triggerSourceLabel).toBe(
+      "\u6765\u6e90\uff1a\u6a21\u5f0f\u89e6\u53d1",
+    );
+    expect(nextState.currentIntentShell?.metaSummary).toBe(
+      "\u6765\u6e90\uff1a\u6a21\u5f0f\u89e6\u53d1",
+    );
+    expect(nextState.currentIntentShell?.metaSummary).not.toContain(
+      "prediction:cycle",
+    );
   });
 });

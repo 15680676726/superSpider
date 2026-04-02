@@ -10,14 +10,6 @@ export function ChatIntentShellCard({
     return null;
   }
 
-  const metaParts = [
-    shell.triggerSource ? `trigger=${shell.triggerSource}` : "",
-    shell.matchedText ? `match=${shell.matchedText}` : "",
-    typeof shell.confidence === "number"
-      ? `confidence=${shell.confidence.toFixed(2)}`
-      : "",
-  ].filter(Boolean);
-
   return (
     <div className={`${styles.humanAssistStrip} ${styles.humanAssistStripIdle}`}>
       <div className={styles.humanAssistStripMain}>
@@ -38,10 +30,13 @@ export function ChatIntentShellCard({
           ) : null}
         </div>
       </div>
-      {metaParts.length > 0 ? (
+      {shell.metaSummary ? (
         <div className={styles.humanAssistStripActions}>
-          <span className={styles.humanAssistStripSummary} title={metaParts.join(" | ")}>
-            {metaParts.join(" | ")}
+          <span
+            className={styles.humanAssistStripSummary}
+            title={shell.metaSummary}
+          >
+            {shell.metaSummary}
           </span>
         </div>
       ) : null}

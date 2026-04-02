@@ -42,6 +42,10 @@ export type RuntimeIntentShellSurface = {
   triggerSource: string | null;
   matchedText: string | null;
   confidence: number | null;
+  triggerSourceLabel: string | null;
+  matchedTextLabel: string | null;
+  confidenceLabel: string | null;
+  metaSummary: string | null;
   updatedAt: number;
   payload: Record<string, unknown>;
 };
@@ -131,6 +135,63 @@ function collectDecisionIds(payload: Record<string, unknown>): string[] {
 
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function resolveIntentShellTriggerSourceLabel(
+  triggerSource: string | null,
+): string | null {
+  if (!triggerSource) {
+    return null;
+  }
+  if (triggerSource === "request") {
+    return "\u6765\u6e90\uff1a\u663e\u5f0f\u6a21\u5f0f";
+  }
+  if (triggerSource === "keyword") {
+    return "\u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d";
+  }
+  if (triggerSource === "attached") {
+    return "\u6765\u6e90\uff1a\u9644\u5e26\u4e0a\u4e0b\u6587";
+  }
+  return "\u6765\u6e90\uff1a\u6a21\u5f0f\u89e6\u53d1";
+}
+
+function resolveIntentShellMatchedTextLabel(
+  matchedText: string | null,
+): string | null {
+  return matchedText ? `\u547d\u4e2d\uff1a${matchedText}` : null;
+}
+
+function resolveIntentShellConfidenceLabel(
+  confidence: number | null,
+): string | null {
+  if (typeof confidence !== "number") {
+    return null;
+  }
+  const percent = Math.max(0, Math.min(100, Math.round(confidence * 100)));
+  return `\u7f6e\u4fe1\u5ea6 ${percent}%`;
+}
+
+function joinIntentShellParts(parts: Array<string | null>): string | null {
+  const values = parts.filter(
+    (part): part is string => typeof part === "string" && part.trim().length > 0,
+  );
+  return values.length > 0 ? values.join(" \u00b7 ") : null;
+}
+
+export function formatRuntimeIntentShellSidebarHint(
+  shell: Pick<RuntimeIntentShellSurface, "label" | "summary" | "metaSummary"> | null,
+): string | null {
+  if (!shell) {
+    return null;
+  }
+  return (
+    joinIntentShellParts([
+      shell.summary ?? `Mode: ${shell.label}`,
+      shell.metaSummary,
+    ]) ??
+    shell.summary ??
+    `Mode: ${shell.label}`
+  );
 }
 
 function resolveControlThreadId(
@@ -247,14 +308,28 @@ function resolveIntentShellSurface(
   ) {
     return null;
   }
+  const triggerSource = asNonEmptyString(shell.trigger_source);
+  const matchedText = asNonEmptyString(shell.matched_text);
+  const confidence = asNumber(shell.confidence);
+  const triggerSourceLabel = resolveIntentShellTriggerSourceLabel(triggerSource);
+  const matchedTextLabel = resolveIntentShellMatchedTextLabel(matchedText);
+  const confidenceLabel = resolveIntentShellConfidenceLabel(confidence);
   return {
     mode,
     label: asNonEmptyString(shell.label) ?? mode.toUpperCase(),
     summary: asNonEmptyString(shell.summary),
     hint: asNonEmptyString(shell.hint),
-    triggerSource: asNonEmptyString(shell.trigger_source),
-    matchedText: asNonEmptyString(shell.matched_text),
-    confidence: asNumber(shell.confidence),
+    triggerSource,
+    matchedText,
+    confidence,
+    triggerSourceLabel,
+    matchedTextLabel,
+    confidenceLabel,
+    metaSummary: joinIntentShellParts([
+      triggerSourceLabel,
+      matchedTextLabel,
+      confidenceLabel,
+    ]),
     updatedAt: now,
     payload: compactPayload({ ...shell }),
   };

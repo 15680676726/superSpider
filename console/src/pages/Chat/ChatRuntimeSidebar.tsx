@@ -11,6 +11,10 @@ import type {
   RuntimeHealthNotice,
   RuntimeWaitState,
 } from "./runtimeDiagnostics";
+import {
+  formatRuntimeIntentShellSidebarHint,
+  type RuntimeIntentShellSurface,
+} from "./runtimeSidecarEvents";
 import styles from "./index.module.less";
 
 export function ChatRuntimeSidebar({
@@ -23,11 +27,10 @@ export function ChatRuntimeSidebar({
   runtimeHealthNotice,
   runtimeModelHint,
   runtimeModelLabel,
+  runtimeIntentShell,
   runtimeWaitDescription,
   runtimeWaitSeconds,
   runtimeWaitState,
-  shellModeHint,
-  shellModeLabel,
   threadKindHint,
   threadKindLabel,
   writebackHint,
@@ -42,11 +45,10 @@ export function ChatRuntimeSidebar({
   runtimeHealthNotice: RuntimeHealthNotice | null;
   runtimeModelHint: string;
   runtimeModelLabel: string;
+  runtimeIntentShell?: RuntimeIntentShellSurface | null;
   runtimeWaitDescription: string | null;
   runtimeWaitSeconds: number;
   runtimeWaitState: RuntimeWaitState | null;
-  shellModeHint?: string | null;
-  shellModeLabel?: string | null;
   threadKindHint?: string | null;
   threadKindLabel?: string | null;
   writebackHint?: string | null;
@@ -67,6 +69,13 @@ export function ChatRuntimeSidebar({
     );
   };
   const hasPendingApprovals = approvalButtonLabel !== "审批";
+
+  const shellModeLabel = runtimeIntentShell
+    ? `Shell: ${runtimeIntentShell.label}`
+    : null;
+  const shellModeHint = formatRuntimeIntentShellSidebarHint(
+    runtimeIntentShell ?? null,
+  );
 
   return (
     <div className={styles.topBar}>

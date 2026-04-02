@@ -17,8 +17,24 @@ describe("ChatRuntimeSidebar", () => {
         runtimeHealthNotice={null}
         runtimeModelHint="当前模型"
         runtimeModelLabel="openai/gpt-5"
-        shellModeLabel="Shell: PLAN"
-        shellModeHint="Mode: PLAN | trigger=keyword"
+        runtimeIntentShell={{
+          mode: "plan",
+          label: "PLAN",
+          summary: "Use a compact planning shell for this reply.",
+          hint: null,
+          triggerSource: "keyword",
+          matchedText: "\u8ba1\u5212",
+          confidence: 0.95,
+          triggerSourceLabel: "\u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d",
+          matchedTextLabel: "\u547d\u4e2d\uff1a\u8ba1\u5212",
+          confidenceLabel: "\u7f6e\u4fe1\u5ea6 95%",
+          metaSummary:
+            "\u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d \u00b7 \u547d\u4e2d\uff1a\u8ba1\u5212 \u00b7 \u7f6e\u4fe1\u5ea6 95%",
+          updatedAt: 500,
+          payload: {
+            mode_hint: "plan",
+          },
+        }}
         threadKindLabel="Thread: control-thread"
         threadKindHint="session_kind=industry-control-thread"
         focusLabel="Focus: Launch runtime center"
@@ -38,6 +54,7 @@ describe("ChatRuntimeSidebar", () => {
     expect(screen.getByText("Thread: control-thread")).toBeTruthy();
     expect(screen.getByText("Focus: Launch runtime center")).toBeTruthy();
     expect(screen.getByText("Writeback: strategy/backlog")).toBeTruthy();
+    expect(screen.queryByTitle(/trigger=/)).toBeNull();
     expect(screen.queryByText("Capability card")).toBeNull();
     expect(screen.queryByText("Open workbench")).toBeNull();
   });
@@ -52,8 +69,23 @@ describe("ChatRuntimeSidebar", () => {
         runtimeHealthNotice={null}
         runtimeModelHint="当前模型说明"
         runtimeModelLabel="openai/gpt-5.4-super-long-model-name-for-overflow-check"
-        shellModeLabel="Shell: REVIEW"
-        shellModeHint="Mode: REVIEW | trigger=keyword"
+        runtimeIntentShell={{
+          mode: "review",
+          label: "REVIEW",
+          summary: "Use a focused review shell for this reply.",
+          hint: null,
+          triggerSource: "keyword",
+          matchedText: null,
+          confidence: null,
+          triggerSourceLabel: "\u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d",
+          matchedTextLabel: null,
+          confidenceLabel: null,
+          metaSummary: "\u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d",
+          updatedAt: 501,
+          payload: {
+            mode_hint: "review",
+          },
+        }}
         threadKindLabel="Thread: control-thread"
         threadKindHint="session_kind=industry-control-thread | thread_binding_kind=control | owner_scope=operator"
         focusLabel="Focus: This is a super long focus label to check truncation and title preservation"
@@ -75,7 +107,12 @@ describe("ChatRuntimeSidebar", () => {
     expect(
       screen.getByTitle("openai/gpt-5.4-super-long-model-name-for-overflow-check"),
     ).toBeTruthy();
-    expect(screen.getByTitle("Mode: REVIEW | trigger=keyword")).toBeTruthy();
+    expect(
+      screen.getByTitle(
+        "Use a focused review shell for this reply. \u00b7 \u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByTitle(/trigger=/)).toBeNull();
     expect(
       screen.getByTitle(
         "session_kind=industry-control-thread | thread_binding_kind=control | owner_scope=operator",

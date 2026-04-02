@@ -568,14 +568,7 @@ export default function ChatPage() {
           {/* 顶部状态条 */}
           <ChatRuntimeSidebar
             bindingLabel={bindingLabel}
-            shellModeLabel={
-              runtimeIntentShell ? `Shell: ${runtimeIntentShell.label}` : null
-            }
-            shellModeHint={
-              runtimeIntentShell
-                ? `Mode: ${runtimeIntentShell.label} | trigger=${runtimeIntentShell.triggerSource ?? "unknown"}`
-                : null
-            }
+            runtimeIntentShell={runtimeIntentShell}
             threadKindLabel={threadKindLabel}
             threadKindHint={threadKindHint}
             focusLabel={focusLabel}
