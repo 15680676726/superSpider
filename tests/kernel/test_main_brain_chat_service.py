@@ -10,6 +10,12 @@ from agentscope.message import Msg, TextBlock, ThinkingBlock
 
 import copaw.kernel.main_brain_chat_service as main_brain_chat_service_module
 from copaw.kernel.main_brain_chat_service import MainBrainChatService
+from copaw.kernel.main_brain_commit_service import MainBrainCommitService
+from copaw.kernel.main_brain_turn_result import (
+    MainBrainActionEnvelope,
+    MainBrainCommitState,
+    MainBrainTurnResult,
+)
 from copaw.memory.models import MemoryRecallHit, MemoryRecallResponse
 from copaw.state import MemoryFactIndexRecord
 
@@ -82,6 +88,16 @@ class _StaticResponseModel:
     async def __call__(self, *, messages, **kwargs):
         _ = (messages, kwargs)
         return SimpleNamespace(content=self.text)
+
+
+class _StructuredResponseModel:
+    def __init__(self, result: MainBrainTurnResult) -> None:
+        self.result = result
+        self.stream = True
+
+    async def __call__(self, *, messages, **kwargs):
+        _ = (messages, kwargs)
+        return self.result
 
 
 class _PromptCapturingResponseModel:
@@ -298,6 +314,28 @@ class _TruthFirstMemoryRecallService:
         )
 
 
+class _SnapshotCountingIndustryService:
+    def __init__(self) -> None:
+        self.version = 1
+        self.calls = 0
+
+    def get_instance_detail(self, instance_id: str) -> object:
+        self.calls += 1
+        return SimpleNamespace(
+            instance_id=instance_id,
+            label=f"Industry v{self.version}",
+            summary=f"Runtime summary v{self.version}",
+            execution_core_identity={"agent_id": "copaw-agent-runner"},
+            team=SimpleNamespace(agents=[]),
+            staffing={},
+            assignments=[],
+            backlog=[{"title": f"Backlog v{self.version}"}],
+            lanes=[],
+            agent_reports=[],
+            current_cycle={"title": f"Cycle v{self.version}"},
+        )
+
+
 async def _snapshot_texts(
     service: MainBrainChatService,
     snapshot: dict,
@@ -496,6 +534,46 @@ async def test_main_brain_chat_service_streams_incremental_chunks_before_complet
     )
     texts = await _snapshot_texts(service, snapshot)
     assert texts[-1] == "hello world"
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_reads_persisted_commit_state_from_bound_agent_snapshot():
+    backend = _FakeSessionBackend()
+    backend.save_session_snapshot(
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        user_id="execution-core-agent",
+        payload={
+            "agent": {"memory": []},
+            "main_brain": {
+                "phase2_commit": {
+                    "status": "confirm_required",
+                    "action_type": "writeback_operating_truth",
+                    "control_thread_id": "industry-chat:industry-v1-demo:execution-core",
+                    "session_id": "industry-chat:industry-v1-demo:execution-core",
+                    "summary": "Confirm the writeback before commit.",
+                }
+            },
+        },
+        source_ref="test:/phase2-commit",
+    )
+    service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: _StaticResponseModel("reply"),
+    )
+    request = SimpleNamespace(
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        user_id="operator-user",
+        agent_id="execution-core-agent",
+        industry_instance_id="industry-v1-demo",
+        work_context_id=None,
+    )
+    msgs = [Msg(name="user", role="user", content="continue")]
+
+    _ = [item async for item in service.execute_stream(msgs=msgs, request=request)]
+
+    commit_state = getattr(request, "_copaw_main_brain_commit_state", None)
+    assert commit_state is not None
+    assert commit_state.status == "confirm_required"
 
 
 @pytest.mark.asyncio
@@ -829,6 +907,101 @@ def test_main_brain_chat_service_prompt_prefers_truth_first_profile_before_lexic
     assert recall_service.calls[0]["scope_id"] == "ctx-truth-first"
 
 
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_skips_lexical_recall_for_short_followup_turns_and_reuses_cached_context():
+    recall_service = _TruthFirstMemoryRecallService()
+    model = _PromptCapturingResponseModel("ok")
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        memory_recall_service=recall_service,
+        model_factory=lambda: model,
+    )
+    request = SimpleNamespace(
+        session_id="sess-short-followup",
+        user_id="user-short-followup",
+        industry_instance_id=None,
+        work_context_id="ctx-truth-first",
+        agent_id="ops-agent",
+    )
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[
+                Msg(
+                    name="user",
+                    role="user",
+                    content="Please use the current checklist before outbound execution",
+                )
+            ],
+            request=request,
+        )
+    ]
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="继续")],
+            request=request,
+        )
+    ]
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="再继续")],
+            request=request,
+        )
+    ]
+
+    assert len(recall_service.calls) == 1
+    context_prompt = model.calls[-1][1]["content"]
+    assert "## Truth-First Lexical Recall" in context_prompt
+    assert "short follow-up turn" in context_prompt
+    timing = getattr(request, "_copaw_main_brain_timing", None)
+    assert timing is not None
+    assert timing["lexical_recall_mode"] == "skip_short_followup"
+    assert timing["prompt_context_cache_hit"] is True
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_keeps_lexical_recall_for_short_explicit_history_queries():
+    recall_service = _TruthFirstMemoryRecallService()
+    model = _PromptCapturingResponseModel("ok")
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        memory_recall_service=recall_service,
+        model_factory=lambda: model,
+    )
+    request = SimpleNamespace(
+        session_id="sess-explicit-memory",
+        user_id="user-explicit-memory",
+        industry_instance_id=None,
+        work_context_id="ctx-truth-first",
+        agent_id="ops-agent",
+    )
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="Summarize the current checklist")],
+            request=request,
+        )
+    ]
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="按记录继续")],
+            request=request,
+        )
+    ]
+
+    assert len(recall_service.calls) == 2
+    context_prompt = model.calls[-1][1]["content"]
+    assert "Lexical fallback note" in context_prompt
+    timing = getattr(request, "_copaw_main_brain_timing", None)
+    assert timing is not None
+    assert timing["lexical_recall_mode"] == "query_recall"
+
+
 def test_main_brain_chat_service_prefers_work_context_recall_over_industry_scope_when_both_exist():
     recall_service = _TruthFirstMemoryRecallService()
     service = MainBrainChatService(
@@ -1111,6 +1284,153 @@ async def test_main_brain_chat_service_never_schedules_background_intake_for_con
     assert industry_service.writeback_calls == []
     assert industry_service.kickoff_calls == []
     assert service._background_tasks == set()  # pylint: disable=protected-access
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_reuses_scope_snapshot_for_same_work_context():
+    backend = _FakeSessionBackend()
+    industry_service = _SnapshotCountingIndustryService()
+    service = MainBrainChatService(
+        session_backend=backend,
+        industry_service=industry_service,
+        memory_recall_service=_TruthFirstMemoryRecallService(),
+        model_factory=lambda: _PromptCapturingResponseModel("ok"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-scope-snapshot",
+        user_id="user-scope-snapshot",
+        industry_instance_id="industry-v1-demo",
+        work_context_id="work-context-1",
+        agent_id="ops-agent",
+    )
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn one")],
+            request=request,
+        )
+    ]
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn two")],
+            request=request,
+        )
+    ]
+
+    snapshot_service = service._scope_snapshot_service  # pylint: disable=protected-access
+    assert snapshot_service.calls == ["work-context-1"]
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_rebuilds_scope_snapshot_after_dirty_mark():
+    backend = _FakeSessionBackend()
+    industry_service = _SnapshotCountingIndustryService()
+    service = MainBrainChatService(
+        session_backend=backend,
+        industry_service=industry_service,
+        memory_recall_service=_TruthFirstMemoryRecallService(),
+        model_factory=lambda: _PromptCapturingResponseModel("ok"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-scope-dirty",
+        user_id="user-scope-dirty",
+        industry_instance_id="industry-v1-demo",
+        work_context_id="work-context-1",
+        agent_id="ops-agent",
+    )
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn one")],
+            request=request,
+        )
+    ]
+    service.mark_scope_snapshot_dirty(work_context_id="work-context-1")
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn two")],
+            request=request,
+        )
+    ]
+
+    snapshot_service = service._scope_snapshot_service  # pylint: disable=protected-access
+    assert snapshot_service.calls == ["work-context-1", "work-context-1"]
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_persists_commit_state_and_reloads_it_from_session_snapshot():
+    backend = _FakeSessionBackend()
+    model = _StructuredResponseModel(
+        MainBrainTurnResult(
+            reply_text="我会先记录 backlog。",
+            action_envelope=MainBrainActionEnvelope(
+                kind="commit_action",
+                action_type="create_backlog_item",
+                summary="Create backlog",
+                payload={
+                    "lane_hint": "growth",
+                    "title": "Follow up the latest request",
+                    "summary": "Track the latest operator request",
+                    "acceptance_hint": "Operator confirms backlog wording",
+                    "source_refs": ["chat:1"],
+                },
+            ),
+        ),
+    )
+    commit_service = MainBrainCommitService(
+        session_backend=backend,
+        action_handlers={
+            "create_backlog_item": lambda envelope, request, commit_key: {
+                "status": "committed",
+                "record_id": "backlog-1",
+                "commit_key": commit_key,
+            }
+        },
+    )
+    service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: model,
+        commit_service=commit_service,
+    )
+    request = SimpleNamespace(
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        user_id="user-commit-state",
+        industry_instance_id="industry-v1-demo",
+        work_context_id="work-context-1",
+        control_thread_id="industry-chat:industry-v1-demo:execution-core",
+        agent_id="ops-agent",
+    )
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="Please record this as backlog")],
+            request=request,
+        )
+    ]
+
+    snapshot = backend.load_session_snapshot(
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        user_id="ops-agent",
+        allow_not_exist=True,
+    )
+    phase2 = snapshot["main_brain"]["phase2_commit"]
+    assert phase2["status"] == "committed"
+    assert phase2["record_id"] == "backlog-1"
+
+    reloaded_service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+    reloaded_state = reloaded_service.get_persisted_commit_state(
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        user_id="ops-agent",
+    )
+    assert reloaded_state == MainBrainCommitState.model_validate(phase2)
 
 
 @pytest.mark.asyncio

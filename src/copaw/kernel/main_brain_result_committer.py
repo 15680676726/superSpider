@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from inspect import isawaitable
 from typing import Any
 
 from .main_brain_environment_coordinator import MainBrainEnvironmentBinding
@@ -13,6 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 class MainBrainResultCommitter:
+    def __init__(
+        self,
+        *,
+        industry_service: Any | None = None,
+    ) -> None:
+        self._industry_service = industry_service
+
     def commit_request_runtime_context(
         self,
         *,
@@ -68,6 +76,62 @@ class MainBrainResultCommitter:
             setattr(request, name, value)
         except Exception:
             logger.debug("Failed to set runtime request attribute '%s'", name)
+
+    async def commit_action(
+        self,
+        *,
+        action_envelope: Any,
+        request: Any,
+        commit_key: str,
+    ) -> dict[str, Any]:
+        action_type = str(getattr(action_envelope, "action_type", "") or "").strip()
+        payload = getattr(action_envelope, "payload", None)
+        if not isinstance(payload, dict):
+            payload = {}
+        service = self._industry_service
+        if service is None:
+            return {
+                "status": "commit_deferred",
+                "reason": "no_industry_service",
+                "commit_key": commit_key,
+            }
+        if action_type in {"writeback_operating_truth", "create_backlog_item"}:
+            handler = getattr(service, "apply_execution_chat_writeback", None)
+            if callable(handler):
+                result = handler(
+                    action_type=action_type,
+                    payload=dict(payload),
+                    request=request,
+                    commit_key=commit_key,
+                )
+                if isawaitable(result):
+                    await result
+                return {
+                    "status": "committed",
+                    "record_id": str(payload.get("title") or payload.get("summary") or commit_key),
+                    "commit_key": commit_key,
+                }
+        if action_type in {"orchestrate_execution", "resume_execution"}:
+            handler = getattr(service, "kickoff_execution_from_chat", None)
+            if callable(handler):
+                result = handler(
+                    action_type=action_type,
+                    payload=dict(payload),
+                    request=request,
+                    commit_key=commit_key,
+                )
+                if isawaitable(result):
+                    await result
+                return {
+                    "status": "committed",
+                    "record_id": str(payload.get("goal_summary") or payload.get("resume_target_id") or commit_key),
+                    "commit_key": commit_key,
+                }
+        return {
+            "status": "commit_deferred",
+            "reason": "no_handler",
+            "commit_key": commit_key,
+        }
 
 
 __all__ = ["MainBrainResultCommitter"]

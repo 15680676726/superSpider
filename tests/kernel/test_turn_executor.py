@@ -505,7 +505,9 @@ async def test_kernel_turn_executor_auto_mode_does_not_guess_execution_from_plai
 
 
 @pytest.mark.asyncio
-async def test_kernel_turn_executor_auto_mode_recognizes_natural_execution_request():
+async def test_kernel_turn_executor_auto_mode_routes_plain_chat_without_writeback_model_decision(
+    monkeypatch,
+):
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()
     executor = KernelTurnExecutor(
@@ -514,25 +516,42 @@ async def test_kernel_turn_executor_auto_mode_recognizes_natural_execution_reque
         main_brain_chat_service=main_brain_chat_service,
     )
     request = AgentRequest(
-        id="req-auto-natural-orchestrate",
-        session_id="sess-auto-natural-orchestrate",
-        user_id="user-auto-natural-orchestrate",
+        id="req-auto-natural-chat",
+        session_id="sess-auto-natural-chat",
+        user_id="user-auto-natural-chat",
         channel="console",
         input=[],
     )
     request.interaction_mode = "auto"
+    resolver_calls = 0
+
+    async def _counting_resolver(**_kwargs):
+        nonlocal resolver_calls
+        resolver_calls += 1
+        return _make_main_brain_intake_contract(
+            intent_kind="execute-task",
+            kickoff_allowed=True,
+        )
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _counting_resolver,
+    )
     msgs = [Msg(name="user", role="user", content="那你开始吧，直接推进下去")]
 
     streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
 
     assert len(streamed) == 1
-    assert streamed[0][0].get_text_content() == "kernel done"
-    assert query_execution_service.calls != []
-    assert main_brain_chat_service.calls == []
+    assert streamed[0][0].get_text_content() == "chat done"
+    assert query_execution_service.calls == []
+    assert len(main_brain_chat_service.calls) == 1
+    assert resolver_calls == 0
 
 
 @pytest.mark.asyncio
-async def test_kernel_turn_executor_auto_mode_routes_goal_setting_to_query_execution_service():
+async def test_kernel_turn_executor_auto_mode_keeps_goal_setting_text_in_chat_without_explicit_actions(
+    monkeypatch,
+):
     query_execution_service = FakeQueryExecutionService()
     main_brain_chat_service = FakeMainBrainChatService()
     executor = KernelTurnExecutor(
@@ -541,21 +560,83 @@ async def test_kernel_turn_executor_auto_mode_routes_goal_setting_to_query_execu
         main_brain_chat_service=main_brain_chat_service,
     )
     request = AgentRequest(
-        id="req-auto-goal-orchestrate",
-        session_id="sess-auto-goal-orchestrate",
-        user_id="user-auto-goal-orchestrate",
+        id="req-auto-goal-chat",
+        session_id="sess-auto-goal-chat",
+        user_id="user-auto-goal-chat",
         channel="console",
         input=[],
     )
     request.interaction_mode = "auto"
+    resolver_calls = 0
+
+    async def _counting_resolver(**_kwargs):
+        nonlocal resolver_calls
+        resolver_calls += 1
+        return _make_main_brain_intake_contract(
+            intent_kind="execute-task",
+            should_writeback=True,
+            kickoff_allowed=True,
+            writeback_plan=SimpleNamespace(active=True),
+        )
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _counting_resolver,
+    )
     msgs = [Msg(name="user", role="user", content="我要在3个月内把这个账号做到月营收10万")]
 
     streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
 
     assert len(streamed) == 1
-    assert streamed[0][0].get_text_content() == "kernel done"
-    assert query_execution_service.calls != []
+    assert streamed[0][0].get_text_content() == "chat done"
+    assert query_execution_service.calls == []
+    assert len(main_brain_chat_service.calls) == 1
+    assert resolver_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_auto_mode_routes_to_orchestrate_only_for_explicit_actions(
+    monkeypatch,
+):
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    main_brain_orchestrator = FakeMainBrainOrchestrator()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+        main_brain_orchestrator=main_brain_orchestrator,
+    )
+    request = AgentRequest(
+        id="req-auto-explicit-actions",
+        session_id="sess-auto-explicit-actions",
+        user_id="user-auto-explicit-actions",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "auto"
+    request.requested_actions = ["writeback_backlog"]
+    msgs = [Msg(name="user", role="user", content="Generate a report draft.")]
+    resolver_calls = 0
+
+    async def _counting_resolver(**_kwargs):
+        nonlocal resolver_calls
+        resolver_calls += 1
+        return None
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _counting_resolver,
+    )
+
+    streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "orchestrator done"
+    assert len(main_brain_orchestrator.calls) == 1
     assert main_brain_chat_service.calls == []
+    assert query_execution_service.calls == []
+    assert resolver_calls == 0
 
 
 @pytest.mark.asyncio
@@ -1181,6 +1262,7 @@ async def test_kernel_turn_executor_stream_request_reuses_auto_mode_resolution_f
         ],
     )
     request.interaction_mode = "auto"
+    request.industry_instance_id = "industry-v1-demo"
     calls = 0
 
     async def _counting_resolver(**_kwargs):

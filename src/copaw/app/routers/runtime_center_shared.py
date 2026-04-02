@@ -76,6 +76,11 @@ class GovernanceDecisionBatchRequest(BaseModel):
     actor: str = Field(default="runtime-center")
     resolution: str | None = Field(default=None)
     execute: bool | None = Field(default=None)
+    control_thread_id: str | None = Field(default=None)
+    session_id: str | None = Field(default=None)
+    user_id: str | None = Field(default=None)
+    agent_id: str | None = Field(default=None)
+    work_context_id: str | None = Field(default=None)
 
 
 class GovernancePatchBatchRequest(BaseModel):
@@ -419,12 +424,38 @@ def _get_human_assist_task_service(request: Request):
 
 
 def _encode_sse_event(event: object) -> str:
+    payload: str | None = None
     if hasattr(event, "model_dump_json"):
-        payload = event.model_dump_json()
-    elif hasattr(event, "json"):
-        payload = event.json()
-    else:
-        payload = json.dumps(event, ensure_ascii=False)
+        try:
+            payload = event.model_dump_json()
+        except Exception:
+            try:
+                payload = event.model_dump_json(fallback=str)
+            except Exception:
+                payload = None
+    if payload is None and hasattr(event, "model_dump"):
+        try:
+            payload = json.dumps(
+                event.model_dump(mode="json"),
+                ensure_ascii=False,
+                default=str,
+            )
+        except Exception:
+            try:
+                payload = json.dumps(
+                    event.model_dump(mode="python"),
+                    ensure_ascii=False,
+                    default=str,
+                )
+            except Exception:
+                payload = None
+    if payload is None and hasattr(event, "json"):
+        try:
+            payload = event.json()
+        except Exception:
+            payload = None
+    if payload is None:
+        payload = json.dumps(event, ensure_ascii=False, default=str)
     return f"data: {payload}\n\n"
 
 

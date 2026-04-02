@@ -1,7 +1,5 @@
 import { getApiToken, getApiUrl } from "../../api/config";
-import { providerApi } from "../../api/modules/provider";
 import type { MediaSourceSpec } from "../../api/modules/media";
-import type { ActiveModelsInfo } from "../../api/types/provider";
 import { CHAT_RUNTIME_TEXT } from "./chatPageHelpers";
 import {
   extractRuntimeHealthNotice,
@@ -50,7 +48,6 @@ interface CreateRuntimeTransportArgs {
   getSelectedMediaAnalysisIds: () => string[];
   setRuntimeHealthNotice: (notice: RuntimeHealthNotice | null) => void;
   setRuntimeWaitState: (state: RuntimeWaitState | null) => void;
-  setShowModelPrompt: (show: boolean) => void;
   dispatchGovernanceDirty?: () => void;
   dispatchHumanAssistDirty?: () => void;
 }
@@ -72,8 +69,6 @@ interface SessionAbortState {
   controller: AbortController;
   networkStarted: boolean;
 }
-
-const ACTIVE_MODELS_CACHE_TTL_MS = 30_000;
 
 const RUNTIME_BIZ_PARAM_ALLOWLIST = new Set<string>([
   "requested_actions",
@@ -140,50 +135,21 @@ function trimRuntimeRequestBody(
   return trimmed;
 }
 
-function resolveRuntimeChatUrl(baseUrl: string | undefined): string {
-  const trimmed = typeof baseUrl === "string" ? baseUrl.trim() : "";
-  if (!trimmed) {
-    return getApiUrl("/runtime-center/chat/run");
-  }
-  return trimmed;
+function resolveRuntimeChatUrl(): string {
+  return getApiUrl("/runtime-center/chat/run");
 }
 
 function beginRuntimeWait(
-  activeModels: ActiveModelsInfo,
   setRuntimeHealthNotice: (notice: RuntimeHealthNotice | null) => void,
   setRuntimeWaitState: (state: RuntimeWaitState | null) => void,
 ): void {
-  const resolvedSlot = activeModels?.resolved_llm || activeModels?.active_llm;
   setRuntimeHealthNotice(null);
   setRuntimeWaitState({
     startedAt: Date.now(),
-    activeLabel: resolvedSlot
-      ? `${resolvedSlot.provider_id}/${resolvedSlot.model}`
-      : CHAT_RUNTIME_TEXT.unknownAgent,
-    fallbackCount:
-      activeModels?.fallback_enabled === false
-        ? 0
-        : activeModels?.fallback_chain?.length || 0,
-    resolutionReason: activeModels?.resolution_reason || null,
+    activeLabel: CHAT_RUNTIME_TEXT.unknownAgent,
+    fallbackCount: 0,
+    resolutionReason: null,
   });
-}
-
-function handleModelError(
-  setRuntimeWaitState: (state: RuntimeWaitState | null) => void,
-  setShowModelPrompt: (show: boolean) => void,
-): Response {
-  setRuntimeWaitState(null);
-  setShowModelPrompt(true);
-  return new Response(
-    JSON.stringify({
-      error: CHAT_RUNTIME_TEXT.modelNotConfigured,
-      message: CHAT_RUNTIME_TEXT.modelNotConfigured,
-    }),
-    {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    },
-  );
 }
 
 function isAbortRuntimeError(error: unknown): boolean {
@@ -222,38 +188,6 @@ function linkAbortSignals(
     signal: controller.signal,
     cleanup: () => upstreamSignal.removeEventListener("abort", forwardAbort),
   };
-}
-
-function createAbortRuntimeError(signal: AbortSignal): Error {
-  if (signal.reason instanceof Error && signal.reason.name !== "AbortError") {
-    return signal.reason;
-  }
-  return new DOMException("The operation was aborted.", "AbortError");
-}
-
-function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) {
-    return Promise.reject(createAbortRuntimeError(signal));
-  }
-
-  return new Promise<T>((resolve, reject) => {
-    const handleAbort = () => {
-      signal.removeEventListener("abort", handleAbort);
-      reject(createAbortRuntimeError(signal));
-    };
-
-    signal.addEventListener("abort", handleAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener("abort", handleAbort);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener("abort", handleAbort);
-        reject(error);
-      },
-    );
-  });
 }
 
 export function parseRuntimeResponseChunk(
@@ -304,7 +238,6 @@ export function parseRuntimeResponseChunk(
 export function createRuntimeTransport({
   runtimeWindow,
   requestedThreadId,
-  optionsBaseUrl,
   getThreadMeta,
   getPendingMediaSources,
   clearPendingMediaDrafts,
@@ -312,7 +245,6 @@ export function createRuntimeTransport({
   getSelectedMediaAnalysisIds,
   setRuntimeHealthNotice,
   setRuntimeWaitState,
-  setShowModelPrompt,
   dispatchGovernanceDirty,
   dispatchHumanAssistDirty,
 }: CreateRuntimeTransportArgs): {
@@ -320,10 +252,6 @@ export function createRuntimeTransport({
   responseParser: (rawChunk: string) => unknown;
   cancelSession: (sessionId: string) => void;
 } {
-  const activeModelsCache = {
-    fetchedAt: 0,
-    value: null as ActiveModelsInfo | null,
-  };
   const sessionAbortControllers = new Map<string, SessionAbortState>();
 
   const customFetch = async (data: RuntimeWebUiFetchData): Promise<Response> => {
@@ -355,41 +283,7 @@ export function createRuntimeTransport({
     }
 
     try {
-      let activeModels: ActiveModelsInfo | null = null;
-      try {
-        const cached = activeModelsCache;
-        if (
-          cached.value &&
-          Date.now() - cached.fetchedAt < ACTIVE_MODELS_CACHE_TTL_MS
-        ) {
-          activeModels = cached.value;
-        } else {
-          activeModels = await raceWithAbort(
-            providerApi.getActiveModels(),
-            localAbortController.signal,
-          );
-          activeModelsCache.fetchedAt = Date.now();
-          activeModelsCache.value = activeModels;
-        }
-
-        const resolvedSlot = activeModels?.resolved_llm || activeModels?.active_llm;
-        if (!resolvedSlot?.provider_id || !resolvedSlot?.model) {
-          return handleModelError(setRuntimeWaitState, setShowModelPrompt);
-        }
-
-        beginRuntimeWait(activeModels, setRuntimeHealthNotice, setRuntimeWaitState);
-      } catch (error) {
-        if (isAbortRuntimeError(error)) {
-          setRuntimeWaitState(null);
-          setRuntimeHealthNotice(null);
-          throw error;
-        }
-
-        activeModelsCache.fetchedAt = 0;
-        activeModelsCache.value = null;
-        console.error("Failed to check model configuration:", error);
-        return handleModelError(setRuntimeWaitState, setShowModelPrompt);
-      }
+      beginRuntimeWait(setRuntimeHealthNotice, setRuntimeWaitState);
 
       const requestBody = trimRuntimeRequestBody(
         buildRuntimeChatRequest({
@@ -413,7 +307,7 @@ export function createRuntimeTransport({
         (headers as Record<string, string>).Authorization = `Bearer ${token}`;
       }
 
-      const url = resolveRuntimeChatUrl(optionsBaseUrl);
+      const url = resolveRuntimeChatUrl();
       const requestThreadId =
         typeof requestBody.thread_id === "string" && requestBody.thread_id.trim()
           ? requestBody.thread_id.trim()
@@ -488,14 +382,10 @@ export function createRuntimeTransport({
             });
           })
           .catch(() => {
-            const resolvedSlot =
-              activeModels?.resolved_llm || activeModels?.active_llm;
             setRuntimeHealthNotice({
               type: "error",
               title: "请求发送失败",
-              description: resolvedSlot
-                ? `请求已发送到 ${resolvedSlot.provider_id}/${resolvedSlot.model}，但服务端没有返回可用结果。`
-                : "服务端没有返回可用结果。",
+              description: CHAT_RUNTIME_TEXT.unknownAgent,
             });
           });
       }

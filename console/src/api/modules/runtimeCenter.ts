@@ -405,6 +405,11 @@ export const runtimeCenterApi = {
     actor: string;
     resolution?: string;
     execute?: boolean;
+    control_thread_id?: string;
+    session_id?: string;
+    user_id?: string;
+    agent_id?: string;
+    work_context_id?: string;
   }) =>
     request<GovernanceBatchResult>(
       "/runtime-center/governance/decisions/approve",
@@ -419,6 +424,11 @@ export const runtimeCenterApi = {
     actor: string;
     resolution?: string;
     execute?: boolean;
+    control_thread_id?: string;
+    session_id?: string;
+    user_id?: string;
+    agent_id?: string;
+    work_context_id?: string;
   }) =>
     request<GovernanceBatchResult>(
       "/runtime-center/governance/decisions/reject",

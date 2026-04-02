@@ -159,6 +159,36 @@ describe("runtimeTransport", () => {
     expect(request.stream).toBe(true);
   });
 
+  it("prefers bound thread agent identity over window user for canonical chat session keys", () => {
+    const request = buildRuntimeChatRequest({
+      data: {
+        input: [
+          {
+            session: {
+              session_id: "session-thread",
+              user_id: "session-user",
+              channel: "session-channel",
+            },
+          },
+        ],
+      },
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      threadMeta: {
+        agent_id: "execution-core-agent",
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      },
+      pendingMediaSources: [],
+      selectedMediaAnalysisIds: [],
+    });
+
+    expect(request.user_id).toBe("execution-core-agent");
+  });
+
   it("normalizes runtime string arrays by trimming empties and deduping while keeping order", () => {
     expect(
       normalizeRuntimeStringList([
@@ -256,7 +286,6 @@ describe("runtimeTransport", () => {
       getSelectedMediaAnalysisIds: () => [],
       setRuntimeHealthNotice: vi.fn(),
       setRuntimeWaitState: vi.fn(),
-      setShowModelPrompt: vi.fn(),
       dispatchHumanAssistDirty,
     });
 
@@ -328,7 +357,6 @@ describe("runtimeTransport", () => {
       getSelectedMediaAnalysisIds: () => [],
       setRuntimeHealthNotice: vi.fn(),
       setRuntimeWaitState: vi.fn(),
-      setShowModelPrompt: vi.fn(),
     });
 
     await transport.fetch({
@@ -361,6 +389,127 @@ describe("runtimeTransport", () => {
     expect(requestBody.requested_actions).toBeUndefined();
   });
 
+  it("does not check active models before sending a runtime chat request", async () => {
+    vi.stubGlobal("BASE_URL", "http://testserver");
+    const getActiveModelsSpy = vi
+      .spyOn(providerApi, "getActiveModels")
+      .mockResolvedValue({
+        resolved_llm: {
+          provider_id: "test-provider",
+          model: "test-model",
+        },
+      } as never);
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            object: "response",
+            status: "completed",
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      );
+
+    const transport = createRuntimeTransport({
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      optionsBaseUrl: undefined,
+      getThreadMeta: () => ({
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      }),
+      getPendingMediaSources: () => [],
+      clearPendingMediaDrafts: vi.fn(),
+      refreshThreadMediaAnalyses: vi.fn(),
+      getSelectedMediaAnalysisIds: () => [],
+      setRuntimeHealthNotice: vi.fn(),
+      setRuntimeWaitState: vi.fn(),
+    });
+
+    await transport.fetch({
+      input: [
+        {
+          session: {
+            session_id: "session-thread",
+            user_id: "session-user",
+            channel: "session-channel",
+          },
+        },
+      ],
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(getActiveModelsSpy).not.toHaveBeenCalled();
+  });
+
+  it("always posts chat sends to the canonical runtime-center chat run endpoint", async () => {
+    vi.stubGlobal("BASE_URL", "http://testserver");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            object: "response",
+            status: "completed",
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      );
+
+    const transport = createRuntimeTransport({
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      optionsBaseUrl: "https://override.example/api/runtime-center/chat/orchestrate",
+      getThreadMeta: () => ({
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      }),
+      getPendingMediaSources: () => [],
+      clearPendingMediaDrafts: vi.fn(),
+      refreshThreadMediaAnalyses: vi.fn(),
+      getSelectedMediaAnalysisIds: () => [],
+      setRuntimeHealthNotice: vi.fn(),
+      setRuntimeWaitState: vi.fn(),
+    });
+
+    await transport.fetch({
+      input: [
+        {
+          session: {
+            session_id: "session-thread",
+            user_id: "session-user",
+            channel: "session-channel",
+          },
+        },
+      ],
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "http://testserver/api/runtime-center/chat/run",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+  });
+
   it("does not surface a connection error when the runtime request is aborted by the client", async () => {
     vi.stubGlobal("BASE_URL", "http://testserver");
     vi.spyOn(providerApi, "getActiveModels").mockResolvedValue({
@@ -391,7 +540,6 @@ describe("runtimeTransport", () => {
       getSelectedMediaAnalysisIds: () => [],
       setRuntimeHealthNotice,
       setRuntimeWaitState,
-      setShowModelPrompt: vi.fn(),
     });
 
     await expect(
@@ -457,7 +605,6 @@ describe("runtimeTransport", () => {
       getSelectedMediaAnalysisIds: () => [],
       setRuntimeHealthNotice,
       setRuntimeWaitState,
-      setShowModelPrompt: vi.fn(),
     });
 
     const requestPromise = transport.fetch({
