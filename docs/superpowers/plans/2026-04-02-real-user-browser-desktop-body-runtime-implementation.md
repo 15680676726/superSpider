@@ -342,9 +342,9 @@ Checklist must prove:
 
 Acceptance evidence on the current host:
 - `PYTHONPATH=src python -m pytest tests/kernel/test_query_execution_runtime.py tests/environments/test_cooperative_browser_attach_runtime.py tests/environments/test_environment_registry.py tests/environments/test_cooperative_windows_apps.py tests/agents/test_browser_tool_evidence.py tests/app/runtime_center_api_parts/detail_environment.py -q` -> `107 passed`
-- `COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 PYTHONPATH=src python -m pytest tests/routines/test_live_routine_smoke.py -q -k "authenticated_continuation_cross_tab_save_reopen_smoke or live_desktop_routine_replay_round_trip"` -> `1 passed, 1 skipped`
+- `COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 PYTHONPATH=src python -m pytest tests/routines/test_live_routine_smoke.py -q -k "authenticated_continuation_cross_tab_save_reopen_smoke or live_desktop_routine_replay_round_trip"` -> `2 passed`
 - browser live smoke passed on the real browser routine chain with authenticated continuation, cross-tab reuse, save-and-reopen, download initiation, and screenshot evidence
-- desktop live smoke remained host-gated on this machine because the runtime could not resolve a foreground window; this is a host precondition failure, not a second-truth or lifecycle architecture gap
+- desktop live smoke now also passes on the current host; the final blocker was a compatibility gap in `WindowsDesktopHost.get_foreground_window()` where live callers expected a top-level `handle` while the host only exposed the nested `window.handle`
 
 - [x] **Step 2: Run focused regression**
 

@@ -177,9 +177,11 @@ class WindowsDesktopHost:
         handle = int(self._win32gui.GetForegroundWindow() or 0)
         if handle <= 0:
             raise DesktopAutomationError("No foreground window is available")
+        window = self._window_info(handle)
         return {
             "success": True,
-            "window": self._window_info(handle),
+            **window,
+            "window": window,
         }
 
     def launch_application(

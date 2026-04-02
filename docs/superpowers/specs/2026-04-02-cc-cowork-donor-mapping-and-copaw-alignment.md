@@ -296,13 +296,13 @@ Fresh evidence on the current host:
   - result: `107 passed`
 - live browser/desktop smoke:
   - `COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 PYTHONPATH=src python -m pytest tests/routines/test_live_routine_smoke.py -q -k "authenticated_continuation_cross_tab_save_reopen_smoke or live_desktop_routine_replay_round_trip"`
-  - result: `1 passed, 1 skipped`
+  - result: `2 passed`
 
 Interpretation:
 
 - the browser smoke passed on the real browser routine chain and proved authenticated continuation, cross-tab reuse, save-and-reopen, download initiation, and screenshot evidence on one canonical runtime path
-- the desktop smoke remained host-gated on this machine because the host session could not provide a resolvable foreground window; that is a live-host precondition failure, not a missing second runtime truth or missing canonical abort chain
-- donor parity is therefore stronger on the browser continuation/runtime-discipline side than on this machine's current desktop live smoke preconditions
+- the desktop smoke also passes on the current host; the remaining blocker was not donor architecture but a CoPaw compatibility gap in `WindowsDesktopHost.get_foreground_window()` where live callers needed a top-level foreground-window reference in addition to the nested payload
+- donor parity on this host is now proven on both live-smoke surfaces covered by the current routine harness; what remains distinct from `cc` is still the richer donor-side lock/ESC/cleanup discipline, not an inability to continue a real browser scope or verify a real desktop focus chain
 
 ## 6. Conditional Future Follow-ups
 

@@ -282,6 +282,19 @@ def test_verify_window_focus_reports_actual_foreground_state() -> None:
     assert verified["foreground_window"]["handle"] == 202
 
 
+def test_get_foreground_window_keeps_nested_payload_and_top_level_reference() -> None:
+    host, gui, _api, _user32 = _build_host()
+
+    gui.foreground = 202
+    result = host.get_foreground_window()
+
+    assert result["success"] is True
+    assert result["window"]["handle"] == 202
+    assert result["handle"] == 202
+    assert result["title"] == "Calculator"
+    assert result["process_id"] == 6002
+
+
 def test_verify_window_focus_rejects_ambiguous_selector() -> None:
     host, gui, _api, _user32 = _build_host()
     gui.windows[404] = {
