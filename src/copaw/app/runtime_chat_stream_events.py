@@ -86,6 +86,9 @@ def _summarize_runtime_context(runtime_context: dict[str, object] | None) -> dic
         value = runtime_context.get(key)
         if value is not None:
             summary[key] = value
+    query_runtime_state = runtime_context.get("query_runtime_state")
+    if isinstance(query_runtime_state, dict) and query_runtime_state:
+        summary["query_runtime_state"] = dict(query_runtime_state)
     intake_contract = runtime_context.get("intake_contract")
     if intake_contract is not None:
         intake_summary = _summarize_intake_contract(intake_contract)
@@ -244,9 +247,14 @@ def _build_sidecar_events(
 ) -> list[dict[str, object]]:
     request_id = getattr(request_payload, "id", None)
     runtime_summary = _summarize_runtime_context(runtime_context)
+    query_runtime_state = runtime_summary.get("query_runtime_state")
+    if not isinstance(query_runtime_state, dict):
+        query_runtime_state = {}
     commit_state = getattr(request_payload, "_copaw_main_brain_commit_state", None)
     if commit_state is None:
         commit_state = runtime_summary.get("commit_outcome")
+    if commit_state is None and query_runtime_state:
+        commit_state = query_runtime_state.get("commit_outcome")
     timing_profile = _safe_get(request_payload, "_copaw_main_brain_timing")
     intent_shell = read_attached_main_brain_intent_shell(request=request_payload)
     sidecar_control_thread_id = _first_non_empty(
@@ -284,6 +292,8 @@ def _build_sidecar_events(
         }
     )
     accepted_persistence = runtime_summary.get("accepted_persistence")
+    if accepted_persistence is None and query_runtime_state:
+        accepted_persistence = query_runtime_state.get("accepted_persistence")
     if isinstance(accepted_persistence, dict) and accepted_persistence:
         accepted_payload = _compact_payload(
             {

@@ -95,6 +95,95 @@ def test_clear_browser_attach_transport_keeps_mount_truth_and_marks_runtime_clea
     assert detail["adapter_gap_or_blocker"] == "browser attach cleared"
 
 
+def test_bridge_reconnect_without_transport_preserves_existing_attach_refs(
+    tmp_path,
+) -> None:
+    service, env_repo, session_repo = _build_environment_service(tmp_path)
+    lease = _acquire_browser_session(service)
+    assert lease.lease_token is not None
+
+    service.ack_bridge_session_work(
+        lease.id,
+        lease_token=lease.lease_token,
+        work_id="bridge-work-attach-2",
+        bridge_session_id="bridge-session-2",
+        browser_attach_transport_ref="chrome-native-host:default",
+        browser_attach_status="attached",
+        browser_attach_session_ref="chrome-session:alice-default",
+        browser_attach_scope_ref="chrome-profile:alice",
+        browser_attach_reconnect_token="reconnect-token-1",
+    )
+
+    reconnected = service.reconnect_bridge_session_work(
+        lease.id,
+        lease_token=lease.lease_token,
+        work_id="bridge-work-attach-2",
+        browser_attach_status="reconnecting",
+        browser_attach_reconnect_token="reconnect-token-2",
+    )
+
+    session = session_repo.get_session(lease.id)
+    assert session is not None
+    environment = env_repo.get_environment(lease.environment_id)
+    assert environment is not None
+    snapshot = service.browser_attach_snapshot(session_mount_id=lease.id)
+
+    assert reconnected.metadata["bridge_work_status"] == "reconnecting"
+    assert session.metadata["browser_attach_transport_ref"] == "chrome-native-host:default"
+    assert session.metadata["browser_attach_session_ref"] == "chrome-session:alice-default"
+    assert session.metadata["browser_attach_scope_ref"] == "chrome-profile:alice"
+    assert session.metadata["browser_attach_reconnect_token"] == "reconnect-token-2"
+    assert environment.metadata["browser_attach_transport_ref"] == "chrome-native-host:default"
+    assert snapshot["browser_attach"]["transport_ref"] == "chrome-native-host:default"
+    assert snapshot["browser_attach"]["status"] == "reconnecting"
+    assert snapshot["browser_attach"]["session_ref"] == "chrome-session:alice-default"
+    assert snapshot["browser_attach"]["scope_ref"] == "chrome-profile:alice"
+
+
+def test_bridge_reconnect_blocker_only_updates_adapter_gap_without_dropping_attach_state(
+    tmp_path,
+) -> None:
+    service, env_repo, session_repo = _build_environment_service(tmp_path)
+    lease = _acquire_browser_session(service)
+    assert lease.lease_token is not None
+
+    service.ack_bridge_session_work(
+        lease.id,
+        lease_token=lease.lease_token,
+        work_id="bridge-work-attach-3",
+        bridge_session_id="bridge-session-3",
+        browser_attach_transport_ref="chrome-native-host:default",
+        browser_attach_status="attached",
+        browser_attach_session_ref="chrome-session:alice-default",
+        browser_attach_scope_ref="chrome-profile:alice",
+        browser_attach_reconnect_token="reconnect-token-1",
+    )
+
+    reconnected = service.reconnect_bridge_session_work(
+        lease.id,
+        lease_token=lease.lease_token,
+        work_id="bridge-work-attach-3",
+        adapter_gap_or_blocker="browser attach blocked by policy",
+    )
+
+    session = session_repo.get_session(lease.id)
+    assert session is not None
+    environment = env_repo.get_environment(lease.environment_id)
+    assert environment is not None
+    snapshot = service.browser_attach_snapshot(session_mount_id=lease.id)
+
+    assert reconnected.metadata["bridge_work_status"] == "reconnecting"
+    assert session.metadata["browser_attach_transport_ref"] == "chrome-native-host:default"
+    assert session.metadata["browser_attach_session_ref"] == "chrome-session:alice-default"
+    assert session.metadata["browser_attach_scope_ref"] == "chrome-profile:alice"
+    assert session.metadata["browser_attach_reconnect_token"] == "reconnect-token-1"
+    assert session.metadata["adapter_gap_or_blocker"] == "browser attach blocked by policy"
+    assert environment.metadata["adapter_gap_or_blocker"] == "browser attach blocked by policy"
+    assert snapshot["adapter_gap_or_blocker"] == "browser attach blocked by policy"
+    assert snapshot["browser_attach"]["transport_ref"] == "chrome-native-host:default"
+    assert snapshot["browser_attach"]["status"] == "attached"
+
+
 def test_browser_attach_runtime_requires_existing_mounts(tmp_path) -> None:
     service, _, _ = _build_environment_service(tmp_path)
 
@@ -103,6 +192,69 @@ def test_browser_attach_runtime_requires_existing_mounts(tmp_path) -> None:
             session_mount_id="missing",
             transport_ref="chrome-native-host:default",
         )
+
+
+def test_browser_attach_snapshot_can_resolve_from_environment_id(tmp_path) -> None:
+    service, _, _ = _build_environment_service(tmp_path)
+    lease = _acquire_browser_session(service)
+
+    service.register_browser_attach_transport(
+        session_mount_id=lease.id,
+        transport_ref="chrome-native-host:default",
+        status="attached",
+        browser_session_ref="chrome-session:alice-default",
+        browser_scope_ref="chrome-profile:alice",
+        reconnect_token="reconnect-token-1",
+    )
+
+    snapshot = service.browser_attach_snapshot(environment_id=lease.environment_id)
+
+    assert snapshot["environment_id"] == lease.environment_id
+    assert snapshot["session_mount_id"] == lease.id
+    assert snapshot["browser_attach"]["transport_ref"] == "chrome-native-host:default"
+    assert snapshot["browser_attach"]["session_ref"] == "chrome-session:alice-default"
+
+
+def test_browser_attach_runtime_replaces_stale_legacy_attach_transport_projection(
+    tmp_path,
+) -> None:
+    service, env_repo, session_repo = _build_environment_service(tmp_path)
+    lease = _acquire_browser_session(service)
+
+    session = session_repo.get_session(lease.id)
+    assert session is not None
+    session.metadata["attach_transport_ref"] = "legacy:stale"
+    session_repo.upsert_session(session)
+
+    environment = env_repo.get_environment(lease.environment_id)
+    assert environment is not None
+    environment.metadata["attach_transport_ref"] = "legacy:stale"
+    env_repo.upsert_environment(environment)
+
+    service.register_browser_attach_transport(
+        session_mount_id=lease.id,
+        transport_ref="chrome-native-host:default",
+        status="attached",
+        browser_session_ref="chrome-session:alice-default",
+        browser_scope_ref="chrome-profile:alice",
+        reconnect_token="reconnect-token-1",
+    )
+
+    detail = service.get_session_detail(lease.id)
+    assert detail is not None
+    assert detail["browser_site_contract"]["attach_transport_ref"] == "chrome-native-host:default"
+    assert detail["browser_site_contract"]["attach_session_ref"] == "chrome-session:alice-default"
+    assert detail["browser_site_contract"]["attach_scope_ref"] == "chrome-profile:alice"
+    assert detail["browser_site_contract"]["attach_reconnect_token"] == "reconnect-token-1"
+
+    service.clear_browser_attach_transport(session_mount_id=lease.id)
+
+    cleared = service.get_session_detail(lease.id)
+    assert cleared is not None
+    assert cleared["browser_site_contract"]["attach_transport_ref"] is None
+    assert cleared["browser_site_contract"]["attach_session_ref"] is None
+    assert cleared["browser_site_contract"]["attach_scope_ref"] is None
+    assert cleared["browser_site_contract"]["attach_reconnect_token"] is None
 
 
 def test_bridge_lifecycle_can_drive_browser_attach_transport_on_same_mount_truth(

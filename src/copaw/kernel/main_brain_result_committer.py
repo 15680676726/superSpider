@@ -129,6 +129,16 @@ def normalize_durable_commit_result(
             "message": _resolve_durable_failure_message(action_type),
             "commit_key": commit_key,
         }
+    if action_type in _KICKOFF_ACTION_TYPES and (
+        _string(payload.get("status")) in {"blocked", "deferred"}
+        or payload.get("blocked_reason") is not None
+    ):
+        normalized = dict(payload)
+        normalized["status"] = "commit_deferred"
+        if record_id is not None:
+            normalized["record_id"] = record_id
+        normalized["commit_key"] = commit_key
+        return normalized
     success = _resolve_downstream_record_id(payload) is not None or any(
         bool(payload.get(key))
         for key in _resolve_success_markers(action_type)

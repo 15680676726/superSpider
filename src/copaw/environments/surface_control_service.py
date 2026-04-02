@@ -627,23 +627,17 @@ class SurfaceControlService:
         session_mount_id: str,
         guardrails: dict[str, Any],
     ) -> dict[str, Any]:
-        if not guardrails:
-            return {}
-        merged = dict(guardrails)
         shared_abort_state = self._resolve_shared_operator_abort_state(
             session_mount_id=session_mount_id,
         )
         if not shared_abort_state.get("requested"):
-            return merged
-        if not self._abort_channels_match(
-            guardrail_channel=merged.get("operator_abort_channel"),
-            shared_channel=shared_abort_state.get("channel"),
-        ):
-            return merged
-        if shared_abort_state.get("channel") is not None and self._normalize_string(
-            merged.get("operator_abort_channel"),
-        ) is None:
-            merged["operator_abort_channel"] = shared_abort_state["channel"]
+            return dict(guardrails)
+        merged = dict(guardrails)
+        shared_channel = self._normalize_string(shared_abort_state.get("channel"))
+        if shared_channel is not None:
+            merged["operator_abort_channel"] = shared_channel
+        elif self._normalize_string(merged.get("operator_abort_channel")) is None:
+            merged.pop("operator_abort_channel", None)
         merged["operator_abort_requested"] = True
         reason = self._normalize_string(
             merged.get("abort_reason"),

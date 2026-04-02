@@ -395,6 +395,113 @@ async def test_browser_action_blocks_when_global_operator_abort_channel_matches(
 
 
 @pytest.mark.asyncio
+async def test_browser_action_blocks_when_shared_operator_abort_state_is_requested_without_any_execution_guardrails(
+    tmp_path,
+) -> None:
+    (
+        environment_service,
+        env_repo,
+        session_repo,
+        _event_bus,
+        environment,
+        session,
+        companion_runtime,
+        _browser_runtime,
+    ) = _build_services(tmp_path)
+
+    companion_runtime.register_companion(
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+    )
+    _patch_browser_abort_state(
+        env_repo=env_repo,
+        session_repo=session_repo,
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        operator_abort_state={
+            "channel": "global-esc",
+            "requested": True,
+            "reason": "global-esc",
+        },
+    )
+
+    class _Executor:
+        async def __call__(self, **_kwargs):
+            raise AssertionError("browser executor should not run after shared operator abort")
+
+    environment_service.register_browser_companion_executor(
+        "transport:browser-companion:localhost",
+        _Executor(),
+    )
+
+    with pytest.raises(RuntimeError, match="operator abort"):
+        await environment_service.execute_browser_action(
+            session_mount_id=session.id,
+            action="click",
+            contract={},
+        )
+
+
+@pytest.mark.asyncio
+async def test_browser_action_blocks_when_caller_guardrails_try_to_override_shared_operator_abort_state(
+    tmp_path,
+) -> None:
+    (
+        environment_service,
+        env_repo,
+        session_repo,
+        _event_bus,
+        environment,
+        session,
+        companion_runtime,
+        _browser_runtime,
+    ) = _build_services(tmp_path)
+
+    companion_runtime.register_companion(
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+    )
+    _patch_browser_abort_state(
+        env_repo=env_repo,
+        session_repo=session_repo,
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        operator_abort_state={
+            "channel": "global-esc",
+            "requested": True,
+            "reason": "global-esc",
+        },
+    )
+
+    class _Executor:
+        async def __call__(self, **_kwargs):
+            raise AssertionError("browser executor should not run after shared operator abort")
+
+    environment_service.register_browser_companion_executor(
+        "transport:browser-companion:localhost",
+        _Executor(),
+    )
+
+    with pytest.raises(RuntimeError, match="operator abort"):
+        await environment_service.execute_browser_action(
+            session_mount_id=session.id,
+            action="click",
+            contract={
+                "guardrails": {
+                    "operator_abort_channel": "local-esc",
+                    "operator_abort_requested": False,
+                },
+            },
+        )
+
+
+@pytest.mark.asyncio
 async def test_browser_action_runs_frontmost_and_clipboard_guardrails_before_execution(
     tmp_path,
 ) -> None:

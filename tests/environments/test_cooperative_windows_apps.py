@@ -382,6 +382,78 @@ async def test_windows_app_action_blocks_when_global_operator_abort_channel_matc
 
 
 @pytest.mark.asyncio
+async def test_windows_app_action_blocks_when_shared_operator_abort_state_is_requested_without_any_execution_guardrails(
+    tmp_path,
+) -> None:
+    service, _, _ = _build_environment_service(tmp_path)
+    lease = _acquire_desktop_session(service)
+
+    service.register_windows_app_adapter(
+        session_mount_id=lease.id,
+        adapter_refs=["app-adapter:excel"],
+        app_identity="excel",
+        control_channel="accessibility-tree",
+    )
+    service._lease_service.set_shared_operator_abort_state(
+        lease.id,
+        channel="global-esc",
+        reason="global-esc",
+    )
+
+    class _Executor:
+        async def __call__(self, **_kwargs):
+            raise AssertionError("executor should not run after shared operator abort")
+
+    service.register_semantic_surface_executor("accessibility-tree", _Executor())
+
+    with pytest.raises(RuntimeError, match="operator abort"):
+        await service.execute_windows_app_action(
+            session_mount_id=lease.id,
+            action="focus_window",
+            contract={"app_identity": "excel"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_windows_app_action_blocks_when_caller_guardrails_try_to_override_shared_operator_abort_state(
+    tmp_path,
+) -> None:
+    service, _, _ = _build_environment_service(tmp_path)
+    lease = _acquire_desktop_session(service)
+
+    service.register_windows_app_adapter(
+        session_mount_id=lease.id,
+        adapter_refs=["app-adapter:excel"],
+        app_identity="excel",
+        control_channel="accessibility-tree",
+    )
+    service._lease_service.set_shared_operator_abort_state(
+        lease.id,
+        channel="global-esc",
+        reason="global-esc",
+    )
+
+    class _Executor:
+        async def __call__(self, **_kwargs):
+            raise AssertionError("executor should not run after shared operator abort")
+
+    service.register_semantic_surface_executor("accessibility-tree", _Executor())
+
+    with pytest.raises(RuntimeError, match="operator abort"):
+        await service.execute_windows_app_action(
+            session_mount_id=lease.id,
+            action="focus_window",
+            contract={
+                "app_identity": "excel",
+                "guardrails": {
+                    "operator_abort_channel": "local-esc",
+                    "operator_abort_requested": False,
+                },
+            },
+        )
+
+
+@pytest.mark.asyncio
 async def test_windows_app_action_blocks_when_shared_operator_abort_state_is_requested_without_explicit_runtime_guardrails(
     tmp_path,
 ) -> None:

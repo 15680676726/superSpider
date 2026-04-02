@@ -1695,6 +1695,13 @@ def _session_runtime_ref_match_rank(
     *,
     runtime_session_ref: str,
 ) -> int | None:
+    allow_session_id_alias = bool(
+        _normalize_string(session.metadata.get("provider_session_ref"))
+        or _normalize_string(session.metadata.get("browser_attach_session_ref"))
+        or _normalize_string(session.metadata.get("browser_session_ref"))
+        or _normalize_string(session.metadata.get("session_ref"))
+        or _normalize_string(getattr(session, "channel", None)) == "browser"
+    )
     ranked_aliases = (
         (_normalize_string(session.metadata.get("provider_session_ref")), 4),
         (_normalize_string(session.metadata.get("browser_attach_session_ref")), 4),
@@ -1702,7 +1709,7 @@ def _session_runtime_ref_match_rank(
         (_normalize_string(session.metadata.get("session_ref")), 4),
         (_normalize_string(session.id), 3),
         (_normalize_string(session.live_handle_ref), 2),
-        (_normalize_string(session.session_id), 1),
+        (_normalize_string(session.session_id) if allow_session_id_alias else None, 1),
     )
     best_rank: int | None = None
     for alias, rank in ranked_aliases:

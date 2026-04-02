@@ -33,6 +33,33 @@ async def _yield_once_with_runtime_bindings() -> None:
                         yield
 
 
+class _SnapshotSessionBackend:
+    def __init__(self) -> None:
+        self.snapshots: dict[tuple[str, str], dict[str, object]] = {}
+
+    def load_session_snapshot(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        allow_not_exist: bool = True,
+    ) -> dict[str, object] | None:
+        _ = allow_not_exist
+        snapshot = self.snapshots.get((session_id, user_id))
+        return dict(snapshot) if snapshot is not None else None
+
+    def save_session_snapshot(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        payload: dict[str, object],
+        source_ref: str,
+    ) -> None:
+        _ = source_ref
+        self.snapshots[(session_id, user_id)] = dict(payload)
+
+
 def test_runtime_context_bindings_survive_cross_task_generator_close() -> None:
     async def _scenario() -> None:
         stream = _yield_once_with_runtime_bindings()
@@ -227,3 +254,64 @@ async def test_query_execution_runtime_requires_durable_kickoff_proof_before_mar
     assert runtime_context["accepted_persistence"]["status"] == "accepted"
     assert runtime_context["commit_outcome"]["status"] == "commit_failed"
     assert runtime_context["commit_outcome"]["reason"] == "durable_kickoff_failed"
+
+
+@pytest.mark.asyncio
+async def test_query_execution_runtime_persists_accepted_boundary_and_commit_outcome_for_replay() -> None:
+    class _IndustryService:
+        async def apply_execution_chat_writeback(self, **kwargs):
+            _ = kwargs
+            return {
+                "applied": True,
+                "strategy_updated": True,
+                "created_goal_titles": ["Follow up on the latest operator request"],
+            }
+
+        async def kickoff_execution_from_chat(self, **kwargs):
+            _ = kwargs
+            return {
+                "summary": "Kickoff tail completed but durable execution proof never arrived.",
+            }
+
+    session_backend = _SnapshotSessionBackend()
+    service = KernelQueryExecutionService(
+        session_backend=session_backend,
+        industry_service=_IndustryService(),
+    )
+    request = SimpleNamespace(
+        industry_instance_id="industry-v1-demo",
+        industry_role_id="execution-core",
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        control_thread_id="industry-chat:industry-v1-demo:execution-core",
+        channel="console",
+        work_context_id="work-context-1",
+        user_id="ops-user",
+        _copaw_main_brain_intake_contract=MainBrainIntakeContract(
+            message_text="Record this and continue execution.",
+            decision=SimpleNamespace(
+                intent_kind="execute-task",
+                should_writeback=True,
+                kickoff_allowed=True,
+                explicit_execution_confirmation=False,
+            ),
+            intent_kind="execute-task",
+            writeback_requested=True,
+            writeback_plan=SimpleNamespace(active=True, fingerprint="plan-1"),
+            should_kickoff=True,
+        ),
+    )
+
+    await service._apply_requested_main_brain_intake(  # pylint: disable=protected-access
+        msgs=[Msg(name="user", role="user", content="Record this and continue execution.")],
+        request=request,
+        owner_agent_id="execution-core-agent",
+        agent_profile=None,
+    )
+
+    snapshot = session_backend.snapshots[(request.session_id, request.user_id)]
+    query_runtime_state = snapshot.get("query_runtime_state")
+    assert isinstance(query_runtime_state, dict)
+    assert query_runtime_state["accepted_persistence"]["status"] == "accepted"
+    assert query_runtime_state["accepted_persistence"]["boundary"] == "execution_runtime_intake"
+    assert query_runtime_state["commit_outcome"]["status"] == "commit_failed"
+    assert query_runtime_state["commit_outcome"]["reason"] == "durable_kickoff_failed"

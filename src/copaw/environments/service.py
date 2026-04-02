@@ -1164,7 +1164,7 @@ class EnvironmentService:
         ui_fallback_mode: str | None = None,
         adapter_gap_or_blocker: str | None = None,
     ) -> SessionMount | None:
-        has_transport_update = any(
+        has_update = any(
             value is not None
             for value in (
                 transport_ref,
@@ -1172,9 +1172,12 @@ class EnvironmentService:
                 browser_session_ref,
                 browser_scope_ref,
                 reconnect_token,
+                preferred_execution_path,
+                ui_fallback_mode,
+                adapter_gap_or_blocker,
             )
         )
-        if not has_transport_update:
+        if not has_update:
             return None
         runtime = self._require_browser_attach_runtime()
         return runtime.register_transport(

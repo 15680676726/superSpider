@@ -13,6 +13,7 @@ from .main_brain_intake import (
 from .main_brain_result_committer import (
     build_accepted_persistence,
     normalize_durable_commit_result,
+    set_request_runtime_value,
     update_request_runtime_context,
 )
 from .query_execution_resident_runtime import _QueryExecutionResidentRuntimeMixin
@@ -1774,13 +1775,14 @@ class _QueryExecutionRuntimeMixin(
         )
         if intake_contract is None:
             return None, None
-        update_request_runtime_context(
-            request,
-            accepted_persistence=build_accepted_persistence(
-                request=request,
-                source="query_execution_runtime",
-                boundary="execution_runtime_intake",
-            ),
+        accepted_persistence = build_accepted_persistence(
+            request=request,
+            source="query_execution_runtime",
+            boundary="execution_runtime_intake",
+        )
+        self._persist_query_runtime_state(
+            request=request,
+            accepted_persistence=accepted_persistence,
         )
         chat_writeback_summary = None
         if intake_contract.has_active_writeback_plan:
@@ -1866,8 +1868,8 @@ class _QueryExecutionRuntimeMixin(
             industry_kickoff_summary=industry_kickoff_summary,
         )
         if commit_outcome is not None:
-            update_request_runtime_context(
-                request,
+            self._persist_query_runtime_state(
+                request=request,
                 commit_outcome=commit_outcome,
             )
         return chat_writeback_summary, industry_kickoff_summary
@@ -1905,3 +1907,89 @@ class _QueryExecutionRuntimeMixin(
             "record_id": record_id,
             "commit_key": "query_execution_runtime:intake",
         }
+
+    def _persist_query_runtime_state(
+        self,
+        *,
+        request: Any,
+        accepted_persistence: dict[str, Any] | None = None,
+        commit_outcome: dict[str, Any] | None = None,
+    ) -> None:
+        runtime_context = update_request_runtime_context(
+            request,
+            accepted_persistence=accepted_persistence,
+            commit_outcome=commit_outcome,
+        )
+        query_runtime_state = _mapping_value(runtime_context.get("query_runtime_state"))
+        if accepted_persistence is not None:
+            query_runtime_state["accepted_persistence"] = dict(accepted_persistence)
+        if commit_outcome is not None:
+            query_runtime_state["commit_outcome"] = dict(commit_outcome)
+        if not query_runtime_state:
+            return
+        runtime_context["query_runtime_state"] = query_runtime_state
+        set_request_runtime_value(
+            request,
+            "_copaw_main_brain_runtime_context",
+            runtime_context,
+        )
+        set_request_runtime_value(
+            request,
+            "_copaw_query_runtime_state",
+            query_runtime_state,
+        )
+        self._save_query_runtime_state_snapshot(
+            request=request,
+            query_runtime_state=query_runtime_state,
+        )
+
+    def _save_query_runtime_state_snapshot(
+        self,
+        *,
+        request: Any,
+        query_runtime_state: dict[str, Any],
+    ) -> None:
+        session_backend = self._session_backend
+        if session_backend is None:
+            return
+        session_id = _first_non_empty(getattr(request, "session_id", None))
+        user_id = _first_non_empty(getattr(request, "user_id", None))
+        if session_id is None or user_id is None:
+            return
+        saver = getattr(session_backend, "save_session_snapshot", None)
+        if not callable(saver):
+            return
+        snapshot: dict[str, Any] = {}
+        loader = getattr(session_backend, "load_session_snapshot", None)
+        if callable(loader):
+            try:
+                existing = loader(
+                    session_id=session_id,
+                    user_id=user_id,
+                    allow_not_exist=True,
+                )
+            except TypeError:
+                try:
+                    existing = loader(
+                        session_id=session_id,
+                        user_id=user_id,
+                    )
+                except Exception:
+                    existing = None
+            if isinstance(existing, dict):
+                snapshot = dict(existing)
+        persisted_state = _mapping_value(snapshot.get("query_runtime_state"))
+        persisted_state.update(query_runtime_state)
+        snapshot["query_runtime_state"] = persisted_state
+        try:
+            saver(
+                session_id=session_id,
+                user_id=user_id,
+                payload=snapshot,
+                source_ref="state:/query-runtime",
+            )
+        except Exception:
+            logger.exception(
+                "Failed to persist query runtime state snapshot for session '%s'",
+                session_id,
+            )
