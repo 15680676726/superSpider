@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   createInitialRuntimeSidecarState,
+  hydrateRuntimeSidecarState,
   parseRuntimeSidecarEvent,
   reduceRuntimeSidecarEvent,
 } from "./runtimeSidecarEvents";
+
+const FAILED_TITLE = "\u63d0\u4ea4\u5931\u8d25";
 
 describe("runtimeSidecarEvents", () => {
   it("reduces commit_started and commit_failed into current-thread status cards", () => {
@@ -38,7 +41,7 @@ describe("runtimeSidecarEvents", () => {
     );
 
     expect(failed.currentCommitStatus?.kind).toBe("failed");
-    expect(failed.currentCommitStatus?.title).toContain("提交失败");
+    expect(failed.currentCommitStatus?.title).toContain(FAILED_TITLE);
     expect(failed.history).toHaveLength(2);
   });
 
@@ -123,6 +126,55 @@ describe("runtimeSidecarEvents", () => {
       payload: {
         control_thread_id: "industry-chat:industry-1:execution-core",
         summary: "Backlog item committed.",
+      },
+    });
+  });
+
+  it("hydrates persisted main-brain commit meta through the reducer path", () => {
+    const state = hydrateRuntimeSidecarState(
+      {
+        status: "confirm_required",
+        control_thread_id: "industry-chat:industry-1:execution-core",
+        session_id: "industry-chat:industry-1:execution-core",
+        summary: "Approve the governed browser action.",
+        payload: {
+          decision_id: "decision-1",
+        },
+      },
+      "industry-chat:industry-1:execution-core",
+      400,
+    );
+
+    expect(state.controlThreadId).toBe("industry-chat:industry-1:execution-core");
+    expect(state.currentCommitStatus?.kind).toBe("confirm_required");
+    expect(state.currentCommitStatus?.summary).toBe(
+      "Approve the governed browser action.",
+    );
+    expect(state.currentCommitStatus?.decisionIds).toEqual(["decision-1"]);
+    expect(state.history).toHaveLength(1);
+  });
+
+  it("parses compatible sidecar envelopes without the canonical wrapper", () => {
+    const parsed = parseRuntimeSidecarEvent(
+      {
+        sidecar_event: "committed",
+        control_thread_id: "industry-chat:industry-1:execution-core",
+        thread_id: "industry-chat:industry-1:execution-core",
+        summary: "Backlog item committed.",
+        payload: {
+          record_id: "backlog-1",
+        },
+      },
+      "industry-chat:industry-1:execution-core",
+    );
+
+    expect(parsed).toEqual({
+      event: "committed",
+      payload: {
+        control_thread_id: "industry-chat:industry-1:execution-core",
+        thread_id: "industry-chat:industry-1:execution-core",
+        summary: "Backlog item committed.",
+        record_id: "backlog-1",
       },
     });
   });

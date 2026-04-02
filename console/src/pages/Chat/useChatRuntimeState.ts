@@ -32,7 +32,7 @@ import {
   type RuntimeWindowContext,
 } from "./runtimeTransport";
 import {
-  createInitialRuntimeSidecarState,
+  hydrateRuntimeSidecarState,
   parseRuntimeSidecarEvent,
   reduceRuntimeSidecarEvent,
   type RuntimeSidecarState,
@@ -131,9 +131,22 @@ export function useChatRuntimeState({
     requestedThreadId,
     runtimeWindow.currentThreadId,
   );
+  const persistedMainBrainCommit =
+    typeof threadMeta.main_brain_commit === "object" &&
+    threadMeta.main_brain_commit !== null
+      ? (threadMeta.main_brain_commit as Record<string, unknown>)
+      : null;
+  const hydratedRuntimeCommitState = useMemo(
+    () =>
+      hydrateRuntimeSidecarState(
+        persistedMainBrainCommit,
+        currentControlThreadId,
+      ),
+    [currentControlThreadId, persistedMainBrainCommit],
+  );
   const [runtimeCommitState, setRuntimeCommitState] =
     useState<RuntimeSidecarState>(() =>
-      createInitialRuntimeSidecarState(currentControlThreadId),
+      hydratedRuntimeCommitState,
     );
   const [approveCommitBusy, setApproveCommitBusy] = useState(false);
   const [rejectCommitBusy, setRejectCommitBusy] = useState(false);
@@ -143,8 +156,19 @@ export function useChatRuntimeState({
     threadMetaRef.current = threadMeta;
   }, [threadMeta]);
   useEffect(() => {
-    setRuntimeCommitState(createInitialRuntimeSidecarState(currentControlThreadId));
-  }, [currentControlThreadId]);
+    setRuntimeCommitState((currentState) => {
+      if (currentState.controlThreadId !== currentControlThreadId) {
+        return hydratedRuntimeCommitState;
+      }
+      if (currentState.currentCommitStatus) {
+        return currentState;
+      }
+      if (hydratedRuntimeCommitState.currentCommitStatus) {
+        return hydratedRuntimeCommitState;
+      }
+      return currentState;
+    });
+  }, [currentControlThreadId, hydratedRuntimeCommitState]);
   useEffect(() => {
     chatRouteAliveRef.current = true;
     return () => {
@@ -268,6 +292,34 @@ export function useChatRuntimeState({
       ),
     [suggestedTeams],
   );
+  const commitSnapshotContext = useMemo(
+    () => ({
+      controlThreadId: currentControlThreadId,
+      sessionId: firstNonEmptyString(
+        currentControlThreadId,
+        requestedThreadId,
+        runtimeWindow.currentThreadId,
+      ),
+      userId: firstNonEmptyString(runtimeWindow.currentUserId),
+      agentId:
+        typeof threadMeta.agent_id === "string" && threadMeta.agent_id.trim()
+          ? threadMeta.agent_id.trim()
+          : null,
+      workContextId:
+        typeof threadMeta.work_context_id === "string" &&
+        threadMeta.work_context_id.trim()
+          ? threadMeta.work_context_id.trim()
+          : null,
+    }),
+    [
+      currentControlThreadId,
+      requestedThreadId,
+      runtimeWindow.currentThreadId,
+      runtimeWindow.currentUserId,
+      threadMeta.agent_id,
+      threadMeta.work_context_id,
+    ],
+  );
 
   const openSuggestedIndustryChat = useCallback(
     async (instance: IndustryInstanceSummary): Promise<boolean> => {
@@ -316,18 +368,43 @@ export function useChatRuntimeState({
       }
       setApproveCommitBusy(true);
       try {
-        await api.approveRuntimeDecisions({
+        const result = await api.approveRuntimeDecisions({
           decision_ids: normalizedDecisionIds,
           actor: resolveGovernanceActor(),
           execute: true,
+          control_thread_id: commitSnapshotContext.controlThreadId || undefined,
+          session_id: commitSnapshotContext.sessionId || undefined,
+          user_id: commitSnapshotContext.userId || undefined,
+          agent_id: commitSnapshotContext.agentId || undefined,
+          work_context_id: commitSnapshotContext.workContextId || undefined,
         });
+        const firstResult =
+          Array.isArray(result.results) && result.results.length > 0
+            ? (result.results[0] as Record<string, unknown>)
+            : null;
+        const output =
+          firstResult && typeof firstResult.output === "object"
+            ? (firstResult.output as Record<string, unknown>)
+            : null;
         setRuntimeCommitState((currentState) =>
           reduceRuntimeSidecarEvent(currentState, {
-            event: "commit_deferred",
+            event: "committed",
             payload: {
               decision_ids: normalizedDecisionIds,
-              summary: "已批准，等待内核完成正式提交。",
-              control_thread_id: currentControlThreadId,
+              decision_id:
+                normalizedDecisionIds.length === 1
+                  ? normalizedDecisionIds[0]
+                  : undefined,
+              summary:
+                (typeof firstResult?.summary === "string" &&
+                firstResult.summary.trim()
+                  ? firstResult.summary
+                  : "\u5df2\u6279\u51c6\uff0c\u6b63\u5f0f\u63d0\u4ea4\u5df2\u6267\u884c\u3002"),
+              record_id:
+                typeof output?.record_id === "string"
+                  ? output.record_id
+                  : undefined,
+              control_thread_id: commitSnapshotContext.controlThreadId,
             },
           }),
         );
@@ -338,7 +415,7 @@ export function useChatRuntimeState({
         setApproveCommitBusy(false);
       }
     },
-    [currentControlThreadId, resolveGovernanceActor],
+    [commitSnapshotContext, resolveGovernanceActor],
   );
 
   const rejectCommitDecisions = useCallback(
@@ -351,18 +428,35 @@ export function useChatRuntimeState({
       }
       setRejectCommitBusy(true);
       try {
-        await api.rejectRuntimeDecisions({
+        const result = await api.rejectRuntimeDecisions({
           decision_ids: normalizedDecisionIds,
           actor: resolveGovernanceActor(),
+          control_thread_id: commitSnapshotContext.controlThreadId || undefined,
+          session_id: commitSnapshotContext.sessionId || undefined,
+          user_id: commitSnapshotContext.userId || undefined,
+          agent_id: commitSnapshotContext.agentId || undefined,
+          work_context_id: commitSnapshotContext.workContextId || undefined,
         });
+        const firstResult =
+          Array.isArray(result.results) && result.results.length > 0
+            ? (result.results[0] as Record<string, unknown>)
+            : null;
         setRuntimeCommitState((currentState) =>
           reduceRuntimeSidecarEvent(currentState, {
             event: "commit_failed",
             payload: {
               decision_ids: normalizedDecisionIds,
+              decision_id:
+                normalizedDecisionIds.length === 1
+                  ? normalizedDecisionIds[0]
+                  : undefined,
               reason: "governance_denied",
-              summary: "当前窗口已拒绝该正式提交动作。",
-              control_thread_id: currentControlThreadId,
+              summary:
+                (typeof firstResult?.summary === "string" &&
+                firstResult.summary.trim()
+                  ? firstResult.summary
+                  : "\u5f53\u524d\u7a97\u53e3\u5df2\u62d2\u7edd\u8be5\u6b63\u5f0f\u63d0\u4ea4\u52a8\u4f5c\u3002"),
+              control_thread_id: commitSnapshotContext.controlThreadId,
             },
           }),
         );
@@ -373,7 +467,7 @@ export function useChatRuntimeState({
         setRejectCommitBusy(false);
       }
     },
-    [currentControlThreadId, resolveGovernanceActor],
+    [commitSnapshotContext, resolveGovernanceActor],
   );
 
   useChatBindingRecovery({

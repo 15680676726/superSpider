@@ -537,6 +537,46 @@ async def test_main_brain_chat_service_streams_incremental_chunks_before_complet
 
 
 @pytest.mark.asyncio
+async def test_main_brain_chat_service_reads_persisted_commit_state_from_bound_agent_snapshot():
+    backend = _FakeSessionBackend()
+    backend.save_session_snapshot(
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        user_id="execution-core-agent",
+        payload={
+            "agent": {"memory": []},
+            "main_brain": {
+                "phase2_commit": {
+                    "status": "confirm_required",
+                    "action_type": "writeback_operating_truth",
+                    "control_thread_id": "industry-chat:industry-v1-demo:execution-core",
+                    "session_id": "industry-chat:industry-v1-demo:execution-core",
+                    "summary": "Confirm the writeback before commit.",
+                }
+            },
+        },
+        source_ref="test:/phase2-commit",
+    )
+    service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: _StaticResponseModel("reply"),
+    )
+    request = SimpleNamespace(
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        user_id="operator-user",
+        agent_id="execution-core-agent",
+        industry_instance_id="industry-v1-demo",
+        work_context_id=None,
+    )
+    msgs = [Msg(name="user", role="user", content="continue")]
+
+    _ = [item async for item in service.execute_stream(msgs=msgs, request=request)]
+
+    commit_state = getattr(request, "_copaw_main_brain_commit_state", None)
+    assert commit_state is not None
+    assert commit_state.status == "confirm_required"
+
+
+@pytest.mark.asyncio
 async def test_main_brain_chat_service_preserves_thinking_blocks_in_streamed_reply():
     backend = _FakeSessionBackend()
     service = MainBrainChatService(
@@ -865,6 +905,101 @@ def test_main_brain_chat_service_prompt_prefers_truth_first_profile_before_lexic
     assert recall_service._derived_index_service.calls[0]["scope_id"] == "ctx-truth-first"
     assert recall_service.calls[0]["scope_type"] == "work_context"
     assert recall_service.calls[0]["scope_id"] == "ctx-truth-first"
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_skips_lexical_recall_for_short_followup_turns_and_reuses_cached_context():
+    recall_service = _TruthFirstMemoryRecallService()
+    model = _PromptCapturingResponseModel("ok")
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        memory_recall_service=recall_service,
+        model_factory=lambda: model,
+    )
+    request = SimpleNamespace(
+        session_id="sess-short-followup",
+        user_id="user-short-followup",
+        industry_instance_id=None,
+        work_context_id="ctx-truth-first",
+        agent_id="ops-agent",
+    )
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[
+                Msg(
+                    name="user",
+                    role="user",
+                    content="Please use the current checklist before outbound execution",
+                )
+            ],
+            request=request,
+        )
+    ]
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="继续")],
+            request=request,
+        )
+    ]
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="再继续")],
+            request=request,
+        )
+    ]
+
+    assert len(recall_service.calls) == 1
+    context_prompt = model.calls[-1][1]["content"]
+    assert "## Truth-First Lexical Recall" in context_prompt
+    assert "short follow-up turn" in context_prompt
+    timing = getattr(request, "_copaw_main_brain_timing", None)
+    assert timing is not None
+    assert timing["lexical_recall_mode"] == "skip_short_followup"
+    assert timing["prompt_context_cache_hit"] is True
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_keeps_lexical_recall_for_short_explicit_history_queries():
+    recall_service = _TruthFirstMemoryRecallService()
+    model = _PromptCapturingResponseModel("ok")
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        memory_recall_service=recall_service,
+        model_factory=lambda: model,
+    )
+    request = SimpleNamespace(
+        session_id="sess-explicit-memory",
+        user_id="user-explicit-memory",
+        industry_instance_id=None,
+        work_context_id="ctx-truth-first",
+        agent_id="ops-agent",
+    )
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="Summarize the current checklist")],
+            request=request,
+        )
+    ]
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="按记录继续")],
+            request=request,
+        )
+    ]
+
+    assert len(recall_service.calls) == 2
+    context_prompt = model.calls[-1][1]["content"]
+    assert "Lexical fallback note" in context_prompt
+    timing = getattr(request, "_copaw_main_brain_timing", None)
+    assert timing is not None
+    assert timing["lexical_recall_mode"] == "query_recall"
 
 
 def test_main_brain_chat_service_prefers_work_context_recall_over_industry_scope_when_both_exist():
@@ -1280,7 +1415,7 @@ async def test_main_brain_chat_service_persists_commit_state_and_reloads_it_from
 
     snapshot = backend.load_session_snapshot(
         session_id="industry-chat:industry-v1-demo:execution-core",
-        user_id="user-commit-state",
+        user_id="ops-agent",
         allow_not_exist=True,
     )
     phase2 = snapshot["main_brain"]["phase2_commit"]
@@ -1293,7 +1428,7 @@ async def test_main_brain_chat_service_persists_commit_state_and_reloads_it_from
     )
     reloaded_state = reloaded_service.get_persisted_commit_state(
         session_id="industry-chat:industry-v1-demo:execution-core",
-        user_id="user-commit-state",
+        user_id="ops-agent",
     )
     assert reloaded_state == MainBrainCommitState.model_validate(phase2)
 

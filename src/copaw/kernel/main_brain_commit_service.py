@@ -65,6 +65,12 @@ def _string_list(value: object | None) -> list[str]:
     return [text for text in (str(item or "").strip() for item in list(value or [])) if text]
 
 
+def _resolve_snapshot_user_id(request: Any) -> str:
+    return _string(getattr(request, "agent_id", None)) or _string(
+        getattr(request, "user_id", None),
+    )
+
+
 class MainBrainCommitService:
     def __init__(
         self,
@@ -142,7 +148,7 @@ class MainBrainCommitService:
         commit_key = self._build_commit_key(envelope=envelope, request=request)
         persisted = self.get_persisted_commit_state(
             session_id=_string(getattr(request, "session_id", None)),
-            user_id=_string(getattr(request, "user_id", None)),
+            user_id=_resolve_snapshot_user_id(request),
         )
         if (
             persisted is not None
@@ -304,7 +310,7 @@ class MainBrainCommitService:
         state: MainBrainCommitState,
     ) -> MainBrainCommitState:
         session_id = _string(getattr(request, "session_id", None))
-        user_id = _string(getattr(request, "user_id", None))
+        user_id = _resolve_snapshot_user_id(request)
         control_thread_id = _string(getattr(request, "control_thread_id", None)) or session_id or None
         work_context_id = _string(getattr(request, "work_context_id", None)) or None
         normalized = self._decorate_state(

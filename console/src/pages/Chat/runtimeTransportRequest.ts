@@ -117,7 +117,13 @@ export function resolveRuntimeSessionContext({
   return {
     currentThreadId,
     sessionId: currentThreadId || requestedThreadId || session?.session_id || "",
-    userId: runtimeWindow.currentUserId || session?.user_id || "default",
+    userId:
+      (typeof threadMeta.agent_id === "string" && threadMeta.agent_id.trim()
+        ? threadMeta.agent_id.trim()
+        : null) ||
+      runtimeWindow.currentUserId ||
+      session?.user_id ||
+      "default",
     channel: runtimeWindow.currentChannel || session?.channel || "console",
   };
 }

@@ -48,6 +48,24 @@ const SIDECAR_EVENTS = new Set<RuntimeSidecarEventName>([
   "commit_deferred",
 ]);
 
+const PERSISTED_COMMIT_STATUS_TO_EVENT: Record<string, RuntimeSidecarEventName> = {
+  confirm_required: "confirm_required",
+  committed: "committed",
+  commit_failed: "commit_failed",
+  governance_denied: "commit_failed",
+  commit_deferred: "commit_deferred",
+};
+
+const COMMIT_STATUS_TITLES: Record<RuntimeCommitStatusKind, string> = {
+  started: "\u63d0\u4ea4\u5904\u7406\u4e2d",
+  confirm_required: "\u5f85\u786e\u8ba4",
+  committed: "\u5df2\u63d0\u4ea4",
+  governance_denied: "\u6cbb\u7406\u62d2\u7edd",
+  environment_unavailable: "\u73af\u5883\u4e0d\u53ef\u7528",
+  failed: "\u63d0\u4ea4\u5931\u8d25",
+  deferred: "\u5df2\u6279\u51c6\uff0c\u7b49\u5f85\u63d0\u4ea4",
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -57,6 +75,25 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function compactPayload(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => {
+      if (value === null || value === undefined) {
+        return false;
+      }
+      if (typeof value === "string") {
+        return value.trim().length > 0;
+      }
+      if (Array.isArray(value)) {
+        return value.length > 0;
+      }
+      return true;
+    }),
+  );
 }
 
 function collectDecisionIds(payload: Record<string, unknown>): string[] {
@@ -111,7 +148,8 @@ function resolveCommitStatusKind(
   if (event === "commit_deferred") {
     return "deferred";
   }
-  const reason = asNonEmptyString(payload.reason) ?? asNonEmptyString(payload.outcome);
+  const reason =
+    asNonEmptyString(payload.reason) ?? asNonEmptyString(payload.outcome);
   if (reason === "governance_denied") {
     return "governance_denied";
   }
@@ -122,27 +160,43 @@ function resolveCommitStatusKind(
 }
 
 function resolveCommitStatusTitle(kind: RuntimeCommitStatusKind): string {
-  switch (kind) {
-    case "started":
-      return "提交处理中";
-    case "confirm_required":
-      return "待确认";
-    case "committed":
-      return "已提交";
-    case "governance_denied":
-      return "治理拒绝";
-    case "environment_unavailable":
-      return "环境不可用";
-    case "deferred":
-      return "已批准，等待提交";
-    case "failed":
-    default:
-      return "提交失败";
-  }
+  return COMMIT_STATUS_TITLES[kind];
 }
 
 function trimHistory(history: RuntimeCommitStatus[]): RuntimeCommitStatus[] {
   return history.slice(-6);
+}
+
+function buildRuntimeSidecarPayload(
+  record: Record<string, unknown>,
+  status: string | null,
+): Record<string, unknown> {
+  const payload = { ...(asRecord(record.payload) ?? {}) };
+  const extras: Record<string, unknown> = {
+    control_thread_id: record.control_thread_id,
+    thread_id: record.thread_id,
+    session_id: record.session_id,
+    summary: record.summary,
+    reason:
+      record.reason ??
+      (status === "governance_denied" ? "governance_denied" : undefined),
+    message: record.message,
+    decision_id: record.decision_id,
+    decision_ids: record.decision_ids,
+    record_id: record.record_id,
+    action_type: record.action_type,
+    risk_level: record.risk_level,
+    work_context_id: record.work_context_id,
+    commit_key: record.commit_key,
+    recovery_options: record.recovery_options,
+    idempotent_replay: record.idempotent_replay,
+  };
+  for (const [key, value] of Object.entries(extras)) {
+    if (value !== undefined) {
+      payload[key] = value;
+    }
+  }
+  return compactPayload(payload);
 }
 
 export function createInitialRuntimeSidecarState(
@@ -164,11 +218,14 @@ export function parseRuntimeSidecarEvent(
   if (!record || record.object === "response") {
     return null;
   }
-  const event = asNonEmptyString(record.event);
+  const status = asNonEmptyString(record.status);
+  const event =
+    asNonEmptyString(record.event ?? record.sidecar_event) ??
+    (status ? PERSISTED_COMMIT_STATUS_TO_EVENT[status] : null);
   if (!event || !SIDECAR_EVENTS.has(event as RuntimeSidecarEventName)) {
     return null;
   }
-  const payload = asRecord(record.payload) ?? {};
+  const payload = buildRuntimeSidecarPayload(record, status);
   const resolvedControlThreadId =
     resolveControlThreadId(controlThreadId, payload) ?? controlThreadId;
   if (resolvedControlThreadId && !payload.control_thread_id) {
@@ -223,4 +280,31 @@ export function reduceRuntimeSidecarEvent(
     history: trimHistory([...state.history, status]),
     lastReplyDoneAt: state.lastReplyDoneAt,
   };
+}
+
+export function hydrateRuntimeSidecarState(
+  persistedCommit: unknown,
+  controlThreadId: string | null = null,
+  now: number = Date.now(),
+): RuntimeSidecarState {
+  const initialState = createInitialRuntimeSidecarState(controlThreadId);
+  const sidecarEvent = parseRuntimeSidecarEvent(
+    persistedCommit,
+    controlThreadId,
+  );
+  if (!sidecarEvent) {
+    return initialState;
+  }
+  const hydratedControlThreadId = resolveControlThreadId(
+    controlThreadId,
+    sidecarEvent.payload,
+  );
+  if (
+    controlThreadId &&
+    hydratedControlThreadId &&
+    hydratedControlThreadId !== controlThreadId
+  ) {
+    return initialState;
+  }
+  return reduceRuntimeSidecarEvent(initialState, sidecarEvent, now);
 }

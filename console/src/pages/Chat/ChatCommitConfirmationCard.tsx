@@ -30,6 +30,10 @@ function resolveAlertType(kind: RuntimeCommitStatusKind) {
   }
 }
 
+const HISTORY_HEADER = "\u5f53\u524d\u7ebf\u7a0b\u63d0\u4ea4\u8bb0\u5f55";
+const APPROVE_LABEL = "\u6279\u51c6";
+const REJECT_LABEL = "\u62d2\u7edd";
+
 export function ChatCommitConfirmationCard({
   state,
   approveBusy,
@@ -63,7 +67,7 @@ export function ChatCommitConfirmationCard({
             {historyItems.length > 1 ? (
               <List
                 size="small"
-                header="当前线程提交记录"
+                header={HISTORY_HEADER}
                 dataSource={historyItems}
                 renderItem={(item) => (
                   <List.Item>
@@ -90,7 +94,7 @@ export function ChatCommitConfirmationCard({
                 loading={approveBusy}
                 onClick={() => onApprove(current.decisionIds)}
               >
-                批准
+                {APPROVE_LABEL}
               </Button>
               <Button
                 danger
@@ -98,7 +102,7 @@ export function ChatCommitConfirmationCard({
                 loading={rejectBusy}
                 onClick={() => onReject(current.decisionIds)}
               >
-                拒绝
+                {REJECT_LABEL}
               </Button>
             </Space>
           ) : null

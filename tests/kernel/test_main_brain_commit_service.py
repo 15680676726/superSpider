@@ -63,7 +63,7 @@ def test_main_brain_commit_service_rejects_invalid_payload_and_persists_failed_s
     assert result.reason == "payload_invalid"
     snapshot = backend.load_session_snapshot(
         session_id="industry-chat:industry-v1-demo:execution-core",
-        user_id="user-1",
+        user_id="ops-agent",
         allow_not_exist=True,
     )
     assert snapshot["main_brain"]["phase2_commit"]["status"] == "commit_failed"
@@ -100,7 +100,7 @@ def test_main_brain_commit_service_escalates_confirm_and_persists_state() -> Non
     assert result.risk_level == "confirm"
     snapshot = backend.load_session_snapshot(
         session_id="industry-chat:industry-v1-demo:execution-core",
-        user_id="user-1",
+        user_id="ops-agent",
         allow_not_exist=True,
     )
     assert snapshot["main_brain"]["phase2_commit"]["status"] == "confirm_required"
@@ -167,6 +167,53 @@ def test_main_brain_commit_service_reports_governance_denied() -> None:
 
     assert result.status == "governance_denied"
     assert result.reason == "governance_denied"
+
+
+def test_main_brain_commit_service_persists_bound_thread_state_under_agent_id() -> None:
+    backend = _FakeSessionBackend()
+    service = MainBrainCommitService(
+        session_backend=backend,
+        risk_evaluator=lambda envelope, request: {
+            "risk_level": "confirm",
+            "reason": "high-risk mutation",
+        },
+    )
+    request = _request()
+    request.user_id = "operator-user"
+    request.agent_id = "execution-core-agent"
+
+    result = service.commit_turn_result(
+        turn_result=MainBrainTurnResult(
+            reply_text="reply",
+            action_envelope=MainBrainActionEnvelope(
+                kind="commit_action",
+                action_type="writeback_operating_truth",
+                payload={
+                    "target_kind": "strategy_memory",
+                    "summary": "Update strategy",
+                    "facts": ["fact-1"],
+                    "source_refs": ["chat:1"],
+                },
+            ),
+        ),
+        request=request,
+    )
+
+    assert result.status == "confirm_required"
+    snapshot = backend.load_session_snapshot(
+        session_id="industry-chat:industry-v1-demo:execution-core",
+        user_id="execution-core-agent",
+        allow_not_exist=True,
+    )
+    assert snapshot["main_brain"]["phase2_commit"]["status"] == "confirm_required"
+    assert (
+        backend.load_session_snapshot(
+            session_id="industry-chat:industry-v1-demo:execution-core",
+            user_id="operator-user",
+            allow_not_exist=True,
+        )
+        == {}
+    )
 
 
 def test_main_brain_commit_service_deduplicates_by_commit_key() -> None:

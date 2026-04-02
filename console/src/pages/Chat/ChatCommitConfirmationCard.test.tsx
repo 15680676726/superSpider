@@ -1,15 +1,40 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatCommitConfirmationCard } from "./ChatCommitConfirmationCard";
 import {
   createInitialRuntimeSidecarState,
+  hydrateRuntimeSidecarState,
   reduceRuntimeSidecarEvent,
 } from "./runtimeSidecarEvents";
 
+const PENDING_TITLE = "\u5f85\u786e\u8ba4";
+const COMMITTED_TITLE = "\u5df2\u63d0\u4ea4";
+const DENIED_TITLE = "\u6cbb\u7406\u62d2\u7edd";
+
+if (!window.matchMedia) {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
 describe("ChatCommitConfirmationCard", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it("renders confirm_required in the same chat window and exposes approve/reject actions", () => {
     const state = reduceRuntimeSidecarEvent(
       createInitialRuntimeSidecarState(
@@ -37,9 +62,14 @@ describe("ChatCommitConfirmationCard", () => {
       />,
     );
 
-    expect(screen.getByText("待确认")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /批\s*准/ }));
-    fireEvent.click(screen.getByRole("button", { name: /拒\s*绝/ }));
+    expect(screen.getByText(PENDING_TITLE)).toBeTruthy();
+    expect(screen.getByText("Approve the governed browser action.")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: /\u6279\s*\u51c6/ }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /\u62d2\s*\u7edd/ }),
+    );
 
     expect(onApprove).toHaveBeenCalledWith(["decision-1"]);
     expect(onReject).toHaveBeenCalledWith(["decision-1"]);
@@ -69,8 +99,9 @@ describe("ChatCommitConfirmationCard", () => {
       />,
     );
 
-    expect(screen.getByText("已提交")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /批\s*准/ })).toBeNull();
+    expect(screen.getByText(COMMITTED_TITLE)).toBeTruthy();
+    expect(screen.getByText("Backlog item committed.")).toBeTruthy();
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
 
     const deniedState = reduceRuntimeSidecarEvent(
       committedState,
@@ -94,7 +125,37 @@ describe("ChatCommitConfirmationCard", () => {
       />,
     );
 
-    expect(screen.getAllByText("治理拒绝").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: /批\s*准/ })).toBeNull();
+    expect(screen.getAllByText(DENIED_TITLE).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Governance denied the action.").length).toBeGreaterThan(0);
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("renders a hydrated persisted confirm_required state after reload", () => {
+    const state = hydrateRuntimeSidecarState(
+      {
+        status: "confirm_required",
+        control_thread_id: "industry-chat:industry-1:execution-core",
+        summary: "Approve the governed browser action.",
+        payload: {
+          decision_id: "decision-1",
+        },
+      },
+      "industry-chat:industry-1:execution-core",
+      300,
+    );
+
+    render(
+      <ChatCommitConfirmationCard
+        state={state}
+        approveBusy={false}
+        rejectBusy={false}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(PENDING_TITLE)).toBeTruthy();
+    expect(screen.getByText("Approve the governed browser action.")).toBeTruthy();
+    expect(screen.getAllByRole("button")).toHaveLength(2);
   });
 });

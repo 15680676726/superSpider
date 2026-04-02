@@ -15,6 +15,7 @@ from copaw.evidence import EvidenceLedger
 from copaw.kernel import KernelDispatcher, KernelTaskStore, KernelTurnExecutor
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.main_brain_orchestrator import MainBrainOrchestrator
+from copaw.kernel.main_brain_turn_result import MainBrainCommitState
 from copaw.media import MediaService
 from copaw.state import SQLiteStateStore
 from copaw.state import MediaAnalysisRecord
@@ -1090,8 +1091,16 @@ def test_runtime_center_chat_run_chat_only_turn_skips_orchestrator_runtime_conte
     assert '"resolved_interaction_mode":"chat"' in response.text
 
 class _CommitAwareTurnExecutor:
-    def __init__(self, *, runtime_context: dict[str, object] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        runtime_context: dict[str, object] | None = None,
+        commit_state: MainBrainCommitState | None = None,
+        timing_profile: dict[str, object] | None = None,
+    ) -> None:
         self.runtime_context = dict(runtime_context or {})
+        self.commit_state = commit_state
+        self.timing_profile = dict(timing_profile or {})
 
     async def stream_request(
         self,
@@ -1102,6 +1111,10 @@ class _CommitAwareTurnExecutor:
     ):
         if self.runtime_context:
             setattr(request_payload, "_copaw_main_brain_runtime_context", self.runtime_context)
+        if self.commit_state is not None:
+            setattr(request_payload, "_copaw_main_brain_commit_state", self.commit_state)
+        if self.timing_profile:
+            setattr(request_payload, "_copaw_main_brain_timing", self.timing_profile)
         yield {
             "object": "response",
             "status": "completed",
@@ -1125,8 +1138,54 @@ def _parse_sse_events(raw_text: str) -> list[dict[str, object]]:
     return events
 
 
+class _SnapshotSessionBackend:
+    def __init__(self) -> None:
+        self.snapshots: dict[tuple[str, str], dict[str, object]] = {}
+
+    def load_session_snapshot(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        allow_not_exist: bool = False,
+    ) -> dict[str, object]:
+        _ = allow_not_exist
+        return dict(self.snapshots.get((session_id, user_id), {}))
+
+    def save_session_snapshot(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        payload: dict[str, object],
+        source_ref: str,
+    ) -> None:
+        _ = source_ref
+        self.snapshots[(session_id, user_id)] = dict(payload)
+
+
+class _BatchGovernanceResult:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = dict(payload)
+
+    def model_dump(self, mode: str = "json") -> dict[str, object]:
+        _ = mode
+        return dict(self._payload)
+
+
+class _SnapshotAwareGovernanceService:
+    def __init__(self, *, result_payload: dict[str, object]) -> None:
+        self.calls: list[dict[str, object]] = []
+        self._result_payload = dict(result_payload)
+
+    async def batch_decisions(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return _BatchGovernanceResult(self._result_payload)
+
+
 def test_runtime_center_chat_run_streams_reply_then_sidecar_commit_events() -> None:
     app = build_runtime_center_app()
+    control_thread_id = "industry-chat:industry-v1-ops:commit-lane"
     runtime_context = {
         "kernel_task_id": "ktask-sidecar",
         "execution_intent": "execute-task",
@@ -1140,9 +1199,19 @@ def test_runtime_center_chat_run_streams_reply_then_sidecar_commit_events() -> N
             decision=SimpleNamespace(intention="execute-task", id="decision-1"),
         ),
     }
-    app.state.turn_executor = _CommitAwareTurnExecutor(runtime_context=runtime_context)
+    app.state.turn_executor = _CommitAwareTurnExecutor(
+        runtime_context=runtime_context,
+        commit_state=MainBrainCommitState(
+            status="confirm_required",
+            action_type="writeback_operating_truth",
+            reason="confirm_required",
+            summary="Approve the backlog writeback before commit.",
+            control_thread_id=control_thread_id,
+            session_id="session-sidecar",
+            payload={"decision_id": "decision-1"},
+        ),
+    )
 
-    control_thread_id = "industry-chat:industry-v1-ops:commit-lane"
     client = TestClient(app)
     response = client.post(
         "/runtime-center/chat/run",
@@ -1169,19 +1238,71 @@ def test_runtime_center_chat_run_streams_reply_then_sidecar_commit_events() -> N
     sidecar_events = [
         event
         for event in _parse_sse_events(response.text)
-        if event.get("sidecar_event")
+        if event.get("object") == "runtime.sidecar"
     ]
-    assert [event["sidecar_event"] for event in sidecar_events] == [
+    assert [event["event"] for event in sidecar_events] == [
         "turn_reply_done",
         "commit_started",
         "confirm_required",
-        "committed",
     ]
-    assert sidecar_events[0]["control_thread_id"] == control_thread_id
+    assert sidecar_events[0]["payload"]["control_thread_id"] == control_thread_id
+    assert sidecar_events[2]["payload"]["summary"] == (
+        "Approve the backlog writeback before commit."
+    )
+    assert sidecar_events[2]["payload"]["decision_id"] == "decision-1"
+
+
+def test_runtime_center_chat_run_turn_reply_done_includes_main_brain_timing_profile() -> None:
+    app = build_runtime_center_app()
+    control_thread_id = "industry-chat:industry-v1-ops:timing"
+    app.state.turn_executor = _CommitAwareTurnExecutor(
+        timing_profile={
+            "pre_model_ms": 18.2,
+            "first_output_ms": 146.4,
+            "prompt_context_cache_hit": True,
+            "lexical_recall_mode": "skip_short_followup",
+        }
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-timing",
+            "session_id": "session-timing",
+            "user_id": "ops-user",
+            "channel": "console",
+            "thread_id": control_thread_id,
+            "control_thread_id": control_thread_id,
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "show timing"}],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    sidecar_events = [
+        event
+        for event in _parse_sse_events(response.text)
+        if event.get("object") == "runtime.sidecar"
+    ]
+    assert sidecar_events[0]["event"] == "turn_reply_done"
+    assert sidecar_events[0]["payload"]["timing"] == {
+        "pre_model_ms": 18.2,
+        "first_output_ms": 146.4,
+        "prompt_context_cache_hit": True,
+        "lexical_recall_mode": "skip_short_followup",
+    }
 
 
 def test_runtime_center_chat_run_keeps_commit_events_in_same_control_thread() -> None:
     app = build_runtime_center_app()
+    control_thread_id = "industry-chat:industry-v1-ops:thread-same"
+    task_thread_id = "task-chat:query:session:console:ops-user:req-thread"
     runtime_context = {
         "kernel_task_id": "ktask-thread",
         "execution_intent": "execute-task",
@@ -1194,10 +1315,19 @@ def test_runtime_center_chat_run_keeps_commit_events_in_same_control_thread() ->
             should_kickoff=True,
         ),
     }
-    executor = _CommitAwareTurnExecutor(runtime_context=runtime_context)
+    executor = _CommitAwareTurnExecutor(
+        runtime_context=runtime_context,
+        commit_state=MainBrainCommitState(
+            status="committed",
+            action_type="create_backlog_item",
+            summary="Committed the backlog item.",
+            control_thread_id=control_thread_id,
+            session_id="session-thread",
+            payload={"record_id": "backlog-1"},
+        ),
+    )
     app.state.turn_executor = executor
 
-    control_thread_id = "industry-chat:industry-v1-ops:thread-same"
     client = TestClient(app)
     response = client.post(
         "/runtime-center/chat/run",
@@ -1206,7 +1336,7 @@ def test_runtime_center_chat_run_keeps_commit_events_in_same_control_thread() ->
             "session_id": "session-thread",
             "user_id": "ops-user",
             "channel": "console",
-            "thread_id": control_thread_id,
+            "thread_id": task_thread_id,
             "control_thread_id": control_thread_id,
             "input": [
                 {
@@ -1219,11 +1349,198 @@ def test_runtime_center_chat_run_keeps_commit_events_in_same_control_thread() ->
     )
 
     assert response.status_code == 200
-    for event in _parse_sse_events(response.text):
-        if not event.get("sidecar_event"):
-            continue
-        assert event.get("control_thread_id") == control_thread_id
-        assert event.get("thread_id") == control_thread_id
+    sidecar_events = [
+        event
+        for event in _parse_sse_events(response.text)
+        if event.get("object") == "runtime.sidecar"
+    ]
+    assert [event["event"] for event in sidecar_events] == [
+        "turn_reply_done",
+        "commit_started",
+        "committed",
+    ]
+    assert sidecar_events[2]["payload"]["record_id"] == "backlog-1"
+    for event in sidecar_events:
+        assert event["payload"].get("control_thread_id") == control_thread_id
+        assert event["payload"].get("thread_id") == control_thread_id
+
+
+def test_runtime_center_chat_run_does_not_fabricate_terminal_sidecar_for_noop_deferred() -> None:
+    app = build_runtime_center_app()
+    control_thread_id = "industry-chat:industry-v1-ops:thread-noop"
+    app.state.turn_executor = _CommitAwareTurnExecutor(
+        runtime_context={
+            "kernel_task_id": "ktask-noop",
+            "execution_intent": "chat",
+        },
+        commit_state=MainBrainCommitState(
+            status="commit_deferred",
+            action_type="none",
+            reason="no_commit_action",
+            summary="No commit action was required.",
+            control_thread_id=control_thread_id,
+            session_id="session-noop",
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-noop",
+            "session_id": "session-noop",
+            "user_id": "ops-user",
+            "channel": "console",
+            "thread_id": control_thread_id,
+            "control_thread_id": control_thread_id,
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "只是聊天，不需要提交"}],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    sidecar_events = [
+        event
+        for event in _parse_sse_events(response.text)
+        if event.get("object") == "runtime.sidecar"
+    ]
+    assert [event["event"] for event in sidecar_events] == ["turn_reply_done"]
+    assert sidecar_events[0]["payload"]["control_thread_id"] == control_thread_id
+
+
+def test_runtime_center_governance_approve_persists_main_brain_commit_resolution() -> None:
+    app = build_runtime_center_app()
+    control_thread_id = "industry-chat:industry-v1-ops:execution-core"
+    session_backend = _SnapshotSessionBackend()
+    session_backend.save_session_snapshot(
+        session_id=control_thread_id,
+        user_id="execution-core-agent",
+        payload={
+            "main_brain": {
+                "phase2_commit": {
+                    "status": "confirm_required",
+                    "action_type": "writeback_operating_truth",
+                    "control_thread_id": control_thread_id,
+                    "session_id": control_thread_id,
+                    "summary": "Approve the writeback before commit.",
+                    "payload": {"decision_id": "decision-1"},
+                }
+            }
+        },
+        source_ref="test:/phase2-commit",
+    )
+    app.state.session_backend = session_backend
+    app.state.governance_service = _SnapshotAwareGovernanceService(
+        result_payload={
+            "action": "decision:approve",
+            "requested": 1,
+            "succeeded": 1,
+            "failed": 0,
+            "actor": "ops-user",
+            "results": [
+                {
+                    "decision_request_id": "decision-1",
+                    "summary": "Approved and executed",
+                    "output": {"record_id": "backlog-1"},
+                }
+            ],
+            "errors": [],
+            "evidence_id": "evidence-1",
+        },
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/governance/decisions/approve",
+        json={
+            "decision_ids": ["decision-1"],
+            "actor": "ops-user",
+            "execute": True,
+            "control_thread_id": control_thread_id,
+            "session_id": control_thread_id,
+            "agent_id": "execution-core-agent",
+        },
+    )
+
+    assert response.status_code == 200
+    snapshot = session_backend.load_session_snapshot(
+        session_id=control_thread_id,
+        user_id="execution-core-agent",
+        allow_not_exist=True,
+    )
+    phase2 = snapshot["main_brain"]["phase2_commit"]
+    assert phase2["status"] == "committed"
+    assert phase2["record_id"] == "backlog-1"
+    assert phase2["payload"]["decision_id"] == "decision-1"
+
+
+def test_runtime_center_governance_reject_persists_main_brain_commit_resolution() -> None:
+    app = build_runtime_center_app()
+    control_thread_id = "industry-chat:industry-v1-ops:execution-core"
+    session_backend = _SnapshotSessionBackend()
+    session_backend.save_session_snapshot(
+        session_id=control_thread_id,
+        user_id="execution-core-agent",
+        payload={
+            "main_brain": {
+                "phase2_commit": {
+                    "status": "confirm_required",
+                    "action_type": "writeback_operating_truth",
+                    "control_thread_id": control_thread_id,
+                    "session_id": control_thread_id,
+                    "summary": "Approve the writeback before commit.",
+                    "payload": {"decision_id": "decision-1"},
+                }
+            }
+        },
+        source_ref="test:/phase2-commit",
+    )
+    app.state.session_backend = session_backend
+    app.state.governance_service = _SnapshotAwareGovernanceService(
+        result_payload={
+            "action": "decision:reject",
+            "requested": 1,
+            "succeeded": 1,
+            "failed": 0,
+            "actor": "ops-user",
+            "results": [
+                {
+                    "decision_request_id": "decision-1",
+                    "summary": "Rejected by operator",
+                }
+            ],
+            "errors": [],
+            "evidence_id": "evidence-2",
+        },
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/governance/decisions/reject",
+        json={
+            "decision_ids": ["decision-1"],
+            "actor": "ops-user",
+            "control_thread_id": control_thread_id,
+            "session_id": control_thread_id,
+            "agent_id": "execution-core-agent",
+        },
+    )
+
+    assert response.status_code == 200
+    snapshot = session_backend.load_session_snapshot(
+        session_id=control_thread_id,
+        user_id="execution-core-agent",
+        allow_not_exist=True,
+    )
+    phase2 = snapshot["main_brain"]["phase2_commit"]
+    assert phase2["status"] == "commit_failed"
+    assert phase2["reason"] == "governance_denied"
+    assert phase2["message"] == "Rejected by operator"
 
 
 def test_runtime_center_chat_run_collects_requested_actions_and_enriches_media_inputs(

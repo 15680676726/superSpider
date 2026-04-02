@@ -135,12 +135,8 @@ function trimRuntimeRequestBody(
   return trimmed;
 }
 
-function resolveRuntimeChatUrl(baseUrl: string | undefined): string {
-  const trimmed = typeof baseUrl === "string" ? baseUrl.trim() : "";
-  if (!trimmed) {
-    return getApiUrl("/runtime-center/chat/run");
-  }
-  return trimmed;
+function resolveRuntimeChatUrl(): string {
+  return getApiUrl("/runtime-center/chat/run");
 }
 
 function beginRuntimeWait(
@@ -242,7 +238,6 @@ export function parseRuntimeResponseChunk(
 export function createRuntimeTransport({
   runtimeWindow,
   requestedThreadId,
-  optionsBaseUrl,
   getThreadMeta,
   getPendingMediaSources,
   clearPendingMediaDrafts,
@@ -312,7 +307,7 @@ export function createRuntimeTransport({
         (headers as Record<string, string>).Authorization = `Bearer ${token}`;
       }
 
-      const url = resolveRuntimeChatUrl(optionsBaseUrl);
+      const url = resolveRuntimeChatUrl();
       const requestThreadId =
         typeof requestBody.thread_id === "string" && requestBody.thread_id.trim()
           ? requestBody.thread_id.trim()

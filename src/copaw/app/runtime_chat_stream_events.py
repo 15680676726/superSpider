@@ -33,8 +33,12 @@ def _resolve_thread_info(request_payload: AgentRequest) -> tuple[str | None, str
         getattr(request_payload, "thread_id", None),
         getattr(request_payload, "session_id", None),
     )
-    thread_id = getattr(request_payload, "thread_id", None) or control_thread_id
-    session_id = getattr(request_payload, "session_id", None)
+    thread_id = _first_non_empty(
+        control_thread_id,
+        getattr(request_payload, "thread_id", None),
+        getattr(request_payload, "session_id", None),
+    )
+    session_id = _first_non_empty(getattr(request_payload, "session_id", None))
     return control_thread_id, thread_id, session_id
 
 
@@ -87,31 +91,142 @@ def _summarize_runtime_context(runtime_context: dict[str, object] | None) -> dic
     return summary
 
 
-def _should_emit_confirm_required(context_summary: dict[str, object]) -> bool:
-    intake = context_summary.get("intake_contract")
-    if not isinstance(intake, dict):
-        return False
-    return not bool(intake.get("should_kickoff"))
+def _normalize_string(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
-def _build_sidecar_event(
-    event_name: str,
+def _normalize_string_list(value: object | None) -> list[str]:
+    raw_items = value if isinstance(value, (list, tuple, set)) else [value]
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        text = _normalize_string(item)
+        if text is None:
+            continue
+        lowered = text.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized.append(text)
+    return normalized
+
+
+def _compact_payload(values: dict[str, object | None]) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in values.items()
+        if value is not None and (not isinstance(value, str) or value.strip())
+    }
+
+
+def _normalize_commit_state_payload(commit_state: object | None) -> dict[str, object]:
+    if commit_state is None:
+        return {}
+    payload = _safe_get(commit_state, "payload")
+    if isinstance(payload, dict):
+        return dict(payload)
+    return {}
+
+
+def _build_commit_payload(
     *,
     request_id: str | None,
     control_thread_id: str | None,
     thread_id: str | None,
     session_id: str | None,
     runtime_context_summary: dict[str, object],
-    extra_payload: dict[str, object] | None = None,
+    commit_state: object | None,
 ) -> dict[str, object]:
-    payload: dict[str, object] = {"request_id": request_id, "runtime_context": runtime_context_summary}
-    if extra_payload:
-        payload["details"] = extra_payload
+    commit_payload = _normalize_commit_state_payload(commit_state)
+    decision_ids = _normalize_string_list(
+        commit_payload.get("decision_ids"),
+    )
+    decision_id = _normalize_string(
+        commit_payload.get("decision_id"),
+    )
+    if decision_id is None:
+        intake_contract = runtime_context_summary.get("intake_contract")
+        if isinstance(intake_contract, dict):
+            decision_id = _normalize_string(intake_contract.get("decision_id"))
+    if decision_id is not None and decision_id not in decision_ids:
+        decision_ids.append(decision_id)
+    return _compact_payload(
+        {
+            "request_id": request_id,
+            "control_thread_id": _first_non_empty(
+                _safe_get(commit_state, "control_thread_id"),
+                control_thread_id,
+            ),
+            "thread_id": _first_non_empty(
+                _safe_get(commit_state, "control_thread_id"),
+                thread_id,
+                control_thread_id,
+            ),
+            "session_id": _first_non_empty(
+                _safe_get(commit_state, "session_id"),
+                session_id,
+            ),
+            "work_context_id": _normalize_string(_safe_get(commit_state, "work_context_id")),
+            "status": _normalize_string(_safe_get(commit_state, "status")),
+            "action_type": _normalize_string(_safe_get(commit_state, "action_type")),
+            "risk_level": _normalize_string(_safe_get(commit_state, "risk_level")),
+            "summary": _normalize_string(_safe_get(commit_state, "summary")),
+            "reason": _normalize_string(_safe_get(commit_state, "reason")),
+            "message": _normalize_string(_safe_get(commit_state, "message")),
+            "record_id": _normalize_string(
+                _first_non_empty(
+                    _safe_get(commit_state, "record_id"),
+                    commit_payload.get("record_id"),
+                )
+            ),
+            "commit_key": _normalize_string(_safe_get(commit_state, "commit_key")),
+            "decision_id": decision_id,
+            "decision_ids": decision_ids or None,
+            "recovery_options": _normalize_string_list(
+                _safe_get(commit_state, "recovery_options"),
+            )
+            or None,
+            "kernel_task_id": runtime_context_summary.get("kernel_task_id"),
+            "execution_intent": runtime_context_summary.get("execution_intent"),
+            "execution_mode": runtime_context_summary.get("execution_mode"),
+            "environment_ref": runtime_context_summary.get("environment_ref"),
+            "environment_session_id": runtime_context_summary.get("environment_session_id"),
+            "writeback_requested": runtime_context_summary.get("writeback_requested"),
+            "should_kickoff": runtime_context_summary.get("should_kickoff"),
+        }
+    )
+
+
+def _resolve_commit_terminal_event(commit_state: object | None) -> str | None:
+    status = _normalize_string(_safe_get(commit_state, "status"))
+    if status == "confirm_required":
+        return "confirm_required"
+    if status == "committed":
+        return "committed"
+    if status == "commit_deferred":
+        return "commit_deferred"
+    if status in {"commit_failed", "governance_denied"}:
+        return "commit_failed"
+    return None
+
+
+def _should_skip_commit_sidecars(commit_state: object | None) -> bool:
+    status = _normalize_string(_safe_get(commit_state, "status"))
+    reason = _normalize_string(_safe_get(commit_state, "reason"))
+    return status == "commit_deferred" and reason == "no_commit_action"
+
+
+def _build_sidecar_event(
+    event_name: str,
+    *,
+    payload: dict[str, object],
+) -> dict[str, object]:
     return {
-        "sidecar_event": event_name,
-        "control_thread_id": control_thread_id,
-        "thread_id": thread_id,
-        "session_id": session_id,
+        "object": "runtime.sidecar",
+        "event": event_name,
         "payload": payload,
     }
 
@@ -126,54 +241,71 @@ def _build_sidecar_events(
 ) -> list[dict[str, object]]:
     request_id = getattr(request_payload, "id", None)
     runtime_summary = _summarize_runtime_context(runtime_context)
+    commit_state = getattr(request_payload, "_copaw_main_brain_commit_state", None)
+    timing_profile = _safe_get(request_payload, "_copaw_main_brain_timing")
+    sidecar_control_thread_id = _first_non_empty(
+        _safe_get(commit_state, "control_thread_id"),
+        control_thread_id,
+        thread_id,
+        session_id,
+    )
+    sidecar_thread_id = _first_non_empty(
+        sidecar_control_thread_id,
+        thread_id,
+        control_thread_id,
+        session_id,
+    )
+    sidecar_session_id = _first_non_empty(
+        _safe_get(commit_state, "session_id"),
+        session_id,
+    )
     events: list[dict[str, object]] = []
+    base_payload = _compact_payload(
+        {
+            "request_id": request_id,
+            "control_thread_id": sidecar_control_thread_id,
+            "thread_id": sidecar_thread_id,
+            "session_id": sidecar_session_id,
+            "kernel_task_id": runtime_summary.get("kernel_task_id"),
+            "execution_intent": runtime_summary.get("execution_intent"),
+            "execution_mode": runtime_summary.get("execution_mode"),
+            "environment_ref": runtime_summary.get("environment_ref"),
+            "environment_session_id": runtime_summary.get("environment_session_id"),
+            "writeback_requested": runtime_summary.get("writeback_requested"),
+            "should_kickoff": runtime_summary.get("should_kickoff"),
+            "timing": timing_profile if isinstance(timing_profile, dict) and timing_profile else None,
+        }
+    )
     events.append(
         _build_sidecar_event(
             "turn_reply_done",
-            request_id=request_id,
-            control_thread_id=control_thread_id,
-            thread_id=thread_id,
-            session_id=session_id,
-            runtime_context_summary=runtime_summary,
-            extra_payload={"phase": "reply"},
+            payload=base_payload,
         )
     )
-    if runtime_context is None:
+    if commit_state is None or _should_skip_commit_sidecars(commit_state):
         return events
+    commit_payload = _build_commit_payload(
+        request_id=request_id,
+        control_thread_id=sidecar_control_thread_id,
+        thread_id=sidecar_thread_id,
+        session_id=sidecar_session_id,
+        runtime_context_summary=runtime_summary,
+        commit_state=commit_state,
+    )
     events.append(
         _build_sidecar_event(
             "commit_started",
-            request_id=request_id,
-            control_thread_id=control_thread_id,
-            thread_id=thread_id,
-            session_id=session_id,
-            runtime_context_summary=runtime_summary,
-            extra_payload={"phase": "commit_started"},
+            payload=commit_payload,
         )
     )
-    if _should_emit_confirm_required(runtime_summary):
+    terminal_event = _resolve_commit_terminal_event(commit_state)
+    if terminal_event is not None:
         events.append(
             _build_sidecar_event(
-                "confirm_required",
-                request_id=request_id,
-                control_thread_id=control_thread_id,
-                thread_id=thread_id,
-                session_id=session_id,
-                runtime_context_summary=runtime_summary,
-                extra_payload={"phase": "confirm_required"},
+                terminal_event,
+                payload=commit_payload,
             )
         )
-    events.append(
-        _build_sidecar_event(
-            "committed",
-            request_id=request_id,
-            control_thread_id=control_thread_id,
-            thread_id=thread_id,
-            session_id=session_id,
-            runtime_context_summary=runtime_summary,
-            extra_payload={"phase": "committed"},
-        )
-    )
     return events
 
 

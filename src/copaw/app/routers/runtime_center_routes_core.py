@@ -16,6 +16,8 @@ from agentscope_runtime.engine.schemas.agent_schemas import (
 )
 from starlette.background import BackgroundTask
 
+from ...kernel.main_brain_turn_result import MainBrainCommitState
+
 _HUMAN_ASSIST_RESUME_MAX_ATTEMPTS = 2
 _HUMAN_ASSIST_RESUME_RETRY_DELAY_SECONDS = 0.15
 
@@ -148,6 +150,120 @@ def _string_list(value: object | None) -> list[str]:
         if text:
             normalized.append(text)
     return normalized
+
+
+def _merge_runtime_decision_ids(*values: object) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        raw_items = value if isinstance(value, list) else [value]
+        for item in raw_items:
+            text = _first_non_empty_text(item)
+            if text is None:
+                continue
+            lowered = text.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(text)
+    return normalized
+
+
+def _persist_runtime_center_main_brain_commit_resolution(
+    *,
+    request: Request,
+    payload: GovernanceDecisionBatchRequest,
+    action: str,
+    result_payload: dict[str, object],
+) -> None:
+    session_backend = getattr(request.app.state, "session_backend", None)
+    loader = getattr(session_backend, "load_session_snapshot", None)
+    saver = getattr(session_backend, "save_session_snapshot", None)
+    if not callable(loader) or not callable(saver):
+        return
+    session_id = _first_non_empty_text(payload.session_id, payload.control_thread_id)
+    user_id = _first_non_empty_text(payload.agent_id, payload.user_id)
+    if session_id is None or user_id is None:
+        return
+    snapshot = loader(
+        session_id=session_id,
+        user_id=user_id,
+        allow_not_exist=True,
+    )
+    if not isinstance(snapshot, dict):
+        return
+    main_brain = _as_mapping(snapshot.get("main_brain"))
+    commit_payload = _as_mapping(main_brain.get("phase2_commit"))
+    if not commit_payload:
+        return
+    current_state = MainBrainCommitState.model_validate(commit_payload)
+    results = result_payload.get("results")
+    errors = result_payload.get("errors")
+    if action == "approve" and not bool(result_payload.get("succeeded")):
+        return
+    if action == "reject" and not bool(result_payload.get("succeeded")):
+        return
+    first_result = _as_mapping(results[0]) if isinstance(results, list) and results else {}
+    first_error = _as_mapping(errors[0]) if isinstance(errors, list) and errors else {}
+    nested_payload = _as_mapping(current_state.payload)
+    decision_ids = _merge_runtime_decision_ids(
+        nested_payload.get("decision_ids"),
+        nested_payload.get("decision_id"),
+        payload.decision_ids,
+    )
+    if decision_ids:
+        nested_payload["decision_ids"] = decision_ids
+        if "decision_id" not in nested_payload and len(decision_ids) == 1:
+            nested_payload["decision_id"] = decision_ids[0]
+    record_id = _first_non_empty_text(
+        first_result.get("record_id"),
+        _as_mapping(first_result.get("output")).get("record_id"),
+        current_state.record_id,
+    )
+    message = _first_non_empty_text(
+        payload.resolution,
+        first_result.get("summary"),
+        first_error.get("error"),
+    )
+    updated_state = current_state.model_copy(
+        update={
+            "status": (
+                "committed"
+                if action == "approve" and payload.execute is not False
+                else ("commit_deferred" if action == "approve" else "commit_failed")
+            ),
+            "reason": (
+                "approved"
+                if action == "approve" and payload.execute is False
+                else ("governance_denied" if action == "reject" else None)
+            ),
+            "message": message,
+            "record_id": record_id,
+            "control_thread_id": _first_non_empty_text(
+                payload.control_thread_id,
+                current_state.control_thread_id,
+                session_id,
+            ),
+            "session_id": _first_non_empty_text(
+                payload.session_id,
+                current_state.session_id,
+                session_id,
+            ),
+            "work_context_id": _first_non_empty_text(
+                payload.work_context_id,
+                current_state.work_context_id,
+            ),
+            "payload": nested_payload or current_state.payload,
+        },
+    )
+    main_brain["phase2_commit"] = updated_state.model_dump(mode="json")
+    snapshot["main_brain"] = main_brain
+    saver(
+        session_id=session_id,
+        user_id=user_id,
+        payload=snapshot,
+        source_ref="state:/main-brain-chat-session",
+    )
 
 
 def _looks_like_human_assist_submission(
@@ -704,7 +820,14 @@ async def approve_decisions_batch(
         resolution=payload.resolution,
         execute=payload.execute,
     )
-    return result.model_dump(mode="json")
+    result_payload = result.model_dump(mode="json")
+    _persist_runtime_center_main_brain_commit_resolution(
+        request=request,
+        payload=payload,
+        action="approve",
+        result_payload=result_payload,
+    )
+    return result_payload
 
 
 @router.post("/governance/decisions/reject", response_model=dict[str, object])
@@ -722,7 +845,14 @@ async def reject_decisions_batch(
         resolution=payload.resolution,
         execute=payload.execute,
     )
-    return result.model_dump(mode="json")
+    result_payload = result.model_dump(mode="json")
+    _persist_runtime_center_main_brain_commit_resolution(
+        request=request,
+        payload=payload,
+        action="reject",
+        result_payload=result_payload,
+    )
+    return result_payload
 
 
 @router.post("/governance/patches/approve", response_model=dict[str, object])

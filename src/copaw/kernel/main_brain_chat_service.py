@@ -44,10 +44,43 @@ _PURE_CHAT_PERSIST_TURNS = 2
 _PURE_CHAT_HISTORY_MAX_MESSAGES = 8
 _PURE_CHAT_HISTORY_MAX_CHARS = 4200
 _PURE_CHAT_HISTORY_MESSAGE_CHAR_LIMIT = 960
+_PURE_CHAT_SHORT_FOLLOWUP_RECALL_MAX_BYTES = 48
 _PURE_CHAT_MODEL_KWARGS: dict[str, object] = {
     "temperature": 0.15,
     "max_tokens": 520,
 }
+_PURE_CHAT_SHORT_FOLLOWUP_LEXICAL_RECALL = (
+    "## Truth-First Lexical Recall\n"
+    "- Reuse current session + scope snapshot for this short follow-up turn."
+)
+_PURE_CHAT_NO_QUERY_LEXICAL_RECALL = (
+    "## Truth-First Lexical Recall\n"
+    "- No query-specific lexical recall requested for this turn."
+)
+_PURE_CHAT_UNAVAILABLE_LEXICAL_RECALL = (
+    "## Truth-First Lexical Recall\n"
+    "- No lexical recall service is available for this turn."
+)
+_PURE_CHAT_EXPLICIT_MEMORY_TERMS = (
+    "history",
+    "earlier",
+    "previous",
+    "remember",
+    "record",
+    "records",
+    "notes",
+    "facts",
+    "context",
+    "之前",
+    "上次",
+    "刚才",
+    "前面",
+    "历史",
+    "记忆",
+    "记录",
+    "事实",
+    "上下文",
+)
 _PURE_CHAT_EMPTY_REPLY_FALLBACK = (
     "我这轮没有拿到有效回复。你可以直接重试；"
     "如果你是在补充目标、约束或执行条件，我会继续整理并自动推进。"
@@ -106,6 +139,20 @@ def _clip_text(value: object, *, limit: int = 160) -> str:
     return f"{text[: max(0, limit - 1)].rstrip()}…"
 
 
+def _normalize_query_signature(value: object | None) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    return re.sub(r"\s+", " ", text)
+
+
+def _query_requests_explicit_memory(query: str) -> bool:
+    normalized = _normalize_query_signature(query)
+    if not normalized:
+        return False
+    return any(term in normalized for term in _PURE_CHAT_EXPLICIT_MEMORY_TERMS)
+
+
 def _safe_mapping(value: object) -> dict[str, Any]:
     if isinstance(value, dict):
         return dict(value)
@@ -118,6 +165,16 @@ def _safe_mapping(value: object) -> dict[str, Any]:
     if isinstance(namespace, dict):
         return dict(namespace)
     return {}
+
+
+def _resolve_snapshot_user_id(request: object) -> str:
+    return str(
+        _first_non_empty(
+            getattr(request, "agent_id", None),
+            getattr(request, "user_id", None),
+        )
+        or ""
+    ).strip()
 
 
 def _merge_stream_text(current_text: str, new_text: str) -> str:
@@ -748,9 +805,10 @@ class MainBrainChatService:
         msgs: list[Any],
         request: Any,
     ) -> AsyncIterator[tuple[Msg, bool]]:
+        turn_started_at = time.perf_counter()
         query = extract_main_brain_intake_text(msgs)
         session_id = str(getattr(request, "session_id", "") or "").strip()
-        user_id = str(getattr(request, "user_id", "") or "").strip()
+        user_id = _resolve_snapshot_user_id(request)
         cache_key = (session_id, user_id) if session_id and user_id else None
         now = time.time()
         cache_entry: _PureChatSessionCacheEntry | None = None
@@ -794,18 +852,23 @@ class MainBrainChatService:
             )
 
         prior_messages = await memory.get_memory(prepend_summary=False)
-        prompt_messages = self._build_prompt_messages(
+        prompt_messages, prompt_timing = self._build_prompt_message_bundle(
             request=request,
             query=query,
             prior_messages=prior_messages,
             current_messages=msgs,
             cache_entry=cache_entry,
         )
+        turn_timing: dict[str, Any] = {
+            "session_cache_hit": cache_entry is not None and cache_entry.last_persisted_at > 0,
+            **prompt_timing,
+        }
         assistant_message_id = uuid.uuid4().hex
         assistant_message: Msg | None = None
         assistant_usage: object | None = None
         reply_already_streamed = False
         model_result = MainBrainTurnResult.from_reply_text("")
+        first_output_at: float | None = None
         try:
             if msgs:
                 await memory.add(msgs, allow_duplicates=False)
@@ -822,6 +885,16 @@ class MainBrainChatService:
             logger.exception("Failed to persist incoming main-brain chat messages")
         try:
             model = self._resolve_model()
+            model_invoke_started_at = time.perf_counter()
+            turn_timing["pre_model_ms"] = round(
+                (model_invoke_started_at - turn_started_at) * 1000,
+                3,
+            )
+            self._set_request_runtime_value(
+                request,
+                "_copaw_main_brain_timing",
+                dict(turn_timing),
+            )
             response = await self._invoke_model_response(
                 model=model,
                 prompt_messages=prompt_messages,
@@ -861,6 +934,8 @@ class MainBrainChatService:
                             False,
                         )
                     if merged_text != accumulated_text or merged_thinking != accumulated_thinking:
+                        if first_output_at is None:
+                            first_output_at = time.perf_counter()
                         accumulated_text = merged_text
                         accumulated_thinking = merged_thinking
                         pending_text = accumulated_text
@@ -884,6 +959,8 @@ class MainBrainChatService:
                 assistant_usage = getattr(response, "usage", None)
                 if not text and model_result.reply_text:
                     text = model_result.reply_text
+                if (text or thinking) and first_output_at is None:
+                    first_output_at = time.perf_counter()
             if not text and not thinking:
                 response = await self._call_model_response(
                     model=model,
@@ -895,7 +972,18 @@ class MainBrainChatService:
                 assistant_usage = getattr(response, "usage", None)
                 if not text and model_result.reply_text:
                     text = model_result.reply_text
+                if (text or thinking) and first_output_at is None:
+                    first_output_at = time.perf_counter()
         except asyncio.CancelledError:
+            turn_timing["turn_total_ms"] = round(
+                (time.perf_counter() - turn_started_at) * 1000,
+                3,
+            )
+            self._set_request_runtime_value(
+                request,
+                "_copaw_main_brain_timing",
+                dict(turn_timing),
+            )
             self._persist_interrupted_snapshot(
                 session_id=session_id,
                 user_id=user_id,
@@ -905,6 +993,24 @@ class MainBrainChatService:
             )
             raise
         except Exception as exc:
+            if first_output_at is not None:
+                turn_timing["first_output_ms"] = round(
+                    (first_output_at - turn_started_at) * 1000,
+                    3,
+                )
+                turn_timing["model_wait_ms"] = round(
+                    (first_output_at - model_invoke_started_at) * 1000,
+                    3,
+                )
+            turn_timing["turn_total_ms"] = round(
+                (time.perf_counter() - turn_started_at) * 1000,
+                3,
+            )
+            self._set_request_runtime_value(
+                request,
+                "_copaw_main_brain_timing",
+                dict(turn_timing),
+            )
             self._persist_interrupted_snapshot(
                 session_id=session_id,
                 user_id=user_id,
@@ -922,6 +1028,21 @@ class MainBrainChatService:
                 "Main-brain pure chat returned an empty response; using fallback text",
             )
             text = _PURE_CHAT_EMPTY_REPLY_FALLBACK
+        if (text or thinking) and first_output_at is None:
+            first_output_at = time.perf_counter()
+        if first_output_at is not None:
+            turn_timing["first_output_ms"] = round(
+                (first_output_at - turn_started_at) * 1000,
+                3,
+            )
+            turn_timing["model_wait_ms"] = round(
+                (first_output_at - model_invoke_started_at) * 1000,
+                3,
+            )
+        turn_timing["turn_total_ms"] = round(
+            (time.perf_counter() - turn_started_at) * 1000,
+            3,
+        )
         model_result = MainBrainTurnResult.normalize(
             model_result,
             fallback_reply_text=text,
@@ -957,6 +1078,13 @@ class MainBrainChatService:
             turn_result=model_result,
             request=request,
         )
+        effective_commit_state = commit_state
+        if (
+            persisted_commit_state is not None
+            and commit_state.status == "commit_deferred"
+            and commit_state.reason == "no_commit_action"
+        ):
+            effective_commit_state = persisted_commit_state
         if cache_entry is not None and not (
             commit_state.status == "commit_deferred"
             and commit_state.reason == "no_commit_action"
@@ -973,7 +1101,12 @@ class MainBrainChatService:
         self._set_request_runtime_value(
             request,
             "_copaw_main_brain_commit_state",
-            commit_state,
+            effective_commit_state,
+        )
+        self._set_request_runtime_value(
+            request,
+            "_copaw_main_brain_timing",
+            dict(turn_timing),
         )
         if not reply_already_streamed:
             yield assistant_message, True
@@ -1146,17 +1279,117 @@ class MainBrainChatService:
         current_messages: list[Any],
         cache_entry: _PureChatSessionCacheEntry | None = None,
     ) -> list[dict[str, str]]:
-        _ = cache_entry
+        prompt_messages, _timing = self._build_prompt_message_bundle(
+            request=request,
+            query=query,
+            prior_messages=prior_messages,
+            current_messages=current_messages,
+            cache_entry=cache_entry,
+        )
+        return prompt_messages
+
+    def _build_prompt_message_bundle(
+        self,
+        *,
+        request: Any,
+        query: str | None,
+        prior_messages: list[Any],
+        current_messages: list[Any],
+        cache_entry: _PureChatSessionCacheEntry | None = None,
+    ) -> tuple[list[dict[str, str]], dict[str, Any]]:
+        build_started_at = time.perf_counter()
+        detail_started_at = time.perf_counter()
         detail = self._load_industry_detail(request)
         owner_agent_id = self._resolve_owner_agent_id(request, detail=detail)
+        detail_load_ms = round((time.perf_counter() - detail_started_at) * 1000, 3)
+
+        context_body, context_timing = self._build_prompt_context_body(
+            request=request,
+            query=query,
+            prior_messages=prior_messages,
+            cache_entry=cache_entry,
+            detail=detail,
+            owner_agent_id=owner_agent_id,
+        )
+        history_started_at = time.perf_counter()
+        history_messages = self._build_history_messages(
+            prior_messages=prior_messages,
+            current_messages=current_messages,
+        )
+        history_build_ms = round((time.perf_counter() - history_started_at) * 1000, 3)
+        prompt_messages = [
+            {"role": "system", "content": _PURE_CHAT_SYSTEM_PROMPT},
+            {"role": "system", "content": context_body},
+            *history_messages,
+        ]
+        timing = {
+            "detail_load_ms": detail_load_ms,
+            "history_build_ms": history_build_ms,
+            "prompt_build_ms": round((time.perf_counter() - build_started_at) * 1000, 3),
+            **context_timing,
+        }
+        return prompt_messages, timing
+
+    def _build_prompt_context_body(
+        self,
+        *,
+        request: Any,
+        query: str | None,
+        prior_messages: list[Any],
+        cache_entry: _PureChatSessionCacheEntry | None,
+        detail: object | None,
+        owner_agent_id: str | None,
+    ) -> tuple[str, dict[str, Any]]:
+        prompt_context_started_at = time.perf_counter()
         prompt_context = self._scope_snapshot_service.resolve_prompt_context(
             request=request,
             detail=detail,
             owner_agent_id=owner_agent_id,
         )
-        lexical_recall = self._build_lexical_recall_context(
-            request=request,
-            query=query,
+        prompt_context_ms = round(
+            (time.perf_counter() - prompt_context_started_at) * 1000,
+            3,
+        )
+        lexical_mode, lexical_signature, lexical_static_body = (
+            self._resolve_lexical_recall_plan(
+                query=query,
+                prior_messages=prior_messages,
+            )
+        )
+        context_signature = "|".join(
+            (
+                prompt_context.stable_signature,
+                prompt_context.scope_signature,
+                lexical_signature,
+            )
+        )
+        if (
+            cache_entry is not None
+            and cache_entry.prompt_context_signature == context_signature
+            and isinstance(cache_entry.prompt_context_body, str)
+            and cache_entry.prompt_context_body
+        ):
+            return cache_entry.prompt_context_body, {
+                "prompt_context_ms": prompt_context_ms,
+                "lexical_recall_ms": 0.0,
+                "prompt_context_cache_hit": True,
+                "lexical_recall_mode": lexical_mode,
+                "stable_prefix_cache_hit": prompt_context.stable_cache_hit,
+                "scope_snapshot_cache_hit": prompt_context.scope_cache_hit,
+            }
+
+        lexical_started_at = time.perf_counter()
+        lexical_recall = (
+            self._build_lexical_recall_context(
+                request=request,
+                query=query,
+            )
+            if lexical_mode == "query_recall"
+            else lexical_static_body
+        )
+        lexical_recall_ms = round(
+            (time.perf_counter() - lexical_started_at) * 1000,
+            3,
         )
         context_body = "\n\n".join(
             part
@@ -1167,15 +1400,52 @@ class MainBrainChatService:
             )
             if part
         )
-        history_messages = self._build_history_messages(
-            prior_messages=prior_messages,
-            current_messages=current_messages,
+        if cache_entry is not None:
+            cache_entry.prompt_context_signature = context_signature
+            cache_entry.prompt_context_body = context_body
+        return context_body, {
+            "prompt_context_ms": prompt_context_ms,
+            "lexical_recall_ms": lexical_recall_ms,
+            "prompt_context_cache_hit": False,
+            "lexical_recall_mode": lexical_mode,
+            "stable_prefix_cache_hit": prompt_context.stable_cache_hit,
+            "scope_snapshot_cache_hit": prompt_context.scope_cache_hit,
+        }
+
+    def _resolve_lexical_recall_plan(
+        self,
+        *,
+        query: str | None,
+        prior_messages: list[Any],
+    ) -> tuple[str, str, str]:
+        normalized_query = _normalize_query_signature(query)
+        if not normalized_query:
+            return (
+                "no_query",
+                "lexical:no_query",
+                _PURE_CHAT_NO_QUERY_LEXICAL_RECALL,
+            )
+        if self._memory_recall_service is None:
+            return (
+                "service_unavailable",
+                "lexical:service_unavailable",
+                _PURE_CHAT_UNAVAILABLE_LEXICAL_RECALL,
+            )
+        if (
+            prior_messages
+            and len(normalized_query.encode("utf-8")) <= _PURE_CHAT_SHORT_FOLLOWUP_RECALL_MAX_BYTES
+            and not _query_requests_explicit_memory(normalized_query)
+        ):
+            return (
+                "skip_short_followup",
+                "lexical:skip_short_followup",
+                _PURE_CHAT_SHORT_FOLLOWUP_LEXICAL_RECALL,
+            )
+        return (
+            "query_recall",
+            f"lexical:query:{normalized_query}",
+            "",
         )
-        return [
-            {"role": "system", "content": _PURE_CHAT_SYSTEM_PROMPT},
-            {"role": "system", "content": context_body},
-            *history_messages,
-        ]
 
     def _build_stable_prompt_prefix(
         self,

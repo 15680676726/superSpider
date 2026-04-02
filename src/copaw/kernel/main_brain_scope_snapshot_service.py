@@ -23,6 +23,10 @@ class MainBrainPromptContext:
     stable_prefix: str
     scope_snapshot: str
     scope_key: str
+    stable_signature: str
+    scope_signature: str
+    stable_cache_hit: bool
+    scope_cache_hit: bool
 
 
 class MainBrainScopeSnapshotService:
@@ -66,6 +70,9 @@ class MainBrainScopeSnapshotService:
             owner_agent_id=owner_agent_id,
         )
         stable_entry = self._stable_prefix_cache.get(session_key)
+        stable_cache_hit = (
+            stable_entry is not None and stable_entry.signature == stable_signature
+        )
         if stable_entry is None or stable_entry.signature != stable_signature:
             stable_prefix = self._call_builder(
                 self._stable_prefix_builder,
@@ -93,6 +100,11 @@ class MainBrainScopeSnapshotService:
             owner_agent_id=owner_agent_id,
         )
         scope_entry = self._scope_snapshot_cache.get(scope_key)
+        scope_cache_hit = (
+            scope_entry is not None
+            and scope_entry.signature == scope_signature
+            and not scope_entry.dirty
+        )
         if (
             scope_entry is None
             or scope_entry.signature != scope_signature
@@ -116,6 +128,10 @@ class MainBrainScopeSnapshotService:
             stable_prefix=stable_prefix,
             scope_snapshot=scope_snapshot,
             scope_key=scope_key,
+            stable_signature=stable_signature,
+            scope_signature=scope_signature,
+            stable_cache_hit=stable_cache_hit,
+            scope_cache_hit=scope_cache_hit,
         )
 
     def mark_dirty(
