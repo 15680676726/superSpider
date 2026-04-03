@@ -249,6 +249,90 @@ def test_industry_bootstrap_goal_compile_regression_keeps_specialist_runtime_con
     assert "- Evidence expectations:" in prompt_text
 
 
+def test_industry_bootstrap_specialist_runtime_metadata_dual_writes_current_focus(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    owner_scope = "industry-v1-focus-dual-write"
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Industrial Automation",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["build a stable inspection loop"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(profile, owner_scope)
+
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_activate": True,
+            "auto_dispatch": False,
+            "execute": False,
+        },
+    )
+
+    assert response.status_code == 200
+    bootstrap_payload = response.json()
+    specialist_goal = next(
+        item for item in bootstrap_payload["goals"] if item["owner_agent_id"] != "copaw-agent-runner"
+    )
+
+    runtime = app.state.agent_runtime_repository.get_runtime(specialist_goal["owner_agent_id"])
+
+    assert runtime is not None
+    metadata = runtime.metadata
+    assert metadata["goal_id"] == specialist_goal["goal"]["id"]
+    assert metadata["goal_title"] == specialist_goal["goal"]["title"]
+    assert metadata["current_focus_kind"] == "goal"
+    assert metadata["current_focus_id"] == specialist_goal["goal"]["id"]
+    assert metadata["current_focus"] == specialist_goal["goal"]["title"]
+
+
+def test_industry_runtime_sync_preserves_assignment_focus_without_goal(tmp_path) -> None:
+    app = _build_industry_app(tmp_path)
+
+    owner_scope = "industry-v1-assignment-focus"
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Industrial Automation",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["stabilize the assignment relay"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(profile, owner_scope)
+    specialist = next(agent for agent in draft.team.agents if agent.agent_id != "copaw-agent-runner")
+
+    app.state.industry_service._sync_actor_runtime_surface(  # pylint: disable=protected-access
+        agent=specialist,
+        instance_id=draft.team.team_id,
+        owner_scope=owner_scope,
+        goal_id=None,
+        goal_title=None,
+        status="waiting",
+        assignment_id="assignment-ops-1",
+        assignment_title="Review assignment relay",
+        assignment_summary="Keep the specialist focused on the active assignment.",
+        assignment_status="running",
+    )
+
+    runtime = app.state.agent_runtime_repository.get_runtime(specialist.agent_id)
+
+    assert runtime is not None
+    metadata = runtime.metadata
+    assert metadata["goal_id"] is None
+    assert metadata["goal_title"] is None
+    assert metadata["current_focus_kind"] == "assignment"
+    assert metadata["current_focus_id"] == "assignment-ops-1"
+    assert metadata["current_focus"] == "Review assignment relay"
+
+
 def test_industry_preview_returns_service_unavailable_when_chat_model_missing(
     tmp_path,
 ) -> None:

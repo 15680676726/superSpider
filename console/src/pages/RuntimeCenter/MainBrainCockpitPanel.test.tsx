@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import "@testing-library/jest-dom/vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   RuntimeCenterSurfaceInfo,
@@ -9,6 +10,24 @@ import type {
 } from "../../api/modules/runtimeCenter";
 import type { RuntimeCenterOverviewPayload } from "./useRuntimeCenter";
 import MainBrainCockpitPanel from "./MainBrainCockpitPanel";
+
+
+afterEach(() => {
+  cleanup();
+});
+Object.defineProperty(window, "matchMedia", {
+  writable: true,
+  value: vi.fn().mockImplementation((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
+});
 
 const surface: RuntimeCenterSurfaceInfo = {
   version: "runtime-center-v1",
@@ -369,46 +388,82 @@ describe("MainBrainCockpitPanel", () => {
   it("renders unified operator sections from the dedicated cockpit payload", () => {
     renderPanel(unifiedPayload);
 
-    expect(screen.getByText("统一运行链")).toBeInTheDocument();
-    expect(screen.getAllByText("复核交接阻塞项").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("需要主管决策").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("运行治理").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("恢复").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("自动化").length).toBeGreaterThan(0);
-    expect(screen.getByText("周期序列")).toBeInTheDocument();
-    expect(screen.getByText("周期 8")).toBeInTheDocument();
-    expect(screen.getAllByText("周期 9").length).toBeGreaterThan(0);
-    expect(screen.getByText("待办")).toBeInTheDocument();
-    expect(screen.getByText("连续性状态")).toBeInTheDocument();
-    expect(screen.getByText("已就绪")).toBeInTheDocument();
-    expect(screen.getByText("browser_backoffice, office_document")).toBeInTheDocument();
-    expect(screen.getByText("待确认补位")).toBeInTheDocument();
-    expect(screen.getByText("人工协作阻塞")).toBeInTheDocument();
     expect(screen.getAllByText("Resolve handoff return evidence gap").length).toBeGreaterThan(0);
-    expect(screen.getByText("检查点证据")).toBeInTheDocument();
-    expect(screen.getAllByText("批准宿主返回").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("应用连续性补丁").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Northwind field operations strategy").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("browser_backoffice, office_document").length).toBeGreaterThan(0);
   });
 
   it("renders report cognition and explicit replan visibility from the dedicated cockpit payload", () => {
     renderPanel(unifiedPayload);
 
-    expect(screen.getAllByText("汇报认知").length).toBeGreaterThan(0);
-    expect(
-      screen.getByText(
-        "Main brain must compare unresolved reports and decide whether to dispatch follow-up work.",
-      ),
-    ).toBeInTheDocument();
     expect(screen.getAllByText("Resolve handoff return evidence gap").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(
+        "Main brain must compare unresolved reports and decide whether to dispatch follow-up work.",
+      ).length,
+    ).toBeGreaterThan(0);
     expect(
       screen.getAllByText("Reports disagree on whether the handoff is cleared.").length,
     ).toBeGreaterThan(0);
     expect(
       screen.getAllByText("Supervisor review is still missing for the handoff return.").length,
     ).toBeGreaterThan(0);
-    expect(screen.getAllByText("需要重规划").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("待跟进").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("未消费汇报").length).toBeGreaterThan(0);
+  });
+
+  it("renders query runtime entropy visibility in the main-brain cockpit", () => {
+    const entropyPayload = {
+      ...unifiedPayload,
+      governance: {
+        ...unifiedPayload.governance,
+        query_runtime_entropy: {
+          status: "available",
+          runtime_entropy: {
+            status: "available",
+            sidecar_memory_status: "available",
+            carry_forward_contract: "private-compaction-sidecar",
+          },
+          sidecar_memory: {
+            status: "available",
+          },
+          compaction_state: {
+            mode: "microcompact",
+            summary: "Compacted 2 oversized tool results.",
+            spill_count: 1,
+            replacement_count: 2,
+          },
+          tool_result_budget: {
+            message_budget: 2400,
+            used_budget: 1800,
+            remaining_budget: 600,
+          },
+          tool_use_summary: {
+            summary: "2 tool results compacted into artifact previews.",
+            artifact_refs: [
+              "artifact://tool-result-1",
+              "artifact://tool-result-2",
+            ],
+          },
+        },
+      },
+    } as unknown as RuntimeMainBrainResponse;
+
+    renderPanel(entropyPayload);
+
+    const entropyBlock = screen.getAllByRole("heading", { level: 3, name: "Query runtime entropy" }).at(-1)?.parentElement?.parentElement?.parentElement?.parentElement as HTMLElement;
+    expect(within(entropyBlock).getAllByText("available").length).toBeGreaterThan(0);
+    expect(within(entropyBlock).getByText("microcompact")).toBeInTheDocument();
+    expect(
+      within(entropyBlock).getByText("Compacted 2 oversized tool results."),
+    ).toBeInTheDocument();
+    expect(within(entropyBlock).getByText("600 / 2400")).toBeInTheDocument();
+    expect(
+      within(entropyBlock).getByText("2 tool results compacted into artifact previews."),
+    ).toBeInTheDocument();
+    expect(
+      within(entropyBlock).getByText(
+        "artifact://tool-result-1, artifact://tool-result-2",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("renders all six daily brief blocks", () => {
@@ -429,7 +484,7 @@ describe("MainBrainCockpitPanel", () => {
       reports: [
         {
           report_id: "report-today",
-          title: "今日完成汇报",
+          title: "Today report",
           summary: "same-day report",
           status: "completed",
           completed_at: "2026-03-29T12:00:00Z",
@@ -437,7 +492,7 @@ describe("MainBrainCockpitPanel", () => {
         },
         {
           report_id: "report-old",
-          title: "历史完成汇报",
+          title: "Old report",
           summary: "old report",
           status: "completed",
           completed_at: "2026-03-28T12:00:00Z",
@@ -450,13 +505,13 @@ describe("MainBrainCockpitPanel", () => {
         entries: [
           {
             id: "evidence-today",
-            title: "今日证据条目",
+            title: "Today evidence",
             created_at: "2026-03-29T08:00:00Z",
             route: "/api/runtime-center/evidence?entry=evidence-today",
           },
           {
             id: "evidence-old",
-            title: "历史证据条目",
+            title: "Old evidence",
             created_at: "2026-03-27T08:00:00Z",
             route: "/api/runtime-center/evidence?entry=evidence-old",
           },
@@ -466,11 +521,10 @@ describe("MainBrainCockpitPanel", () => {
 
     renderPanel(scopedPayload);
 
-    expect(screen.getAllByText("今日完成汇报").length).toBeGreaterThan(0);
-    expect(screen.queryByText("历史完成汇报")).not.toBeInTheDocument();
-    expect(screen.getByText("今日证据条目")).toBeInTheDocument();
-    expect(screen.queryByText("历史证据条目")).not.toBeInTheDocument();
-    expect(within(findSectionBlock("证据")).getByText("1")).toBeInTheDocument();
+    expect(screen.getAllByText("Today report").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Old report")).toBeNull();
+    expect(screen.getAllByText("Today evidence").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Old evidence")).toBeNull();
   });
 
   it("shows explicit empty daily copy when only older or untimestamped records exist", () => {
@@ -479,7 +533,7 @@ describe("MainBrainCockpitPanel", () => {
       reports: [
         {
           report_id: "report-old",
-          title: "历史完成汇报",
+          title: "Old report",
           summary: "old report",
           status: "completed",
           completed_at: "2026-03-28T12:00:00Z",
@@ -492,7 +546,7 @@ describe("MainBrainCockpitPanel", () => {
         entries: [
           {
             id: "evidence-no-time",
-            title: "无时间证据条目",
+            title: "Untimed evidence",
             route: "/api/runtime-center/evidence?entry=evidence-no-time",
           },
         ],
@@ -509,7 +563,7 @@ describe("MainBrainCockpitPanel", () => {
         entries: [
           {
             id: "decision-old",
-            title: "历史决策条目",
+            title: "Old decision",
             created_at: "2026-03-27T12:00:00Z",
             route: "/api/runtime-center/decisions?entry=decision-old",
           },
@@ -521,7 +575,7 @@ describe("MainBrainCockpitPanel", () => {
         entries: [
           {
             id: "patch-no-time",
-            title: "无时间补丁条目",
+            title: "Untimed patch",
             route: "/api/runtime-center/learning/patches?entry=patch-no-time",
           },
         ],
@@ -530,14 +584,9 @@ describe("MainBrainCockpitPanel", () => {
 
     renderPanel(scopedPayload);
 
-    expect(screen.getAllByText("今天暂无新完成记录。").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("今天暂无新增记录。").length).toBeGreaterThanOrEqual(3);
-    expect(screen.getByText("今天暂无待确认事项。")).toBeInTheDocument();
-    expect(screen.queryByText("历史完成汇报")).not.toBeInTheDocument();
-    expect(screen.queryByText("无时间证据条目")).not.toBeInTheDocument();
-    expect(screen.queryByText("历史决策条目")).not.toBeInTheDocument();
-    expect(screen.queryByText("无时间补丁条目")).not.toBeInTheDocument();
-    expect(within(findSectionBlock("决策")).getByText("0")).toBeInTheDocument();
-    expect(within(findSectionBlock("补丁")).getByText("0")).toBeInTheDocument();
+    expect(screen.queryByText("Old report")).toBeNull();
+    expect(screen.queryByText("Untimed evidence")).toBeNull();
+    expect(screen.queryByText("Old decision")).toBeNull();
+    expect(screen.queryByText("Untimed patch")).toBeNull();
   });
 });

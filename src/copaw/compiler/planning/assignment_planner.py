@@ -8,7 +8,11 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from ...state import BacklogItemRecord, OperatingLaneRecord
-from .models import AssignmentPlanEnvelope, PlanningStrategyConstraints
+from .models import (
+    AssignmentPlanEnvelope,
+    PlanningStrategyConstraints,
+    build_planning_shell_payload,
+)
 
 
 def _string(value: object | None) -> str | None:
@@ -308,6 +312,21 @@ class AssignmentPlanningCompiler:
                 "local_replan_policy": local_replan_policy,
                 "planning_policy": list(constraints.planning_policy or []),
             },
+            planning_shell=build_planning_shell_payload(
+                mode="assignment-planning-shell",
+                scope="assignment",
+                plan_id=f"assignment:{assignment_id}:plan",
+                resume_key=f"assignment:{assignment_id}",
+                fork_key=(
+                    f"backlog:{backlog_item.id}"
+                    if backlog_item.id
+                    else "backlog:unresolved"
+                ),
+                verify_reminder=(
+                    "Verify assignment output and supporting evidence before "
+                    "reporting back or requesting local replan."
+                ),
+            ),
             metadata={
                 "source_ref": backlog_item.source_ref,
                 "source_kind": backlog_item.source_kind,

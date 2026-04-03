@@ -98,6 +98,25 @@ def _coerce_lane_weights(value: object | None) -> dict[str, float]:
     return weights
 
 
+def build_planning_shell_payload(
+    *,
+    mode: str,
+    scope: str,
+    plan_id: str,
+    resume_key: str,
+    fork_key: str,
+    verify_reminder: str,
+) -> dict[str, str]:
+    return {
+        "mode": mode,
+        "scope": scope,
+        "plan_id": plan_id,
+        "resume_key": resume_key,
+        "fork_key": fork_key,
+        "verify_reminder": verify_reminder,
+    }
+
+
 StrategyChangeDecision = Literal[
     "follow_up_backlog",
     "cycle_rebalance",
@@ -346,6 +365,7 @@ class CyclePlanningDecision(BaseModel):
     planning_policy: list[str] = Field(default_factory=list)
     affected_relation_ids: list[str] = Field(default_factory=list)
     affected_relation_kinds: list[str] = Field(default_factory=list)
+    planning_shell: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -369,6 +389,7 @@ class AssignmentPlanEnvelope(BaseModel):
     retry_policy: dict[str, Any] = Field(default_factory=dict)
     local_replan_policy: dict[str, Any] = Field(default_factory=dict)
     sidecar_plan: dict[str, Any] = Field(default_factory=dict)
+    planning_shell: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def context_payload(self) -> dict[str, Any]:
@@ -382,6 +403,7 @@ class AssignmentPlanEnvelope(BaseModel):
                 payload.get("acceptance_criteria") or [],
             ),
             "assignment_sidecar_plan": dict(payload.get("sidecar_plan") or {}),
+            "assignment_planning_shell": dict(payload.get("planning_shell") or {}),
             "report_back_mode": self.report_back_mode,
         }
 
@@ -416,6 +438,7 @@ class ReportReplanDecision(BaseModel):
     relation_source_refs: list[str] = Field(default_factory=list)
     directives: list[dict[str, Any]] = Field(default_factory=list)
     recommended_actions: list[dict[str, Any]] = Field(default_factory=list)
+    planning_shell: dict[str, Any] = Field(default_factory=dict)
     activation: dict[str, Any] = Field(default_factory=dict)
     rationale: dict[str, Any] = Field(default_factory=dict)
     strategy_change: dict[str, Any] = Field(default_factory=dict)

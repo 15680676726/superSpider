@@ -1104,4 +1104,67 @@ describe("runtimeTransport", () => {
       }),
     );
   });
+
+  it("surfaces compaction visibility details on reply_done lifecycle and sidecar callback", () => {
+    const setRuntimeLifecycleState = vi.fn();
+    const onRuntimeSidecarEvent = vi.fn();
+
+    parseRuntimeResponseChunk(
+      JSON.stringify({
+        object: "runtime.sidecar",
+        event: "turn_reply_done",
+        payload: {
+          summary: "reply complete",
+          compaction_state: {
+            mode: "microcompact",
+            summary: "Compacted 2 oversized tool results.",
+            spill_count: 1,
+          },
+          tool_result_budget: {
+            message_budget: 2400,
+            remaining_budget: 600,
+          },
+          tool_use_summary: {
+            summary: "2 tool results compacted into artifact previews.",
+            artifact_refs: ["artifact://tool-result-1"],
+          },
+        },
+      }),
+      {
+        setRuntimeHealthNotice: vi.fn(),
+        setRuntimeLifecycleState,
+        setRuntimeWaitState: vi.fn(),
+        dispatchGovernanceDirty: vi.fn(),
+        dispatchHumanAssistDirty: vi.fn(),
+        onRuntimeSidecarEvent,
+      },
+    );
+
+    expect(onRuntimeSidecarEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        object: "runtime.sidecar",
+        event: "turn_reply_done",
+        payload: expect.objectContaining({
+          compaction_state: expect.objectContaining({
+            mode: "microcompact",
+            spill_count: 1,
+          }),
+          tool_result_budget: expect.objectContaining({
+            remaining_budget: 600,
+          }),
+          tool_use_summary: expect.objectContaining({
+            summary: "2 tool results compacted into artifact previews.",
+          }),
+        }),
+      }),
+    );
+    expect(setRuntimeLifecycleState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "reply_done",
+        description: expect.stringContaining(
+          "2 tool results compacted into artifact previews.",
+        ),
+      }),
+    );
+  });
 });

@@ -71,6 +71,14 @@ def test_report_replan_engine_translates_synthesis_surface_into_follow_up_backlo
     assert _strategy_change(decision)["rationale"] == (
         "1 unresolved report synthesis signal requires main-brain judgment."
     )
+    assert decision.planning_shell == {
+        "mode": "report-replan-shell",
+        "scope": "report-replan",
+        "plan_id": "report-synthesis:needs-replan:failed-report:1",
+        "resume_key": "report:report-1",
+        "fork_key": "decision:follow_up_backlog",
+        "verify_reminder": "Verify synthesis pressure before mutating backlog, cycle, lane, or strategy truth.",
+    }
 
 
 def test_report_replan_engine_escalates_repeated_blocker_across_cycles_to_cycle_rebalance() -> None:

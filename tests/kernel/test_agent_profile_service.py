@@ -320,8 +320,9 @@ def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp
             queue_depth=1,
             last_result_summary="Runtime result",
             metadata={
-                "goal_id": "goal-runtime",
-                "goal_title": "Runtime projected goal",
+                "current_focus_kind": "assignment",
+                "current_focus_id": "assignment-runtime",
+                "current_focus": "Runtime projected assignment",
             },
         ),
     )
@@ -335,7 +336,11 @@ def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp
             status="running",
             capability_ref="system:dispatch_query",
             payload={"environment_ref": "session:industry:ops"},
-            metadata={"goal_id": "goal-mailbox", "goal_title": "Mailbox goal"},
+            metadata={
+                "current_focus_kind": "assignment",
+                "current_focus_id": "assignment-mailbox",
+                "current_focus": "Mailbox projected assignment",
+            },
         ),
     )
     checkpoint_repo.upsert_checkpoint(
@@ -349,7 +354,11 @@ def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp
             phase="query-streaming",
             environment_ref="session:industry:ops",
             summary="Checkpoint summary",
-            resume_payload={"goal_id": "goal-checkpoint", "goal_title": "Checkpoint goal"},
+            resume_payload={
+                "current_focus_kind": "assignment",
+                "current_focus_id": "assignment-checkpoint",
+                "current_focus": "Checkpoint projected assignment",
+            },
         ),
     )
 
@@ -363,9 +372,9 @@ def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp
     profile = service.get_agent("agent-1")
 
     assert profile is not None
-    assert profile.current_focus_kind == "goal"
-    assert profile.current_focus_id == "goal-runtime"
-    assert profile.current_focus == "Runtime projected goal"
+    assert profile.current_focus_kind == "assignment"
+    assert profile.current_focus_id == "assignment-runtime"
+    assert profile.current_focus == "Runtime projected assignment"
     assert hasattr(profile, "current_goal_id") is False
     assert hasattr(profile, "current_goal") is False
     assert profile.current_task_id == "task-runtime"
@@ -374,6 +383,72 @@ def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp
     assert profile.queue_depth == 1
     assert profile.today_output_summary == "Runtime result"
     assert profile.last_checkpoint_id == "checkpoint-1"
+
+
+def test_agent_profile_service_preserves_legacy_goal_focus_backfill_until_writers_migrate(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    runtime_repo = SqliteAgentRuntimeRepository(store)
+    mailbox_repo = SqliteAgentMailboxRepository(store)
+    checkpoint_repo = SqliteAgentCheckpointRepository(store)
+
+    runtime_repo.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-1",
+            actor_key="industry-v1-ops:operator",
+            actor_fingerprint="fp-agent-1",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="running",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="operator",
+            display_name="Ops Agent",
+            role_name="Operations",
+            metadata={
+                "goal_id": "goal-runtime",
+                "goal_title": "Legacy runtime goal",
+            },
+        ),
+    )
+    mailbox_repo.upsert_item(
+        AgentMailboxRecord(
+            id="mailbox-1",
+            agent_id="agent-1",
+            title="Mailbox task",
+            summary="Mailbox summary",
+            status="running",
+            capability_ref="system:dispatch_query",
+            metadata={"goal_id": "goal-mailbox", "goal_title": "Legacy mailbox goal"},
+        ),
+    )
+    checkpoint_repo.upsert_checkpoint(
+        AgentCheckpointRecord(
+            id="checkpoint-1",
+            agent_id="agent-1",
+            mailbox_id="mailbox-1",
+            checkpoint_kind="worker-step",
+            status="ready",
+            phase="query-streaming",
+            summary="Checkpoint summary",
+            resume_payload={
+                "goal_id": "goal-checkpoint",
+                "goal_title": "Legacy checkpoint goal",
+            },
+        ),
+    )
+
+    service = AgentProfileService(
+        agent_runtime_repository=runtime_repo,
+        agent_mailbox_repository=mailbox_repo,
+        agent_checkpoint_repository=checkpoint_repo,
+    )
+    profile = service.get_agent("agent-1")
+
+    assert profile is not None
+    assert profile.current_focus_kind == "goal"
+    assert profile.current_focus_id == "goal-runtime"
+    assert profile.current_focus == "Legacy runtime goal"
 
 
 def test_agent_profile_service_detail_stats_drop_goal_count(tmp_path) -> None:

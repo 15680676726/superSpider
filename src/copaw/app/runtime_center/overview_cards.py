@@ -348,6 +348,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             failure_source = self._string(sidecar_memory.get("failure_source")) or "sidecar-memory"
             blocked_next_step = self._string(sidecar_memory.get("blocked_next_step"))
             summary = summary or self._string(sidecar_memory.get("summary"))
+            current_status = "blocked"
         if (
             not summary
             and isinstance(host_twin_summary_payload, dict)
@@ -866,6 +867,8 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         staffing = self._mapping(meta.get("staffing")) or {}
         human_assist = self._mapping(meta.get("human_assist")) or {}
         capability_governance = await self._build_capability_governance_projection(app_state)
+        query_runtime_entropy = self._mapping(meta.get("query_runtime_entropy")) or {}
+        sidecar_memory = self._mapping(meta.get("sidecar_memory")) or {}
         return {
             "status": entry.status if entry is not None else governance_card.status,
             "summary": governance_card.summary,
@@ -897,6 +900,8 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                     capability_governance.get("degraded_components") or [],
                 ),
             },
+            "query_runtime_entropy": query_runtime_entropy,
+            "sidecar_memory": sidecar_memory,
         }
 
     def _build_main_brain_recovery_payload(self, app_state: Any) -> dict[str, Any]:

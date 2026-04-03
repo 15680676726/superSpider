@@ -207,6 +207,14 @@ def test_report_replan_engine_defaults_failed_report_synthesis_to_follow_up_back
     assert _decision_kind(decision) == "follow_up_backlog"
     assert _strategy_change(decision)["trigger_family"] == "local_follow_up_pressure"
     assert decision.recommended_actions == synthesis["recommended_actions"]
+    assert decision.planning_shell == {
+        "mode": "report-replan-shell",
+        "scope": "report-replan",
+        "plan_id": "report-synthesis:needs-replan",
+        "resume_key": f"report:{report.id}",
+        "fork_key": "decision:follow_up_backlog",
+        "verify_reminder": "Verify synthesis pressure before mutating backlog, cycle, lane, or strategy truth.",
+    }
 
 
 def test_synthesize_reports_keeps_needs_followup_visible() -> None:

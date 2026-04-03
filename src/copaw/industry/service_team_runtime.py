@@ -360,11 +360,25 @@ class _IndustryTeamRuntimeMixin:
         incoming_actor_key = _string(agent.actor_key) or (existing.actor_key if existing is not None else f"{instance_id}:{agent.role_id}")
         incoming_actor_fingerprint = _string(agent.actor_fingerprint) or (existing.actor_fingerprint if existing is not None else None)
         metadata = dict(existing.metadata) if existing is not None else {}
+        current_focus_kind = _string(metadata.get("current_focus_kind"))
+        current_focus_id = _string(metadata.get("current_focus_id"))
+        current_focus = _string(metadata.get("current_focus"))
+        if goal_id or goal_title:
+            current_focus_kind = "goal"
+            current_focus_id = goal_id
+            current_focus = goal_title
+        elif assignment_active:
+            current_focus_kind = "assignment"
+            current_focus_id = assignment_id
+            current_focus = assignment_title or assignment_summary or assignment_id
         metadata.update(
             {
                 "owner_scope": owner_scope,
                 "goal_id": goal_id,
                 "goal_title": goal_title,
+                "current_focus_kind": current_focus_kind,
+                "current_focus_id": current_focus_id,
+                "current_focus": current_focus,
                 "employment_mode": agent.employment_mode,
                 "allowed_capabilities": list(agent.allowed_capabilities),
                 "environment_constraints": list(agent.environment_constraints),

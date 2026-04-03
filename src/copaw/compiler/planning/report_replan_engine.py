@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import re
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import ReportReplanDecision
+from .models import ReportReplanDecision, build_planning_shell_payload
+
+
+_UUID_SUFFIX_RE = re.compile(
+    r"^report-synthesis:needs-replan:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+)
 
 
 def _string(value: object | None) -> str | None:
@@ -58,6 +64,14 @@ def _unique_strings(*values: object | None) -> list[str]:
 
 def _append_unique(items: list[str], *values: object | None) -> list[str]:
     return _unique_strings(items, *values)
+
+
+def _latest_finding_report_ids(value: object | None) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return []
+    return _unique_strings(
+        [item.get("report_id") for item in value if isinstance(item, Mapping)],
+    )
 
 
 class _ReportReplanRawDecision(BaseModel):
@@ -296,6 +310,26 @@ def _relation_projection(
 class ReportReplanEngine:
     """Compile report synthesis output into a typed replan surface."""
 
+    @staticmethod
+    def _planning_shell(decision: ReportReplanDecision) -> dict[str, str]:
+        source_report_id = next(iter(decision.source_report_ids or []), "latest")
+        decision_kind = _normalize_decision_kind(decision.decision_kind) or (
+            "follow_up_backlog" if decision.status == "needs-replan" else "clear"
+        )
+        plan_id = decision.decision_id
+        if _UUID_SUFFIX_RE.match(plan_id):
+            plan_id = "report-synthesis:needs-replan"
+        return build_planning_shell_payload(
+            mode="report-replan-shell",
+            scope="report-replan",
+            plan_id=plan_id,
+            resume_key=f"report:{source_report_id}",
+            fork_key=f"decision:{decision_kind}",
+            verify_reminder=(
+                "Verify synthesis pressure before mutating backlog, cycle, lane, or strategy truth."
+            ),
+        )
+
     def compile(
         self,
         synthesis: Mapping[str, Any] | None,
@@ -357,6 +391,7 @@ class ReportReplanEngine:
                     or "Report synthesis still requires main-brain review."
                 ),
                 strategy_change_decision="follow_up_backlog",
+                source_report_ids=_latest_finding_report_ids(payload.latest_findings),
                 directives=list(payload.replan_directives),
                 recommended_actions=list(payload.recommended_actions),
                 activation=dict(payload.activation),
@@ -402,6 +437,7 @@ class ReportReplanEngine:
                     "summary": summary,
                     "source_report_ids": _append_unique(
                         list(decision.source_report_ids),
+                        _latest_finding_report_ids(payload.latest_findings),
                         *(
                             item.get("source_report_ids")
                             for item in strategy_change["trigger_evidence"]
@@ -489,7 +525,11 @@ class ReportReplanEngine:
                 "strategy_change": dict(strategy_change_payload),
             },
         )
-        return decision
+        return decision.model_copy(
+            update={
+                "planning_shell": self._planning_shell(decision),
+            },
+        )
 
     def _classify_strategy_change(
         self,

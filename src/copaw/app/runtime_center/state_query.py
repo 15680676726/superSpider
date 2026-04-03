@@ -114,6 +114,9 @@ class RuntimeCenterStateQueryService:
         return self._task_list_projector.list_kernel_tasks(phase=phase, limit=limit)
 
     def get_task_detail(self, task_id: str) -> dict[str, object] | None:
+        self._task_detail_projector.set_memory_activation_service(
+            self._memory_activation_service,
+        )
         return self._task_detail_projector.get_task_detail(task_id)
 
     def _build_task_activation_summary(
@@ -123,6 +126,9 @@ class RuntimeCenterStateQueryService:
         runtime: object | None,
         kernel_metadata: dict[str, object] | None,
     ) -> dict[str, object] | None:
+        self._task_detail_projector.set_memory_activation_service(
+            self._memory_activation_service,
+        )
         return self._task_detail_projector.build_task_activation_summary(
             task=task,
             runtime=runtime,
@@ -206,6 +212,9 @@ class RuntimeCenterStateQueryService:
         return payload
 
     def get_task_review(self, task_id: str) -> dict[str, object] | None:
+        self._task_detail_projector.set_memory_activation_service(
+            self._memory_activation_service,
+        )
         return self._task_detail_projector.get_task_review(task_id)
 
     def list_work_contexts(self, limit: int | None = 5) -> list[dict[str, object]]:

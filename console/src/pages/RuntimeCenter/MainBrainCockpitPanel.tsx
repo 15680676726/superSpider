@@ -565,6 +565,46 @@ export default function MainBrainCockpitPanel({
   const governancePayload = isRecord(mainBrainData?.governance)
     ? (mainBrainData?.governance as Record<string, unknown>)
     : null;
+  const queryRuntimeEntropy = isRecord(governancePayload?.query_runtime_entropy)
+    ? (governancePayload.query_runtime_entropy as Record<string, unknown>)
+    : null;
+  const queryRuntimeEntropyState = isRecord(queryRuntimeEntropy?.runtime_entropy)
+    ? (queryRuntimeEntropy.runtime_entropy as Record<string, unknown>)
+    : null;
+  const queryRuntimeCompactionState = isRecord(queryRuntimeEntropy?.compaction_state)
+    ? (queryRuntimeEntropy.compaction_state as Record<string, unknown>)
+    : null;
+  const queryRuntimeBudget = isRecord(queryRuntimeEntropy?.tool_result_budget)
+    ? (queryRuntimeEntropy.tool_result_budget as Record<string, unknown>)
+    : null;
+  const queryRuntimeToolUseSummary = isRecord(queryRuntimeEntropy?.tool_use_summary)
+    ? (queryRuntimeEntropy.tool_use_summary as Record<string, unknown>)
+    : null;
+  const queryRuntimeArtifactRefs = Array.isArray(queryRuntimeToolUseSummary?.artifact_refs)
+    ? queryRuntimeToolUseSummary.artifact_refs
+        .map((value) => firstString(value))
+        .filter((value): value is string => Boolean(value))
+    : [];
+  const queryRuntimeBudgetRemaining = firstString(
+    queryRuntimeBudget?.remaining_budget,
+    queryRuntimeBudget?.remaining,
+    queryRuntimeBudget?.budget_remaining,
+  );
+  const queryRuntimeBudgetCapacity = firstString(
+    queryRuntimeBudget?.message_budget,
+    queryRuntimeBudget?.budget,
+  );
+  const queryRuntimeBudgetSummary =
+    queryRuntimeBudgetRemaining && queryRuntimeBudgetCapacity
+      ? `${queryRuntimeBudgetRemaining} / ${queryRuntimeBudgetCapacity}`
+      : null;
+  const queryRuntimeEntropySummary =
+    firstString(
+      queryRuntimeCompactionState?.summary,
+      queryRuntimeToolUseSummary?.summary,
+      queryRuntimeEntropyState?.carry_forward_contract,
+      queryRuntimeEntropy?.status,
+    ) ?? null;
   const recoveryPayload = isRecord(mainBrainData?.recovery)
     ? (mainBrainData?.recovery as Record<string, unknown>)
     : null;
@@ -1136,6 +1176,30 @@ export default function MainBrainCockpitPanel({
                   ["待处理补丁", firstString(governancePayload?.pending_patches)],
                   ["已暂停计划", firstString(governancePayload?.paused_schedule_count)],
                   ["交接是否激活", firstString(governancePayload?.handoff_active)],
+                ],
+                onOpenRoute,
+              })}
+              {renderOperatorBlock({
+                title: "Query runtime entropy",
+                summary: queryRuntimeEntropySummary,
+                status: firstString(queryRuntimeEntropy?.status, queryRuntimeEntropyState?.status),
+                route: firstString(governancePayload?.route),
+                routeTitle: "运行治理",
+                details: [
+                  ["状态", firstString(queryRuntimeEntropy?.status, queryRuntimeEntropyState?.status)],
+                  [
+                    "压缩模式",
+                    firstString(
+                      queryRuntimeCompactionState?.mode,
+                      queryRuntimeCompactionState?.status,
+                    ),
+                  ],
+                  ["预算余量", queryRuntimeBudgetSummary],
+                  ["工具摘要", firstString(queryRuntimeToolUseSummary?.summary)],
+                  [
+                    "Artifacts",
+                    queryRuntimeArtifactRefs.length > 0 ? queryRuntimeArtifactRefs.join(", ") : null,
+                  ],
                 ],
                 onOpenRoute,
               })}

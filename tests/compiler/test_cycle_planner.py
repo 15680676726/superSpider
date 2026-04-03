@@ -267,6 +267,41 @@ def test_cycle_planner_uses_graph_focus_to_break_near_ties() -> None:
 
 
 def test_cycle_planner_uses_relation_focus_to_break_near_ties() -> None:
+def test_cycle_planner_emits_planning_shell_continuity_payload() -> None:
+    planner = CyclePlanningCompiler()
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind",
+        summary="Northwind execution shell",
+        owner_scope="industry:northwind",
+    )
+
+    decision = planner.plan(
+        record=record,
+        current_cycle=None,
+        next_cycle_due_at=None,
+        open_backlog=[
+            _backlog_item("growth-1", lane_id="lane-growth", priority=4),
+            _backlog_item("ops-1", lane_id="lane-ops", priority=3),
+        ],
+        pending_reports=[],
+        force=False,
+        strategy_constraints=PlanningStrategyConstraints(
+            planning_policy=["single-assignment-cycle"],
+        ),
+    )
+
+    assert decision.planning_shell == {
+        "mode": "cycle-planning-shell",
+        "scope": "operating-cycle",
+        "plan_id": "industry:industry-1:cycle-plan",
+        "resume_key": "industry:industry-1:next-cycle",
+        "fork_key": "cycle:daily",
+        "verify_reminder": "Verify backlog selection and lane pressure before materializing assignments.",
+    }
+
+
+def test_cycle_planner_uses_relation_focus_to_break_near_ties() -> None:
     planner = CyclePlanningCompiler()
     record = IndustryInstanceRecord(
         instance_id="industry-1",

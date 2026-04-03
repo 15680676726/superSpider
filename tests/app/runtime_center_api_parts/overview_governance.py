@@ -16,10 +16,16 @@ from copaw.capabilities import CapabilityService
 from copaw.app.startup_recovery import StartupRecoverySummary
 from copaw.environments.models import SessionMount
 from copaw.evidence import EvidenceLedger
-from copaw.kernel import KernelDispatcher, KernelTaskStore, KernelTurnExecutor
+from copaw.kernel import (
+    KernelDispatcher,
+    KernelQueryExecutionService,
+    KernelTaskStore,
+    KernelTurnExecutor,
+)
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.main_brain_orchestrator import MainBrainOrchestrator
 from copaw.kernel.main_brain_turn_result import MainBrainCommitState
+from copaw.memory.conversation_compaction_service import ConversationCompactionService
 from copaw.media import MediaService
 from copaw.app.runtime_center.overview_cards import _RuntimeCenterOverviewCardsSupport
 from copaw.app.routers.runtime_center_shared import _encode_sse_event
@@ -575,7 +581,6 @@ def test_runtime_center_main_brain_route_exposes_unified_operator_sections():
     assert payload["signals"]["automation"]["count"] == 1
     assert payload["signals"]["recovery"]["count"] == 1
 
-
 def test_runtime_center_main_brain_route_prefers_canonical_latest_recovery_report():
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()
@@ -678,6 +683,291 @@ def test_runtime_center_overview_capabilities_card_exposes_skill_mcp_governance_
     assert capabilities["meta"]["package_bound_mcp_count"] == 1
     assert capabilities["meta"]["delta"]["missing_capability_count"] == 1
     assert capabilities["meta"]["degraded"] is True
+
+
+def test_runtime_center_main_brain_route_exposes_query_runtime_entropy_contract():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    query_execution_service = KernelQueryExecutionService(
+        session_backend=object(),
+        conversation_compaction_service=None,
+    )
+    expected_entropy = query_execution_service._resolve_execution_task_context(  # pylint: disable=protected-access
+        request=SimpleNamespace(),
+        agent_id="ops-agent",
+        kernel_task_id=None,
+        conversation_thread_id="industry-chat:industry-v1-ops:execution-core",
+    )["query_runtime_entropy"]
+    app.state.query_execution_service = SimpleNamespace(
+        get_query_runtime_entropy_contract=lambda: expected_entropy,
+    )
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["governance"]["query_runtime_entropy"] == expected_entropy
+    assert payload["governance"]["sidecar_memory"] == expected_entropy["sidecar_memory"]
+    assert payload["governance"]["query_runtime_entropy"]["runtime_entropy"]["status"] == "degraded"
+    assert (
+        payload["governance"]["query_runtime_entropy"]["runtime_entropy"]["carry_forward_contract"]
+        == "canonical-state-only"
+    )
+    assert payload["governance"]["sidecar_memory"]["failure_source"] == "sidecar-memory"
+ 
+
+def test_runtime_center_main_brain_route_exposes_compaction_visibility_from_query_runtime_entropy():
+    class _CompactionService:
+        @staticmethod
+        def build_visibility_payload(source: dict[str, object] | None = None) -> dict[str, object]:
+            return ConversationCompactionService.build_visibility_payload(source)
+
+        def runtime_health_payload(self) -> dict[str, object]:
+            return {
+                "compaction_state": {
+                    "mode": "microcompact",
+                    "summary": "Compacted 2 oversized tool results.",
+                    "spill_count": 1,
+                },
+                "tool_result_budget": {
+                    "message_budget": 2400,
+                    "remaining_budget": 600,
+                },
+                "tool_use_summary": {
+                    "summary": "2 tool results compacted into artifact previews.",
+                    "artifact_refs": ["artifact://tool-result-1"],
+                },
+            }
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.query_execution_service = KernelQueryExecutionService(
+        session_backend=object(),
+        conversation_compaction_service=_CompactionService(),
+    )
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    entropy = payload["governance"]["query_runtime_entropy"]
+    assert entropy["compaction_state"] == {
+        "mode": "microcompact",
+        "summary": "Compacted 2 oversized tool results.",
+        "spill_count": 1,
+    }
+    assert entropy["tool_result_budget"] == {
+        "message_budget": 2400,
+        "remaining_budget": 600,
+    }
+    assert entropy["tool_use_summary"] == {
+        "summary": "2 tool results compacted into artifact previews.",
+        "artifact_refs": ["artifact://tool-result-1"],
+    }
+
+
+def test_runtime_center_main_brain_route_exposes_query_runtime_compaction_visibility():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.query_execution_service = SimpleNamespace(
+        get_query_runtime_entropy_contract=lambda: {
+            "status": "available",
+            "runtime_entropy": {
+                "status": "available",
+                "carry_forward_contract": "private-compaction-sidecar",
+            },
+            "sidecar_memory": {
+                "status": "available",
+                "availability": "attached",
+            },
+            "degradation": {},
+            "compaction_state": {
+                "mode": "microcompact",
+                "summary": "Compacted 2 oversized tool results.",
+                "spill_count": 1,
+            },
+            "tool_result_budget": {
+                "message_budget": 2400,
+                "remaining_budget": 600,
+            },
+            "tool_use_summary": {
+                "summary": "2 tool results compacted into artifact previews.",
+                "artifact_refs": ["artifact://tool-result-1"],
+            },
+        },
+    )
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    entropy = payload["governance"]["query_runtime_entropy"]
+    assert entropy["compaction_state"]["mode"] == "microcompact"
+    assert entropy["tool_result_budget"]["remaining_budget"] == 600
+    assert entropy["tool_use_summary"]["artifact_refs"] == ["artifact://tool-result-1"]
+
+
+def test_runtime_center_main_brain_route_falls_back_to_runtime_contract_sidecar_when_entropy_absent():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.actor_worker = SimpleNamespace(
+        runtime_contract={
+            "sidecar_memory": {
+                "status": "available",
+                "availability": "attached",
+                "summary": "legacy runtime-contract fallback should stay hidden",
+            },
+        },
+    )
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["governance"]["query_runtime_entropy"] == {}
+    assert payload["governance"]["sidecar_memory"] == {
+        "status": "available",
+        "availability": "attached",
+        "summary": "legacy runtime-contract fallback should stay hidden",
+    }
+
+
+def test_runtime_center_main_brain_route_prefers_entropy_sidecar_over_runtime_contract_fallback():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.query_execution_service = SimpleNamespace(
+        get_query_runtime_entropy_contract=lambda: {
+            "status": "degraded",
+            "runtime_entropy": {
+                "status": "degraded",
+                "carry_forward_contract": "canonical-state-only",
+            },
+            "sidecar_memory": {
+                "status": "degraded",
+                "failure_source": "entropy-sidecar",
+                "blocked_next_step": "Restore the query runtime entropy sidecar.",
+                "summary": "Query runtime entropy sidecar is degraded and should take precedence.",
+            },
+        },
+    )
+    app.state.actor_worker = SimpleNamespace(
+        runtime_contract={
+            "sidecar_memory": {
+                "status": "degraded",
+                "failure_source": "runtime-contract-sidecar",
+                "blocked_next_step": "This runtime-contract fallback should not win.",
+                "summary": "runtime_contract fallback should stay hidden when entropy exists",
+            },
+        },
+    )
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    governance = payload["governance"]
+    assert governance["query_runtime_entropy"]["status"] == "degraded"
+    assert governance["sidecar_memory"] == {
+        "status": "degraded",
+        "failure_source": "entropy-sidecar",
+        "blocked_next_step": "Restore the query runtime entropy sidecar.",
+        "summary": "Query runtime entropy sidecar is degraded and should take precedence.",
+    }
+    assert governance["sidecar_memory"]["failure_source"] == "entropy-sidecar"
+    assert governance["sidecar_memory"]["blocked_next_step"] == (
+        "Restore the query runtime entropy sidecar."
+    )
+    assert governance["summary"] == (
+        "Query runtime entropy sidecar is degraded and should take precedence."
+    )
+
+
+def test_runtime_center_main_brain_route_exposes_degraded_runtime_contract_sidecar_without_entropy_service():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.actor_supervisor = SimpleNamespace(
+        runtime_contract={
+            "sidecar_memory": {
+                "status": "degraded",
+                "failure_source": "runtime-contract-sidecar",
+                "blocked_next_step": "Reattach the runtime-contract sidecar before resuming autonomy.",
+                "summary": "Runtime contract fallback reports degraded sidecar memory.",
+            },
+        },
+    )
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    governance = payload["governance"]
+    assert governance["query_runtime_entropy"] == {}
+    assert governance["status"] == "blocked"
+    assert governance["sidecar_memory"] == {
+        "status": "degraded",
+        "failure_source": "runtime-contract-sidecar",
+        "blocked_next_step": "Reattach the runtime-contract sidecar before resuming autonomy.",
+        "summary": "Runtime contract fallback reports degraded sidecar memory.",
+    }
+    assert governance["sidecar_memory"]["failure_source"] == "runtime-contract-sidecar"
+    assert governance["sidecar_memory"]["blocked_next_step"] == (
+        "Reattach the runtime-contract sidecar before resuming autonomy."
+    )
+    assert governance["summary"] == "Runtime contract fallback reports degraded sidecar memory."
 
 
 def test_runtime_center_main_brain_route_exposes_automation_loop_and_supervisor_health():

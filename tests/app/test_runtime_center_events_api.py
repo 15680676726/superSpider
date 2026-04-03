@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from copaw.app.runtime_events import RuntimeEventBus
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.app.startup_recovery import StartupRecoverySummary
+from copaw.memory.conversation_compaction_service import ConversationCompactionService
 
 
 def _build_app() -> FastAPI:
@@ -89,3 +89,39 @@ def test_runtime_center_recovery_latest_endpoint_prefers_canonical_latest_report
     assert payload["latest_scope"] == "runtime"
     assert payload["detail"]["decisions"]["pending_decisions"] == 1
     assert payload["detail"]["automation"]["active_schedules"] == 4
+def test_conversation_compaction_service_builds_visibility_payload() -> None:
+    payload = ConversationCompactionService.build_visibility_payload(
+        {
+            "compaction_state": {
+                "mode": "microcompact",
+                "summary": "Compacted 2 oversized tool results.",
+                "spill_count": 1,
+                "replacement_count": 2,
+            },
+            "tool_result_budget": {
+                "message_budget": 2400,
+                "used_budget": 1800,
+                "remaining_budget": 600,
+            },
+            "tool_use_summary": {
+                "summary": "2 tool results compacted into artifact previews.",
+                "artifact_refs": ["artifact://tool-result-1"],
+            },
+        }
+    )
+
+    assert payload["compaction_state"] == {
+        "mode": "microcompact",
+        "summary": "Compacted 2 oversized tool results.",
+        "spill_count": 1,
+        "replacement_count": 2,
+    }
+    assert payload["tool_result_budget"] == {
+        "message_budget": 2400,
+        "used_budget": 1800,
+        "remaining_budget": 600,
+    }
+    assert payload["tool_use_summary"] == {
+        "summary": "2 tool results compacted into artifact previews.",
+        "artifact_refs": ["artifact://tool-result-1"],
+    }
