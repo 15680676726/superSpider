@@ -264,9 +264,6 @@ def test_cycle_planner_uses_graph_focus_to_break_near_ties() -> None:
 
     assert decision.should_start is True
     assert decision.selected_backlog_item_ids[0] == "inventory-variance-review"
-
-
-def test_cycle_planner_uses_relation_focus_to_break_near_ties() -> None:
 def test_cycle_planner_emits_planning_shell_continuity_payload() -> None:
     planner = CyclePlanningCompiler()
     record = IndustryInstanceRecord(
