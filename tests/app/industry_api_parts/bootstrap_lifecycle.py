@@ -8,6 +8,7 @@ from ..test_capability_market_api import FakeMcpRegistryCatalog
 from copaw.app.console_push_store import take_all
 from copaw.capabilities.system_team_handlers import SystemTeamCapabilityFacade
 from copaw.industry import IndustryBootstrapInstallItem
+from copaw.kernel.persistence import decode_kernel_task_metadata
 from copaw.memory.activation_models import ActivationResult
 from copaw.state import AgentReportRecord, AssignmentRecord
 
@@ -2554,6 +2555,108 @@ def test_activation_followup_materialized_assignment_keeps_activation_metadata(
     assert assignment.metadata["activation_support_refs"] == [
         "memory:weekend-audit-gap",
     ]
+
+
+def test_run_operating_cycle_auto_dispatch_keeps_assignment_formal_planning_in_compiled_task(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    execution_core_agent_id = preview_payload["draft"]["team"]["agents"][0]["agent_id"]
+    support_role = _build_support_role(execution_core_agent_id)
+    facade = _build_team_capability_facade(app)
+
+    created = asyncio.run(
+        facade.handle_update_industry_team(
+            {
+                "instance_id": instance_id,
+                "operation": "add-role",
+                "role": support_role.model_dump(mode="json"),
+            },
+        ),
+    )
+    assert created["success"] is True
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    assert detail.lanes
+    app.state.industry_service._backlog_service.record_chat_writeback(
+        industry_instance_id=instance_id,
+        lane_id=str(detail.lanes[0]["lane_id"]),
+        title="Carry the formal assignment plan into dispatch",
+        summary="Dispatch the assignment with the same formal planning shell that was materialized.",
+        priority=5,
+        source_ref="test:auto-dispatch-assignment-formal-planning",
+        metadata={
+            "owner_agent_id": support_role.agent_id,
+            "industry_role_id": support_role.role_id,
+            "industry_role_name": support_role.role_name,
+            "role_name": support_role.role_name,
+            "role_summary": support_role.role_summary,
+            "mission": support_role.mission,
+            "goal_kind": support_role.goal_kind,
+            "task_mode": "autonomy-cycle",
+            "report_back_mode": "summary",
+            "plan_steps": [
+                "Clarify the governed move.",
+                "Verify the result and evidence.",
+            ],
+        },
+    )
+
+    cycle_result = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:auto-dispatch-assignment-formal-planning",
+            force=True,
+            auto_dispatch_materialized_goals=True,
+        ),
+    )
+    assert cycle_result["count"] == 1
+    processed_instance = cycle_result["processed_instances"][0]
+    assert processed_instance["created_assignment_ids"]
+    assert processed_instance["created_task_ids"]
+
+    assignment_id = processed_instance["created_assignment_ids"][0]
+    assignment = app.state.assignment_repository.get_assignment(assignment_id)
+    assert assignment is not None
+    formal_planning = dict((assignment.metadata or {}).get("formal_planning") or {})
+    assignment_plan = dict(formal_planning.get("assignment_plan") or {})
+    assert assignment_plan["assignment_id"] == assignment.id
+
+    task = app.state.task_repository.get_task(assignment.task_id or "")
+    assert task is not None
+    kernel_metadata = decode_kernel_task_metadata(task.acceptance_criteria)
+    assert kernel_metadata is not None
+    payload = dict(kernel_metadata.get("payload") or {})
+    compiler_meta = dict(payload.get("compiler") or {})
+    task_seed = dict(payload.get("task_seed") or {})
+
+    assert compiler_meta["assignment_plan_envelope"] == assignment_plan
+    assert task_seed["assignment_plan_envelope"] == assignment_plan
+    assert compiler_meta["assignment_sidecar_plan"] == assignment_plan.get("sidecar_plan", {})
+    assert task_seed["assignment_sidecar_plan"] == assignment_plan.get("sidecar_plan", {})
 
 
 def test_runtime_detail_exposes_first_class_main_brain_cognitive_surface_with_continuity_refs(

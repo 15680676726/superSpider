@@ -120,6 +120,11 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
             ensure_ascii=False,
             sort_keys=True,
         )
+        payload["strategy_trigger_rules_json"] = json.dumps(
+            _jsonable_model_list(record.strategy_trigger_rules),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
         payload["planning_policy_json"] = json.dumps(
             record.planning_policy,
             sort_keys=True,
@@ -163,6 +168,7 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
                     lane_weights_json,
                     strategic_uncertainties_json,
                     lane_budgets_json,
+                    strategy_trigger_rules_json,
                     planning_policy_json,
                     current_focuses_json,
                     paused_lane_ids_json,
@@ -195,6 +201,7 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
                     :lane_weights_json,
                     :strategic_uncertainties_json,
                     :lane_budgets_json,
+                    :strategy_trigger_rules_json,
                     :planning_policy_json,
                     :current_focuses_json,
                     :paused_lane_ids_json,
@@ -227,6 +234,7 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
                     lane_weights_json = excluded.lane_weights_json,
                     strategic_uncertainties_json = excluded.strategic_uncertainties_json,
                     lane_budgets_json = excluded.lane_budgets_json,
+                    strategy_trigger_rules_json = excluded.strategy_trigger_rules_json,
                     planning_policy_json = excluded.planning_policy_json,
                     current_focuses_json = excluded.current_focuses_json,
                     paused_lane_ids_json = excluded.paused_lane_ids_json,
@@ -287,6 +295,9 @@ def _strategy_memory_from_row(
     ) or []
     payload["lane_budgets"] = _decode_any_json(
         payload.pop("lane_budgets_json", None),
+    ) or []
+    payload["strategy_trigger_rules"] = _decode_any_json(
+        payload.pop("strategy_trigger_rules_json", None),
     ) or []
     payload["planning_policy"] = _decode_json_list(
         payload.pop("planning_policy_json", None),

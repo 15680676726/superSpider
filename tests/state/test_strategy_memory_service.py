@@ -280,3 +280,95 @@ def test_strategy_memory_service_persists_typed_uncertainty_and_lane_budget_trut
     assert raw is not None
     assert json.loads(raw["strategic_uncertainties_json"])[0]["uncertainty_id"] == "uncertainty-1"
     assert json.loads(raw["lane_budgets_json"])[0]["lane_id"] == "lane-retention"
+
+
+def test_strategy_memory_service_persists_strategy_trigger_rules_as_formal_truth(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteStrategyMemoryRepository(store)
+    service = StateStrategyMemoryService(repository=repository)
+
+    strategy = service.upsert_strategy(
+        StrategyMemoryRecord(
+            strategy_id=service.canonical_strategy_id(
+                scope_type="industry",
+                scope_id="industry-triggered",
+                owner_agent_id="copaw-agent-runner",
+            ),
+            scope_type="industry",
+            scope_id="industry-triggered",
+            owner_agent_id="copaw-agent-runner",
+            title="Triggered strategy",
+            summary="Keep durable strategy trigger rules on the strategy truth record.",
+            north_star="Escalate governed uncertainty through durable trigger rules.",
+            strategic_uncertainties=[
+                {
+                    "uncertainty_id": "uncertainty-ops",
+                    "statement": "Follow-up pressure may exceed lane capacity.",
+                    "scope": "strategy",
+                    "impact_level": "high",
+                    "current_confidence": 0.41,
+                    "review_by_cycle": "cycle-weekly-1",
+                    "escalate_when": ["confidence drop"],
+                }
+            ],
+            strategy_trigger_rules=[
+                {
+                    "rule_id": "review-rule:0",
+                    "source_type": "review_rule",
+                    "trigger_family": "review_rule",
+                    "summary": "repeat-failure-needs-review",
+                    "decision_hint": "strategy_review_required",
+                    "source": "review-rule",
+                    "decision_kind": "strategy_review_required",
+                    "trigger_signals": ["repeat-failure-needs-review"],
+                },
+                {
+                    "rule_id": "uncertainty:uncertainty-ops:confidence-drop",
+                    "source_type": "uncertainty_escalation",
+                    "source_ref": "uncertainty-ops",
+                    "trigger_family": "confidence_collapse",
+                    "summary": "Follow-up pressure may exceed lane capacity. (confidence drop)",
+                    "decision_hint": "strategy_review_required",
+                    "source": "uncertainty-register",
+                    "decision_kind": "strategy_review_required",
+                    "trigger_signals": ["confidence-drop"],
+                    "uncertainty_ids": ["uncertainty-ops"],
+                },
+            ],
+        ),
+    )
+
+    active = service.get_active_strategy(
+        scope_type="industry",
+        scope_id="industry-triggered",
+        owner_agent_id="copaw-agent-runner",
+    )
+    payload = resolve_strategy_payload(
+        service=service,
+        scope_type="industry",
+        scope_id="industry-triggered",
+        owner_agent_id="copaw-agent-runner",
+    )
+
+    with store.connection() as conn:
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(strategy_memories)").fetchall()
+        }
+        raw = conn.execute(
+            """
+            SELECT strategy_trigger_rules_json
+            FROM strategy_memories
+            WHERE strategy_id = ?
+            """,
+            (strategy.strategy_id,),
+        ).fetchone()
+
+    assert active is not None
+    assert payload is not None
+    assert "strategy_trigger_rules_json" in columns
+    assert active.strategy_trigger_rules[0].rule_id == "review-rule:0"
+    assert active.strategy_trigger_rules[1].uncertainty_ids == ["uncertainty-ops"]
+    assert payload["strategy_trigger_rules"][1]["trigger_family"] == "confidence_collapse"
+    assert raw is not None
+    assert json.loads(raw["strategy_trigger_rules_json"])[0]["rule_id"] == "review-rule:0"

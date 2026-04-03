@@ -62,6 +62,42 @@ class LaneBudgetRecord(BaseModel):
         return self
 
 
+class StrategyTriggerRuleRecord(BaseModel):
+    """Typed durable strategy trigger rule persisted on strategy truth."""
+
+    rule_id: str = Field(..., min_length=1)
+    source_type: Literal["review_rule", "uncertainty_escalation"] = "review_rule"
+    source_ref: str | None = None
+    trigger_family: str = "review_rule"
+    summary: str = ""
+    decision_hint: Literal[
+        "follow_up_backlog",
+        "cycle_rebalance",
+        "lane_reweight",
+        "strategy_review_required",
+    ] | None = None
+    source: str = "review-rule"
+    decision_kind: Literal[
+        "follow_up_backlog",
+        "cycle_rebalance",
+        "lane_reweight",
+        "strategy_review_required",
+    ] | None = None
+    trigger_signals: list[str] = Field(default_factory=list)
+    uncertainty_ids: list[str] = Field(default_factory=list)
+    lane_ids: list[str] = Field(default_factory=list)
+
+    @field_validator(
+        "trigger_signals",
+        "uncertainty_ids",
+        "lane_ids",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_trigger_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+
 class StrategyMemoryRecord(UpdatedRecord):
     """Formal persisted strategic memory for the execution core."""
 
@@ -90,6 +126,7 @@ class StrategyMemoryRecord(UpdatedRecord):
     paused_lane_ids: list[str] = Field(default_factory=list)
     strategic_uncertainties: list[StrategicUncertaintyRecord] = Field(default_factory=list)
     lane_budgets: list[LaneBudgetRecord] = Field(default_factory=list)
+    strategy_trigger_rules: list[StrategyTriggerRuleRecord] = Field(default_factory=list)
     review_rules: list[str] = Field(default_factory=list)
     source_ref: str | None = None
     status: StrategyMemoryStatus = "active"
@@ -157,6 +194,29 @@ class StrategyMemoryRecord(UpdatedRecord):
             )
             for item in list(value or [])
         ]
+
+    @field_serializer("strategy_trigger_rules", when_used="always")
+    def _serialize_strategy_trigger_rules(
+        self,
+        value: list[StrategyTriggerRuleRecord] | list[dict[str, Any]] | list[object],
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for item in list(value or []):
+            if isinstance(item, StrategyTriggerRuleRecord):
+                items.append(item.model_dump(mode="python"))
+                continue
+            model_dump = getattr(item, "model_dump", None)
+            if callable(model_dump):
+                items.append(
+                    StrategyTriggerRuleRecord.model_validate(
+                        model_dump(mode="python"),
+                    ).model_dump(mode="python"),
+                )
+                continue
+            items.append(
+                StrategyTriggerRuleRecord.model_validate(item).model_dump(mode="python"),
+            )
+        return items
 
 
 class MetricRecord(CreatedRecord):

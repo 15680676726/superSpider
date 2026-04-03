@@ -430,6 +430,9 @@ class SemanticCompiler:
             "strategy_lane_budgets": _mapping_context_list(
                 unit.context.get("strategy_lane_budgets"),
             ),
+            "strategy_trigger_rules": _mapping_context_list(
+                unit.context.get("strategy_trigger_rules"),
+            ),
             "strategy_planning_policy": _string_context_list(
                 unit.context.get("strategy_planning_policy"),
             ),

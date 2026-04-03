@@ -86,6 +86,7 @@ from .models_reporting import (
     ReportRecord,
     ReportTaskDigest,
     StrategicUncertaintyRecord,
+    StrategyTriggerRuleRecord,
     StrategyMemoryRecord,
 )
 from .models_work_context import WorkContextRecord, WorkContextStatus
@@ -171,6 +172,7 @@ __all__ = [
     "ScheduleStatus",
     "StrategicUncertaintyRecord",
     "StrategyMemoryRecord",
+    "StrategyTriggerRuleRecord",
     "StrategyMemoryStatus",
     "StrategyScopeType",
     "TaskRecord",

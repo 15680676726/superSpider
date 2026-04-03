@@ -518,6 +518,115 @@ def test_predictions_api_create_list_and_detail(tmp_path) -> None:
     assert main_brain_handoff["routes"]["coordinate"].endswith("/coordinate")
 
 
+def test_predictions_consume_strategy_trigger_rules_into_signals_and_recommendations(
+    tmp_path,
+) -> None:
+    app = _build_predictions_app(tmp_path)
+    app.state.strategy_memory_service.upsert_strategy(
+        StrategyMemoryRecord(
+            strategy_id="strategy:industry:industry-demo:copaw-agent-runner",
+            scope_type="industry",
+            scope_id="industry-demo",
+            owner_agent_id="copaw-agent-runner",
+            owner_scope="industry-demo-scope",
+            industry_instance_id="industry-demo",
+            title="Industry demo strategy",
+            summary="Escalate weekend-demand uncertainty before expanding growth work.",
+            north_star="Stabilize growth without scaling unresolved risk",
+            priority_order=["review demand uncertainty", "protect growth lane", "expand later"],
+            execution_constraints=["Do not scale outreach before weekend demand is revalidated"],
+            strategic_uncertainties=[
+                {
+                    "uncertainty_id": "uncertainty-weekend-demand",
+                    "statement": "Weekend demand model is still unverified.",
+                    "scope": "strategy",
+                    "impact_level": "high",
+                    "current_confidence": 0.28,
+                    "review_by_cycle": "cycle-weekly-1",
+                    "escalate_when": ["confidence-drop"],
+                }
+            ],
+            lane_budgets=[
+                {
+                    "lane_id": "lane-growth",
+                    "budget_window": "next-2-cycles",
+                    "target_share": 0.55,
+                    "min_share": 0.4,
+                    "max_share": 0.7,
+                    "current_share": 0.78,
+                    "review_pressure": "high",
+                    "force_include_reason": "Protect validated growth experiments while the uncertainty stays open.",
+                }
+            ],
+            strategy_trigger_rules=[
+                {
+                    "rule_id": "review-rule:weekend-demand",
+                    "source_type": "review_rule",
+                    "summary": "Weekend demand confidence dropped below threshold.",
+                    "trigger_family": "confidence_collapse",
+                    "decision_hint": "strategy_review_required",
+                    "decision_kind": "strategy_review_required",
+                    "trigger_signals": ["confidence-drop"],
+                    "lane_ids": ["lane-growth"],
+                    "uncertainty_ids": ["uncertainty-weekend-demand"],
+                    "source": "strategy-memory",
+                }
+            ],
+            active_goal_ids=["goal-prediction"],
+            active_goal_titles=["Stabilize outbound execution"],
+            status="active",
+        ),
+    )
+    client = TestClient(app)
+
+    created = _create_prediction_case(client)
+    case_id = created["case"]["case_id"]
+    detail = client.get(f"/predictions/{case_id}")
+
+    assert detail.status_code == 200
+    payload = detail.json()
+    trigger_signal = next(
+        item
+        for item in payload["signals"]
+        if item["source_ref"] == "review-rule:weekend-demand"
+    )
+    assert trigger_signal["payload"]["decision_kind"] == "strategy_review_required"
+    assert trigger_signal["payload"]["uncertainty_ids"] == ["uncertainty-weekend-demand"]
+
+    uncertainty_signal = next(
+        item
+        for item in payload["signals"]
+        if item["source_ref"] == "uncertainty-weekend-demand"
+    )
+    assert uncertainty_signal["payload"]["impact_level"] == "high"
+    assert uncertainty_signal["payload"]["review_by_cycle"] == "cycle-weekly-1"
+
+    lane_budget_signal = next(
+        item
+        for item in payload["signals"]
+        if item["source_ref"] == "lane-budget:lane-growth"
+    )
+    assert lane_budget_signal["payload"]["review_pressure"] == "high"
+    assert lane_budget_signal["payload"]["current_share"] == 0.78
+
+    strategy_review = next(
+        item
+        for item in payload["recommendations"]
+        if item["recommendation"]["metadata"].get("strategy_change_decision")
+        == "strategy_review_required"
+    )
+    assert strategy_review["recommendation"]["action_kind"] == "manual:coordinate-main-brain"
+    assert strategy_review["recommendation"]["metadata"]["trigger_rule_ids"] == [
+        "review-rule:weekend-demand"
+    ]
+    assert strategy_review["recommendation"]["metadata"]["affected_lane_ids"] == [
+        "lane-growth"
+    ]
+    assert strategy_review["recommendation"]["metadata"]["affected_uncertainty_ids"] == [
+        "uncertainty-weekend-demand"
+    ]
+
+
 def test_predictions_recommend_schedule_copy_points_to_fixed_sop_instead_of_workflow_templates(
     tmp_path,
 ) -> None:

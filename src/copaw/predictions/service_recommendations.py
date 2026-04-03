@@ -269,6 +269,121 @@ class _PredictionServiceRecommendationMixin:
                     "execution_constraints": execution_constraints,
                 },
             )
+        strategic_uncertainties = [
+            _safe_dict(item)
+            for item in _safe_list(strategy.get("strategic_uncertainties"))
+        ]
+        for uncertainty in strategic_uncertainties[:3]:
+            uncertainty_id = _string(uncertainty.get("uncertainty_id"))
+            statement = _string(uncertainty.get("statement"))
+            if uncertainty_id is None and statement is None:
+                continue
+            impact_level = (_string(uncertainty.get("impact_level")) or "medium").lower()
+            confidence = float(uncertainty.get("current_confidence") or 0.0)
+            direction = (
+                "negative"
+                if impact_level in {"high", "critical"} or confidence < 0.45
+                else "neutral"
+            )
+            append_signal(
+                label="战略不确定性",
+                summary=statement or f"Uncertainty {uncertainty_id} remains open.",
+                source_kind=strategy_source_kind,
+                source_ref=uncertainty_id or strategy_source_ref,
+                direction=direction,
+                strength=0.42 if direction == "negative" else 0.28,
+                payload={
+                    "strategy_id": _string(strategy.get("strategy_id")),
+                    "uncertainty_id": uncertainty_id,
+                    "statement": statement,
+                    "impact_level": impact_level,
+                    "current_confidence": confidence,
+                    "review_by_cycle": _string(uncertainty.get("review_by_cycle")),
+                    "lane_id": _string(uncertainty.get("lane_id")),
+                    "escalate_when": _string_list(uncertainty.get("escalate_when")),
+                },
+            )
+        lane_budgets = [
+            _safe_dict(item)
+            for item in _safe_list(strategy.get("lane_budgets"))
+        ]
+        for lane_budget in lane_budgets[:3]:
+            lane_id = _string(lane_budget.get("lane_id"))
+            if lane_id is None:
+                continue
+            review_pressure = (_string(lane_budget.get("review_pressure")) or "normal").lower()
+            current_share = float(lane_budget.get("current_share") or 0.0)
+            min_share = float(lane_budget.get("min_share") or 0.0)
+            max_share = float(lane_budget.get("max_share") or 0.0)
+            out_of_band = (
+                (min_share > 0.0 and current_share < min_share)
+                or (max_share > 0.0 and current_share > max_share)
+            )
+            direction = (
+                "negative"
+                if review_pressure in {"high", "critical"} or out_of_band
+                else "neutral"
+            )
+            append_signal(
+                label="Lane budget",
+                summary=(
+                    _string(lane_budget.get("force_include_reason"))
+                    or f"Lane {lane_id} budget requires review."
+                ),
+                source_kind=strategy_source_kind,
+                source_ref=f"lane-budget:{lane_id}",
+                direction=direction,
+                strength=0.4 if direction == "negative" else 0.26,
+                payload={
+                    "strategy_id": _string(strategy.get("strategy_id")),
+                    "lane_id": lane_id,
+                    "budget_window": _string(lane_budget.get("budget_window")),
+                    "target_share": float(lane_budget.get("target_share") or 0.0),
+                    "min_share": min_share,
+                    "max_share": max_share,
+                    "current_share": current_share,
+                    "review_pressure": review_pressure,
+                    "force_include_reason": _string(lane_budget.get("force_include_reason")),
+                },
+            )
+        strategy_trigger_rules = [
+            _safe_dict(item)
+            for item in _safe_list(strategy.get("strategy_trigger_rules"))
+        ]
+        for rule in strategy_trigger_rules[:4]:
+            rule_id = _string(rule.get("rule_id"))
+            if rule_id is None:
+                continue
+            decision_kind = _string(rule.get("decision_kind")) or _string(
+                rule.get("decision_hint"),
+            )
+            direction = (
+                "negative"
+                if decision_kind in {
+                    "strategy_review_required",
+                    "lane_reweight",
+                    "cycle_rebalance",
+                }
+                else "neutral"
+            )
+            append_signal(
+                label="战略触发规则",
+                summary=_string(rule.get("summary")) or f"Trigger rule {rule_id} requires review.",
+                source_kind=strategy_source_kind,
+                source_ref=rule_id,
+                direction=direction,
+                strength=0.46 if direction == "negative" else 0.3,
+                payload={
+                    "strategy_id": _string(strategy.get("strategy_id")),
+                    "rule_id": rule_id,
+                    "decision_kind": decision_kind,
+                    "trigger_family": _string(rule.get("trigger_family")),
+                    "lane_ids": _string_list(rule.get("lane_ids")),
+                    "uncertainty_ids": _string_list(rule.get("uncertainty_ids")),
+                    "trigger_signals": _string_list(rule.get("trigger_signals")),
+                    "source_type": _string(rule.get("source_type")),
+                },
+            )
 
         if case.industry_instance_id:
             append_signal(
@@ -321,6 +436,18 @@ class _PredictionServiceRecommendationMixin:
             strategy.get("delegation_policy"),
             strategy.get("direct_execution_policy"),
         )
+        strategic_uncertainties = [
+            _safe_dict(item)
+            for item in _safe_list(strategy.get("strategic_uncertainties"))
+        ]
+        lane_budgets = [
+            _safe_dict(item)
+            for item in _safe_list(strategy.get("lane_budgets"))
+        ]
+        strategy_trigger_rules = [
+            _safe_dict(item)
+            for item in _safe_list(strategy.get("strategy_trigger_rules"))
+        ]
         seen_keys: set[tuple[str, str]] = set()
         team_gap_findings = self._team_role_gap_findings(case=case, facts=facts)
 
@@ -397,6 +524,49 @@ class _PredictionServiceRecommendationMixin:
             strategy.get("active_goal_titles"),
             strategy.get("priority_order"),
         )
+        trigger_rule_ids = _string_list(
+            [item.get("rule_id") for item in strategy_trigger_rules],
+        )
+        trigger_decision_candidates = _string_list(
+            [item.get("decision_kind") for item in strategy_trigger_rules],
+            [item.get("decision_hint") for item in strategy_trigger_rules],
+        )
+        decision_priority = {
+            "strategy_review_required": 0,
+            "lane_reweight": 1,
+            "cycle_rebalance": 2,
+            "follow_up_backlog": 3,
+        }
+        strategy_change_decision = None
+        if trigger_decision_candidates:
+            strategy_change_decision = sorted(
+                trigger_decision_candidates,
+                key=lambda item: decision_priority.get(item, 99),
+            )[0]
+        affected_lane_ids = _string_list(
+            [item.get("lane_ids") for item in strategy_trigger_rules],
+            [item.get("lane_id") for item in strategic_uncertainties],
+            [
+                item.get("lane_id")
+                for item in lane_budgets
+                if (
+                    (_string(item.get("review_pressure")) or "").lower() in {"high", "critical"}
+                    or float(item.get("current_share") or 0.0) > float(item.get("max_share") or 0.0)
+                    or float(item.get("current_share") or 0.0) < float(item.get("min_share") or 0.0)
+                )
+            ],
+        )
+        affected_uncertainty_ids = _string_list(
+            [item.get("uncertainty_ids") for item in strategy_trigger_rules],
+            [
+                item.get("uncertainty_id")
+                for item in strategic_uncertainties
+                if (
+                    (_string(item.get("impact_level")) or "").lower() in {"high", "critical"}
+                    or float(item.get("current_confidence") or 0.0) < 0.45
+                )
+            ],
+        )
 
         def goal_alignment_score(goal: GoalRecord) -> int:
             score = 0
@@ -410,6 +580,30 @@ class _PredictionServiceRecommendationMixin:
             if str(goal.status).lower() == "active":
                 score += 10
             return score
+
+        if strategy_change_decision:
+            append_recommendation(
+                recommendation_type="plan_recommendation",
+                title="发起主脑战略复盘",
+                summary=(
+                    "当前战略触发信号显示主脑应先复盘 lane 投入与不确定性处理，"
+                    "再决定是否继续扩大执行。"
+                ),
+                priority=92 if strategy_change_decision == "strategy_review_required" else 86,
+                confidence=min(0.95, confidence_baseline + 0.12),
+                risk_level="guarded",
+                action_kind="manual:coordinate-main-brain",
+                executable=False,
+                auto_eligible=False,
+                status="manual-only",
+                target_agent_id=case.owner_agent_id or EXECUTION_CORE_AGENT_ID,
+                metadata={
+                    "strategy_change_decision": strategy_change_decision,
+                    "trigger_rule_ids": trigger_rule_ids[:8],
+                    "affected_lane_ids": affected_lane_ids[:8],
+                    "affected_uncertainty_ids": affected_uncertainty_ids[:8],
+                },
+            )
 
         get_mcp_client_info = getattr(self._capability_service, "get_mcp_client_info", None)
         for workflow in facts.workflows[:4]:

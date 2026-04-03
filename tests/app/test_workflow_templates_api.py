@@ -23,7 +23,7 @@ from copaw.goals import GoalService
 from copaw.industry import IndustryService
 from copaw.industry.service_context import build_industry_service_runtime_bindings
 from copaw.kernel import AgentProfileService, KernelDispatcher, KernelTaskStore
-from copaw.state import SQLiteStateStore
+from copaw.state import SQLiteStateStore, StrategyMemoryRecord
 from copaw.state.strategy_memory_service import StateStrategyMemoryService
 from copaw.state.repositories import (
     SqliteAgentProfileOverrideRepository,
@@ -821,6 +821,85 @@ def test_workflow_templates_list_and_preview(tmp_path) -> None:
         "researcher",
         "execution-core",
     ]
+
+
+def test_workflow_preview_keeps_strategy_trigger_rules_and_uncertainty_budget_context(
+    tmp_path,
+) -> None:
+    app = _build_workflow_app(tmp_path)
+    client = TestClient(app)
+    instance_id = _bootstrap_industry(client)
+    app.state.strategy_memory_service.upsert_strategy(
+        StrategyMemoryRecord(
+            strategy_id=f"strategy:industry:{instance_id}:copaw-agent-runner",
+            scope_type="industry",
+            scope_id=instance_id,
+            owner_agent_id="copaw-agent-runner",
+            owner_scope=instance_id,
+            industry_instance_id=instance_id,
+            title="Workflow preview strategy",
+            summary="Keep growth work bounded until demand uncertainty is revalidated.",
+            north_star="Stabilize the next operating move before expansion",
+            priority_order=["review uncertainty", "protect lane", "expand later"],
+            strategic_uncertainties=[
+                {
+                    "uncertainty_id": "uncertainty-demand-model",
+                    "statement": "Demand model remains unverified.",
+                    "scope": "strategy",
+                    "impact_level": "high",
+                    "current_confidence": 0.31,
+                    "review_by_cycle": "cycle-weekly-1",
+                }
+            ],
+            lane_budgets=[
+                {
+                    "lane_id": "lane-growth",
+                    "budget_window": "next-2-cycles",
+                    "target_share": 0.5,
+                    "min_share": 0.35,
+                    "max_share": 0.65,
+                    "current_share": 0.72,
+                    "review_pressure": "high",
+                }
+            ],
+            strategy_trigger_rules=[
+                {
+                    "rule_id": "review-rule:demand-model",
+                    "source_type": "review_rule",
+                    "summary": "Demand model confidence dropped below threshold.",
+                    "trigger_family": "confidence_collapse",
+                    "decision_hint": "strategy_review_required",
+                    "decision_kind": "strategy_review_required",
+                    "lane_ids": ["lane-growth"],
+                    "uncertainty_ids": ["uncertainty-demand-model"],
+                    "source": "strategy-memory",
+                }
+            ],
+            status="active",
+        ),
+    )
+
+    preview = client.post(
+        "/workflow-templates/industry-daily-control-loop/preview",
+        json={
+            "industry_instance_id": instance_id,
+            "parameters": {
+                "business_goal": "Push the next operating move",
+                "daily_review_time": "0 8 * * *",
+                "timezone": "UTC",
+            },
+        },
+    )
+
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    assert preview_payload["strategy_memory"]["strategy_trigger_rules"][0]["rule_id"] == (
+        "review-rule:demand-model"
+    )
+    assert preview_payload["strategy_memory"]["strategic_uncertainties"][0][
+        "uncertainty_id"
+    ] == "uncertainty-demand-model"
+    assert preview_payload["strategy_memory"]["lane_budgets"][0]["lane_id"] == "lane-growth"
 
 
 def test_workflow_preview_exposes_install_template_routes(tmp_path) -> None:

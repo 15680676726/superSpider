@@ -383,6 +383,45 @@ class _IndustryLifecycleMixin:
             return dict(value)
         return {}
 
+    def _assignment_plan_context_from_formal_planning(
+        self,
+        assignment: AssignmentRecord,
+    ) -> dict[str, object]:
+        formal_planning = (
+            dict((assignment.metadata or {}).get("formal_planning") or {})
+            if isinstance(assignment.metadata, Mapping)
+            else {}
+        )
+        envelope = formal_planning.get("assignment_plan")
+        if not isinstance(envelope, Mapping):
+            return {}
+        assignment_plan_envelope = dict(envelope)
+        checkpoints = assignment_plan_envelope.get("checkpoints")
+        acceptance_criteria = assignment_plan_envelope.get("acceptance_criteria")
+        sidecar_plan = assignment_plan_envelope.get("sidecar_plan")
+        context: dict[str, object] = {
+            "assignment_plan_envelope": assignment_plan_envelope,
+        }
+        if isinstance(checkpoints, list):
+            context["assignment_plan_checkpoints"] = [
+                dict(item) for item in checkpoints if isinstance(item, Mapping)
+            ]
+        if isinstance(acceptance_criteria, list):
+            context["assignment_plan_acceptance_criteria"] = [
+                str(item).strip()
+                for item in acceptance_criteria
+                if isinstance(item, str) and str(item).strip()
+            ]
+        if isinstance(sidecar_plan, Mapping):
+            context["assignment_sidecar_plan"] = dict(sidecar_plan)
+        report_back_mode = (
+            _string(assignment.report_back_mode)
+            or _string(assignment_plan_envelope.get("report_back_mode"))
+        )
+        if report_back_mode is not None:
+            context["report_back_mode"] = report_back_mode
+        return context
+
     def _mapping_list(self, value: object | None) -> list[dict[str, Any]]:
         if not isinstance(value, list):
             return []
@@ -4096,6 +4135,9 @@ class _IndustryLifecycleMixin:
             "session_id": control_thread_id,
             "control_thread_id": control_thread_id,
         }
+        compiler_context.update(
+            self._assignment_plan_context_from_formal_planning(assignment),
+        )
         build_strategy_context = getattr(self._goal_service, "_build_strategy_context", None)
         if callable(build_strategy_context):
             compiler_context.update(build_strategy_context(context=compiler_context))

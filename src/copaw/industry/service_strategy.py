@@ -2068,7 +2068,7 @@ class _IndustryStrategyMixin:
 
         )
 
-        return StrategyMemoryRecord(
+        strategy_record = StrategyMemoryRecord(
 
             strategy_id=strategy_id,
 
@@ -2178,6 +2178,14 @@ class _IndustryStrategyMixin:
 
             updated_at=record.updated_at,
 
+        )
+        compiled_constraints = self._strategy_compiler.compile(strategy_record)
+        return strategy_record.model_copy(
+            update={
+                "strategy_trigger_rules": list(
+                    compiled_constraints.strategy_trigger_rules or [],
+                ),
+            },
         )
 
 

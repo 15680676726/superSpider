@@ -1556,6 +1556,58 @@ def test_runtime_center_chat_run_attaches_environment_without_claiming_resume_on
     assert '"resolved_interaction_mode":"orchestrate"' in response.text
 
 
+def test_runtime_center_chat_run_auto_writeback_requested_actions_routes_through_orchestrator() -> None:
+    app = build_runtime_center_app()
+    query_execution_service = _CapturingRouteQueryExecutionService()
+    chat_service = _CapturingRouteChatService()
+
+    async def _resolve_intake_contract(**_kwargs):
+        return None
+
+    app.state.turn_executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=chat_service,
+        main_brain_orchestrator=MainBrainOrchestrator(
+            query_execution_service=query_execution_service,
+            session_backend=object(),
+            intake_contract_resolver=_resolve_intake_contract,
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-auto-writeback-route",
+            "session_id": "industry-chat:industry-v1-ops:execution-core",
+            "user_id": "ops-user",
+            "channel": "console",
+            "interaction_mode": "auto",
+            "requested_actions": ["writeback_backlog"],
+            "session_kind": "industry-control-thread",
+            "control_thread_id": "industry-chat:industry-v1-ops:execution-core",
+            "industry_instance_id": "industry-v1-ops",
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "Please write this back into the execution backlog."}],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(query_execution_service.calls) == 1
+    assert chat_service.calls == []
+    request = query_execution_service.calls[0]["request"]
+    assert getattr(request, "_copaw_resolved_interaction_mode") == "orchestrate"
+    assert list(getattr(request, "requested_actions", []) or []) == ["writeback_backlog"]
+    assert '"resolved_interaction_mode":"orchestrate"' in response.text
+
+
 def test_runtime_center_chat_run_chat_only_turn_skips_orchestrator_runtime_context() -> None:
     app = build_runtime_center_app()
     query_execution_service = _CapturingRouteQueryExecutionService()

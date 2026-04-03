@@ -75,3 +75,48 @@ def test_strategy_compiler_returns_empty_constraints_without_strategy() -> None:
     assert constraints.strategic_uncertainties == []
     assert constraints.lane_budgets == []
     assert constraints.strategy_trigger_rules == []
+
+
+def test_strategy_compiler_prefers_persisted_strategy_trigger_rules_when_present() -> None:
+    compiler = StrategyPlanningCompiler()
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Industry planning shell",
+        review_rules=["repeat-failure-needs-review"],
+        strategic_uncertainties=[
+            {
+                "uncertainty_id": "uncertainty-1",
+                "statement": "Retention signal is still noisy.",
+                "scope": "lane",
+                "impact_level": "high",
+                "current_confidence": 0.45,
+                "review_by_cycle": "cycle-2",
+                "escalate_when": ["confidence drop", "target miss"],
+            }
+        ],
+        strategy_trigger_rules=[
+            {
+                "rule_id": "persisted-trigger:confidence-drop",
+                "source_type": "uncertainty_escalation",
+                "source_ref": "uncertainty-1",
+                "trigger_family": "confidence_collapse",
+                "summary": "Persisted confidence-drop strategy review trigger.",
+                "decision_hint": "strategy_review_required",
+                "source": "strategy-memory",
+                "decision_kind": "strategy_review_required",
+                "trigger_signals": ["confidence-drop"],
+                "uncertainty_ids": ["uncertainty-1"],
+                "lane_ids": ["lane-retention"],
+            }
+        ],
+    )
+
+    constraints = compiler.compile(strategy)
+
+    assert [rule.rule_id for rule in constraints.strategy_trigger_rules] == [
+        "persisted-trigger:confidence-drop",
+    ]
+    assert constraints.strategy_trigger_rules[0].source == "strategy-memory"
+    assert constraints.strategy_trigger_rules[0].lane_ids == ["lane-retention"]

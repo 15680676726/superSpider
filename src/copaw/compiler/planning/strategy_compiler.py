@@ -109,9 +109,16 @@ class StrategyPlanningCompiler:
             review_rules=list(strategy.review_rules or []),
             paused_lane_ids=list(strategy.paused_lane_ids or []),
             current_focuses=list(strategy.current_focuses or []),
-            strategy_trigger_rules=self._compile_trigger_rules(
-                review_rules=list(strategy.review_rules or []),
-                strategic_uncertainties=strategic_uncertainties,
+            strategy_trigger_rules=(
+                [
+                    StrategyTriggerRule.model_validate(rule)
+                    for rule in list(strategy.strategy_trigger_rules or [])
+                ]
+                if list(strategy.strategy_trigger_rules or [])
+                else self._compile_trigger_rules(
+                    review_rules=list(strategy.review_rules or []),
+                    strategic_uncertainties=strategic_uncertainties,
+                )
             ),
         )
 

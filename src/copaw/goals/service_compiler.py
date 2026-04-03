@@ -540,6 +540,7 @@ class _GoalServiceCompilerMixin:
                 strategy_payload.get("strategic_uncertainties") or []
             ),
             "strategy_lane_budgets": list(strategy_payload.get("lane_budgets") or []),
+            "strategy_trigger_rules": list(strategy_payload.get("strategy_trigger_rules") or []),
             "strategy_planning_policy": _string_list(
                 strategy_payload.get("planning_policy"),
             ),
@@ -588,6 +589,7 @@ class _GoalServiceCompilerMixin:
             "strategy_constraints": payload,
             "strategy_strategic_uncertainties": list(payload.get("strategic_uncertainties") or []),
             "strategy_lane_budgets": list(payload.get("lane_budgets") or []),
+            "strategy_trigger_rules": list(payload.get("strategy_trigger_rules") or []),
         }
 
     def _build_assignment_strategy_constraints(

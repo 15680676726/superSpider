@@ -1434,6 +1434,18 @@ def test_compile_goal_injects_strategy_memory_context(tmp_path) -> None:
                     "max_share": 0.75,
                 }
             ],
+            strategy_trigger_rules=[
+                {
+                    "rule_id": "review-rule:launch-window",
+                    "source_type": "review_rule",
+                    "trigger_family": "review_rule",
+                    "summary": "repeat-failure-needs-review",
+                    "decision_hint": "strategy_review_required",
+                    "source": "strategy-memory",
+                    "decision_kind": "strategy_review_required",
+                    "trigger_signals": ["repeat-failure-needs-review"],
+                }
+            ],
         ),
     )
 
@@ -1464,6 +1476,7 @@ def test_compile_goal_injects_strategy_memory_context(tmp_path) -> None:
         "uncertainty:acme-launch-window"
     )
     assert compiler_payload["strategy_lane_budgets"][0]["lane_id"] == "lane-growth"
+    assert compiler_payload["strategy_trigger_rules"][0]["rule_id"] == "review-rule:launch-window"
 
 
 def test_goal_detail_exposes_strategy_memory_from_industry_instance(tmp_path) -> None:

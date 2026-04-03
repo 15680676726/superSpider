@@ -360,3 +360,127 @@ def test_runtime_canonical_flow_covers_identity_chat_execution_and_runtime_reads
     assert evidence_list.status_code == 200
     evidence_ids = {item["id"] for item in evidence_list.json()}
     assert evidence.id in evidence_ids
+
+
+def test_runtime_canonical_flow_auto_writeback_requested_actions_still_closes_real_frontdoor(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+
+    instruction = "Please turn this into the governed execution backlog and keep the same control thread."
+    control_ack = "Recorded. I will move this into the governed execution chain."
+
+    chat_service = MainBrainChatService(
+        session_backend=app.state.session_backend,
+        industry_service=app.state.industry_service,
+        agent_profile_service=app.state.agent_profile_service,
+        model_factory=lambda: _StaticResponseModel(control_ack),
+    )
+    query_execution_service = _CanonicalFlowQueryExecutionService(
+        chat_service=chat_service,
+        industry_service=app.state.industry_service,
+    )
+
+    async def _resolve_intake_contract(**_kwargs):
+        return MainBrainIntakeContract(
+            message_text=instruction,
+            decision=SimpleNamespace(intent_kind="execute-task", kickoff_allowed=False),
+            intent_kind="execute-task",
+            writeback_requested=True,
+            writeback_plan=build_chat_writeback_plan(
+                instruction,
+                approved_classifications=["backlog"],
+                goal_title="Governed execution backlog handoff",
+                goal_summary="Carry the requested work into the governed execution backlog on the same control thread.",
+                goal_plan_steps=[
+                    "Normalize the operator request into a governed execution backlog item.",
+                    "Keep the same control thread and execution-core ownership.",
+                    "Return the writeback result and next step.",
+                ],
+            ),
+            should_kickoff=False,
+        )
+
+    app.state.turn_executor = KernelTurnExecutor(
+        session_backend=app.state.session_backend,
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=chat_service,
+        main_brain_orchestrator=MainBrainOrchestrator(
+            query_execution_service=query_execution_service,
+            session_backend=app.state.session_backend,
+            intake_contract_resolver=_resolve_intake_contract,
+        ),
+    )
+
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Customer Operations",
+            "company_name": "Northwind Robotics",
+            "product": "governed execution backlog",
+            "goals": ["keep one canonical execution ingress"],
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-canonical-flow-auto-writeback",
+            "session_id": control_thread_id,
+            "thread_id": control_thread_id,
+            "user_id": "copaw-agent-runner",
+            "channel": "console",
+            "agent_id": "copaw-agent-runner",
+            "industry_instance_id": instance_id,
+            "industry_role_id": "execution-core",
+            "session_kind": "industry-control-thread",
+            "control_thread_id": control_thread_id,
+            "interaction_mode": "auto",
+            "requested_actions": ["writeback_backlog"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": instruction}],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(query_execution_service.calls) == 1
+    routed_request = query_execution_service.calls[0]["request"]
+    assert getattr(routed_request, "_copaw_resolved_interaction_mode") == "orchestrate"
+    assert query_execution_service.writeback_result is not None
+
+    writeback = query_execution_service.writeback_result
+    assert writeback["created_backlog_ids"]
+    backlog_id = str(writeback["created_backlog_ids"][0])
+
+    detail = client.get(f"/runtime-center/industry/{instance_id}")
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    backlog_item = next(
+        item
+        for item in detail_payload["backlog"]
+        if item["backlog_item_id"] == backlog_id
+    )
+    assert backlog_item["metadata"]["control_thread_id"] == control_thread_id
+    assert backlog_item["metadata"]["source"] == "chat-writeback"
