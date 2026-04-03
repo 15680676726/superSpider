@@ -350,3 +350,36 @@ def test_capability_skill_service_read_binding_rejects_invalid_frontmatter() -> 
 
     with pytest.raises(ValueError, match="Front Matter|front matter|description"):
         service.read_skill_package_binding(skill)
+
+
+def test_capability_skill_service_read_skill_package_binding_reanchors_filesystem_identity(
+    tmp_path,
+) -> None:
+    skill_dir = tmp_path / "skills" / "research"
+    skill_dir.mkdir(parents=True)
+    escaped_ref = str(tmp_path / "other-skill")
+    skill = SimpleNamespace(
+        name="research",
+        content=(
+            "---\n"
+            "name: research\n"
+            "description: Research skill\n"
+            f"package_ref: {escaped_ref}\n"
+            "package_kind: filesystem\n"
+            "package_version: 2026.04\n"
+            "---\n"
+            "# Research\n"
+        ),
+        source="customized",
+        path=str(skill_dir),
+        references={},
+        scripts={},
+    )
+
+    binding = CapabilitySkillService().read_skill_package_binding(skill)
+
+    assert binding == {
+        "package_ref": str(skill_dir.resolve()),
+        "package_kind": "filesystem",
+        "package_version": "2026.04",
+    }

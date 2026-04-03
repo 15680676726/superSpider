@@ -199,6 +199,7 @@ class KernelDispatcher:
             result = self.fail_task(
                 task_id,
                 error=str(execution.get("error") or execution.get("summary") or "execution failed"),
+                append_kernel_evidence=not bool(execution.get("evidence_emitted")),
             )
             output = execution.get("output") if isinstance(execution, dict) else None
             if isinstance(output, dict):
@@ -275,6 +276,11 @@ class KernelDispatcher:
         task = self._lifecycle.get_task(task_id)
         if task is None:
             raise KeyError(f"Task '{task_id}' not found in kernel")
+        if task.phase in {"completed", "failed", "cancelled"}:
+            return self._lifecycle.complete(
+                task_id,
+                summary=summary,
+            )
         child_block_summary = self._active_child_block_summary(task_id)
         if child_block_summary is not None:
             if self._task_store is not None:
@@ -312,29 +318,38 @@ class KernelDispatcher:
         self._after_terminal_transition(task=task, result=result)
         return result
 
-    def fail_task(self, task_id: str, *, error: str) -> KernelResult:
+    def fail_task(
+        self,
+        task_id: str,
+        *,
+        error: str,
+        append_kernel_evidence: bool = True,
+    ) -> KernelResult:
         """Fail a task and write kernel evidence / decision resolution."""
         task = self._lifecycle.get_task(task_id)
         if task is None:
             raise KeyError(f"Task '{task_id}' not found in kernel")
+        if task.phase in {"completed", "failed", "cancelled"}:
+            return self._lifecycle.fail(task_id, error=error)
         if self._task_store is not None:
             self._task_store.resolve_open_decisions(
                 task_id=task_id,
                 status="rejected",
                 resolution=error,
             )
-            evidence = self._task_store.append_evidence(
-                task,
-                action_summary="内核任务失败",
-                result_summary=error,
-                metadata={
-                    "trace_stage": "kernel.failed",
-                    "trace_component": "kernel.dispatcher",
-                    "phase": task.phase,
-                },
-            )
-            if evidence is not None:
-                self._task_store.upsert(task, last_evidence_id=evidence.id)
+            if append_kernel_evidence:
+                evidence = self._task_store.append_evidence(
+                    task,
+                    action_summary="内核任务失败",
+                    result_summary=error,
+                    metadata={
+                        "trace_stage": "kernel.failed",
+                        "trace_component": "kernel.dispatcher",
+                        "phase": task.phase,
+                    },
+                )
+                if evidence is not None:
+                    self._task_store.upsert(task, last_evidence_id=evidence.id)
         result = self._lifecycle.fail(task_id, error=error)
         self._after_terminal_transition(task=task, result=result)
         return result
@@ -349,6 +364,11 @@ class KernelDispatcher:
         task = self._lifecycle.get_task(task_id)
         if task is None:
             raise KeyError(f"Task '{task_id}' not found in kernel")
+        if task.phase in {"completed", "failed", "cancelled"}:
+            return self._lifecycle.cancel(
+                task_id,
+                summary=resolution or "Task cancelled",
+            )
         resolution_text = resolution or "任务已取消。"
         resolved_decision_id = decision_request_id
         if self._task_store is not None:

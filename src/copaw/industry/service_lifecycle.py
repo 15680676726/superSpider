@@ -355,8 +355,12 @@ class _IndustryLifecycleMixin:
             "synthesis_kind",
             "activation_top_entities",
             "activation_top_opinions",
+            "activation_top_relations",
+            "activation_top_relation_kinds",
+            "activation_top_relation_ids",
             "activation_top_constraints",
             "activation_top_next_actions",
+            "activation_relation_source_refs",
             "activation_support_refs",
             "upstream_backlog_source_ref",
         ):
@@ -658,7 +662,29 @@ class _IndustryLifecycleMixin:
         graph_focus_opinions = _unique_strings(
             getattr(activation_result, "top_opinions", None),
         )
-        if not graph_focus_entities and not graph_focus_opinions:
+        graph_focus_relations = _unique_strings(
+            getattr(activation_result, "top_relations", None),
+        )
+        relation_evidence = list(
+            getattr(activation_result, "top_relation_evidence", None) or [],
+        )
+        graph_relation_evidence: list[dict[str, Any]] = []
+        for item in relation_evidence:
+            model_dump = getattr(item, "model_dump", None)
+            if callable(model_dump):
+                payload = model_dump(mode="json")
+            elif isinstance(item, Mapping):
+                payload = dict(item)
+            else:
+                payload = None
+            if isinstance(payload, dict):
+                graph_relation_evidence.append(payload)
+        if (
+            not graph_focus_entities
+            and not graph_focus_opinions
+            and not graph_focus_relations
+            and not graph_relation_evidence
+        ):
             return constraints
         return constraints.model_copy(
             update={
@@ -669,6 +695,8 @@ class _IndustryLifecycleMixin:
                 ),
                 "graph_focus_entities": graph_focus_entities,
                 "graph_focus_opinions": graph_focus_opinions,
+                "graph_focus_relations": graph_focus_relations,
+                "graph_relation_evidence": graph_relation_evidence,
             },
         )
 

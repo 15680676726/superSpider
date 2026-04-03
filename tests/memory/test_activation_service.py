@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from copaw.memory import DerivedMemoryIndexService
 from copaw.memory.activation_models import ActivationInput
@@ -104,6 +105,31 @@ def _opinion_view(
         entity_keys=list(entity_keys or []),
         source_refs=list(supporting_refs or []),
         metadata={},
+    )
+
+
+def _relation_view(
+    relation_id: str,
+    *,
+    relation_kind: str,
+    scope_type: str,
+    scope_id: str,
+    summary: str,
+    source_refs: list[str] | None = None,
+    confidence: float = 0.8,
+    source_node_id: str = "fact-1",
+    target_node_id: str = "entity-1",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        relation_id=relation_id,
+        relation_kind=relation_kind,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        summary=summary,
+        confidence=confidence,
+        source_node_id=source_node_id,
+        target_node_id=target_node_id,
+        source_refs=list(source_refs or []),
     )
 
 
@@ -432,6 +458,82 @@ def test_activation_service_activate_for_query_pulls_entity_and_opinion_views() 
     assert calls["fact"][0]["scope_type"] == "industry"
     assert calls["entity"][0]["scope_id"] == "industry-1"
     assert calls["opinion"][0]["owner_agent_id"] == "agent-main-brain"
+
+
+def test_activation_service_activate_for_query_uses_shared_strategy_resolver_and_relation_views() -> None:
+    calls: dict[str, list[dict[str, object]]] = {
+        "relation": [],
+    }
+
+    def _list_relation_views(**kwargs: object) -> list[object]:
+        calls["relation"].append(dict(kwargs))
+        return [
+            _relation_view(
+                "relation-1",
+                relation_kind="contradicts",
+                scope_type="industry",
+                scope_id="industry-1",
+                summary="Approval evidence contradicts the current warehouse release assumption.",
+                source_refs=["chunk-approval-1"],
+            ),
+            _relation_view(
+                "relation-2",
+                relation_kind="supports",
+                scope_type="industry",
+                scope_id="industry-1",
+                summary="Inventory evidence supports the weekend staffing caution.",
+                source_refs=["chunk-weekend-1"],
+            ),
+        ]
+
+    strategy_service = SimpleNamespace(
+        get_active_strategy=lambda **_: (_ for _ in ()).throw(
+            AssertionError("activate_for_query should use resolve_strategy_payload helper"),
+        ),
+    )
+    service = MemoryActivationService(
+        derived_index_service=SimpleNamespace(
+            list_fact_entries=lambda **_: [],
+            list_entity_views=lambda **_: [],
+            list_opinion_views=lambda **_: [],
+            list_relation_views=_list_relation_views,
+        ),
+        strategy_memory_service=strategy_service,
+    )
+
+    with patch(
+        "copaw.memory.activation_service.resolve_strategy_payload",
+        return_value={
+            "strategy_id": "strategy:industry:industry-1:agent-main-brain",
+            "scope_type": "industry",
+            "scope_id": "industry-1",
+            "title": "Industry strategy",
+            "summary": "Protect release quality before expanding the lane.",
+            "execution_constraints": ["Do not release until contradictions are resolved."],
+            "current_focuses": ["Resolve warehouse approval contradiction."],
+        },
+    ) as resolve_strategy_payload_mock:
+        result = service.activate_for_query(
+            query="warehouse approval contradiction",
+            industry_instance_id="industry-1",
+            owner_agent_id="agent-main-brain",
+            limit=6,
+        )
+
+    resolve_strategy_payload_mock.assert_called_once()
+    assert calls["relation"][0]["scope_type"] == "industry"
+    assert calls["relation"][0]["scope_id"] == "industry-1"
+    assert result.metadata["top_relation_kinds"] == ["contradicts", "supports"]
+    assert result.metadata["top_relations"] == [
+        "Approval evidence contradicts the current warehouse release assumption.",
+        "Inventory evidence supports the weekend staffing caution.",
+    ]
+    assert [item.relation_id for item in result.top_relation_evidence] == [
+        "relation-1",
+        "relation-2",
+    ]
+    assert result.top_relation_evidence[0].relation_kind == "contradicts"
+    assert result.top_relation_evidence[0].source_refs == ["chunk-approval-1"]
 
 
 def test_derived_index_service_persists_relation_views_from_fact_entity_links() -> None:

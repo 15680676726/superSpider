@@ -43,6 +43,7 @@ from .tools import (
     write_file,
     create_memory_search_tool,
 )
+from ..capabilities.tool_execution_contracts import get_tool_execution_contract
 from .utils import process_file_and_media_blocks_in_message
 from ..constant import (
     MEMORY_COMPACT_RATIO,
@@ -53,6 +54,7 @@ from ..memory.conversation_compaction_service import ConversationCompactionServi
 logger = logging.getLogger(__name__)
 
 ToolPreflightHook = Callable[[str, tuple[Any, ...], dict[str, Any]], ToolResponse | None]
+ToolExecutionDelegate = Callable[[str, dict[str, Any]], Any]
 
 _TOOL_PREFLIGHT_HOOK: ContextVar[ToolPreflightHook | None] = (
     ContextVar("_tool_preflight_hook", default=None)
@@ -60,6 +62,10 @@ _TOOL_PREFLIGHT_HOOK: ContextVar[ToolPreflightHook | None] = (
 _TOOL_CHOICE_OVERRIDE_RESOLVER: ContextVar[
     Callable[[], Literal["auto", "none", "required"] | None] | None
 ] = ContextVar("_tool_choice_override_resolver", default=None)
+_TOOL_EXECUTION_DELEGATE: ContextVar[ToolExecutionDelegate | None] = ContextVar(
+    "_tool_execution_delegate",
+    default=None,
+)
 
 # Valid namesake strategies for tool registration
 NamesakeStrategy = Literal["override", "skip", "raise", "rename"]
@@ -110,6 +116,75 @@ def _coerce_tool_response(value: Any) -> ToolResponse:
     )
 
 
+def _coerce_tool_execution_delegate_result(value: Any) -> ToolResponse:
+    if isinstance(value, dict):
+        output = value.get("output")
+        if output is not None:
+            return _coerce_tool_response(output)
+        summary = value.get("summary")
+        if isinstance(summary, str) and summary:
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=summary,
+                    ),
+                ],
+            )
+    return _coerce_tool_response(value)
+
+
+def _tool_capability_id_for_function(
+    tool_fn: Callable[..., Any],
+) -> str | None:
+    tool_name = getattr(tool_fn, "__name__", None)
+    if not tool_name:
+        return None
+    capability_id = f"tool:{tool_name}"
+    if get_tool_execution_contract(capability_id) is None:
+        return None
+    return capability_id
+
+
+def _build_tool_payload_from_call(
+    tool_fn: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> dict[str, Any] | None:
+    try:
+        bound = inspect.signature(tool_fn).bind_partial(*args, **kwargs)
+    except TypeError:
+        return None
+    return dict(bound.arguments)
+
+
+def _run_tool_contract_validation(
+    tool_fn: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> ToolResponse | None:
+    capability_id = _tool_capability_id_for_function(tool_fn)
+    if capability_id is None:
+        return None
+    tool_contract = get_tool_execution_contract(capability_id)
+    if tool_contract is None:
+        return None
+    payload = _build_tool_payload_from_call(tool_fn, args, kwargs)
+    if payload is None:
+        return None
+    validation_error = tool_contract.validate_payload(payload)
+    if validation_error is None:
+        return None
+    return ToolResponse(
+        content=[
+            TextBlock(
+                type="text",
+                text=validation_error,
+            ),
+        ],
+    )
+
+
 @contextmanager
 def bind_tool_preflight(
     preflight: ToolPreflightHook | None,
@@ -136,6 +211,18 @@ def bind_reasoning_tool_choice_resolver(
         _TOOL_CHOICE_OVERRIDE_RESOLVER.set(previous)
 
 
+@contextmanager
+def bind_tool_execution_delegate(
+    delegate: ToolExecutionDelegate | None,
+):
+    previous = _TOOL_EXECUTION_DELEGATE.get()
+    _TOOL_EXECUTION_DELEGATE.set(delegate)
+    try:
+        yield
+    finally:
+        _TOOL_EXECUTION_DELEGATE.set(previous)
+
+
 def _run_tool_preflight(
     tool_name: str,
     args: tuple[Any, ...],
@@ -151,6 +238,38 @@ def _run_tool_preflight(
         return None
 
 
+def _run_tool_frontdoor_checks(
+    tool_fn: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    *,
+    apply_preflight: bool,
+) -> ToolResponse | None:
+    validation_block = _run_tool_contract_validation(tool_fn, args, kwargs)
+    if validation_block is not None:
+        return validation_block
+    if not apply_preflight:
+        return None
+    return _run_tool_preflight(tool_fn.__name__, args, kwargs)
+
+
+def _resolve_tool_execution_delegate_call(
+    tool_fn: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> tuple[ToolExecutionDelegate, str, dict[str, Any]] | None:
+    delegate = _TOOL_EXECUTION_DELEGATE.get()
+    if not callable(delegate):
+        return None
+    capability_id = _tool_capability_id_for_function(tool_fn)
+    if capability_id is None:
+        return None
+    payload = _build_tool_payload_from_call(tool_fn, args, kwargs)
+    if payload is None:
+        return None
+    return delegate, capability_id, payload
+
+
 def _wrap_tool_function_for_toolkit(
     tool_fn: Callable[..., Any],
     *,
@@ -160,14 +279,28 @@ def _wrap_tool_function_for_toolkit(
     if inspect.isasyncgenfunction(tool_fn):
         @functools.wraps(tool_fn)
         async def _wrapped(*args: Any, **kwargs: Any):
-            blocked = (
-                _run_tool_preflight(tool_fn.__name__, args, kwargs)
-                if apply_preflight
-                else None
+            blocked = _run_tool_frontdoor_checks(
+                tool_fn,
+                args,
+                kwargs,
+                apply_preflight=apply_preflight,
             )
             if blocked is not None:
                 yield blocked
                 return
+            delegated = _resolve_tool_execution_delegate_call(tool_fn, args, kwargs)
+            if delegated is not None:
+                delegate, capability_id, payload = delegated
+                try:
+                    yield _coerce_tool_execution_delegate_result(
+                        await delegate(capability_id, payload),
+                    )
+                    return
+                except Exception:
+                    logger.exception(
+                        "Tool execution delegate failed for '%s'; falling back to builtin tool",
+                        capability_id,
+                    )
             async for item in tool_fn(*args, **kwargs):
                 yield _coerce_tool_response(item)
 
@@ -176,13 +309,26 @@ def _wrap_tool_function_for_toolkit(
     if inspect.iscoroutinefunction(tool_fn):
         @functools.wraps(tool_fn)
         async def _wrapped(*args: Any, **kwargs: Any) -> ToolResponse:
-            blocked = (
-                _run_tool_preflight(tool_fn.__name__, args, kwargs)
-                if apply_preflight
-                else None
+            blocked = _run_tool_frontdoor_checks(
+                tool_fn,
+                args,
+                kwargs,
+                apply_preflight=apply_preflight,
             )
             if blocked is not None:
                 return blocked
+            delegated = _resolve_tool_execution_delegate_call(tool_fn, args, kwargs)
+            if delegated is not None:
+                delegate, capability_id, payload = delegated
+                try:
+                    return _coerce_tool_execution_delegate_result(
+                        await delegate(capability_id, payload),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Tool execution delegate failed for '%s'; falling back to builtin tool",
+                        capability_id,
+                    )
             return _coerce_tool_response(await tool_fn(*args, **kwargs))
 
         return _wrapped
@@ -190,10 +336,11 @@ def _wrap_tool_function_for_toolkit(
     if inspect.isgeneratorfunction(tool_fn):
         @functools.wraps(tool_fn)
         def _wrapped(*args: Any, **kwargs: Any):
-            blocked = (
-                _run_tool_preflight(tool_fn.__name__, args, kwargs)
-                if apply_preflight
-                else None
+            blocked = _run_tool_frontdoor_checks(
+                tool_fn,
+                args,
+                kwargs,
+                apply_preflight=apply_preflight,
             )
             if blocked is not None:
                 yield blocked
@@ -205,10 +352,11 @@ def _wrap_tool_function_for_toolkit(
 
     @functools.wraps(tool_fn)
     def _wrapped(*args: Any, **kwargs: Any) -> ToolResponse:
-        blocked = (
-            _run_tool_preflight(tool_fn.__name__, args, kwargs)
-            if apply_preflight
-            else None
+        blocked = _run_tool_frontdoor_checks(
+            tool_fn,
+            args,
+            kwargs,
+            apply_preflight=apply_preflight,
         )
         if blocked is not None:
             return blocked

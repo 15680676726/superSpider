@@ -1227,7 +1227,7 @@ def test_runtime_task_list_projector_projects_stable_task_list_fields(tmp_path) 
         "trace_id": "trace:projector-parent",
         "title": "Project stable list payload",
         "kind": "system:dispatch_query",
-        "status": "active",
+        "status": "executing",
         "owner_agent_id": "runtime-owner",
         "summary": "Runtime summary wins.",
         "current_progress_summary": "Runtime summary wins.",

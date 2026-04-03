@@ -70,6 +70,7 @@ async def get_system_overview(request: Request) -> dict[str, object]:
 
     file_count, total_size = _workspace_stats(WORKING_DIR)
     startup_recovery = getattr(app_state, "startup_recovery_summary", None)
+    latest_recovery = getattr(app_state, "latest_recovery_report", None)
     return {
         "generated_at": _utc_now_iso(),
         "backup": {
@@ -100,6 +101,7 @@ async def get_system_overview(request: Request) -> dict[str, object]:
             "governance_route": "/api/runtime-center/governance/status",
             "recovery_route": "/api/runtime-center/recovery/latest",
             "events_route": "/api/runtime-center/events",
+            "latest_recovery": latest_recovery,
             "startup_recovery": startup_recovery,
         },
     }
@@ -206,11 +208,13 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
         ],
     )
 
-    recovery_summary = getattr(app_state, "startup_recovery_summary", None)
+    recovery_summary = getattr(app_state, "latest_recovery_report", None)
+    if recovery_summary is None:
+        recovery_summary = getattr(app_state, "startup_recovery_summary", None)
     add_check(
         "startup_recovery",
         "pass" if recovery_summary is not None else "warn",
-        "Startup recovery summary is available." if recovery_summary is not None else "Startup recovery summary is missing.",
+        "Recovery summary is available." if recovery_summary is not None else "Recovery summary is missing.",
         recovery_summary=recovery_summary,
     )
 

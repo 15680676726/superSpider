@@ -39,6 +39,8 @@ def test_runtime_center_recovery_latest_endpoint_returns_summary() -> None:
     app = _build_app()
     app.state.startup_recovery_summary = StartupRecoverySummary(
         reason="startup",
+        reaped_expired_leases=2,
+        recovered_orphaned_mailbox_items=3,
         pending_decisions=2,
         hydrated_waiting_confirm_tasks=1,
         active_schedules=3,
@@ -50,6 +52,40 @@ def test_runtime_center_recovery_latest_endpoint_returns_summary() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["reason"] == "startup"
+    assert payload["source"] == "startup"
     assert payload["pending_decisions"] == 2
     assert payload["hydrated_waiting_confirm_tasks"] == 1
     assert payload["active_schedules"] == 3
+    assert payload["detail"]["leases"]["reaped_expired_leases"] == 2
+    assert payload["detail"]["mailbox"]["recovered_orphaned_mailbox_items"] == 3
+    assert payload["detail"]["decisions"]["pending_decisions"] == 2
+    assert payload["detail"]["automation"]["active_schedules"] == 3
+
+
+def test_runtime_center_recovery_latest_endpoint_prefers_canonical_latest_report() -> None:
+    app = _build_app()
+    app.state.startup_recovery_summary = StartupRecoverySummary(
+        reason="startup",
+        pending_decisions=2,
+        hydrated_waiting_confirm_tasks=1,
+        active_schedules=3,
+    )
+    app.state.latest_recovery_report = {
+        "reason": "runtime-recovery",
+        "pending_decisions": 1,
+        "active_schedules": 4,
+        "latest_scope": "runtime",
+    }
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/recovery/latest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reason"] == "runtime-recovery"
+    assert payload["source"] == "latest"
+    assert payload["pending_decisions"] == 1
+    assert payload["active_schedules"] == 4
+    assert payload["latest_scope"] == "runtime"
+    assert payload["detail"]["decisions"]["pending_decisions"] == 1
+    assert payload["detail"]["automation"]["active_schedules"] == 4

@@ -231,6 +231,8 @@ class PlanningStrategyConstraints(BaseModel):
     strategy_trigger_rules: list[StrategyTriggerRule] = Field(default_factory=list)
     graph_focus_entities: list[str] = Field(default_factory=list)
     graph_focus_opinions: list[str] = Field(default_factory=list)
+    graph_focus_relations: list[str] = Field(default_factory=list)
+    graph_relation_evidence: list[dict[str, Any]] = Field(default_factory=list)
 
     @classmethod
     def from_value(cls, value: object | None) -> PlanningStrategyConstraints:
@@ -342,6 +344,8 @@ class CyclePlanningDecision(BaseModel):
     max_assignment_count: int = 0
     summary: str = ""
     planning_policy: list[str] = Field(default_factory=list)
+    affected_relation_ids: list[str] = Field(default_factory=list)
+    affected_relation_kinds: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -404,11 +408,14 @@ class ReportReplanDecision(BaseModel):
     trigger_family: str | None = None
     trigger_families: list[str] = Field(default_factory=list)
     trigger_rule_ids: list[str] = Field(default_factory=list)
+    trigger_context: dict[str, Any] = Field(default_factory=dict)
     affected_lane_ids: list[str] = Field(default_factory=list)
     affected_uncertainty_ids: list[str] = Field(default_factory=list)
-    trigger_context: dict[str, Any] = Field(default_factory=dict)
-    strategy_change: dict[str, Any] = Field(default_factory=dict)
+    affected_relation_ids: list[str] = Field(default_factory=list)
+    affected_relation_kinds: list[str] = Field(default_factory=list)
+    relation_source_refs: list[str] = Field(default_factory=list)
     directives: list[dict[str, Any]] = Field(default_factory=list)
     recommended_actions: list[dict[str, Any]] = Field(default_factory=list)
     activation: dict[str, Any] = Field(default_factory=dict)
     rationale: dict[str, Any] = Field(default_factory=dict)
+    strategy_change: dict[str, Any] = Field(default_factory=dict)

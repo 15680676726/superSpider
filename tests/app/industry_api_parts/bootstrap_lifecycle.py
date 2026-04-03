@@ -915,6 +915,18 @@ class _FakePlanningActivationService:
             scope_id=str(kwargs.get("industry_instance_id") or "industry-1"),
             top_entities=["weekend-variance", "inventory"],
             top_opinions=["staffing:caution:premature-change"],
+            top_relations=["weekend variance contradicts staffing expansion readiness"],
+            top_relation_kinds=["contradicts"],
+            top_relation_evidence=[
+                {
+                    "relation_id": "relation-weekend-variance",
+                    "relation_kind": "contradicts",
+                    "summary": "Weekend variance evidence contradicts immediate staffing expansion.",
+                    "source_refs": ["memory:weekend-variance-gap"],
+                    "source_node_id": "entity:weekend-variance",
+                    "target_node_id": "opinion:staffing-expansion-readiness",
+                },
+            ],
             top_constraints=["Do not expand staffing before the variance is explained."],
             top_next_actions=["Review the weekend variance evidence before launching the next move."],
         )
@@ -1141,6 +1153,20 @@ def test_run_operating_cycle_persists_graph_focus_into_formal_planning_sidecar(t
     assert strategy_constraints["graph_focus_opinions"] == [
         "staffing:caution:premature-change",
     ]
+    assert strategy_constraints["graph_focus_relations"] == [
+        "weekend variance contradicts staffing expansion readiness",
+    ]
+    assert strategy_constraints["graph_relation_evidence"] == [
+        {
+            "confidence": 0.0,
+            "relation_id": "relation-weekend-variance",
+            "relation_kind": "contradicts",
+            "source_node_id": "entity:weekend-variance",
+            "source_refs": ["memory:weekend-variance-gap"],
+            "summary": "Weekend variance evidence contradicts immediate staffing expansion.",
+            "target_node_id": "opinion:staffing-expansion-readiness",
+        },
+    ]
     assert cycle_decision["metadata"]["graph_focus_entities"] == [
         "weekend-variance",
         "inventory",
@@ -1148,6 +1174,8 @@ def test_run_operating_cycle_persists_graph_focus_into_formal_planning_sidecar(t
     assert cycle_decision["metadata"]["graph_focus_opinions"] == [
         "staffing:caution:premature-change",
     ]
+    assert cycle_decision["affected_relation_ids"] == ["relation-weekend-variance"]
+    assert cycle_decision["affected_relation_kinds"] == ["contradicts"]
 
 
 def test_run_operating_cycle_skips_unresolved_chat_writeback_gap_backlog(tmp_path) -> None:
@@ -2324,6 +2352,20 @@ def test_activation_followup_backlog_carries_activation_metadata(tmp_path) -> No
             "activation": {
                 "top_entities": ["weekend-variance", "staffing"],
                 "top_opinions": ["staffing:caution:premature-change"],
+                "top_relations": [
+                    "weekend variance contradicts immediate staffing expansion",
+                ],
+                "top_relation_kinds": ["contradicts"],
+                "top_relation_evidence": [
+                    {
+                        "relation_id": "relation-weekend-variance",
+                        "relation_kind": "contradicts",
+                        "summary": "Weekend variance evidence contradicts immediate staffing expansion.",
+                        "source_refs": ["memory:weekend-audit-gap"],
+                        "source_node_id": "entity:weekend-variance",
+                        "target_node_id": "opinion:staffing-expansion-readiness",
+                    },
+                ],
                 "top_constraints": [
                     "Weekend escalation root cause is still unvalidated.",
                 ],
@@ -2372,6 +2414,18 @@ def test_activation_followup_backlog_carries_activation_metadata(tmp_path) -> No
     assert activation_followup["metadata"]["activation_top_opinions"] == [
         "staffing:caution:premature-change",
     ]
+    assert activation_followup["metadata"]["activation_top_relations"] == [
+        "weekend variance contradicts immediate staffing expansion",
+    ]
+    assert activation_followup["metadata"]["activation_top_relation_kinds"] == [
+        "contradicts",
+    ]
+    assert activation_followup["metadata"]["activation_top_relation_ids"] == [
+        "relation-weekend-variance",
+    ]
+    assert activation_followup["metadata"]["activation_relation_source_refs"] == [
+        "memory:weekend-audit-gap",
+    ]
     assert activation_followup["metadata"]["activation_top_next_actions"] == [
         "Pull the weekend audit trail before changing staffing.",
     ]
@@ -2417,6 +2471,20 @@ def test_activation_followup_materialized_assignment_keeps_activation_metadata(
             "activation": {
                 "top_entities": ["weekend-variance", "staffing"],
                 "top_opinions": ["staffing:caution:premature-change"],
+                "top_relations": [
+                    "weekend variance contradicts immediate staffing expansion",
+                ],
+                "top_relation_kinds": ["contradicts"],
+                "top_relation_evidence": [
+                    {
+                        "relation_id": "relation-weekend-variance",
+                        "relation_kind": "contradicts",
+                        "summary": "Weekend variance evidence contradicts immediate staffing expansion.",
+                        "source_refs": ["memory:weekend-audit-gap"],
+                        "source_node_id": "entity:weekend-variance",
+                        "target_node_id": "opinion:staffing-expansion-readiness",
+                    },
+                ],
                 "top_constraints": [
                     "Weekend escalation root cause is still unvalidated.",
                 ],
@@ -2467,6 +2535,18 @@ def test_activation_followup_materialized_assignment_keeps_activation_metadata(
     ]
     assert assignment.metadata["activation_top_opinions"] == [
         "staffing:caution:premature-change",
+    ]
+    assert assignment.metadata["activation_top_relations"] == [
+        "weekend variance contradicts immediate staffing expansion",
+    ]
+    assert assignment.metadata["activation_top_relation_kinds"] == [
+        "contradicts",
+    ]
+    assert assignment.metadata["activation_top_relation_ids"] == [
+        "relation-weekend-variance",
+    ]
+    assert assignment.metadata["activation_relation_source_refs"] == [
+        "memory:weekend-audit-gap",
     ]
     assert assignment.metadata["activation_top_next_actions"] == [
         "Pull the weekend audit trail before changing staffing.",

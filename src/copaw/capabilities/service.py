@@ -343,6 +343,12 @@ class CapabilityService:
     async def execute_task(self, task: "KernelTask") -> dict[str, object]:
         return await self._execution.execute_task(task)
 
+    async def execute_task_batch(
+        self,
+        tasks: list["KernelTask"],
+    ) -> list[dict[str, object]]:
+        return await self._execution.execute_task_batch(tasks)
+
     def _append_execution_evidence(
         self,
         *,

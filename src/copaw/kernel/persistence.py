@@ -114,6 +114,9 @@ class KernelTaskStore:
         runtime_record = self._task_runtime_repository.get_runtime(task_id)
         return self._task_from_records(task_record, runtime_record)
 
+    def get_runtime_record(self, task_id: str) -> TaskRuntimeRecord | None:
+        return self._task_runtime_repository.get_runtime(task_id)
+
     def list_tasks(
         self,
         *,

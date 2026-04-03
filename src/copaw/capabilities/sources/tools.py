@@ -31,9 +31,7 @@ def list_tool_capabilities() -> list[CapabilityMount]:
                 "tags": ["shell", "execution", "workspace"],
                 "metadata": {
                     "execution_policy": {
-                        "action_mode": "write",
                         "evidence_owner": "tool-bridge",
-                        "writer_scope_source": "file_path",
                     },
                 },
             },
@@ -70,7 +68,6 @@ def list_tool_capabilities() -> list[CapabilityMount]:
                 "tags": ["file", "write"],
                 "metadata": {
                     "execution_policy": {
-                        "action_mode": "write",
                         "evidence_owner": "tool-bridge",
                         "writer_scope_source": "file_path",
                     },

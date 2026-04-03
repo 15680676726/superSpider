@@ -5,6 +5,7 @@ import asyncio
 import inspect
 
 from .runtime_center_shared_core import *  # noqa: F401,F403
+from ..runtime_center.recovery_projection import project_latest_recovery_summary
 from ..runtime_chat_stream_events import stream_runtime_chat_events
 
 from agentscope.message import Msg
@@ -921,15 +922,14 @@ async def get_latest_recovery_report(
     response: Response,
 ) -> dict[str, object]:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
-    summary = getattr(request.app.state, "startup_recovery_summary", None)
+    summary = getattr(request.app.state, "latest_recovery_report", None)
+    source = "latest"
+    if summary is None:
+        summary = getattr(request.app.state, "startup_recovery_summary", None)
+        source = "startup"
     if summary is None:
         raise HTTPException(404, detail="Startup recovery summary is not available")
-    model_dump = getattr(summary, "model_dump", None)
-    if callable(model_dump):
-        return model_dump(mode="json")
-    if isinstance(summary, dict):
-        return dict(summary)
-    return {"summary": str(summary)}
+    return project_latest_recovery_summary(summary, source=source)
 
 
 async def _stream_runtime_chat_events(

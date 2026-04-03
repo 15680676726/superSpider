@@ -30,3 +30,18 @@ def test_execution_context_marks_read_actions_as_read_only() -> None:
     )
 
     assert context.is_read_only is True
+
+
+def test_execution_context_carries_contract_fields() -> None:
+    context = CapabilityExecutionContext(
+        task_id="ktask:test",
+        capability_ref="tool:read_file",
+        action_mode="read",
+        concurrency_class="parallel-read",
+        preflight_policy="inline",
+        evidence_mode="tool-bridge",
+    )
+
+    assert context.concurrency_class == "parallel-read"
+    assert context.preflight_policy == "inline"
+    assert context.evidence_mode == "tool-bridge"

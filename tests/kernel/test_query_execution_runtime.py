@@ -9,6 +9,7 @@ import pytest
 from agentscope.message import Msg
 
 from copaw.agents.react_agent import (
+    _wrap_tool_function_for_toolkit,
     bind_reasoning_tool_choice_resolver,
     bind_tool_preflight,
 )
@@ -17,6 +18,7 @@ from copaw.agents.tools.evidence_runtime import (
     bind_file_evidence_sink,
     bind_shell_evidence_sink,
 )
+from copaw.agents.tools.file_io import read_file
 from copaw.kernel import KernelTask
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.query_execution import KernelQueryExecutionService
@@ -281,6 +283,15 @@ def test_query_execution_runtime_exposes_attached_entropy_budget_from_config(
         "enable_tool_result_compact": True,
         "tool_result_compact_keep_n": 7,
         "keep_recent_messages": MEMORY_COMPACT_KEEP_RECENT,
+        "tool_result_budget": {
+            "enabled": True,
+            "keep_recent_messages": MEMORY_COMPACT_KEEP_RECENT,
+            "keep_recent_tool_results": 7,
+            "state_channel": "query_runtime_state",
+            "summary_surface": "runtime-center",
+            "spill_surface": "runtime-center",
+            "replay_surface": "runtime-conversation",
+        },
     }
     assert entropy["sidecar_memory"]["status"] == "available"
     assert entropy["sidecar_memory"]["availability"] == "attached"
@@ -408,3 +419,195 @@ async def test_query_execution_runtime_persists_accepted_boundary_and_commit_out
     assert query_runtime_state["accepted_persistence"]["boundary"] == "execution_runtime_intake"
     assert query_runtime_state["commit_outcome"]["status"] == "commit_failed"
     assert query_runtime_state["commit_outcome"]["reason"] == "durable_kickoff_failed"
+
+
+@pytest.mark.asyncio
+async def test_wrapped_builtin_tool_applies_unified_tool_contract_validation() -> None:
+    wrapped = _wrap_tool_function_for_toolkit(read_file)
+
+    response = await wrapped(file_path="   ")
+
+    assert "Missing required tool field(s): file_path" in response.content[0]["text"]
+
+
+def test_query_execution_runtime_evidence_sinks_attach_tool_contract_metadata() -> None:
+    class _ToolBridge:
+        def __init__(self) -> None:
+            self.shell_calls: list[dict[str, object]] = []
+            self.file_calls: list[dict[str, object]] = []
+            self.browser_calls: list[dict[str, object]] = []
+
+        def record_shell_event(self, task_id: str, payload: dict[str, object]) -> None:
+            self.shell_calls.append({"task_id": task_id, "payload": payload})
+
+        def record_file_event(self, task_id: str, payload: dict[str, object]) -> None:
+            self.file_calls.append({"task_id": task_id, "payload": payload})
+
+        def record_browser_event(self, task_id: str, payload: dict[str, object]) -> None:
+            self.browser_calls.append({"task_id": task_id, "payload": payload})
+
+    bridge = _ToolBridge()
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        tool_bridge=bridge,
+    )
+
+    shell_sink = service._make_shell_evidence_sink("ktask:query-tool")  # pylint: disable=protected-access
+    assert shell_sink is not None
+    shell_sink(
+        {
+            "tool_name": "execute_shell_command",
+            "command": "git status",
+            "cwd": "D:/word/copaw",
+            "timeout_seconds": 60,
+            "status": "success",
+            "returncode": 0,
+            "stdout": "ok",
+            "stderr": "",
+            "metadata": {},
+        },
+    )
+
+    file_sink = service._make_file_evidence_sink("ktask:query-tool")  # pylint: disable=protected-access
+    assert file_sink is not None
+    file_sink(
+        {
+            "tool_name": "write_file",
+            "action": "write",
+            "file_path": "notes.txt",
+            "resolved_path": "D:/word/copaw/notes.txt",
+            "status": "success",
+            "result_summary": "done",
+            "metadata": {},
+        },
+    )
+
+    browser_sink = service._make_browser_evidence_sink("ktask:query-tool")  # pylint: disable=protected-access
+    assert browser_sink is not None
+    browser_sink(
+        {
+            "tool_name": "browser_use",
+            "action": "click",
+            "page_id": "page-1",
+            "status": "success",
+            "result_summary": "clicked",
+            "metadata": {},
+        },
+    )
+
+    shell_meta = bridge.shell_calls[0]["payload"]["metadata"]
+    assert shell_meta["tool_contract"] == "tool:execute_shell_command"
+    assert shell_meta["action_mode"] == "read"
+    assert shell_meta["read_only"] is True
+    assert shell_meta["concurrency_class"] == "parallel-read"
+    assert shell_meta["preflight_policy"] == "shell-safety"
+
+    file_meta = bridge.file_calls[0]["payload"]["metadata"]
+    assert file_meta["tool_contract"] == "tool:write_file"
+    assert file_meta["action_mode"] == "write"
+    assert file_meta["read_only"] is False
+    assert file_meta["concurrency_class"] == "serial-write"
+    assert file_meta["preflight_policy"] == "inline"
+
+    browser_meta = bridge.browser_calls[0]["payload"]["metadata"]
+    assert browser_meta["tool_contract"] == "tool:browser_use"
+    assert browser_meta["action_mode"] == "write"
+    assert browser_meta["read_only"] is False
+    assert browser_meta["concurrency_class"] == "serial-write"
+    assert browser_meta["preflight_policy"] == "inline"
+
+
+@pytest.mark.asyncio
+async def test_query_execution_runtime_builds_capability_frontdoor_delegate_for_builtin_tools() -> None:
+    class _CapabilityService:
+        def __init__(self) -> None:
+            self.calls: list[KernelTask] = []
+
+        async def execute_task(self, task: KernelTask) -> dict[str, object]:
+            self.calls.append(task)
+            return {
+                "success": True,
+                "summary": "delegated-via-capability-frontdoor",
+            }
+
+    capability_service = _CapabilityService()
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        capability_service=capability_service,
+    )
+
+    delegate = service._build_query_tool_execution_delegate(  # pylint: disable=protected-access
+        owner_agent_id="ops-agent",
+        kernel_task_id="ktask:query-frontdoor",
+        execution_context={
+            "work_context_id": "work-context-1",
+            "main_brain_runtime": {
+                "environment": {
+                    "ref": "desktop:runtime",
+                },
+            },
+        },
+    )
+
+    assert delegate is not None
+    result = await delegate(
+        "tool:execute_shell_command",
+        {"command": "git status"},
+    )
+
+    assert result["summary"] == "delegated-via-capability-frontdoor"
+    [submitted] = capability_service.calls
+    assert submitted.id == "ktask:query-frontdoor"
+    assert submitted.capability_ref == "tool:execute_shell_command"
+    assert submitted.owner_agent_id == "ops-agent"
+    assert submitted.work_context_id == "work-context-1"
+    assert submitted.environment_ref == "desktop:runtime"
+    assert submitted.payload == {"command": "git status"}
+
+
+@pytest.mark.asyncio
+async def test_query_execution_runtime_delegate_and_wrapped_builtin_tool_form_end_to_end_frontdoor_path() -> None:
+    from copaw.agents.react_agent import _wrap_tool_function_for_toolkit, bind_tool_execution_delegate
+    from copaw.agents.tools import get_current_time
+
+    class _CapabilityService:
+        def __init__(self) -> None:
+            self.calls: list[KernelTask] = []
+
+        async def execute_task(self, task: KernelTask) -> dict[str, object]:
+            self.calls.append(task)
+            return {
+                "success": True,
+                "summary": "delegated-e2e",
+            }
+
+    capability_service = _CapabilityService()
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        capability_service=capability_service,
+    )
+    delegate = service._build_query_tool_execution_delegate(  # pylint: disable=protected-access
+        owner_agent_id="ops-agent",
+        kernel_task_id="ktask:query-e2e-frontdoor",
+        execution_context={
+            "work_context_id": "work-context-e2e",
+            "main_brain_runtime": {
+                "environment": {
+                    "ref": "desktop:e2e",
+                },
+            },
+        },
+    )
+    wrapped = _wrap_tool_function_for_toolkit(get_current_time)
+
+    with bind_tool_execution_delegate(delegate):
+        response = await wrapped()
+
+    assert response.content[0]["text"] == "delegated-e2e"
+    [submitted] = capability_service.calls
+    assert submitted.id == "ktask:query-e2e-frontdoor"
+    assert submitted.capability_ref == "tool:get_current_time"
+    assert submitted.owner_agent_id == "ops-agent"
+    assert submitted.work_context_id == "work-context-e2e"
+    assert submitted.environment_ref == "desktop:e2e"
+    assert submitted.payload == {}

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from .runtime_outcome import normalize_runtime_summary, should_block_runtime_error
+from .task_execution_projection import build_child_run_resume_payload
 from ..state import AgentCheckpointRecord, AgentMailboxRecord, AgentRuntimeRecord
 from ..state.repositories import (
     BaseAgentCheckpointRepository,
@@ -362,12 +363,15 @@ class ActorMailboxService:
                 "mailbox": item.model_dump(mode="json"),
                 "task_phase": task_phase,
             }
-            resume_payload = {
-                "mailbox_id": item.id,
-                "task_id": item.task_id,
-                "recovered_from_status": item.status,
-                "task_phase": task_phase,
-            }
+            resume_payload = build_child_run_resume_payload(
+                mailbox_item=item,
+                task_id=item.task_id,
+                phase="queued",
+                extra_payload={
+                    "recovered_from_status": item.status,
+                    "task_phase": task_phase,
+                },
+            )
             if task_phase == "completed":
                 checkpoint = self.create_checkpoint(
                     agent_id=item.agent_id,
@@ -737,6 +741,30 @@ class ActorMailboxService:
             mailbox_item = self._mailbox_repository.get_item(mailbox_id)
             if mailbox_item is not None:
                 resolved_work_context_id = _non_empty_str(mailbox_item.work_context_id)
+        normalized_snapshot_payload = dict(snapshot_payload or {})
+        normalized_resume_payload = dict(resume_payload or {})
+        existing = self._find_matching_checkpoint(
+            agent_id=agent_id,
+            mailbox_id=mailbox_id,
+            task_id=task_id,
+            checkpoint_kind=checkpoint_kind,
+            status=status,
+            phase=phase,
+            conversation_thread_id=conversation_thread_id,
+            environment_ref=environment_ref,
+            work_context_id=resolved_work_context_id,
+            snapshot_payload=normalized_snapshot_payload,
+            resume_payload=normalized_resume_payload,
+            summary=summary,
+        )
+        if existing is not None:
+            self._sync_runtime(
+                agent_id,
+                current_mailbox_id=mailbox_id,
+                current_task_id=task_id,
+                checkpoint_id=existing.id,
+            )
+            return existing
         checkpoint = AgentCheckpointRecord(
             agent_id=agent_id,
             mailbox_id=mailbox_id,
@@ -751,8 +779,8 @@ class ActorMailboxService:
             phase=phase,
             conversation_thread_id=conversation_thread_id,
             environment_ref=environment_ref,
-            snapshot_payload=dict(snapshot_payload or {}),
-            resume_payload=dict(resume_payload or {}),
+            snapshot_payload=normalized_snapshot_payload,
+            resume_payload=normalized_resume_payload,
             summary=summary,
         )
         stored = self._checkpoint_repository.upsert_checkpoint(checkpoint)
@@ -763,6 +791,49 @@ class ActorMailboxService:
             checkpoint_id=stored.id,
         )
         return stored
+
+    def _find_matching_checkpoint(
+        self,
+        *,
+        agent_id: str,
+        mailbox_id: str | None,
+        task_id: str | None,
+        checkpoint_kind: str,
+        status: str,
+        phase: str,
+        conversation_thread_id: str | None,
+        environment_ref: str | None,
+        work_context_id: str | None,
+        snapshot_payload: dict[str, object],
+        resume_payload: dict[str, object],
+        summary: str,
+    ) -> AgentCheckpointRecord | None:
+        if self._checkpoint_repository is None:
+            return None
+        candidates = self._checkpoint_repository.list_checkpoints(
+            agent_id=agent_id,
+            mailbox_id=mailbox_id,
+            task_id=task_id,
+            work_context_id=work_context_id,
+            limit=None,
+        )
+        for checkpoint in candidates:
+            if checkpoint.checkpoint_kind != checkpoint_kind:
+                continue
+            if checkpoint.status != status or checkpoint.phase != phase:
+                continue
+            if checkpoint.conversation_thread_id != conversation_thread_id:
+                continue
+            if checkpoint.environment_ref != environment_ref:
+                continue
+            if dict(checkpoint.snapshot_payload or {}) != snapshot_payload:
+                continue
+            if dict(checkpoint.resume_payload or {}) != resume_payload:
+                continue
+            if checkpoint.summary != summary:
+                continue
+            return checkpoint
+        return None
 
     def pending_count(self, agent_id: str) -> int:
         return sum(

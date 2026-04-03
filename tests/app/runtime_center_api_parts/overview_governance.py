@@ -271,7 +271,24 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
     app.state.learning_service = FakeLearningService()
     app.state.agent_profile_service = FakeAgentProfileService()
     app.state.industry_service = FakeIndustryService()
-    app.state.governance_service = FakeGovernanceService()
+    app.state.prediction_service = FakePredictionService()
+    governance_service = FakeGovernanceService()
+    governance_service.status["decision_provenance"] = {
+        "open_count": 3,
+        "by_type": [
+            {"decision_type": "tool-confirmation", "count": 2},
+            {"decision_type": "staffing-confirmation", "count": 1},
+        ],
+        "by_risk_level": [
+            {"risk_level": "confirm", "count": 2},
+            {"risk_level": "guarded", "count": 1},
+        ],
+        "by_requester": [
+            {"requested_by": "execution-core", "count": 2},
+            {"requested_by": "main-brain", "count": 1},
+        ],
+    }
+    app.state.governance_service = governance_service
     app.state.routine_service = FakeRoutineService()
     app.state.strategy_memory_service = FakeStrategyMemoryService()
 
@@ -319,7 +336,10 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
     assert "current_goal_id" not in cards["agents"]["entries"][0]["meta"]
     assert "current_goal" not in cards["agents"]["entries"][0]["meta"]
     assert cards["capabilities"]["source"] == "capability_service"
-    assert cards["capabilities"]["meta"]["total"] == 1
+    assert cards["capabilities"]["meta"]["total"] == 3
+    assert cards["capabilities"]["meta"]["skill_count"] == 2
+    assert cards["capabilities"]["meta"]["mcp_count"] == 2
+    assert cards["capabilities"]["meta"]["delta"]["missing_capability_count"] == 1
     assert cards["evidence"]["source"] == "evidence_query_service"
     assert cards["evidence"]["count"] == 1
     assert cards["governance"]["source"] == "governance_service"
@@ -454,7 +474,24 @@ def test_runtime_center_main_brain_route_exposes_unified_operator_sections():
     app.state.learning_service = FakeLearningService()
     app.state.agent_profile_service = FakeAgentProfileService()
     app.state.industry_service = FakeIndustryService()
-    app.state.governance_service = FakeGovernanceService()
+    app.state.prediction_service = FakePredictionService()
+    governance_service = FakeGovernanceService()
+    governance_service.status["decision_provenance"] = {
+        "open_count": 3,
+        "by_type": [
+            {"decision_type": "tool-confirmation", "count": 2},
+            {"decision_type": "staffing-confirmation", "count": 1},
+        ],
+        "by_risk_level": [
+            {"risk_level": "confirm", "count": 2},
+            {"risk_level": "guarded", "count": 1},
+        ],
+        "by_requester": [
+            {"requested_by": "execution-core", "count": 2},
+            {"requested_by": "main-brain", "count": 1},
+        ],
+    }
+    app.state.governance_service = governance_service
     app.state.routine_service = FakeRoutineService()
     app.state.strategy_memory_service = FakeStrategyMemoryService()
     app.state.startup_recovery_summary = StartupRecoverySummary(
@@ -495,11 +532,32 @@ def test_runtime_center_main_brain_route_exposes_unified_operator_sections():
     assert payload["governance"]["route"] == "/api/runtime-center/governance/status"
     assert payload["governance"]["pending_decisions"] == 0
     assert payload["governance"]["pending_patches"] == 1
+    assert payload["governance"]["decision_provenance"]["open_count"] == 3
+    assert payload["governance"]["decision_provenance"]["by_type"][0] == {
+        "decision_type": "tool-confirmation",
+        "count": 2,
+    }
+    assert payload["governance"]["explain"]["decision_provenance"]["open_count"] == 3
+    assert payload["governance"]["explain"]["remediation_summary"] == payload["governance"]["summary"]
+    capability_governance = payload["governance"]["capability_governance"]
+    assert capability_governance["total"] == 3
+    assert capability_governance["enabled"] == 2
+    assert capability_governance["skill_count"] == 2
+    assert capability_governance["mcp_count"] == 2
+    assert capability_governance["package_bound_skill_count"] == 1
+    assert capability_governance["package_bound_mcp_count"] == 1
+    assert capability_governance["delta"]["missing_capability_count"] == 1
+    assert capability_governance["delta"]["trial_count"] == 1
+    assert capability_governance["degraded"] is True
+    assert capability_governance["degraded_components"][0]["component"] == "capability-coverage"
+    assert payload["governance"]["explain"]["degraded_components"][0]["component"] == "capability-coverage"
     assert payload["governance"]["summary"]
 
     assert payload["recovery"]["available"] is True
     assert payload["recovery"]["route"] == "/api/runtime-center/recovery/latest"
+    assert payload["recovery"]["source"] == "startup"
     assert payload["recovery"]["pending_decisions"] == 2
+    assert payload["recovery"]["detail"]["decisions"]["pending_decisions"] == 2
     assert payload["recovery"]["summary"]
 
     assert payload["automation"]["route"] == "/api/runtime-center/schedules"
@@ -516,6 +574,110 @@ def test_runtime_center_main_brain_route_exposes_unified_operator_sections():
     assert payload["signals"]["governance"]["count"] == 1
     assert payload["signals"]["automation"]["count"] == 1
     assert payload["signals"]["recovery"]["count"] == 1
+
+
+def test_runtime_center_main_brain_route_prefers_canonical_latest_recovery_report():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.prediction_service = FakePredictionService()
+    governance_service = FakeGovernanceService()
+    governance_service.status["decision_provenance"] = {
+        "open_count": 3,
+        "by_type": [
+            {"decision_type": "tool-confirmation", "count": 2},
+            {"decision_type": "staffing-confirmation", "count": 1},
+        ],
+        "by_risk_level": [
+            {"risk_level": "confirm", "count": 2},
+            {"risk_level": "guarded", "count": 1},
+        ],
+        "by_requester": [
+            {"requested_by": "execution-core", "count": 2},
+            {"requested_by": "main-brain", "count": 1},
+        ],
+    }
+    app.state.governance_service = governance_service
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.startup_recovery_summary = StartupRecoverySummary(
+        reason="startup",
+        pending_decisions=2,
+        active_schedules=1,
+    )
+    app.state.latest_recovery_report = {
+        "reason": "runtime-recovery",
+        "pending_decisions": 1,
+        "active_schedules": 4,
+        "notes": ["Recovered post-start runtime drift."],
+    }
+    app.state.cron_manager = FakeCronManager(
+        [make_job("sched-1")],
+        states={
+            "sched-1": CronJobState(
+                last_status="success",
+                last_run_at=datetime(2026, 3, 9, 8, 0, tzinfo=timezone.utc),
+                next_run_at=datetime(2026, 3, 9, 9, 0, tzinfo=timezone.utc),
+            ),
+        },
+        heartbeat_state=CronJobState(
+            last_status="success",
+            last_run_at=datetime(2026, 3, 9, 8, 30, tzinfo=timezone.utc),
+            next_run_at=datetime(2026, 3, 9, 14, 30, tzinfo=timezone.utc),
+        ),
+    )
+
+    client = TestClient(app)
+    with patch(
+        "copaw.app.runtime_center.overview_cards.get_heartbeat_config",
+        return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
+        create=True,
+    ):
+        response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recovery"]["reason"] == "runtime-recovery"
+    assert payload["recovery"]["source"] == "latest"
+    assert payload["recovery"]["pending_decisions"] == 1
+    assert payload["recovery"]["active_schedules"] == 4
+    assert payload["recovery"]["detail"]["decisions"]["pending_decisions"] == 1
+    assert payload["recovery"]["detail"]["automation"]["active_schedules"] == 4
+
+
+def test_runtime_center_overview_capabilities_card_exposes_skill_mcp_governance_projection():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.prediction_service = FakePredictionService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/overview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    cards = {
+        card["key"]: card
+        for card in payload["cards"]
+    }
+    capabilities = cards["capabilities"]
+    assert capabilities["meta"]["skill_count"] == 2
+    assert capabilities["meta"]["mcp_count"] == 2
+    assert capabilities["meta"]["package_bound_skill_count"] == 1
+    assert capabilities["meta"]["package_bound_mcp_count"] == 1
+    assert capabilities["meta"]["delta"]["missing_capability_count"] == 1
+    assert capabilities["meta"]["degraded"] is True
 
 
 def test_runtime_center_main_brain_route_exposes_automation_loop_and_supervisor_health():
@@ -1012,7 +1174,9 @@ def test_runtime_center_overview_returns_unavailable_cards_without_backing_state
     assert "goals" not in cards
     assert "schedules" not in cards
     assert cards["capabilities"]["status"] == "state-service"
-    assert cards["capabilities"]["meta"]["total"] == 1
+    assert cards["capabilities"]["meta"]["total"] == 3
+    assert cards["capabilities"]["meta"]["skill_count"] == 2
+    assert cards["capabilities"]["meta"]["mcp_count"] == 2
     for key, card in cards.items():
         if key in {"capabilities", "patches", "growth"}:
             continue

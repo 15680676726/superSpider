@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from ...kernel.task_execution_projection import resolve_visible_execution_phase
 from ...kernel.persistence import KernelTaskStore, decode_kernel_task_metadata
 from ...utils.runtime_routes import task_route
 from .task_review_projection import first_non_empty, trace_id_from_kernel_meta
@@ -68,16 +69,17 @@ class RuntimeCenterTaskListProjector:
             runtime=runtime,
             kernel_metadata=kernel_meta,
         )
+        visible_status = resolve_visible_execution_phase(
+            runtime_phase=getattr(runtime, "current_phase", None) if runtime is not None else None,
+            runtime_status=getattr(runtime, "runtime_status", None) if runtime is not None else None,
+            task_status=getattr(task, "status", None),
+        ) or task.status
         return {
             "id": task.id,
             "trace_id": trace_id_from_kernel_meta(task.id, kernel_meta),
             "title": task.title,
             "kind": task.task_type,
-            "status": (
-                runtime.runtime_status
-                if runtime is not None and task.status == "running"
-                else task.status
-            ),
+            "status": visible_status,
             "owner_agent_id": (
                 runtime.last_owner_agent_id
                 if runtime is not None and runtime.last_owner_agent_id

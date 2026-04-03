@@ -778,10 +778,56 @@ class FakeCapabilityService:
 
     def summarize(self):
         return {
-            "total": 1,
-            "enabled": 1,
-            "by_kind": {"local-tool": 1},
+            "total": 3,
+            "enabled": 2,
+            "by_kind": {"local-tool": 1, "remote-mcp": 1, "skill-bundle": 1},
+            "by_source": {"mcp": 1, "skill": 1, "tool": 1},
         }
+
+    def list_skill_specs(self, *, enabled_only: bool = False):
+        items = [
+            {
+                "name": "nextgen_outreach",
+                "enabled": True,
+                "package_ref": "https://example.com/skills/nextgen-outreach.zip",
+                "package_kind": "hub-bundle",
+                "package_version": "1.2.3",
+            },
+            {
+                "name": "legacy_outreach",
+                "enabled": False,
+                "package_ref": None,
+                "package_kind": None,
+                "package_version": None,
+            },
+        ]
+        if enabled_only:
+            return [item for item in items if item["enabled"]]
+        return items
+
+    def list_mcp_client_infos(self):
+        return [
+            {
+                "key": "research-remote",
+                "name": "Research Remote",
+                "enabled": True,
+                "transport": "stdio",
+                "package_ref": "acme/research-remote",
+                "package_kind": "registry",
+                "package_version": "2026.04",
+                "runtime_status": "ready",
+            },
+            {
+                "key": "ops-remote",
+                "name": "Ops Remote",
+                "enabled": False,
+                "transport": "http",
+                "package_ref": None,
+                "package_kind": None,
+                "package_version": None,
+                "runtime_status": "degraded",
+            },
+        ]
 
 
 class FakeLearningService:
@@ -1284,6 +1330,12 @@ class FakeGovernanceService:
             "pending_decisions": 0,
             "proposed_patches": 1,
             "pending_patches": 1,
+            "decision_provenance": {
+                "open_count": 0,
+                "by_type": [],
+                "by_risk_level": [],
+                "by_requester": [],
+            },
             "host_twin": {
                 "blocking_session_count": 0,
                 "blocking_families": [],

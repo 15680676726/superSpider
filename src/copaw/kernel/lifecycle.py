@@ -23,6 +23,7 @@ class TaskLifecycleManager:
         self._config = config or KernelConfig()
         self._store = store
         self._tasks: dict[str, KernelTask] = {}
+        self._terminal_results: dict[str, KernelResult] = {}
 
     def accept(self, task: KernelTask) -> KernelTask:
         task = task.model_copy(
@@ -83,6 +84,12 @@ class TaskLifecycleManager:
         evidence_id: str | None = None,
     ) -> KernelResult:
         task = self._get_task(task_id)
+        if task.phase in {"completed", "failed", "cancelled"}:
+            return self._terminal_result(
+                task,
+                fallback_summary=summary,
+                evidence_id=evidence_id,
+            )
         if task.phase != "executing":
             raise ValueError(
                 f"Task {task_id} is in phase '{task.phase}', expected 'executing'",
@@ -98,7 +105,7 @@ class TaskLifecycleManager:
             last_evidence_id=evidence_id,
         )
         logger.info("Kernel completed task %s", task_id)
-        return KernelResult(
+        result = KernelResult(
             task_id=task_id,
             trace_id=task.trace_id,
             success=True,
@@ -106,38 +113,54 @@ class TaskLifecycleManager:
             summary=summary,
             evidence_id=evidence_id,
         )
+        self._terminal_results[task_id] = result
+        return result
 
     def fail(self, task_id: str, *, error: str) -> KernelResult:
         task = self._get_task(task_id)
+        if task.phase in {"completed", "failed", "cancelled"}:
+            return self._terminal_result(
+                task,
+                fallback_error=error,
+            )
         task = task.model_copy(
             update={"phase": "failed", "updated_at": self._now()},
         )
         self._tasks[task_id] = task
         self._persist(task, last_error_summary=error)
         logger.warning("Kernel failed task %s: %s", task_id, error)
-        return KernelResult(
+        result = KernelResult(
             task_id=task_id,
             trace_id=task.trace_id,
             success=False,
             phase="failed",
             error=error,
         )
+        self._terminal_results[task_id] = result
+        return result
 
     def cancel(self, task_id: str, *, summary: str = "Task cancelled") -> KernelResult:
         task = self._get_task(task_id)
+        if task.phase in {"completed", "failed", "cancelled"}:
+            return self._terminal_result(
+                task,
+                fallback_summary=summary,
+            )
         task = task.model_copy(
             update={"phase": "cancelled", "updated_at": self._now()},
         )
         self._tasks[task_id] = task
         self._persist(task, last_error_summary=summary)
         logger.info("Kernel cancelled task %s", task_id)
-        return KernelResult(
+        result = KernelResult(
             task_id=task_id,
             trace_id=task.trace_id,
             success=False,
             phase="cancelled",
             summary=summary,
         )
+        self._terminal_results[task_id] = result
+        return result
 
     def get_task(self, task_id: str) -> KernelTask | None:
         task = self._tasks.get(task_id)
@@ -181,6 +204,41 @@ class TaskLifecycleManager:
             last_error_summary=last_error_summary,
             last_evidence_id=last_evidence_id,
         )
+
+    def _terminal_result(
+        self,
+        task: KernelTask,
+        *,
+        fallback_summary: str = "",
+        fallback_error: str | None = None,
+        evidence_id: str | None = None,
+    ) -> KernelResult:
+        cached = self._terminal_results.get(task.id)
+        if cached is not None:
+            return cached
+        runtime_record = (
+            self._store.get_runtime_record(task.id)
+            if self._store is not None
+            else None
+        )
+        summary = fallback_summary
+        error = fallback_error
+        resolved_evidence_id = evidence_id
+        if runtime_record is not None:
+            summary = runtime_record.last_result_summary or summary
+            error = runtime_record.last_error_summary or error
+            resolved_evidence_id = runtime_record.last_evidence_id or resolved_evidence_id
+        result = KernelResult(
+            task_id=task.id,
+            trace_id=task.trace_id,
+            success=task.phase == "completed",
+            phase=task.phase,
+            summary=summary if task.phase != "failed" else "",
+            error=error if task.phase != "completed" else None,
+            evidence_id=resolved_evidence_id,
+        )
+        self._terminal_results[task.id] = result
+        return result
 
     @staticmethod
     def _now() -> datetime:

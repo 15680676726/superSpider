@@ -20,11 +20,14 @@ def _string(value: object | None) -> str | None:
 def _string_list(value: object | None) -> list[str]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         return []
-    return [
-        text
-        for item in value
-        if (text := _string(item)) is not None
-    ]
+    items: list[str] = []
+    for item in value:
+        if isinstance(item, Sequence) and not isinstance(item, (str, bytes, bytearray)):
+            items.extend(_string_list(item))
+            continue
+        if (text := _string(item)) is not None:
+            items.append(text)
+    return items
 
 
 def _dict_list(value: object | None) -> list[dict[str, Any]]:
@@ -251,13 +254,43 @@ def _promote_strategy_change_payload(
     *,
     trigger_rule_ids: Sequence[str],
     trigger_context: Mapping[str, Any],
+    relation_projection: Mapping[str, list[str]],
 ) -> dict[str, Any]:
     payload = dict(strategy_change)
     if trigger_rule_ids:
         payload["trigger_rule_ids"] = list(trigger_rule_ids)
     if trigger_context:
         payload["trigger_context"] = dict(trigger_context)
+    if relation_projection.get("relation_ids"):
+        payload["affected_relation_ids"] = list(relation_projection["relation_ids"])
+    if relation_projection.get("relation_kinds"):
+        payload["affected_relation_kinds"] = list(relation_projection["relation_kinds"])
+    if relation_projection.get("source_refs"):
+        payload["relation_source_refs"] = list(relation_projection["source_refs"])
     return payload
+
+
+def _relation_projection(
+    activation: Mapping[str, Any],
+    strategy_change: Mapping[str, Any] | None = None,
+) -> dict[str, list[str]]:
+    relation_evidence = _dict_list(activation.get("top_relation_evidence"))
+    if isinstance(strategy_change, Mapping):
+        relation_evidence.extend(_dict_list(strategy_change.get("relation_evidence")))
+    return {
+        "relation_ids": _unique_strings(
+            [item.get("relation_id") for item in relation_evidence],
+            *[item.get("affected_relation_ids") for item in relation_evidence],
+        ),
+        "relation_kinds": _unique_strings(
+            [item.get("relation_kind") for item in relation_evidence],
+            *[item.get("affected_relation_kinds") for item in relation_evidence],
+        ),
+        "source_refs": _unique_strings(
+            *[item.get("source_refs") for item in relation_evidence],
+            [item.get("source_ref") for item in relation_evidence],
+        ),
+    }
 
 
 class ReportReplanEngine:
@@ -312,6 +345,7 @@ class ReportReplanEngine:
                 recommended_actions=list(payload.recommended_actions),
                 activation=dict(payload.activation),
                 rationale=dict(raw_decision.rationale),
+                trigger_context=dict(raw_decision.trigger_context),
             )
         elif payload.needs_replan:
             decision = ReportReplanDecision(
@@ -326,6 +360,7 @@ class ReportReplanEngine:
                 directives=list(payload.replan_directives),
                 recommended_actions=list(payload.recommended_actions),
                 activation=dict(payload.activation),
+                trigger_context={},
             )
         else:
             return ReportReplanDecision()
@@ -348,10 +383,12 @@ class ReportReplanEngine:
                 context=context,
                 strategy_change=strategy_change,
             )
+            relation_projection = _relation_projection(activation, strategy_change)
             promoted_strategy_change = _promote_strategy_change_payload(
                 strategy_change,
                 trigger_rule_ids=trigger_rule_ids,
                 trigger_context=trigger_context,
+                relation_projection=relation_projection,
             )
             activation["strategy_change"] = promoted_strategy_change
             summary = decision.summary
@@ -383,6 +420,11 @@ class ReportReplanEngine:
                         ],
                     ),
                     "activation": activation,
+                    "trigger_context": trigger_context,
+                    "strategy_change": promoted_strategy_change,
+                    "affected_relation_ids": relation_projection["relation_ids"],
+                    "affected_relation_kinds": relation_projection["relation_kinds"],
+                    "relation_source_refs": relation_projection["source_refs"],
                 },
             )
         elif activation:
@@ -408,6 +450,7 @@ class ReportReplanEngine:
             decision.trigger_rule_ids,
             strategy_change_payload.get("trigger_rule_ids"),
         )
+        relation_projection = _relation_projection(activation, strategy_change_payload)
         affected_lane_ids = _unique_strings(
             decision.affected_lane_ids,
             strategy_change_payload.get("affected_lane_ids"),
@@ -437,10 +480,13 @@ class ReportReplanEngine:
                 "trigger_rule_ids": trigger_rule_ids,
                 "affected_lane_ids": affected_lane_ids,
                 "affected_uncertainty_ids": affected_uncertainty_ids,
-                "trigger_context": _mapping(strategy_change_payload.get("trigger_context")),
-                "strategy_change": dict(strategy_change_payload),
+                "affected_relation_ids": relation_projection["relation_ids"],
+                "affected_relation_kinds": relation_projection["relation_kinds"],
+                "relation_source_refs": relation_projection["source_refs"],
                 "rationale": rationale,
                 "activation": activation,
+                "trigger_context": _mapping(strategy_change_payload.get("trigger_context")),
+                "strategy_change": dict(strategy_change_payload),
             },
         )
         return decision

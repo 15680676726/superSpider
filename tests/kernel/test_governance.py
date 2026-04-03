@@ -221,6 +221,63 @@ def test_governance_status_surfaces_host_handoff_staffing_and_human_assist(
     assert status.human_assist["need_more_evidence_count"] == 1
 
 
+def test_governance_status_exposes_decision_provenance_summary(
+    tmp_path,
+) -> None:
+    repository = SqliteGovernanceControlRepository(
+        SQLiteStateStore(tmp_path / "governance.sqlite3"),
+    )
+    decision_repository = SimpleNamespace(
+        list_decision_requests=lambda: [
+            SimpleNamespace(
+                status="open",
+                decision_type="tool-confirmation",
+                risk_level="confirm",
+                requested_by="execution-core",
+            ),
+            SimpleNamespace(
+                status="reviewing",
+                decision_type="tool-confirmation",
+                risk_level="confirm",
+                requested_by="execution-core",
+            ),
+            SimpleNamespace(
+                status="open",
+                decision_type="staffing-confirmation",
+                risk_level="guarded",
+                requested_by="main-brain",
+            ),
+            SimpleNamespace(
+                status="approved",
+                decision_type="ignored-terminal",
+                risk_level="auto",
+                requested_by="operator",
+            ),
+        ],
+    )
+    service = GovernanceService(
+        control_repository=repository,
+        decision_request_repository=decision_repository,
+    )
+
+    status = service.get_status()
+
+    assert status.pending_decisions == 3
+    assert status.decision_provenance["open_count"] == 3
+    assert status.decision_provenance["by_type"] == [
+        {"decision_type": "tool-confirmation", "count": 2},
+        {"decision_type": "staffing-confirmation", "count": 1},
+    ]
+    assert status.decision_provenance["by_risk_level"] == [
+        {"risk_level": "confirm", "count": 2},
+        {"risk_level": "guarded", "count": 1},
+    ]
+    assert status.decision_provenance["by_requester"] == [
+        {"requested_by": "execution-core", "count": 2},
+        {"requested_by": "main-brain", "count": 1},
+    ]
+
+
 def test_governance_admission_blocks_dispatch_when_runtime_governance_requires_handoff(
     tmp_path,
 ) -> None:

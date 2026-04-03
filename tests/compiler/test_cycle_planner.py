@@ -266,6 +266,61 @@ def test_cycle_planner_uses_graph_focus_to_break_near_ties() -> None:
     assert decision.selected_backlog_item_ids[0] == "inventory-variance-review"
 
 
+def test_cycle_planner_uses_relation_focus_to_break_near_ties() -> None:
+    planner = CyclePlanningCompiler()
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind",
+        summary="Northwind execution shell",
+        owner_scope="industry:northwind",
+    )
+
+    decision = planner.plan(
+        record=record,
+        current_cycle=None,
+        next_cycle_due_at=None,
+        open_backlog=[
+            _backlog_item(
+                "approval-refresh",
+                lane_id="lane-ops",
+                priority=3,
+                title="Refresh warehouse approval checklist",
+                summary="Refresh the release checklist before the next shipment window.",
+            ),
+            _backlog_item(
+                "approval-contradiction-review",
+                lane_id="lane-ops",
+                priority=3,
+                title="Review contradictory warehouse approval evidence",
+                summary="Resolve the contradiction between warehouse approval evidence and release readiness.",
+            ),
+        ],
+        pending_reports=[],
+        force=False,
+        strategy_constraints=PlanningStrategyConstraints(
+            graph_focus_relations=[
+                "approval contradicts release evidence",
+                "warehouse approval contradiction",
+            ],
+            graph_relation_evidence=[
+                {
+                    "relation_id": "relation-approval-1",
+                    "relation_kind": "contradicts",
+                    "summary": "Warehouse approval evidence contradicts release readiness.",
+                    "source_refs": ["chunk-warehouse-1"],
+                    "source_node_id": "entity:warehouse-approval",
+                    "target_node_id": "opinion:release-readiness",
+                },
+            ],
+        ),
+    )
+
+    assert decision.should_start is True
+    assert decision.selected_backlog_item_ids[0] == "approval-contradiction-review"
+    assert decision.affected_relation_ids == ["relation-approval-1"]
+    assert decision.affected_relation_kinds == ["contradicts"]
+
+
 def test_cycle_planner_lane_budgets_constrain_selection_across_cycles_with_lane_metadata() -> None:
     planner = CyclePlanningCompiler()
     record = IndustryInstanceRecord(

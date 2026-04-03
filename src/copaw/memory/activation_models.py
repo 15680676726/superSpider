@@ -47,6 +47,16 @@ class ActivationInput(BaseModel):
     limit: int = 12
 
 
+class ActivationRelationEvidence(BaseModel):
+    relation_id: str
+    relation_kind: str = "references"
+    summary: str = ""
+    source_node_id: str | None = None
+    target_node_id: str | None = None
+    confidence: float = 0.0
+    source_refs: list[str] = Field(default_factory=list)
+
+
 class ActivationResult(BaseModel):
     query: str
     scope_type: str
@@ -59,6 +69,9 @@ class ActivationResult(BaseModel):
     strategy_refs: list[str] = Field(default_factory=list)
     top_entities: list[str] = Field(default_factory=list)
     top_opinions: list[str] = Field(default_factory=list)
+    top_relations: list[str] = Field(default_factory=list)
+    top_relation_kinds: list[str] = Field(default_factory=list)
+    top_relation_evidence: list[ActivationRelationEvidence] = Field(default_factory=list)
     top_constraints: list[str] = Field(default_factory=list)
     top_next_actions: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)

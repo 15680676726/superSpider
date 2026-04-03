@@ -93,6 +93,41 @@ def _dict_list(value: object | None) -> list[dict[str, object]]:
     return payloads
 
 
+def _counted_entries(items: dict[str, int], key_name: str) -> list[dict[str, object]]:
+    return [
+        {key_name: key, "count": count}
+        for key, count in sorted(items.items(), key=lambda entry: (-entry[1], entry[0]))
+    ]
+
+
+def _build_decision_provenance(
+    decisions: list[object],
+) -> dict[str, object]:
+    if not decisions:
+        return {
+            "open_count": 0,
+            "by_type": [],
+            "by_risk_level": [],
+            "by_requester": [],
+        }
+    by_type: dict[str, int] = {}
+    by_risk_level: dict[str, int] = {}
+    by_requester: dict[str, int] = {}
+    for decision in decisions:
+        decision_type = _first_non_empty(getattr(decision, "decision_type", None), "unknown")
+        risk_level = _first_non_empty(getattr(decision, "risk_level", None), "unknown")
+        requester = _first_non_empty(getattr(decision, "requested_by", None), "unknown")
+        by_type[decision_type] = by_type.get(decision_type, 0) + 1
+        by_risk_level[risk_level] = by_risk_level.get(risk_level, 0) + 1
+        by_requester[requester] = by_requester.get(requester, 0) + 1
+    return {
+        "open_count": len(decisions),
+        "by_type": _counted_entries(by_type, "decision_type"),
+        "by_risk_level": _counted_entries(by_risk_level, "risk_level"),
+        "by_requester": _counted_entries(by_requester, "requested_by"),
+    }
+
+
 def _staffing_confirmation_required(entry: object | None) -> bool:
     payload = _mapping_value(entry)
     if not payload:
@@ -211,6 +246,7 @@ class GovernanceStatus(BaseModel):
     pending_decisions: int = 0
     proposed_patches: int = 0
     pending_patches: int = 0
+    decision_provenance: dict[str, object] = Field(default_factory=dict)
     host_twin: dict[str, object] = Field(default_factory=dict)
     handoff: dict[str, object] = Field(default_factory=dict)
     staffing: dict[str, object] = Field(default_factory=dict)
@@ -291,15 +327,18 @@ class GovernanceService:
     def get_status(self) -> GovernanceStatus:
         control = self.get_control()
         pending_decisions = 0
+        open_decisions: list[object] = []
         if self._decision_request_repository is not None:
             try:
-                pending_decisions = sum(
-                    1
+                open_decisions = [
+                    decision
                     for decision in self._decision_request_repository.list_decision_requests()
                     if getattr(decision, "status", None) in {"open", "reviewing"}
-                )
+                ]
+                pending_decisions = len(open_decisions)
             except Exception:
                 logger.exception("Failed to count pending decisions")
+                open_decisions = []
         proposed_patches = 0
         pending_patches = 0
         if self._learning_service is not None:
@@ -336,6 +375,7 @@ class GovernanceService:
             pending_decisions=pending_decisions,
             proposed_patches=proposed_patches,
             pending_patches=pending_patches,
+            decision_provenance=_build_decision_provenance(open_decisions),
             host_twin=host_twin,
             handoff=handoff,
             staffing=staffing,

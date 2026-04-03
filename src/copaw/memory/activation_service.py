@@ -6,7 +6,13 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import Any, Iterable
 
-from .activation_models import ActivationInput, ActivationResult, KnowledgeNeuron
+from .activation_models import (
+    ActivationInput,
+    ActivationRelationEvidence,
+    ActivationResult,
+    KnowledgeNeuron,
+)
+from ..state.strategy_memory_service import resolve_strategy_payload
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{1,}")
 
@@ -103,6 +109,14 @@ class MemoryActivationService:
             industry_instance_id=industry_instance_id,
             limit=max(limit, 12),
         )
+        relation_views = self._list_derived_views(
+            method_name="list_relation_views",
+            scope_type=resolved_scope_type,
+            scope_id=resolved_scope_id,
+            owner_agent_id=owner_agent_id,
+            industry_instance_id=industry_instance_id,
+            limit=max(limit, 12),
+        )
         strategy_payload = self._resolve_strategy_payload(
             activation_input=activation_input,
             owner_agent_id=owner_agent_id,
@@ -113,6 +127,7 @@ class MemoryActivationService:
             fact_entries=fact_entries,
             entity_views=entity_views,
             opinion_views=opinion_views,
+            relation_views=relation_views,
             profile_view=None,
             episode_views=[],
             strategy_payload=strategy_payload,
@@ -125,6 +140,7 @@ class MemoryActivationService:
         fact_entries,
         entity_views,
         opinion_views,
+        relation_views=None,
         profile_view,
         episode_views,
         strategy_payload,
@@ -145,6 +161,11 @@ class MemoryActivationService:
             neuron.activation_score = self._score_neuron(neuron, activation_input, seed_terms)
 
         self._spread_relations(neurons)
+        top_relations, top_relation_kinds, top_relation_evidence = self._summarize_relations(
+            relation_views=relation_views or [],
+            activation_input=activation_input,
+            seed_terms=seed_terms,
+        )
 
         activated_neurons = sorted(
             neurons,
@@ -189,11 +210,20 @@ class MemoryActivationService:
             strategy_refs=strategy_refs,
             top_entities=self._collect_top_terms(activated_neurons, attribute="entity_keys"),
             top_opinions=self._collect_top_terms(activated_neurons, attribute="opinion_keys"),
+            top_relations=top_relations,
+            top_relation_kinds=top_relation_kinds,
+            top_relation_evidence=top_relation_evidence,
             top_constraints=_dedupe((strategy_payload or {}).get("execution_constraints") or []),
             top_next_actions=_dedupe((strategy_payload or {}).get("current_focuses") or []),
             metadata={
                 "seed_term_count": len(seed_terms),
                 "activated_count": len(activated_neurons),
+                "top_relations": top_relations,
+                "top_relation_kinds": top_relation_kinds,
+                "top_relation_evidence": [
+                    item.model_dump(mode="json", exclude_none=True)
+                    for item in top_relation_evidence
+                ],
             },
         )
 
@@ -424,31 +454,22 @@ class MemoryActivationService:
         owner_agent_id: str | None,
         industry_instance_id: str | None,
     ) -> dict[str, Any] | None:
-        service = self._strategy_memory_service
-        getter = getattr(service, "get_active_strategy", None)
-        if not callable(getter):
-            return None
-        resolved_scope_type = (
-            "industry"
-            if industry_instance_id
-            else "global"
-        )
-        resolved_scope_id = industry_instance_id or "runtime"
-        strategy = getter(
-            scope_type=resolved_scope_type,
-            scope_id=resolved_scope_id,
+        strategy_payload = resolve_strategy_payload(
+            service=self._strategy_memory_service,
+            scope_type=(
+                "industry"
+                if industry_instance_id
+                else "global"
+            ),
+            scope_id=industry_instance_id or "runtime",
             owner_agent_id=owner_agent_id,
         )
-        if strategy is None:
-            return None
-        if isinstance(strategy, dict):
-            return dict(strategy)
-        model_dump = getattr(strategy, "model_dump", None)
-        if callable(model_dump):
-            payload = model_dump(mode="json")
-            if isinstance(payload, dict):
-                return dict(payload)
-        return None
+        if strategy_payload is not None:
+            return strategy_payload
+        return {
+            "scope_type": self._resolve_scope_type(activation_input),
+            "scope_id": self._resolve_scope_id(activation_input),
+        }
 
     def _freshness_score(self, value: object | None) -> float:
         if not isinstance(value, datetime):
@@ -511,6 +532,74 @@ class MemoryActivationService:
         for neuron in neurons:
             counter.update(getattr(neuron, attribute, []) or [])
         return [value for value, _count in counter.most_common(6)]
+
+    def _summarize_relations(
+        self,
+        *,
+        relation_views: Iterable[object],
+        activation_input: ActivationInput,
+        seed_terms: list[str],
+    ) -> tuple[list[str], list[str], list[ActivationRelationEvidence]]:
+        scored: list[tuple[float, ActivationRelationEvidence]] = []
+        for relation in list(relation_views or []):
+            relation_kind = self._optional_text(getattr(relation, "relation_kind", None)) or "references"
+            summary = self._optional_text(getattr(relation, "summary", None)) or " ".join(
+                part
+                for part in (
+                    getattr(relation, "source_node_id", None),
+                    relation_kind,
+                    getattr(relation, "target_node_id", None),
+                )
+                if self._optional_text(part)
+            )
+            if not summary:
+                continue
+            evidence = ActivationRelationEvidence(
+                relation_id=str(getattr(relation, "relation_id")),
+                relation_kind=relation_kind,
+                summary=summary,
+                source_node_id=self._optional_text(getattr(relation, "source_node_id", None)),
+                target_node_id=self._optional_text(getattr(relation, "target_node_id", None)),
+                confidence=float(getattr(relation, "confidence", 0.0) or 0.0),
+                source_refs=_dedupe(getattr(relation, "source_refs", []) or []),
+            )
+            score = 0.0
+            if (
+                self._optional_text(getattr(relation, "scope_type", None))
+                == self._resolve_scope_type(activation_input)
+                and self._optional_text(getattr(relation, "scope_id", None))
+                == self._resolve_scope_id(activation_input)
+            ):
+                score += 10.0
+            score += float(
+                sum(
+                    1
+                    for term in seed_terms
+                    if term in set(
+                        _tokenize(summary)
+                        + _tokenize(relation_kind)
+                        + _tokenize(evidence.source_node_id)
+                        + _tokenize(evidence.target_node_id)
+                    )
+                )
+                * 4
+            )
+            score += evidence.confidence * 5.0
+            scored.append((score, evidence))
+        scored.sort(
+            key=lambda item: (
+                item[0],
+                item[1].summary.lower(),
+                item[1].relation_id,
+            ),
+            reverse=True,
+        )
+        top_relation_evidence = [evidence for _score, evidence in scored[:6]]
+        return (
+            _dedupe(item.summary for item in top_relation_evidence),
+            _dedupe(item.relation_kind for item in top_relation_evidence),
+            top_relation_evidence,
+        )
 
     def _optional_text(self, value: object | None) -> str | None:
         text = str(value or "").strip()

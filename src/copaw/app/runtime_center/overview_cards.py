@@ -12,6 +12,7 @@ from ...kernel.runtime_outcome import build_execution_diagnostics
 from .overview_entry_builders import _RuntimeCenterOverviewEntryBuildersMixin
 from .overview_helpers import build_runtime_surface
 from .overview_main_brain import RuntimeCenterMainBrainAssembly
+from .recovery_projection import project_latest_recovery_summary
 from .task_review_projection import (
     build_host_twin_summary,
     derive_host_twin_continuity_state,
@@ -222,6 +223,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             await self._call_optional_method(capability_service, "summarize"),
             mounts,
         )
+        summary.update(await self._build_capability_governance_projection(app_state))
         return RuntimeOverviewCard(
             key="capabilities",
             title="能力",
@@ -691,7 +693,10 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         decisions_card = await self._build_decisions_card(app_state)
         patches_card = await self._build_patches_card(app_state)
         governance_card = await self._build_governance_card(app_state)
-        governance = self._build_main_brain_governance_payload(governance_card)
+        governance = await self._build_main_brain_governance_payload(
+            governance_card,
+            app_state,
+        )
         recovery = self._build_main_brain_recovery_payload(app_state)
         automation = await self._build_main_brain_automation_payload(app_state)
         signals = dict(main_brain_card.meta.get("signals") or {})
@@ -850,15 +855,17 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             "status": self._string(payload.get("status")) or "idle",
         }
 
-    def _build_main_brain_governance_payload(
+    async def _build_main_brain_governance_payload(
         self,
         governance_card: RuntimeOverviewCard,
+        app_state: Any,
     ) -> dict[str, Any]:
         entry = governance_card.entries[0] if governance_card.entries else None
         meta = dict(governance_card.meta or {})
         handoff = self._mapping(meta.get("handoff")) or {}
         staffing = self._mapping(meta.get("staffing")) or {}
         human_assist = self._mapping(meta.get("human_assist")) or {}
+        capability_governance = await self._build_capability_governance_projection(app_state)
         return {
             "status": entry.status if entry is not None else governance_card.status,
             "summary": governance_card.summary,
@@ -867,6 +874,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             "pending_decisions": self._int(meta.get("pending_decisions"), 0),
             "pending_patches": self._int(meta.get("pending_patches"), 0),
             "proposed_patches": self._int(meta.get("proposed_patches"), 0),
+            "decision_provenance": self._mapping(meta.get("decision_provenance")) or {},
             "paused_schedule_count": len(list(meta.get("paused_schedule_ids") or [])),
             "emergency_stop_active": bool(meta.get("emergency_stop_active")),
             "handoff_active": bool(handoff.get("active")),
@@ -879,10 +887,24 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 0,
             ),
             "host_twin_summary": self._mapping(meta.get("host_twin_summary")) or {},
+            "capability_governance": capability_governance,
+            "explain": {
+                "failure_source": self._string(meta.get("failure_source")),
+                "blocked_next_step": self._string(meta.get("blocked_next_step")),
+                "remediation_summary": self._string(meta.get("remediation_summary")),
+                "decision_provenance": self._mapping(meta.get("decision_provenance")) or {},
+                "degraded_components": list(
+                    capability_governance.get("degraded_components") or [],
+                ),
+            },
         }
 
     def _build_main_brain_recovery_payload(self, app_state: Any) -> dict[str, Any]:
-        summary = getattr(app_state, "startup_recovery_summary", None)
+        summary = getattr(app_state, "latest_recovery_report", None)
+        source = "latest"
+        if summary is None:
+            summary = getattr(app_state, "startup_recovery_summary", None)
+            source = "startup"
         route = "/api/runtime-center/recovery/latest"
         if summary is None:
             return {
@@ -890,9 +912,16 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 "status": "unavailable",
                 "summary": "Startup recovery summary is not available.",
                 "route": route,
+                "source": None,
+                "detail": {
+                    "leases": {},
+                    "mailbox": {},
+                    "decisions": {},
+                    "automation": {},
+                },
                 "notes": [],
             }
-        payload = self._model_dump(summary)
+        payload = project_latest_recovery_summary(summary, source=source)
         return {
             "available": True,
             "status": "ready",
@@ -904,6 +933,8 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             "active_schedules": self._int(payload.get("active_schedules"), 0),
             "expired_decisions": self._int(payload.get("expired_decisions"), 0),
             "pending_decisions": self._int(payload.get("pending_decisions"), 0),
+            "source": self._string(payload.get("source")),
+            "detail": self._mapping(payload.get("detail")) or {},
             "notes": list(payload.get("notes") or []),
         }
 
@@ -1370,14 +1401,121 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
 
     def _index_industry_by_instance_id(self, items: list[Any]) -> dict[str, Any]:
         return self._main_brain_assembly.index_industry_by_instance_id(items)
-
     def _capability_summary_text(self, summary: Mapping[str, Any]) -> str:
         total = self._int(summary.get("total"), 0)
         enabled = self._int(summary.get("enabled"), 0)
         if total == 0:
             return "能力服务已接入，但当前还没有可见的能力挂载。"
         kinds = ", ".join(f"{kind} {count}" for kind, count in self._normalize_int_map(summary.get("by_kind")).items())
-        return f"统一能力图谱中当前已启用 {enabled}/{total} 个能力挂载。" + (f" 类型分布：{kinds}。" if kinds else "")
+        degraded = bool(summary.get("degraded"))
+        delta = self._mapping(summary.get("delta")) or {}
+        missing_count = self._int(delta.get("missing_capability_count"), 0)
+        base = f"统一能力图谱中当前已启用 {enabled}/{total} 个能力挂载。"
+        if kinds:
+            base += f" 类型分布：{kinds}。"
+        if degraded and missing_count > 0:
+            base += f" 当前仍有 {missing_count} 个 capability gap 处于待收敛状态。"
+        return base
+
+    async def _build_capability_governance_projection(
+        self,
+        app_state: Any,
+    ) -> dict[str, Any]:
+        capability_service = getattr(app_state, "capability_service", None)
+        if capability_service is None:
+            return {
+                "status": "unavailable",
+                "degraded": False,
+                "degraded_components": [],
+                "delta": {},
+            }
+        mounts = await self._call_list_method(capability_service, "list_capabilities")
+        if mounts is _MISSING:
+            mounts = []
+        summary = self._normalize_capability_summary(
+            await self._call_optional_method(capability_service, "summarize"),
+            mounts,
+        )
+        skills = list(
+            await self._call_optional_method(
+                capability_service,
+                "list_skill_specs",
+            )
+            or []
+        )
+        mcps = list(
+            await self._call_optional_method(
+                capability_service,
+                "list_mcp_client_infos",
+            )
+            or []
+        )
+        prediction_service = getattr(app_state, "prediction_service", None)
+        optimization_overview = {}
+        get_runtime_capability_optimization_overview = getattr(
+            prediction_service,
+            "get_runtime_capability_optimization_overview",
+            None,
+        )
+        if callable(get_runtime_capability_optimization_overview):
+            optimization_overview = self._mapping(
+                get_runtime_capability_optimization_overview(),
+            ) or {}
+        delta = self._mapping(optimization_overview.get("summary")) or {}
+        package_bound_skill_count = sum(
+            1
+            for item in skills
+            if self._string(self._get_field(item, "package_ref"))
+        )
+        package_bound_mcp_count = sum(
+            1
+            for item in mcps
+            if self._string(self._get_field(item, "package_ref"))
+        )
+        degraded_components: list[dict[str, Any]] = []
+        missing_capability_count = self._int(delta.get("missing_capability_count"), 0)
+        if missing_capability_count > 0:
+            degraded_components.append(
+                {
+                    "component": "capability-coverage",
+                    "status": "degraded",
+                    "summary": (
+                        f"{missing_capability_count} 个 capability gap 仍待补齐或治理决策。"
+                    ),
+                    "route": "/api/runtime-center/governance/capability-optimizations",
+                },
+            )
+        return {
+            "status": "degraded" if degraded_components else "ready",
+            "route": "/api/runtime-center/governance/capability-optimizations",
+            "total": self._int(summary.get("total"), len(mounts)),
+            "enabled": self._int(summary.get("enabled"), self._enabled_count(mounts)),
+            "by_kind": self._normalize_int_map(summary.get("by_kind")),
+            "by_source": self._normalize_int_map(summary.get("by_source")),
+            "skill_count": len(skills),
+            "enabled_skill_count": sum(
+                1 for item in skills if bool(self._get_field(item, "enabled"))
+            ),
+            "package_bound_skill_count": package_bound_skill_count,
+            "mcp_count": len(mcps),
+            "enabled_mcp_count": sum(
+                1 for item in mcps if bool(self._get_field(item, "enabled"))
+            ),
+            "package_bound_mcp_count": package_bound_mcp_count,
+            "delta": {
+                "missing_capability_count": missing_capability_count,
+                "underperforming_capability_count": self._int(
+                    delta.get("underperforming_capability_count"),
+                    0,
+                ),
+                "trial_count": self._int(delta.get("trial_count"), 0),
+                "rollout_count": self._int(delta.get("rollout_count"), 0),
+                "retire_count": self._int(delta.get("retire_count"), 0),
+                "actionable_count": self._int(delta.get("actionable_count"), 0),
+            },
+            "degraded": bool(degraded_components),
+            "degraded_components": degraded_components,
+        }
 
     def _summarize_evidence_card(self, records: list[Any], total_count: int) -> str:
         if total_count <= 0:

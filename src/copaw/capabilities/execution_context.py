@@ -19,6 +19,9 @@ class CapabilityExecutionContext:
     environment_ref: str | None = None
     risk_level: str = "auto"
     action_mode: str | None = None
+    concurrency_class: str | None = None
+    preflight_policy: str | None = None
+    evidence_mode: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -31,6 +34,9 @@ class CapabilityExecutionContext:
         task: "KernelTask",
         *,
         action_mode: str | None = None,
+        concurrency_class: str | None = None,
+        preflight_policy: str | None = None,
+        evidence_mode: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> "CapabilityExecutionContext":
         return cls(
@@ -43,5 +49,8 @@ class CapabilityExecutionContext:
             environment_ref=task.environment_ref,
             risk_level=task.risk_level,
             action_mode=action_mode,
+            concurrency_class=concurrency_class,
+            preflight_policy=preflight_policy,
+            evidence_mode=evidence_mode,
             payload=dict(payload or {}),
         )

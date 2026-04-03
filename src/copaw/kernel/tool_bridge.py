@@ -11,6 +11,7 @@ from typing import Any
 from ..constant import WORKING_DIR
 from ..evidence import ReplayPointer
 from ..environments import EnvironmentService
+from .runtime_outcome import classify_runtime_outcome
 from .models import KernelTask
 from .persistence import KernelTaskStore
 
@@ -34,19 +35,28 @@ class KernelToolBridge:
         task = self._get_task(task_id)
         if task is None:
             return
-        status = self._string(payload.get("status")) or "success"
+        payload_metadata = self._payload_metadata(payload)
+        status = self._string(payload_metadata.get("status")) or "success"
         command = self._string(payload.get("command")) or "shell"
         stdout = self._string(payload.get("stdout"))
         stderr = self._string(payload.get("stderr"))
         rule_id = self._string(payload.get("rule_id"))
         environment_ref = self._string(payload.get("cwd"))
         summary = self._shell_summary(status, command, stdout, stderr, rule_id)
-        replay_pointer = self._build_shell_replay_pointer(
-            task=task,
-            payload=payload,
-            environment_ref=environment_ref,
-            command=command,
+        outcome_kind = self._string(payload_metadata.get("outcome_kind")) or classify_runtime_outcome(
+            summary,
+            success=status == "success",
+            phase=self._string(payload_metadata.get("phase")) or status,
+            timed_out=bool(payload_metadata.get("timed_out")),
         )
+        replay_pointer = None
+        if status != "blocked":
+            replay_pointer = self._build_shell_replay_pointer(
+                task=task,
+                payload=payload,
+                environment_ref=environment_ref,
+                command=command,
+            )
         evidence = self._append_evidence(
             task,
             action_summary=f"shell {status}",
@@ -55,7 +65,10 @@ class KernelToolBridge:
             environment_ref=environment_ref,
             capability_ref="tool:execute_shell_command",
             actor_ref="tool:execute_shell_command",
-            metadata=payload,
+            metadata={
+                **payload_metadata,
+                "outcome_kind": outcome_kind,
+            },
             replay_pointers=(replay_pointer,) if replay_pointer is not None else None,
         )
         self._touch_environment(
@@ -73,12 +86,18 @@ class KernelToolBridge:
         task = self._get_task(task_id)
         if task is None:
             return
-        status = self._string(payload.get("status")) or "success"
+        payload_metadata = self._payload_metadata(payload)
+        status = self._string(payload_metadata.get("status")) or "success"
         action = self._string(payload.get("action")) or "write"
         tool_name = self._string(payload.get("tool_name")) or "file_io"
         resolved_path = self._string(payload.get("resolved_path"))
         result_summary = self._string(payload.get("result_summary"))
         summary = self._file_summary(status, action, resolved_path, result_summary)
+        outcome_kind = self._string(payload_metadata.get("outcome_kind")) or classify_runtime_outcome(
+            summary,
+            success=status == "success",
+            phase=self._string(payload_metadata.get("phase")) or status,
+        )
         evidence = self._append_evidence(
             task,
             action_summary=f"file {action} {status}",
@@ -87,7 +106,10 @@ class KernelToolBridge:
             environment_ref=resolved_path,
             capability_ref=f"tool:{tool_name}",
             actor_ref=f"tool:{tool_name}",
-            metadata=payload,
+            metadata={
+                **payload_metadata,
+                "outcome_kind": outcome_kind,
+            },
         )
         self._touch_environment(
             ref=resolved_path,
@@ -104,13 +126,19 @@ class KernelToolBridge:
         task = self._get_task(task_id)
         if task is None:
             return
-        status = self._string(payload.get("status")) or "success"
+        payload_metadata = self._payload_metadata(payload)
+        status = self._string(payload_metadata.get("status")) or "success"
         action = self._string(payload.get("action")) or "browser"
         url = self._string(payload.get("url"))
         page_id = self._string(payload.get("page_id"))
         environment_ref = url or page_id
         result_summary = self._string(payload.get("result_summary"))
         summary = self._browser_summary(status, action, environment_ref, result_summary)
+        outcome_kind = self._string(payload_metadata.get("outcome_kind")) or classify_runtime_outcome(
+            summary,
+            success=status == "success",
+            phase=self._string(payload_metadata.get("phase")) or status,
+        )
         evidence = self._append_evidence(
             task,
             action_summary=f"browser {action} {status}",
@@ -119,7 +147,10 @@ class KernelToolBridge:
             environment_ref=environment_ref,
             capability_ref="tool:browser_use",
             actor_ref="tool:browser_use",
-            metadata=payload,
+            metadata={
+                **payload_metadata,
+                "outcome_kind": outcome_kind,
+            },
         )
         self._touch_environment(
             ref=environment_ref,
@@ -276,11 +307,24 @@ class KernelToolBridge:
         normalized = str(status or "").strip().lower()
         if normalized == "success":
             return "succeeded"
+        if normalized == "blocked":
+            return "blocked"
         if normalized == "timeout":
             return "timeout"
         if normalized == "cancelled":
             return "cancelled"
         return "failed"
+
+    @staticmethod
+    def _payload_metadata(payload: dict[str, object]) -> dict[str, object]:
+        metadata = dict(payload or {})
+        nested = metadata.pop("metadata", None)
+        if isinstance(nested, dict):
+            metadata = {
+                **nested,
+                **metadata,
+            }
+        return metadata
 
     @staticmethod
     def _coerce_datetime(value: object) -> datetime | None:

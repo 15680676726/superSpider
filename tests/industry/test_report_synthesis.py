@@ -53,6 +53,9 @@ def _activation(
     top_next_actions: list[str] | None = None,
     top_entities: list[str] | None = None,
     top_opinions: list[str] | None = None,
+    top_relations: list[str] | None = None,
+    top_relation_kinds: list[str] | None = None,
+    top_relation_evidence: list[dict[str, object]] | None = None,
     support_refs: list[str] | None = None,
     contradictions: list[KnowledgeNeuron] | None = None,
 ) -> ActivationResult:
@@ -62,6 +65,9 @@ def _activation(
         scope_id="industry-1",
         top_entities=top_entities or [],
         top_opinions=top_opinions or [],
+        top_relations=top_relations or [],
+        top_relation_kinds=top_relation_kinds or [],
+        top_relation_evidence=top_relation_evidence or [],
         top_constraints=top_constraints or [],
         top_next_actions=top_next_actions or [],
         support_refs=support_refs or [],
@@ -257,6 +263,56 @@ def test_synthesize_reports_exposes_explicit_replan_reasons() -> None:
     assert synthesis["replan_reasons"] == [
         "Reports disagree on assignment-shared.",
         "Warehouse issue still blocked requires main-brain follow-up.",
+    ]
+
+
+def test_synthesize_reports_carries_relation_activation_into_synthesis_payload() -> None:
+    report = _report(
+        headline="Warehouse approval still contested",
+        owner_agent_id="agent-a",
+        result="failed",
+        lane_id="lane-ops",
+        uncertainties=["Approval evidence still conflicts with release readiness."],
+    )
+
+    synthesis = synthesize_reports(
+        [report],
+        activation_result=_activation(
+            top_relations=[
+                "warehouse approval contradicts release readiness",
+            ],
+            top_relation_kinds=["contradicts"],
+            top_relation_evidence=[
+                {
+                    "relation_id": "relation-warehouse-approval",
+                    "relation_kind": "contradicts",
+                    "summary": "Warehouse approval evidence contradicts release readiness.",
+                    "source_refs": ["chunk-warehouse-1"],
+                    "source_node_id": "entity:warehouse-approval",
+                    "target_node_id": "opinion:release-readiness",
+                },
+            ],
+            top_constraints=[
+                "Do not launch the release until warehouse approval evidence is reconciled.",
+            ],
+        ),
+    )
+
+    activation = synthesis["activation"]
+    assert activation["top_relations"] == [
+        "warehouse approval contradicts release readiness",
+    ]
+    assert activation["top_relation_kinds"] == ["contradicts"]
+    assert activation["top_relation_evidence"] == [
+        {
+            "relation_id": "relation-warehouse-approval",
+            "relation_kind": "contradicts",
+            "summary": "Warehouse approval evidence contradicts release readiness.",
+            "source_refs": ["chunk-warehouse-1"],
+            "source_node_id": "entity:warehouse-approval",
+            "target_node_id": "opinion:release-readiness",
+            "confidence": 0.0,
+        },
     ]
 
 

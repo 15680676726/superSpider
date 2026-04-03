@@ -19,6 +19,7 @@ from ..agents.memory import MemoryManager
 from ..agents.react_agent import (
     CoPawAgent,
     bind_reasoning_tool_choice_resolver,
+    bind_tool_execution_delegate,
     bind_tool_preflight,
 )
 from ..agents.tools import (

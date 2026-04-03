@@ -133,6 +133,10 @@ class CyclePlanningCompiler:
 
         if force:
             should_start = bool(selected or pending_reports)
+            relation_projection = self._relation_focus_projection(
+                items=selected,
+                constraints=constraints,
+            )
             return CyclePlanningDecision(
                 should_start=should_start,
                 reason="forced" if should_start else "forced-empty",
@@ -146,6 +150,8 @@ class CyclePlanningCompiler:
                     [item.lane_id for item in selected if item.lane_id is not None],
                 ),
                 max_assignment_count=len(selected),
+                affected_relation_ids=relation_projection["relation_ids"],
+                affected_relation_kinds=relation_projection["relation_kinds"],
                 summary=(
                     "Force-started cycle materialization from scoped backlog."
                     if should_start
@@ -197,6 +203,10 @@ class CyclePlanningCompiler:
             and pending_reports
         ):
             reason = "pending-reports-without-materializable-backlog"
+        relation_projection = self._relation_focus_projection(
+            items=selected,
+            constraints=constraints,
+        )
 
         summary = (
             f"Plan a {cycle_kind} cycle for {len(selected)} backlog item(s) across "
@@ -213,6 +223,8 @@ class CyclePlanningCompiler:
                 [item.lane_id for item in selected if item.lane_id is not None],
             ),
             max_assignment_count=len(selected),
+            affected_relation_ids=relation_projection["relation_ids"],
+            affected_relation_kinds=relation_projection["relation_kinds"],
             summary=summary,
             planning_policy=list(constraints.planning_policy or []),
             metadata=self._decision_metadata(
@@ -371,6 +383,7 @@ class CyclePlanningCompiler:
             _backlog_followup_overdue_score(item),
             1 if _backlog_is_report_followup(item) else 0,
             int(item.priority or 0),
+            self._relation_focus_score(item=item, constraints=constraints),
             self._graph_focus_score(item=item, constraints=constraints),
             self._strategy_priority_score(item=item, constraints=constraints),
             float(lane_weights.get(item.lane_id or "", 0.0)),
@@ -767,6 +780,117 @@ class CyclePlanningCompiler:
             ),
         )
         return len(item_tokens & focus_tokens)
+
+    def _relation_focus_score(
+        self,
+        *,
+        item: BacklogItemRecord,
+        constraints: PlanningStrategyConstraints,
+    ) -> int:
+        return int(
+            self._relation_matches_for_item(
+                item=item,
+                constraints=constraints,
+            )["score"],
+        )
+
+    def _relation_focus_projection(
+        self,
+        *,
+        items: Sequence[BacklogItemRecord],
+        constraints: PlanningStrategyConstraints,
+    ) -> dict[str, list[str]]:
+        relation_ids: list[str] = []
+        relation_kinds: list[str] = []
+        seen_relation_ids: set[str] = set()
+        seen_relation_kinds: set[str] = set()
+        for item in items:
+            projection = self._relation_matches_for_item(
+                item=item,
+                constraints=constraints,
+            )
+            for relation_id in projection["relation_ids"]:
+                if relation_id in seen_relation_ids:
+                    continue
+                seen_relation_ids.add(relation_id)
+                relation_ids.append(relation_id)
+            for relation_kind in projection["relation_kinds"]:
+                if relation_kind in seen_relation_kinds:
+                    continue
+                seen_relation_kinds.add(relation_kind)
+                relation_kinds.append(relation_kind)
+        return {
+            "relation_ids": relation_ids,
+            "relation_kinds": relation_kinds,
+        }
+
+    def _relation_matches_for_item(
+        self,
+        *,
+        item: BacklogItemRecord,
+        constraints: PlanningStrategyConstraints,
+    ) -> dict[str, object]:
+        item_tokens = self._item_tokens(item)
+        if not item_tokens:
+            return {"score": 0, "relation_ids": [], "relation_kinds": []}
+        focus_tokens = set(
+            _tokenize(
+                " ".join(
+                    _unique_strings(
+                        getattr(constraints, "graph_focus_relations", []),
+                    ),
+                ),
+            ),
+        )
+        score = len(item_tokens & focus_tokens)
+        relation_ids: list[str] = []
+        relation_kinds: list[str] = []
+        for entry in list(getattr(constraints, "graph_relation_evidence", []) or []):
+            if not isinstance(entry, dict):
+                continue
+            relation_tokens = set(
+                _tokenize(
+                    " ".join(
+                        _unique_strings(
+                            entry.get("summary"),
+                            entry.get("relation_kind"),
+                            entry.get("source_node_id"),
+                            entry.get("target_node_id"),
+                            entry.get("source_refs"),
+                        ),
+                    ),
+                ),
+            )
+            overlap = item_tokens & relation_tokens
+            if not overlap:
+                continue
+            score += len(overlap)
+            relation_id = _string(entry.get("relation_id"))
+            if relation_id is not None and relation_id not in relation_ids:
+                relation_ids.append(relation_id)
+            relation_kind = _string(entry.get("relation_kind"))
+            if relation_kind is not None and relation_kind not in relation_kinds:
+                relation_kinds.append(relation_kind)
+        return {
+            "score": score,
+            "relation_ids": relation_ids,
+            "relation_kinds": relation_kinds,
+        }
+
+    def _item_tokens(self, item: BacklogItemRecord) -> set[str]:
+        metadata = dict(item.metadata or {})
+        return set(
+            _tokenize(
+                " ".join(
+                    [
+                        item.id,
+                        item.title,
+                        item.summary,
+                        *[str(value) for value in metadata.values() if value is not None],
+                    ],
+                ),
+            ),
+        )
 
     def _strategy_priority_score(
         self,

@@ -1422,6 +1422,115 @@ def test_mount_declared_writer_scope_conflict_blocks_direct_write_before_executo
     assert "writer scope" in result["summary"].lower()
 
 
+def test_execute_task_batch_runs_parallel_reads_before_serial_write(
+    monkeypatch,
+) -> None:
+    from copaw.capabilities.tool_execution_contracts import (
+        TOOL_EXECUTION_CONTRACTS,
+        ToolExecutionContract,
+    )
+
+    events: list[str] = []
+
+    async def _read_time(**kwargs):
+        _ = kwargs
+        events.append("start:time")
+        await asyncio.sleep(0.02)
+        events.append("end:time")
+        return {"success": True, "summary": "time"}
+
+    async def _read_file(**kwargs):
+        _ = kwargs
+        events.append("start:file")
+        await asyncio.sleep(0.02)
+        events.append("end:file")
+        return {"success": True, "summary": "file"}
+
+    async def _write_file(**kwargs):
+        _ = kwargs
+        events.append("start:write")
+        events.append("end:write")
+        return {"success": True, "summary": "write"}
+
+    monkeypatch.setitem(
+        TOOL_EXECUTION_CONTRACTS,
+        "tool:get_current_time",
+        ToolExecutionContract(
+            capability_id="tool:get_current_time",
+            executor=_read_time,
+            action_mode="read",
+            concurrency_class="parallel-read",
+            preflight_policy="inline",
+            result_normalizer=lambda response: response,
+        ),
+    )
+    monkeypatch.setitem(capability_execution_module._TOOL_EXECUTORS, "tool:get_current_time", _read_time)
+    monkeypatch.setitem(
+        TOOL_EXECUTION_CONTRACTS,
+        "tool:read_file",
+        ToolExecutionContract(
+            capability_id="tool:read_file",
+            executor=_read_file,
+            action_mode="read",
+            concurrency_class="parallel-read",
+            preflight_policy="inline",
+            result_normalizer=lambda response: response,
+        ),
+    )
+    monkeypatch.setitem(capability_execution_module._TOOL_EXECUTORS, "tool:read_file", _read_file)
+    monkeypatch.setitem(
+        TOOL_EXECUTION_CONTRACTS,
+        "tool:write_file",
+        ToolExecutionContract(
+            capability_id="tool:write_file",
+            executor=_write_file,
+            action_mode="write",
+            concurrency_class="serial-write",
+            preflight_policy="inline",
+            result_normalizer=lambda response: response,
+        ),
+    )
+    monkeypatch.setitem(capability_execution_module._TOOL_EXECUTORS, "tool:write_file", _write_file)
+
+    capability_service = CapabilityService(
+        evidence_ledger=EvidenceLedger(),
+    )
+
+    results = asyncio.run(
+        capability_service.execute_task_batch(
+            [
+                KernelTask(
+                    title="Read time",
+                    capability_ref="tool:get_current_time",
+                    owner_agent_id="copaw-operator",
+                    environment_ref="session:console:test",
+                    payload={},
+                ),
+                KernelTask(
+                    title="Read file",
+                    capability_ref="tool:read_file",
+                    owner_agent_id="copaw-operator",
+                    environment_ref="session:console:test",
+                    payload={"file_path": "README.md"},
+                ),
+                KernelTask(
+                    title="Write file",
+                    capability_ref="tool:write_file",
+                    owner_agent_id="copaw-operator",
+                    environment_ref="session:console:test",
+                    payload={"file_path": "README.md", "content": "updated"},
+                ),
+            ],
+        ),
+    )
+
+    assert [result["success"] for result in results] == [True, True, True]
+    assert events[:2] == ["start:time", "start:file"]
+    assert events.index("start:write") > events.index("end:time")
+    assert events.index("start:write") > events.index("end:file")
+    assert events[-2:] == ["start:write", "end:write"]
+
+
 def test_mount_declared_evidence_owner_can_prefer_execution_facade_over_tool_bridge(
     monkeypatch,
     tmp_path,
@@ -1501,6 +1610,7 @@ def test_shell_execution_writes_evidence_via_unified_contract(
         "copaw.agents.tools.shell._execute_subprocess_sync",
         lambda cmd, cwd, timeout: (0, "hello world", ""),
     )
+    monkeypatch.setattr("copaw.kernel.tool_bridge.WORKING_DIR", tmp_path)
     state_store = SQLiteStateStore(tmp_path / "tool-bridge-state.db")
     evidence_ledger = EvidenceLedger(tmp_path / "tool-bridge-evidence.db")
     task_repository = SqliteTaskRepository(state_store)
@@ -1540,6 +1650,168 @@ def test_shell_execution_writes_evidence_via_unified_contract(
         and record.metadata["status"] == "success"
         for record in records
     )
+
+
+def test_blocked_shell_execution_preserves_contract_metadata_in_tool_bridge_evidence(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    calls: list[tuple[str, str, int]] = []
+
+    def _fake_subprocess(cmd: str, cwd: str, timeout: int):
+        calls.append((cmd, cwd, timeout))
+        return (0, "should not run", "")
+
+    monkeypatch.setattr(
+        "copaw.agents.tools.shell._execute_subprocess_sync",
+        _fake_subprocess,
+    )
+    state_store = SQLiteStateStore(tmp_path / "tool-bridge-blocked-state.db")
+    evidence_ledger = EvidenceLedger(tmp_path / "tool-bridge-blocked-evidence.db")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    runtime_frame_repository = SqliteRuntimeFrameRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    task_store = KernelTaskStore(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        runtime_frame_repository=runtime_frame_repository,
+        decision_request_repository=decision_request_repository,
+        evidence_ledger=evidence_ledger,
+    )
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+        tool_bridge=KernelToolBridge(task_store=task_store),
+    )
+    dispatcher = KernelDispatcher(
+        task_store=task_store,
+        capability_service=capability_service,
+    )
+
+    payload = _execute_capability_direct(
+        capability_service,
+        dispatcher,
+        capability_id="tool:execute_shell_command",
+        environment_ref="session:console:test",
+        payload={
+            "command": "git reset --hard HEAD",
+            "timeout": 5,
+            "cwd": str(tmp_path),
+        },
+    )
+
+    assert calls == []
+    assert payload["success"] is False
+    assert payload["phase"] in {"blocked", "failed"}
+    records = evidence_ledger.list_by_task(payload["task_id"])
+    assert len(records) == 1
+    record = records[0]
+    assert record.status == "blocked"
+    assert record.metadata["tool_contract"] == "tool:execute_shell_command"
+    assert record.metadata["concurrency_class"] == "serial-write"
+    assert record.metadata["preflight_policy"] == "shell-safety"
+    assert record.metadata["outcome_kind"] == "blocked"
+    assert record.metadata["read_only"] is False
+
+
+def test_shell_execution_blocked_status_propagates_to_tool_bridge_evidence(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr("copaw.kernel.tool_bridge.WORKING_DIR", tmp_path)
+    state_store = SQLiteStateStore(tmp_path / "tool-bridge-blocked-state.db")
+    evidence_ledger = EvidenceLedger(tmp_path / "tool-bridge-blocked-evidence.db")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    runtime_frame_repository = SqliteRuntimeFrameRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    task_store = KernelTaskStore(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        runtime_frame_repository=runtime_frame_repository,
+        decision_request_repository=decision_request_repository,
+        evidence_ledger=evidence_ledger,
+    )
+    tool_bridge = KernelToolBridge(task_store=task_store)
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+        tool_bridge=tool_bridge,
+    )
+    dispatcher = KernelDispatcher(
+        task_store=task_store,
+        capability_service=capability_service,
+    )
+
+    payload = _execute_capability_direct(
+        capability_service,
+        dispatcher,
+        capability_id="tool:execute_shell_command",
+        environment_ref="session:console:test",
+        payload={"command": "git reset --hard HEAD", "cwd": str(tmp_path)},
+    )
+
+    assert payload["success"] is False
+    records = evidence_ledger.list_by_task(payload["task_id"])
+    assert any(
+        record.capability_ref == "tool:execute_shell_command"
+        and record.status == "blocked"
+        and record.metadata["status"] == "blocked"
+        for record in records
+    )
+
+
+def test_shell_execution_tool_bridge_evidence_carries_execution_contract_metadata(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(
+        "copaw.agents.tools.shell._execute_subprocess_sync",
+        lambda cmd, cwd, timeout: (0, "hello world", ""),
+    )
+    monkeypatch.setattr("copaw.kernel.tool_bridge.WORKING_DIR", tmp_path)
+    state_store = SQLiteStateStore(tmp_path / "tool-bridge-metadata-state.db")
+    evidence_ledger = EvidenceLedger(tmp_path / "tool-bridge-metadata-evidence.db")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    runtime_frame_repository = SqliteRuntimeFrameRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    task_store = KernelTaskStore(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        runtime_frame_repository=runtime_frame_repository,
+        decision_request_repository=decision_request_repository,
+        evidence_ledger=evidence_ledger,
+    )
+    tool_bridge = KernelToolBridge(task_store=task_store)
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+        tool_bridge=tool_bridge,
+    )
+    dispatcher = KernelDispatcher(
+        task_store=task_store,
+        capability_service=capability_service,
+    )
+
+    payload = _execute_capability_direct(
+        capability_service,
+        dispatcher,
+        capability_id="tool:execute_shell_command",
+        environment_ref="session:console:test",
+        payload={"command": "Get-ChildItem", "cwd": str(tmp_path)},
+    )
+
+    assert payload["success"] is True
+    records = evidence_ledger.list_by_task(payload["task_id"])
+    record = next(
+        record
+        for record in records
+        if record.capability_ref == "tool:execute_shell_command"
+    )
+    assert record.metadata["action_mode"] == "read"
+    assert record.metadata["read_only"] is True
+    assert record.metadata["concurrency_class"] == "parallel-read"
+    assert record.metadata["preflight_policy"] == "shell-safety"
+    assert record.metadata["tool_contract"] == "tool:execute_shell_command"
 
 
 def test_system_dispatch_query_executes_through_kernel_query_execution_service() -> None:

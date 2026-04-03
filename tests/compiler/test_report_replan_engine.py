@@ -351,6 +351,58 @@ def test_report_replan_engine_promotes_strategy_change_payload_into_top_level_su
         ],
     }
     assert strategy_change == _strategy_change(decision)
+    assert decision.trigger_context == {
+        "review_window": "weekly",
+        "source_scope": "industry-1",
+        "strategic_uncertainty_ids": ["uncertainty-warehouse-approval"],
+        "trigger_families": ["repeated_evidence_contradiction"],
+    }
+
+
+def test_report_replan_engine_promotes_relation_activation_into_typed_fields() -> None:
+    engine = ReportReplanEngine()
+
+    decision = engine.compile(
+        {
+            "replan_decision": {
+                "decision_id": "report-synthesis:needs-replan:warehouse-approval",
+                "status": "needs-replan",
+                "summary": "Repeated contradiction requires main-brain judgment.",
+                "reason_ids": ["activation:contradictions", "failed-report:report-6"],
+                "source_report_ids": ["report-6"],
+                "topic_keys": ["warehouse-approval"],
+            },
+            "activation": {
+                "contradiction_count": 2,
+                "top_relation_evidence": [
+                    {
+                        "relation_id": "relation-warehouse-approval",
+                        "relation_kind": "contradicts",
+                        "summary": "Warehouse approval evidence contradicts release readiness.",
+                        "source_refs": ["chunk-warehouse-1"],
+                        "source_node_id": "entity:warehouse-approval",
+                        "target_node_id": "opinion:release-readiness",
+                    },
+                ],
+            },
+            "strategy_change_context": {
+                "evidence_contradictions": [
+                    {
+                        "topic_key": "warehouse-approval",
+                        "source_families": ["synthesis", "activation", "report"],
+                        "repeat_count": 3,
+                        "source_report_ids": ["report-6"],
+                        "summary": "Repeated contradiction spans synthesis, activation, and report evidence.",
+                    },
+                ],
+            },
+        },
+    )
+
+    assert decision.affected_relation_ids == ["relation-warehouse-approval"]
+    assert decision.affected_relation_kinds == ["contradicts"]
+    assert decision.relation_source_refs == ["chunk-warehouse-1"]
+    assert decision.strategy_change["affected_relation_ids"] == ["relation-warehouse-approval"]
 
 
 def test_report_replan_engine_round_trips_top_level_strategy_change_fields() -> None:

@@ -61,6 +61,38 @@ def _normalize_package_ref(
     return normalized
 
 
+def _normalize_skill_root(skill: Any) -> str:
+    return _normalize_package_ref(
+        getattr(skill, "path", None),
+        package_kind="filesystem",
+    )
+
+
+def _canonical_skill_package_binding(
+    skill: Any,
+    *,
+    package_ref: object | None,
+    package_kind: object | None,
+    package_version: object | None,
+) -> dict[str, str | None]:
+    normalized_kind = _normalize_package_kind(package_kind)
+    normalized_ref = _normalize_package_ref(
+        package_ref,
+        package_kind=normalized_kind,
+    )
+    if not normalized_ref:
+        normalized_ref = _normalize_skill_root(skill)
+    if not normalized_kind:
+        normalized_kind = _skill_package_kind_from_ref(normalized_ref)
+    if normalized_kind == "filesystem":
+        normalized_ref = _normalize_skill_root(skill) or normalized_ref
+    return {
+        "package_ref": normalized_ref or None,
+        "package_kind": normalized_kind or None,
+        "package_version": _normalize_package_version(package_version) or None,
+    }
+
+
 class CapabilitySkillService:
     """Canonical skill service for the capability system.
 
@@ -117,32 +149,23 @@ class CapabilitySkillService:
 
     def read_skill_package_binding(self, skill: Any) -> dict[str, str | None]:
         content = getattr(skill, "content", "")
-        package_ref = ""
-        package_kind = ""
-        package_version = ""
+        package_ref: object | None = None
+        package_kind: object | None = None
+        package_version: object | None = None
         if isinstance(content, str) and content.strip():
             try:
                 post = parse_skill_frontmatter(content)
             except SkillFrontmatterError as exc:
                 raise ValueError(str(exc)) from exc
-            package_kind = _normalize_package_kind(post.get("package_kind"))
-            package_ref = _normalize_package_ref(
-                post.get("package_ref"),
-                package_kind=package_kind,
-            )
-            package_version = _normalize_package_version(post.get("package_version"))
-        if not package_ref:
-            package_ref = _normalize_package_ref(
-                getattr(skill, "path", None),
-                package_kind="filesystem",
-            )
-        if not package_kind:
-            package_kind = _skill_package_kind_from_ref(package_ref)
-        return {
-            "package_ref": package_ref or None,
-            "package_kind": package_kind or None,
-            "package_version": package_version or None,
-        }
+            package_kind = post.get("package_kind")
+            package_ref = post.get("package_ref")
+            package_version = post.get("package_version")
+        return _canonical_skill_package_binding(
+            skill,
+            package_ref=package_ref,
+            package_kind=package_kind,
+            package_version=package_version,
+        )
 
     def bind_skill_package_metadata(
         self,
@@ -164,32 +187,34 @@ class CapabilitySkillService:
             post = parse_skill_frontmatter(content)
         except Exception:
             return False
-        normalized_package_kind = _normalize_package_kind(package_kind)
-        normalized_package_ref = _normalize_package_ref(
-            package_ref,
-            package_kind=normalized_package_kind,
+        binding = _canonical_skill_package_binding(
+            skill,
+            package_ref=package_ref,
+            package_kind=package_kind,
+            package_version=package_version,
         )
-        if not normalized_package_kind:
-            normalized_package_kind = _skill_package_kind_from_ref(normalized_package_ref)
+        normalized_package_ref = binding["package_ref"] or ""
+        normalized_package_kind = binding["package_kind"] or ""
+        normalized_package_version = binding["package_version"] or ""
         conflict = find_skill_package_identity_conflict(
             skill_name=skill_name,
             package_identity=(
                 normalized_package_ref,
                 normalized_package_kind or None,
-                _normalize_package_version(package_version) or None,
+                normalized_package_version or None,
             ),
         )
         if conflict is not None or self._has_package_identity_conflict(
             skill_name=skill_name,
             package_ref=normalized_package_ref,
             package_kind=normalized_package_kind,
-            package_version=_normalize_package_version(package_version),
+            package_version=normalized_package_version,
         ):
             return False
         package_fields = {
             "package_ref": normalized_package_ref,
             "package_kind": normalized_package_kind,
-            "package_version": _normalize_package_version(package_version),
+            "package_version": normalized_package_version,
         }
         for key, value in package_fields.items():
             if value:

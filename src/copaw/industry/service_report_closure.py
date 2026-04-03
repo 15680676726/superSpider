@@ -51,6 +51,8 @@ def _activation_followup_metadata(synthesis: Mapping[str, Any] | None) -> dict[s
     for source_key, target_key in (
         ("top_entities", "activation_top_entities"),
         ("top_opinions", "activation_top_opinions"),
+        ("top_relations", "activation_top_relations"),
+        ("top_relation_kinds", "activation_top_relation_kinds"),
         ("top_constraints", "activation_top_constraints"),
         ("top_next_actions", "activation_top_next_actions"),
         ("support_refs", "activation_support_refs"),
@@ -61,6 +63,26 @@ def _activation_followup_metadata(synthesis: Mapping[str, Any] | None) -> dict[s
         copied = list(value)
         if copied:
             metadata[target_key] = copied
+    relation_evidence = activation.get("top_relation_evidence")
+    if isinstance(relation_evidence, Sequence) and not isinstance(relation_evidence, str):
+        relation_ids = _unique_strings(
+            [
+                item.get("relation_id")
+                for item in relation_evidence
+                if isinstance(item, Mapping)
+            ],
+        )
+        relation_source_refs = _unique_strings(
+            *[
+                item.get("source_refs")
+                for item in relation_evidence
+                if isinstance(item, Mapping)
+            ],
+        )
+        if relation_ids:
+            metadata["activation_top_relation_ids"] = relation_ids
+        if relation_source_refs:
+            metadata["activation_relation_source_refs"] = relation_source_refs
     return metadata
 
 

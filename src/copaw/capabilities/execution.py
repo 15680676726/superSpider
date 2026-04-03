@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
 import inspect
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -42,6 +43,7 @@ from .execution_support import (
     _tool_response_summary,
 )
 from .skill_service import CapabilitySkillService
+from .tool_execution_contracts import ToolExecutionContract, get_tool_execution_contract
 
 if TYPE_CHECKING:
     from ..kernel import KernelToolBridge
@@ -203,6 +205,7 @@ class CapabilityExecutionFacade:
     async def execute_task(self, task: "KernelTask") -> dict[str, object]:
         capability_id = task.capability_ref or ""
         payload = dict(task.payload or {})
+        tool_contract = get_tool_execution_contract(capability_id)
         if capability_id.startswith("system:"):
             payload.setdefault("task_id", task.id)
             payload.setdefault("owner_agent_id", task.owner_agent_id)
@@ -213,6 +216,7 @@ class CapabilityExecutionFacade:
             task,
             payload=payload,
             mount=mount,
+            tool_contract=tool_contract,
         )
         if mount is None:
             summary = f"Capability '{capability_id}' not found"
@@ -258,6 +262,21 @@ class CapabilityExecutionFacade:
                 error_kind="failed",
             )
 
+        if tool_contract is not None:
+            validation_error = tool_contract.validate_payload(payload)
+            if validation_error is not None:
+                return self._build_execution_result(
+                    execution_context=execution_context,
+                    mount=mount,
+                    payload=_json_safe(execution_context.payload),
+                    success=False,
+                    summary=validation_error,
+                    error_kind="failed",
+                    read_only=execution_context.is_read_only,
+                    concurrency_class=execution_context.concurrency_class,
+                    preflight_policy=execution_context.preflight_policy,
+                )
+
         executor = self.resolve_executor(capability_id)
         if executor is None:
             summary = (
@@ -275,6 +294,8 @@ class CapabilityExecutionFacade:
         kwargs = _filter_executor_kwargs(executor, execution_context.payload)
         json_safe_kwargs = _json_safe(kwargs)
         evidence_emitted = False
+        concurrency_class = execution_context.concurrency_class
+        preflight_policy = execution_context.preflight_policy
         metadata = {
             "trace_id": execution_context.trace_id,
             "trace_stage": "capability.execute",
@@ -292,12 +313,19 @@ class CapabilityExecutionFacade:
             "work_context_id": execution_context.work_context_id,
             "action_mode": execution_context.action_mode,
             "read_only": execution_context.is_read_only,
+            "concurrency_class": concurrency_class,
+            "preflight_policy": preflight_policy,
+            "tool_contract": capability_id if tool_contract is not None else None,
         }
 
-        with bind_shell_evidence_sink(self._make_shell_evidence_sink(task.id)):
-            with bind_file_evidence_sink(self._make_file_evidence_sink(task.id)):
+        with bind_shell_evidence_sink(
+            self._make_shell_evidence_sink(task.id, execution_metadata=metadata),
+        ):
+            with bind_file_evidence_sink(
+                self._make_file_evidence_sink(task.id, execution_metadata=metadata),
+            ):
                 with bind_browser_evidence_sink(
-                    self._make_browser_evidence_sink(task.id),
+                    self._make_browser_evidence_sink(task.id, execution_metadata=metadata),
                 ):
                     try:
                         response = await self._execute_direct_path(
@@ -328,6 +356,9 @@ class CapabilityExecutionFacade:
                             summary=summary,
                             error_kind=error_kind,
                             evidence_id=evidence_id,
+                            read_only=execution_context.is_read_only,
+                            concurrency_class=concurrency_class,
+                            preflight_policy=preflight_policy,
                         )
                     except Exception as exc:
                         summary = f"{exc.__class__.__name__}: {exc}"
@@ -351,10 +382,17 @@ class CapabilityExecutionFacade:
                             summary=summary,
                             error_kind=error_kind,
                             evidence_id=evidence_id,
+                            read_only=execution_context.is_read_only,
+                            concurrency_class=concurrency_class,
+                            preflight_policy=preflight_policy,
                         )
 
         summary = _tool_response_summary(response)
-        output_payload = _tool_response_payload(response)
+        output_payload = (
+            tool_contract.normalize_output(response)
+            if tool_contract is not None
+            else _tool_response_payload(response)
+        )
         output_dict = output_payload if isinstance(output_payload, dict) else None
         error_kind = classify_runtime_outcome(
             summary,
@@ -398,7 +436,55 @@ class CapabilityExecutionFacade:
             evidence_id=evidence_id,
             evidence_emitted=evidence_emitted or handled_by_tool_bridge,
             output=_json_safe(output_payload) if output_payload is not None else None,
+            read_only=execution_context.is_read_only,
+            concurrency_class=concurrency_class,
+            preflight_policy=preflight_policy,
         )
+
+    async def execute_task_batch(
+        self,
+        tasks: list["KernelTask"],
+    ) -> list[dict[str, object]]:
+        results: list[dict[str, object]] = []
+        for concurrency_class, batch in self.partition_execution_batch(tasks):
+            if concurrency_class == "parallel-read":
+                results.extend(await asyncio.gather(*(self.execute_task(task) for task in batch)))
+                continue
+            for task in batch:
+                results.append(await self.execute_task(task))
+        return results
+
+    def partition_execution_batch(
+        self,
+        tasks: list["KernelTask"],
+    ) -> list[tuple[str, list["KernelTask"]]]:
+        partitions: list[tuple[str, list["KernelTask"]]] = []
+        current_reads: list["KernelTask"] = []
+        for task in tasks:
+            payload = dict(task.payload or {})
+            mount = self._get_capability(task.capability_ref or "")
+            tool_contract = get_tool_execution_contract(task.capability_ref or "")
+            action_mode = self._resolve_action_mode(
+                mount,
+                tool_contract=tool_contract,
+                payload=payload,
+            )
+            concurrency_class = self._resolve_concurrency_class(
+                mount,
+                tool_contract=tool_contract,
+                action_mode=action_mode,
+                payload=payload,
+            ) or "serial-write"
+            if concurrency_class == "parallel-read":
+                current_reads.append(task)
+                continue
+            if current_reads:
+                partitions.append(("parallel-read", list(current_reads)))
+                current_reads.clear()
+            partitions.append(("serial-write", [task]))
+        if current_reads:
+            partitions.append(("parallel-read", list(current_reads)))
+        return partitions
 
     def _build_execution_context(
         self,
@@ -406,10 +492,27 @@ class CapabilityExecutionFacade:
         *,
         payload: dict[str, object],
         mount: "CapabilityMount | None",
+        tool_contract: ToolExecutionContract | None = None,
     ) -> CapabilityExecutionContext:
+        action_mode = self._resolve_action_mode(
+            mount,
+            tool_contract=tool_contract,
+            payload=payload,
+        )
         return CapabilityExecutionContext.from_kernel_task(
             task,
-            action_mode=self._resolve_action_mode(mount),
+            action_mode=action_mode,
+            concurrency_class=self._resolve_concurrency_class(
+                mount,
+                tool_contract=tool_contract,
+                action_mode=action_mode,
+                payload=payload,
+            ),
+            preflight_policy=self._resolve_preflight_policy(
+                mount,
+                tool_contract=tool_contract,
+            ),
+            evidence_mode=self._resolve_evidence_owner(mount),
             payload=payload,
         )
 
@@ -501,20 +604,73 @@ class CapabilityExecutionFacade:
         return text or None
 
     @staticmethod
-    def _resolve_action_mode(mount: "CapabilityMount | None") -> str | None:
+    def _resolve_action_mode(
+        mount: "CapabilityMount | None",
+        *,
+        tool_contract: ToolExecutionContract | None = None,
+        payload: dict[str, object] | None = None,
+    ) -> str | None:
+        if mount is not None:
+            declared = CapabilityExecutionFacade._execution_policy_value(
+                mount,
+                "action_mode",
+            )
+            if declared in {"read", "write"}:
+                return declared
+        if tool_contract is not None:
+            resolved = tool_contract.resolve_action_mode(payload or {})
+            if resolved in {"read", "write"}:
+                return resolved
         if mount is None:
             return None
-        declared = CapabilityExecutionFacade._execution_policy_value(
-            mount,
-            "action_mode",
-        )
-        if declared in {"read", "write"}:
-            return declared
         contracts = set(mount.evidence_contract)
         if contracts & _READ_ONLY_EVIDENCE_CONTRACTS:
             return "read"
         if contracts & _WRITE_EVIDENCE_CONTRACTS:
             return "write"
+        return None
+
+    @staticmethod
+    def _resolve_concurrency_class(
+        mount: "CapabilityMount | None",
+        *,
+        tool_contract: ToolExecutionContract | None,
+        action_mode: str | None,
+        payload: dict[str, object] | None = None,
+    ) -> str | None:
+        if mount is not None:
+            declared = CapabilityExecutionFacade._execution_policy_value(
+                mount,
+                "concurrency_class",
+            )
+            if declared in {"parallel-read", "serial-write"}:
+                return declared
+        if tool_contract is not None:
+            return tool_contract.resolve_concurrency_class(
+                payload or {},
+                action_mode=action_mode if action_mode in {"read", "write"} else None,
+            )
+        if action_mode == "read":
+            return "parallel-read"
+        if action_mode == "write":
+            return "serial-write"
+        return None
+
+    @staticmethod
+    def _resolve_preflight_policy(
+        mount: "CapabilityMount | None",
+        *,
+        tool_contract: ToolExecutionContract | None,
+    ) -> str | None:
+        if mount is not None:
+            declared = CapabilityExecutionFacade._execution_policy_value(
+                mount,
+                "preflight_policy",
+            )
+            if declared is not None:
+                return declared
+        if tool_contract is not None:
+            return tool_contract.preflight_policy
         return None
 
     @staticmethod
@@ -579,6 +735,9 @@ class CapabilityExecutionFacade:
         evidence_id: str | None = None,
         evidence_emitted: bool = False,
         output: object | None = None,
+        read_only: bool = False,
+        concurrency_class: str | None = None,
+        preflight_policy: str | None = None,
     ) -> dict[str, object]:
         return {
             "success": success,
@@ -598,27 +757,68 @@ class CapabilityExecutionFacade:
             "environment_ref": execution_context.environment_ref,
             "work_context_id": execution_context.work_context_id,
             "action_mode": execution_context.action_mode,
+            "read_only": read_only,
+            "concurrency_class": concurrency_class,
+            "preflight_policy": preflight_policy,
             "evidence_id": evidence_id,
             "evidence_emitted": evidence_emitted,
             "output": output,
             "error_kind": error_kind,
             "error": None if success else summary,
+            "execution_contract": {
+                "read_only": read_only,
+                "concurrency_class": concurrency_class,
+                "preflight_policy": preflight_policy,
+            },
         }
 
-    def _make_shell_evidence_sink(self, task_id: str):
+    def _make_shell_evidence_sink(
+        self,
+        task_id: str,
+        *,
+        execution_metadata: dict[str, object] | None = None,
+    ):
         if self._tool_bridge is None:
             return None
-        return lambda payload: self._tool_bridge.record_shell_event(task_id, payload)
+        return lambda payload: self._tool_bridge.record_shell_event(
+            task_id,
+            {
+                **dict(execution_metadata or {}),
+                **dict(payload or {}),
+            },
+        )
 
-    def _make_file_evidence_sink(self, task_id: str):
+    def _make_file_evidence_sink(
+        self,
+        task_id: str,
+        *,
+        execution_metadata: dict[str, object] | None = None,
+    ):
         if self._tool_bridge is None:
             return None
-        return lambda payload: self._tool_bridge.record_file_event(task_id, payload)
+        return lambda payload: self._tool_bridge.record_file_event(
+            task_id,
+            {
+                **dict(execution_metadata or {}),
+                **dict(payload or {}),
+            },
+        )
 
-    def _make_browser_evidence_sink(self, task_id: str):
+    def _make_browser_evidence_sink(
+        self,
+        task_id: str,
+        *,
+        execution_metadata: dict[str, object] | None = None,
+    ):
         if self._tool_bridge is None:
             return None
-        return lambda payload: self._tool_bridge.record_browser_event(task_id, payload)
+        return lambda payload: self._tool_bridge.record_browser_event(
+            task_id,
+            {
+                **dict(execution_metadata or {}),
+                **dict(payload or {}),
+            },
+        )
 
     async def _execute_skill(
         self,

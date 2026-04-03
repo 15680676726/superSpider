@@ -383,9 +383,24 @@ def _build_activation_summary(
         return None, [], []
     top_entities = _unique_strings(getattr(activation_result, "top_entities", None))
     top_opinions = _unique_strings(getattr(activation_result, "top_opinions", None))
+    top_relations = _unique_strings(getattr(activation_result, "top_relations", None))
+    top_relation_kinds = _unique_strings(
+        getattr(activation_result, "top_relation_kinds", None),
+    )
     top_constraints = _unique_strings(getattr(activation_result, "top_constraints", None))
     top_next_actions = _unique_strings(getattr(activation_result, "top_next_actions", None))
     support_refs = _unique_strings(getattr(activation_result, "support_refs", None))
+    top_relation_evidence: list[dict[str, Any]] = []
+    for item in list(getattr(activation_result, "top_relation_evidence", None) or []):
+        model_dump = getattr(item, "model_dump", None)
+        if callable(model_dump):
+            payload = model_dump(mode="json")
+        elif isinstance(item, dict):
+            payload = dict(item)
+        else:
+            payload = None
+        if isinstance(payload, dict):
+            top_relation_evidence.append(payload)
     contradictions = list(getattr(activation_result, "contradictions", []) or [])
     contradiction_count = len(contradictions)
     reasons: list[str] = []
@@ -403,6 +418,9 @@ def _build_activation_summary(
         {
             "top_entities": top_entities,
             "top_opinions": top_opinions,
+            "top_relations": top_relations,
+            "top_relation_kinds": top_relation_kinds,
+            "top_relation_evidence": top_relation_evidence,
             "top_constraints": top_constraints,
             "top_next_actions": top_next_actions,
             "support_refs": support_refs,

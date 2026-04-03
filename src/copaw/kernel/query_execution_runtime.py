@@ -1,8 +1,9 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import importlib
 
+from ..capabilities.tool_execution_contracts import get_tool_execution_contract
 from ..constant import MEMORY_COMPACT_KEEP_RECENT
 from ..memory.conversation_compaction_service import ConversationCompactionService
 from .main_brain_intake import (
@@ -56,6 +57,54 @@ _RUNTIME_ENTROPY_DEGRADED_NEXT_STEP = (
 )
 _RUNTIME_ENTROPY_AVAILABLE_SUMMARY = "The private compaction memory sidecar is attached."
 
+_QUERY_TOOL_CAPABILITY_IDS_BY_NAME = {
+    "browser_use": "tool:browser_use",
+    "desktop_screenshot": "tool:desktop_screenshot",
+    "edit_file": "tool:edit_file",
+    "execute_shell_command": "tool:execute_shell_command",
+    "get_current_time": "tool:get_current_time",
+    "read_file": "tool:read_file",
+    "send_file_to_user": "tool:send_file_to_user",
+    "write_file": "tool:write_file",
+}
+
+
+def _query_tool_contract_metadata(
+    payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    raw_payload = dict(payload or {})
+    tool_name = _first_non_empty(raw_payload.get("tool_name"))
+    capability_id = _QUERY_TOOL_CAPABILITY_IDS_BY_NAME.get(tool_name or "")
+    if capability_id is None:
+        return raw_payload
+    tool_contract = get_tool_execution_contract(capability_id)
+    if tool_contract is None:
+        return raw_payload
+    metadata = {
+        **dict(_mapping_value(raw_payload.get("metadata"))),
+        "tool_contract": capability_id,
+    }
+    action_mode = tool_contract.resolve_action_mode(raw_payload)
+    if action_mode in {"read", "write"}:
+        metadata["action_mode"] = action_mode
+        metadata["read_only"] = action_mode == "read"
+    metadata["concurrency_class"] = tool_contract.resolve_concurrency_class(
+        raw_payload,
+        action_mode=action_mode if action_mode in {"read", "write"} else None,
+    )
+    metadata["preflight_policy"] = tool_contract.preflight_policy
+    raw_payload["metadata"] = metadata
+    return raw_payload
+
+
+def _query_environment_ref(execution_context: Mapping[str, Any] | None) -> str | None:
+    runtime = _mapping_value((execution_context or {}).get("main_brain_runtime"))
+    environment = _mapping_value(runtime.get("environment"))
+    return _first_non_empty(
+        environment.get("ref"),
+        environment.get("session_id"),
+    )
+
 
 def _resolve_runtime_entropy_budget_payload(
     *,
@@ -71,18 +120,30 @@ def _resolve_runtime_entropy_budget_payload(
                 * float(getattr(running, "memory_compact_ratio", 0) or 0),
             ),
         )
+    keep_recent_messages = MEMORY_COMPACT_KEEP_RECENT
+    tool_result_compact_keep_n = int(
+        getattr(running, "tool_result_compact_keep_n", 0) or 0,
+    )
+    enable_tool_result_compact = bool(
+        getattr(running, "enable_tool_result_compact", False),
+    )
     return {
         "max_input_length": int(getattr(running, "max_input_length", 0) or 0),
         "memory_compact_ratio": float(getattr(running, "memory_compact_ratio", 0) or 0),
         "memory_compact_threshold": int(compact_threshold or 0),
         "memory_compact_reserve": int(getattr(running, "memory_compact_reserve", 0) or 0),
-        "enable_tool_result_compact": bool(
-            getattr(running, "enable_tool_result_compact", False),
-        ),
-        "tool_result_compact_keep_n": int(
-            getattr(running, "tool_result_compact_keep_n", 0) or 0,
-        ),
-        "keep_recent_messages": MEMORY_COMPACT_KEEP_RECENT,
+        "enable_tool_result_compact": enable_tool_result_compact,
+        "tool_result_compact_keep_n": tool_result_compact_keep_n,
+        "keep_recent_messages": keep_recent_messages,
+        "tool_result_budget": {
+            "enabled": enable_tool_result_compact,
+            "keep_recent_messages": keep_recent_messages,
+            "keep_recent_tool_results": tool_result_compact_keep_n,
+            "state_channel": "query_runtime_state",
+            "summary_surface": "runtime-center",
+            "spill_surface": "runtime-center",
+            "replay_surface": "runtime-conversation",
+        },
     }
 
 
@@ -729,6 +790,11 @@ class _QueryExecutionRuntimeMixin(
                 session_lease=lease,
                 actor_lease=actor_lease,
             )
+            tool_execution_delegate = self._build_query_tool_execution_delegate(
+                owner_agent_id=owner_agent_id,
+                kernel_task_id=kernel_task_id,
+                execution_context=execution_context,
+            )
             tool_preflight = self._build_tool_preflight(
                 delegation_guard=delegation_guard,
                 msgs=msgs,
@@ -744,46 +810,19 @@ class _QueryExecutionRuntimeMixin(
                     else None
                 ),
             ):
-                with bind_tool_preflight(tool_preflight):
-                    with bind_shell_evidence_sink(self._make_shell_evidence_sink(kernel_task_id)):
-                        with bind_file_evidence_sink(self._make_file_evidence_sink(kernel_task_id)):
-                            with bind_browser_evidence_sink(
-                                self._make_browser_evidence_sink(kernel_task_id),
-                            ):
-                                if heartbeat is None:
-                                    async for msg, last in stream_printing_messages(
-                                        agents=[agent],
-                                        coroutine_task=agent(msgs),
-                                    ):
-                                        stream_step_count += 1
-                                        final_summary = _message_preview(msg) or final_summary
-                                        self._record_query_checkpoint(
-                                            agent_id=owner_agent_id,
-                                            task_id=kernel_task_id,
-                                            session_id=session_id,
-                                            user_id=user_id,
-                                            conversation_thread_id=session_id,
-                                            channel=channel,
-                                            phase="query-streaming",
-                                            checkpoint_kind="worker-step",
-                                            status="ready",
-                                            summary=final_summary or f"流式输出第 {stream_step_count} 条消息",
-                                            execution_context=execution_context,
-                                            stream_step_count=stream_step_count,
-                                            snapshot_payload={
-                                                "last_message_preview": final_summary,
-                                                "last_message_is_terminal": last,
-                                            },
-                                        )
-                                        yield msg, last
-                                else:
-                                    async with heartbeat:
+                with bind_tool_execution_delegate(tool_execution_delegate):
+                    with bind_tool_preflight(tool_preflight):
+                        with bind_shell_evidence_sink(self._make_shell_evidence_sink(kernel_task_id)):
+                            with bind_file_evidence_sink(self._make_file_evidence_sink(kernel_task_id)):
+                                with bind_browser_evidence_sink(
+                                    self._make_browser_evidence_sink(kernel_task_id),
+                                ):
+                                    if heartbeat is None:
                                         async for msg, last in stream_printing_messages(
                                             agents=[agent],
                                             coroutine_task=agent(msgs),
                                         ):
                                             stream_step_count += 1
-                                            await heartbeat.pulse()
                                             final_summary = _message_preview(msg) or final_summary
                                             self._record_query_checkpoint(
                                                 agent_id=owner_agent_id,
@@ -795,7 +834,7 @@ class _QueryExecutionRuntimeMixin(
                                                 phase="query-streaming",
                                                 checkpoint_kind="worker-step",
                                                 status="ready",
-                                                summary=final_summary or f"流式输出第 {stream_step_count} 条消息",
+                                                summary=final_summary or f"Stream output step {stream_step_count}",
                                                 execution_context=execution_context,
                                                 stream_step_count=stream_step_count,
                                                 snapshot_payload={
@@ -804,6 +843,34 @@ class _QueryExecutionRuntimeMixin(
                                                 },
                                             )
                                             yield msg, last
+                                    else:
+                                        async with heartbeat:
+                                            async for msg, last in stream_printing_messages(
+                                                agents=[agent],
+                                                coroutine_task=agent(msgs),
+                                            ):
+                                                stream_step_count += 1
+                                                await heartbeat.pulse()
+                                                final_summary = _message_preview(msg) or final_summary
+                                                self._record_query_checkpoint(
+                                                    agent_id=owner_agent_id,
+                                                    task_id=kernel_task_id,
+                                                    session_id=session_id,
+                                                    user_id=user_id,
+                                                    conversation_thread_id=session_id,
+                                                    channel=channel,
+                                                    phase="query-streaming",
+                                                    checkpoint_kind="worker-step",
+                                                    status="ready",
+                                                    summary=final_summary or f"Stream output step {stream_step_count}",
+                                                    execution_context=execution_context,
+                                                    stream_step_count=stream_step_count,
+                                                    snapshot_payload={
+                                                        "last_message_preview": final_summary,
+                                                        "last_message_is_terminal": last,
+                                                    },
+                                                )
+                                                yield msg, last
         except asyncio.CancelledError:
             final_error = "任务已取消。"
             if agent is not None:
@@ -1222,7 +1289,7 @@ class _QueryExecutionRuntimeMixin(
             return None
         return lambda payload: self._tool_bridge.record_shell_event(
             kernel_task_id,
-            payload,
+            _query_tool_contract_metadata(payload),
         )
 
     def _make_file_evidence_sink(self, kernel_task_id: str | None):
@@ -1230,7 +1297,7 @@ class _QueryExecutionRuntimeMixin(
             return None
         return lambda payload: self._tool_bridge.record_file_event(
             kernel_task_id,
-            payload,
+            _query_tool_contract_metadata(payload),
         )
 
     def _make_browser_evidence_sink(self, kernel_task_id: str | None):
@@ -1238,8 +1305,45 @@ class _QueryExecutionRuntimeMixin(
             return None
         return lambda payload: self._tool_bridge.record_browser_event(
             kernel_task_id,
-            payload,
+            _query_tool_contract_metadata(payload),
         )
+
+    def _build_query_tool_execution_delegate(
+        self,
+        *,
+        owner_agent_id: str | None,
+        kernel_task_id: str | None,
+        execution_context: Mapping[str, Any] | None,
+    ):
+        service = self._capability_service
+        execute_task = getattr(service, "execute_task", None)
+        if not callable(execute_task):
+            return None
+        if owner_agent_id is None or kernel_task_id is None:
+            return None
+        work_context_id = _first_non_empty(
+            (execution_context or {}).get("work_context_id"),
+        )
+        environment_ref = _query_environment_ref(execution_context)
+        risk_level = _first_non_empty(
+            _mapping_value((execution_context or {}).get("main_brain_runtime")).get("risk_level"),
+            "auto",
+        ) or "auto"
+
+        async def _delegate(capability_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+            task = KernelTask(
+                id=kernel_task_id,
+                title=f"Query tool execution: {capability_id}",
+                capability_ref=capability_id,
+                owner_agent_id=owner_agent_id,
+                work_context_id=work_context_id,
+                environment_ref=environment_ref,
+                risk_level=risk_level,
+                payload=dict(payload or {}),
+            )
+            return await execute_task(task)
+
+        return _delegate
 
     def _mark_actor_query_started(
         self,

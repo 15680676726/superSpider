@@ -17,7 +17,7 @@ from copaw.kernel import (
     KernelTaskStore,
     TaskLifecycleManager,
 )
-from copaw.learning import LearningService
+from copaw.learning import LearningEngine, LearningService
 from copaw.state import SQLiteStateStore, TaskRecord, WorkContextService
 from copaw.state.agent_experience_service import AgentExperienceMemoryService
 from copaw.state.repositories import (
@@ -56,6 +56,18 @@ class _FakeKnowledgeService:
     def remember_fact(self, **kwargs):
         self.calls.append(kwargs)
         return kwargs
+
+
+class _CountingGoalService:
+    def __init__(self) -> None:
+        self.reconcile_calls: list[tuple[str, str]] = []
+        self.resume_calls: list[str] = []
+
+    def reconcile_goal_status(self, goal_id: str, *, source: str) -> None:
+        self.reconcile_calls.append((goal_id, source))
+
+    def resume_background_goal_chain_for_task(self, task_id: str) -> None:
+        self.resume_calls.append(task_id)
 
 
 # ── TaskLifecycleManager tests ──────────────────────────────────────
@@ -292,7 +304,10 @@ class TestKernelDispatcher:
                 }
 
         knowledge = _FakeKnowledgeService()
-        learning_service = LearningService(evidence_ledger=EvidenceLedger())
+        learning_service = LearningService(
+            engine=LearningEngine(tmp_path / "learning.sqlite3"),
+            evidence_ledger=EvidenceLedger(),
+        )
         learning_service.set_experience_memory_service(
             AgentExperienceMemoryService(knowledge_service=knowledge),
         )
@@ -422,6 +437,50 @@ class TestKernelDispatcher:
 
         dispatcher.fail_task(child.id, error="child failed")
         assert dispatcher.lifecycle.get_task(parent.id).phase == "failed"
+
+    def test_fail_task_is_idempotent_for_terminal_task(self, tmp_path):
+        dispatcher, task_store = _build_dispatcher_with_decisions(tmp_path)
+        goal_service = _CountingGoalService()
+        dispatcher.set_goal_service(goal_service)
+        task = KernelTask(
+            title="Idempotent fail task",
+            capability_ref="system:dispatch_query",
+            owner_agent_id="copaw-agent-runner",
+            goal_id="goal-1",
+        )
+        admitted = dispatcher.submit(task)
+
+        first = dispatcher.fail_task(admitted.task_id, error="first failure")
+        second = dispatcher.fail_task(admitted.task_id, error="second failure")
+
+        records = task_store._evidence_ledger.list_by_task(admitted.task_id)
+        assert first.phase == "failed"
+        assert second.phase == "failed"
+        assert [record.result_summary for record in records] == ["first failure"]
+        assert goal_service.reconcile_calls == [("goal-1", "task-terminal")]
+        assert goal_service.resume_calls == [admitted.task_id]
+
+    def test_cancel_task_is_idempotent_for_terminal_task(self, tmp_path):
+        dispatcher, task_store = _build_dispatcher_with_decisions(tmp_path)
+        goal_service = _CountingGoalService()
+        dispatcher.set_goal_service(goal_service)
+        task = KernelTask(
+            title="Idempotent cancel task",
+            capability_ref="system:dispatch_query",
+            owner_agent_id="copaw-agent-runner",
+            goal_id="goal-1",
+        )
+        admitted = dispatcher.submit(task)
+
+        first = dispatcher.cancel_task(admitted.task_id, resolution="first cancel")
+        second = dispatcher.cancel_task(admitted.task_id, resolution="second cancel")
+
+        records = task_store._evidence_ledger.list_by_task(admitted.task_id)
+        assert first.phase == "cancelled"
+        assert second.phase == "cancelled"
+        assert [record.result_summary for record in records] == ["first cancel"]
+        assert goal_service.reconcile_calls == [("goal-1", "task-terminal")]
+        assert goal_service.resume_calls == [admitted.task_id]
 
 
 # ── Agent profile tests ─────────────────────────────────────────────
