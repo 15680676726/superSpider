@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from copaw.capabilities.execution_context import CapabilityExecutionContext
 
 
@@ -45,3 +47,32 @@ def test_execution_context_carries_contract_fields() -> None:
     assert context.concurrency_class == "parallel-read"
     assert context.preflight_policy == "inline"
     assert context.evidence_mode == "tool-bridge"
+
+
+def test_execution_context_tracks_writer_lock_discipline_for_writes() -> None:
+    task = SimpleNamespace(
+        id="ktask:test",
+        trace_id="trace:test",
+        goal_id="goal:test",
+        work_context_id="work:test",
+        owner_agent_id="execution-core",
+        capability_ref="tool:write_file",
+        environment_ref="session:console:test",
+        risk_level="guarded",
+    )
+
+    context = CapabilityExecutionContext.from_kernel_task(
+        task,
+        action_mode="write",
+        concurrency_class="serial-write",
+        writer_lock_scope="file:C:/tmp/report.txt",
+        writer_lock_required=True,
+        payload={"file_path": "C:/tmp/report.txt"},
+    )
+
+    assert context.is_read_only is False
+    assert context.trace_id == "trace:test"
+    assert context.work_context_id == "work:test"
+    assert context.concurrency_class == "serial-write"
+    assert context.writer_lock_scope == "file:C:/tmp/report.txt"
+    assert context.writer_lock_required is True

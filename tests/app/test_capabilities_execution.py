@@ -1422,6 +1422,265 @@ def test_mount_declared_writer_scope_conflict_blocks_direct_write_before_executo
     assert "writer scope" in result["summary"].lower()
 
 
+def test_builtin_edit_file_acquires_shared_writer_lease_for_direct_write(
+    tmp_path,
+) -> None:
+    target = tmp_path / "notes.txt"
+    target.write_text("old", encoding="utf-8")
+
+    class FakeEnvironmentService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, object]] = []
+            self._leases: dict[str, SimpleNamespace] = {}
+
+        def acquire_shared_writer_lease(
+            self,
+            *,
+            writer_lock_scope: str,
+            owner: str,
+            ttl_seconds: int | None = None,
+            handle: object | None = None,
+            metadata: dict[str, object] | None = None,
+        ):
+            self.calls.append(
+                (
+                    "acquire",
+                    {
+                        "writer_lock_scope": writer_lock_scope,
+                        "owner": owner,
+                        "ttl_seconds": ttl_seconds,
+                        "handle": handle,
+                        "metadata": dict(metadata or {}),
+                    },
+                ),
+            )
+            lease = SimpleNamespace(
+                id="lease-edit-1",
+                lease_token="token-edit-1",
+                lease_status="leased",
+                metadata=dict(metadata or {}),
+            )
+            self._leases[writer_lock_scope] = lease
+            return lease
+
+        def heartbeat_shared_writer_lease(
+            self,
+            lease_id: str,
+            *,
+            lease_token: str,
+            ttl_seconds: int | None = None,
+            handle: object | None = None,
+            metadata: dict[str, object] | None = None,
+        ):
+            self.calls.append(
+                (
+                    "heartbeat",
+                    {
+                        "lease_id": lease_id,
+                        "lease_token": lease_token,
+                        "ttl_seconds": ttl_seconds,
+                        "handle": handle,
+                        "metadata": dict(metadata or {}),
+                    },
+                ),
+            )
+            return SimpleNamespace(
+                id=lease_id,
+                lease_token=lease_token,
+                lease_status="leased",
+                metadata=dict(metadata or {}),
+            )
+
+        def release_shared_writer_lease(
+            self,
+            *,
+            lease_id: str,
+            lease_token: str | None = None,
+            reason: str | None = None,
+            release_status: str = "released",
+            validate_token: bool = True,
+        ):
+            self.calls.append(
+                (
+                    "release",
+                    {
+                        "lease_id": lease_id,
+                        "lease_token": lease_token,
+                        "reason": reason,
+                        "release_status": release_status,
+                        "validate_token": validate_token,
+                    },
+                ),
+            )
+            for lease in self._leases.values():
+                if lease.id == lease_id:
+                    lease.lease_status = release_status
+                    return lease
+            return None
+
+        def get_shared_writer_lease(self, *, writer_lock_scope: str):
+            return self._leases.get(writer_lock_scope)
+
+    fake_environment_service = FakeEnvironmentService()
+    capability_service = CapabilityService(
+        evidence_ledger=EvidenceLedger(),
+        environment_service=fake_environment_service,
+    )
+
+    async def _fake_edit_executor(**kwargs):
+        active_lease = fake_environment_service.get_shared_writer_lease(
+            writer_lock_scope=f"file:{target.resolve()}",
+        )
+        assert active_lease is not None
+        assert active_lease.lease_status == "leased"
+        return {"success": True, "summary": f"edited {kwargs['file_path']}"}
+
+    with patch.dict(
+        capability_execution_module._TOOL_EXECUTORS,
+        {"tool:edit_file": _fake_edit_executor},
+    ):
+        result = asyncio.run(
+            capability_service.execute_task(
+                KernelTask(
+                    title="Edit file with builtin writer lease",
+                    capability_ref="tool:edit_file",
+                    owner_agent_id="copaw-operator",
+                    environment_ref="session:console:test",
+                    payload={
+                        "file_path": str(target),
+                        "old_text": "old",
+                        "new_text": "new",
+                    },
+                ),
+            ),
+        )
+
+    assert result["success"] is True
+    assert fake_environment_service.calls[0][0] == "acquire"
+    assert (
+        fake_environment_service.calls[0][1]["writer_lock_scope"]
+        == f"file:{target.resolve()}"
+    )
+    assert fake_environment_service.calls[-1][0] == "release"
+
+
+def test_write_mount_without_resolved_writer_scope_blocks_direct_execution_fail_closed(
+    tmp_path,
+) -> None:
+    target = tmp_path / "notes.txt"
+    executor_calls: list[dict[str, object]] = []
+    capability_service = CapabilityService(
+        registry=StaticCapabilityRegistry(
+            CapabilityMount(
+                id="tool:write_file",
+                name="write_file",
+                summary="Write a file.",
+                kind="local-tool",
+                source_kind="tool",
+                risk_level="guarded",
+                environment_requirements=["workspace", "file-view"],
+                evidence_contract=["file-write"],
+                role_access_policy=["all"],
+                enabled=True,
+                metadata={
+                    "execution_policy": {
+                        "action_mode": "write",
+                        "evidence_owner": "execution-facade",
+                    },
+                },
+            ),
+        ),
+        evidence_ledger=EvidenceLedger(),
+    )
+
+    async def _fake_write_executor(**kwargs):
+        executor_calls.append(dict(kwargs))
+        return {"success": True, "summary": "should not run"}
+
+    with patch.dict(
+        capability_execution_module._TOOL_EXECUTORS,
+        {"tool:write_file": _fake_write_executor},
+    ):
+        result = asyncio.run(
+            capability_service.execute_task(
+                KernelTask(
+                    title="Blocked write file without writer scope",
+                    capability_ref="tool:write_file",
+                    owner_agent_id="copaw-operator",
+                    environment_ref="session:console:test",
+                    payload={
+                        "file_path": str(target),
+                        "content": "blocked",
+                    },
+                ),
+            ),
+        )
+
+    assert executor_calls == []
+    assert result["success"] is False
+    assert result["error_kind"] == "blocked"
+    assert "writer lock scope" in result["summary"].lower()
+
+
+def test_write_mount_with_blank_declared_writer_scope_blocks_direct_execution_fail_closed(
+    tmp_path,
+) -> None:
+    target = tmp_path / "notes.txt"
+    executor_calls: list[dict[str, object]] = []
+    capability_service = CapabilityService(
+        registry=StaticCapabilityRegistry(
+            CapabilityMount(
+                id="tool:write_file",
+                name="write_file",
+                summary="Write a file.",
+                kind="local-tool",
+                source_kind="tool",
+                risk_level="guarded",
+                environment_requirements=["workspace", "file-view"],
+                evidence_contract=["file-write"],
+                role_access_policy=["all"],
+                enabled=True,
+                metadata={
+                    "execution_policy": {
+                        "action_mode": "write",
+                        "evidence_owner": "execution-facade",
+                        "writer_lock_scope": "   ",
+                    },
+                },
+            ),
+        ),
+        evidence_ledger=EvidenceLedger(),
+    )
+
+    async def _fake_write_executor(**kwargs):
+        executor_calls.append(dict(kwargs))
+        return {"success": True, "summary": "should not run"}
+
+    with patch.dict(
+        capability_execution_module._TOOL_EXECUTORS,
+        {"tool:write_file": _fake_write_executor},
+    ):
+        result = asyncio.run(
+            capability_service.execute_task(
+                KernelTask(
+                    title="Blocked write file with blank writer scope",
+                    capability_ref="tool:write_file",
+                    owner_agent_id="copaw-operator",
+                    environment_ref="session:console:test",
+                    payload={
+                        "file_path": str(target),
+                        "content": "blocked",
+                    },
+                ),
+            ),
+        )
+
+    assert executor_calls == []
+    assert result["success"] is False
+    assert result["error_kind"] == "blocked"
+    assert "writer lock scope" in result["summary"].lower()
+
+
 def test_execute_task_batch_runs_parallel_reads_before_serial_write(
     monkeypatch,
 ) -> None:

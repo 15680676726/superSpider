@@ -80,6 +80,13 @@ _WRITE_EVIDENCE_CONTRACTS = frozenset(
         "shell-command",
     },
 )
+_SHARED_WRITER_SCOPE_EVIDENCE_CONTRACTS = frozenset(
+    {
+        "file-edit",
+        "file-transfer",
+        "file-write",
+    },
+)
 _TOOL_BRIDGE_EVIDENCE_CONTRACTS = frozenset(
     {
         "browser-action",
@@ -499,6 +506,19 @@ class CapabilityExecutionFacade:
             tool_contract=tool_contract,
             payload=payload,
         )
+        writer_lock_required = self._requires_writer_lock_scope(
+            mount,
+            action_mode=action_mode,
+        )
+        writer_lock_scope = (
+            self._resolve_writer_lock_scope(
+                mount=mount,
+                payload=payload,
+                environment_ref=task.environment_ref,
+            )
+            if mount is not None and writer_lock_required
+            else None
+        )
         return CapabilityExecutionContext.from_kernel_task(
             task,
             action_mode=action_mode,
@@ -508,6 +528,8 @@ class CapabilityExecutionFacade:
                 action_mode=action_mode,
                 payload=payload,
             ),
+            writer_lock_scope=writer_lock_scope,
+            writer_lock_required=writer_lock_required,
             preflight_policy=self._resolve_preflight_policy(
                 mount,
                 tool_contract=tool_contract,
@@ -528,6 +550,11 @@ class CapabilityExecutionFacade:
             mount=mount,
             execution_context=execution_context,
         )
+        if execution_context.action_mode == "write" and execution_context.writer_lock_required:
+            if execution_context.writer_lock_scope is None:
+                raise ChildRunWriterLeaseConflict(
+                    "Write mount is blocked because no writer lock scope could be resolved.",
+                )
         return await run_child_task_with_writer_lease(
             label="capability-direct-execution",
             execute=lambda: self._invoke_executor(executor, **kwargs),
@@ -555,11 +582,7 @@ class CapabilityExecutionFacade:
     ) -> ChildRunWriterContract | None:
         if mount is None or execution_context.action_mode != "write":
             return None
-        writer_lock_scope = self._resolve_writer_lock_scope(
-            mount=mount,
-            payload=execution_context.payload,
-            environment_ref=execution_context.environment_ref,
-        )
+        writer_lock_scope = execution_context.writer_lock_scope
         if writer_lock_scope is None:
             return None
         return ChildRunWriterContract(
@@ -570,6 +593,27 @@ class CapabilityExecutionFacade:
         )
 
     @classmethod
+    def _requires_writer_lock_scope(
+        cls,
+        mount: "CapabilityMount | None",
+        *,
+        action_mode: str | None,
+    ) -> bool:
+        if mount is None or action_mode != "write":
+            return False
+        declared_scope = cls._execution_policy_value(mount, "writer_lock_scope")
+        if cls._normalize_writer_scope(declared_scope) is not None:
+            return True
+        declared_scope_source = cls._normalize_writer_scope(
+            cls._execution_policy_value(mount, "writer_scope_source")
+        )
+        if declared_scope_source is not None:
+            return True
+        return bool(
+            set(mount.evidence_contract) & _SHARED_WRITER_SCOPE_EVIDENCE_CONTRACTS
+        )
+
+    @classmethod
     def _resolve_writer_lock_scope(
         cls,
         *,
@@ -577,7 +621,9 @@ class CapabilityExecutionFacade:
         payload: dict[str, object],
         environment_ref: str | None,
     ) -> str | None:
-        declared_scope = cls._execution_policy_value(mount, "writer_lock_scope")
+        declared_scope = cls._normalize_writer_scope(
+            cls._execution_policy_value(mount, "writer_lock_scope")
+        )
         if declared_scope is not None:
             return declared_scope
         scope_source = cls._execution_policy_value(mount, "writer_scope_source")
