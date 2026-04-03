@@ -114,6 +114,14 @@ class _QueryExecutionContextRuntimeMixin:
             request=request,
             agent_id=agent_id,
         )
+        runtime_entropy = self._build_runtime_entropy_contract(
+            degradation=degradation,
+        )
+        context["runtime_entropy"] = runtime_entropy
+        context["query_runtime_entropy"] = self._build_query_runtime_entropy_contract(
+            degradation=degradation,
+            runtime_entropy=runtime_entropy,
+        )
         if degradation:
             context["degradation"] = degradation
         return context

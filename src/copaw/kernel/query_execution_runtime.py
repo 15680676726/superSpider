@@ -20,6 +20,7 @@ from .main_brain_result_committer import (
 from .query_execution_resident_runtime import _QueryExecutionResidentRuntimeMixin
 from .query_execution_shared import *  # noqa: F401,F403
 from .query_execution_usage_runtime import _QueryExecutionUsageRuntimeMixin
+from .runtime_outcome import build_execution_diagnostics
 
 
 def CoPawAgent(*args, **kwargs):
