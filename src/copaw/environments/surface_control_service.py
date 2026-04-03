@@ -176,7 +176,6 @@ class SurfaceControlService:
                 "provider_session_ref": provider_session_ref,
             },
         )
-        )
         return self._decorate_result(result=result, resolution=resolution)
 
     async def execute_document_action(
@@ -250,7 +249,6 @@ class SurfaceControlService:
                 "document_family": resolved_family,
                 "snapshot": snapshot,
             },
-        )
         )
         return self._decorate_result(result=result, resolution=resolution)
 
@@ -336,7 +334,6 @@ class SurfaceControlService:
                 "app_identity": app_identity,
                 "control_channel": control_channel,
             },
-        )
         )
         return self._decorate_result(result=result, resolution=resolution)
 

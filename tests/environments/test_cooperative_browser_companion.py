@@ -573,7 +573,14 @@ async def test_browser_action_blocks_when_shared_writer_scope_is_already_reserve
         _browser_runtime,
     ) = _build_services(tmp_path)
 
+    companion_runtime.register_companion(
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
     )
+
     environment_service.acquire_shared_writer_lease(
         writer_lock_scope=session.id,
         owner="other-agent",
