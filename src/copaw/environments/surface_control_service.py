@@ -141,19 +141,6 @@ class SurfaceControlService:
             host_executor=host_executor,
         )
         browser_site_contract = self._mapping(detail.get("browser_site_contract"))
-        await self._enforce_browser_guardrails(
-            session_mount_id=session_mount_id,
-            action=action,
-            contract=contract,
-            snapshot=snapshot,
-            selected_executor=selected_executor,
-            transport_ref=transport_ref,
-            provider_session_ref=provider_session_ref,
-            default_expected_frontmost_ref=self._normalize_string(
-                browser_site_contract.get("active_tab_ref"),
-                browser_site_contract.get("site_contract_ref"),
-            ),
-        )
         result = await self._execute_live_action(
             surface_kind="browser",
             session_mount_id=session_mount_id,
@@ -165,8 +152,30 @@ class SurfaceControlService:
             cooperative_executor=cooperative_executor,
             semantic_executor=None,
             host_executor=host_executor,
-            transport_ref=transport_ref,
-            provider_session_ref=provider_session_ref,
+            selected_executor=selected_executor,
+            guardrail_runner=self._enforce_browser_guardrails,
+            guardrail_kwargs={
+                "session_mount_id": session_mount_id,
+                "action": action,
+                "contract": contract,
+                "snapshot": snapshot,
+                "selected_executor": selected_executor,
+                "transport_ref": transport_ref,
+                "provider_session_ref": provider_session_ref,
+                "default_expected_frontmost_ref": self._normalize_string(
+                    browser_site_contract.get("active_tab_ref"),
+                    browser_site_contract.get("site_contract_ref"),
+                ),
+            },
+            execution_kwargs={
+                "session_mount_id": session_mount_id,
+                "action": action,
+                "contract": contract,
+                "snapshot": snapshot,
+                "transport_ref": transport_ref,
+                "provider_session_ref": provider_session_ref,
+            },
+        )
         )
         return self._decorate_result(result=result, resolution=resolution)
 
@@ -211,15 +220,6 @@ class SurfaceControlService:
             semantic_executor=None,
             host_executor=host_executor,
         )
-        await self._enforce_document_guardrails(
-            session_mount_id=session_mount_id,
-            action=action,
-            contract=contract,
-            snapshot=snapshot,
-            selected_executor=selected_executor,
-            bridge_ref=bridge_ref,
-            document_family=resolved_family,
-        )
         detail = self._service.get_session_detail(session_mount_id, limit=limit) or {}
         result = await self._execute_live_action(
             surface_kind="document",
@@ -232,7 +232,25 @@ class SurfaceControlService:
             cooperative_executor=cooperative_executor,
             semantic_executor=None,
             host_executor=host_executor,
-            document_family=resolved_family,
+            selected_executor=selected_executor,
+            guardrail_runner=self._enforce_document_guardrails,
+            guardrail_kwargs={
+                "session_mount_id": session_mount_id,
+                "action": action,
+                "contract": contract,
+                "snapshot": snapshot,
+                "selected_executor": selected_executor,
+                "bridge_ref": bridge_ref,
+                "document_family": resolved_family,
+            },
+            execution_kwargs={
+                "session_mount_id": session_mount_id,
+                "action": action,
+                "contract": contract,
+                "document_family": resolved_family,
+                "snapshot": snapshot,
+            },
+        )
         )
         return self._decorate_result(result=result, resolution=resolution)
 
@@ -288,15 +306,6 @@ class SurfaceControlService:
             semantic_executor=semantic_executor,
             host_executor=host_executor,
         )
-        await self._enforce_windows_app_guardrails(
-            session_mount_id=session_mount_id,
-            action=action,
-            contract=contract,
-            snapshot=snapshot,
-            selected_executor=selected_executor,
-            app_identity=app_identity,
-            control_channel=control_channel,
-        )
         result = await self._execute_live_action(
             surface_kind="windows-app",
             session_mount_id=session_mount_id,
@@ -308,8 +317,26 @@ class SurfaceControlService:
             cooperative_executor=cooperative_executor,
             semantic_executor=semantic_executor,
             host_executor=host_executor,
-            app_identity=app_identity,
-            control_channel=control_channel,
+            selected_executor=selected_executor,
+            guardrail_runner=self._enforce_windows_app_guardrails,
+            guardrail_kwargs={
+                "session_mount_id": session_mount_id,
+                "action": action,
+                "contract": contract,
+                "snapshot": snapshot,
+                "selected_executor": selected_executor,
+                "app_identity": app_identity,
+                "control_channel": control_channel,
+            },
+            execution_kwargs={
+                "session_mount_id": session_mount_id,
+                "action": action,
+                "contract": contract,
+                "snapshot": snapshot,
+                "app_identity": app_identity,
+                "control_channel": control_channel,
+            },
+        )
         )
         return self._decorate_result(result=result, resolution=resolution)
 
@@ -326,91 +353,102 @@ class SurfaceControlService:
         cooperative_executor: object | None,
         semantic_executor: object | None,
         host_executor: object | None,
-        **kwargs,
+        selected_executor: object | None,
+        guardrail_runner,
+        guardrail_kwargs: dict[str, Any],
+        execution_kwargs: dict[str, Any],
     ) -> dict[str, Any]:
-        if resolution_selected_path is None:
-            return await self._execute_selected_path(
-                resolution_selected_path,
-                cooperative_executor=cooperative_executor,
-                semantic_executor=semantic_executor,
-                host_executor=host_executor,
-                session_mount_id=session_mount_id,
-                action=action,
-                contract=contract,
-                snapshot=snapshot,
-                **kwargs,
-            )
-
-        acquire = getattr(self._service, "acquire_shared_writer_lease", None)
-        release = getattr(self._service, "release_shared_writer_lease", None)
-        if not callable(acquire) or not callable(release):
-            return await self._execute_selected_path(
-                resolution_selected_path,
-                cooperative_executor=cooperative_executor,
-                semantic_executor=semantic_executor,
-                host_executor=host_executor,
-                session_mount_id=session_mount_id,
-                action=action,
-                contract=contract,
-                snapshot=snapshot,
-                **kwargs,
-            )
-
-        writer_lock_scope = self._resolve_live_surface_writer_scope(
-            session_mount_id=session_mount_id,
-            contract=contract,
-            snapshot=snapshot,
-            detail=detail,
+        cleanup_state = await self._prepare_execution_cleanup(
+            selected_executor,
+            **execution_kwargs,
         )
-        writer_owner, lease_metadata = self._build_live_surface_writer_lease_payload(
-            surface_kind=surface_kind,
-            session_mount_id=session_mount_id,
-            action=action,
-            writer_lock_scope=writer_lock_scope,
-            contract=contract,
-            snapshot=snapshot,
-            detail=detail,
+        execution_started = False
+        failure: BaseException | None = None
+        result: dict[str, Any] | None = None
+        try:
+            await self._invoke(guardrail_runner, **guardrail_kwargs)
+            acquire = getattr(self._service, "acquire_shared_writer_lease", None)
+            release = getattr(self._service, "release_shared_writer_lease", None)
+            if resolution_selected_path is None or not callable(acquire) or not callable(release):
+                execution_started = True
+                result = await self._execute_selected_path(
+                    resolution_selected_path,
+                    cooperative_executor=cooperative_executor,
+                    semantic_executor=semantic_executor,
+                    host_executor=host_executor,
+                    **execution_kwargs,
+                )
+            else:
+                writer_lock_scope = self._resolve_live_surface_writer_scope(
+                    session_mount_id=session_mount_id,
+                    contract=contract,
+                    snapshot=snapshot,
+                    detail=detail,
+                )
+                writer_owner, lease_metadata = self._build_live_surface_writer_lease_payload(
+                    surface_kind=surface_kind,
+                    session_mount_id=session_mount_id,
+                    action=action,
+                    writer_lock_scope=writer_lock_scope,
+                    contract=contract,
+                    snapshot=snapshot,
+                    detail=detail,
+                )
+                try:
+                    lease = acquire(
+                        writer_lock_scope=writer_lock_scope,
+                        owner=writer_owner,
+                        metadata=lease_metadata,
+                    )
+                except RuntimeError as exc:
+                    message = str(exc).lower()
+                    if "already leased by" in message:
+                        raise RuntimeError(
+                            f"Writer scope '{writer_lock_scope}' is already reserved.",
+                        ) from exc
+                    raise
+
+                release_reason = f"{surface_kind} action completed"
+                execution_started = True
+                try:
+                    result = await self._execute_selected_path(
+                        resolution_selected_path,
+                        cooperative_executor=cooperative_executor,
+                        semantic_executor=semantic_executor,
+                        host_executor=host_executor,
+                        **execution_kwargs,
+                    )
+                except asyncio.CancelledError:
+                    release_reason = f"{surface_kind} action cancelled"
+                    raise
+                except Exception:
+                    release_reason = f"{surface_kind} action failed"
+                    raise
+                finally:
+                    release(
+                        lease_id=lease.id,
+                        lease_token=lease.lease_token,
+                        reason=release_reason,
+                    )
+        except BaseException as exc:  # includes asyncio.CancelledError
+            failure = exc
+
+        cleanup_error = await self._run_execution_cleanup(
+            selected_executor,
+            cleanup_state=cleanup_state,
+            execution_started=execution_started,
+            execution_outcome=self._execution_outcome(
+                execution_started=execution_started,
+                failure=failure,
+            ),
+            execution_error=failure,
+            **execution_kwargs,
         )
-
-        try:
-            lease = acquire(
-                writer_lock_scope=writer_lock_scope,
-                owner=writer_owner,
-                metadata=lease_metadata,
-            )
-        except RuntimeError as exc:
-            message = str(exc).lower()
-            if "already leased by" in message:
-                raise RuntimeError(
-                    f"Writer scope '{writer_lock_scope}' is already reserved.",
-                ) from exc
-            raise
-
-        release_reason = f"{surface_kind} action completed"
-        try:
-            return await self._execute_selected_path(
-                resolution_selected_path,
-                cooperative_executor=cooperative_executor,
-                semantic_executor=semantic_executor,
-                host_executor=host_executor,
-                session_mount_id=session_mount_id,
-                action=action,
-                contract=contract,
-                snapshot=snapshot,
-                **kwargs,
-            )
-        except asyncio.CancelledError:
-            release_reason = f"{surface_kind} action cancelled"
-            raise
-        except Exception:
-            release_reason = f"{surface_kind} action failed"
-            raise
-        finally:
-            release(
-                lease_id=lease.id,
-                lease_token=lease.lease_token,
-                reason=release_reason,
-            )
+        if failure is not None:
+            raise failure.with_traceback(failure.__traceback__)
+        if cleanup_error is not None:
+            raise cleanup_error.with_traceback(cleanup_error.__traceback__)
+        return result or {}
 
     def _resolve_live_surface_writer_scope(
         self,
@@ -899,12 +937,12 @@ class SurfaceControlService:
         if executor is None:
             return {}
         payload: dict[str, Any] = {}
-        provider = getattr(executor, "guardrail_snapshot", None)
-        if callable(provider):
+        provider = self._resolve_executor_hook(executor, "guardrail_snapshot")
+        if provider is not None:
             payload.update(self._mapping(await self._invoke(provider, **kwargs)))
         if frontmost_verification_required:
-            verifier = getattr(executor, "verify_frontmost", None)
-            if callable(verifier):
+            verifier = self._resolve_executor_hook(executor, "verify_frontmost")
+            if verifier is not None:
                 result = self._mapping(await self._invoke(verifier, **kwargs))
                 if "verified" in result:
                     payload["frontmost_verified"] = bool(result.get("verified"))
@@ -924,8 +962,11 @@ class SurfaceControlService:
             ):
                 payload["frontmost_verifier_missing"] = True
         if clipboard_roundtrip_required:
-            verifier = getattr(executor, "verify_clipboard_roundtrip", None)
-            if callable(verifier):
+            verifier = self._resolve_executor_hook(
+                executor,
+                "verify_clipboard_roundtrip",
+            )
+            if verifier is not None:
                 result = self._mapping(await self._invoke(verifier, **kwargs))
                 if "verified" in result:
                     payload["clipboard_roundtrip_ok"] = bool(result.get("verified"))
@@ -936,6 +977,78 @@ class SurfaceControlService:
             elif "clipboard_roundtrip_ok" not in payload:
                 payload["clipboard_verifier_missing"] = True
         return payload
+
+    async def _prepare_execution_cleanup(
+        self,
+        executor: object | None,
+        **kwargs,
+    ) -> dict[str, Any]:
+        hook = self._resolve_executor_hook(executor, "prepare_execution_cleanup")
+        if hook is None:
+            return {}
+        return self._mapping(await self._invoke(hook, **kwargs))
+
+    async def _run_execution_cleanup(
+        self,
+        executor: object | None,
+        *,
+        cleanup_state: dict[str, Any],
+        execution_started: bool,
+        execution_outcome: str,
+        execution_error: BaseException | None,
+        **kwargs,
+    ) -> BaseException | None:
+        cleanup_error: BaseException | None = None
+        for hook_name in (
+            "restore_foreground",
+            "verify_clipboard_restore",
+            "cleanup_execution",
+        ):
+            hook = self._resolve_executor_hook(executor, hook_name)
+            if hook is None:
+                continue
+            try:
+                await self._invoke(
+                    hook,
+                    cleanup_state=cleanup_state,
+                    execution_started=execution_started,
+                    execution_outcome=execution_outcome,
+                    execution_error=execution_error,
+                    **kwargs,
+                )
+            except BaseException as exc:  # includes asyncio.CancelledError
+                if cleanup_error is None:
+                    cleanup_error = exc
+        return cleanup_error
+
+    @staticmethod
+    def _execution_outcome(
+        *,
+        execution_started: bool,
+        failure: BaseException | None,
+    ) -> str:
+        if failure is None:
+            return "completed"
+        if isinstance(failure, asyncio.CancelledError):
+            return "cancelled"
+        if execution_started:
+            return "failed"
+        return "blocked"
+
+    @staticmethod
+    def _resolve_executor_hook(
+        executor: object | None,
+        hook_name: str,
+    ):
+        if executor is None:
+            return None
+        for candidate in (executor, getattr(executor, "__self__", None)):
+            if candidate is None:
+                continue
+            hook = getattr(candidate, hook_name, None)
+            if callable(hook):
+                return hook
+        return None
 
     def _publish_guardrail_event(
         self,

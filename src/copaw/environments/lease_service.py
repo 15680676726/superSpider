@@ -9,6 +9,7 @@ from uuid import uuid4
 from weakref import WeakSet
 
 from ..state import AgentLeaseRecord
+from .cooperative.browser_attach_runtime import build_browser_attach_clear_patch
 from .models import SessionMount
 
 if TYPE_CHECKING:
@@ -188,7 +189,10 @@ class EnvironmentLeaseService:
             raise ValueError(f"Lease token mismatch for session '{session_mount_id}'")
 
         self._service._registry.detach_live_handle(session.environment_id)
+        attach_cleanup_patch = build_browser_attach_clear_patch()
         metadata = dict(session.metadata)
+        metadata.update(attach_cleanup_patch)
+        self._apply_lease_runtime_descriptor_patch(metadata, attach_cleanup_patch)
         if reason:
             metadata["lease_release_reason"] = reason
         metadata["lease_runtime"] = self.build_lease_runtime_metadata(
@@ -218,6 +222,8 @@ class EnvironmentLeaseService:
             live_handle_ref=None,
             last_active_at=now,
             expires_at=now,
+            metadata_patch=attach_cleanup_patch,
+            descriptor_patch=attach_cleanup_patch,
         )
         self._publish_runtime_event(
             topic="session",
@@ -281,6 +287,39 @@ class EnvironmentLeaseService:
             },
         )
         return updated
+
+    def publish_host_operator_abort(
+        self,
+        *,
+        session_mount_id: str | None = None,
+        runtime_session_ref: str | None = None,
+        channel: str | None = None,
+        reason: str | None = None,
+    ) -> SessionMount:
+        resolved_session_mount_id = _normalize_string(session_mount_id)
+        if resolved_session_mount_id is None:
+            normalized_runtime_ref = _normalize_string(runtime_session_ref)
+            if normalized_runtime_ref is None:
+                raise ValueError(
+                    "session_mount_id or runtime_session_ref is required",
+                )
+            binding = _resolve_operator_abort_binding_for_service(
+                self,
+                runtime_session_ref=normalized_runtime_ref,
+            )
+            resolved_session_mount_id = _normalize_string(
+                binding.get("session_mount_id"),
+            )
+            if resolved_session_mount_id is None:
+                raise KeyError(
+                    "Operator abort binding was not found for runtime session "
+                    f"'{normalized_runtime_ref}'",
+                )
+        return self.set_shared_operator_abort_state(
+            resolved_session_mount_id,
+            channel=channel,
+            reason=reason,
+        )
 
     def clear_shared_operator_abort_state(
         self,
@@ -1523,12 +1562,20 @@ class EnvironmentLeaseService:
         live_handle_ref: str | None,
         last_active_at: datetime,
         expires_at: datetime | None,
+        metadata_patch: dict[str, object] | None = None,
+        descriptor_patch: dict[str, object] | None = None,
     ) -> None:
         mount = self._service._registry.get(env_id)
         if mount is None:
             return
         live_handle = self._service._registry.get_live_handle_info(env_id) or {}
         existing_lease_runtime = self.lease_runtime_mapping(mount.metadata)
+        runtime_descriptor = dict(
+            live_handle.get("descriptor")
+            or self.lease_runtime_descriptor(mount.metadata),
+        )
+        if descriptor_patch:
+            runtime_descriptor.update(descriptor_patch)
         lease_runtime = {
             "host_id": live_handle.get("host_id")
             or existing_lease_runtime.get("host_id"),
@@ -1537,8 +1584,7 @@ class EnvironmentLeaseService:
             "owner": owner,
             "status": lease_status,
             "token": lease_token,
-            "descriptor": live_handle.get("descriptor")
-            or self.lease_runtime_descriptor(mount.metadata),
+            "descriptor": runtime_descriptor,
             "seen_at": last_active_at.isoformat(),
             "expires_at": (
                 expires_at.isoformat() if expires_at is not None else None
@@ -1549,6 +1595,7 @@ class EnvironmentLeaseService:
                 "last_active_at": last_active_at,
                 "metadata": {
                     **mount.metadata,
+                    **(metadata_patch or {}),
                     "lease_runtime": lease_runtime,
                 },
                 "lease_status": lease_status,
@@ -1564,6 +1611,25 @@ class EnvironmentLeaseService:
             },
         )
         self._service._registry.upsert(updated)
+
+    def _apply_lease_runtime_descriptor_patch(
+        self,
+        metadata: dict[str, object],
+        descriptor_patch: dict[str, object],
+    ) -> None:
+        if not descriptor_patch:
+            return
+        lease_runtime = metadata.get("lease_runtime")
+        if not isinstance(lease_runtime, dict):
+            return
+        descriptor = lease_runtime.get("descriptor")
+        metadata["lease_runtime"] = {
+            **lease_runtime,
+            "descriptor": {
+                **(dict(descriptor) if isinstance(descriptor, dict) else {}),
+                **descriptor_patch,
+            },
+        }
 
 
 def _session_mount_id(*, channel: str, session_id: str) -> str:

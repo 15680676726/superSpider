@@ -301,3 +301,104 @@ def test_bridge_lifecycle_can_drive_browser_attach_transport_on_same_mount_truth
     assert snapshot["browser_attach"]["transport_ref"] == "chrome-native-host:reconnected"
     assert snapshot["browser_attach"]["status"] == "reconnecting"
     assert snapshot["browser_attach"]["reconnect_token"] == "reconnect-token-2"
+
+
+def test_bridge_stop_clears_browser_attach_continuity_before_reconnect(tmp_path) -> None:
+    service, env_repo, session_repo = _build_environment_service(tmp_path)
+    lease = _acquire_browser_session(service)
+    assert lease.lease_token is not None
+
+    service.ack_bridge_session_work(
+        lease.id,
+        lease_token=lease.lease_token,
+        work_id="bridge-work-attach-stop",
+        bridge_session_id="bridge-session-stop",
+        browser_attach_transport_ref="chrome-native-host:default",
+        browser_attach_status="attached",
+        browser_attach_session_ref="chrome-session:alice-default",
+        browser_attach_scope_ref="chrome-profile:alice",
+        browser_attach_reconnect_token="reconnect-token-1",
+    )
+
+    stopped = service.stop_bridge_session_work(
+        lease.id,
+        work_id="bridge-work-attach-stop",
+        force=True,
+        reason="bridge supervisor stop",
+    )
+    reconnected = service.reconnect_bridge_session_work(
+        lease.id,
+        lease_token=lease.lease_token,
+        work_id="bridge-work-attach-stop",
+        browser_attach_status="reconnecting",
+    )
+
+    session = session_repo.get_session(lease.id)
+    assert session is not None
+    environment = env_repo.get_environment(lease.environment_id)
+    assert environment is not None
+    snapshot = service.browser_attach_snapshot(session_mount_id=lease.id)
+
+    assert stopped.metadata["bridge_work_status"] == "stopped"
+    assert reconnected.metadata["bridge_work_status"] == "reconnecting"
+    assert session.metadata["browser_attach_transport_ref"] is None
+    assert session.metadata["browser_attach_session_ref"] is None
+    assert session.metadata["browser_attach_scope_ref"] is None
+    assert session.metadata["browser_attach_reconnect_token"] is None
+    assert environment.metadata["browser_attach_transport_ref"] is None
+    assert environment.metadata["browser_attach_session_ref"] is None
+    assert environment.metadata["browser_attach_scope_ref"] is None
+    assert environment.metadata["browser_attach_reconnect_token"] is None
+    assert snapshot["browser_attach"] == {
+        "transport_ref": None,
+        "status": "reconnecting",
+        "session_ref": None,
+        "scope_ref": None,
+        "reconnect_token": None,
+    }
+
+
+def test_release_browser_attach_transport_clears_session_and_environment_truth(
+    tmp_path,
+) -> None:
+    service, env_repo, session_repo = _build_environment_service(tmp_path)
+    lease = _acquire_browser_session(service)
+
+    service.register_browser_attach_transport(
+        session_mount_id=lease.id,
+        transport_ref="chrome-native-host:default",
+        status="attached",
+        browser_session_ref="chrome-session:alice-default",
+        browser_scope_ref="chrome-profile:alice",
+        reconnect_token="reconnect-token-1",
+    )
+
+    released = service.release_session_lease(
+        lease.id,
+        lease_token=lease.lease_token,
+        reason="runtime stop",
+    )
+
+    session = session_repo.get_session(lease.id)
+    assert session is not None
+    environment = env_repo.get_environment(lease.environment_id)
+    assert environment is not None
+    snapshot = service.browser_attach_snapshot(session_mount_id=lease.id)
+
+    assert released is not None
+    assert released.lease_status == "released"
+    assert session.metadata["browser_attach_transport_ref"] is None
+    assert session.metadata["browser_attach_session_ref"] is None
+    assert session.metadata["browser_attach_scope_ref"] is None
+    assert session.metadata["browser_attach_reconnect_token"] is None
+    assert environment.metadata["browser_attach_transport_ref"] is None
+    assert environment.metadata["browser_attach_session_ref"] is None
+    assert environment.metadata["browser_attach_scope_ref"] is None
+    assert environment.metadata["browser_attach_reconnect_token"] is None
+    assert snapshot["browser_attach"] == {
+        "transport_ref": None,
+        "status": None,
+        "session_ref": None,
+        "scope_ref": None,
+        "reconnect_token": None,
+    }

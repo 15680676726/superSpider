@@ -10,6 +10,32 @@ from .execution_path import (
     DEFAULT_UI_FALLBACK_MODE,
 )
 
+_BROWSER_ATTACH_METADATA_KEYS = (
+    "browser_attach_transport_ref",
+    "attach_transport_ref",
+    "browser_attach_status",
+    "browser_attach_session_ref",
+    "attach_session_ref",
+    "browser_attach_scope_ref",
+    "attach_scope_ref",
+    "browser_attach_reconnect_token",
+    "attach_reconnect_token",
+)
+
+
+def build_browser_attach_clear_patch() -> dict[str, object]:
+    return {key: None for key in _BROWSER_ATTACH_METADATA_KEYS}
+
+
+def build_browser_attach_descriptor_patch(
+    updates: dict[str, object],
+) -> dict[str, object]:
+    return {
+        key: updates.get(key)
+        for key in _BROWSER_ATTACH_METADATA_KEYS
+        if key in updates
+    }
+
 
 class BrowserAttachRuntime:
     """Records real-user browser attach transport facts on canonical metadata."""
@@ -122,15 +148,7 @@ class BrowserAttachRuntime:
         session = self._require_session(session_mount_id)
         environment = self._require_environment(session.environment_id)
         updates = {
-            "browser_attach_transport_ref": None,
-            "attach_transport_ref": None,
-            "browser_attach_status": None,
-            "browser_attach_session_ref": None,
-            "attach_session_ref": None,
-            "browser_attach_scope_ref": None,
-            "attach_scope_ref": None,
-            "browser_attach_reconnect_token": None,
-            "attach_reconnect_token": None,
+            **build_browser_attach_clear_patch(),
             "preferred_execution_path": (
                 self._normalized(preferred_execution_path)
                 or self._existing_string(
@@ -227,10 +245,16 @@ class BrowserAttachRuntime:
         updates: dict[str, object],
     ) -> SessionMount:
         timestamp = datetime.now(timezone.utc)
+        descriptor_patch = build_browser_attach_descriptor_patch(updates)
         session_metadata = dict(session.metadata)
         session_metadata.update(updates)
+        self._apply_lease_runtime_descriptor_patch(session_metadata, descriptor_patch)
         environment_metadata = dict(environment.metadata)
         environment_metadata.update(updates)
+        self._apply_lease_runtime_descriptor_patch(
+            environment_metadata,
+            descriptor_patch,
+        )
 
         updated_session = session.model_copy(
             update={
@@ -248,6 +272,13 @@ class BrowserAttachRuntime:
             raise RuntimeError("BrowserAttachRuntime requires a session repository")
         self._service._session_repository.upsert_session(updated_session)
         self._service._registry.upsert(updated_environment)
+        if session.lease_token is not None:
+            self._service._registry.touch_live_handle(
+                session.environment_id,
+                lease_token=session.lease_token,
+                seen_at=timestamp,
+                descriptor=descriptor_patch,
+            )
         return updated_session
 
     def _require_session(self, session_mount_id: str) -> SessionMount:
@@ -296,3 +327,22 @@ class BrowserAttachRuntime:
             if normalized:
                 return normalized
         return None
+
+    def _apply_lease_runtime_descriptor_patch(
+        self,
+        metadata: dict[str, object],
+        descriptor_patch: dict[str, object],
+    ) -> None:
+        if not descriptor_patch:
+            return
+        lease_runtime = metadata.get("lease_runtime")
+        if not isinstance(lease_runtime, dict):
+            return
+        descriptor = lease_runtime.get("descriptor")
+        metadata["lease_runtime"] = {
+            **lease_runtime,
+            "descriptor": {
+                **(dict(descriptor) if isinstance(descriptor, dict) else {}),
+                **descriptor_patch,
+            },
+        }

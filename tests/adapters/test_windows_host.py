@@ -109,6 +109,7 @@ class _FakeUser32:
         self.allow_calls: list[int] = []
         self.key_events: list[tuple[int, int, int, int]] = []
         self._attached = False
+        self.escape_pressed = False
 
     def SendInput(self, count: int, _array, _size: int) -> int:
         self.calls.append(count)
@@ -140,6 +141,11 @@ class _FakeUser32:
 
     def keybd_event(self, key: int, scan_code: int, flags: int, extra_info: int) -> None:
         self.key_events.append((key, scan_code, flags, extra_info))
+
+    def GetAsyncKeyState(self, key: int) -> int:
+        if key == 27 and self.escape_pressed:
+            return 0x8000
+        return 0
 
 
 class _FakeKernel32:
@@ -268,6 +274,82 @@ def test_type_text_and_press_keys_dispatch_input_events() -> None:
     assert pressed["keys"] == ["Ctrl", "L"]
     assert gui.foreground == 101
     assert user32.calls == [4, 4]
+
+
+def test_poll_operator_abort_signal_publishes_abort_request() -> None:
+    gui = _FakeWin32GUI()
+    api = _FakeWin32API()
+    user32 = _FakeUser32(gui)
+    user32.escape_pressed = True
+    producer_calls: list[dict[str, object | None]] = []
+
+    def _producer(**payload):
+        producer_calls.append(dict(payload))
+        return {
+            "session_mount_id": "session:desktop:seat-operator-abort",
+            "environment_id": "env-seat-operator-abort",
+        }
+
+    host = WindowsDesktopHost(
+        platform_name="win32",
+        win32gui_module=gui,
+        win32process_module=_FakeWin32Process(),
+        win32api_module=api,
+        win32con_module=SimpleNamespace(
+            MOUSEEVENTF_LEFTDOWN=2,
+            MOUSEEVENTF_LEFTUP=4,
+            MOUSEEVENTF_RIGHTDOWN=8,
+            MOUSEEVENTF_RIGHTUP=16,
+            SW_RESTORE=9,
+            SW_SHOW=5,
+            WM_CLOSE=16,
+            VK_MENU=18,
+            VK_BACK=8,
+            VK_CONTROL=17,
+            VK_DELETE=46,
+            VK_DOWN=40,
+            VK_END=35,
+            VK_ESCAPE=27,
+            VK_HOME=36,
+            VK_LEFT=37,
+            VK_LWIN=91,
+            VK_NEXT=34,
+            VK_PRIOR=33,
+            VK_RETURN=13,
+            VK_RIGHT=39,
+            VK_SHIFT=16,
+            VK_SPACE=32,
+            VK_TAB=9,
+            VK_UP=38,
+        ),
+        user32=user32,
+        kernel32=_FakeKernel32(),
+        operator_abort_producer=_producer,
+    )
+
+    result = host.poll_operator_abort_signal(
+        runtime_session_ref="desktop-runtime:seat-operator-abort",
+        channel="global-esc",
+        reason="esc hotkey",
+    )
+
+    assert result == {
+        "success": True,
+        "abort_requested": True,
+        "channel": "global-esc",
+        "reason": "esc hotkey",
+        "runtime_session_ref": "desktop-runtime:seat-operator-abort",
+        "session_mount_id": "session:desktop:seat-operator-abort",
+        "environment_id": "env-seat-operator-abort",
+    }
+    assert producer_calls == [
+        {
+            "session_mount_id": None,
+            "runtime_session_ref": "desktop-runtime:seat-operator-abort",
+            "channel": "global-esc",
+            "reason": "esc hotkey",
+        }
+    ]
 
 
 def test_verify_window_focus_reports_actual_foreground_state() -> None:
@@ -538,3 +620,18 @@ def test_focus_window_uses_thread_attach_fallback_when_foreground_switch_is_bloc
         (77, 1, True),
         (77, 1, False),
     ]
+
+
+def test_prepare_execution_cleanup_captures_and_restores_foreground_window() -> None:
+    host, gui, _api, _user32 = _build_host()
+
+    gui.foreground = 101
+    cleanup_state = host.prepare_execution_cleanup()
+    gui.foreground = 202
+
+    restored = host.restore_foreground(cleanup_state=cleanup_state)
+
+    assert cleanup_state["foreground_window"]["handle"] == 101
+    assert restored["restored"] is True
+    assert restored["foreground_window"]["handle"] == 101
+    assert gui.foreground == 101

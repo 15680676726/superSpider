@@ -260,17 +260,20 @@ Landed shape:
 
 - shared operator-abort state now lives on the canonical session/environment truth
 - formal write/clear surfaces exist on the same Runtime Center lifecycle plane
+- `WindowsDesktopHost.poll_operator_abort_signal(...)` can now act as a host-side producer and publish into that same canonical truth through `EnvironmentService / EnvironmentLeaseService`
 - read models expose the same operator-abort truth through:
   - `cooperative_adapter_availability.operator_abort_state`
   - `desktop_app_contract.operator_abort_state`
   - downstream execution guardrails on browser/document/windows surfaces
 - browser/document/windows live execution boundaries all merge the shared operator-abort truth before action dispatch
 - blocked actions emit surface-specific guardrail events and browser tool execution respects the same operator-abort truth
+- bridge stop / archive and lease release paths now deterministically clear stale browser-attach continuity instead of leaving reconnect tokens and attach transport facts behind
+- live execution cleanup now captures and restores foreground state through the current desktop host helpers instead of leaving restore discipline implicit
 
 Status:
 
 - landed for the current canonical runtime and live execution surfaces
-- donor-style OS-specific ESC capture is now an adapter-side producer concern, not a missing core-runtime truth path
+- donor-style OS-specific ESC capture is no longer only a future adapter concern on Windows; the current desktop host now has a formal producer path onto the canonical operator-abort truth
 
 ### 5.8 Stable host-scoped memory continuity
 
@@ -294,15 +297,22 @@ Fresh evidence on the current host:
 - focused regression:
   - `PYTHONPATH=src python -m pytest tests/kernel/test_query_execution_runtime.py tests/environments/test_cooperative_browser_attach_runtime.py tests/environments/test_environment_registry.py tests/environments/test_cooperative_windows_apps.py tests/agents/test_browser_tool_evidence.py tests/app/runtime_center_api_parts/detail_environment.py -q`
   - result: `107 passed`
+- expanded execution-harness regression:
+  - `PYTHONPATH=src python -m pytest tests/adapters/test_windows_host.py tests/environments/test_cooperative_windows_apps.py tests/environments/test_cooperative_browser_companion.py tests/environments/test_cooperative_document_bridge.py tests/environments/test_cooperative_browser_attach_runtime.py tests/environments/test_environment_registry.py tests/routines/test_routine_service.py tests/routines/test_live_routine_smoke.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/runtime_center_api_parts/overview_governance.py tests/kernel/test_query_execution_runtime.py tests/kernel/test_main_brain_commit_service.py -q`
+  - result: `224 passed, 9 skipped`
 - live browser/desktop smoke:
   - `COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 PYTHONPATH=src python -m pytest tests/routines/test_live_routine_smoke.py -q -k "authenticated_continuation_cross_tab_save_reopen_smoke or live_desktop_routine_replay_round_trip"`
   - result: `2 passed`
+- expanded live harness smoke:
+  - `COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 PYTHONPATH=src python -m pytest tests/routines/test_live_routine_smoke.py -q -k "reconnect_cleanup_smoke or cross_surface_contention_smoke or live_desktop_routine_replay_round_trip"`
+  - result: `2 passed, 1 skipped`
 
 Interpretation:
 
 - the browser smoke passed on the real browser routine chain and proved authenticated continuation, cross-tab reuse, save-and-reopen, download initiation, and screenshot evidence on one canonical runtime path
-- the desktop smoke also passes on the current host; the remaining blocker was not donor architecture but a CoPaw compatibility gap in `WindowsDesktopHost.get_foreground_window()` where live callers needed a top-level foreground-window reference in addition to the nested payload
-- donor parity on this host is now proven on both live-smoke surfaces covered by the current routine harness; what remains distinct from `cc` is still the richer donor-side lock/ESC/cleanup discipline, not an inability to continue a real browser scope or verify a real desktop focus chain
+- the expanded desktop smoke now also covers cross-surface contention on the current host and proves the desktop side releases its session lease cleanly when a browser-style page-tab lock already owns the surface
+- the expanded browser reconnect/cleanup smoke is now part of the live harness and skips explicitly when the current host cannot start the browser runtime, instead of pretending a host prerequisite failure is a product regression
+- donor parity for the currently exercised CoPaw execution harness now includes host-side abort production, deterministic attach cleanup, and thicker cleanup/restore discipline on the canonical truth chain; the only remaining future follow-up stays the conditional remote-session transport reliability work in section `6`
 
 ## 6. Conditional Future Follow-ups
 

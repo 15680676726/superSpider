@@ -16,7 +16,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 if sys.platform == "win32":
     import win32api
@@ -134,6 +134,7 @@ class WindowsDesktopHost:
         kernel32: Any | None = None,
         subprocess_module: Any | None = None,
         time_module: Any | None = None,
+        operator_abort_producer: Callable[..., object] | None = None,
     ) -> None:
         self._platform_name = platform_name or sys.platform
         self._win32gui = win32gui_module or win32gui
@@ -148,6 +149,7 @@ class WindowsDesktopHost:
         )
         self._subprocess = subprocess_module or subprocess
         self._time = time_module or time
+        self._operator_abort_producer = operator_abort_producer
 
     def list_windows(
         self,
@@ -182,6 +184,103 @@ class WindowsDesktopHost:
             "success": True,
             **window,
             "window": window,
+        }
+
+    def poll_operator_abort_signal(
+        self,
+        *,
+        session_mount_id: str | None = None,
+        runtime_session_ref: str | None = None,
+        channel: str = "global-esc",
+        reason: str | None = None,
+    ) -> dict[str, object]:
+        """Publish a canonical operator-abort request when the host ESC key is pressed."""
+        self._ensure_supported()
+        if not self._operator_abort_requested():
+            return {
+                "success": True,
+                "abort_requested": False,
+            }
+        if session_mount_id is None and runtime_session_ref is None:
+            raise DesktopAutomationError(
+                "session_mount_id or runtime_session_ref is required to publish operator abort",
+                code="operator_abort_binding_required",
+            )
+        if not callable(self._operator_abort_producer):
+            raise DesktopAutomationError(
+                "operator abort producer is not configured",
+                code="operator_abort_producer_unavailable",
+            )
+        resolved_channel = str(channel or "").strip() or "global-esc"
+        resolved_reason = str(reason or "").strip() or "esc hotkey"
+        produced = self._operator_abort_producer(
+            session_mount_id=session_mount_id,
+            runtime_session_ref=runtime_session_ref,
+            channel=resolved_channel,
+            reason=resolved_reason,
+        )
+        payload: dict[str, object] = {
+            "success": True,
+            "abort_requested": True,
+            "channel": resolved_channel,
+            "reason": resolved_reason,
+        }
+        if runtime_session_ref is not None:
+            payload["runtime_session_ref"] = runtime_session_ref
+        if session_mount_id is not None:
+            payload["session_mount_id"] = session_mount_id
+        producer_session_mount_id = None
+        producer_environment_id = None
+        if isinstance(produced, dict):
+            producer_session_mount_id = produced.get("session_mount_id")
+            producer_environment_id = produced.get("environment_id")
+        else:
+            producer_session_mount_id = getattr(produced, "id", None)
+            producer_environment_id = getattr(produced, "environment_id", None)
+        if producer_session_mount_id is not None:
+            payload["session_mount_id"] = producer_session_mount_id
+        if producer_environment_id is not None:
+            payload["environment_id"] = producer_environment_id
+        return payload
+
+    def prepare_execution_cleanup(self, **_kwargs) -> dict[str, object]:
+        """Capture the current foreground window for best-effort restore."""
+        self._ensure_supported()
+        return {
+            "foreground_window": self._window_reference(
+                self._foreground_window_info(),
+            ),
+        }
+
+    def restore_foreground(
+        self,
+        *,
+        cleanup_state: dict[str, object] | None = None,
+        **_kwargs,
+    ) -> dict[str, object]:
+        """Restore a previously captured foreground window when it still exists."""
+        self._ensure_supported()
+        state = cleanup_state if isinstance(cleanup_state, dict) else {}
+        reference = state.get("foreground_window")
+        handle = 0
+        if isinstance(reference, dict):
+            try:
+                handle = int(reference.get("handle") or 0)
+            except Exception:
+                handle = 0
+        if handle > 0 and bool(self._win32gui.IsWindow(handle)):
+            if not self._is_foreground_window(handle):
+                self._prepare_window_for_focus(handle)
+                self._activate_window(handle)
+        foreground_window = self._foreground_window_info()
+        return {
+            "success": True,
+            "restored": bool(
+                foreground_window is not None
+                and int(foreground_window["handle"]) == int(handle)
+                and handle > 0
+            ),
+            "foreground_window": self._window_reference(foreground_window),
         }
 
     def launch_application(
@@ -584,6 +683,19 @@ class WindowsDesktopHost:
             except Exception:
                 pass
         self._try_focus_primitives(handle)
+
+    def _operator_abort_requested(self) -> bool:
+        get_async_key_state = getattr(self._user32, "GetAsyncKeyState", None)
+        if not callable(get_async_key_state):
+            return False
+        try:
+            state = int(get_async_key_state(self._win32con.VK_ESCAPE))
+        except Exception as exc:
+            raise DesktopAutomationError(
+                "Failed to read operator abort hotkey state",
+                code="operator_abort_state_unavailable",
+            ) from exc
+        return bool(state & 0x8000)
 
     def _is_foreground_window(self, handle: int) -> bool:
         try:

@@ -1289,19 +1289,13 @@ def test_runtime_center_bridge_lifecycle_endpoints_drive_canonical_environment_c
     assert detail_payload["seat_runtime"]["bridge_registration"][
         "bridge_work_status"
     ] == "stopped"
-    assert (
-        detail_payload["browser_site_contract"]["attach_transport_ref"]
-        == "transport:cdp:bridge-reconnect"
-    )
-    assert (
-        detail_payload["browser_site_contract"]["attach_reconnect_token"]
-        == "reconnect-token-2"
-    )
+    assert detail_payload["browser_site_contract"]["attach_transport_ref"] is None
+    assert detail_payload["browser_site_contract"]["attach_reconnect_token"] is None
     assert (
         detail_payload["cooperative_adapter_availability"]["browser_companion"][
             "transport_ref"
         ]
-        == "transport:cdp:bridge-reconnect"
+        is None
     )
 
     archive = client.post(

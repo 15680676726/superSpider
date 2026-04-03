@@ -14,7 +14,7 @@ from copaw.environments import (
     SessionMountRepository,
 )
 from copaw.evidence import EvidenceLedger, EvidenceRecord
-from copaw.learning import LearningService
+from copaw.learning import LearningEngine, LearningService
 from copaw.routines import (
     RoutineCreateFromEvidenceRequest,
     RoutineCreateRequest,
@@ -90,6 +90,7 @@ def build_routine_service(tmp_path, *, learning_service=None):
         service=service,
         ledger=ledger,
         environment_service=environment_service,
+        session_repository=session_repo,
         browser_runtime=browser_runtime,
         kernel_dispatcher=kernel_dispatcher,
     )
@@ -189,7 +190,10 @@ async def test_routine_service_execution_core_run_records_growth_and_experience(
     monkeypatch,
 ) -> None:
     knowledge = FakeKnowledgeService()
-    learning_service = LearningService(evidence_ledger=EvidenceLedger())
+    learning_service = LearningService(
+        engine=LearningEngine(tmp_path / "learning.sqlite3"),
+        evidence_ledger=EvidenceLedger(database_path=tmp_path / "learning-evidence.sqlite3"),
+    )
     learning_service.set_experience_memory_service(
         AgentExperienceMemoryService(knowledge_service=knowledge),
     )
@@ -387,6 +391,195 @@ async def test_routine_service_replay_reports_lock_conflict(tmp_path, monkeypatc
     assert response.run.status == "failed"
     assert response.run.failure_class == "lock-conflict"
     assert response.diagnosis.lock_health == "contended"
+    harness.environment_service.release_resource_slot_lease(
+        lease_id=held_lease.id,
+        lease_token=held_lease.lease_token,
+        reason="test cleanup",
+    )
+
+
+@pytest.mark.asyncio
+async def test_routine_service_operator_abort_retries_same_session_and_releases_cleanup(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    harness = build_routine_service(tmp_path)
+    browser_calls: list[dict[str, object]] = []
+
+    async def fake_browser_use(**kwargs):
+        browser_calls.append(dict(kwargs))
+        return make_browser_tool_response(
+            {"ok": False, "error": "operator abort requested by host"},
+        )
+
+    monkeypatch.setattr(routine_service_module, "browser_use", fake_browser_use)
+    routine = harness.service.create_routine(
+        RoutineCreateRequest(
+            routine_key="browser-operator-abort",
+            name="Browser Operator Abort",
+            session_requirements={"profile_id": "profile-abort"},
+            action_contract=[
+                {"action": "open", "page_id": "page-1", "url": "https://example.com"},
+            ],
+        ),
+    )
+
+    response = await harness.service.replay_routine(
+        routine.id,
+        RoutineReplayRequest(session_id="abort-browser-session"),
+    )
+
+    assert response.run.status == "failed"
+    assert response.run.failure_class == "execution-error"
+    assert response.run.fallback_mode == "retry-same-session"
+    assert response.run.session_id == "abort-browser-session"
+    assert [call["action"] for call in browser_calls] == [
+        "open",
+        "evaluate",
+        "open",
+        "evaluate",
+    ]
+    assert [call.session_id for call in harness.browser_runtime.start_calls] == [
+        "abort-browser-session",
+        "abort-browser-session",
+    ]
+    assert harness.browser_runtime.stop_calls == []
+    session = harness.session_repository.get_session(response.run.lease_ref)
+    assert session is not None
+    assert session.lease_status == "released"
+    assert session.metadata["lease_release_reason"] == "routine browser replay completed"
+    browser_session_lease = harness.environment_service.get_resource_slot_lease(
+        scope_type="browser-session",
+        scope_value="abort-browser-session",
+    )
+    assert browser_session_lease is not None
+    assert browser_session_lease.lease_status == "released"
+    browser_profile_lease = harness.environment_service.get_resource_slot_lease(
+        scope_type="browser-profile",
+        scope_value="profile-abort",
+    )
+    assert browser_profile_lease is not None
+    assert browser_profile_lease.lease_status == "released"
+    records = harness.ledger.list_by_task(f"routine-run:{response.run.id}")
+    assert len(records) == 2
+
+
+@pytest.mark.asyncio
+async def test_routine_service_auth_expired_recovers_session_and_cleans_up_locks(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    harness = build_routine_service(tmp_path)
+    attempts = 0
+
+    async def fake_browser_use(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return make_browser_tool_response(
+                {"ok": False, "error": "login expired and auth refresh is required"},
+            )
+        return make_browser_tool_response(
+            {
+                "ok": True,
+                "message": "open ok",
+                "url": kwargs.get("url"),
+            },
+        )
+
+    monkeypatch.setattr(routine_service_module, "browser_use", fake_browser_use)
+    routine = harness.service.create_routine(
+        RoutineCreateRequest(
+            routine_key="browser-auth-recover",
+            name="Browser Auth Recover",
+            session_requirements={
+                "profile_id": "profile-recover",
+                "reuse_running_session": True,
+            },
+            action_contract=[
+                {"action": "open", "page_id": "page-1", "url": "https://example.com/login"},
+            ],
+        ),
+    )
+
+    response = await harness.service.replay_routine(
+        routine.id,
+        RoutineReplayRequest(session_id="recover-browser-session"),
+    )
+
+    assert response.run.status == "completed"
+    assert response.run.session_id == "recover-browser-session"
+    assert [call.reuse_running_session for call in harness.browser_runtime.start_calls] == [
+        True,
+        False,
+    ]
+    assert harness.browser_runtime.stop_calls == ["recover-browser-session"]
+    session = harness.session_repository.get_session(response.run.lease_ref)
+    assert session is not None
+    assert session.lease_status == "released"
+    assert session.metadata["lease_release_reason"] == "routine browser replay completed"
+    browser_session_lease = harness.environment_service.get_resource_slot_lease(
+        scope_type="browser-session",
+        scope_value="recover-browser-session",
+    )
+    assert browser_session_lease is not None
+    assert browser_session_lease.lease_status == "released"
+    browser_profile_lease = harness.environment_service.get_resource_slot_lease(
+        scope_type="browser-profile",
+        scope_value="profile-recover",
+    )
+    assert browser_profile_lease is not None
+    assert browser_profile_lease.lease_status == "released"
+    records = harness.ledger.list_by_task(f"routine-run:{response.run.id}")
+    assert [record.metadata.get("action") for record in records] == ["open", "open"]
+
+
+@pytest.mark.asyncio
+async def test_routine_service_cross_surface_page_tab_contention_releases_desktop_session(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    harness = build_routine_service(tmp_path)
+
+    class FakeWindowsDesktopHost:
+        pass
+
+    monkeypatch.setattr(routine_service_module.sys, "platform", "win32")
+    monkeypatch.setattr(routine_service_module, "WindowsDesktopHost", FakeWindowsDesktopHost)
+    held_lease = harness.environment_service.acquire_resource_slot_lease(
+        scope_type="page-tab",
+        scope_value="shared-surface",
+        owner="browser-owner",
+    )
+    routine = harness.service.create_routine(
+        RoutineCreateRequest(
+            routine_key="desktop-shared-surface-contention",
+            name="Desktop Shared Surface Contention",
+            engine_kind="desktop",
+            environment_kind="desktop",
+            action_contract=[
+                {
+                    "action": "verify_window_focus",
+                    "selector": {"title": "shared-surface"},
+                },
+            ],
+        ),
+    )
+
+    response = await harness.service.replay_routine(
+        routine.id,
+        RoutineReplayRequest(session_id="desktop-shared-session"),
+    )
+
+    assert response.run.status == "failed"
+    assert response.run.failure_class == "lock-conflict"
+    assert response.diagnosis.lock_health == "contended"
+    conflicts = list(response.run.metadata.get("resource_conflicts") or [])
+    assert conflicts[0]["scope_type"] == "page-tab"
+    assert conflicts[0]["scope_value"] == "shared-surface"
+    session = harness.environment_service.get_session("session:desktop:desktop-shared-session")
+    assert session is not None
+    assert session.lease_status == "released"
     harness.environment_service.release_resource_slot_lease(
         lease_id=held_lease.id,
         lease_token=held_lease.lease_token,

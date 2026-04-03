@@ -615,6 +615,11 @@ def _run_live_browser_case(
 
         ACTION_CONTRACT = json.loads({json.dumps(json.dumps(action_contract))})
         EVIDENCE_EXPECTATIONS = json.loads({json.dumps(json.dumps(evidence_expectations))})
+        PAGE_IDS = [
+            str(item.get("page_id"))
+            for item in ACTION_CONTRACT
+            if isinstance(item, dict) and str(item.get("page_id") or "").strip()
+        ]
 
         async def main() -> None:
             root = Path({json.dumps(str(tmp_path))})
@@ -639,6 +644,7 @@ def _run_live_browser_case(
                 and str(item.get("action") or "").strip().lower() == "screenshot"
                 and str(item.get("path") or "").strip()
             ]
+            payload = {{"routine_id": None, "runs": [], "stop_payload": None}}
             try:
                 service = RoutineService(
                     routine_repository=routine_repository,
@@ -658,6 +664,7 @@ def _run_live_browser_case(
                         evidence_expectations=EVIDENCE_EXPECTATIONS,
                     ),
                 )
+                payload["routine_id"] = routine.id
                 runs = []
                 for attempt in range({replay_count}):
                     response = await service.replay_routine(
@@ -673,13 +680,58 @@ def _run_live_browser_case(
                         ),
                     )
                     records = evidence_ledger.list_by_task(f"routine-run:{{response.run.id}}")
+                    session_lease = environment_service.get_session(response.run.lease_ref)
+                    browser_session_lease = environment_service.get_resource_slot_lease(
+                        scope_type="browser-session",
+                        scope_value=session_id,
+                    )
+                    cleanup = {{
+                        "session_lease_status": (
+                            getattr(session_lease, "lease_status", None)
+                            if session_lease is not None
+                            else None
+                        ),
+                        "lease_release_reason": (
+                            dict(getattr(session_lease, "metadata", {{}})).get("lease_release_reason")
+                            if session_lease is not None
+                            else None
+                        ),
+                        "resource_locks": {{
+                            "browser_session": bool(
+                                browser_session_lease is not None
+                                and getattr(browser_session_lease, "lease_status", None) == "leased"
+                            ),
+                            "page_tabs": {{
+                                page_id: bool(
+                                    (lease := environment_service.get_resource_slot_lease(
+                                        scope_type="page-tab",
+                                        scope_value=page_id,
+                                    )) is not None
+                                    and getattr(lease, "lease_status", None) == "leased"
+                                )
+                                for page_id in PAGE_IDS
+                            }},
+                            "artifact_targets": {{
+                                path: bool(
+                                    (lease := environment_service.get_resource_slot_lease(
+                                        scope_type="artifact-target",
+                                        scope_value=path,
+                                    )) is not None
+                                    and getattr(lease, "lease_status", None) == "leased"
+                                )
+                                for path in screenshot_paths
+                            }},
+                        }},
+                    }}
                     runs.append(
                         {{
                             "run_id": response.run.id,
                             "status": response.run.status,
                             "deterministic_result": response.run.deterministic_result,
+                            "failure_class": response.run.failure_class,
                             "session_id": response.run.session_id,
                             "start_status": dict(response.run.metadata.get("start_payload") or {{}}).get("status"),
+                            "start_payload": dict(response.run.metadata.get("start_payload") or {{}}),
                             "verification_summary": dict(response.run.metadata.get("verification_summary") or {{}}),
                             "evidence_ids": list(response.run.evidence_ids or []),
                             "actions": [record.metadata.get("action") for record in records],
@@ -688,12 +740,14 @@ def _run_live_browser_case(
                                 path: Path(path).exists()
                                 for path in screenshot_paths
                             }},
+                            "cleanup": cleanup,
                         }}
                     )
-                print(json.dumps({{"routine_id": routine.id, "runs": runs}}))
+                payload["runs"] = runs
             finally:
-                await browser_runtime.stop_session(session_id)
+                payload["stop_payload"] = await browser_runtime.stop_session(session_id)
                 evidence_ledger.close()
+            print(json.dumps(payload))
 
         asyncio.run(main())
         """,
@@ -818,6 +872,151 @@ def test_live_browser_routine_replay_reuses_same_session(tmp_path) -> None:
     assert first_run["start_status"] == "started"
     assert second_run["start_status"] == "attached"
     assert all(second_run["screenshot_exists"].values())
+
+
+@pytest.mark.skipif(
+    not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
+    reason="Set COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 to run V6 live routine smoke coverage.",
+)
+def test_live_browser_routine_reconnect_cleanup_smoke(tmp_path) -> None:
+    screenshot_path = tmp_path / "browser-routine-reconnect-cleanup.png"
+    payload = _run_live_browser_case(
+        tmp_path,
+        routine_key="live-browser-routine-reconnect-cleanup-smoke",
+        name="Live Browser Routine Reconnect Cleanup Smoke",
+        summary="Replay the same browser routine twice and verify reconnect plus cleanup on the current host.",
+        session_id="live-browser-routine-reconnect-cleanup",
+        action_contract=[
+            {"action": "open", "page_id": "page-1", "url": "https://example.com"},
+            {"action": "screenshot", "page_id": "page-1", "path": str(screenshot_path)},
+        ],
+        evidence_expectations=["open", "screenshot"],
+        replay_count=2,
+    )
+    first_run, second_run = payload["runs"]
+    if (
+        first_run["status"] == "failed"
+        and not first_run["actions"]
+        and first_run["start_status"] is None
+    ):
+        start_payload = dict(first_run.get("start_payload") or {})
+        runtime_error = start_payload.get("error") or payload["stop_payload"].get("result", {}).get("message")
+        pytest.skip(f"Browser live runtime is unavailable on this host: {runtime_error}")
+    assert first_run["start_status"] == "started"
+    assert second_run["start_status"] == "attached"
+    assert first_run["cleanup"]["session_lease_status"] == "released"
+    assert second_run["cleanup"]["session_lease_status"] == "released"
+    assert first_run["cleanup"]["lease_release_reason"] == "routine browser replay completed"
+    assert second_run["cleanup"]["lease_release_reason"] == "routine browser replay completed"
+    assert not first_run["cleanup"]["resource_locks"]["browser_session"]
+    assert not second_run["cleanup"]["resource_locks"]["browser_session"]
+    assert not any(first_run["cleanup"]["resource_locks"]["page_tabs"].values())
+    assert not any(second_run["cleanup"]["resource_locks"]["page_tabs"].values())
+    assert not any(first_run["cleanup"]["resource_locks"]["artifact_targets"].values())
+    assert not any(second_run["cleanup"]["resource_locks"]["artifact_targets"].values())
+    assert payload["stop_payload"]["ok"] is True
+
+
+@pytest.mark.skipif(
+    not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
+    reason="Set COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 to run V6 live routine smoke coverage.",
+)
+def test_live_desktop_routine_cross_surface_contention_smoke(tmp_path) -> None:
+    script = textwrap.dedent(
+        f"""
+        import asyncio
+        import json
+        import sys
+        from pathlib import Path
+
+        from copaw.environments import EnvironmentRegistry, EnvironmentRepository, EnvironmentService, SessionMountRepository
+        from copaw.evidence import EvidenceLedger
+        from copaw.routines import RoutineCreateRequest, RoutineReplayRequest, RoutineService
+        from copaw.state import SQLiteStateStore
+        from copaw.state.repositories import SqliteExecutionRoutineRepository, SqliteRoutineRunRepository
+        import copaw.routines.service as routine_service_module
+
+        async def main() -> None:
+            root = Path({json.dumps(str(tmp_path))})
+            state_store = SQLiteStateStore(root / "state.sqlite3")
+            routine_repository = SqliteExecutionRoutineRepository(state_store)
+            routine_run_repository = SqliteRoutineRunRepository(state_store)
+            environment_repository = EnvironmentRepository(state_store)
+            session_repository = SessionMountRepository(state_store)
+            registry = EnvironmentRegistry(
+                repository=environment_repository,
+                session_repository=session_repository,
+            )
+            environment_service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+            environment_service.set_session_repository(session_repository)
+            evidence_ledger = EvidenceLedger(database_path=root / "evidence.sqlite3")
+            if sys.platform != "win32":
+                raise SystemExit("Desktop live routine smoke requires a Windows host.")
+            foreground = routine_service_module.WindowsDesktopHost().get_foreground_window()
+            if not foreground.get("success") or not foreground.get("title"):
+                raise SystemExit("Desktop live routine smoke requires a resolvable foreground window.")
+            shared_scope = str(foreground["title"])
+            held_lease = environment_service.acquire_resource_slot_lease(
+                scope_type="page-tab",
+                scope_value=shared_scope,
+                owner="browser-owner",
+            )
+            try:
+                service = RoutineService(
+                    routine_repository=routine_repository,
+                    routine_run_repository=routine_run_repository,
+                    evidence_ledger=evidence_ledger,
+                    environment_service=environment_service,
+                    state_store=state_store,
+                )
+                routine = service.create_routine(
+                    RoutineCreateRequest(
+                        routine_key="live-desktop-surface-contention-smoke",
+                        name="Live Desktop Surface Contention Smoke",
+                        summary="Verify desktop routines fail closed when a browser-side page-tab lock already owns the same surface.",
+                        engine_kind="desktop",
+                        environment_kind="desktop",
+                        action_contract=[
+                            {{
+                                "action": "verify_window_focus",
+                                "selector": {{"title": shared_scope}},
+                            }},
+                        ],
+                    ),
+                )
+                response = await service.replay_routine(
+                    routine.id,
+                    RoutineReplayRequest(session_id="live-desktop-contention-smoke"),
+                )
+                session = environment_service.get_session("session:desktop:live-desktop-contention-smoke")
+                print(json.dumps({{
+                    "status": response.run.status,
+                    "failure_class": response.run.failure_class,
+                    "lock_health": response.diagnosis.lock_health,
+                    "resource_conflicts": list(response.run.metadata.get("resource_conflicts") or []),
+                    "session_lease_status": getattr(session, "lease_status", None) if session is not None else None,
+                    "held_lock_status": getattr(held_lease, "lease_status", None),
+                }}))
+            finally:
+                environment_service.release_resource_slot_lease(
+                    lease_id=held_lease.id,
+                    lease_token=held_lease.lease_token,
+                    reason="live desktop smoke cleanup",
+                )
+                evidence_ledger.close()
+
+        asyncio.run(main())
+        """,
+    )
+    payload = _run_live_python_script(tmp_path, script)
+    assert payload["status"] == "failed"
+    assert payload["failure_class"] == "lock-conflict"
+    assert payload["lock_health"] == "contended"
+    conflicts = list(payload["resource_conflicts"] or [])
+    assert conflicts
+    assert conflicts[0]["scope_type"] == "page-tab"
+    assert payload["session_lease_status"] == "released"
+    assert payload["held_lock_status"] == "leased"
 
 
 @pytest.mark.skipif(

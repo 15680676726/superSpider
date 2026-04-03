@@ -1101,6 +1101,77 @@ def test_environment_service_recovers_orphaned_leases_after_restart(tmp_path):
     assert recovered_mount.live_handle_ref is None
 
 
+def test_orphaned_browser_attach_lease_recovery_clears_stale_attach_continuity(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="host-a",
+        process_id=101,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="browser",
+        session_id="sess-attach-restart",
+        user_id="u1",
+        owner="worker-1",
+        ttl_seconds=60,
+        handle={"browser": "tab-restart"},
+        metadata={
+            "host_mode": "attach-existing-session",
+            "lease_class": "exclusive-writer",
+            "access_mode": "writer",
+            "session_scope": "browser-user-session",
+        },
+    )
+    service.register_browser_attach_transport(
+        session_mount_id=lease.id,
+        transport_ref="chrome-native-host:default",
+        status="attached",
+        browser_session_ref="chrome-session:alice-default",
+        browser_scope_ref="chrome-profile:alice",
+        reconnect_token="reconnect-token-1",
+    )
+
+    recovered_registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="host-a",
+        process_id=202,
+    )
+    recovered_service = EnvironmentService(
+        registry=recovered_registry,
+        lease_ttl_seconds=120,
+    )
+    recovered_service.set_session_repository(session_repo)
+
+    recovered = recovered_service.recover_orphaned_leases(
+        now=(lease.lease_acquired_at or datetime.now(timezone.utc)) + timedelta(seconds=1),
+        allow_cross_process_recovery=True,
+    )
+
+    assert recovered == 1
+    recovered_session = session_repo.get_session(lease.id)
+    assert recovered_session is not None
+    recovered_mount = env_repo.get_environment(lease.environment_id)
+    assert recovered_mount is not None
+
+    assert recovered_session.lease_status == "expired"
+    assert recovered_session.metadata["browser_attach_transport_ref"] is None
+    assert recovered_session.metadata["browser_attach_session_ref"] is None
+    assert recovered_session.metadata["browser_attach_scope_ref"] is None
+    assert recovered_session.metadata["browser_attach_reconnect_token"] is None
+    assert recovered_mount.lease_status == "expired"
+    assert recovered_mount.metadata["browser_attach_transport_ref"] is None
+    assert recovered_mount.metadata["browser_attach_session_ref"] is None
+    assert recovered_mount.metadata["browser_attach_scope_ref"] is None
+    assert recovered_mount.metadata["browser_attach_reconnect_token"] is None
+
+
 def test_environment_service_restores_orphaned_leases_with_registered_restorer(
     tmp_path,
 ):
@@ -1828,6 +1899,9 @@ def test_bridge_archive_and_deregister_update_session_and_environment_contracts(
     assert session_detail.status == "deregistered"
     assert session_detail.metadata["bridge_work_status"] == "deregistered"
     assert session_detail.metadata["browser_attach_transport_ref"] is None
+    assert session_detail.metadata["browser_attach_session_ref"] is None
+    assert session_detail.metadata["browser_attach_scope_ref"] is None
+    assert session_detail.metadata["browser_attach_reconnect_token"] is None
     assert isinstance(session_detail.metadata.get("bridge_deregistered_at"), str)
 
 
@@ -1911,6 +1985,53 @@ def test_operator_abort_state_reuses_same_truth_and_surfaces_projection(tmp_path
     assert cleared.metadata["operator_abort_state"]["channel"] == "global-esc"
     assert cleared.metadata["operator_abort_state"]["reason"] == "resume"
     assert refreshed_environment.metadata["operator_abort_state"]["requested"] is False
+
+
+def test_host_abort_producer_reuses_shared_operator_abort_truth(tmp_path):
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    env_repo = EnvironmentRepository(store)
+    session_repo = SessionMountRepository(store)
+    registry = EnvironmentRegistry(
+        repository=env_repo,
+        session_repository=session_repo,
+        host_id="windows-host",
+        process_id=4242,
+    )
+    service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+    service.set_session_repository(session_repo)
+
+    lease = service.acquire_session_lease(
+        channel="desktop",
+        session_id="seat-host-abort",
+        user_id="u1",
+        owner="worker-bridge",
+        ttl_seconds=60,
+        metadata={
+            "host_mode": "local-managed",
+            "lease_class": "exclusive-writer",
+            "access_mode": "desktop-app",
+            "session_scope": "desktop-user-session",
+            "session_ref": "desktop-runtime:seat-host-abort",
+        },
+    )
+
+    requested = service.publish_host_operator_abort(
+        runtime_session_ref="desktop-runtime:seat-host-abort",
+        channel="global-esc",
+        reason="esc hotkey",
+    )
+    session = session_repo.get_session(lease.id)
+    environment = env_repo.get_environment(lease.environment_id)
+
+    assert requested is not None
+    assert requested.id == lease.id
+    assert session is not None
+    assert environment is not None
+    assert session.metadata["operator_abort_state"]["requested"] is True
+    assert session.metadata["operator_abort_state"]["channel"] == "global-esc"
+    assert session.metadata["operator_abort_state"]["reason"] == "esc hotkey"
+    assert environment.metadata["operator_abort_state"]["requested"] is True
+    assert environment.metadata["operator_abort_state"]["channel"] == "global-esc"
 
 
 def test_environment_and_session_detail_expose_execution_contract_projections(tmp_path):

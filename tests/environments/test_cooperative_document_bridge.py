@@ -530,6 +530,75 @@ async def test_document_action_acquires_and_releases_shared_writer_lease(
     assert released.lease_status == "released"
 
 
+@pytest.mark.asyncio
+async def test_document_action_restores_clipboard_and_cleans_up_after_execution_failure(
+    tmp_path,
+) -> None:
+    service, _, _, _event_bus = _build_environment_service(tmp_path)
+    lease = _acquire_document_session(service)
+    service.register_document_bridge(
+        session_mount_id=lease.id,
+        bridge_ref="document-bridge:office",
+        status="ready",
+        supported_families=["documents"],
+        execution_guardrails={
+            "frontmost_verification_required": True,
+            "clipboard_roundtrip_required": True,
+        },
+    )
+
+    call_order: list[str] = []
+
+    class _Executor:
+        async def prepare_execution_cleanup(self, **_kwargs):
+            call_order.append("prepare")
+            return {"foreground_window": {"handle": 101}}
+
+        async def verify_frontmost(self, **_kwargs):
+            call_order.append("frontmost")
+            return {"verified": True}
+
+        async def verify_clipboard_roundtrip(self, **_kwargs):
+            call_order.append("clipboard")
+            return {"verified": True}
+
+        async def restore_foreground(self, **_kwargs):
+            call_order.append("restore_foreground")
+            return {"restored": True}
+
+        async def verify_clipboard_restore(self, **_kwargs):
+            call_order.append("verify_clipboard_restore")
+            return {"verified": True}
+
+        async def cleanup_execution(self, **_kwargs):
+            call_order.append("cleanup")
+            return {"cleaned": True}
+
+        async def __call__(self, **_kwargs):
+            call_order.append("execute")
+            raise RuntimeError("document execution failed")
+
+    service.register_document_bridge_executor("document-bridge:office", _Executor())
+
+    with pytest.raises(RuntimeError, match="document execution failed"):
+        await service.execute_document_action(
+            session_mount_id=lease.id,
+            action="write_document",
+            document_family="documents",
+            contract={},
+        )
+
+    assert call_order == [
+        "prepare",
+        "frontmost",
+        "clipboard",
+        "execute",
+        "restore_foreground",
+        "verify_clipboard_restore",
+        "cleanup",
+    ]
+
+
 def test_document_action_publishes_guardrail_block_event(tmp_path) -> None:
     service, _, _, event_bus = _build_environment_service(tmp_path)
     lease = _acquire_document_session(service)

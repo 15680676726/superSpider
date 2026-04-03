@@ -398,13 +398,17 @@ class EnvironmentService:
         lease_token: str | None = None,
         reason: str | None = None,
     ) -> SessionMount:
-        return self._lease_service.stop_bridge_session_work(
+        session = self._lease_service.stop_bridge_session_work(
             session_mount_id,
             work_id=work_id,
             force=force,
             lease_token=lease_token,
             reason=reason,
         )
+        return self._clear_bridge_browser_attach_transport(
+            session_mount_id=session_mount_id,
+            adapter_gap_or_blocker=reason,
+        ) or session
 
     def archive_bridge_session(
         self,
@@ -466,6 +470,21 @@ class EnvironmentService:
     ) -> SessionMount:
         return self._lease_service.set_shared_operator_abort_state(
             session_mount_id,
+            channel=channel,
+            reason=reason,
+        )
+
+    def publish_host_operator_abort(
+        self,
+        *,
+        session_mount_id: str | None = None,
+        runtime_session_ref: str | None = None,
+        channel: str | None = None,
+        reason: str | None = None,
+    ) -> SessionMount:
+        return self._lease_service.publish_host_operator_abort(
+            session_mount_id=session_mount_id,
+            runtime_session_ref=runtime_session_ref,
             channel=channel,
             reason=reason,
         )
@@ -1217,7 +1236,7 @@ class EnvironmentService:
                 "scope_ref",
                 "reconnect_token",
             )
-        ):
+        ) and adapter_gap_or_blocker is None:
             return None
         return runtime.clear_transport(
             session_mount_id=session_mount_id,
