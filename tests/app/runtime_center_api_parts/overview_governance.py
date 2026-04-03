@@ -232,6 +232,74 @@ class _CognitiveFakeIndustryService(FakeIndustryService):
             ],
             "needs_replan": True,
         }
+        payload["main_brain_planning"] = {
+            "is_truth_store": False,
+            "source": "industry-runtime-read-model",
+            "strategy_constraints": {
+                "planning_policy": ["prefer-followup-before-net-new"],
+                "strategic_uncertainties": [
+                    {
+                        "uncertainty_id": "uncertainty-followup-pressure",
+                        "statement": "Follow-up pressure may exceed the current lane mix.",
+                    }
+                ],
+                "lane_budgets": [
+                    {
+                        "lane_id": "lane-ops",
+                        "budget": 2,
+                    }
+                ],
+            },
+            "latest_cycle_decision": {
+                "cycle_id": "cycle-1",
+                "summary": "Cycle shell for Runtime Center.",
+                "selected_backlog_item_ids": ["backlog-followup-1"],
+                "selected_assignment_ids": ["assignment-1"],
+                "planning_shell": {
+                    "resume_key": "industry:industry-v1-ops:cycle-1",
+                    "fork_key": "cycle:daily",
+                    "verify_reminder": "Verify cycle lane pressure before materializing assignments.",
+                },
+            },
+            "focused_assignment_plan": {
+                "summary": "Assignment shell keeps the browser follow-up on the same control thread.",
+                "checkpoints": [{"kind": "verify", "label": "Verify browser evidence."}],
+                "acceptance_criteria": ["Browser evidence captured and linked."],
+                "planning_shell": {
+                    "resume_key": "assignment:assignment-1",
+                    "fork_key": "assignment:followup",
+                    "verify_reminder": "Verify browser evidence before closing the assignment.",
+                },
+            },
+            "replan": {
+                "status": "needs-replan",
+                "decision_kind": "lane_reweight",
+                "summary": "Replan shell is waiting for main-brain judgment.",
+                "strategy_trigger_rules": [
+                    {"rule_id": "review-rule:0"},
+                    {"rule_id": "uncertainty:uncertainty-followup-pressure:confidence-drop"},
+                ],
+                "uncertainty_register": {
+                    "summary": {
+                        "uncertainty_count": 1,
+                        "lane_budget_count": 1,
+                        "trigger_rule_count": 2,
+                    },
+                    "items": [
+                        {
+                            "uncertainty_id": "uncertainty-followup-pressure",
+                            "statement": "Follow-up pressure may exceed the current lane mix.",
+                        }
+                    ],
+                },
+                "planning_shell": {
+                    "resume_key": "report:report-1",
+                    "fork_key": "decision:lane_reweight",
+                    "verify_reminder": "Verify synthesis pressure before mutating planning truth.",
+                },
+            },
+        }
+        payload["current_cycle"]["main_brain_planning"] = payload["main_brain_planning"]
         payload["backlog"] = [
             {
                 "backlog_item_id": "backlog-followup-1",
@@ -441,12 +509,12 @@ def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
         "Reports disagree on whether the handoff is cleared.",
         "Supervisor review is still missing for the handoff return.",
     ]
-    assert cognition["decision_kind"] == "follow_up_backlog"
+    assert cognition["decision_kind"] == "lane_reweight"
     assert cognition["judgment"]["status"] == "attention"
-    assert cognition["judgment"]["decision_kind"] == "follow_up_backlog"
+    assert cognition["judgment"]["decision_kind"] == "lane_reweight"
     assert "decide whether to dispatch follow-up work" in cognition["judgment"]["summary"]
     assert cognition["next_action"]["kind"] == "followup-backlog"
-    assert cognition["next_action"]["decision_kind"] == "follow_up_backlog"
+    assert cognition["next_action"]["decision_kind"] == "lane_reweight"
     assert cognition["next_action"]["title"] == "Resolve handoff return evidence gap"
     assert cognition["next_action"]["route"] == (
         "/api/runtime-center/industry/industry-v1-ops?backlog_item_id=backlog-followup-1"
@@ -466,10 +534,20 @@ def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
     )
     assert payload["reports"][0]["report_consumed"] is False
     assert payload["signals"]["report_cognition"]["status"] == "attention"
-    assert payload["signals"]["report_cognition"]["decision_kind"] == "follow_up_backlog"
+    assert payload["signals"]["report_cognition"]["decision_kind"] == "lane_reweight"
     assert payload["signals"]["report_cognition"]["count"] == 4
     assert payload["meta"]["agent_reports"]["unconsumed_count"] == 1
     assert payload["meta"]["report_cognition"]["needs_replan"] is True
+    planning = payload["main_brain_planning"]
+    assert planning["latest_cycle_decision"]["summary"] == "Cycle shell for Runtime Center."
+    assert planning["latest_cycle_decision"]["planning_shell"]["resume_key"] == (
+        "industry:industry-v1-ops:cycle-1"
+    )
+    assert planning["focused_assignment_plan"]["planning_shell"]["fork_key"] == (
+        "assignment:followup"
+    )
+    assert planning["replan"]["decision_kind"] == "lane_reweight"
+    assert planning["replan"]["uncertainty_register"]["summary"]["uncertainty_count"] == 1
 
 
 def test_runtime_center_main_brain_route_exposes_unified_operator_sections():

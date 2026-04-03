@@ -451,6 +451,124 @@ def test_agent_profile_service_preserves_legacy_goal_focus_backfill_until_writer
     assert profile.current_focus == "Legacy runtime goal"
 
 
+def test_agent_profile_service_uses_mailbox_current_focus_when_runtime_focus_missing(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    runtime_repo = SqliteAgentRuntimeRepository(store)
+    mailbox_repo = SqliteAgentMailboxRepository(store)
+    checkpoint_repo = SqliteAgentCheckpointRepository(store)
+
+    runtime_repo.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-1",
+            actor_key="industry-v1-ops:operator",
+            actor_fingerprint="fp-agent-1",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="running",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="operator",
+            display_name="Ops Agent",
+            role_name="Operations",
+            metadata={},
+        ),
+    )
+    mailbox_repo.upsert_item(
+        AgentMailboxRecord(
+            id="mailbox-1",
+            agent_id="agent-1",
+            title="Mailbox task",
+            summary="Mailbox summary",
+            status="running",
+            capability_ref="system:dispatch_query",
+            metadata={
+                "current_focus_kind": "assignment",
+                "current_focus_id": "assignment-mailbox",
+                "current_focus": "Mailbox projected assignment",
+            },
+        ),
+    )
+    checkpoint_repo.upsert_checkpoint(
+        AgentCheckpointRecord(
+            id="checkpoint-1",
+            agent_id="agent-1",
+            mailbox_id="mailbox-1",
+            checkpoint_kind="worker-step",
+            status="ready",
+            phase="query-streaming",
+            summary="Checkpoint summary",
+            resume_payload={
+                "current_focus_kind": "assignment",
+                "current_focus_id": "assignment-checkpoint",
+                "current_focus": "Checkpoint projected assignment",
+            },
+        ),
+    )
+
+    service = AgentProfileService(
+        agent_runtime_repository=runtime_repo,
+        agent_mailbox_repository=mailbox_repo,
+        agent_checkpoint_repository=checkpoint_repo,
+    )
+    profile = service.get_agent("agent-1")
+
+    assert profile is not None
+    assert profile.current_focus_kind == "assignment"
+    assert profile.current_focus_id == "assignment-mailbox"
+    assert profile.current_focus == "Mailbox projected assignment"
+
+
+def test_agent_profile_service_uses_checkpoint_current_focus_when_runtime_and_mailbox_missing(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    runtime_repo = SqliteAgentRuntimeRepository(store)
+    checkpoint_repo = SqliteAgentCheckpointRepository(store)
+
+    runtime_repo.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-1",
+            actor_key="industry-v1-ops:operator",
+            actor_fingerprint="fp-agent-1",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="running",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="operator",
+            display_name="Ops Agent",
+            role_name="Operations",
+            metadata={},
+        ),
+    )
+    checkpoint_repo.upsert_checkpoint(
+        AgentCheckpointRecord(
+            id="checkpoint-1",
+            agent_id="agent-1",
+            checkpoint_kind="worker-step",
+            status="ready",
+            phase="query-streaming",
+            summary="Checkpoint summary",
+            resume_payload={
+                "current_focus_kind": "assignment",
+                "current_focus_id": "assignment-checkpoint",
+                "current_focus": "Checkpoint projected assignment",
+            },
+        ),
+    )
+
+    service = AgentProfileService(
+        agent_runtime_repository=runtime_repo,
+        agent_checkpoint_repository=checkpoint_repo,
+    )
+    profile = service.get_agent("agent-1")
+
+    assert profile is not None
+    assert profile.current_focus_kind == "assignment"
+    assert profile.current_focus_id == "assignment-checkpoint"
+    assert profile.current_focus == "Checkpoint projected assignment"
+
+
 def test_agent_profile_service_detail_stats_drop_goal_count(tmp_path) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
     runtime_repo = SqliteAgentRuntimeRepository(store)

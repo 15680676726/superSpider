@@ -249,7 +249,7 @@ def test_industry_bootstrap_goal_compile_regression_keeps_specialist_runtime_con
     assert "- Evidence expectations:" in prompt_text
 
 
-def test_industry_bootstrap_specialist_runtime_metadata_dual_writes_current_focus(
+def test_industry_bootstrap_specialist_runtime_metadata_only_persists_current_focus(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
@@ -287,8 +287,8 @@ def test_industry_bootstrap_specialist_runtime_metadata_dual_writes_current_focu
 
     assert runtime is not None
     metadata = runtime.metadata
-    assert metadata["goal_id"] == specialist_goal["goal"]["id"]
-    assert metadata["goal_title"] == specialist_goal["goal"]["title"]
+    assert "goal_id" not in metadata
+    assert "goal_title" not in metadata
     assert metadata["current_focus_kind"] == "goal"
     assert metadata["current_focus_id"] == specialist_goal["goal"]["id"]
     assert metadata["current_focus"] == specialist_goal["goal"]["title"]
@@ -326,8 +326,8 @@ def test_industry_runtime_sync_preserves_assignment_focus_without_goal(tmp_path)
 
     assert runtime is not None
     metadata = runtime.metadata
-    assert metadata["goal_id"] is None
-    assert metadata["goal_title"] is None
+    assert "goal_id" not in metadata
+    assert "goal_title" not in metadata
     assert metadata["current_focus_kind"] == "assignment"
     assert metadata["current_focus_id"] == "assignment-ops-1"
     assert metadata["current_focus"] == "Review assignment relay"

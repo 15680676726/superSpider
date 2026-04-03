@@ -129,6 +129,58 @@ const unifiedPayload = {
     focus_count: 2,
     next_cycle_due_at: "2026-03-31T23:59:59Z",
   },
+  main_brain_planning: {
+    strategy_constraints: {
+      planning_policy: ["prefer-followup-before-net-new"],
+      strategic_uncertainties: [
+        { uncertainty_id: "uncertainty-followup-pressure" },
+      ],
+      lane_budgets: [{ lane_id: "lane-ops", budget: 2 }],
+    },
+    latest_cycle_decision: {
+      cycle_id: "cycle-9",
+      summary: "Cycle shell for Runtime Center.",
+      selected_backlog_item_ids: ["backlog-followup-1"],
+      selected_assignment_ids: ["assignment-1"],
+      planning_shell: {
+        verify_reminder: "Verify cycle lane pressure before materializing assignments.",
+        resume_key: "industry:industry-v1-ops:cycle-9",
+        fork_key: "cycle:daily",
+      },
+    },
+    focused_assignment_plan: {
+      summary: "Assignment shell keeps the browser follow-up on the same control thread.",
+      checkpoints: [{ kind: "verify", label: "Verify browser evidence." }],
+      acceptance_criteria: ["Browser evidence captured and linked."],
+      planning_shell: {
+        verify_reminder: "Verify browser evidence before closing the assignment.",
+        resume_key: "assignment:assignment-1",
+        fork_key: "assignment:followup",
+      },
+    },
+    replan: {
+      status: "needs-replan",
+      decision_kind: "lane_reweight",
+      summary: "Replan shell is waiting for main-brain judgment.",
+      strategy_trigger_rules: [
+        { rule_id: "review-rule:0" },
+        { rule_id: "uncertainty:uncertainty-followup-pressure:confidence-drop" },
+      ],
+      uncertainty_register: {
+        summary: {
+          uncertainty_count: 1,
+          lane_budget_count: 1,
+          trigger_rule_count: 2,
+        },
+        items: [{ uncertainty_id: "uncertainty-followup-pressure" }],
+      },
+      planning_shell: {
+        verify_reminder: "Verify synthesis pressure before mutating planning truth.",
+        resume_key: "report:report-1",
+        fork_key: "decision:lane_reweight",
+      },
+    },
+  },
   assignments: [
     {
       assignment_id: "assignment-1",
@@ -408,6 +460,29 @@ describe("MainBrainCockpitPanel", () => {
     expect(
       screen.getAllByText("Supervisor review is still missing for the handoff return.").length,
     ).toBeGreaterThan(0);
+  });
+
+  it("renders structured formal planning shell visibility in the main-brain cockpit", () => {
+    renderPanel(unifiedPayload);
+
+    expect(screen.getByText("Cycle shell for Runtime Center.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Verify cycle lane pressure before materializing assignments."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Assignment shell keeps the browser follow-up on the same control thread.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Verify browser evidence before closing the assignment."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Replan shell is waiting for main-brain judgment."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Verify synthesis pressure before mutating planning truth."),
+    ).toBeInTheDocument();
   });
 
   it("renders query runtime entropy visibility in the main-brain cockpit", () => {

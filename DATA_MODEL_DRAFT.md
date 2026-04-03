@@ -280,7 +280,6 @@
 - `current_focus_kind`
 - `current_focus_id`
 - `current_focus`
-- `current_goal_id`
 - `current_primary_task_id`
 - `today_output_summary`
 - `latest_evidence_summary`
@@ -288,7 +287,7 @@
 说明：
 
 - `current_focus_*` 是 agent 当前执行焦点的正式前台口径，可指向 goal/backlog/assignment 等 live focus。
-- `current_goal_id` 暂时只应保留为 leaf goal backlink 或执行层兼容字段，不应继续被新的 operator/runtime 前台直接当主心智消费。
+- `goal_id / goal_title` 不再允许作为 live runtime metadata 的正式焦点字段；如历史数据仍存在，只能停留在兼容读取边界，不得重新回写。
 
 ### 待验证字段
 
@@ -1196,7 +1195,6 @@ Windows-first 约束：
 - `current_focus_kind`
 - `current_focus_id`
 - `current_focus`
-- `current_goal`
 - `current_task_id`
 - `environment_summary`
 - `today_output_summary`

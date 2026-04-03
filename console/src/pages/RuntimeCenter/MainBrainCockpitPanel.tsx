@@ -619,6 +619,80 @@ export default function MainBrainCockpitPanel({
     : isRecord(mainBrainData?.meta?.report_cognition)
       ? (mainBrainData?.meta?.report_cognition as Record<string, unknown>)
       : null;
+  const planningPayload = isRecord(mainBrainData?.main_brain_planning)
+    ? (mainBrainData?.main_brain_planning as Record<string, unknown>)
+    : isRecord(mainBrainData?.current_cycle) &&
+        isRecord((mainBrainData.current_cycle as Record<string, unknown>).main_brain_planning)
+      ? ((mainBrainData.current_cycle as Record<string, unknown>)
+          .main_brain_planning as Record<string, unknown>)
+      : isRecord(mainBrainData?.meta?.main_brain_planning)
+        ? (mainBrainData.meta.main_brain_planning as Record<string, unknown>)
+        : null;
+  const planningStrategyConstraints = isRecord(planningPayload?.strategy_constraints)
+    ? (planningPayload.strategy_constraints as Record<string, unknown>)
+    : null;
+  const planningLatestCycleDecision = isRecord(planningPayload?.latest_cycle_decision)
+    ? (planningPayload.latest_cycle_decision as Record<string, unknown>)
+    : null;
+  const planningAssignmentPlan = isRecord(planningPayload?.focused_assignment_plan)
+    ? (planningPayload.focused_assignment_plan as Record<string, unknown>)
+    : null;
+  const planningReplan = isRecord(planningPayload?.replan)
+    ? (planningPayload.replan as Record<string, unknown>)
+    : null;
+  const planningCycleShell = isRecord(planningLatestCycleDecision?.planning_shell)
+    ? (planningLatestCycleDecision.planning_shell as Record<string, unknown>)
+    : null;
+  const planningAssignmentShell = isRecord(planningAssignmentPlan?.planning_shell)
+    ? (planningAssignmentPlan.planning_shell as Record<string, unknown>)
+    : null;
+  const planningReplanShell = isRecord(planningReplan?.planning_shell)
+    ? (planningReplan.planning_shell as Record<string, unknown>)
+    : null;
+  const planningPolicy = Array.isArray(planningStrategyConstraints?.planning_policy)
+    ? planningStrategyConstraints.planning_policy
+        .map((item) => firstString(item))
+        .filter((item): item is string => Boolean(item))
+        .join(", ")
+    : null;
+  const planningUncertaintyCount = Array.isArray(
+    planningStrategyConstraints?.strategic_uncertainties,
+  )
+    ? planningStrategyConstraints.strategic_uncertainties.length
+    : null;
+  const planningLaneBudgetCount = Array.isArray(planningStrategyConstraints?.lane_budgets)
+    ? planningStrategyConstraints.lane_budgets.length
+    : null;
+  const planningBacklogCount = Array.isArray(
+    planningLatestCycleDecision?.selected_backlog_item_ids,
+  )
+    ? planningLatestCycleDecision.selected_backlog_item_ids.length
+    : null;
+  const planningAssignmentCount = Array.isArray(
+    planningLatestCycleDecision?.selected_assignment_ids,
+  )
+    ? planningLatestCycleDecision.selected_assignment_ids.length
+    : null;
+  const planningCheckpointCount = Array.isArray(planningAssignmentPlan?.checkpoints)
+    ? planningAssignmentPlan.checkpoints.length
+    : null;
+  const planningAcceptanceCount = Array.isArray(planningAssignmentPlan?.acceptance_criteria)
+    ? planningAssignmentPlan.acceptance_criteria.length
+    : null;
+  const planningTriggerRuleCount = Array.isArray(planningReplan?.strategy_trigger_rules)
+    ? planningReplan.strategy_trigger_rules.length
+    : null;
+  const planningUncertaintyRegister = isRecord(planningReplan?.uncertainty_register)
+    ? (planningReplan.uncertainty_register as Record<string, unknown>)
+    : null;
+  const planningUncertaintyRegisterSummary = isRecord(planningUncertaintyRegister?.summary)
+    ? (planningUncertaintyRegister.summary as Record<string, unknown>)
+    : null;
+  const planningUncertaintyRegisterCount =
+    firstString(planningUncertaintyRegisterSummary?.uncertainty_count) ??
+    (Array.isArray(planningUncertaintyRegister?.items)
+      ? String(planningUncertaintyRegister.items.length)
+      : null);
   const assignmentRecords = recordList(mainBrainData?.assignments);
   const backlogRecords = recordList(mainBrainData?.backlog);
   const laneRecords = recordList(mainBrainData?.lanes);
@@ -1002,6 +1076,217 @@ export default function MainBrainCockpitPanel({
               </div>
             </div>
           </Card>
+
+          {planningPayload ? (
+            <Card size="small" title="正式规划壳" style={{ marginBottom: 16 }}>
+              <div className={styles.metaGrid}>
+                <div className={styles.controlCard}>
+                  <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                    <div>
+                      <h3 className={styles.entryTitle}>策略约束</h3>
+                      {firstString(planningPayload?.source) ? (
+                        <p className={styles.selectionSummary}>
+                          {firstString(planningPayload?.source)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <Descriptions
+                    size="small"
+                    column={1}
+                    items={[
+                      {
+                        key: "planning_policy",
+                        label: "规划策略",
+                        children: planningPolicy ?? RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                      {
+                        key: "uncertainty_count",
+                        label: "战略不确定项",
+                        children:
+                          planningUncertaintyCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningUncertaintyCount),
+                      },
+                      {
+                        key: "lane_budget_count",
+                        label: "赛道预算",
+                        children:
+                          planningLaneBudgetCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningLaneBudgetCount),
+                      },
+                    ]}
+                  />
+                </div>
+                <div className={styles.controlCard}>
+                  <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                    <div>
+                      <h3 className={styles.entryTitle}>周期壳</h3>
+                      {firstString(planningLatestCycleDecision?.summary) ? (
+                        <p className={styles.selectionSummary}>
+                          {firstString(planningLatestCycleDecision?.summary)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <Descriptions
+                    size="small"
+                    column={1}
+                    items={[
+                      {
+                        key: "cycle_backlog_count",
+                        label: "选中待办",
+                        children:
+                          planningBacklogCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningBacklogCount),
+                      },
+                      {
+                        key: "cycle_assignment_count",
+                        label: "选中派工",
+                        children:
+                          planningAssignmentCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningAssignmentCount),
+                      },
+                      {
+                        key: "cycle_resume_key",
+                        label: "Resume key",
+                        children:
+                          firstString(planningCycleShell?.resume_key) ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                      {
+                        key: "cycle_fork_key",
+                        label: "Fork key",
+                        children:
+                          firstString(planningCycleShell?.fork_key) ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                    ]}
+                  />
+                  {firstString(planningCycleShell?.verify_reminder) ? (
+                    <p className={styles.selectionSummary} style={{ marginTop: 12 }}>
+                      {firstString(planningCycleShell?.verify_reminder)}
+                    </p>
+                  ) : null}
+                </div>
+                <div className={styles.controlCard}>
+                  <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                    <div>
+                      <h3 className={styles.entryTitle}>派工壳</h3>
+                      {firstString(planningAssignmentPlan?.summary) ? (
+                        <p className={styles.selectionSummary}>
+                          {firstString(planningAssignmentPlan?.summary)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <Descriptions
+                    size="small"
+                    column={1}
+                    items={[
+                      {
+                        key: "assignment_checkpoint_count",
+                        label: "检查点",
+                        children:
+                          planningCheckpointCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningCheckpointCount),
+                      },
+                      {
+                        key: "assignment_acceptance_count",
+                        label: "验收条件",
+                        children:
+                          planningAcceptanceCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningAcceptanceCount),
+                      },
+                      {
+                        key: "assignment_resume_key",
+                        label: "Resume key",
+                        children:
+                          firstString(planningAssignmentShell?.resume_key) ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                      {
+                        key: "assignment_fork_key",
+                        label: "Fork key",
+                        children:
+                          firstString(planningAssignmentShell?.fork_key) ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                    ]}
+                  />
+                  {firstString(planningAssignmentShell?.verify_reminder) ? (
+                    <p className={styles.selectionSummary} style={{ marginTop: 12 }}>
+                      {firstString(planningAssignmentShell?.verify_reminder)}
+                    </p>
+                  ) : null}
+                </div>
+                <div className={styles.controlCard}>
+                  <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                    <div>
+                      <div className={styles.cardTitleRow}>
+                        <h3 className={styles.entryTitle}>重规划壳</h3>
+                        {firstString(planningReplan?.status) ? (
+                          <Tag color={surfaceTagColor(firstString(planningReplan?.status) ?? "default")}>
+                            {firstString(planningReplan?.status)}
+                          </Tag>
+                        ) : null}
+                      </div>
+                      {firstString(planningReplan?.summary) ? (
+                        <p className={styles.selectionSummary}>
+                          {firstString(planningReplan?.summary)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <Descriptions
+                    size="small"
+                    column={1}
+                    items={[
+                      {
+                        key: "replan_decision_kind",
+                        label: "决策类型",
+                        children:
+                          firstString(planningReplan?.decision_kind) ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                      {
+                        key: "replan_trigger_rule_count",
+                        label: "触发规则",
+                        children:
+                          planningTriggerRuleCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningTriggerRuleCount),
+                      },
+                      {
+                        key: "replan_uncertainty_count",
+                        label: "不确定项登记",
+                        children:
+                          planningUncertaintyRegisterCount ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                      {
+                        key: "replan_resume_key",
+                        label: "Resume key",
+                        children:
+                          firstString(planningReplanShell?.resume_key) ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                    ]}
+                  />
+                  {firstString(planningReplanShell?.verify_reminder) ? (
+                    <p className={styles.selectionSummary} style={{ marginTop: 12 }}>
+                      {firstString(planningReplanShell?.verify_reminder)}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </Card>
+          ) : null}
 
           {reportCognitionPayload ? (
             <Card size="small" title="汇报认知" style={{ marginBottom: 16 }}>

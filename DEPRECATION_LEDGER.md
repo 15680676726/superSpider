@@ -120,6 +120,23 @@
   - `2026-03-25` 已从 `runtime_center_routes_core.py` 物理删除该 HTTP 路由
   - 前台 direct delegate 心智正式下线
 
+### 3.0.6 legacy runtime 焦点键：`goal_id / goal_title / current_goal*`
+
+- 当前状态：`read-only-compat`
+- 问题：旧 `goal_*` 焦点键如果继续作为 live runtime writer contract，会让 `current_focus_*` 与 legacy goal 文本长期双语义并存
+- 目标替代：
+  - `current_focus_kind`
+  - `current_focus_id`
+  - `current_focus`
+- 删除阶段：`execution-discipline closure`
+- 删除前提：
+  - runtime metadata writer 不再持久化 `goal_id / goal_title`
+  - Runtime Center / Agent Workbench / conversations / industry detail 正式只消费 `current_focus_*`
+  - mailbox / checkpoint 的历史兼容读被专项迁移或自然淘汰
+- 删除方式：
+  - `2026-04-03` 已切掉 `industry/service_team_runtime.py` 对 `goal_id / goal_title` 的 runtime metadata 双写
+  - 当前仅保留 `AgentProfileService` 的兼容读，用于历史 mailbox/checkpoint payload；待历史数据迁完后物理删除 compatibility fallback
+
 ### 3.0.3 `MainBrainChatService` 后台 `writeback / kickoff`
 
 - 当前状态：`frozen`

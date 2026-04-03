@@ -371,11 +371,11 @@ class _IndustryTeamRuntimeMixin:
             current_focus_kind = "assignment"
             current_focus_id = assignment_id
             current_focus = assignment_title or assignment_summary or assignment_id
+        metadata.pop("goal_id", None)
+        metadata.pop("goal_title", None)
         metadata.update(
             {
                 "owner_scope": owner_scope,
-                "goal_id": goal_id,
-                "goal_title": goal_title,
                 "current_focus_kind": current_focus_kind,
                 "current_focus_id": current_focus_id,
                 "current_focus": current_focus,

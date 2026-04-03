@@ -107,6 +107,7 @@ class RuntimeMainBrainResponse(BaseModel):
     cycles: list[dict[str, Any]] = Field(default_factory=list)
     backlog: list[dict[str, Any]] = Field(default_factory=list)
     current_cycle: dict[str, Any] | None = None
+    main_brain_planning: dict[str, Any] = Field(default_factory=dict)
     assignments: list[dict[str, Any]] = Field(default_factory=list)
     reports: list[dict[str, Any]] = Field(default_factory=list)
     report_cognition: dict[str, Any] = Field(default_factory=dict)

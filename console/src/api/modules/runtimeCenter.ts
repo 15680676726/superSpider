@@ -219,6 +219,7 @@ export interface RuntimeMainBrainResponse {
   cycles: Record<string, unknown>[];
   backlog: Record<string, unknown>[];
   current_cycle: Record<string, unknown> | null;
+  main_brain_planning: Record<string, unknown>;
   assignments: Record<string, unknown>[];
   reports: Record<string, unknown>[];
   report_cognition: Record<string, unknown>;

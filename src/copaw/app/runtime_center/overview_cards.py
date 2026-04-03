@@ -807,6 +807,9 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             cycles=self._normalize_list(industry_detail.get("cycles")),
             backlog=normalized_backlog,
             current_cycle=self._mapping(industry_detail.get("current_cycle")),
+            main_brain_planning=(
+                self._mapping(industry_detail.get("main_brain_planning")) or {}
+            ),
             assignments=self._normalize_list(industry_detail.get("assignments")),
             reports=normalized_reports,
             report_cognition=report_cognition,

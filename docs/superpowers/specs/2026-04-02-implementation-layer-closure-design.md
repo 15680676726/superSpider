@@ -874,3 +874,8 @@
 - runtime/bindings/persistence 混装
 
 所以本轮的正确做法不是再补新功能，而是按本设计完成一次真正的实现层硬收口。
+## `2026-04-03` 施工补充
+
+- live runtime metadata writer 已经切到只落 `current_focus_*`，`goal_id / goal_title` 不再被 industry runtime sync 写回 `AgentRuntimeRecord.metadata`
+- 当前 `current_goal*` 残留已缩到历史 mailbox/checkpoint 的 compatibility read，而不再是活跃 writer
+- `Runtime Center` 主脑 cockpit 已直接消费 dedicated `main_brain_planning` read contract，planning shell 不再只埋在 `report_cognition.replan` 或 `current_cycle.main_brain_planning` 的次级字段中
