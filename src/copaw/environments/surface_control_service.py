@@ -358,8 +358,16 @@ class SurfaceControlService:
         guardrail_kwargs: dict[str, Any],
         execution_kwargs: dict[str, Any],
     ) -> dict[str, Any]:
+        cleanup_executors = self._cleanup_executors(
+            selected_executor=selected_executor,
+            host_executor=host_executor,
+        )
+        await self._poll_host_operator_abort(
+            host_executor,
+            **execution_kwargs,
+        )
         cleanup_state = await self._prepare_execution_cleanup(
-            selected_executor,
+            cleanup_executors,
             **execution_kwargs,
         )
         execution_started = False
@@ -434,7 +442,7 @@ class SurfaceControlService:
             failure = exc
 
         cleanup_error = await self._run_execution_cleanup(
-            selected_executor,
+            cleanup_executors,
             cleanup_state=cleanup_state,
             execution_started=execution_started,
             execution_outcome=self._execution_outcome(
@@ -978,19 +986,47 @@ class SurfaceControlService:
                 payload["clipboard_verifier_missing"] = True
         return payload
 
-    async def _prepare_execution_cleanup(
+    def _cleanup_executors(
+        self,
+        *,
+        selected_executor: object | None,
+        host_executor: object | None,
+    ) -> list[object]:
+        executors: list[object] = []
+        for executor in (host_executor, selected_executor):
+            if executor is None:
+                continue
+            if any(existing is executor for existing in executors):
+                continue
+            executors.append(executor)
+        return executors
+
+    async def _poll_host_operator_abort(
         self,
         executor: object | None,
         **kwargs,
     ) -> dict[str, Any]:
-        hook = self._resolve_executor_hook(executor, "prepare_execution_cleanup")
+        hook = self._resolve_executor_hook(executor, "poll_operator_abort_signal")
         if hook is None:
             return {}
         return self._mapping(await self._invoke(hook, **kwargs))
 
+    async def _prepare_execution_cleanup(
+        self,
+        executors: list[object],
+        **kwargs,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for executor in executors:
+            hook = self._resolve_executor_hook(executor, "prepare_execution_cleanup")
+            if hook is None:
+                continue
+            payload.update(self._mapping(await self._invoke(hook, **kwargs)))
+        return payload
+
     async def _run_execution_cleanup(
         self,
-        executor: object | None,
+        executors: list[object],
         *,
         cleanup_state: dict[str, Any],
         execution_started: bool,
@@ -1004,21 +1040,33 @@ class SurfaceControlService:
             "verify_clipboard_restore",
             "cleanup_execution",
         ):
-            hook = self._resolve_executor_hook(executor, hook_name)
-            if hook is None:
-                continue
-            try:
-                await self._invoke(
-                    hook,
-                    cleanup_state=cleanup_state,
-                    execution_started=execution_started,
-                    execution_outcome=execution_outcome,
-                    execution_error=execution_error,
-                    **kwargs,
-                )
-            except BaseException as exc:  # includes asyncio.CancelledError
-                if cleanup_error is None:
-                    cleanup_error = exc
+            for executor in executors:
+                hook = self._resolve_executor_hook(executor, hook_name)
+                if hook is None:
+                    continue
+                try:
+                    result = await self._invoke(
+                        hook,
+                        cleanup_state=cleanup_state,
+                        execution_started=execution_started,
+                        execution_outcome=execution_outcome,
+                        execution_error=execution_error,
+                        **kwargs,
+                    )
+                    if hook_name == "verify_clipboard_restore":
+                        verification = self._mapping(result)
+                        verified = verification.get("verified")
+                        clipboard_restore_ok = verification.get("clipboard_restore_ok")
+                        if verified is False or (
+                            clipboard_restore_ok is not None
+                            and not bool(clipboard_restore_ok)
+                        ):
+                            raise RuntimeError(
+                                "Clipboard restore verification failed after execution cleanup.",
+                            )
+                except BaseException as exc:  # includes asyncio.CancelledError
+                    if cleanup_error is None:
+                        cleanup_error = exc
         return cleanup_error
 
     @staticmethod

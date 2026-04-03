@@ -261,6 +261,7 @@ Landed shape:
 - shared operator-abort state now lives on the canonical session/environment truth
 - formal write/clear surfaces exist on the same Runtime Center lifecycle plane
 - `WindowsDesktopHost.poll_operator_abort_signal(...)` can now act as a host-side producer and publish into that same canonical truth through `EnvironmentService / EnvironmentLeaseService`
+- desktop environment execution now passes a hook-capable host executor into `EnvironmentService`, so host-side abort polling and restore hooks are no longer test-only surfaces
 - read models expose the same operator-abort truth through:
   - `cooperative_adapter_availability.operator_abort_state`
   - `desktop_app_contract.operator_abort_state`

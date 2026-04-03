@@ -750,6 +750,75 @@ async def test_windows_app_action_restores_clipboard_and_cleans_up_after_cancell
     ]
 
 
+@pytest.mark.asyncio
+async def test_windows_app_action_fails_when_host_clipboard_restore_verification_fails(
+    tmp_path,
+) -> None:
+    service, env_repo, session_repo = _build_environment_service(tmp_path)
+    lease = _acquire_desktop_session(service)
+
+    service.register_windows_app_adapter(
+        session_mount_id=lease.id,
+        adapter_refs=["app-adapter:excel"],
+        app_identity="excel",
+        control_channel="accessibility-tree",
+        execution_guardrails={
+            "frontmost_verification_required": True,
+        },
+    )
+    _patch_session_environment_metadata(
+        env_repo=env_repo,
+        session_repo=session_repo,
+        session_mount_id=lease.id,
+        patch={
+            "active_window_ref": "window:excel:main",
+            "window_scope": "window:excel:main",
+        },
+    )
+
+    call_order: list[str] = []
+
+    class _Executor:
+        async def verify_frontmost(self, **_kwargs):
+            call_order.append("frontmost")
+            return {"verified": True}
+
+        async def __call__(self, **_kwargs):
+            call_order.append("execute")
+            return {"success": True, "message": "semantic ok"}
+
+    class _HostExecutor:
+        async def prepare_execution_cleanup(self, **_kwargs):
+            call_order.append("prepare_host")
+            return {"foreground_window": {"handle": 101}}
+
+        async def restore_foreground(self, **_kwargs):
+            call_order.append("restore_host")
+            return {"restored": True}
+
+        async def verify_clipboard_restore(self, **_kwargs):
+            call_order.append("verify_clipboard_restore_host")
+            return {"verified": False}
+
+    service.register_semantic_surface_executor("accessibility-tree", _Executor())
+
+    with pytest.raises(RuntimeError, match="Clipboard restore verification failed"):
+        await service.execute_windows_app_action(
+            session_mount_id=lease.id,
+            action="focus_window",
+            contract={"app_identity": "excel"},
+            host_executor=_HostExecutor(),
+        )
+
+    assert call_order == [
+        "prepare_host",
+        "frontmost",
+        "execute",
+        "restore_host",
+        "verify_clipboard_restore_host",
+    ]
+
+
 def test_execute_windows_app_action_blocks_when_frontmost_window_mismatches_expected(
     tmp_path,
 ) -> None:

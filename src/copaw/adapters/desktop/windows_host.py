@@ -193,6 +193,7 @@ class WindowsDesktopHost:
         runtime_session_ref: str | None = None,
         channel: str = "global-esc",
         reason: str | None = None,
+        **_kwargs,
     ) -> dict[str, object]:
         """Publish a canonical operator-abort request when the host ESC key is pressed."""
         self._ensure_supported()

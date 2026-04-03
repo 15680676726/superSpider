@@ -62,6 +62,41 @@ _DESKTOP_DOCUMENT_FAMILY_BY_SUFFIX = {
 }
 
 
+class _DesktopHostExecutorAdapter:
+    """Expose desktop host execution plus host-side hooks to EnvironmentService."""
+
+    def __init__(self, *, host: WindowsDesktopHost, execute_action) -> None:
+        self._host = host
+        self._execute_action = execute_action
+
+    def __call__(self, **kwargs):
+        return self._execute_action(**kwargs)
+
+    def prepare_execution_cleanup(self, **kwargs):
+        hook = getattr(self._host, "prepare_execution_cleanup", None)
+        if callable(hook):
+            return hook(**kwargs)
+        return {}
+
+    def restore_foreground(self, **kwargs):
+        hook = getattr(self._host, "restore_foreground", None)
+        if callable(hook):
+            return hook(**kwargs)
+        return {}
+
+    def verify_clipboard_restore(self, **kwargs):
+        hook = getattr(self._host, "verify_clipboard_restore", None)
+        if callable(hook):
+            return hook(**kwargs)
+        return {}
+
+    def poll_operator_abort_signal(self, **kwargs):
+        hook = getattr(self._host, "poll_operator_abort_signal", None)
+        if callable(hook):
+            return hook(**kwargs)
+        return {}
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -2123,10 +2158,13 @@ class RoutineService:
     ) -> dict[str, Any]:
         is_document_action = action in {"write_document_file", "edit_document_file"}
         document_family = self._desktop_document_family(contract) if is_document_action else None
-        host_executor = lambda **_kwargs: self._execute_desktop_action(  # noqa: E731
+        host_executor = _DesktopHostExecutorAdapter(
             host=host,
-            action=action,
-            contract=contract,
+            execute_action=lambda **_kwargs: self._execute_desktop_action(
+                host=host,
+                action=action,
+                contract=contract,
+            ),
         )
         if is_document_action:
             executor = getattr(self._environment_service, "execute_document_action", None)

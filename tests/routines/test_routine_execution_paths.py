@@ -222,6 +222,82 @@ async def test_routine_service_windows_app_uses_semantic_operator_before_ui_fall
 
 
 @pytest.mark.asyncio
+async def test_routine_service_environment_path_passes_host_executor_hooks(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    harness = _build_routine_service(tmp_path)
+    monkeypatch.setattr(routine_service_module.sys, "platform", "win32")
+
+    captured: dict[str, object] = {}
+
+    class _Host:
+        def __init__(self) -> None:
+            pass
+
+        def focus_window(self, **_kwargs):
+            return {
+                "success": True,
+                "message": "focused by host",
+                "window": {"title": "Orders.xlsx"},
+            }
+
+        def poll_operator_abort_signal(self, **_kwargs):
+            return {"abort_requested": False}
+
+        def prepare_execution_cleanup(self, **_kwargs):
+            return {"foreground_window": {"handle": 101}}
+
+        def restore_foreground(self, **_kwargs):
+            return {"restored": True}
+
+        def verify_clipboard_restore(self, **_kwargs):
+            return {"verified": True}
+
+    async def _fake_execute_windows_app_action(**kwargs):
+        captured.update(kwargs)
+        return {
+            "success": True,
+            "message": "semantic focus ok",
+            "execution_path": {"selected_path": "semantic-operator"},
+        }
+
+    monkeypatch.setattr(routine_service_module, "WindowsDesktopHost", _Host)
+    monkeypatch.setattr(
+        harness.environment_service,
+        "execute_windows_app_action",
+        _fake_execute_windows_app_action,
+    )
+
+    routine = harness.service.create_routine(
+        RoutineCreateRequest(
+            routine_key="desktop-host-hook-plumbing",
+            name="Desktop Host Hook Plumbing",
+            engine_kind="desktop",
+            environment_kind="desktop",
+            action_contract=[
+                {
+                    "action": "focus_window",
+                    "selector": {"title": "Orders.xlsx"},
+                },
+            ],
+        ),
+    )
+
+    response = await harness.service.replay_routine(
+        routine.id,
+        RoutineReplayRequest(session_id="desktop-host-hook-session"),
+    )
+
+    host_executor = captured["host_executor"]
+    assert response.run.status == "completed"
+    assert callable(getattr(host_executor, "poll_operator_abort_signal", None))
+    assert callable(getattr(host_executor, "prepare_execution_cleanup", None))
+    assert callable(getattr(host_executor, "restore_foreground", None))
+    assert callable(getattr(host_executor, "verify_clipboard_restore", None))
+
+
+@pytest.mark.asyncio
 async def test_routine_service_windows_app_falls_back_to_ui_host_as_last_resort(
     tmp_path,
     monkeypatch,
