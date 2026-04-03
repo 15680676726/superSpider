@@ -5,6 +5,9 @@ import asyncio
 import inspect
 
 from .runtime_center_shared_core import *  # noqa: F401,F403
+from ..runtime_center.overview_cards import (
+    build_runtime_capability_governance_projection,
+)
 from ..runtime_center.recovery_projection import project_latest_recovery_summary
 from ..runtime_chat_stream_events import stream_runtime_chat_events
 
@@ -755,7 +758,11 @@ async def get_governance_status(
 ) -> dict[str, object]:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
     service = _get_governance_service(request)
-    return service.get_status().model_dump(mode="json")
+    payload = service.get_status().model_dump(mode="json")
+    payload["capability_governance"] = await build_runtime_capability_governance_projection(
+        request.app.state,
+    )
+    return payload
 
 
 @router.get(

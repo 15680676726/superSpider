@@ -186,6 +186,216 @@ def test_query_execution_service_system_dispatch_tools_execute_via_kernel_dispat
     assert delegate_task.payload["owner_agent_id"] == "ops-researcher"
 
 
+def test_query_execution_service_query_turn_binds_builtin_tool_delegate_into_runtime_stream(
+    monkeypatch,
+) -> None:
+    from copaw.agents.react_agent import _wrap_tool_function_for_toolkit
+    from copaw.agents.tools import get_current_time
+
+    _FakeAgent.created.clear()
+
+    class _FrontdoorCapabilityService(_FakeCapabilityService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tasks: list[KernelTask] = []
+
+        async def execute_task(self, task: KernelTask) -> dict[str, object]:
+            self.tasks.append(task)
+            return {
+                "success": True,
+                "summary": "delegated-runtime-frontdoor",
+            }
+
+    class _FrontdoorAgent(_FakeAgent):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.tool_response = None
+
+        def __call__(self, msgs):
+            self.messages = msgs
+            wrapped = _wrap_tool_function_for_toolkit(get_current_time)
+
+            async def _run():
+                self.tool_response = await wrapped()
+                return "fake-agent-task"
+
+            return _run()
+
+    async def _stream_and_wait_for_agent_tool(*, agents, coroutine_task):
+        _ = agents
+        await coroutine_task
+        yield SimpleNamespace(id="msg-1"), True
+
+    monkeypatch.setattr(query_execution_module, "CoPawAgent", _FrontdoorAgent)
+    monkeypatch.setattr(
+        query_execution_module,
+        "stream_printing_messages",
+        _stream_and_wait_for_agent_tool,
+    )
+    monkeypatch.setattr(
+        query_execution_module,
+        "load_config",
+        lambda: SimpleNamespace(
+            agents=SimpleNamespace(
+                running=SimpleNamespace(max_iters=1, max_input_length=512),
+            ),
+        ),
+    )
+
+    capability_service = _FrontdoorCapabilityService()
+    kernel_task = KernelTask(
+        id="task-query-frontdoor",
+        title="query turn frontdoor task",
+        owner_agent_id="ops-agent",
+        work_context_id="work-context-frontdoor",
+        payload={
+            "request_context": {
+                "main_brain_runtime": {
+                    "environment": {"ref": "desktop:query-frontdoor"},
+                },
+            },
+        },
+    )
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=capability_service,
+        agent_profile_service=_FakeAgentProfileService(),
+        kernel_dispatcher=SimpleNamespace(
+            lifecycle=SimpleNamespace(
+                get_task=lambda task_id: kernel_task if task_id == kernel_task.id else None,
+            ),
+        ),
+    )
+
+    async def _run():
+        async for _msg, _last in service.execute_stream(
+            msgs=[SimpleNamespace(get_text_content=lambda: "what time is it")],
+            request=SimpleNamespace(
+                session_id="industry-chat-1",
+                user_id="default",
+                agent_id="ops-agent",
+                channel="console",
+                industry_instance_id="industry-v1-ops",
+                session_kind="industry-agent-chat",
+            ),
+            kernel_task_id=kernel_task.id,
+        ):
+            pass
+
+    asyncio.run(_run())
+
+    assert len(_FakeAgent.created) == 1
+    agent = _FakeAgent.created[0]
+    assert agent.tool_response.content[0]["text"] == "delegated-runtime-frontdoor"
+    [submitted] = capability_service.tasks
+    assert submitted.id == "task-query-frontdoor"
+    assert submitted.capability_ref == "tool:get_current_time"
+    assert submitted.owner_agent_id == "ops-agent"
+    assert submitted.work_context_id == "work-context-frontdoor"
+    assert submitted.environment_ref == "desktop:query-frontdoor"
+    assert submitted.payload == {}
+
+
+def test_query_execution_service_query_turn_falls_back_to_builtin_when_delegate_fails(
+    monkeypatch,
+) -> None:
+    from copaw.agents.react_agent import _wrap_tool_function_for_toolkit
+
+    _FakeAgent.created.clear()
+
+    async def get_current_time() -> dict[str, object]:
+        return {
+            "success": True,
+            "summary": "builtin-fallback-sentinel",
+        }
+
+    class _FailingFrontdoorCapabilityService(_FakeCapabilityService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tasks: list[KernelTask] = []
+
+        async def execute_task(self, task: KernelTask) -> dict[str, object]:
+            self.tasks.append(task)
+            raise RuntimeError("delegate-offline")
+
+    class _FrontdoorAgent(_FakeAgent):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.tool_response = None
+
+        def __call__(self, msgs):
+            self.messages = msgs
+            wrapped = _wrap_tool_function_for_toolkit(get_current_time)
+
+            async def _run():
+                self.tool_response = await wrapped()
+                return "fake-agent-task"
+
+            return _run()
+
+    async def _stream_and_wait_for_agent_tool(*, agents, coroutine_task):
+        _ = agents
+        await coroutine_task
+        yield SimpleNamespace(id="msg-1"), True
+
+    monkeypatch.setattr(query_execution_module, "CoPawAgent", _FrontdoorAgent)
+    monkeypatch.setattr(
+        query_execution_module,
+        "stream_printing_messages",
+        _stream_and_wait_for_agent_tool,
+    )
+    monkeypatch.setattr(
+        query_execution_module,
+        "load_config",
+        lambda: SimpleNamespace(
+            agents=SimpleNamespace(
+                running=SimpleNamespace(max_iters=1, max_input_length=512),
+            ),
+        ),
+    )
+
+    capability_service = _FailingFrontdoorCapabilityService()
+    kernel_task = KernelTask(
+        id="task-query-frontdoor-fallback",
+        title="query turn frontdoor fallback task",
+        owner_agent_id="ops-agent",
+    )
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=capability_service,
+        agent_profile_service=_FakeAgentProfileService(),
+        kernel_dispatcher=SimpleNamespace(
+            lifecycle=SimpleNamespace(
+                get_task=lambda task_id: kernel_task if task_id == kernel_task.id else None,
+            ),
+        ),
+    )
+
+    async def _run():
+        async for _msg, _last in service.execute_stream(
+            msgs=[SimpleNamespace(get_text_content=lambda: "what time is it")],
+            request=SimpleNamespace(
+                session_id="industry-chat-1",
+                user_id="default",
+                agent_id="ops-agent",
+                channel="console",
+                industry_instance_id="industry-v1-ops",
+                session_kind="industry-agent-chat",
+            ),
+            kernel_task_id=kernel_task.id,
+        ):
+            pass
+
+    asyncio.run(_run())
+
+    assert len(_FakeAgent.created) == 1
+    agent = _FakeAgent.created[0]
+    assert capability_service.tasks
+    assert agent.tool_response.content
+    assert "builtin-fallback-sentinel" in agent.tool_response.content[0]["text"]
+    assert "delegate-offline" not in agent.tool_response.content[0]["text"]
+
+
 def test_query_execution_service_delegation_first_guard_blocks_direct_work_until_claim() -> None:
     kernel_dispatcher = _FakeKernelDispatcher()
     capability_service = _FakeCapabilityService()

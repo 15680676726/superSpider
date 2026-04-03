@@ -1576,4 +1576,16 @@ class RuntimeCenterOverviewBuilder:
         return await support.build_main_brain_payload(app_state)
 
 
-__all__ = ["RuntimeCenterOverviewBuilder"]
+async def build_runtime_capability_governance_projection(
+    app_state: Any,
+    *,
+    item_limit: int = 5,
+) -> dict[str, Any]:
+    support = _RuntimeCenterOverviewCardsSupport(item_limit=item_limit)
+    return await support._build_capability_governance_projection(app_state)
+
+
+__all__ = [
+    "RuntimeCenterOverviewBuilder",
+    "build_runtime_capability_governance_projection",
+]

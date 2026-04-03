@@ -1279,6 +1279,31 @@ def test_runtime_center_chat_run_and_task_list_endpoints() -> None:
     request_payload = app.state.turn_executor.stream_calls[0]["request_payload"]
     assert getattr(request_payload, "interaction_mode", None) == "auto"
 
+
+def test_runtime_center_governance_status_includes_capability_governance_projection() -> None:
+    app = build_runtime_center_app()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.prediction_service = FakePredictionService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/governance/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    capability_governance = payload["capability_governance"]
+    assert capability_governance["total"] == 3
+    assert capability_governance["enabled"] == 2
+    assert capability_governance["skill_count"] == 2
+    assert capability_governance["mcp_count"] == 2
+    assert capability_governance["package_bound_skill_count"] == 1
+    assert capability_governance["package_bound_mcp_count"] == 1
+    assert capability_governance["delta"]["missing_capability_count"] == 1
+    assert capability_governance["delta"]["trial_count"] == 1
+    assert capability_governance["degraded"] is True
+    assert capability_governance["degraded_components"][0]["component"] == "capability-coverage"
+
+
 def test_runtime_center_chat_run_ignores_legacy_kernel_task_flags() -> None:
     app = build_runtime_center_app()
     turn_executor = FakeTurnExecutor()
@@ -1505,6 +1530,226 @@ def test_runtime_center_chat_run_chat_only_turn_skips_orchestrator_runtime_conte
     assert getattr(request, "_copaw_resolved_interaction_mode") == "chat"
     assert not hasattr(request, "_copaw_main_brain_runtime_context")
     assert '"resolved_interaction_mode":"chat"' in response.text
+
+
+def test_runtime_center_chat_run_e2e_routes_builtin_tool_calls_through_capability_frontdoor(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    import copaw.kernel.query_execution as query_execution_module
+    from copaw.agents.react_agent import _wrap_tool_function_for_toolkit
+    from copaw.agents.tools import get_current_time
+    from copaw.capabilities import CapabilityMount
+    from copaw.kernel import KernelQueryExecutionService
+
+    app = build_runtime_center_app()
+
+    class _FrontdoorSessionBackend:
+        async def load_session_state(self, *, session_id: str, user_id: str, agent) -> None:
+            _ = (session_id, user_id, agent)
+
+        async def save_session_state(self, *, session_id: str, user_id: str, agent) -> None:
+            _ = (session_id, user_id, agent)
+
+    class _FrontdoorAgentProfileService:
+        def get_agent(self, agent_id: str):
+            if agent_id != "ops-agent":
+                return None
+            return SimpleNamespace(
+                agent_id="ops-agent",
+                actor_key="industry:ops:execution-core",
+                actor_fingerprint="fp-ops-v1",
+                name="Ops Agent",
+                role_name="Operations lead",
+                role_summary="Owns runtime closeout.",
+                mission="Turn the industry brief into an executable operating loop.",
+                environment_constraints=[],
+                evidence_expectations=[],
+                current_focus_kind="goal",
+                current_focus_id="goal-1",
+                current_focus="Launch runtime center",
+                current_task_id="task-1",
+                industry_instance_id="industry-v1-ops",
+                industry_role_id="execution-core",
+            )
+
+    class _FrontdoorCapabilityService:
+        def __init__(self) -> None:
+            self.tasks = []
+
+        def list_accessible_capabilities(
+            self,
+            *,
+            agent_id: str | None,
+            enabled_only: bool = False,
+        ):
+            _ = enabled_only
+            assert agent_id == "ops-agent"
+            return [
+                CapabilityMount(
+                    id="tool:get_current_time",
+                    name="get_current_time",
+                    summary="Return the current time.",
+                    kind="local-tool",
+                    source_kind="tool",
+                    risk_level="auto",
+                    environment_requirements=[],
+                    evidence_contract=["call-record"],
+                    role_access_policy=["all"],
+                    enabled=True,
+                ),
+            ]
+
+        async def execute_task(self, task):
+            self.tasks.append(task)
+            return {
+                "success": True,
+                "summary": "delegated-http-frontdoor",
+            }
+
+    class _FrontdoorDispatcher:
+        def __init__(self) -> None:
+            self.submitted = []
+            self.lifecycle = SimpleNamespace(
+                get_task=lambda task_id: next(
+                    (task for task in self.submitted if task.id == task_id),
+                    None,
+                ),
+            )
+
+        def submit(self, task):
+            self.submitted.append(task)
+            return SimpleNamespace(
+                task_id=task.id,
+                phase="executing",
+                summary="admitted",
+                error=None,
+                decision_request_id=None,
+            )
+
+        def complete_task(self, task_id, **kwargs) -> None:
+            _ = (task_id, kwargs)
+
+        def fail_task(self, task_id, **kwargs) -> None:
+            _ = (task_id, kwargs)
+
+    class _FrontdoorAgent:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            self.tool_response = None
+
+        async def register_mcp_clients(self) -> None:
+            return None
+
+        def set_console_output_enabled(self, *, enabled: bool) -> None:
+            _ = enabled
+
+        def rebuild_sys_prompt(self) -> None:
+            return None
+
+        async def interrupt(self) -> None:
+            return None
+
+        def __call__(self, msgs):
+            _ = msgs
+            wrapped = _wrap_tool_function_for_toolkit(get_current_time)
+
+            async def _run():
+                self.tool_response = await wrapped()
+                return "fake-agent-task"
+
+            return _run()
+
+    async def _stream_and_wait_for_agent_tool(*, agents, coroutine_task):
+        await coroutine_task
+        agent = agents[0]
+        text = str(agent.tool_response.content[0]["text"])
+        yield Msg(name="assistant", role="assistant", content=text), True
+
+    monkeypatch.setattr(query_execution_module, "CoPawAgent", _FrontdoorAgent)
+    monkeypatch.setattr(
+        query_execution_module,
+        "stream_printing_messages",
+        _stream_and_wait_for_agent_tool,
+    )
+    monkeypatch.setattr(
+        query_execution_module,
+        "load_config",
+        lambda: SimpleNamespace(
+            agents=SimpleNamespace(
+                running=SimpleNamespace(max_iters=1, max_input_length=512),
+            ),
+        ),
+    )
+
+    capability_service = _FrontdoorCapabilityService()
+    kernel_dispatcher = _FrontdoorDispatcher()
+    session_backend = _FrontdoorSessionBackend()
+    query_execution_service = KernelQueryExecutionService(
+        session_backend=session_backend,
+        capability_service=capability_service,
+        agent_profile_service=_FrontdoorAgentProfileService(),
+    )
+    chat_service = _CapturingRouteChatService()
+
+    async def _resolve_intake_contract(**_kwargs):
+        return MainBrainIntakeContract(
+            message_text="what time is it",
+            decision=SimpleNamespace(intent_kind="execute-task", kickoff_allowed=True),
+            intent_kind="execute-task",
+            writeback_requested=False,
+            writeback_plan=None,
+            should_kickoff=True,
+        )
+
+    app.state.turn_executor = KernelTurnExecutor(
+        session_backend=session_backend,
+        kernel_dispatcher=kernel_dispatcher,
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=chat_service,
+        main_brain_orchestrator=MainBrainOrchestrator(
+            query_execution_service=query_execution_service,
+            session_backend=session_backend,
+            intake_contract_resolver=_resolve_intake_contract,
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-http-frontdoor",
+            "session_id": "industry-chat:industry-v1-ops:execution-core",
+            "user_id": "ops-user",
+            "agent_id": "ops-agent",
+            "channel": "console",
+            "interaction_mode": "orchestrate",
+            "session_kind": "industry-agent-chat",
+            "industry_instance_id": "industry-v1-ops",
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": "what time is it"}],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert '"execution_mode": "delegated"' in response.text
+    assert chat_service.calls == []
+    assert len(capability_service.tasks) == 1
+    submitted = capability_service.tasks[0]
+    assert submitted.capability_ref == "tool:get_current_time"
+    assert submitted.owner_agent_id == "ops-agent"
+    assert submitted.id.startswith(
+        "query:session:console:ops-user:industry-chat:industry-v1-ops:execution-core:",
+    )
+    assert submitted.payload == {}
+
 
 class _CommitAwareTurnExecutor:
     def __init__(
