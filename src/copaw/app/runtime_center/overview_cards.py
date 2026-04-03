@@ -1472,8 +1472,15 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             for item in mcps
             if self._string(self._get_field(item, "package_ref"))
         )
+        governance_route = "/api/runtime-center/governance/capability-optimizations"
         degraded_components: list[dict[str, Any]] = []
         missing_capability_count = self._int(delta.get("missing_capability_count"), 0)
+        underperforming_capability_count = self._int(
+            delta.get("underperforming_capability_count"),
+            0,
+        )
+        waiting_confirm_count = self._int(delta.get("waiting_confirm_count"), 0)
+        manual_only_count = self._int(delta.get("manual_only_count"), 0)
         if missing_capability_count > 0:
             degraded_components.append(
                 {
@@ -1482,12 +1489,45 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                     "summary": (
                         f"{missing_capability_count} 个 capability gap 仍待补齐或治理决策。"
                     ),
-                    "route": "/api/runtime-center/governance/capability-optimizations",
+                    "route": governance_route,
+                },
+            )
+        if underperforming_capability_count > 0:
+            degraded_components.append(
+                {
+                    "component": "capability-performance",
+                    "status": "degraded",
+                    "summary": (
+                        f"{underperforming_capability_count} underperforming capability recommendations need operator review."
+                    ),
+                    "route": governance_route,
+                },
+            )
+        if waiting_confirm_count > 0:
+            degraded_components.append(
+                {
+                    "component": "capability-approval-backlog",
+                    "status": "degraded",
+                    "summary": (
+                        f"{waiting_confirm_count} capability actions are waiting for confirmation."
+                    ),
+                    "route": governance_route,
+                },
+            )
+        if manual_only_count > 0:
+            degraded_components.append(
+                {
+                    "component": "capability-manual-operations",
+                    "status": "degraded",
+                    "summary": (
+                        f"{manual_only_count} capability actions are still manual-only."
+                    ),
+                    "route": governance_route,
                 },
             )
         return {
             "status": "degraded" if degraded_components else "ready",
-            "route": "/api/runtime-center/governance/capability-optimizations",
+            "route": governance_route,
             "total": self._int(summary.get("total"), len(mounts)),
             "enabled": self._int(summary.get("enabled"), self._enabled_count(mounts)),
             "by_kind": self._normalize_int_map(summary.get("by_kind")),
@@ -1503,14 +1543,17 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             ),
             "package_bound_mcp_count": package_bound_mcp_count,
             "delta": {
+                "total_items": self._int(delta.get("total_items"), 0),
+                "history_count": self._int(delta.get("history_count"), 0),
+                "case_count": self._int(delta.get("case_count"), 0),
                 "missing_capability_count": missing_capability_count,
-                "underperforming_capability_count": self._int(
-                    delta.get("underperforming_capability_count"),
-                    0,
-                ),
+                "underperforming_capability_count": underperforming_capability_count,
                 "trial_count": self._int(delta.get("trial_count"), 0),
                 "rollout_count": self._int(delta.get("rollout_count"), 0),
                 "retire_count": self._int(delta.get("retire_count"), 0),
+                "waiting_confirm_count": waiting_confirm_count,
+                "manual_only_count": manual_only_count,
+                "executed_count": self._int(delta.get("executed_count"), 0),
                 "actionable_count": self._int(delta.get("actionable_count"), 0),
             },
             "degraded": bool(degraded_components),

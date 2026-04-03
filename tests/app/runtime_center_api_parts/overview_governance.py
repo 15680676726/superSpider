@@ -1304,6 +1304,69 @@ def test_runtime_center_governance_status_includes_capability_governance_project
     assert capability_governance["degraded_components"][0]["component"] == "capability-coverage"
 
 
+def test_runtime_center_governance_status_projects_full_capability_delta_diagnostics() -> None:
+    app = build_runtime_center_app()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.capability_service = FakeCapabilityService()
+
+    class _RichPredictionService(FakePredictionService):
+        def get_runtime_capability_optimization_overview(
+            self,
+            *,
+            industry_instance_id: str | None = None,
+            owner_scope: str | None = None,
+            limit: int = 12,
+            history_limit: int = 8,
+            window_days: int = 14,
+        ) -> dict[str, object]:
+            payload = super().get_runtime_capability_optimization_overview(
+                industry_instance_id=industry_instance_id,
+                owner_scope=owner_scope,
+                limit=limit,
+                history_limit=history_limit,
+                window_days=window_days,
+            )
+            payload["summary"] = {
+                **dict(payload["summary"]),
+                "total_items": 5,
+                "history_count": 2,
+                "case_count": 4,
+                "missing_capability_count": 1,
+                "underperforming_capability_count": 2,
+                "trial_count": 1,
+                "rollout_count": 1,
+                "retire_count": 1,
+                "waiting_confirm_count": 1,
+                "manual_only_count": 1,
+                "executed_count": 3,
+                "actionable_count": 2,
+            }
+            return payload
+
+    app.state.prediction_service = _RichPredictionService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/governance/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    delta = payload["capability_governance"]["delta"]
+    assert delta["total_items"] == 5
+    assert delta["history_count"] == 2
+    assert delta["case_count"] == 4
+    assert delta["waiting_confirm_count"] == 1
+    assert delta["manual_only_count"] == 1
+    assert delta["executed_count"] == 3
+    components = {
+        item["component"]: item
+        for item in payload["capability_governance"]["degraded_components"]
+    }
+    assert "capability-coverage" in components
+    assert "capability-performance" in components
+    assert "capability-approval-backlog" in components
+    assert "capability-manual-operations" in components
+
+
 def test_runtime_center_chat_run_ignores_legacy_kernel_task_flags() -> None:
     app = build_runtime_center_app()
     turn_executor = FakeTurnExecutor()
