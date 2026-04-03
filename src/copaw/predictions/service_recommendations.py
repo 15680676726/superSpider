@@ -870,6 +870,33 @@ class _PredictionServiceRecommendationMixin:
                     "workflow_run_ids": _string_list(finding.get("workflow_run_ids")),
                     "stats": self._json_safe(finding.get("stats")),
                     "target_agent_id": target_agent_id,
+                    "lifecycle_stage": preflight.lifecycle_stage,
+                    "next_lifecycle_stage": preflight.next_lifecycle_stage,
+                    "trial_scope": (
+                        preflight.trial_plan.rollout_scope
+                        if preflight.trial_plan is not None
+                        else None
+                    ),
+                    "selected_seat_ref": (
+                        preflight.trial_plan.target_seat_ref
+                        if preflight.trial_plan is not None
+                        else None
+                    ),
+                    "target_role_id": (
+                        preflight.trial_plan.target_role_id
+                        if preflight.trial_plan is not None
+                        else None
+                    ),
+                    "replacement_target_ids": (
+                        preflight.trial_plan.replacement_target_ids
+                        if preflight.trial_plan is not None
+                        else replacement_capability_ids
+                    ),
+                    "rollback_target_ids": (
+                        preflight.trial_plan.replacement_target_ids
+                        if preflight.trial_plan is not None
+                        else replacement_capability_ids
+                    ),
                 }
                 if candidate.installed and requested_capability_ids:
                     action_kind = "system:apply_role"
@@ -960,6 +987,13 @@ class _PredictionServiceRecommendationMixin:
                             "review_acknowledged": True,
                             "enable": True,
                             "overwrite": False,
+                            "lifecycle_stage": preflight.lifecycle_stage,
+                            "next_lifecycle_stage": preflight.next_lifecycle_stage,
+                            "replacement_target_ids": metadata["replacement_target_ids"],
+                            "rollback_target_ids": metadata["rollback_target_ids"],
+                            "trial_scope": metadata["trial_scope"],
+                            "selected_seat_ref": metadata["selected_seat_ref"],
+                            "target_role_id": metadata["target_role_id"],
                             "reason": (
                                 f"prediction:{case.case_id}:trial-remote-skill"
                             ),
@@ -1009,6 +1043,73 @@ class _PredictionServiceRecommendationMixin:
                         "old_capability_id": old_capability_id,
                         "new_capability_id": new_capability_id,
                         "source_recommendation_id": _string(finding.get("source_recommendation_id")),
+                        "lifecycle_stage": _string(finding.get("lifecycle_stage")) or "rollout",
+                        "candidate_lifecycle_stage": (
+                            _string(finding.get("candidate_lifecycle_stage")) or "active"
+                        ),
+                        "replacement_target_stage": (
+                            _string(finding.get("replacement_target_stage")) or "deprecated"
+                        ),
+                        "replacement_target_ids": _string_list(
+                            finding.get("replacement_target_ids"),
+                            [old_capability_id],
+                        ),
+                        "trial_scope": _string(finding.get("trial_scope")) or "single-agent",
+                        "source_trial_seat_ref": _string(finding.get("selected_seat_ref")),
+                        "stats": self._json_safe(finding.get("stats")),
+                    },
+                )
+                continue
+            if gap_kind == "capability_rollback" and target_agent_id:
+                final_capabilities = [
+                    item
+                    for item in self._effective_capabilities_for_agent(target_agent_id)
+                    if item != new_capability_id
+                ]
+                if old_capability_id not in final_capabilities:
+                    final_capabilities.append(old_capability_id)
+                append_recommendation(
+                    recommendation_type="capability_recommendation",
+                    title=f"回滚试投放候选 {new_capability_id}",
+                    summary=(
+                        f"试投放候选 {new_capability_id} 在单 seat 验证中劣于 {old_capability_id}，"
+                        "先回滚到已验证能力，再决定是否继续保留候选。"
+                    ),
+                    priority=91,
+                    confidence=min(0.96, confidence_baseline + 0.14),
+                    risk_level="guarded",
+                    action_kind="system:apply_role",
+                    executable=True,
+                    auto_eligible=False,
+                    status="proposed",
+                    target_agent_id=target_agent_id,
+                    target_capability_ids=[old_capability_id, new_capability_id],
+                    action_payload={
+                        "agent_id": target_agent_id,
+                        "capabilities": final_capabilities,
+                        "capability_assignment_mode": "replace",
+                        "reason": f"prediction:{case.case_id}:rollback-remote-skill-trial",
+                    },
+                    metadata={
+                        "gap_kind": gap_kind,
+                        "optimization_stage": str(finding.get("optimization_stage") or "rollback"),
+                        "industry_instance_id": case.industry_instance_id,
+                        "old_capability_id": old_capability_id,
+                        "new_capability_id": new_capability_id,
+                        "source_recommendation_id": _string(finding.get("source_recommendation_id")),
+                        "lifecycle_stage": _string(finding.get("lifecycle_stage")) or "blocked",
+                        "candidate_lifecycle_stage": (
+                            _string(finding.get("candidate_lifecycle_stage")) or "deprecated"
+                        ),
+                        "replacement_target_stage": (
+                            _string(finding.get("replacement_target_stage")) or "active"
+                        ),
+                        "rollback_target_ids": _string_list(
+                            finding.get("rollback_target_ids"),
+                            [old_capability_id],
+                        ),
+                        "source_trial_seat_ref": _string(finding.get("selected_seat_ref")),
+                        "trial_scope": _string(finding.get("trial_scope")) or "single-agent",
                         "stats": self._json_safe(finding.get("stats")),
                     },
                 )
@@ -1042,6 +1143,19 @@ class _PredictionServiceRecommendationMixin:
                         "old_capability_id": old_capability_id,
                         "new_capability_id": new_capability_id,
                         "source_recommendation_id": _string(finding.get("source_recommendation_id")),
+                        "lifecycle_stage": _string(finding.get("lifecycle_stage")) or "retired",
+                        "candidate_lifecycle_stage": (
+                            _string(finding.get("candidate_lifecycle_stage")) or "active"
+                        ),
+                        "replacement_target_stage": (
+                            _string(finding.get("replacement_target_stage")) or "retired"
+                        ),
+                        "replacement_target_ids": _string_list(
+                            finding.get("replacement_target_ids"),
+                            [old_capability_id],
+                        ),
+                        "trial_scope": _string(finding.get("trial_scope")) or "single-agent",
+                        "source_trial_seat_ref": _string(finding.get("selected_seat_ref")),
                         "stats": self._json_safe(finding.get("stats")),
                     },
                 )

@@ -920,6 +920,83 @@ def test_industry_chat_writeback_auto_creates_temporary_local_ops_for_desktop_fi
     assert "mcp:desktop_windows" in list(temp_local_ops.allowed_capabilities)
 
 
+def test_industry_chat_writeback_auto_closes_temporary_seat_desktop_gap_via_governed_install(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Field Operations",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["build a stable inspection loop"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    message_text = "我需要你把电脑桌面的text文件整理到一个文件夹"
+    with (
+        patch("copaw.capabilities.service.load_config") as mock_load,
+        patch("copaw.capabilities.service.save_config"),
+        patch("copaw.capabilities.sources.mcp.load_config") as mock_mcp_load,
+        patch("copaw.industry.service_activation.load_config") as mock_industry_load,
+    ):
+        config = SimpleNamespace(mcp=SimpleNamespace(clients={}))
+        mock_load.return_value = config
+        mock_mcp_load.return_value = config
+        mock_industry_load.return_value = config
+        result = asyncio.run(
+            app.state.industry_service.apply_execution_chat_writeback(
+                industry_instance_id=instance_id,
+                message_text=message_text,
+                owner_agent_id="copaw-agent-runner",
+                session_id=f"industry-chat:{instance_id}:execution-core",
+                channel="console",
+                writeback_plan=build_chat_writeback_plan(
+                    message_text,
+                    approved_classifications=["backlog"],
+                    goal_title="桌面 text 文件整理",
+                    goal_summary=message_text,
+                    goal_plan_steps=[
+                        "Open the desktop workspace and inspect the current text files.",
+                        "Move the target text files into the destination folder.",
+                        "Write back the organization result and any blocker.",
+                    ],
+                ),
+            ),
+        )
+
+    assert result is not None
+    assert "temporary-seat-auto" in result["classification"]
+    assert app.state.capability_service.get_mcp_client_info("desktop_windows") is not None
+    install_tasks = app.state.task_repository.list_tasks(
+        task_type="system:create_mcp_client",
+    )
+    assignment_tasks = app.state.task_repository.list_tasks(
+        task_type="system:apply_role",
+    )
+    assert install_tasks
+    assert assignment_tasks
+    assert any(task.owner_agent_id == "copaw-agent-runner" for task in install_tasks)
+    assert any(task.owner_agent_id == "copaw-agent-runner" for task in assignment_tasks)
+
+
 def test_industry_chat_writeback_routes_unknown_desktop_app_by_surface_plan_instead_of_app_name(
     tmp_path,
 ) -> None:

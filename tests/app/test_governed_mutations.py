@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -102,6 +103,37 @@ def test_capability_toggle_reuses_shared_governed_mutation_dispatch() -> None:
     assert callable(dispatch_governed_mutation)
     assert response.status_code == 200
     assert response.json()["success"] is True
+
+
+def test_requestless_governed_mutation_helper_dispatches_through_kernel() -> None:
+    from copaw.kernel.governed_mutation_dispatch import (
+        dispatch_governed_mutation_runtime,
+    )
+
+    dispatcher = _FakeDispatcher()
+    capability_service = _FakeCapabilityService()
+
+    result = asyncio.run(
+        dispatch_governed_mutation_runtime(
+            capability_service=capability_service,
+            kernel_dispatcher=dispatcher,
+            capability_ref="system:set_capability_enabled",
+            title="Enable skill:research",
+            environment_ref="config:capabilities",
+            payload={
+                "capability_id": "skill:research",
+                "enabled": True,
+                "actor": "copaw-operator",
+            },
+            fallback_risk="guarded",
+        ),
+    )
+
+    assert result["success"] is True
+    assert len(dispatcher.submitted) == 1
+    assert dispatcher.submitted[0].capability_ref == "system:set_capability_enabled"
+    assert dispatcher.submitted[0].risk_level == "guarded"
+    assert dispatcher.executed == [dispatcher.submitted[0].id]
 
 
 def test_shared_governed_mutation_helper_translates_dispatcher_errors() -> None:

@@ -310,6 +310,16 @@ class SystemTeamCapabilityFacade:
                 reason=reason,
             )
         stored = self._agent_profile_override_repository.upsert_override(override)
+        sync_runtime_capability_override = getattr(
+            self._industry_service,
+            "sync_agent_runtime_capability_override",
+            None,
+        )
+        if capabilities_provided and callable(sync_runtime_capability_override):
+            sync_runtime_capability_override(
+                agent_id=agent_id,
+                capability_ids=list(stored.capabilities or []),
+            )
         if has_role_update and capabilities_provided:
             summary = (
                 f"Updated role/profile and capability allowlist for agent '{agent_id}'."

@@ -339,6 +339,93 @@ async def test_reconnect_mcp_client_respects_timeout() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mcp_manager_clearing_session_overlay_only_closes_session_clients(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = MCPClientManager()
+    clients: dict[str, _FakeMCPClient] = {}
+
+    def _fake_build_client(cfg: MCPClientConfig) -> _FakeMCPClient:
+        client = _FakeMCPClient(name=cfg.name, connect_ok=True)
+        clients[cfg.name] = client
+        return client
+
+    monkeypatch.setattr(MCPClientManager, "_build_client", staticmethod(_fake_build_client))
+
+    await manager.init_from_config(
+        MCPConfig(
+            clients={
+                "worker": MCPClientConfig(
+                    name="worker",
+                    enabled=True,
+                    transport="stdio",
+                    command="python",
+                    args=["-m", "worker"],
+                ),
+            },
+        ),
+    )
+    await manager.mount_scope_overlay(
+        "seat:alpha",
+        MCPConfig(
+            clients={
+                "alpha_browser": MCPClientConfig(
+                    name="alpha_browser",
+                    enabled=True,
+                    transport="stdio",
+                    command="python",
+                    args=["-m", "alpha_browser"],
+                ),
+            },
+        ),
+        additive=True,
+        timeout=3.0,
+    )
+    await manager.mount_scope_overlay(
+        "seat:beta",
+        MCPConfig(
+            clients={
+                "beta_browser": MCPClientConfig(
+                    name="beta_browser",
+                    enabled=True,
+                    transport="stdio",
+                    command="python",
+                    args=["-m", "beta_browser"],
+                ),
+            },
+        ),
+        additive=True,
+        timeout=3.0,
+    )
+    await manager.mount_scope_overlay(
+        "session:alpha:1",
+        MCPConfig(
+            clients={
+                "temp_browser": MCPClientConfig(
+                    name="temp_browser",
+                    enabled=True,
+                    transport="stdio",
+                    command="python",
+                    args=["-m", "temp_browser"],
+                ),
+            },
+        ),
+        parent_scope_ref="seat:alpha",
+        additive=True,
+        timeout=3.0,
+    )
+
+    await manager.clear_scope_overlay("session:alpha:1")
+
+    assert clients["temp_browser"].close_calls == 1
+    assert clients["alpha_browser"].close_calls == 0
+    assert clients["beta_browser"].close_calls == 0
+    assert clients["worker"].close_calls == 0
+    assert await manager.get_client("alpha_browser", scope_ref="seat:alpha") is not None
+    assert await manager.get_client("temp_browser", scope_ref="seat:alpha") is None
+
+
+@pytest.mark.asyncio
 async def test_query_handler_skips_session_save_when_load_not_reached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

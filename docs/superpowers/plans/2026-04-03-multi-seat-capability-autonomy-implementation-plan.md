@@ -8,6 +8,19 @@
 
 **Tech Stack:** Python, Pydantic, existing CoPaw industry/kernel/capability services, MCP manager, pytest.
 
+## Execution Status
+
+- [x] Tasks 1-6 are implemented on feature branch `multi-seat-capability-autonomy`.
+- [x] Focused backend verification completed on `2026-04-03`.
+- [x] Final verification Step 1 completed:
+  `PYTHONPATH=src python -m pytest tests/app/test_industry_service_wiring.py tests/industry/test_runtime_views_split.py tests/kernel/test_query_execution_runtime.py tests/agents/test_react_agent_tool_compat.py tests/app/test_capability_market_api.py tests/app/industry_api_parts/bootstrap_lifecycle.py tests/app/test_industry_api.py tests/app/test_mcp_runtime_contract.py tests/test_mcp_resilience.py tests/capabilities/test_remote_skill_presentation.py tests/app/test_capability_skill_service.py tests/test_skill_service.py -q`
+  -> `259 passed`
+- [x] Final verification Step 2 completed:
+  `PYTHONPATH=src python -m pytest tests/app/test_capabilities_execution.py tests/agents/test_skills_hub.py tests/app/test_capabilities_api.py tests/app/test_capability_catalog.py -q`
+  -> `61 passed`
+- [x] Additional focused regressions completed during integration:
+  - `tests/app/test_industry_api.py tests/app/industry_api_parts/bootstrap_lifecycle.py tests/app/test_capability_market_api.py tests/app/test_capability_skill_service.py tests/industry/test_runtime_views_split.py -q` -> `190 passed`
+- [x] Merged-main verification completed after conflict resolution and root-cause fixes; repository integration is no longer blocked on docs-only baseline.
 ---
 
 ### Task 1: Formalize Role Prototype And Seat Instance Capability Layers

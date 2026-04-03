@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import frontmatter
 
 from ..agents.skills_hub import install_skill_from_hub as _install_skill_from_hub
+from .remote_skill_contract import RemoteSkillLifecycleStage, RemoteSkillRolloutScope
 from ..skill_service import (
     SkillService,
     SkillFrontmatterError,
@@ -14,6 +15,27 @@ from ..skill_service import (
     list_available_skills,
     parse_skill_frontmatter,
     sync_skills_to_working_dir as sync_skills_to_working_dir_fn,
+)
+
+_REMOTE_SKILL_LIFECYCLE_STAGES = set(get_args(RemoteSkillLifecycleStage))
+_REMOTE_SKILL_ROLLOUT_SCOPES = set(get_args(RemoteSkillRolloutScope))
+_INSTALL_FROM_HUB_KEYS = {
+    "bundle_url",
+    "version",
+    "enable",
+    "overwrite",
+}
+_SKILL_UPGRADE_METADATA_KEYS = (
+    "lifecycle_stage",
+    "next_lifecycle_stage",
+    "replacement_target_ids",
+    "rollback_target_ids",
+    "target_agent_id",
+    "target_role_id",
+    "target_seat_ref",
+    "rollout_scope",
+    "role_budget_limit",
+    "seat_budget_limit",
 )
 
 
@@ -60,7 +82,6 @@ def _normalize_package_ref(
             return str(Path(normalized).expanduser())
     return normalized
 
-
 def _normalize_skill_root(skill: Any) -> str:
     return _normalize_package_ref(
         getattr(skill, "path", None),
@@ -91,8 +112,103 @@ def _canonical_skill_package_binding(
         "package_kind": normalized_kind or None,
         "package_version": _normalize_package_version(package_version) or None,
     }
+def _normalize_optional_text(value: object | None) -> str | None:
+    normalized = _normalize_text(value)
+    return normalized or None
 
 
+def _normalize_string_list(value: object | None) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        normalized = _normalize_text(item)
+        if normalized and normalized not in result:
+            result.append(normalized)
+    return result
+
+
+def _normalize_upgrade_stage(
+    value: object | None,
+    *,
+    field_name: str,
+) -> str | None:
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        return None
+    lowered = normalized.lower()
+    if lowered not in _REMOTE_SKILL_LIFECYCLE_STAGES:
+        raise ValueError(f"Invalid {field_name}: {normalized}")
+    return lowered
+
+
+def _normalize_rollout_scope(value: object | None) -> str | None:
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        return None
+    lowered = normalized.lower()
+    if lowered not in _REMOTE_SKILL_ROLLOUT_SCOPES:
+        raise ValueError(f"Invalid rollout_scope: {normalized}")
+    return lowered
+
+
+def _normalize_optional_int(
+    value: object | None,
+    *,
+    field_name: str,
+) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid {field_name}: {value}") from exc
+
+
+def _normalize_skill_upgrade_metadata(
+    **kwargs: object,
+) -> dict[str, object]:
+    return {
+        "lifecycle_stage": _normalize_upgrade_stage(
+            kwargs.get("lifecycle_stage"),
+            field_name="lifecycle_stage",
+        ),
+        "next_lifecycle_stage": _normalize_upgrade_stage(
+            kwargs.get("next_lifecycle_stage"),
+            field_name="next_lifecycle_stage",
+        ),
+        "replacement_target_ids": _normalize_string_list(
+            kwargs.get("replacement_target_ids"),
+        ),
+        "rollback_target_ids": _normalize_string_list(
+            kwargs.get("rollback_target_ids"),
+        ),
+        "target_agent_id": _normalize_optional_text(kwargs.get("target_agent_id")),
+        "target_role_id": _normalize_optional_text(kwargs.get("target_role_id")),
+        "target_seat_ref": _normalize_optional_text(kwargs.get("target_seat_ref")),
+        "rollout_scope": _normalize_rollout_scope(kwargs.get("rollout_scope")),
+        "role_budget_limit": _normalize_optional_int(
+            kwargs.get("role_budget_limit"),
+            field_name="role_budget_limit",
+        ),
+        "seat_budget_limit": _normalize_optional_int(
+            kwargs.get("seat_budget_limit"),
+            field_name="seat_budget_limit",
+        ),
+    }
+
+
+def _has_skill_upgrade_metadata(metadata: dict[str, object]) -> bool:
+    for value in metadata.values():
+        if isinstance(value, list):
+            if value:
+                return True
+            continue
+        if value is not None:
+            return True
+    return False
 class CapabilitySkillService:
     """Canonical skill service for the capability system.
 
@@ -167,6 +283,41 @@ class CapabilitySkillService:
             package_version=package_version,
         )
 
+    def read_skill_upgrade_metadata(self, skill: Any) -> dict[str, object]:
+        content = getattr(skill, "content", "")
+        if (not isinstance(content, str) or not content.strip()) and getattr(skill, "path", None):
+            skill_md_path = Path(str(getattr(skill, "path", "") or "")).expanduser() / "SKILL.md"
+            if skill_md_path.exists():
+                content = skill_md_path.read_text(encoding="utf-8")
+        if not isinstance(content, str) or not content.strip():
+            return _normalize_skill_upgrade_metadata()
+        try:
+            post = parse_skill_frontmatter(content)
+        except SkillFrontmatterError as exc:
+            raise ValueError(str(exc)) from exc
+        return _normalize_skill_upgrade_metadata(
+            lifecycle_stage=post.get("lifecycle_stage"),
+            next_lifecycle_stage=post.get("next_lifecycle_stage"),
+            replacement_target_ids=post.get("replacement_target_ids"),
+            rollback_target_ids=post.get("rollback_target_ids"),
+            target_agent_id=post.get("target_agent_id"),
+            target_role_id=post.get("target_role_id"),
+            target_seat_ref=post.get("target_seat_ref"),
+            rollout_scope=post.get("rollout_scope"),
+            role_budget_limit=post.get("role_budget_limit"),
+            seat_budget_limit=post.get("seat_budget_limit"),
+        )
+
+    def _resolve_skill_md_path(self, skill_name: str) -> Path | None:
+        skill = self.find_skill(skill_name)
+        if skill is None:
+            return None
+        skill_path = Path(str(getattr(skill, "path", "") or "")).expanduser()
+        skill_md_path = skill_path / "SKILL.md"
+        if not skill_md_path.exists():
+            return None
+        return skill_md_path
+
     def bind_skill_package_metadata(
         self,
         *,
@@ -178,9 +329,8 @@ class CapabilitySkillService:
         skill = self.find_skill(skill_name)
         if skill is None:
             return False
-        skill_path = Path(str(getattr(skill, "path", "") or "")).expanduser()
-        skill_md_path = skill_path / "SKILL.md"
-        if not skill_md_path.exists():
+        skill_md_path = self._resolve_skill_md_path(skill_name)
+        if skill_md_path is None:
             return False
         try:
             content = skill_md_path.read_text(encoding="utf-8")
@@ -224,6 +374,35 @@ class CapabilitySkillService:
         skill_md_path.write_text(frontmatter.dumps(post), encoding="utf-8")
         return True
 
+    def bind_skill_upgrade_metadata(
+        self,
+        *,
+        skill_name: str,
+        **kwargs: object,
+    ) -> bool:
+        skill_md_path = self._resolve_skill_md_path(skill_name)
+        if skill_md_path is None:
+            return False
+        try:
+            content = skill_md_path.read_text(encoding="utf-8")
+            post = parse_skill_frontmatter(content)
+            metadata = _normalize_skill_upgrade_metadata(**kwargs)
+        except Exception:
+            return False
+        for key, value in metadata.items():
+            if isinstance(value, list):
+                if value:
+                    post[key] = list(value)
+                else:
+                    post.metadata.pop(key, None)
+                continue
+            if value is None:
+                post.metadata.pop(key, None)
+                continue
+            post[key] = value
+        skill_md_path.write_text(frontmatter.dumps(post), encoding="utf-8")
+        return True
+
     def enable_skill(self, skill_name: str) -> None:
         SkillService.enable_skill(skill_name)
 
@@ -237,24 +416,37 @@ class CapabilitySkillService:
         return SkillService.create_skill(**kwargs)
 
     def install_skill_from_hub(self, **kwargs: object) -> object:
-        result = install_skill_from_hub(**kwargs)
+        install_kwargs = {
+            key: value
+            for key, value in kwargs.items()
+            if key in _INSTALL_FROM_HUB_KEYS
+        }
+        upgrade_metadata = _normalize_skill_upgrade_metadata(
+            **{
+                key: kwargs.get(key)
+                for key in _SKILL_UPGRADE_METADATA_KEYS
+            },
+        )
+        result = install_skill_from_hub(**install_kwargs)
         skill_name = _normalize_text(getattr(result, "name", None))
         package_ref = _normalize_text(
             kwargs.get("bundle_url") or getattr(result, "source_url", None),
         )
         package_kind = _skill_package_kind_from_ref(package_ref)
         package_version = _normalize_text(kwargs.get("version"))
+        skill_md_exists = bool(skill_name and self._resolve_skill_md_path(skill_name) is not None)
         if skill_name and package_ref:
-            bound = self.bind_skill_package_metadata(
-                skill_name=skill_name,
-                package_ref=package_ref,
-                package_kind=package_kind,
-                package_version=package_version,
-            )
-            if not bound:
-                raise RuntimeError(
-                    f"Failed to bind package metadata for skill '{skill_name}'.",
+            if skill_md_exists:
+                bound = self.bind_skill_package_metadata(
+                    skill_name=skill_name,
+                    package_ref=package_ref,
+                    package_kind=package_kind,
+                    package_version=package_version,
                 )
+                if not bound:
+                    raise RuntimeError(
+                        f"Failed to bind package metadata for skill '{skill_name}'.",
+                    )
             for key, value in (
                 ("package_ref", package_ref),
                 ("package_kind", package_kind),
@@ -262,6 +454,30 @@ class CapabilitySkillService:
             ):
                 try:
                     setattr(result, key, value)
+                except Exception:
+                    pass
+            for key, value in upgrade_metadata.items():
+                try:
+                    setattr(result, key, value)
+                except Exception:
+                    pass
+        if skill_name and _has_skill_upgrade_metadata(upgrade_metadata):
+            if skill_md_exists:
+                bound = self.bind_skill_upgrade_metadata(
+                    skill_name=skill_name,
+                    **upgrade_metadata,
+                )
+                if not bound:
+                    raise RuntimeError(
+                        f"Failed to bind upgrade metadata for skill '{skill_name}'.",
+                    )
+            for key, value in upgrade_metadata.items():
+                try:
+                    setattr(
+                        result,
+                        key,
+                        list(value) if isinstance(value, list) else value,
+                    )
                 except Exception:
                     pass
         return result

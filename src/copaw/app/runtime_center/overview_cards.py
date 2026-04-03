@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ...config import get_heartbeat_config
+from ...industry.models import IndustrySeatCapabilityLayers
 from ...kernel.runtime_outcome import build_execution_diagnostics
 from .overview_entry_builders import _RuntimeCenterOverviewEntryBuildersMixin
 from .overview_helpers import build_runtime_surface
@@ -188,15 +189,23 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             },
         )
 
-    async def _build_agents_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:
-        return await self._service_card(
-            target=app_state.agent_profile_service,
+    async def _build_agents_card(self, app_state: Any) -> RuntimeOverviewCard:
+        service = getattr(app_state, "agent_profile_service", None)
+        items = await self._call_list_method(service, "list_agents")
+        if items is _MISSING:
+            return self._unavailable_card("agents", "智能体", self._unavailable_summary("智能体"))
+        total = await self._call_count_method(service)
+        if total is None:
+            total = len(items)
+        enriched_items = await self._enrich_agent_overview_items(items, service)
+        return self._available_card(
             key="agents",
             title="智能体",
             source="agent_profile_service",
+            count=total,
             summary="由默认配置、覆盖配置与运行态汇总出的可见智能体画像。",
-            methods=("list_agents",),
-            mapper=self._map_agent_entries,
+            entries=self._map_agent_entries(enriched_items),
+            meta=self._build_standard_card_meta(enriched_items, total),
         )
 
     async def _build_industry_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:
@@ -725,6 +734,256 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
             return list(value)
         return [value]
+
+    async def _enrich_agent_overview_items(
+        self,
+        items: list[Any],
+        service: Any,
+    ) -> list[Any]:
+        detail_getter = getattr(service, "get_agent_detail", None)
+        if not callable(detail_getter):
+            return items
+        enriched: list[Any] = []
+        for item in items:
+            payload = self._model_dump(item)
+            agent_id = self._string(payload.get("agent_id") or payload.get("id"))
+            if agent_id is None:
+                enriched.append(payload or item)
+                continue
+            try:
+                detail = await self._maybe_await(detail_getter(agent_id))
+            except Exception:
+                logger.debug("runtime_center agent detail enrichment failed", exc_info=True)
+                enriched.append(payload or item)
+                continue
+            governance = self._project_agent_capability_governance_from_detail(
+                payload,
+                detail,
+            )
+            if governance is not None:
+                payload["capability_governance"] = governance
+            enriched.append(payload or item)
+        return enriched
+
+    def _project_agent_capability_governance_from_detail(
+        self,
+        agent_payload: Mapping[str, Any],
+        detail: Any,
+    ) -> dict[str, Any] | None:
+        detail_payload = self._model_dump(detail)
+        runtime_payload = self._model_dump(detail_payload.get("runtime"))
+        metadata = self._model_dump(runtime_payload.get("metadata"))
+        capability_layers = IndustrySeatCapabilityLayers.from_metadata(
+            metadata.get("capability_layers"),
+        )
+        if not capability_layers.merged_capability_ids():
+            return None
+        layers_payload = capability_layers.to_metadata_payload()
+        raw_session_overlay = self._model_dump(metadata.get("current_session_overlay"))
+        overlay_capability_ids = self._strings(
+            raw_session_overlay.get("capability_ids"),
+        ) or self._strings(layers_payload.get("session_overlay_capability_ids"))
+        current_session_overlay: dict[str, Any] | None = None
+        if raw_session_overlay or overlay_capability_ids:
+            current_session_overlay = {
+                **raw_session_overlay,
+                "overlay_scope": self._string(raw_session_overlay.get("overlay_scope")) or "session",
+                "overlay_mode": self._string(raw_session_overlay.get("overlay_mode")) or (
+                    "additive" if overlay_capability_ids else None
+                ),
+                "session_id": self._string(raw_session_overlay.get("session_id")),
+                "capability_ids": overlay_capability_ids,
+                "status": self._string(raw_session_overlay.get("status")) or (
+                    "active" if overlay_capability_ids else None
+                ),
+            }
+        return {
+            "is_projection": True,
+            "is_truth_store": False,
+            "source": "agent_runtime.metadata.capability_layers",
+            "layers": layers_payload,
+            "counts": {
+                "role_prototype": len(self._strings(layers_payload.get("role_prototype_capability_ids"))),
+                "seat_instance": len(self._strings(layers_payload.get("seat_instance_capability_ids"))),
+                "cycle_delta": len(self._strings(layers_payload.get("cycle_delta_capability_ids"))),
+                "session_overlay": len(self._strings(layers_payload.get("session_overlay_capability_ids"))),
+                "effective": len(self._strings(layers_payload.get("effective_capability_ids"))),
+            },
+            "current_session_overlay": current_session_overlay,
+            "lifecycle": {
+                "employment_mode": self._string(runtime_payload.get("employment_mode"))
+                or self._string(agent_payload.get("employment_mode")),
+                "activation_mode": self._string(runtime_payload.get("activation_mode"))
+                or self._string(agent_payload.get("activation_mode")),
+                "desired_state": self._string(runtime_payload.get("desired_state")),
+                "runtime_status": self._string(runtime_payload.get("runtime_status")),
+                "status": self._string(agent_payload.get("status")),
+            },
+        }
+
+    def _map_task_entries(self, items: list[Any]) -> list[RuntimeOverviewEntry]:
+        return self._build_mapped_entries(
+            items,
+            "updated_at",
+            "created_at",
+            builder=self._build_task_entry,
+        )
+
+    def _build_task_entry(self, item: Any) -> RuntimeOverviewEntry:
+        task_id = self._string(self._get_field(item, "id", "task_id")) or "unknown-task"
+        work_context = self._mapping(self._get_field(item, "work_context")) or {}
+        return RuntimeOverviewEntry(
+            id=task_id,
+            title=self._string(self._get_field(item, "title", "name")) or task_id,
+            kind=self._string(self._get_field(item, "kind", "task_type")) or "task",
+            status=self._string(self._get_field(item, "status")) or "created",
+            owner=self._string(self._get_field(item, "owner_agent_id", "owner_role", "owner")),
+            summary=self._string(self._get_field(item, "summary", "current_progress_summary", "last_result_summary")),
+            updated_at=self._dt(self._get_field(item, "updated_at", "created_at")),
+            route=self._string(self._get_field(item, "route")),
+            meta={
+                "parent_task_id": self._string(self._get_field(item, "parent_task_id")),
+                "child_task_count": self._int(
+                    self._get_field(item, "child_task_count"),
+                    0,
+                ),
+                "work_context_id": self._string(
+                    self._get_field(item, "work_context_id"),
+                ),
+                "work_context_title": self._string(work_context.get("title")),
+                "work_context_key": self._string(
+                    work_context.get("context_key"),
+                ),
+            },
+        )
+
+    def _map_work_context_entries(self, items: list[Any]) -> list[RuntimeOverviewEntry]:
+        return self._build_mapped_entries(
+            items,
+            "updated_at",
+            "created_at",
+            builder=self._build_work_context_entry,
+        )
+
+    def _build_work_context_entry(self, item: Any) -> RuntimeOverviewEntry:
+        context_id = self._string(self._get_field(item, "id")) or "unknown-work-context"
+        return RuntimeOverviewEntry(
+            id=context_id,
+            title=self._string(self._get_field(item, "title")) or context_id,
+            kind="work-context",
+            status=self._string(self._get_field(item, "status")) or "active",
+            owner=self._string(
+                self._get_field(item, "owner_scope", "owner_agent_id"),
+            ),
+            summary=self._string(self._get_field(item, "summary")),
+            updated_at=self._dt(self._get_field(item, "updated_at", "created_at")),
+            route=self._string(self._get_field(item, "route"))
+            or f"/api/runtime-center/work-contexts/{context_id}",
+            meta={
+                "context_type": self._string(self._get_field(item, "context_type")),
+                "context_key": self._string(self._get_field(item, "context_key")),
+                "primary_thread_id": self._string(
+                    self._get_field(item, "primary_thread_id"),
+                ),
+                "task_count": self._int(self._get_field(item, "task_count"), 0),
+                "active_task_count": self._int(
+                    self._get_field(item, "active_task_count"),
+                    0,
+                ),
+            },
+        )
+
+    def _map_routine_entries(self, items: list[Any]) -> list[RuntimeOverviewEntry]:
+        entries = []
+        for item in self._sorted(items, "updated_at", "created_at"):
+            routine_id = self._string(self._get_field(item, "id", "routine_id")) or "unknown-routine"
+            actions = self._string_map(self._get_field(item, "actions"))
+            actions.pop("replay", None)
+            route = self._string(self._get_field(item, "route")) or f"/api/routines/{routine_id}"
+            meta = self._mapping(self._get_field(item, "meta")) or {}
+            entries.append(
+                RuntimeOverviewEntry(
+                    id=routine_id,
+                    title=self._string(self._get_field(item, "title", "name")) or routine_id,
+                    kind="routine",
+                    status=self._string(self._get_field(item, "status")) or "active",
+                    owner=self._string(self._get_field(item, "owner_agent_id", "owner_scope", "owner")),
+                    summary=self._string(self._get_field(item, "summary")),
+                    updated_at=self._dt(self._get_field(item, "updated_at", "created_at")),
+                    route=route,
+                    actions=actions,
+                    meta={
+                        "engine_kind": self._string(meta.get("engine_kind") or self._get_field(item, "engine_kind")),
+                        "trigger_kind": self._string(meta.get("trigger_kind") or self._get_field(item, "trigger_kind")),
+                        "success_rate": meta.get("success_rate") if "success_rate" in meta else self._get_field(item, "success_rate"),
+                        "last_verified_at": self._string(meta.get("last_verified_at") or self._get_field(item, "last_verified_at")),
+                    },
+                ),
+            )
+        return entries
+
+    def _map_agent_entries(self, items: list[Any]) -> list[RuntimeOverviewEntry]:
+        return self._build_mapped_entries(
+            items,
+            "updated_at",
+            builder=self._build_agent_entry,
+        )
+
+    def _build_agent_entry(self, item: Any) -> RuntimeOverviewEntry:
+        agent_id = self._string(self._get_field(item, "agent_id", "id")) or "unknown-agent"
+        capabilities = self._strings(self._get_field(item, "capabilities"))
+        governance = self._model_dump(self._get_field(item, "capability_governance"))
+        lifecycle = self._model_dump(governance.get("lifecycle"))
+        overlay = self._model_dump(governance.get("current_session_overlay"))
+        return RuntimeOverviewEntry(
+            id=agent_id,
+            title=self._string(self._get_field(item, "name")) or agent_id,
+            kind="agent",
+            status=self._string(self._get_field(item, "status")) or "idle",
+            owner=self._string(self._get_field(item, "role_name")),
+            summary=self._string(self._get_field(item, "role_summary", "today_output_summary", "latest_evidence_summary")),
+            updated_at=self._dt(self._get_field(item, "updated_at")),
+            route=f"/api/runtime-center/agents/{agent_id}",
+            meta={
+                "risk_level": self._string(self._get_field(item, "risk_level")),
+                "current_focus_kind": self._string(self._get_field(item, "current_focus_kind")),
+                "current_focus_id": self._string(self._get_field(item, "current_focus_id")),
+                "current_focus": self._string(self._get_field(item, "current_focus")),
+                "current_task_id": self._string(self._get_field(item, "current_task_id")),
+                "environment_summary": self._string(self._get_field(item, "environment_summary")),
+                "capability_count": len(capabilities),
+                "employment_mode": self._string(lifecycle.get("employment_mode")),
+                "activation_mode": self._string(lifecycle.get("activation_mode")),
+                "desired_state": self._string(lifecycle.get("desired_state")),
+                "runtime_status": self._string(lifecycle.get("runtime_status")),
+                "capability_layer_counts": self._normalize_int_map(governance.get("counts")),
+                "session_overlay_active": bool(
+                    self._strings(overlay.get("capability_ids"))
+                    or self._string(overlay.get("status")) == "active"
+                ),
+            },
+        )
+
+    def _map_industry_entries(self, items: list[Any]) -> list[RuntimeOverviewEntry]:
+        return self._build_mapped_entries(
+            items,
+            "updated_at",
+            "created_at",
+            builder=self._build_industry_entry,
+        )
+
+    def _map_main_brain_entries(
+        self,
+        *,
+        strategies: list[Any],
+        industries: list[Any],
+        industry_by_instance_id: Mapping[str, Any],
+    ) -> list[RuntimeOverviewEntry]:
+        return self._main_brain_assembly.map_main_brain_entries(
+            strategies=strategies,
+            industries=industries,
+            industry_by_instance_id=industry_by_instance_id,
+        )
 
     def _select_prebuilt_card(
         self,

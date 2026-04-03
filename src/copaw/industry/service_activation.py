@@ -4,9 +4,139 @@ from __future__ import annotations
 from .service_context import *  # noqa: F401,F403
 from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
+from ..kernel.governed_mutation_dispatch import dispatch_governed_mutation_runtime
 
 
 class _IndustryActivationMixin:
+    async def auto_close_capability_gap_for_instance(
+        self,
+        instance_id: str,
+        recommendation: IndustryCapabilityRecommendation,
+        *,
+        target_agent_ids: list[str] | None = None,
+        capability_ids: list[str] | None = None,
+        capability_assignment_mode: Literal["replace", "merge"] = "merge",
+        review_acknowledged: bool = False,
+    ) -> IndustryBootstrapInstallResult:
+        detail = self.get_instance_detail(instance_id)
+        if detail is None:
+            raise KeyError(f"Industry instance '{instance_id}' not found")
+        normalized_mode = (
+            capability_assignment_mode
+            if capability_assignment_mode in {"replace", "merge"}
+            else "merge"
+        )
+        plan = _IndustryPlan(
+            profile=detail.profile,
+            owner_scope=detail.owner_scope,
+            draft=self._build_draft_from_instance_detail(detail),
+            goal_seeds=[],
+            schedule_seeds=[],
+            recommendation_pack=IndustryCapabilityRecommendationPack(
+                summary="Runtime capability gap closure plan.",
+                items=[recommendation],
+            ),
+            readiness_checks=[],
+            media_analyses=[],
+            media_analysis_ids=[],
+            media_warnings=[],
+        )
+        resolved_target_agent_ids = _unique_strings(
+            target_agent_ids,
+            recommendation.target_agent_ids,
+        )
+        resolved_capability_ids = _unique_strings(
+            capability_ids,
+            recommendation.capability_ids,
+        )
+        install_item = IndustryBootstrapInstallItem(
+            recommendation_id=recommendation.recommendation_id,
+            install_kind=recommendation.install_kind,
+            template_id=recommendation.template_id,
+            install_option_key=recommendation.install_option_key,
+            client_key=recommendation.default_client_key or None,
+            bundle_url=recommendation.source_url or None,
+            version=recommendation.version or None,
+            source_kind=recommendation.source_kind,
+            source_label=recommendation.source_label or None,
+            review_acknowledged=review_acknowledged,
+            enabled=bool(recommendation.default_enabled),
+            required=False,
+            capability_assignment_mode=normalized_mode,
+            capability_ids=resolved_capability_ids,
+            target_agent_ids=resolved_target_agent_ids,
+            target_role_ids=list(recommendation.suggested_role_ids or []),
+        )
+        if recommendation.review_required or recommendation.risk_level != "auto":
+            return IndustryBootstrapInstallResult(
+                recommendation_id=recommendation.recommendation_id,
+                install_kind=recommendation.install_kind,
+                template_id=recommendation.template_id,
+                install_option_key=recommendation.install_option_key,
+                client_key=recommendation.default_client_key or "",
+                capability_ids=resolved_capability_ids,
+                source_kind=recommendation.source_kind,
+                source_label=recommendation.source_label,
+                source_url=recommendation.source_url,
+                version=recommendation.version,
+                status="skipped",
+                detail=(
+                    "Automatic gap closure only installs low-risk recommendations. "
+                    "This recommendation still requires governed review."
+                ),
+                installed=False,
+            )
+        resolved_targets = self._resolve_install_targets(
+            team=plan.draft.team,
+            item=install_item,
+            recommendation=recommendation,
+        )
+        if not resolved_targets:
+            return IndustryBootstrapInstallResult(
+                recommendation_id=recommendation.recommendation_id,
+                install_kind=recommendation.install_kind,
+                template_id=recommendation.template_id,
+                install_option_key=recommendation.install_option_key,
+                client_key=recommendation.default_client_key or "",
+                capability_ids=resolved_capability_ids,
+                source_kind=recommendation.source_kind,
+                source_label=recommendation.source_label,
+                source_url=recommendation.source_url,
+                version=recommendation.version,
+                status="skipped",
+                detail=(
+                    "Automatic gap closure requires a resolvable target seat or role."
+                ),
+                installed=False,
+            )
+        install_item.target_agent_ids = resolved_targets
+        results = await self._execute_install_plan(
+            plan=plan,
+            install_plan=[install_item],
+            governed_mode=True,
+            governed_actor="industry-bootstrap",
+            governed_risk_level_override="auto",
+        )
+        return (
+            results[0]
+            if results
+            else IndustryBootstrapInstallResult(
+                recommendation_id=recommendation.recommendation_id,
+                install_kind=recommendation.install_kind,
+                template_id=recommendation.template_id,
+                install_option_key=recommendation.install_option_key,
+                client_key=recommendation.default_client_key or "",
+                capability_ids=resolved_capability_ids,
+                source_kind=recommendation.source_kind,
+                source_label=recommendation.source_label,
+                source_url=recommendation.source_url,
+                version=recommendation.version,
+                status="failed",
+                detail="Automatic gap closure did not return an install result.",
+                installed=False,
+            )
+        )
+
     async def _activate_plan(
         self,
         *,
@@ -939,19 +1069,59 @@ class _IndustryActivationMixin:
             return None
         return executor
 
+    async def _dispatch_industry_governed_mutation(
+        self,
+        *,
+        capability_ref: str,
+        title: str,
+        payload: dict[str, object],
+        environment_ref: str,
+        fallback_risk: str = "guarded",
+        risk_level_override: str | None = None,
+    ) -> dict[str, object]:
+        capability_service = self._capability_service
+        dispatcher = self._get_industry_kernel_dispatcher()
+        if capability_service is None:
+            raise ValueError("Capability service is not available.")
+        if dispatcher is None:
+            raise ValueError("Kernel dispatcher is not available.")
+        return await dispatch_governed_mutation_runtime(
+            capability_service=capability_service,
+            kernel_dispatcher=dispatcher,
+            capability_ref=capability_ref,
+            title=title,
+            payload=payload,
+            environment_ref=environment_ref,
+            fallback_risk=fallback_risk,
+            risk_level_override=risk_level_override,
+        )
+
     async def _execute_install_plan(
         self,
         *,
         plan: _IndustryPlan,
         install_plan: list[IndustryBootstrapInstallItem],
+        governed_mode: bool = False,
+        governed_actor: str = "industry-bootstrap",
+        governed_risk_level_override: str | None = None,
     ) -> list[IndustryBootstrapInstallResult]:
         if not install_plan:
             return []
-        create_mcp_client = self._resolve_system_executor("system:create_mcp_client")
-        update_mcp_client = self._resolve_system_executor("system:update_mcp_client")
-        apply_role = self._resolve_system_executor("system:apply_role")
-        set_capability_enabled = self._resolve_system_executor("system:set_capability_enabled")
-        install_hub_skill = self._resolve_system_executor("system:install_hub_skill")
+        create_mcp_client = (
+            None if governed_mode else self._resolve_system_executor("system:create_mcp_client")
+        )
+        update_mcp_client = (
+            None if governed_mode else self._resolve_system_executor("system:update_mcp_client")
+        )
+        apply_role = (
+            None if governed_mode else self._resolve_system_executor("system:apply_role")
+        )
+        set_capability_enabled = (
+            None if governed_mode else self._resolve_system_executor("system:set_capability_enabled")
+        )
+        install_hub_skill = (
+            None if governed_mode else self._resolve_system_executor("system:install_hub_skill")
+        )
         requires_mcp_install = any(
             str(item.install_kind or "mcp-template") in {"mcp-template", "mcp-registry"}
             for item in install_plan
@@ -961,11 +1131,14 @@ class _IndustryActivationMixin:
             for item in install_plan
         )
         if requires_mcp_install and create_mcp_client is None:
-            raise ValueError("Capability install executor is not available.")
+            if not governed_mode:
+                raise ValueError("Capability install executor is not available.")
         if requires_hub_install and install_hub_skill is None:
-            raise ValueError("Skill hub install executor is not available.")
+            if not governed_mode:
+                raise ValueError("Skill hub install executor is not available.")
         if apply_role is None:
-            raise ValueError("Capability assignment executor is not available.")
+            if not governed_mode:
+                raise ValueError("Capability assignment executor is not available.")
 
         recommendation_by_id = {
             item.recommendation_id: item
@@ -976,6 +1149,61 @@ class _IndustryActivationMixin:
         installed_client_configs = self._list_installed_mcp_client_configs()
         installed_skills = self._list_installed_skill_specs()
         results: list[IndustryBootstrapInstallResult] = []
+        environment_ref = f"industry:{plan.draft.team.team_id or plan.profile.slug}"
+
+        async def execute_system_mutation(
+            capability_ref: str,
+            *,
+            title: str,
+            payload: dict[str, object],
+            fallback_risk: str = "guarded",
+        ) -> dict[str, object]:
+            governed_owner_agent_id = next(
+                (
+                    role.agent_id
+                    for role in plan.draft.team.agents
+                    if is_execution_core_role_id(role.role_id) and _string(role.agent_id)
+                ),
+                EXECUTION_CORE_AGENT_ID,
+            )
+            normalized_payload = dict(payload)
+            normalized_payload.setdefault("actor", governed_actor)
+            normalized_payload.setdefault("owner_agent_id", governed_owner_agent_id)
+            if governed_mode:
+                response = await self._dispatch_industry_governed_mutation(
+                    capability_ref=capability_ref,
+                    title=title,
+                    payload=normalized_payload,
+                    environment_ref=environment_ref,
+                    fallback_risk=fallback_risk,
+                    risk_level_override=governed_risk_level_override,
+                )
+                mutation_output = response.get("output")
+                if isinstance(mutation_output, dict):
+                    normalized_output = dict(mutation_output)
+                    normalized_output.setdefault("success", bool(response.get("success")))
+                    normalized_output.setdefault(
+                        "summary",
+                        _string(response.get("summary")) or _string(mutation_output.get("summary")) or "",
+                    )
+                    normalized_output.setdefault("task_id", _string(response.get("task_id")))
+                    normalized_output.setdefault("trace_id", _string(response.get("trace_id")))
+                    normalized_output.setdefault(
+                        "decision_request_id",
+                        _string(response.get("decision_request_id")),
+                    )
+                    return normalized_output
+                return response
+            executor = {
+                "system:create_mcp_client": create_mcp_client,
+                "system:update_mcp_client": update_mcp_client,
+                "system:apply_role": apply_role,
+                "system:set_capability_enabled": set_capability_enabled,
+                "system:install_hub_skill": install_hub_skill,
+            }.get(capability_ref)
+            if executor is None:
+                raise ValueError(f"Capability executor '{capability_ref}' is not available.")
+            return await executor(payload=normalized_payload)
         for item in install_plan:
             recommendation = (
                 recommendation_by_id.get(item.recommendation_id)
@@ -1103,11 +1331,13 @@ class _IndustryActivationMixin:
                 if status == "installed":
                     client_payload = dict(template.client)
                     client_payload["enabled"] = item.enabled
-                    response = await create_mcp_client(
+                    response = await execute_system_mutation(
+                        "system:create_mcp_client",
+                        title=f"Install MCP template {item.template_id} as {client_key}",
                         payload={
                             "client_key": client_key,
                             "client": client_payload,
-                            "actor": "industry-bootstrap",
+                            "actor": governed_actor,
                         },
                     )
                     if not bool(response.get("success")):
@@ -1167,11 +1397,13 @@ class _IndustryActivationMixin:
                             ),
                         )
                         continue
-                    response = await set_capability_enabled(
+                    response = await execute_system_mutation(
+                        "system:set_capability_enabled",
+                        title=f"Enable MCP client {client_key}",
                         payload={
                             "capability_id": f"mcp:{client_key}",
                             "enabled": True,
-                            "actor": "industry-bootstrap",
+                            "actor": governed_actor,
                         },
                     )
                     if not bool(response.get("success")):
@@ -1317,11 +1549,13 @@ class _IndustryActivationMixin:
                     )
                 )
                 if existing_client is None:
-                    response = await create_mcp_client(
+                    response = await execute_system_mutation(
+                        "system:create_mcp_client",
+                        title=f"Install registry MCP {item.template_id} as {client_key}",
                         payload={
                             "client_key": client_key,
                             "client": materialized.client.model_dump(mode="json"),
-                            "actor": "industry-bootstrap",
+                            "actor": governed_actor,
                         },
                     )
                     if not bool(response.get("success")):
@@ -1381,11 +1615,13 @@ class _IndustryActivationMixin:
                             ),
                         )
                         continue
-                    response = await update_mcp_client(
+                    response = await execute_system_mutation(
+                        "system:update_mcp_client",
+                        title=f"Update registry MCP {item.template_id} as {client_key}",
                         payload={
                             "client_key": client_key,
                             "client": materialized.client.model_dump(mode="json"),
-                            "actor": "industry-bootstrap",
+                            "actor": governed_actor,
                         },
                     )
                     if not bool(response.get("success")):
@@ -1444,11 +1680,13 @@ class _IndustryActivationMixin:
                             ),
                         )
                         continue
-                    response = await set_capability_enabled(
+                    response = await execute_system_mutation(
+                        "system:set_capability_enabled",
+                        title=f"Enable registry MCP {client_key}",
                         payload={
                             "capability_id": f"mcp:{client_key}",
                             "enabled": True,
-                            "actor": "industry-bootstrap",
+                            "actor": governed_actor,
                         },
                     )
                     if not bool(response.get("success")):
@@ -1530,11 +1768,13 @@ class _IndustryActivationMixin:
                                 ),
                             )
                             continue
-                        response = await set_capability_enabled(
+                        response = await execute_system_mutation(
+                            "system:set_capability_enabled",
+                            title=f"Enable builtin runtime {template_spec.default_capability_id}",
                             payload={
                                 "capability_id": template_spec.default_capability_id,
                                 "enabled": True,
-                                "actor": "industry-bootstrap",
+                                "actor": governed_actor,
                             },
                         )
                         if not bool(response.get("success")):
@@ -1663,13 +1903,15 @@ class _IndustryActivationMixin:
                         f"Hub skill '{installed_skill_name}' is already installed."
                     )
                 else:
-                    response = await install_hub_skill(
+                    response = await execute_system_mutation(
+                        "system:install_hub_skill",
+                        title=f"Install hub skill {item.template_id or source_url}",
                         payload={
                             "bundle_url": source_url,
                             "version": version,
                             "enable": item.enabled,
                             "overwrite": False,
-                            "actor": "industry-bootstrap",
+                            "actor": governed_actor,
                         },
                     )
                     if not bool(response.get("success")):
@@ -1714,7 +1956,7 @@ class _IndustryActivationMixin:
                         response.get("summary")
                         or f"Installed hub skill '{installed_skill_name}'."
                     )
-                client_key = client_key or installed_skill_name or item.template_id
+                client_key = installed_skill_name or client_key or item.template_id
                 capability_ids = self._resolve_hub_skill_capabilities(
                     item=item,
                     recommendation=recommendation,
@@ -1744,12 +1986,15 @@ class _IndustryActivationMixin:
 
             assignment_results: list[IndustryBootstrapInstallAssignmentResult] = []
             for agent_id in target_agent_ids:
-                assignment_response = await apply_role(
+                assignment_response = await execute_system_mutation(
+                    "system:apply_role",
+                    title=f"Assign installed capabilities to {agent_id}",
                     payload={
                         "agent_id": agent_id,
                         "capabilities": capability_ids,
                         "capability_assignment_mode": item.capability_assignment_mode,
                         "reason": f"Industry bootstrap install plan: {item.template_id}",
+                        "actor": governed_actor,
                     },
                 )
                 assignment_success = bool(assignment_response.get("success"))

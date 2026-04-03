@@ -531,6 +531,7 @@ def _build_industry_app(
     )
     industry_runtime_bindings = build_industry_service_runtime_bindings(
         state_store=state_store,
+        kernel_dispatcher=dispatcher,
         operating_lane_repository=operating_lane_repository,
         backlog_item_repository=backlog_item_repository,
         operating_cycle_repository=operating_cycle_repository,

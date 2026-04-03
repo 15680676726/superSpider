@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from copaw.app.runtime_events import RuntimeEventBus
 from copaw.app.runtime_session import SafeJSONSession
-from copaw.app.startup_recovery import run_startup_recovery
+from copaw.app.startup_recovery import _detect_requested_surfaces, run_startup_recovery
 from copaw.environments import EnvironmentRegistry, EnvironmentRepository, EnvironmentService, SessionMountRepository
 from copaw.kernel import ActorMailboxService, KernelConfig, KernelDispatcher, KernelTask, KernelTaskStore
 from copaw.state import (
@@ -48,6 +48,41 @@ from copaw.state.repositories import (
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
 )
+
+
+def test_startup_recovery_surface_detection_prefers_capability_layers() -> None:
+    surfaces = _detect_requested_surfaces(
+        "整理本地文件并处理桌面操作",
+        metadata={
+            "capability_layers": {
+                "schema_version": "industry-seat-capability-layers-v1",
+                "role_prototype_capability_ids": ["tool:read_file"],
+                "seat_instance_capability_ids": ["tool:write_file"],
+                "cycle_delta_capability_ids": ["tool:edit_file"],
+                "session_overlay_capability_ids": ["mcp:desktop_windows"],
+            },
+            "environment_constraints": ["desktop", "workspace", "file-view"],
+            "role_summary": "Handles local desktop work and governed file organization.",
+        },
+    )
+
+    assert surfaces == ["file", "desktop"]
+
+
+def test_startup_recovery_surface_detection_fails_closed_when_layers_are_malformed() -> None:
+    surfaces = _detect_requested_surfaces(
+        "打开浏览器并改本地文件",
+        metadata={
+            "capability_layers": {
+                "schema_version": "industry-seat-capability-layers-v1",
+                "role_prototype_capability_ids": "not-a-list",
+            },
+            "allowed_capabilities": ["mcp:browser", "tool:write_file"],
+            "environment_constraints": ["browser", "desktop", "file-view"],
+        },
+    )
+
+    assert surfaces == []
 
 
 def test_startup_recovery_recovers_local_orphans_and_expires_decisions(tmp_path) -> None:

@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ..industry.models import IndustrySeatCapabilityLayers
 from ..kernel.surface_routing import infer_requested_execution_surfaces
 
 
@@ -68,6 +69,11 @@ def _detect_requested_surfaces(
     metadata: dict[str, Any] | None = None,
 ) -> list[str]:
     resolved_metadata = metadata if isinstance(metadata, dict) else {}
+    capability_ids, capability_layers_declared, capability_layers_valid = (
+        _resolve_runtime_capability_projection(resolved_metadata)
+    )
+    if capability_layers_declared and not capability_layers_valid:
+        return []
     return infer_requested_execution_surfaces(
         texts=[
             _string(message_text),
@@ -75,7 +81,7 @@ def _detect_requested_surfaces(
             _string(resolved_metadata.get("industry_role_name")),
             _string(resolved_metadata.get("role_name")),
         ],
-        capability_ids=_unique_strings(resolved_metadata.get("allowed_capabilities")),
+        capability_ids=capability_ids,
         environment_texts=_unique_strings(
             resolved_metadata.get("environment_constraints"),
             resolved_metadata.get("role_summary"),
@@ -84,6 +90,38 @@ def _detect_requested_surfaces(
         ),
         allow_hard_hints_without_text=True,
     )
+
+
+def _resolve_runtime_capability_ids(metadata: dict[str, Any]) -> list[str]:
+    return _resolve_runtime_capability_projection(metadata)[0]
+
+
+def _resolve_runtime_capability_projection(
+    metadata: dict[str, Any],
+) -> tuple[list[str], bool, bool]:
+    capability_layers = metadata.get("capability_layers")
+    if "capability_layers" in metadata:
+        if not isinstance(capability_layers, dict):
+            return [], True, False
+        for field_name in (
+            "role_prototype_capability_ids",
+            "seat_instance_capability_ids",
+            "cycle_delta_capability_ids",
+            "session_overlay_capability_ids",
+            "effective_capability_ids",
+        ):
+            if field_name not in capability_layers:
+                continue
+            if not isinstance(capability_layers.get(field_name), (list, tuple, set)):
+                return [], True, False
+        try:
+            merged = IndustrySeatCapabilityLayers.from_metadata(
+                capability_layers,
+            ).merged_capability_ids()
+        except Exception:
+            return [], True, False
+        return merged, True, True
+    return _unique_strings(metadata.get("allowed_capabilities")), False, True
 
 
 def _runtime_has_terminal_signal(runtime: object | None) -> bool:

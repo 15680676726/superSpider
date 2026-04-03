@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+import inspect
 from typing import Any
 
 from ..config.config import MCPConfig
@@ -28,6 +29,7 @@ class ChildRunWriterLeaseConflict(RuntimeError):
 class ChildRunMCPOverlayContract:
     scope_ref: str
     config: MCPConfig
+    parent_scope_ref: str | None = None
     additive: bool = True
 
 
@@ -64,7 +66,15 @@ def _resolve_mcp_overlay_contract(
     )
     if not raw_overlay:
         return None
-    scope_ref = _non_empty_text(
+    seat_scope_ref = _non_empty_text(
+        raw_overlay.get("seat_scope_ref")
+        or raw_overlay.get("parent_scope_ref")
+        or raw_overlay.get("visibility_scope_ref"),
+    )
+    session_scope_ref = _non_empty_text(
+        raw_overlay.get("session_scope_ref") or raw_overlay.get("session_scope"),
+    )
+    scope_ref = session_scope_ref or _non_empty_text(
         raw_overlay.get("scope_ref") or raw_overlay.get("overlay_scope"),
     )
     clients = _mapping(raw_overlay.get("clients"))
@@ -79,8 +89,24 @@ def _resolve_mcp_overlay_contract(
     return ChildRunMCPOverlayContract(
         scope_ref=scope_ref,
         config=MCPConfig.model_validate({"clients": clients}),
+        parent_scope_ref=(
+            None if seat_scope_ref == scope_ref else seat_scope_ref
+        ),
         additive=True,
     )
+
+
+def _supports_keyword_argument(callable_obj: object, keyword: str) -> bool:
+    try:
+        signature = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return False
+    for parameter in signature.parameters.values():
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            return True
+        if parameter.name == keyword:
+            return True
+    return False
 
 
 def resolve_child_run_writer_contract(
@@ -262,10 +288,19 @@ async def run_child_task_with_writer_lease(
     if not callable(mount_scope_overlay) or not callable(clear_scope_overlay):
         return await _run_with_writer_lease()
 
+    mount_kwargs: dict[str, object] = {
+        "additive": mcp_overlay_contract.additive,
+    }
+    if (
+        mcp_overlay_contract.parent_scope_ref is not None
+        and _supports_keyword_argument(mount_scope_overlay, "parent_scope_ref")
+    ):
+        mount_kwargs["parent_scope_ref"] = mcp_overlay_contract.parent_scope_ref
+
     await mount_scope_overlay(
         mcp_overlay_contract.scope_ref,
         mcp_overlay_contract.config,
-        additive=mcp_overlay_contract.additive,
+        **mount_kwargs,
     )
     try:
         return await _run_with_writer_lease()

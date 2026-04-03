@@ -4,9 +4,70 @@ from __future__ import annotations
 from .service_context import *  # noqa: F401,F403
 from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
+from .models import _normalize_text_list
 
 
 class _IndustryTeamRuntimeMixin:
+    def sync_agent_runtime_capability_override(
+        self,
+        *,
+        agent_id: str,
+        capability_ids: list[str] | None,
+    ) -> None:
+        repository = self._agent_runtime_repository
+        if repository is None or not isinstance(agent_id, str) or not agent_id.strip():
+            return
+        runtime = repository.get_runtime(agent_id)
+        if runtime is None:
+            return
+        metadata = dict(getattr(runtime, "metadata", {}) or {})
+        layers = IndustrySeatCapabilityLayers.from_metadata(
+            metadata.get("capability_layers"),
+        )
+        role_prototype_capability_ids = list(layers.role_prototype_capability_ids)
+        role_prototype_capability_set = set(role_prototype_capability_ids)
+        effective_capability_ids = _normalize_text_list(capability_ids)
+        seat_instance_capability_ids = [
+            capability_id
+            for capability_id in effective_capability_ids
+            if capability_id not in role_prototype_capability_set
+        ]
+        metadata["capability_layers"] = IndustrySeatCapabilityLayers(
+            role_prototype_capability_ids=role_prototype_capability_ids,
+            seat_instance_capability_ids=seat_instance_capability_ids,
+            cycle_delta_capability_ids=list(layers.cycle_delta_capability_ids),
+            session_overlay_capability_ids=list(
+                layers.session_overlay_capability_ids,
+            ),
+        ).to_metadata_payload()
+        repository.upsert_runtime(
+            runtime.model_copy(
+                update={
+                    "metadata": metadata,
+                },
+            ),
+        )
+
+    def _build_actor_runtime_capability_layers(
+        self,
+        *,
+        agent: IndustryRoleBlueprint,
+        existing_metadata: dict[str, object],
+    ) -> dict[str, object]:
+        existing_layers = IndustrySeatCapabilityLayers.from_metadata(
+            existing_metadata.get("capability_layers"),
+        )
+        return IndustrySeatCapabilityLayers(
+            role_prototype_capability_ids=list(agent.allowed_capabilities),
+            seat_instance_capability_ids=list(
+                existing_layers.seat_instance_capability_ids,
+            ),
+            cycle_delta_capability_ids=list(existing_layers.cycle_delta_capability_ids),
+            session_overlay_capability_ids=list(
+                existing_layers.session_overlay_capability_ids,
+            ),
+        ).to_metadata_payload()
+
     def _ensure_execution_core_work_context(
         self,
         *,
@@ -380,9 +441,12 @@ class _IndustryTeamRuntimeMixin:
                 "current_focus_id": current_focus_id,
                 "current_focus": current_focus,
                 "employment_mode": agent.employment_mode,
-                "allowed_capabilities": list(agent.allowed_capabilities),
                 "environment_constraints": list(agent.environment_constraints),
                 "evidence_expectations": list(agent.evidence_expectations),
+                "capability_layers": self._build_actor_runtime_capability_layers(
+                    agent=agent,
+                    existing_metadata=metadata,
+                ),
                 "retired": status == "retired",
             },
         )

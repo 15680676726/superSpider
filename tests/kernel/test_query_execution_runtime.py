@@ -704,3 +704,75 @@ async def test_query_execution_runtime_delegate_and_wrapped_builtin_tool_form_en
     assert submitted.work_context_id == "work-context-e2e"
     assert submitted.environment_ref == "desktop:e2e"
     assert submitted.payload == {}
+
+
+def test_query_execution_runtime_filters_capabilities_by_effective_seat_layers(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "query-runtime-seat-capability-layers.db")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-support",
+            actor_key="industry-1:support-specialist",
+            actor_fingerprint="fingerprint-support",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            metadata={
+                "capability_layers": {
+                    "schema_version": "industry-seat-capability-layers-v1",
+                    "role_prototype_capability_ids": ["tool:read_file"],
+                    "seat_instance_capability_ids": ["skill:crm-seat-playbook"],
+                    "cycle_delta_capability_ids": ["mcp:campaign-dashboard"],
+                    "session_overlay_capability_ids": ["mcp:browser-temp"],
+                    "effective_capability_ids": [
+                        "tool:read_file",
+                        "skill:crm-seat-playbook",
+                        "mcp:campaign-dashboard",
+                        "mcp:browser-temp",
+                    ],
+                },
+            },
+        ),
+    )
+
+    def _mount(capability_id: str, source_kind: str) -> SimpleNamespace:
+        return SimpleNamespace(id=capability_id, source_kind=source_kind)
+
+    capability_service = SimpleNamespace(
+        list_accessible_capabilities=lambda *, agent_id, enabled_only=True: [
+            _mount("tool:read_file", "tool"),
+            _mount("tool:write_file", "tool"),
+            _mount("skill:crm-seat-playbook", "skill"),
+            _mount("skill:generic-overlap", "skill"),
+            _mount("mcp:campaign-dashboard", "mcp"),
+            _mount("mcp:browser-temp", "mcp"),
+            _mount("mcp:desktop_windows", "mcp"),
+        ],
+    )
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        capability_service=capability_service,
+        agent_runtime_repository=runtime_repository,
+    )
+
+    (
+        tool_capability_ids,
+        skill_names,
+        mcp_client_keys,
+        system_capability_ids,
+        desktop_actuation_available,
+        capability_layers,
+    ) = service._resolve_query_capability_context("agent-support")  # pylint: disable=protected-access
+
+    assert tool_capability_ids == {"tool:read_file"}
+    assert skill_names == {"crm-seat-playbook"}
+    assert mcp_client_keys == ["browser-temp", "campaign-dashboard"]
+    assert system_capability_ids == set()
+    assert desktop_actuation_available is False
+    assert capability_layers is not None
+    assert capability_layers.role_prototype_capability_ids == ["tool:read_file"]
+    assert capability_layers.seat_instance_capability_ids == ["skill:crm-seat-playbook"]
+    assert capability_layers.cycle_delta_capability_ids == ["mcp:campaign-dashboard"]
+    assert capability_layers.session_overlay_capability_ids == ["mcp:browser-temp"]

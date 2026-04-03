@@ -549,9 +549,14 @@ class _PredictionServiceContextMixin:
                 "",
             }:
                 continue
+            preflight = _safe_dict(metadata.get("preflight"))
+            trial_plan = _safe_dict(preflight.get("trial_plan"))
             old_capability_id = _string(metadata.get("replacement_capability_id"))
             if old_capability_id is None:
-                replacement_ids = _string_list(metadata.get("replacement_capability_ids"))
+                replacement_ids = _string_list(
+                    metadata.get("replacement_target_ids"),
+                    metadata.get("replacement_capability_ids"),
+                )
                 old_capability_id = replacement_ids[0] if replacement_ids else None
             target_agent_id = record.target_agent_id or _string(metadata.get("target_agent_id"))
             if old_capability_id is None or target_agent_id is None:
@@ -573,13 +578,58 @@ class _PredictionServiceContextMixin:
             new_capability_id = installed_capability_ids[0]
             new_stats = telemetry.get((target_agent_id, new_capability_id), {})
             old_stats = telemetry.get((target_agent_id, old_capability_id), {})
+            selected_seat_ref = (
+                _string(metadata.get("selected_seat_ref"))
+                or _string(trial_plan.get("target_seat_ref"))
+            )
+            trial_scope = (
+                _string(metadata.get("trial_scope"))
+                or _string(trial_plan.get("rollout_scope"))
+                or "single-agent"
+            )
             if not self._trial_improved(new_stats=new_stats, old_stats=old_stats):
+                if self._trial_underperformed(new_stats=new_stats, old_stats=old_stats):
+                    findings.append(
+                        {
+                            "gap_kind": "capability_rollback",
+                            "optimization_stage": "rollback",
+                            "lifecycle_stage": "blocked",
+                            "candidate_lifecycle_stage": "deprecated",
+                            "replacement_target_stage": "active",
+                            "old_capability_id": old_capability_id,
+                            "new_capability_id": new_capability_id,
+                            "target_agent_id": target_agent_id,
+                            "source_recommendation_id": record.recommendation_id,
+                            "selected_seat_ref": selected_seat_ref,
+                            "trial_scope": trial_scope,
+                            "rollback_target_ids": [old_capability_id],
+                            "stats": {
+                                "new_stats": new_stats,
+                                "old_stats": old_stats,
+                            },
+                        },
+                    )
                 continue
             rollout_agent_ids = [
                 agent_id
                 for agent_id in self._agents_using_capability(facts, old_capability_id)
                 if agent_id != target_agent_id
             ]
+            if not rollout_agent_ids:
+                target_role_id = (
+                    _string(metadata.get("target_role_id"))
+                    or _string(trial_plan.get("target_role_id"))
+                )
+                team_blueprint = self._instance_team_blueprint(case.industry_instance_id)
+                if team_blueprint is not None and target_role_id is not None:
+                    rollout_agent_ids = [
+                        agent.agent_id
+                        for agent in team_blueprint.agents
+                        if (
+                            agent.agent_id != target_agent_id
+                            and _string(getattr(agent, "role_id", None)) == target_role_id
+                        )
+                    ]
             if rollout_agent_ids:
                 for rollout_agent_id in rollout_agent_ids[:2]:
                     dedupe_key = (rollout_agent_id, old_capability_id, new_capability_id)
@@ -590,10 +640,16 @@ class _PredictionServiceContextMixin:
                         {
                             "gap_kind": "capability_rollout",
                             "optimization_stage": "rollout",
+                            "lifecycle_stage": "rollout",
+                            "candidate_lifecycle_stage": "active",
+                            "replacement_target_stage": "deprecated",
                             "old_capability_id": old_capability_id,
                             "new_capability_id": new_capability_id,
                             "target_agent_id": rollout_agent_id,
                             "source_recommendation_id": record.recommendation_id,
+                            "selected_seat_ref": selected_seat_ref,
+                            "trial_scope": trial_scope,
+                            "replacement_target_ids": [old_capability_id],
                             "stats": {
                                 "trial_agent_id": target_agent_id,
                                 "new_stats": new_stats,
@@ -607,10 +663,16 @@ class _PredictionServiceContextMixin:
                     {
                         "gap_kind": "capability_retirement",
                         "optimization_stage": "retire",
+                        "lifecycle_stage": "retired",
+                        "candidate_lifecycle_stage": "active",
+                        "replacement_target_stage": "retired",
                         "old_capability_id": old_capability_id,
                         "new_capability_id": new_capability_id,
                         "target_agent_id": target_agent_id,
                         "source_recommendation_id": record.recommendation_id,
+                        "selected_seat_ref": selected_seat_ref,
+                        "trial_scope": trial_scope,
+                        "replacement_target_ids": [old_capability_id],
                         "stats": {
                             "new_stats": new_stats,
                             "old_stats": old_stats,
@@ -655,10 +717,52 @@ class _PredictionServiceContextMixin:
             )
         )
 
+    def _trial_underperformed(
+        self,
+        *,
+        new_stats: dict[str, Any],
+        old_stats: dict[str, Any],
+    ) -> bool:
+        if not new_stats:
+            return False
+        if not old_stats:
+            return (
+                float(new_stats.get("failure_rate") or 0.0) >= 0.34
+                or float(new_stats.get("manual_intervention_rate") or 0.0) >= 0.3
+                or float(new_stats.get("workflow_blockage_rate") or 0.0) >= 0.25
+            )
+        return (
+            float(new_stats.get("failure_rate") or 0.0)
+            > float(old_stats.get("failure_rate") or 0.0)
+            or float(new_stats.get("manual_intervention_rate") or 0.0)
+            > float(old_stats.get("manual_intervention_rate") or 0.0)
+            or float(new_stats.get("workflow_blockage_rate") or 0.0)
+            > float(old_stats.get("workflow_blockage_rate") or 0.0)
+        )
+
     def _agents_using_capability(self, facts: _FactPack, capability_id: str) -> list[str]:
         users: list[str] = []
-        for agent in facts.agents:
-            agent_id = _string(getattr(agent, "agent_id", None))
+        candidate_agents = list(facts.agents)
+        list_agents = getattr(self._agent_profile_service, "list_agents", None)
+        if callable(list_agents):
+            try:
+                candidate_agents.extend(list_agents() or [])
+            except Exception:
+                pass
+        override_repository = getattr(self._agent_profile_service, "_override_repository", None)
+        if override_repository is not None:
+            list_overrides = getattr(override_repository, "list_overrides", None)
+            if callable(list_overrides):
+                try:
+                    candidate_agents.extend(list_overrides() or [])
+                except Exception:
+                    pass
+        for agent in candidate_agents:
+            agent_payload = _safe_dict(agent)
+            agent_id = (
+                _string(getattr(agent, "agent_id", None))
+                or _string(agent_payload.get("agent_id"))
+            )
             if agent_id is None:
                 continue
             effective_capabilities = self._effective_capabilities_for_agent(agent_id)
@@ -667,6 +771,27 @@ class _PredictionServiceContextMixin:
         return users
 
     def _effective_capabilities_for_agent(self, agent_id: str) -> list[str]:
+        detail_getter = getattr(self._agent_profile_service, "get_agent_detail", None)
+        if callable(detail_getter):
+            try:
+                detail = detail_getter(agent_id)
+            except Exception:
+                detail = None
+            detail_payload = _safe_dict(detail)
+            runtime_payload = _safe_dict(detail_payload.get("runtime"))
+            metadata_payload = _safe_dict(runtime_payload.get("metadata"))
+            capability_layers = _safe_dict(metadata_payload.get("capability_layers"))
+            layered_capabilities: list[str] = []
+            for capability_id in (
+                _string_list(capability_layers.get("role_prototype_capability_ids"))
+                + _string_list(capability_layers.get("seat_instance_capability_ids"))
+                + _string_list(capability_layers.get("cycle_delta_capability_ids"))
+                + _string_list(capability_layers.get("session_overlay_capability_ids"))
+            ):
+                if capability_id not in layered_capabilities:
+                    layered_capabilities.append(capability_id)
+            if layered_capabilities:
+                return layered_capabilities
         getter = getattr(self._agent_profile_service, "get_capability_surface", None)
         if callable(getter):
             surface = getter(agent_id)

@@ -23,6 +23,7 @@ from agentscope.tool import Toolkit, ToolResponse
 from anyio import ClosedResourceError
 from pydantic import BaseModel
 
+from ..industry.models import IndustrySeatCapabilityLayers
 from ..skill_service import (
     ensure_skills_initialized,
     get_working_skills_dir,
@@ -407,6 +408,7 @@ class CoPawAgent(ReActAgent):
         namesake_strategy: NamesakeStrategy = "skip",
         allowed_tool_capability_ids: Iterable[str] | None = None,
         allowed_skill_names: Iterable[str] | None = None,
+        capability_layers: IndustrySeatCapabilityLayers | None = None,
         extra_tool_functions: Iterable[Callable[..., Any]] | None = None,
     ):
         """Initialize CoPawAgent.
@@ -441,6 +443,7 @@ class CoPawAgent(ReActAgent):
             if allowed_skill_names is not None
             else None
         )
+        self._capability_layers = capability_layers
         self._extra_tool_functions = list(extra_tool_functions or [])
 
         # Memory compaction threshold: configurable ratio of max_input_length
