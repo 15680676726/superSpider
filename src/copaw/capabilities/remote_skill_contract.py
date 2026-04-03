@@ -7,6 +7,7 @@ from urllib.parse import quote, urlparse
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..agents.skills_hub import HubSkillResult, search_hub_skills
+from ..industry.models import IndustrySeatCapabilityLayers
 from .remote_skill_catalog import (
     CuratedSkillCatalogEntry,
     get_curated_skill_catalog_entry,
@@ -15,6 +16,16 @@ from .remote_skill_catalog import (
 )
 
 _BUSINESS_AGENT_EXTRA_CAPABILITY_LIMIT = 12
+RemoteSkillLifecycleStage = Literal[
+    "candidate",
+    "trial",
+    "rollout",
+    "active",
+    "deprecated",
+    "retired",
+    "blocked",
+]
+RemoteSkillRolloutScope = Literal["single-agent", "single-seat", "wider-rollout"]
 
 
 class RemoteSkillCandidate(BaseModel):
@@ -57,10 +68,17 @@ class RemoteSkillTrialPlan(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     target_agent_id: str | None = None
+    target_role_id: str | None = None
+    target_seat_ref: str | None = None
+    lifecycle_stage: RemoteSkillLifecycleStage = "candidate"
+    next_lifecycle_stage: RemoteSkillLifecycleStage = "trial"
     capability_assignment_mode: Literal["merge", "replace"] = "merge"
     predicted_capability_ids: list[str] = Field(default_factory=list)
     replacement_capability_ids: list[str] = Field(default_factory=list)
-    rollout_scope: Literal["single-agent"] = "single-agent"
+    replacement_target_ids: list[str] = Field(default_factory=list)
+    rollout_scope: RemoteSkillRolloutScope = "single-agent"
+    role_budget_limit: int | None = None
+    seat_budget_limit: int | None = None
 
 
 class RemoteSkillPreflightReport(BaseModel):
@@ -68,6 +86,8 @@ class RemoteSkillPreflightReport(BaseModel):
 
     ready: bool = False
     risk_level: Literal["guarded", "confirm"] = "guarded"
+    lifecycle_stage: RemoteSkillLifecycleStage = "candidate"
+    next_lifecycle_stage: RemoteSkillLifecycleStage = "trial"
     summary: str = ""
     review_required: bool = False
     checks: list[RemoteSkillPreflightCheck] = Field(default_factory=list)
@@ -216,6 +236,12 @@ def build_remote_skill_preflight(
         requested_capability_ids=requested_capability_ids,
     )
     replacement_ids = _unique_strings(list(replacement_capability_ids or []))
+    runtime_context = _resolve_target_runtime_context(
+        agent_profile_service=agent_profile_service,
+        target_agent_id=target_agent_id,
+    )
+    target_role_id = _string(runtime_context.get("target_role_id"))
+    target_seat_ref = _string(runtime_context.get("target_seat_ref"))
 
     source_allowed = _is_allowlisted_remote_url(candidate.bundle_url)
     checks.append(
@@ -285,20 +311,44 @@ def build_remote_skill_preflight(
             ),
         )
 
-    budget_check = _budget_check(
+    role_budget_check = _role_skill_budget_check(
         agent_profile_service=agent_profile_service,
         target_agent_id=target_agent_id,
         capability_assignment_mode=capability_assignment_mode,
         predicted_capability_ids=predicted_capability_ids,
         replacement_capability_ids=replacement_ids,
+        role_prototype_capability_ids=_string_list(
+            runtime_context.get("role_prototype_capability_ids"),
+        ),
+        effective_capability_ids=_string_list(
+            runtime_context.get("effective_capability_ids"),
+        ),
     )
-    if budget_check is not None:
-        checks.append(budget_check)
+    if role_budget_check is not None:
+        checks.append(role_budget_check)
+
+    seat_budget_check = _seat_skill_budget_check(
+        agent_profile_service=agent_profile_service,
+        target_agent_id=target_agent_id,
+        target_seat_ref=target_seat_ref,
+        capability_assignment_mode=capability_assignment_mode,
+        predicted_capability_ids=predicted_capability_ids,
+        replacement_capability_ids=replacement_ids,
+        seat_instance_capability_ids=_string_list(
+            runtime_context.get("seat_instance_capability_ids"),
+        ),
+    )
+    if seat_budget_check is not None:
+        checks.append(seat_budget_check)
 
     risk_level: Literal["guarded", "confirm"] = (
         "confirm" if candidate.review_required or replacement_ids else "guarded"
     )
     ready = all(item.status != "fail" for item in checks)
+    lifecycle_stage: RemoteSkillLifecycleStage = "candidate" if ready else "blocked"
+    next_lifecycle_stage: RemoteSkillLifecycleStage = (
+        "trial" if ready else "blocked"
+    )
     summary_parts: list[str] = []
     if candidate.review_required:
         summary_parts.append(candidate.review_summary or "该候选项需要人工审查。")
@@ -311,14 +361,30 @@ def build_remote_skill_preflight(
     return RemoteSkillPreflightReport(
         ready=ready,
         risk_level=risk_level,
+        lifecycle_stage=lifecycle_stage,
+        next_lifecycle_stage=next_lifecycle_stage,
         summary=" ".join(part.strip() for part in summary_parts if part.strip()),
         review_required=candidate.review_required,
         checks=checks,
         trial_plan=RemoteSkillTrialPlan(
             target_agent_id=target_agent_id,
+            target_role_id=target_role_id,
+            target_seat_ref=target_seat_ref,
+            lifecycle_stage=lifecycle_stage,
+            next_lifecycle_stage=next_lifecycle_stage,
             capability_assignment_mode=capability_assignment_mode,
             predicted_capability_ids=predicted_capability_ids,
             replacement_capability_ids=replacement_ids,
+            replacement_target_ids=replacement_ids,
+            rollout_scope="single-seat" if target_seat_ref else "single-agent",
+            role_budget_limit=_budget_limit(
+                agent_profile_service=agent_profile_service,
+                target_agent_id=target_agent_id,
+            ),
+            seat_budget_limit=_budget_limit(
+                agent_profile_service=agent_profile_service,
+                target_agent_id=target_agent_id,
+            ),
         ),
     )
 
@@ -434,54 +500,188 @@ def _get_agent(agent_profile_service: object | None, agent_id: str | None) -> ob
     return getter(agent_id)
 
 
-def _budget_check(
+def _resolve_target_runtime_context(
+    *,
+    agent_profile_service: object | None,
+    target_agent_id: str | None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    if not target_agent_id or agent_profile_service is None:
+        return payload
+    detail_getter = getattr(agent_profile_service, "get_agent_detail", None)
+    if callable(detail_getter):
+        detail = detail_getter(target_agent_id)
+        if isinstance(detail, dict):
+            runtime = detail.get("runtime")
+            if isinstance(runtime, dict):
+                payload["target_role_id"] = runtime.get("industry_role_id")
+                metadata = runtime.get("metadata")
+                if isinstance(metadata, dict):
+                    payload["target_seat_ref"] = metadata.get("selected_seat_ref")
+                    layers = IndustrySeatCapabilityLayers.from_metadata(
+                        metadata.get("capability_layers"),
+                    )
+                    if layers.merged_capability_ids():
+                        payload.update(layers.to_metadata_payload())
+    getter = getattr(agent_profile_service, "get_capability_surface", None)
+    if callable(getter):
+        surface = getter(target_agent_id)
+        if isinstance(surface, dict):
+            payload.setdefault(
+                "role_prototype_capability_ids",
+                _string_list(surface.get("baseline_capabilities")),
+            )
+            payload.setdefault(
+                "effective_capability_ids",
+                _string_list(surface.get("effective_capabilities")),
+            )
+    if _string(payload.get("target_role_id")) is None:
+        target_agent = _get_agent(agent_profile_service, target_agent_id)
+        payload["target_role_id"] = _string(
+            getattr(target_agent, "industry_role_id", None),
+        )
+    return payload
+
+
+def _budget_limit(
+    *,
+    agent_profile_service: object | None,
+    target_agent_id: str | None,
+) -> int | None:
+    target_agent = _get_agent(agent_profile_service, target_agent_id)
+    if _string(getattr(target_agent, "agent_class", None)) != "business":
+        return None
+    return _BUSINESS_AGENT_EXTRA_CAPABILITY_LIMIT
+
+
+def _planned_skill_capability_ids(
+    *,
+    existing_capability_ids: list[str],
+    capability_assignment_mode: Literal["merge", "replace"],
+    predicted_capability_ids: list[str],
+    replacement_capability_ids: list[str],
+) -> list[str]:
+    planned = {
+        capability_id
+        for capability_id in existing_capability_ids
+        if capability_id.startswith("skill:")
+    }
+    if capability_assignment_mode == "replace":
+        planned.difference_update(
+            capability_id
+            for capability_id in replacement_capability_ids
+            if capability_id.startswith("skill:")
+        )
+    planned.update(
+        capability_id
+        for capability_id in predicted_capability_ids
+        if capability_id.startswith("skill:")
+    )
+    return sorted(planned)
+
+
+def _role_skill_budget_check(
     *,
     agent_profile_service: object | None,
     target_agent_id: str | None,
     capability_assignment_mode: Literal["merge", "replace"],
     predicted_capability_ids: list[str],
     replacement_capability_ids: list[str],
+    role_prototype_capability_ids: list[str],
+    effective_capability_ids: list[str],
 ) -> RemoteSkillPreflightCheck | None:
-    if not target_agent_id or agent_profile_service is None:
-        return None
-    getter = getattr(agent_profile_service, "get_capability_surface", None)
-    if not callable(getter):
-        return None
-    surface = getter(target_agent_id)
-    if not isinstance(surface, dict):
-        return None
-    baseline_capability_ids = _string_list(surface.get("baseline_capabilities"))
-    effective_capability_ids = _string_list(surface.get("effective_capabilities"))
-    target_agent = _get_agent(agent_profile_service, target_agent_id)
-    extra_limit = (
-        _BUSINESS_AGENT_EXTRA_CAPABILITY_LIMIT
-        if _string(getattr(target_agent, "agent_class", None)) == "business"
-        else None
+    limit = _budget_limit(
+        agent_profile_service=agent_profile_service,
+        target_agent_id=target_agent_id,
     )
-    if extra_limit is None:
+    if limit is None:
         return None
-    effective_extras = {
+    planned = _planned_skill_capability_ids(
+        existing_capability_ids=effective_capability_ids,
+        capability_assignment_mode=capability_assignment_mode,
+        predicted_capability_ids=predicted_capability_ids,
+        replacement_capability_ids=replacement_capability_ids,
+    )
+    prototype_skills = {
         capability_id
-        for capability_id in effective_capability_ids
-        if capability_id not in baseline_capability_ids
+        for capability_id in role_prototype_capability_ids
+        if capability_id.startswith("skill:")
     }
-    planned_extras = set(effective_extras)
-    if capability_assignment_mode == "replace":
-        planned_extras.difference_update(replacement_capability_ids)
-    planned_extras.update(
-        capability_id
-        for capability_id in predicted_capability_ids
-        if capability_id not in baseline_capability_ids
+    counted = [capability_id for capability_id in planned if capability_id not in prototype_skills]
+    current_count = len(
+        [
+            capability_id
+            for capability_id in effective_capability_ids
+            if capability_id.startswith("skill:") and capability_id not in prototype_skills
+        ],
     )
-    over_limit_by = max(len(planned_extras) - extra_limit, 0)
+    over_limit_by = max(len(counted) - limit, 0)
+    within_replacement_baseline = (
+        capability_assignment_mode == "replace" and len(counted) <= current_count
+    )
     return RemoteSkillPreflightCheck(
-        code="capability-budget",
-        label="Capability budget",
-        status="pass" if over_limit_by <= 0 else "fail",
+        code="role-skill-budget",
+        label="Role skill budget",
+        status="pass" if over_limit_by <= 0 or within_replacement_baseline else "fail",
         detail=(
-            f"Planned extra capability count {len(planned_extras)}/{extra_limit} stays within budget."
+            f"Planned role skill count {len(counted)}/{limit} stays within budget."
             if over_limit_by <= 0
-            else f"Planned extra capability count exceeds the business-agent budget by {over_limit_by}."
+            else (
+                f"Planned role skill count remains {len(counted)} and does not worsen the current over-budget baseline."
+                if within_replacement_baseline
+                else f"Planned role skill count exceeds budget by {over_limit_by}."
+            )
+        ),
+    )
+
+
+def _seat_skill_budget_check(
+    *,
+    agent_profile_service: object | None,
+    target_agent_id: str | None,
+    target_seat_ref: str | None,
+    capability_assignment_mode: Literal["merge", "replace"],
+    predicted_capability_ids: list[str],
+    replacement_capability_ids: list[str],
+    seat_instance_capability_ids: list[str],
+) -> RemoteSkillPreflightCheck | None:
+    if target_seat_ref is None:
+        return None
+    limit = _budget_limit(
+        agent_profile_service=agent_profile_service,
+        target_agent_id=target_agent_id,
+    )
+    if limit is None:
+        return None
+    planned = _planned_skill_capability_ids(
+        existing_capability_ids=seat_instance_capability_ids,
+        capability_assignment_mode=capability_assignment_mode,
+        predicted_capability_ids=predicted_capability_ids,
+        replacement_capability_ids=replacement_capability_ids,
+    )
+    current_count = len(
+        [
+            capability_id
+            for capability_id in seat_instance_capability_ids
+            if capability_id.startswith("skill:")
+        ],
+    )
+    over_limit_by = max(len(planned) - limit, 0)
+    within_replacement_baseline = (
+        capability_assignment_mode == "replace" and len(planned) <= current_count
+    )
+    return RemoteSkillPreflightCheck(
+        code="seat-skill-budget",
+        label="Seat skill budget",
+        status="pass" if over_limit_by <= 0 or within_replacement_baseline else "fail",
+        detail=(
+            f"Planned seat skill count {len(planned)}/{limit} stays within budget."
+            if over_limit_by <= 0
+            else (
+                f"Planned seat skill count remains {len(planned)} and does not worsen the current over-budget baseline."
+                if within_replacement_baseline
+                else f"Planned seat skill count exceeds budget by {over_limit_by}."
+            )
         ),
     )
 

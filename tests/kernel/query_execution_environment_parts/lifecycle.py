@@ -475,6 +475,133 @@ def test_query_execution_service_uses_agent_profile_and_capability_graph(
     assert mcp_manager.get_clients_calls == 0
 
 
+def test_query_execution_service_passes_typed_capability_layers_into_agent_and_prompt(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    class _FakeAgentProfileServiceWithGovernance(_FakeAgentProfileService):
+        def get_prompt_capability_projection(self, agent_id: str, *, item_limit: int = 4):
+            _ = item_limit
+            assert agent_id == "ops-agent"
+            return {
+                "agent_id": agent_id,
+                "default_mode": "governed",
+                "effective_count": 3,
+                "pending_decision_count": 2,
+                "drift_detected": True,
+                "bucket_counts": {
+                    "system_dispatch": 1,
+                    "system_governance": 1,
+                    "tools": 1,
+                    "skills": 0,
+                    "mcp": 0,
+                    "other": 0,
+                },
+                "system_dispatch": [{"id": "system:dispatch_query", "label": "dispatch_query"}],
+                "system_governance": [{"id": "system:apply_role", "label": "apply_role"}],
+                "tools": [{"id": "tool:read_file", "label": "read_file"}],
+                "skills": [],
+                "mcp": [],
+                "other": [],
+                "risk_levels": {"auto": 1, "guarded": 2},
+                "environment_requirements": ["workspace"],
+                "evidence_contract": ["file-read"],
+            }
+
+    _FakeAgent.created.clear()
+    monkeypatch.setattr(query_execution_module, "CoPawAgent", _FakeAgent)
+    monkeypatch.setattr(
+        query_execution_module,
+        "stream_printing_messages",
+        _fake_stream_printing_messages,
+    )
+    monkeypatch.setattr(
+        query_execution_module,
+        "load_config",
+        lambda: SimpleNamespace(
+            agents=SimpleNamespace(
+                running=SimpleNamespace(max_iters=1, max_input_length=512),
+            ),
+        ),
+    )
+
+    state_store = SQLiteStateStore(tmp_path / "query-runtime-capability-layers.sqlite3")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="ops-agent",
+            actor_key="industry:ops:execution-core",
+            actor_fingerprint="fp-ops-v1",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            metadata={
+                "capability_layers": {
+                    "schema_version": "industry-seat-capability-layers-v1",
+                    "role_prototype_capability_ids": [
+                        "tool:read_file",
+                        "system:dispatch_query",
+                    ],
+                    "seat_instance_capability_ids": ["tool:write_file"],
+                    "cycle_delta_capability_ids": ["mcp:browser"],
+                    "session_overlay_capability_ids": ["mcp:other"],
+                },
+            },
+        ),
+    )
+
+    session_backend = _FakeSessionBackend()
+    mcp_manager = _FakeMCPManager()
+    service = KernelQueryExecutionService(
+        session_backend=session_backend,
+        mcp_manager=mcp_manager,
+        capability_service=_FakeCapabilityService(),
+        agent_profile_service=_FakeAgentProfileServiceWithGovernance(),
+        industry_service=_FakeIndustryService(),
+        knowledge_service=_FakeKnowledgeService(),
+        agent_runtime_repository=runtime_repository,
+    )
+
+    async def _run():
+        async for _msg, _last in service.execute_stream(
+            msgs=[SimpleNamespace(get_text_content=lambda: "plan the next move")],
+            request=SimpleNamespace(
+                session_id="goal-capability-layers",
+                user_id="ops-agent",
+                channel="goal",
+                industry_label="Ops Industry Team",
+                owner_scope="industry-v1-ops-scope",
+                session_kind="industry-agent-chat",
+            ),
+            kernel_task_id="task-capability-layers",
+        ):
+            pass
+
+    asyncio.run(_run())
+
+    assert len(_FakeAgent.created) == 1
+    agent = _FakeAgent.created[0]
+    assert agent.kwargs["capability_layers"].role_prototype_capability_ids == [
+        "tool:read_file",
+        "system:dispatch_query",
+    ]
+    assert agent.kwargs["capability_layers"].seat_instance_capability_ids == [
+        "tool:write_file",
+    ]
+    assert agent.kwargs["capability_layers"].cycle_delta_capability_ids == [
+        "mcp:browser",
+    ]
+    assert agent.kwargs["capability_layers"].session_overlay_capability_ids == [
+        "mcp:other",
+    ]
+    assert "Role prototype surfaces:" in agent.kwargs["prompt_appendix"]
+    assert "Seat instance surfaces:" in agent.kwargs["prompt_appendix"]
+    assert "Cycle delta surfaces:" in agent.kwargs["prompt_appendix"]
+    assert "Session overlay surfaces:" in agent.kwargs["prompt_appendix"]
+    assert "pending_governance=2" in agent.kwargs["prompt_appendix"]
+    assert "drift=yes" in agent.kwargs["prompt_appendix"]
+
+
 def test_query_execution_service_isolates_long_term_memory_for_task_threads(
     monkeypatch,
 ) -> None:

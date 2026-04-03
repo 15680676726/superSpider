@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from ...config import get_heartbeat_config
+from ...industry.models import IndustrySeatCapabilityLayers
 from ...kernel.runtime_outcome import build_execution_diagnostics
 from ...utils.runtime_action_links import build_decision_actions, build_patch_actions
 from .overview_helpers import build_runtime_surface
@@ -184,14 +185,22 @@ class _RuntimeCenterOverviewCardsSupport:
         )
 
     async def _build_agents_card(self, app_state: Any) -> RuntimeOverviewCard:
-        return await self._service_card(
-            target=getattr(app_state, "agent_profile_service", None),
+        service = getattr(app_state, "agent_profile_service", None)
+        items = await self._call_list_method(service, "list_agents")
+        if items is _MISSING:
+            return self._unavailable_card("agents", "智能体", self._unavailable_summary("智能体"))
+        total = await self._call_count_method(service)
+        if total is None:
+            total = len(items)
+        enriched_items = await self._enrich_agent_overview_items(items, service)
+        return self._available_card(
             key="agents",
             title="智能体",
             source="agent_profile_service",
+            count=total,
             summary="由默认配置、覆盖配置与运行态汇总出的可见智能体画像。",
-            methods=("list_agents",),
-            mapper=self._map_agent_entries,
+            entries=self._map_agent_entries(enriched_items),
+            meta=self._build_standard_card_meta(enriched_items, total),
         )
 
     async def _build_industry_card(self, app_state: Any) -> RuntimeOverviewCard:
@@ -687,6 +696,92 @@ class _RuntimeCenterOverviewCardsSupport:
             return list(value)
         return [value]
 
+    async def _enrich_agent_overview_items(
+        self,
+        items: list[Any],
+        service: Any,
+    ) -> list[Any]:
+        detail_getter = getattr(service, "get_agent_detail", None)
+        if not callable(detail_getter):
+            return items
+        enriched: list[Any] = []
+        for item in items:
+            payload = self._model_dump(item)
+            agent_id = self._string(payload.get("agent_id") or payload.get("id"))
+            if agent_id is None:
+                enriched.append(payload or item)
+                continue
+            try:
+                detail = await self._maybe_await(detail_getter(agent_id))
+            except Exception:
+                logger.debug("runtime_center agent detail enrichment failed", exc_info=True)
+                enriched.append(payload or item)
+                continue
+            governance = self._project_agent_capability_governance_from_detail(
+                payload,
+                detail,
+            )
+            if governance is not None:
+                payload["capability_governance"] = governance
+            enriched.append(payload or item)
+        return enriched
+
+    def _project_agent_capability_governance_from_detail(
+        self,
+        agent_payload: Mapping[str, Any],
+        detail: Any,
+    ) -> dict[str, Any] | None:
+        detail_payload = self._model_dump(detail)
+        runtime_payload = self._model_dump(detail_payload.get("runtime"))
+        metadata = self._model_dump(runtime_payload.get("metadata"))
+        capability_layers = IndustrySeatCapabilityLayers.from_metadata(
+            metadata.get("capability_layers"),
+        )
+        if not capability_layers.merged_capability_ids():
+            return None
+        layers_payload = capability_layers.to_metadata_payload()
+        raw_session_overlay = self._model_dump(metadata.get("current_session_overlay"))
+        overlay_capability_ids = self._strings(
+            raw_session_overlay.get("capability_ids"),
+        ) or self._strings(layers_payload.get("session_overlay_capability_ids"))
+        current_session_overlay: dict[str, Any] | None = None
+        if raw_session_overlay or overlay_capability_ids:
+            current_session_overlay = {
+                **raw_session_overlay,
+                "overlay_scope": self._string(raw_session_overlay.get("overlay_scope")) or "session",
+                "overlay_mode": self._string(raw_session_overlay.get("overlay_mode")) or (
+                    "additive" if overlay_capability_ids else None
+                ),
+                "session_id": self._string(raw_session_overlay.get("session_id")),
+                "capability_ids": overlay_capability_ids,
+                "status": self._string(raw_session_overlay.get("status")) or (
+                    "active" if overlay_capability_ids else None
+                ),
+            }
+        return {
+            "is_projection": True,
+            "is_truth_store": False,
+            "source": "agent_runtime.metadata.capability_layers",
+            "layers": layers_payload,
+            "counts": {
+                "role_prototype": len(self._strings(layers_payload.get("role_prototype_capability_ids"))),
+                "seat_instance": len(self._strings(layers_payload.get("seat_instance_capability_ids"))),
+                "cycle_delta": len(self._strings(layers_payload.get("cycle_delta_capability_ids"))),
+                "session_overlay": len(self._strings(layers_payload.get("session_overlay_capability_ids"))),
+                "effective": len(self._strings(layers_payload.get("effective_capability_ids"))),
+            },
+            "current_session_overlay": current_session_overlay,
+            "lifecycle": {
+                "employment_mode": self._string(runtime_payload.get("employment_mode"))
+                or self._string(agent_payload.get("employment_mode")),
+                "activation_mode": self._string(runtime_payload.get("activation_mode"))
+                or self._string(agent_payload.get("activation_mode")),
+                "desired_state": self._string(runtime_payload.get("desired_state")),
+                "runtime_status": self._string(runtime_payload.get("runtime_status")),
+                "status": self._string(agent_payload.get("status")),
+            },
+        }
+
     def _map_task_entries(self, items: list[Any]) -> list[RuntimeOverviewEntry]:
         return self._build_mapped_entries(
             items,
@@ -798,6 +893,9 @@ class _RuntimeCenterOverviewCardsSupport:
     def _build_agent_entry(self, item: Any) -> RuntimeOverviewEntry:
         agent_id = self._string(self._get_field(item, "agent_id", "id")) or "unknown-agent"
         capabilities = self._strings(self._get_field(item, "capabilities"))
+        governance = self._model_dump(self._get_field(item, "capability_governance"))
+        lifecycle = self._model_dump(governance.get("lifecycle"))
+        overlay = self._model_dump(governance.get("current_session_overlay"))
         return RuntimeOverviewEntry(
             id=agent_id,
             title=self._string(self._get_field(item, "name")) or agent_id,
@@ -815,6 +913,15 @@ class _RuntimeCenterOverviewCardsSupport:
                 "current_task_id": self._string(self._get_field(item, "current_task_id")),
                 "environment_summary": self._string(self._get_field(item, "environment_summary")),
                 "capability_count": len(capabilities),
+                "employment_mode": self._string(lifecycle.get("employment_mode")),
+                "activation_mode": self._string(lifecycle.get("activation_mode")),
+                "desired_state": self._string(lifecycle.get("desired_state")),
+                "runtime_status": self._string(lifecycle.get("runtime_status")),
+                "capability_layer_counts": self._normalize_int_map(governance.get("counts")),
+                "session_overlay_active": bool(
+                    self._strings(overlay.get("capability_ids"))
+                    or self._string(overlay.get("status")) == "active"
+                ),
             },
         )
 

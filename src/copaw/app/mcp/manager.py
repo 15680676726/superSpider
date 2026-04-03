@@ -35,6 +35,7 @@ class _ScopedOverlayRegistry:
     mode: Literal["additive", "replace"] = "additive"
     clients: Dict[str, Any] = field(default_factory=dict)
     configs: Dict[str, "MCPClientConfig"] = field(default_factory=dict)
+    parent_scope_ref: str | None = None
 
 
 class MCPClientManager:
@@ -305,6 +306,7 @@ class MCPClientManager:
         scope_ref: str,
         config: "MCPConfig",
         *,
+        parent_scope_ref: str | None = None,
         additive: bool = True,
         timeout: float = 60.0,
     ) -> None:
@@ -368,10 +370,16 @@ class MCPClientManager:
             old_configs = (
                 dict(previous_overlay.configs) if previous_overlay is not None else {}
             )
+            resolved_parent_scope_ref = self._resolve_parent_scope_ref(
+                scope_ref=scope_ref,
+                parent_scope_ref=parent_scope_ref,
+                previous_overlay=previous_overlay,
+            )
             self._overlay_scopes[scope_ref] = _ScopedOverlayRegistry(
                 mode=overlay_mode,
                 clients=connected_clients,
                 configs=connected_configs,
+                parent_scope_ref=resolved_parent_scope_ref,
             )
             for key, client_config in connected_configs.items():
                 self._runtime_records[(scope_ref, key)] = self._build_runtime_record(
@@ -464,6 +472,7 @@ class MCPClientManager:
                     mode=overlay.mode,
                     clients=dict(overlay.clients),
                     configs=dict(overlay.configs),
+                    parent_scope_ref=overlay.parent_scope_ref,
                 )
                 for scope_ref, overlay in self._overlay_scopes.items()
             }
@@ -707,6 +716,17 @@ class MCPClientManager:
         )
 
     def _scoped_clients_locked(self, scope_ref: str | None) -> Dict[str, Any]:
+        return self._resolve_scoped_clients_locked(
+            scope_ref=scope_ref,
+            visited_scopes=set(),
+        )
+
+    def _resolve_scoped_clients_locked(
+        self,
+        *,
+        scope_ref: str | None,
+        visited_scopes: set[str],
+    ) -> Dict[str, Any]:
         base_clients = {
             key: client
             for key, client in self._clients.items()
@@ -727,9 +747,43 @@ class MCPClientManager:
         if overlay.mode == "replace":
             return scoped_clients
 
-        merged = dict(base_clients)
+        parent_scope_ref = overlay.parent_scope_ref
+        if (
+            parent_scope_ref is not None
+            and parent_scope_ref != scope_ref
+            and parent_scope_ref not in visited_scopes
+        ):
+            merged = self._resolve_scoped_clients_locked(
+                scope_ref=parent_scope_ref,
+                visited_scopes={*visited_scopes, scope_ref},
+            )
+        else:
+            merged = dict(base_clients)
         merged.update(scoped_clients)
         return merged
+
+    @staticmethod
+    def _resolve_parent_scope_ref(
+        *,
+        scope_ref: str,
+        parent_scope_ref: str | None,
+        previous_overlay: _ScopedOverlayRegistry | None,
+    ) -> str | None:
+        candidate = (
+            parent_scope_ref
+            if parent_scope_ref is not None
+            else (
+                previous_overlay.parent_scope_ref
+                if previous_overlay is not None
+                else None
+            )
+        )
+        if candidate is None:
+            return None
+        normalized = str(candidate).strip()
+        if not normalized or normalized == scope_ref:
+            return None
+        return normalized
 
     @staticmethod
     async def _close_client_quietly(client: Any | None) -> None:

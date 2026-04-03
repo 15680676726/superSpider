@@ -8,6 +8,8 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from copaw.app.runtime_center.overview_cards import _RuntimeCenterOverviewCardsSupport
+from copaw.app.runtime_center.state_query import RuntimeCenterStateQueryService
 from copaw.app.routers.capability_market import (
     CapabilityMarketCapabilityAssignmentResult,
     router as capability_market_router,
@@ -42,12 +44,14 @@ from copaw.environments import (
 )
 from copaw.app.runtime_events import RuntimeEventBus
 from copaw.industry import IndustryProfile, IndustryRoleBlueprint
+from copaw.kernel.agent_profile import AgentProfile
 from .industry_api_parts.shared import _build_industry_app
 from copaw.kernel import KernelDispatcher, KernelTaskStore
-from copaw.state import SQLiteStateStore
+from copaw.state import AgentRuntimeRecord, SQLiteStateStore, TaskRecord, TaskRuntimeRecord
 from copaw.state.repositories import (
     SqliteDecisionRequestRepository,
     SqliteRuntimeFrameRepository,
+    SqliteScheduleRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
 )
@@ -302,13 +306,140 @@ class FakeMcpRegistryCatalog:
             client=client,
             registry=registry,
             summary=f"{server_name} -> {version}",
-            version_changed=bool(existing_client and existing_client.registry and existing_client.registry.version != version),
+            version_changed=bool(
+                existing_client
+                and existing_client.registry
+                and existing_client.registry.version != version
+            ),
             previous_version=(
                 existing_client.registry.version
                 if existing_client is not None and existing_client.registry is not None
                 else ""
             ),
         )
+
+    def _item(
+        self,
+        *,
+        version: str,
+        server_name: str = "io.github/example-filesystem",
+        installed_clients: dict[str, MCPClientConfig] | None = None,
+    ) -> McpRegistryCatalogItem:
+        installed_client_key = None
+        installed_version = ""
+        installed_via_registry = False
+        update_available = False
+        for candidate_client_key, client in dict(installed_clients or {}).items():
+            registry = getattr(client, "registry", None)
+            if registry is None:
+                continue
+            if getattr(registry, "server_name", None) != server_name:
+                continue
+            installed_client_key = candidate_client_key
+            installed_version = str(getattr(registry, "version", "") or "")
+            installed_via_registry = True
+            update_available = bool(installed_version and installed_version != version)
+            break
+        return McpRegistryCatalogItem(
+            server_name=server_name,
+            title="Filesystem MCP",
+            description="Official filesystem server",
+            version=version,
+            source_url="https://registry.modelcontextprotocol.io/v0/servers/io.github%2Fexample-filesystem",
+            website_url="https://example.com/filesystem",
+            category_keys=["filesystem"],
+            transport_types=["stdio"],
+            suggested_client_key="io_github_example_filesystem",
+            option_count=1,
+            supported_option_count=1,
+            install_supported=True,
+            installed_client_key=installed_client_key,
+            installed_version=installed_version,
+            installed_via_registry=installed_via_registry,
+            update_available=update_available,
+            routes={},
+        )
+
+
+class _GovernedAgentProfileService:
+    def __init__(self) -> None:
+        self._agent = AgentProfile(
+            agent_id="agent-seat",
+            name="Support Seat",
+            role_name="Support Specialist",
+            role_summary="Handles governed support follow-up.",
+            agent_class="business",
+            employment_mode="temporary",
+            activation_mode="on-demand",
+            status="waiting",
+            risk_level="guarded",
+            capabilities=[
+                "tool:read_file",
+                "skill:crm-seat-playbook",
+                "mcp:campaign-dashboard",
+                "mcp:browser-temp",
+            ],
+        )
+        self._runtime = AgentRuntimeRecord(
+            agent_id="agent-seat",
+            actor_key="industry-1:support-seat",
+            actor_fingerprint="seat-fingerprint",
+            actor_class="industry-dynamic",
+            desired_state="paused",
+            runtime_status="blocked",
+            employment_mode="temporary",
+            activation_mode="on-demand",
+            persistent=False,
+            industry_instance_id="industry-1",
+            industry_role_id="support-seat",
+            metadata={
+                "capability_layers": {
+                    "schema_version": "industry-seat-capability-layers-v1",
+                    "role_prototype_capability_ids": ["tool:read_file"],
+                    "seat_instance_capability_ids": ["skill:crm-seat-playbook"],
+                    "cycle_delta_capability_ids": ["mcp:campaign-dashboard"],
+                    "session_overlay_capability_ids": ["mcp:browser-temp"],
+                    "effective_capability_ids": [
+                        "tool:read_file",
+                        "skill:crm-seat-playbook",
+                        "mcp:campaign-dashboard",
+                        "mcp:browser-temp",
+                    ],
+                },
+                "current_session_overlay": {
+                    "overlay_scope": "session",
+                    "overlay_mode": "additive",
+                    "session_id": "session-seat-1",
+                    "capability_ids": ["mcp:browser-temp"],
+                    "status": "active",
+                },
+            },
+        )
+
+    def list_agents(self, *, view: str = "all", limit: int | None = None, industry_instance_id: str | None = None):
+        _ = (view, industry_instance_id)
+        items = [self._agent]
+        if isinstance(limit, int):
+            return items[:limit]
+        return items
+
+    def get_agent(self, agent_id: str):
+        if agent_id != self._agent.agent_id:
+            return None
+        return self._agent
+
+    def get_agent_detail(self, agent_id: str):
+        if agent_id != self._agent.agent_id:
+            return None
+        return {
+            "agent": self._agent.model_dump(mode="json"),
+            "runtime": self._runtime.model_dump(mode="json"),
+            "capability_surface": {
+                "agent_id": agent_id,
+                "default_mode": "governed",
+                "effective_capabilities": list(self._agent.capabilities),
+            },
+        }
 
     def _item(
         self,
@@ -1491,3 +1622,99 @@ def test_capability_market_install_template_assignment_requires_existing_target_
 
     assert response.status_code == 404
     assert "Target agents not found" in response.json()["detail"]
+
+
+def test_state_query_projects_multi_seat_capability_governance_into_task_detail(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state-query-capability-governance.db")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    schedule_repository = SqliteScheduleRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-1",
+            title="Handle governed support follow-up",
+            summary="Prepare the next governed support move.",
+            task_type="query",
+            status="running",
+            owner_agent_id="agent-seat",
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-1",
+            runtime_status="active",
+            current_phase="executing",
+            last_owner_agent_id="agent-seat",
+        ),
+    )
+
+    service = RuntimeCenterStateQueryService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        runtime_frame_repository=SqliteRuntimeFrameRepository(state_store),
+        schedule_repository=schedule_repository,
+        goal_repository=None,
+        decision_request_repository=decision_request_repository,
+        agent_profile_service=_GovernedAgentProfileService(),
+    )
+
+    detail = service.get_task_detail("task-1")
+
+    assert detail is not None
+    agent = detail["agents"][0]
+    governance = agent["capability_governance"]
+    assert governance["is_projection"] is True
+    assert governance["is_truth_store"] is False
+    assert governance["source"] == "agent_runtime.metadata.capability_layers"
+    assert governance["layers"]["role_prototype_capability_ids"] == ["tool:read_file"]
+    assert governance["layers"]["seat_instance_capability_ids"] == [
+        "skill:crm-seat-playbook",
+    ]
+    assert governance["layers"]["cycle_delta_capability_ids"] == [
+        "mcp:campaign-dashboard",
+    ]
+    assert governance["layers"]["session_overlay_capability_ids"] == [
+        "mcp:browser-temp",
+    ]
+    assert governance["current_session_overlay"] == {
+        "overlay_scope": "session",
+        "overlay_mode": "additive",
+        "session_id": "session-seat-1",
+        "capability_ids": ["mcp:browser-temp"],
+        "status": "active",
+    }
+    assert governance["lifecycle"] == {
+        "employment_mode": "temporary",
+        "activation_mode": "on-demand",
+        "desired_state": "paused",
+        "runtime_status": "blocked",
+        "status": "waiting",
+    }
+
+
+def test_runtime_center_agents_overview_projects_capability_governance_meta() -> None:
+    support = _RuntimeCenterOverviewCardsSupport()
+
+    card = asyncio.run(
+        support._build_agents_card(
+            SimpleNamespace(agent_profile_service=_GovernedAgentProfileService()),
+        ),
+    ).model_dump(mode="json")
+
+    entry = card["entries"][0]
+    assert entry["meta"]["employment_mode"] == "temporary"
+    assert entry["meta"]["activation_mode"] == "on-demand"
+    assert entry["meta"]["desired_state"] == "paused"
+    assert entry["meta"]["runtime_status"] == "blocked"
+    assert entry["meta"]["session_overlay_active"] is True
+    assert entry["meta"]["capability_layer_counts"] == {
+        "role_prototype": 1,
+        "seat_instance": 1,
+        "cycle_delta": 1,
+        "session_overlay": 1,
+        "effective": 4,
+    }

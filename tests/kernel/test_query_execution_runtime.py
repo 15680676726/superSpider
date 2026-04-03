@@ -455,6 +455,7 @@ def test_query_execution_runtime_filters_capabilities_by_effective_seat_layers(
         mcp_client_keys,
         system_capability_ids,
         desktop_actuation_available,
+        capability_layers,
     ) = service._resolve_query_capability_context("agent-support")  # pylint: disable=protected-access
 
     assert tool_capability_ids == {"tool:read_file"}
@@ -462,3 +463,8 @@ def test_query_execution_runtime_filters_capabilities_by_effective_seat_layers(
     assert mcp_client_keys == ["browser-temp", "campaign-dashboard"]
     assert system_capability_ids == set()
     assert desktop_actuation_available is False
+    assert capability_layers is not None
+    assert capability_layers.role_prototype_capability_ids == ["tool:read_file"]
+    assert capability_layers.seat_instance_capability_ids == ["skill:crm-seat-playbook"]
+    assert capability_layers.cycle_delta_capability_ids == ["mcp:campaign-dashboard"]
+    assert capability_layers.session_overlay_capability_ids == ["mcp:browser-temp"]

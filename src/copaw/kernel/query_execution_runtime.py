@@ -556,6 +556,7 @@ class _QueryExecutionRuntimeMixin(
                 mcp_client_keys,
                 system_capability_ids,
                 desktop_actuation_available,
+                capability_layers,
             ) = self._resolve_query_capability_context(owner_agent_id)
             (
                 tool_capability_ids,
@@ -623,6 +624,7 @@ class _QueryExecutionRuntimeMixin(
                 kernel_task_id=kernel_task_id,
                 agent_profile=agent_profile,
                 mounted_capabilities=mounted_capabilities,
+                capability_layers=capability_layers,
                 desktop_actuation_available=desktop_actuation_available,
                 execution_context=execution_context,
                 delegation_guard=delegation_guard,
@@ -676,6 +678,7 @@ class _QueryExecutionRuntimeMixin(
                     max_input_length=config.agents.running.max_input_length,
                     allowed_tool_capability_ids=tool_capability_ids,
                     allowed_skill_names=skill_names,
+                    capability_layers=capability_layers,
                     extra_tool_functions=system_tool_functions,
                 ),
             )
@@ -1776,13 +1779,14 @@ class _QueryExecutionRuntimeMixin(
         list[str] | None,
         set[str] | None,
         bool,
+        IndustrySeatCapabilityLayers | None,
     ]:
         service = self._capability_service
         if service is None:
-            return None, None, None, None, False
+            return None, None, None, None, False, None
         lister = getattr(service, "list_accessible_capabilities", None)
         if not callable(lister):
-            return None, None, None, None, False
+            return None, None, None, None, False, None
         mounts = list(lister(agent_id=owner_agent_id, enabled_only=True) or [])
         runtime_capability_layers = self._resolve_runtime_capability_layers(
             owner_agent_id=owner_agent_id,
@@ -1826,6 +1830,7 @@ class _QueryExecutionRuntimeMixin(
             mcp_client_keys,
             system_capability_ids,
             desktop_actuation_available,
+            runtime_capability_layers,
         )
 
     def _resolve_runtime_capability_layers(

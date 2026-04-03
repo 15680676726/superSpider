@@ -36,6 +36,7 @@ class _QueryExecutionPromptMixin:
         agent_profile: Any | None,
         kernel_task_id: str | None = None,
         mounted_capabilities: list[str] | None = None,
+        capability_layers: Any | None = None,
         desktop_actuation_available: bool = False,
         execution_context: dict[str, Any] | None = None,
         delegation_guard: _DelegationFirstGuard | None = None,
@@ -359,6 +360,7 @@ class _QueryExecutionPromptMixin:
         capability_projection = self._resolve_prompt_capability_projection(
             owner_agent_id=owner_agent_id,
             capabilities=capabilities,
+            capability_layers=capability_layers,
         )
         capability_card_lines = self._build_capability_card_lines(
             capability_projection=capability_projection,
@@ -953,7 +955,9 @@ class _QueryExecutionPromptMixin:
         *,
         owner_agent_id: str,
         capabilities: list[str],
+        capability_layers: Any | None = None,
     ) -> dict[str, Any] | None:
+        service_projection: dict[str, Any] | None = None
         service = self._agent_profile_service
         getter = getattr(service, "get_prompt_capability_projection", None)
         if callable(getter):
@@ -964,17 +968,26 @@ class _QueryExecutionPromptMixin:
             else:
                 resolved_projection = _mapping_value(projection)
                 if resolved_projection:
-                    return resolved_projection
-        return self._build_prompt_capability_projection_from_mounts(
-            owner_agent_id=owner_agent_id,
-            capabilities=capabilities,
+                    service_projection = resolved_projection
+        if service_projection is None:
+            service_projection = self._build_prompt_capability_projection_from_mounts(
+                owner_agent_id=owner_agent_id,
+                capabilities=capabilities,
+                capability_layers=capability_layers,
+            )
+        if service_projection is None:
+            return None
+        service_projection["capability_layers"] = self._prompt_capability_layer_payload(
+            capability_layers,
         )
+        return service_projection
 
     def _build_prompt_capability_projection_from_mounts(
         self,
         *,
         owner_agent_id: str,
         capabilities: list[str],
+        capability_layers: Any | None = None,
     ) -> dict[str, Any] | None:
         capability_ids = [
             capability_id
@@ -1052,6 +1065,9 @@ class _QueryExecutionPromptMixin:
             "effective_count": len(capability_ids),
             "pending_decision_count": 0,
             "drift_detected": False,
+            "capability_layers": self._prompt_capability_layer_payload(
+                capability_layers,
+            ),
             "bucket_counts": bucket_counts,
             "system_dispatch": buckets["system_dispatch"],
             "system_governance": buckets["system_governance"],
@@ -1062,6 +1078,28 @@ class _QueryExecutionPromptMixin:
             "risk_levels": risk_levels,
             "environment_requirements": environment_requirements[:8],
             "evidence_contract": evidence_contract[:8],
+        }
+
+    def _prompt_capability_layer_payload(
+        self,
+        capability_layers: Any | None,
+    ) -> dict[str, list[str]]:
+        payload = _mapping_value(
+            getattr(capability_layers, "to_metadata_payload", lambda: capability_layers)(),
+        )
+        return {
+            "role_prototype_capability_ids": _string_list(
+                payload.get("role_prototype_capability_ids"),
+            ),
+            "seat_instance_capability_ids": _string_list(
+                payload.get("seat_instance_capability_ids"),
+            ),
+            "cycle_delta_capability_ids": _string_list(
+                payload.get("cycle_delta_capability_ids"),
+            ),
+            "session_overlay_capability_ids": _string_list(
+                payload.get("session_overlay_capability_ids"),
+            ),
         }
 
     def _build_capability_card_lines(
@@ -1121,6 +1159,16 @@ class _QueryExecutionPromptMixin:
             lines.append(
                 f"- Evidence outputs: {', '.join(evidence_contract[:6])}",
             )
+        capability_layers = _mapping_value(capability_projection.get("capability_layers"))
+        for label, key in (
+            ("Role prototype surfaces", "role_prototype_capability_ids"),
+            ("Seat instance surfaces", "seat_instance_capability_ids"),
+            ("Cycle delta surfaces", "cycle_delta_capability_ids"),
+            ("Session overlay surfaces", "session_overlay_capability_ids"),
+        ):
+            entries = _string_list(capability_layers.get(key))
+            if entries:
+                lines.append(f"- {label}: {', '.join(entries[:6])}")
         return lines
 
     def _get_industry_instance(self, industry_instance_id: str) -> Any | None:

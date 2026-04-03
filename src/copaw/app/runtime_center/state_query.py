@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
 from ...evidence import EvidenceLedger
+from ...industry.models import IndustrySeatCapabilityLayers
 from ...kernel.decision_policy import (
     decision_chat_route,
     decision_chat_thread_id,
@@ -882,10 +884,39 @@ class RuntimeCenterStateQueryService:
             return []
         service = self._agent_profile_service
         getter = getattr(service, "get_agent", None)
+        detail_getter = getattr(service, "get_agent_detail", None)
         payload: list[dict[str, object]] = []
         for agent_id in sorted(agent_ids):
-            agent = getter(agent_id) if callable(getter) else None
-            if agent is None:
+            agent_detail = detail_getter(agent_id) if callable(detail_getter) else None
+            if agent_detail is not None:
+                agent_payload = self._agent_payload_from_detail(agent_id, agent_detail)
+            else:
+                agent = getter(agent_id) if callable(getter) else None
+                if agent is None:
+                    payload.append(
+                        {
+                            "agent_id": agent_id,
+                            "name": agent_id,
+                            "status": "unknown",
+                            "route": agent_route(agent_id),
+                        },
+                    )
+                    continue
+                model_dump = getattr(agent, "model_dump", None)
+                agent_payload = (
+                    model_dump(mode="json")
+                    if callable(model_dump)
+                    else dict(agent)
+                    if isinstance(agent, dict)
+                    else {"agent_id": agent_id, "name": agent_id}
+                )
+                governance = self._project_agent_capability_governance(
+                    agent_payload=agent_payload,
+                    runtime_payload=None,
+                )
+                if governance is not None:
+                    agent_payload["capability_governance"] = governance
+            if not isinstance(agent_payload, dict):
                 payload.append(
                     {
                         "agent_id": agent_id,
@@ -895,17 +926,124 @@ class RuntimeCenterStateQueryService:
                     },
                 )
                 continue
-            model_dump = getattr(agent, "model_dump", None)
-            agent_payload = (
-                model_dump(mode="json")
-                if callable(model_dump)
-                else dict(agent)
-                if isinstance(agent, dict)
-                else {"agent_id": agent_id, "name": agent_id}
-            )
             agent_payload["route"] = agent_route(agent_id)
             payload.append(agent_payload)
         return payload
+
+    def _agent_payload_from_detail(
+        self,
+        agent_id: str,
+        detail: object,
+    ) -> dict[str, object]:
+        detail_payload = self._mapping_payload(detail)
+        agent_payload = self._mapping_payload(detail_payload.get("agent"))
+        if not agent_payload:
+            agent_payload = {"agent_id": agent_id, "name": agent_id}
+        runtime_payload = self._mapping_payload(detail_payload.get("runtime"))
+        governance = self._project_agent_capability_governance(
+            agent_payload=agent_payload,
+            runtime_payload=runtime_payload,
+        )
+        if governance is not None:
+            agent_payload["capability_governance"] = governance
+        return agent_payload
+
+    def _project_agent_capability_governance(
+        self,
+        *,
+        agent_payload: Mapping[str, object],
+        runtime_payload: Mapping[str, object] | None,
+    ) -> dict[str, object] | None:
+        runtime_payload = runtime_payload or {}
+        metadata = self._mapping_payload(runtime_payload.get("metadata"))
+        capability_layers = IndustrySeatCapabilityLayers.from_metadata(
+            metadata.get("capability_layers"),
+        )
+        if not capability_layers.merged_capability_ids():
+            return None
+        layers_payload = capability_layers.to_metadata_payload()
+        overlay_payload = self._mapping_payload(metadata.get("current_session_overlay"))
+        overlay_capability_ids = list(
+            dict.fromkeys(
+                string_list_from_values(
+                    overlay_payload.get("capability_ids"),
+                    layers_payload.get("session_overlay_capability_ids"),
+                ),
+            ),
+        )
+        current_session_overlay: dict[str, object] | None = None
+        if overlay_payload or overlay_capability_ids:
+            current_session_overlay = {
+                **overlay_payload,
+                "overlay_scope": first_non_empty(
+                    overlay_payload.get("overlay_scope"),
+                    "session",
+                ),
+                "overlay_mode": first_non_empty(
+                    overlay_payload.get("overlay_mode"),
+                    "additive" if overlay_capability_ids else None,
+                ),
+                "capability_ids": overlay_capability_ids,
+                "status": first_non_empty(
+                    overlay_payload.get("status"),
+                    "active" if overlay_capability_ids else None,
+                ),
+            }
+        return {
+            "is_projection": True,
+            "is_truth_store": False,
+            "source": "agent_runtime.metadata.capability_layers",
+            "layers": layers_payload,
+            "counts": {
+                "role_prototype": len(
+                    string_list_from_values(
+                        layers_payload.get("role_prototype_capability_ids"),
+                    ),
+                ),
+                "seat_instance": len(
+                    string_list_from_values(
+                        layers_payload.get("seat_instance_capability_ids"),
+                    ),
+                ),
+                "cycle_delta": len(
+                    string_list_from_values(
+                        layers_payload.get("cycle_delta_capability_ids"),
+                    ),
+                ),
+                "session_overlay": len(
+                    string_list_from_values(
+                        layers_payload.get("session_overlay_capability_ids"),
+                    ),
+                ),
+                "effective": len(
+                    string_list_from_values(layers_payload.get("effective_capability_ids")),
+                ),
+            },
+            "current_session_overlay": current_session_overlay,
+            "lifecycle": {
+                "employment_mode": first_non_empty(
+                    runtime_payload.get("employment_mode"),
+                    agent_payload.get("employment_mode"),
+                ),
+                "activation_mode": first_non_empty(
+                    runtime_payload.get("activation_mode"),
+                    agent_payload.get("activation_mode"),
+                ),
+                "desired_state": first_non_empty(runtime_payload.get("desired_state")),
+                "runtime_status": first_non_empty(runtime_payload.get("runtime_status")),
+                "status": first_non_empty(agent_payload.get("status")),
+            },
+        }
+
+    def _mapping_payload(self, value: object) -> dict[str, object]:
+        if isinstance(value, Mapping):
+            return dict(value)
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            payload = model_dump(mode="json")
+            if isinstance(payload, Mapping):
+                return dict(payload)
+        return {}
 
 Phase1StateQueryService = RuntimeCenterStateQueryService
 RuntimeStateQueryService = RuntimeCenterStateQueryService

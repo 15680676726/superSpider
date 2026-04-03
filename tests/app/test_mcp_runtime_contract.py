@@ -47,12 +47,14 @@ class _RecordingMCPManager:
         scope_ref: str,
         config,
         *,
+        parent_scope_ref: str | None = None,
         additive: bool = True,
         timeout: float = 60.0,
     ) -> None:
         self.mount_calls.append(
             {
                 "scope_ref": scope_ref,
+                "parent_scope_ref": parent_scope_ref,
                 "config": config,
                 "additive": additive,
                 "timeout": timeout,
@@ -63,9 +65,13 @@ class _RecordingMCPManager:
         self.clear_calls.append(scope_ref)
 
 
-def _child_run_overlay_payload(scope_ref: str) -> dict[str, object]:
-    return {
-        "scope_ref": scope_ref,
+def _child_run_overlay_payload(
+    scope_ref: str | None = None,
+    *,
+    seat_scope_ref: str | None = None,
+    session_scope_ref: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
         "clients": {
             "scoped_worker": {
                 "name": "scoped_worker",
@@ -76,6 +82,13 @@ def _child_run_overlay_payload(scope_ref: str) -> dict[str, object]:
             },
         },
     }
+    if scope_ref is not None:
+        payload["scope_ref"] = scope_ref
+    if seat_scope_ref is not None:
+        payload["seat_scope_ref"] = seat_scope_ref
+    if session_scope_ref is not None:
+        payload["session_scope_ref"] = session_scope_ref
+    return payload
 
 
 @pytest.mark.asyncio
@@ -452,6 +465,92 @@ async def test_mcp_manager_scoped_overlay_replace_hides_base_until_cleared(
 
 
 @pytest.mark.asyncio
+async def test_mcp_manager_session_scope_inherits_selected_seat_overlay_without_cross_seat_leak(
+    monkeypatch,
+) -> None:
+    manager = MCPClientManager()
+
+    monkeypatch.setattr(
+        MCPClientManager,
+        "_build_client",
+        staticmethod(lambda cfg: _FakeClient(cfg.name)),
+    )
+
+    base_cfg = MCPClientConfig(
+        name="worker",
+        enabled=True,
+        transport="stdio",
+        command="python",
+        args=["-m", "worker"],
+    )
+    alpha_cfg = MCPClientConfig(
+        name="alpha_browser",
+        enabled=True,
+        transport="stdio",
+        command="python",
+        args=["-m", "alpha_browser"],
+    )
+    beta_cfg = MCPClientConfig(
+        name="beta_browser",
+        enabled=True,
+        transport="stdio",
+        command="python",
+        args=["-m", "beta_browser"],
+    )
+    session_cfg = MCPClientConfig(
+        name="temp_browser",
+        enabled=True,
+        transport="stdio",
+        command="python",
+        args=["-m", "temp_browser"],
+    )
+    await manager.init_from_config(MCPConfig(clients={"worker": base_cfg}))
+    await manager.mount_scope_overlay(
+        "seat:alpha",
+        MCPConfig(clients={"alpha_browser": alpha_cfg}),
+        additive=True,
+        timeout=3.0,
+    )
+    await manager.mount_scope_overlay(
+        "seat:beta",
+        MCPConfig(clients={"beta_browser": beta_cfg}),
+        additive=True,
+        timeout=3.0,
+    )
+    await manager.mount_scope_overlay(
+        "session:alpha:1",
+        MCPConfig(clients={"temp_browser": session_cfg}),
+        parent_scope_ref="seat:alpha",
+        additive=True,
+        timeout=3.0,
+    )
+
+    alpha_session_clients = await manager.get_clients(scope_ref="session:alpha:1")
+    beta_seat_clients = await manager.get_clients(scope_ref="seat:beta")
+
+    assert sorted(client.name for client in alpha_session_clients) == [
+        "alpha_browser",
+        "temp_browser",
+        "worker",
+    ]
+    assert sorted(client.name for client in beta_seat_clients) == [
+        "beta_browser",
+        "worker",
+    ]
+    assert await manager.get_client("alpha_browser", scope_ref="session:alpha:1") is not None
+    assert await manager.get_client("beta_browser", scope_ref="session:alpha:1") is None
+    assert await manager.get_client("temp_browser", scope_ref="seat:alpha") is None
+
+    await manager.clear_scope_overlay("session:alpha:1")
+
+    cleared_alpha_clients = await manager.get_clients(scope_ref="seat:alpha")
+    assert sorted(client.name for client in cleared_alpha_clients) == [
+        "alpha_browser",
+        "worker",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_mcp_manager_failed_overlay_mount_preserves_previous_scope_clients(
     monkeypatch,
 ) -> None:
@@ -569,3 +668,48 @@ async def test_child_run_direct_delegation_mounts_and_clears_scoped_overlay_on_f
     mounted_config = mcp_manager.mount_calls[0]["config"]
     assert mounted_config.clients["scoped_worker"].command == "python"
     assert mcp_manager.clear_calls == ["assignment:delegated-child-run"]
+
+
+@pytest.mark.asyncio
+async def test_child_run_direct_delegation_mounts_session_overlay_under_selected_seat_scope() -> None:
+    mcp_manager = _RecordingMCPManager()
+
+    class _SuccessfulDispatcher:
+        def __init__(self) -> None:
+            self._capability_service = SimpleNamespace(_mcp_manager=mcp_manager)
+
+        async def execute_task(self, task_id: str):
+            return SimpleNamespace(phase="completed", summary=f"ok:{task_id}")
+
+    service = TaskDelegationService(
+        task_repository=SimpleNamespace(),
+        task_runtime_repository=SimpleNamespace(),
+        kernel_dispatcher=_SuccessfulDispatcher(),
+    )
+    child_task = KernelTask(
+        title="Child run with seat-session scoped MCP",
+        capability_ref="system:dispatch_query",
+        owner_agent_id="agent-1",
+        payload={
+            "meta": {
+                "mcp_scope_overlay": _child_run_overlay_payload(
+                    seat_scope_ref="seat:agent-1",
+                    session_scope_ref="session:agent-1:delegated-child-run",
+                ),
+            },
+        },
+    )
+
+    result = await service._execute_delegated_child_task(
+        child_task,
+        mailbox_item=None,
+    )
+
+    assert result.phase == "completed"
+    assert [call["scope_ref"] for call in mcp_manager.mount_calls] == [
+        "session:agent-1:delegated-child-run",
+    ]
+    assert [call["parent_scope_ref"] for call in mcp_manager.mount_calls] == [
+        "seat:agent-1",
+    ]
+    assert mcp_manager.clear_calls == ["session:agent-1:delegated-child-run"]

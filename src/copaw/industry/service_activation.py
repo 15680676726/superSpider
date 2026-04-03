@@ -1170,7 +1170,7 @@ class _IndustryActivationMixin:
             normalized_payload.setdefault("actor", governed_actor)
             normalized_payload.setdefault("owner_agent_id", governed_owner_agent_id)
             if governed_mode:
-                return await self._dispatch_industry_governed_mutation(
+                response = await self._dispatch_industry_governed_mutation(
                     capability_ref=capability_ref,
                     title=title,
                     payload=normalized_payload,
@@ -1178,6 +1178,22 @@ class _IndustryActivationMixin:
                     fallback_risk=fallback_risk,
                     risk_level_override=governed_risk_level_override,
                 )
+                mutation_output = response.get("output")
+                if isinstance(mutation_output, dict):
+                    normalized_output = dict(mutation_output)
+                    normalized_output.setdefault("success", bool(response.get("success")))
+                    normalized_output.setdefault(
+                        "summary",
+                        _string(response.get("summary")) or _string(mutation_output.get("summary")) or "",
+                    )
+                    normalized_output.setdefault("task_id", _string(response.get("task_id")))
+                    normalized_output.setdefault("trace_id", _string(response.get("trace_id")))
+                    normalized_output.setdefault(
+                        "decision_request_id",
+                        _string(response.get("decision_request_id")),
+                    )
+                    return normalized_output
+                return response
             executor = {
                 "system:create_mcp_client": create_mcp_client,
                 "system:update_mcp_client": update_mcp_client,
@@ -1940,7 +1956,7 @@ class _IndustryActivationMixin:
                         response.get("summary")
                         or f"Installed hub skill '{installed_skill_name}'."
                     )
-                client_key = client_key or installed_skill_name or item.template_id
+                client_key = installed_skill_name or client_key or item.template_id
                 capability_ids = self._resolve_hub_skill_capabilities(
                     item=item,
                     recommendation=recommendation,

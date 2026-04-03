@@ -7,11 +7,25 @@ from .service_context import *  # noqa: F401,F403
 from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
 from .main_brain_cognitive_surface import build_main_brain_cognitive_surface
-from .models import IndustryMainBrainPlanningSurface
+from .models import IndustryMainBrainPlanningSurface, IndustrySeatCapabilityLayers
 from ..state.strategy_memory_service import resolve_strategy_payload
 
 
 class _IndustryRuntimeViewsMixin:
+    def _backlog_item_is_chat_writeback(
+        self,
+        item: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(item, dict):
+            return False
+        source_ref = str(item.get("source_ref") or "")
+        if source_ref.startswith("chat-writeback:"):
+            return True
+        metadata = _mapping(item.get("metadata"))
+        if _string(metadata.get("source")) == "chat-writeback":
+            return True
+        return _string(item.get("source_kind")) == "operator"
+
     def _resolve_live_focus_payload(
         self,
         *,
@@ -75,18 +89,10 @@ class _IndustryRuntimeViewsMixin:
                 ),
                 None,
             )
-        if current_assignment is None and assignments:
-            current_assignment = assignments[0]
-        current_assignment_id = (
-            _string(current_assignment.get("assignment_id"))
-            if isinstance(current_assignment, dict)
-            else None
-        )
         chat_writeback_items = [
             item
             for item in backlog
-            if str(item.get("source_ref") or "").startswith("chat-writeback:")
-            or _string(_mapping(item.get("metadata")).get("source")) == "chat-writeback"
+            if self._backlog_item_is_chat_writeback(item)
         ]
         latest_writeback = (
             max(
@@ -96,6 +102,36 @@ class _IndustryRuntimeViewsMixin:
                 ),
             )
             if chat_writeback_items
+            else None
+        )
+        if (
+            current_assignment is None
+            and current_task_id is None
+            and selected_assignment_id is None
+            and selected_backlog_item_id is None
+            and isinstance(latest_writeback, dict)
+        ):
+            latest_writeback_assignment_id = _string(latest_writeback.get("assignment_id"))
+            latest_writeback_backlog_id = _string(latest_writeback.get("backlog_item_id"))
+            current_assignment = (
+                assignments_by_id.get(latest_writeback_assignment_id)
+                if latest_writeback_assignment_id is not None
+                else None
+            )
+            if current_assignment is None and latest_writeback_backlog_id is not None:
+                current_assignment = next(
+                    (
+                        item
+                        for item in assignments
+                        if _string(item.get("backlog_item_id")) == latest_writeback_backlog_id
+                    ),
+                    None,
+                )
+        if current_assignment is None and assignments:
+            current_assignment = assignments[0]
+        current_assignment_id = (
+            _string(current_assignment.get("assignment_id"))
+            if isinstance(current_assignment, dict)
             else None
         )
         live_backlog_items = [
@@ -1284,8 +1320,7 @@ class _IndustryRuntimeViewsMixin:
         chat_writeback_items = [
             item
             for item in backlog
-            if str(item.get("source_ref") or "").startswith("chat-writeback:")
-            or _string(_mapping(item.get("metadata")).get("source")) == "chat-writeback"
+            if self._backlog_item_is_chat_writeback(item)
         ]
         latest_writeback = (
             max(
@@ -1928,6 +1963,92 @@ class _IndustryRuntimeViewsMixin:
                 if _string(goal.get("status")) == status:
                     return goal
         return matches[0]
+
+    def _enrich_agent_capability_governance_payload(
+        self,
+        agent: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not isinstance(agent, dict):
+            return agent
+        agent_id = _string(agent.get("agent_id"))
+        repository = getattr(self, "_agent_runtime_repository", None)
+        runtime = (
+            repository.get_runtime(agent_id)
+            if agent_id is not None and repository is not None
+            else None
+        )
+        if runtime is None:
+            return agent
+        metadata = _mapping(getattr(runtime, "metadata", None))
+        capability_layers = IndustrySeatCapabilityLayers.from_metadata(
+            metadata.get("capability_layers"),
+        )
+        if not capability_layers.merged_capability_ids():
+            return agent
+        layers_payload = capability_layers.to_metadata_payload()
+        raw_session_overlay = _mapping(metadata.get("current_session_overlay"))
+        overlay_capability_ids = _unique_strings(
+            raw_session_overlay.get("capability_ids"),
+            layers_payload.get("session_overlay_capability_ids"),
+        )
+        current_session_overlay = None
+        if raw_session_overlay or overlay_capability_ids:
+            current_session_overlay = {
+                **raw_session_overlay,
+                "overlay_scope": (
+                    _string(raw_session_overlay.get("overlay_scope")) or "session"
+                ),
+                "overlay_mode": (
+                    _string(raw_session_overlay.get("overlay_mode"))
+                    or ("additive" if overlay_capability_ids else None)
+                ),
+                "session_id": _string(raw_session_overlay.get("session_id")),
+                "capability_ids": overlay_capability_ids,
+                "status": (
+                    _string(raw_session_overlay.get("status"))
+                    or ("active" if overlay_capability_ids else None)
+                ),
+            }
+        return {
+            **agent,
+            "capability_governance": {
+                "is_projection": True,
+                "is_truth_store": False,
+                "source": "agent_runtime.metadata.capability_layers",
+                "layers": layers_payload,
+                "counts": {
+                    "role_prototype": len(
+                        _unique_strings(layers_payload.get("role_prototype_capability_ids")),
+                    ),
+                    "seat_instance": len(
+                        _unique_strings(layers_payload.get("seat_instance_capability_ids")),
+                    ),
+                    "cycle_delta": len(
+                        _unique_strings(layers_payload.get("cycle_delta_capability_ids")),
+                    ),
+                    "session_overlay": len(
+                        _unique_strings(layers_payload.get("session_overlay_capability_ids")),
+                    ),
+                    "effective": len(
+                        _unique_strings(layers_payload.get("effective_capability_ids")),
+                    ),
+                },
+                "current_session_overlay": current_session_overlay,
+                "lifecycle": {
+                    "employment_mode": (
+                        _string(getattr(runtime, "employment_mode", None))
+                        or _string(agent.get("employment_mode"))
+                    ),
+                    "activation_mode": (
+                        _string(getattr(runtime, "activation_mode", None))
+                        or _string(agent.get("activation_mode"))
+                    ),
+                    "desired_state": _string(getattr(runtime, "desired_state", None)),
+                    "runtime_status": _string(getattr(runtime, "runtime_status", None)),
+                    "status": _string(agent.get("status")),
+                },
+            },
+        }
 
     def _build_instance_execution_summary(
         self,
@@ -3177,6 +3298,10 @@ class _IndustryRuntimeViewsMixin:
             goals=goals,
 
         )
+        agents = [
+            self._enrich_agent_capability_governance_payload(agent)
+            for agent in agents
+        ]
 
         proposals = self._list_instance_proposals(
 

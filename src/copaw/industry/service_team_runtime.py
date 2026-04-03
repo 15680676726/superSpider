@@ -427,7 +427,6 @@ class _IndustryTeamRuntimeMixin:
                 "goal_id": goal_id,
                 "goal_title": goal_title,
                 "employment_mode": agent.employment_mode,
-                "allowed_capabilities": list(agent.allowed_capabilities),
                 "environment_constraints": list(agent.environment_constraints),
                 "evidence_expectations": list(agent.evidence_expectations),
                 "capability_layers": self._build_actor_runtime_capability_layers(
