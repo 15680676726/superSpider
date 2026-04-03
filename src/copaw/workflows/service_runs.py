@@ -766,8 +766,5 @@ class _WorkflowServiceRunMixin:
                 for item in detail.evidence
                 if str(item.get("id") or "") in set(step.linked_evidence_ids)
             ],
-            routes={
-                "run": f"/api/workflow-runs/{run_id}",
-                "step": f"/api/workflow-runs/{run_id}/steps/{step_id}",
-            },
+            routes={},
         )

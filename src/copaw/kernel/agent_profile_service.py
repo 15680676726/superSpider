@@ -616,8 +616,6 @@ class AgentProfileService:
                 "current_focus_kind",
                 "current_focus_id",
                 "current_focus",
-                "current_goal_id",
-                "current_goal",
                 "current_task_id",
                 "industry_instance_id",
                 "industry_role_id",
@@ -997,8 +995,6 @@ class AgentProfileService:
                 or _coerce_non_empty_str(metadata.get("goal_title"))
                 or ""
             ),
-            current_goal_id=_coerce_non_empty_str(metadata.get("goal_id")),
-            current_goal=_coerce_non_empty_str(metadata.get("goal_title")) or "",
             industry_instance_id=getattr(runtime, "industry_instance_id", None),
             industry_role_id=runtime_role_id,
             capabilities=self._baseline_capabilities_for_role(runtime_role_id),
@@ -1152,33 +1148,33 @@ class AgentProfileService:
             or _coerce_non_empty_str(checkpoint_snapshot.get("focus"))
         )
 
-        current_goal_id = (
+        goal_focus_id = (
             _coerce_non_empty_str(runtime_metadata.get("goal_id"))
             or _coerce_non_empty_str(mailbox_metadata.get("goal_id"))
             or _coerce_non_empty_str(mailbox_payload.get("goal_id"))
             or _coerce_non_empty_str(checkpoint_resume.get("goal_id"))
             or _coerce_non_empty_str(checkpoint_snapshot.get("goal_id"))
             or (task.goal_id if task is not None else None)
-            or profile.current_goal_id
+            or (profile.current_focus_id if profile.current_focus_kind == "goal" else None)
         )
-        current_goal = (
+        goal_focus = (
             _coerce_non_empty_str(runtime_metadata.get("goal_title"))
             or _coerce_non_empty_str(mailbox_metadata.get("goal_title"))
             or _coerce_non_empty_str(mailbox_payload.get("goal_title"))
             or _coerce_non_empty_str(checkpoint_resume.get("goal_title"))
             or _coerce_non_empty_str(checkpoint_snapshot.get("goal_title"))
             or (
-                self._resolve_goal_title(current_goal_id)
-                if current_goal_id is not None
+                self._resolve_goal_title(goal_focus_id)
+                if goal_focus_id is not None
                 else None
             )
-            or profile.current_goal
+            or (profile.current_focus if profile.current_focus_kind == "goal" else "")
         )
         current_focus_kind = explicit_focus_kind or profile.current_focus_kind
-        current_focus_id = explicit_focus_id or current_goal_id or profile.current_focus_id
-        current_focus = explicit_focus or current_goal or profile.current_focus
+        current_focus_id = explicit_focus_id or goal_focus_id or profile.current_focus_id
+        current_focus = explicit_focus or goal_focus or profile.current_focus
         if current_focus_kind is None and not explicit_focus_kind and (
-            current_goal_id or current_goal
+            goal_focus_id or goal_focus
         ):
             current_focus_kind = "goal"
 
@@ -1251,8 +1247,6 @@ class AgentProfileService:
             "current_focus_kind": current_focus_kind,
             "current_focus_id": current_focus_id,
             "current_focus": current_focus,
-            "current_goal_id": current_goal_id,
-            "current_goal": current_goal,
             "updated_at": max(updated_candidates),
         }
         if actor_runtime is not None:
@@ -1382,7 +1376,6 @@ class AgentProfileService:
                 item["current_focus_kind"] = teammate_profile.current_focus_kind
                 item["current_focus_id"] = teammate_profile.current_focus_id
                 item["current_focus"] = teammate_profile.current_focus
-                item["current_goal"] = teammate_profile.current_goal
                 item["capabilities"] = list(teammate_profile.capabilities)
             payload.append(item)
         payload.sort(key=lambda item: ((item.get("queue_depth") or 0), str(item.get("role_name") or "")), reverse=True)

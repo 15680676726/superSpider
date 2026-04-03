@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from ..industry.identity import EXECUTION_CORE_AGENT_ID, EXECUTION_CORE_NAME
 
@@ -41,8 +41,6 @@ class AgentProfile(BaseModel):
     current_focus_kind: str | None = Field(default=None)
     current_focus_id: str | None = Field(default=None)
     current_focus: str = Field(default="", description="Current live execution focus")
-    current_goal_id: str | None = Field(default=None)
-    current_goal: str = Field(default="", description="Current top-level goal")
     current_task_id: str | None = Field(default=None)
     current_mailbox_id: str | None = Field(default=None)
     queue_depth: int = Field(default=0, ge=0)
@@ -60,22 +58,6 @@ class AgentProfile(BaseModel):
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
     )
-
-    @model_validator(mode="after")
-    def _sync_focus_goal_backlinks(self) -> "AgentProfile":
-        if not self.current_focus_kind and (self.current_goal_id or self.current_goal):
-            self.current_focus_kind = "goal"
-        if not self.current_focus_id and self.current_goal_id:
-            self.current_focus_id = self.current_goal_id
-        if not self.current_focus and self.current_goal:
-            self.current_focus = self.current_goal
-        if self.current_focus_kind == "goal":
-            if not self.current_goal_id and self.current_focus_id:
-                self.current_goal_id = self.current_focus_id
-            if not self.current_goal and self.current_focus:
-                self.current_goal = self.current_focus
-        return self
-
 
 class AgentDailyReport(BaseModel):
     """Agent daily report based on AGENT_VISIBLE_MODEL.md §4."""
@@ -100,7 +82,8 @@ DEFAULT_AGENTS: list[AgentProfile] = [
         role_summary="系统唯一执行大脑，负责承接团队目标、统一调度执行与分派协作。",
         agent_class="business",
         status="running",
-        current_goal="承接业务团队目标并统一调度执行，不再生成团队级主管副本。",
+        current_focus_kind="goal",
+        current_focus="承接业务团队目标并统一调度执行，不再生成团队级主管副本。",
         environment_summary="workspace + browser + session",
     ),
     AgentProfile(
@@ -109,7 +92,8 @@ DEFAULT_AGENTS: list[AgentProfile] = [
         role_name="定时调度",
         role_summary="管理定时任务的生命周期和触发",
         status="idle",
-        current_goal="让 schedule 只保留 ingress/adapter 角色，停止依赖 runner 执行 turn",
+        current_focus_kind="goal",
+        current_focus="让 schedule 只保留 ingress/adapter 角色，停止依赖 runner 执行 turn",
     ),
     AgentProfile(
         agent_id="copaw-governance",
@@ -117,6 +101,7 @@ DEFAULT_AGENTS: list[AgentProfile] = [
         role_name="风险治理",
         role_summary="审查高风险操作，管理 confirm 审批流",
         status="idle",
-        current_goal="补齐 Decision 前端动作，并继续收口 patch/expiry 治理策略",
+        current_focus_kind="goal",
+        current_focus="补齐 Decision 前端动作，并继续收口 patch/expiry 治理策略",
     ),
 ]

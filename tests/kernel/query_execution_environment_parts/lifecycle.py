@@ -559,7 +559,8 @@ def test_query_execution_service_injects_execution_core_industry_identity(
                     role_name="团队执行中枢",
                     role_summary="Generic execution core profile.",
                     mission="Generic mission.",
-                    current_goal="Generic current goal",
+                    current_focus_kind="goal",
+                    current_focus="",
                     capabilities=["tool:browser_use", "system:dispatch_query"],
                 )
                 if agent_id == "copaw-agent-runner"
@@ -632,7 +633,8 @@ def test_query_execution_service_keeps_execution_core_identity_for_task_chat_ses
                     role_name="Execution Core",
                     role_summary="Generic execution core profile.",
                     mission="Generic mission.",
-                    current_goal="Generic current goal",
+                    current_focus_kind="goal",
+                    current_focus="Generic current goal",
                     capabilities=["tool:browser_use", "system:dispatch_query"],
                 )
                 if agent_id == "copaw-agent-runner"

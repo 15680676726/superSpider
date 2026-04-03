@@ -16,6 +16,7 @@ from copaw.app.runtime_center import (
     RuntimeCenterEvidenceQueryService,
     RuntimeCenterStateQueryService,
 )
+from copaw.app.runtime_center.task_detail_projection import RuntimeCenterTaskDetailProjector
 from copaw.app.runtime_center.task_list_projection import RuntimeCenterTaskListProjector
 from copaw.app.runtime_center.work_context_projection import (
     RuntimeCenterWorkContextProjector,
@@ -25,6 +26,7 @@ from copaw.kernel.models import KernelTask
 from copaw.kernel.persistence import KernelTaskStore
 from copaw.state import (
     DecisionRequestRecord,
+    GoalRecord,
     HumanAssistTaskRecord,
     SQLiteStateStore,
     TaskRecord,
@@ -34,6 +36,7 @@ from copaw.state import (
 from copaw.state.human_assist_task_service import HumanAssistTaskService
 from copaw.state.repositories import (
     SqliteDecisionRequestRepository,
+    SqliteGoalRepository,
     SqliteHumanAssistTaskRepository,
     SqliteScheduleRepository,
     SqliteTaskRepository,
@@ -1252,6 +1255,153 @@ def test_runtime_task_list_projector_projects_stable_task_list_fields(tmp_path) 
     assert tasks[1]["child_task_count"] == 0
 
 
+def test_runtime_task_detail_projector_keeps_review_and_activation_surfaces(tmp_path) -> None:
+    from copaw.app.runtime_center.environment_feedback_projection import (
+        RuntimeCenterEnvironmentFeedbackProjector,
+    )
+    from copaw.app.runtime_center.goal_decision_projection import (
+        RuntimeCenterGoalDecisionProjector,
+    )
+
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    task_repository = SqliteTaskRepository(state_store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+    goal_repository = SqliteGoalRepository(state_store)
+    work_context_repository = SqliteWorkContextRepository(state_store)
+
+    timestamp = datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc)
+    work_context_repository.upsert_context(
+        WorkContextRecord(
+            id="ctx-detail",
+            title="Detail context",
+            summary="State-backed task detail projector context.",
+            context_type="control-thread",
+            status="active",
+            context_key="control-thread:detail",
+            owner_scope="detail-scope",
+        ),
+    )
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-detail",
+            title="Project task detail",
+            summary="Detail projector summary.",
+            task_type="system:dispatch_query",
+            status="running",
+            owner_agent_id="task-owner",
+            work_context_id="ctx-detail",
+            acceptance_criteria=json.dumps(
+                {
+                    "kind": "kernel-task-meta-v1",
+                    "trace_id": "trace:task-detail",
+                    "capability_ref": "system:dispatch_query",
+                },
+            ),
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-detail",
+            runtime_status="active",
+            current_phase="executing",
+            risk_level="guarded",
+            last_result_summary="Runtime detail summary wins.",
+            last_owner_agent_id="runtime-owner",
+            updated_at=timestamp,
+        ),
+    )
+
+    class StubActivationResult:
+        def model_dump(self, *, mode: str = "json") -> dict[str, object]:
+            assert mode == "json"
+            return {
+                "scope_type": "task",
+                "scope_id": "task-detail",
+                "activated_neurons": [{"id": "neuron-1"}],
+                "contradictions": [],
+                "top_entities": ["runtime-owner"],
+                "top_constraints": ["respect detail context"],
+                "top_next_actions": ["finish detail projector split"],
+                "support_refs": ["report:detail"],
+                "evidence_refs": [],
+                "strategy_refs": [],
+            }
+
+    class StubMemoryActivationService:
+        def activate_for_query(self, **_: object) -> StubActivationResult:
+            return StubActivationResult()
+
+    work_context_projector = RuntimeCenterWorkContextProjector(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        work_context_repository=work_context_repository,
+        related_agents_loader=lambda agent_ids: [
+            {
+                "agent_id": "runtime-owner",
+                "name": "Runtime Owner",
+                "status": "active",
+                "route": "/api/runtime-center/agents/runtime-owner",
+            }
+            for _ in [agent_ids]
+            if "runtime-owner" in agent_ids
+        ],
+    )
+    projector = RuntimeCenterTaskDetailProjector(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        decision_request_repository=decision_request_repository,
+        goal_decision_projector=RuntimeCenterGoalDecisionProjector(
+            goal_repository=goal_repository,
+            goal_service=None,
+            decision_request_repository=decision_request_repository,
+            task_repository=task_repository,
+        ),
+        environment_feedback_projector=RuntimeCenterEnvironmentFeedbackProjector(
+            task_repository=task_repository,
+            task_runtime_repository=task_runtime_repository,
+        ),
+        work_context_projector=work_context_projector,
+        related_patches_loader=lambda **_: [],
+        related_growth_loader=lambda **_: [],
+        related_agents_loader=lambda agent_ids: [
+            {
+                "agent_id": "runtime-owner",
+                "name": "Runtime Owner",
+                "status": "active",
+                "route": "/api/runtime-center/agents/runtime-owner",
+            }
+            for _ in [agent_ids]
+            if "runtime-owner" in agent_ids
+        ],
+        memory_activation_service=StubMemoryActivationService(),
+    )
+
+    detail = projector.get_task_detail("task-detail")
+    assert detail is not None
+    assert detail["trace_id"] == "trace:task-detail"
+    assert detail["work_context"]["id"] == "ctx-detail"
+    assert detail["activation"] == {
+        "scope_type": "task",
+        "scope_id": "task-detail",
+        "activated_count": 1,
+        "contradiction_count": 0,
+        "top_entities": ["runtime-owner"],
+        "top_constraints": ["respect detail context"],
+        "top_next_actions": ["finish detail projector split"],
+        "support_refs": ["report:detail"],
+        "evidence_refs": [],
+        "strategy_refs": [],
+    }
+
+    review = projector.get_task_review("task-detail")
+    assert review is not None
+    assert review["route"] == "/api/runtime-center/tasks/task-detail/review"
+    assert review["review"]["review_route"] == "/api/runtime-center/tasks/task-detail/review"
+
+
 def test_runtime_work_context_projector_uses_runtime_owner_for_detail_rollups(
     tmp_path,
 ) -> None:
@@ -1369,6 +1519,99 @@ def test_runtime_work_context_projector_counts_real_contexts(tmp_path) -> None:
     assert projector.count_work_contexts() == 2
     contexts = projector.list_work_contexts(limit=10)
     assert {item["id"] for item in contexts} == {"ctx-count-1", "ctx-count-2"}
+
+
+def test_runtime_goal_decision_projector_keeps_goal_order_and_confirmation_routes(
+    tmp_path,
+) -> None:
+    from copaw.app.runtime_center.goal_decision_projection import (
+        RuntimeCenterGoalDecisionProjector,
+    )
+
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    goal_repository = SqliteGoalRepository(state_store)
+    task_repository = SqliteTaskRepository(state_store)
+    decision_request_repository = SqliteDecisionRequestRepository(state_store)
+
+    older = datetime(2026, 4, 2, 8, 0, tzinfo=timezone.utc)
+    newer = datetime(2026, 4, 2, 9, 0, tzinfo=timezone.utc)
+    goal_repository.upsert_goal(
+        GoalRecord(
+            id="goal-active-high",
+            title="Active high priority goal",
+            summary="Should sort first.",
+            status="active",
+            priority=9,
+            owner_scope="ops",
+            updated_at=older,
+        ),
+    )
+    goal_repository.upsert_goal(
+        GoalRecord(
+            id="goal-draft-low",
+            title="Draft low priority goal",
+            summary="Should sort after active goals.",
+            status="draft",
+            priority=1,
+            owner_scope="ops",
+            updated_at=newer,
+        ),
+    )
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-governed-confirmation",
+            title="Governed browser action",
+            summary="Requires confirmation in the same chat thread.",
+            task_type="system:dispatch_query",
+            status="running",
+            owner_agent_id="ops-agent",
+                acceptance_criteria=json.dumps(
+                    {
+                        "kind": "kernel-task-meta-v1",
+                        "trace_id": "trace:goal-decision-projector",
+                        "payload": {
+                            "request_context": {
+                                "control_thread_id": "industry-chat:industry-1:execution-core",
+                            },
+                        },
+                    },
+                ),
+            updated_at=newer,
+        ),
+    )
+    decision = decision_request_repository.upsert_decision_request(
+        DecisionRequestRecord(
+            task_id="task-governed-confirmation",
+            decision_type="query-tool-confirmation",
+            risk_level="confirm",
+            summary="Need approval before continuing the query tool action.",
+            status="open",
+            requested_by="ops-agent",
+            created_at=newer,
+        ),
+    )
+
+    projector = RuntimeCenterGoalDecisionProjector(
+        goal_repository=goal_repository,
+        goal_service=None,
+        decision_request_repository=decision_request_repository,
+        task_repository=task_repository,
+    )
+
+    goals = projector.list_goals(limit=10)
+    assert [goal["id"] for goal in goals] == ["goal-active-high", "goal-draft-low"]
+    assert goals[0]["route"] == "/api/goals/goal-active-high/detail"
+
+    decision_payload = projector.get_decision_request(decision.id)
+    assert decision_payload is not None
+    assert decision_payload["trace_id"] == "trace:goal-decision-projector"
+    assert decision_payload["task_route"] == "/api/runtime-center/tasks/task-governed-confirmation"
+    assert decision_payload["chat_thread_id"] == "industry-chat:industry-1:execution-core"
+    assert decision_payload["preferred_route"] == decision_payload["chat_route"]
+    assert decision_payload["chat_route"].endswith(
+        "threadId=industry-chat%3Aindustry-1%3Aexecution-core",
+    )
+    assert decision_payload["actions"]["approve"].endswith(f"/{decision.id}/approve")
 
 
 def test_runtime_query_service_counts_work_contexts_from_projector_backed_state(

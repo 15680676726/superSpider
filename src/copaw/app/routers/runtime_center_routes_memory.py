@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .runtime_center_shared_core import *  # noqa: F401,F403
-from .runtime_center_shared import _get_memory_activation_service, _list_memory_relation_views
+from .runtime_center_dependencies import _get_memory_activation_service, _list_memory_relation_views
 
 
 def _first_non_empty(*values: object) -> str | None:

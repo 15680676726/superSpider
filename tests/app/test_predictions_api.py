@@ -14,6 +14,7 @@ from copaw.capabilities.remote_skill_contract import RemoteSkillCandidate
 from copaw.config import load_config, save_config
 from copaw.config.config import MCPClientConfig
 from copaw.compiler.planning.assignment_planner import AssignmentPlanningCompiler
+from copaw.compiler.planning.models import PlanningStrategyConstraints
 from copaw.evidence import EvidenceLedger
 from copaw.evidence.models import EvidenceRecord
 from copaw.goals import GoalService
@@ -936,6 +937,69 @@ def test_goal_compiler_assignment_context_keeps_uncertainty_and_budget_inputs() 
     assert assignment_context["strategy_lane_budgets"][0]["force_include_reason"] == (
         "Protect validated growth work while uncertainty is open."
     )
+
+
+def test_goal_compiler_assignment_context_accepts_typed_strategy_constraints() -> None:
+    class _Compiler(_GoalServiceCompilerMixin):
+        pass
+
+    compiler = _Compiler()
+    compiler._assignment_planning_compiler = AssignmentPlanningCompiler()
+
+    typed_constraints = PlanningStrategyConstraints.from_context(
+        {
+            "strategy_constraints": SimpleNamespace(
+                mission="Protect growth quality before scaling.",
+                lane_weights={"lane-growth": 0.6},
+                planning_policy=["prefer-evidence-before-external-move"],
+                strategic_uncertainties=[
+                    SimpleNamespace(
+                        uncertainty_id="uncertainty-weekend-demand",
+                        statement="Weekend demand model is still unverified.",
+                        scope="strategy",
+                        impact_level="high",
+                        review_by_cycle="cycle-weekly-1",
+                    ),
+                ],
+                lane_budgets=[
+                    SimpleNamespace(
+                        lane_id="lane-growth",
+                        budget_window="next-2-cycles",
+                        target_share=0.55,
+                        min_share=0.4,
+                        max_share=0.7,
+                        review_pressure="high",
+                        force_include_reason=(
+                            "Protect validated growth work while uncertainty is open."
+                        ),
+                    ),
+                ],
+            ),
+        },
+    )
+
+    assignment_context = compiler._build_assignment_plan_context(
+        context={
+            "assignment_id": "assignment-live-9",
+            "backlog_item_id": "backlog-live-9",
+            "lane_id": "lane-growth",
+            "cycle_id": "cycle-daily-2",
+            "goal_title": "Stabilize weekend demand assumptions",
+            "goal_summary": "Keep growth work bounded while uncertainty remains open.",
+            "strategy_constraints": typed_constraints,
+        },
+    )
+
+    assert assignment_context["strategy_constraints"]["mission"] == (
+        "Protect growth quality before scaling."
+    )
+    assert assignment_context["strategy_constraints"]["lane_weights"] == {
+        "lane-growth": 0.6,
+    }
+    assert assignment_context["strategy_constraints"]["strategic_uncertainties"][0][
+        "uncertainty_id"
+    ] == "uncertainty-weekend-demand"
+    assert assignment_context["strategy_lane_budgets"][0]["lane_id"] == "lane-growth"
 
 
 def test_prediction_recommendation_executes_through_kernel(tmp_path) -> None:

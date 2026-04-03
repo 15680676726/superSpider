@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from types import MethodType
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from .models import ReportReplanDecision
 
@@ -56,6 +57,90 @@ def _append_unique(items: list[str], *values: object | None) -> list[str]:
     return _unique_strings(items, *values)
 
 
+class _ReportReplanRawDecision(BaseModel):
+    """Typed raw synthesis decision payload before promotion into formal fields."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    decision_id: str | None = None
+    status: str | None = None
+    decision_kind: str | None = None
+    summary: str | None = None
+    reason_ids: list[str] = Field(default_factory=list)
+    source_report_ids: list[str] = Field(default_factory=list)
+    topic_keys: list[str] = Field(default_factory=list)
+    trigger_family: str | None = None
+    trigger_families: list[str] = Field(default_factory=list)
+    trigger_rule_ids: list[str] = Field(default_factory=list)
+    affected_lane_ids: list[str] = Field(default_factory=list)
+    affected_uncertainty_ids: list[str] = Field(default_factory=list)
+    rationale: dict[str, Any] = Field(default_factory=dict)
+    trigger_context: dict[str, Any] = Field(default_factory=dict)
+    strategy_change_context: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_value(
+        cls,
+        value: object | None,
+    ) -> _ReportReplanRawDecision | None:
+        if isinstance(value, cls):
+            return value
+        if not isinstance(value, Mapping):
+            return None
+        return cls(
+            decision_id=_string(value.get("decision_id")),
+            status=_string(value.get("status")),
+            decision_kind=_string(value.get("decision_kind")),
+            summary=_string(value.get("summary")),
+            reason_ids=_string_list(value.get("reason_ids")),
+            source_report_ids=_string_list(value.get("source_report_ids")),
+            topic_keys=_string_list(value.get("topic_keys")),
+            trigger_family=_string(value.get("trigger_family")),
+            trigger_families=_string_list(value.get("trigger_families")),
+            trigger_rule_ids=_string_list(value.get("trigger_rule_ids")),
+            affected_lane_ids=_string_list(value.get("affected_lane_ids")),
+            affected_uncertainty_ids=_string_list(value.get("affected_uncertainty_ids")),
+            rationale=_mapping(value.get("rationale")),
+            trigger_context=_mapping(value.get("trigger_context")),
+            strategy_change_context=_mapping(value.get("strategy_change_context")),
+        )
+
+
+class _ReportReplanSynthesisInput(BaseModel):
+    """Typed boundary wrapper for report synthesis -> replan compilation."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    needs_replan: bool = False
+    summary: str = ""
+    replan_reasons: list[str] = Field(default_factory=list)
+    replan_decision: _ReportReplanRawDecision | None = None
+    replan_directives: list[dict[str, Any]] = Field(default_factory=list)
+    recommended_actions: list[dict[str, Any]] = Field(default_factory=list)
+    activation: dict[str, Any] = Field(default_factory=dict)
+    strategy_change_context: dict[str, Any] = Field(default_factory=dict)
+    latest_findings: list[dict[str, Any]] = Field(default_factory=list)
+
+    @classmethod
+    def from_value(
+        cls,
+        value: object | None,
+    ) -> _ReportReplanSynthesisInput | None:
+        if not isinstance(value, Mapping):
+            return None
+        return cls(
+            needs_replan=bool(value.get("needs_replan")),
+            summary=_string(value.get("summary")) or "",
+            replan_reasons=_string_list(value.get("replan_reasons")),
+            replan_decision=_ReportReplanRawDecision.from_value(value.get("replan_decision")),
+            replan_directives=_dict_list(value.get("replan_directives")),
+            recommended_actions=_dict_list(value.get("recommended_actions")),
+            activation=_mapping(value.get("activation")),
+            strategy_change_context=_mapping(value.get("strategy_change_context")),
+            latest_findings=_dict_list(value.get("latest_findings")),
+        )
+
+
 def _first_summary(entries: Sequence[Mapping[str, Any]], *, fallback: str) -> str:
     for entry in entries:
         if (summary := _string(entry.get("summary"))) is not None:
@@ -64,11 +149,11 @@ def _first_summary(entries: Sequence[Mapping[str, Any]], *, fallback: str) -> st
 
 
 def _strategy_context(
-    synthesis: Mapping[str, Any],
-    raw_decision: Mapping[str, Any],
+    synthesis: _ReportReplanSynthesisInput,
+    raw_decision: _ReportReplanRawDecision,
 ) -> dict[str, Any]:
-    context = _mapping(raw_decision.get("strategy_change_context"))
-    context.update(_mapping(synthesis.get("strategy_change_context")))
+    context = dict(raw_decision.strategy_change_context)
+    context.update(dict(synthesis.strategy_change_context))
     return context
 
 
@@ -95,52 +180,14 @@ def _normalize_decision_kind(value: object | None) -> str | None:
     return None
 
 
-def _set_extra_fields(
-    decision: ReportReplanDecision,
-    *,
-    model_fields: Mapping[str, Any] | None = None,
-    dump_fields: Mapping[str, Any] | None = None,
-    **field_values: Any,
-) -> ReportReplanDecision:
-    updates: dict[str, Any] = {}
-    resolved_model_fields = dict(model_fields or getattr(type(decision), "model_fields", {}))
-    for field_name, field_value in field_values.items():
-        if field_name in resolved_model_fields:
-            updates[field_name] = field_value
-        else:
-            object.__setattr__(decision, field_name, field_value)
-    if updates:
-        decision = decision.model_copy(update=updates)
-    if dump_fields:
-        dump_payload = {
-            field_name: field_value
-            for field_name, field_value in dump_fields.items()
-            if field_value is not None
-        }
-        if dump_payload:
-            base_model_dump = type(decision).model_dump
-
-            def _model_dump(self: ReportReplanDecision, *args: Any, **kwargs: Any) -> Any:
-                payload = base_model_dump(self, *args, **kwargs)
-                if isinstance(payload, Mapping):
-                    return {
-                        **dict(payload),
-                        **dump_payload,
-                    }
-                return payload
-
-            object.__setattr__(decision, "model_dump", MethodType(_model_dump, decision))
-    return decision
-
-
 def _trigger_rule_ids(
     *,
-    raw_decision: Mapping[str, Any],
+    raw_decision: _ReportReplanRawDecision,
     context: Mapping[str, Any],
     strategy_change: Mapping[str, Any],
 ) -> list[str]:
     return _unique_strings(
-        raw_decision.get("trigger_rule_ids"),
+        raw_decision.trigger_rule_ids,
         context.get("trigger_rule_ids"),
         [
             item.get("rule_id")
@@ -151,11 +198,11 @@ def _trigger_rule_ids(
 
 def _trigger_context(
     *,
-    raw_decision: Mapping[str, Any],
+    raw_decision: _ReportReplanRawDecision,
     context: Mapping[str, Any],
     strategy_change: Mapping[str, Any],
 ) -> dict[str, Any]:
-    payload = _mapping(raw_decision.get("trigger_context"))
+    payload = dict(raw_decision.trigger_context)
     payload.update(_mapping(context.get("trigger_context")))
     trigger_families = _unique_strings(
         payload.get("trigger_families"),
@@ -220,28 +267,29 @@ class ReportReplanEngine:
         self,
         synthesis: Mapping[str, Any] | None,
     ) -> ReportReplanDecision:
-        if not isinstance(synthesis, Mapping):
+        payload = _ReportReplanSynthesisInput.from_value(synthesis)
+        if payload is None:
             return ReportReplanDecision()
-        raw_decision = _mapping(synthesis.get("replan_decision"))
+        raw_decision = payload.replan_decision
         decision: ReportReplanDecision
-        if raw_decision:
-            raw_decision_kind = _normalize_decision_kind(raw_decision.get("decision_kind"))
-            raw_trigger_family = _string(raw_decision.get("trigger_family"))
+        if raw_decision is not None:
+            raw_decision_kind = _normalize_decision_kind(raw_decision.decision_kind)
+            raw_trigger_family = raw_decision.trigger_family
             decision = ReportReplanDecision(
-                decision_id=_string(raw_decision.get("decision_id")) or "report-synthesis:clear",
+                decision_id=raw_decision.decision_id or "report-synthesis:clear",
                 status=(
                     "needs-replan"
-                    if _string(raw_decision.get("status")) == "needs-replan"
+                    if raw_decision.status == "needs-replan"
                     else "clear"
                 ),
                 decision_kind=raw_decision_kind or "clear",
                 summary=(
-                    _string(raw_decision.get("summary"))
+                    raw_decision.summary
                     or "No unresolved report synthesis pressure."
                 ),
-                reason_ids=_string_list(raw_decision.get("reason_ids")),
-                source_report_ids=_string_list(raw_decision.get("source_report_ids")),
-                topic_keys=_string_list(raw_decision.get("topic_keys")),
+                reason_ids=list(raw_decision.reason_ids),
+                source_report_ids=list(raw_decision.source_report_ids),
+                topic_keys=list(raw_decision.topic_keys),
                 strategy_change_decision=(
                     raw_decision_kind
                     if raw_decision_kind in {
@@ -254,57 +302,49 @@ class ReportReplanEngine:
                 ),
                 trigger_family=raw_trigger_family,
                 trigger_families=_unique_strings(
-                    raw_decision.get("trigger_families"),
+                    raw_decision.trigger_families,
                     [raw_trigger_family] if raw_trigger_family is not None else [],
                 ),
-                trigger_rule_ids=_string_list(raw_decision.get("trigger_rule_ids")),
-                affected_lane_ids=_string_list(raw_decision.get("affected_lane_ids")),
-                affected_uncertainty_ids=_string_list(raw_decision.get("affected_uncertainty_ids")),
-                directives=_dict_list(synthesis.get("replan_directives")),
-                recommended_actions=_dict_list(synthesis.get("recommended_actions")),
-                activation=(
-                    dict(synthesis.get("activation"))
-                    if isinstance(synthesis.get("activation"), Mapping)
-                    else {}
-                ),
-                rationale=_mapping(raw_decision.get("rationale")),
+                trigger_rule_ids=list(raw_decision.trigger_rule_ids),
+                affected_lane_ids=list(raw_decision.affected_lane_ids),
+                affected_uncertainty_ids=list(raw_decision.affected_uncertainty_ids),
+                directives=list(payload.replan_directives),
+                recommended_actions=list(payload.recommended_actions),
+                activation=dict(payload.activation),
+                rationale=dict(raw_decision.rationale),
             )
-        elif synthesis.get("needs_replan"):
+        elif payload.needs_replan:
             decision = ReportReplanDecision(
                 decision_id="report-synthesis:needs-replan",
                 status="needs-replan",
                 decision_kind="follow_up_backlog",
                 summary=(
-                    _string(synthesis.get("summary"))
+                    payload.summary
                     or "Report synthesis still requires main-brain review."
                 ),
                 strategy_change_decision="follow_up_backlog",
-                directives=_dict_list(synthesis.get("replan_directives")),
-                recommended_actions=_dict_list(synthesis.get("recommended_actions")),
-                activation=(
-                    dict(synthesis.get("activation"))
-                    if isinstance(synthesis.get("activation"), Mapping)
-                    else {}
-                ),
+                directives=list(payload.replan_directives),
+                recommended_actions=list(payload.recommended_actions),
+                activation=dict(payload.activation),
             )
         else:
             return ReportReplanDecision()
 
         strategy_change = self._classify_strategy_change(
-            synthesis=synthesis,
+            synthesis=payload,
             raw_decision=raw_decision,
             decision=decision,
         )
         activation = dict(decision.activation)
         if strategy_change is not None:
-            context = _strategy_context(synthesis, raw_decision)
+            context = _strategy_context(payload, raw_decision or _ReportReplanRawDecision())
             trigger_rule_ids = _trigger_rule_ids(
-                raw_decision=raw_decision,
+                raw_decision=raw_decision or _ReportReplanRawDecision(),
                 context=context,
                 strategy_change=strategy_change,
             )
             trigger_context = _trigger_context(
-                raw_decision=raw_decision,
+                raw_decision=raw_decision or _ReportReplanRawDecision(),
                 context=context,
                 strategy_change=strategy_change,
             )
@@ -383,7 +423,7 @@ class ReportReplanEngine:
         if strategy_change_payload:
             rationale["strategy_change"] = strategy_change_payload
         if raw_decision:
-            rationale["raw_decision"] = raw_decision
+            rationale["raw_decision"] = raw_decision.model_dump(mode="json", exclude_none=True)
         decision = decision.model_copy(
             update={
                 "decision_kind": typed_decision_kind,
@@ -397,33 +437,27 @@ class ReportReplanEngine:
                 "trigger_rule_ids": trigger_rule_ids,
                 "affected_lane_ids": affected_lane_ids,
                 "affected_uncertainty_ids": affected_uncertainty_ids,
+                "trigger_context": _mapping(strategy_change_payload.get("trigger_context")),
+                "strategy_change": dict(strategy_change_payload),
                 "rationale": rationale,
                 "activation": activation,
             },
         )
-        if not strategy_change_payload:
-            return decision
-        trigger_context = _mapping(strategy_change_payload.get("trigger_context"))
-        return _set_extra_fields(
-            decision,
-            dump_fields={
-                "trigger_context": trigger_context,
-                "strategy_change": strategy_change_payload,
-            },
-            trigger_context=trigger_context,
-            strategy_change=strategy_change_payload,
-        )
+        return decision
 
     def _classify_strategy_change(
         self,
         *,
-        synthesis: Mapping[str, Any],
-        raw_decision: Mapping[str, Any],
+        synthesis: _ReportReplanSynthesisInput,
+        raw_decision: _ReportReplanRawDecision | None,
         decision: ReportReplanDecision,
     ) -> dict[str, Any] | None:
         if decision.status != "needs-replan":
             return None
-        context = _strategy_context(synthesis, raw_decision)
+        context = _strategy_context(
+            synthesis,
+            raw_decision or _ReportReplanRawDecision(),
+        )
         contradictions = _dict_list(
             context.get("evidence_contradictions") or context.get("repeated_contradictions"),
         )
@@ -437,11 +471,11 @@ class ReportReplanEngine:
                 ),
                 trigger_evidence=contradictions,
             )
-        activation = _mapping(synthesis.get("activation"))
+        activation = dict(synthesis.activation)
         contradiction_count = activation.get("contradiction_count")
         if isinstance(contradiction_count, int) and contradiction_count > 0:
             contradiction_sources = ["activation"]
-            latest_findings = _dict_list(synthesis.get("latest_findings"))
+            latest_findings = list(synthesis.latest_findings)
             report_ids = _append_unique(
                 list(decision.source_report_ids),
                 [item.get("report_id") for item in latest_findings],
@@ -452,8 +486,8 @@ class ReportReplanEngine:
                 contradiction_sources.insert(0, "synthesis")
             if len(contradiction_sources) >= 2:
                 rationale = (
-                    _string_list(synthesis.get("replan_reasons"))[0]
-                    if _string_list(synthesis.get("replan_reasons"))
+                    list(synthesis.replan_reasons)[0]
+                    if synthesis.replan_reasons
                     else "Contradictory activation and report evidence requires strategy review."
                 )
                 return _build_strategy_change_payload(

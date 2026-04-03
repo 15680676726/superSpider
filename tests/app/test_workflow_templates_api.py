@@ -952,7 +952,9 @@ def test_workflow_template_service_launch_materializes_run(tmp_path) -> None:
     detail_payload = run_detail.json()
     assert detail_payload["run"]["run_id"] == run_id
     assert detail_payload["template"]["template_id"] == "industry-weekly-research-synthesis"
-    assert detail_payload["routes"]["run"] == f"/api/workflow-runs/{run_id}"
+    assert "run" not in (detail_payload.get("routes") or {})
+    assert "template" not in (detail_payload.get("routes") or {})
+    assert "cancel" not in (detail_payload.get("routes") or {})
     assert "resume" not in (detail_payload.get("routes") or {})
     assert detail_payload["diagnosis"]["status"] == "planned"
     assert detail_payload["diagnosis"]["host_snapshot"]["coordination"][
@@ -1042,7 +1044,7 @@ def test_workflow_run_step_detail_stays_read_only_and_service_resume_rehydrates_
     step_detail_payload = step_detail.json()
     assert step_detail_payload["step"]["step_id"] == goal_step["step_id"]
     assert step_detail_payload["linked_goals"]
-    assert step_detail_payload["routes"]["run"] == f"/api/workflow-runs/{run_id}"
+    assert "run" not in (step_detail_payload.get("routes") or {})
     assert "resume" not in (step_detail_payload.get("routes") or {})
 
     run_record = client.app.state.workflow_run_repository.get_run(run_id)
@@ -1111,9 +1113,7 @@ def test_workflow_run_step_detail_stays_read_only_and_service_resume_rehydrates_
     assert resumed_step_detail.status_code == 200
     resumed_step_detail_payload = resumed_step_detail.json()
     assert resumed_step_detail_payload["linked_goals"]
-    assert resumed_step_detail_payload["routes"]["step"] == (
-        f"/api/workflow-runs/{run_id}/steps/{goal_step['step_id']}"
-    )
+    assert "step" not in (resumed_step_detail_payload.get("routes") or {})
 
 
 def test_workflow_preview_declares_host_requirements_and_phase6_coordination_blocker(

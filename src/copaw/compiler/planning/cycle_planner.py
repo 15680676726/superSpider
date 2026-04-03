@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from ...state import AgentReportRecord, BacklogItemRecord, IndustryInstanceRecord, OperatingCycleRecord
-from .models import CyclePlanningDecision, PlanningStrategyConstraints
+from .models import CyclePlanningDecision, PlanningLaneBudget, PlanningStrategyConstraints, StrategyTriggerRule
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_-]{1,}")
 
@@ -63,12 +63,6 @@ def _tokenize(text: object | None) -> list[str]:
     return [token for token in _TOKEN_RE.findall(raw) if len(token) > 1]
 
 
-def _read_field(value: object, field: str) -> object | None:
-    if isinstance(value, dict):
-        return value.get(field)
-    return getattr(value, field, None)
-
-
 def _lane_metadata_key(lane_id: str | None) -> str:
     return lane_id or "__no_lane__"
 
@@ -115,7 +109,7 @@ class CyclePlanningCompiler:
         force_scoped_backlog: bool = False,
         strategy_constraints: PlanningStrategyConstraints | None = None,
     ) -> CyclePlanningDecision:
-        constraints = strategy_constraints or PlanningStrategyConstraints()
+        constraints = PlanningStrategyConstraints.from_value(strategy_constraints)
         selection_limit = self._selection_limit(constraints)
         lane_budgets = self._lane_budget_map(constraints)
         lane_budget_outcomes: dict[str, dict[str, object]] = {}
@@ -269,20 +263,14 @@ class CyclePlanningCompiler:
         cycle_kind_reason: str | None,
     ) -> dict[str, object]:
         strategic_uncertainty_ids = [
-            uncertainty_id
-            for uncertainty_id in (
-                _string(_read_field(entry, "uncertainty_id"))
-                for entry in list(getattr(constraints, "strategic_uncertainties", []) or [])
-            )
-            if uncertainty_id is not None
+            entry.uncertainty_id
+            for entry in list(constraints.strategic_uncertainties or [])
+            if entry.uncertainty_id
         ]
         trigger_families = [
-            family
-            for family in (
-                _string(_read_field(entry, "trigger_family"))
-                for entry in list(getattr(constraints, "strategy_trigger_rules", []) or [])
-            )
-            if family is not None
+            entry.trigger_family
+            for entry in list(constraints.strategy_trigger_rules or [])
+            if entry.trigger_family
         ]
         metadata: dict[str, object] = {
             "industry_instance_id": record.instance_id,
@@ -311,15 +299,12 @@ class CyclePlanningCompiler:
         *,
         constraints: PlanningStrategyConstraints,
     ) -> tuple[str, str]:
-        strategic_uncertainties = list(getattr(constraints, "strategic_uncertainties", []) or [])
-        trigger_rules = list(getattr(constraints, "strategy_trigger_rules", []) or [])
+        strategic_uncertainties = list(constraints.strategic_uncertainties or [])
+        trigger_rules = list(constraints.strategy_trigger_rules or [])
         trigger_families = {
-            family
-            for family in (
-                _string(_read_field(entry, "trigger_family"))
-                for entry in trigger_rules
-            )
-            if family is not None
+            rule.trigger_family
+            for rule in trigger_rules
+            if rule.trigger_family
         }
         if self._has_event_cycle_signal(
             strategic_uncertainties=strategic_uncertainties,
@@ -341,14 +326,14 @@ class CyclePlanningCompiler:
         self,
         *,
         strategic_uncertainties: Sequence[object],
-        trigger_rules: Sequence[object],
+        trigger_rules: Sequence[StrategyTriggerRule],
     ) -> bool:
         for entry in strategic_uncertainties:
-            review_by_cycle = (_string(_read_field(entry, "review_by_cycle")) or "").casefold()
+            review_by_cycle = (_string(getattr(entry, "review_by_cycle", None)) or "").casefold()
             if "weekly" in review_by_cycle:
                 return True
         for rule in trigger_rules:
-            decision_hint = _string(_read_field(rule, "decision_hint"))
+            decision_hint = _string(rule.decision_hint)
             if decision_hint == "strategy_review_required":
                 return True
         return False
@@ -362,8 +347,8 @@ class CyclePlanningCompiler:
         if not trigger_families.intersection({"confidence_collapse", "repeated_blocker"}):
             return False
         for entry in strategic_uncertainties:
-            impact_level = (_string(_read_field(entry, "impact_level")) or "").casefold()
-            current_confidence = _number(_read_field(entry, "current_confidence"))
+            impact_level = (_string(getattr(entry, "impact_level", None)) or "").casefold()
+            current_confidence = _number(getattr(entry, "current_confidence", None))
             if impact_level == "high" and current_confidence <= 0.35:
                 return True
         return False
@@ -396,22 +381,22 @@ class CyclePlanningCompiler:
         self,
         constraints: PlanningStrategyConstraints,
     ) -> dict[str, dict[str, object]]:
-        entries = list(getattr(constraints, "lane_budgets", []) or [])
+        entries = list(constraints.lane_budgets or [])
         budgets: dict[str, dict[str, object]] = {}
         for entry in entries:
-            lane_id = _string(_read_field(entry, "lane_id"))
+            lane_id = _string(entry.lane_id)
             if lane_id is None:
                 continue
-            budget_window = _read_field(entry, "budget_window")
+            budget_window = entry.budget_window
             current_share = self._budget_current_share(entry)
-            target_share = max(_number(_read_field(entry, "target_share")), 0.0)
-            min_share = max(_number(_read_field(entry, "min_share")), 0.0)
-            max_share = max(_number(_read_field(entry, "max_share")), 0.0)
-            force_include_reason = _string(_read_field(entry, "force_include_reason"))
+            target_share = max(_number(entry.target_share), 0.0)
+            min_share = max(_number(entry.min_share), 0.0)
+            max_share = max(_number(entry.max_share), 0.0)
+            force_include_reason = _string(entry.force_include_reason)
             if force_include_reason is None and min_share > 0.0 and current_share < min_share:
                 force_include_reason = "lane-below-min-share"
             if force_include_reason is None and self._is_multi_cycle_underinvested(
-                budget_window=budget_window,
+                budget=entry,
                 current_share=current_share,
                 target_share=target_share,
             ):
@@ -423,36 +408,18 @@ class CyclePlanningCompiler:
                 "target_share": target_share,
                 "min_share": min_share,
                 "max_share": max_share,
-                "review_pressure": _string(_read_field(entry, "review_pressure")) or "",
-                "defer_reason": _string(_read_field(entry, "defer_reason")),
+                "review_pressure": _string(entry.review_pressure) or "",
+                "defer_reason": _string(entry.defer_reason),
                 "force_include_reason": force_include_reason,
             }
         return budgets
 
-    def _budget_current_share(self, budget_window: object | None) -> float:
-        if isinstance(budget_window, (int, float)):
-            return float(budget_window)
-        raw_current_share = _read_field(budget_window or {}, "current_share")
-        if raw_current_share is not None:
-            return _number(raw_current_share)
-        nested_budget_window = _read_field(budget_window or {}, "budget_window")
-        if nested_budget_window is not None and nested_budget_window is not budget_window:
-            nested_current_share = self._budget_current_share(nested_budget_window)
-            if nested_current_share > 0.0:
-                return nested_current_share
-        completed_cycles = int(_number(_read_field(budget_window or {}, "completed_cycles")))
-        allocated_cycles = int(
-            _number(_read_field(budget_window or {}, "allocated_cycles"))
-            or _number(_read_field(budget_window or {}, "selected_cycles"))
-            or _number(_read_field(budget_window or {}, "consumed_cycles"))
-        )
-        if completed_cycles <= 0 and nested_budget_window is not None and nested_budget_window is not budget_window:
-            completed_cycles = int(_number(_read_field(nested_budget_window or {}, "completed_cycles")))
-            allocated_cycles = int(
-                _number(_read_field(nested_budget_window or {}, "allocated_cycles"))
-                or _number(_read_field(nested_budget_window or {}, "selected_cycles"))
-                or _number(_read_field(nested_budget_window or {}, "consumed_cycles"))
-            )
+    def _budget_current_share(self, budget: PlanningLaneBudget) -> float:
+        current_share = budget.current_share_or_default()
+        if current_share > 0.0:
+            return current_share
+        completed_cycles = budget.completed_cycles_or_default()
+        allocated_cycles = budget.consumed_cycles_or_default()
         if completed_cycles > 0 and allocated_cycles >= 0:
             return allocated_cycles / completed_cycles
         return 0.0
@@ -836,18 +803,13 @@ class CyclePlanningCompiler:
     def _is_multi_cycle_underinvested(
         self,
         *,
-        budget_window: object | None,
+        budget: PlanningLaneBudget,
         current_share: float,
         target_share: float,
     ) -> bool:
         if current_share >= target_share:
             return False
-        missed_cycles = max(
-            _number(_read_field(budget_window or {}, "consecutive_missed_cycles")),
-            _number(_read_field(budget_window or {}, "missed_target_cycles")),
-            _number(_read_field(budget_window or {}, "underinvested_cycles")),
-        )
-        return missed_cycles >= 2
+        return budget.underinvested_cycle_count() >= 2
 
     def _lane_force_include_reason_for_items(
         self,

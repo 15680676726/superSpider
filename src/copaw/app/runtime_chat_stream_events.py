@@ -6,7 +6,7 @@ from typing import AsyncIterator
 from agentscope_runtime.engine.schemas.agent_schemas import AgentRequest, SequenceNumberGenerator
 
 from ..kernel.main_brain_intent_shell import read_attached_main_brain_intent_shell
-from .routers.runtime_center_shared import _encode_sse_event
+from .routers.runtime_center_sse import _encode_sse_event
 
 
 def _safe_get(source: object | None, key: str) -> object | None:

@@ -221,8 +221,9 @@ def test_query_execution_service_recognizes_desktop_mcp_as_actuation(
                 mission="Use the mounted browser and desktop surfaces to complete delivery work.",
                 environment_constraints=["browser allowed", "desktop allowed"],
                 evidence_expectations=["execution evidence"],
-                current_goal_id="goal-1",
-                current_goal="Execute specialist workflow",
+                current_focus_kind="goal",
+                current_focus_id="goal-1",
+                current_focus="Execute specialist workflow",
             )
 
         def list_agents(self):

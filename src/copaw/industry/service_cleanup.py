@@ -1781,8 +1781,9 @@ class _IndustryCleanupMixin:
             "mission": agent.mission,
             "status": status,
             "risk_level": agent.risk_level,
-            "current_goal_id": goal_id,
-            "current_goal": goal_title,
+            "current_focus_kind": "goal" if goal_id or goal_title else None,
+            "current_focus_id": goal_id,
+            "current_focus": goal_title,
             "industry_instance_id": instance_id,
             "industry_role_id": agent.role_id,
             "environment_summary": "; ".join(agent.environment_constraints),
@@ -1866,8 +1867,8 @@ class _IndustryCleanupMixin:
                     agent=agent,
                     instance_id=active_record.instance_id,
                     owner_scope=active_record.owner_scope,
-                    goal_id=_string(override.current_goal_id) if override is not None else None,
-                    goal_title=_string(override.current_goal) if override is not None else None,
+                    goal_id=_string(override.current_focus_id) if override is not None else None,
+                    goal_title=_string(override.current_focus) if override is not None else None,
                     status=_string(override.status) if override is not None else "idle",
                 )
             self._retire_stale_actors(

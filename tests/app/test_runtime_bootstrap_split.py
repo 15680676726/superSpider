@@ -56,6 +56,7 @@ def test_task_status_locks_main_brain_chat_performance_regression_guards() -> No
 
 def test_query_execution_runtime_mixin_inherits_split_runtime_seams() -> None:
     base_modules = {base.__module__ for base in _QueryExecutionRuntimeMixin.__bases__}
+    assert "copaw.kernel.query_execution_context_runtime" in base_modules
     assert "copaw.kernel.query_execution_resident_runtime" in base_modules
     assert "copaw.kernel.query_execution_usage_runtime" in base_modules
 

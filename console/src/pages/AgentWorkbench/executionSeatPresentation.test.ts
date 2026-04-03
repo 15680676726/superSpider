@@ -29,8 +29,6 @@ const agentFixture: AgentProfile = {
   current_focus_kind: null,
   current_focus_id: null,
   current_focus: "",
-  current_goal_id: null,
-  current_goal: "",
   current_task_id: null,
   industry_instance_id: "industry-1",
   industry_role_id: "operator",

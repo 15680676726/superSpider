@@ -49,8 +49,6 @@ function createAgentProfile(overrides: Record<string, unknown> = {}) {
     current_focus_kind: "assignment",
     current_focus_id: "assignment-1",
     current_focus: "当前聚焦摘要",
-    current_goal_id: "goal-legacy",
-    current_goal: "旧目标摘要",
     current_task_id: null,
     current_mailbox_id: null,
     queue_depth: 0,

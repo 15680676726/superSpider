@@ -130,7 +130,6 @@ class _FakeAgentProfileService:
                 "current_focus_kind": "goal",
                 "current_focus_id": "goal-execution-core",
                 "current_focus": "Run weekly industry review",
-                "current_goal": "Run weekly industry review",
                 "industry_instance_id": "industry-v1-acme",
                 "industry_role_id": "execution-core",
             }
@@ -142,7 +141,6 @@ class _FakeAgentProfileService:
                 "current_focus_kind": "goal",
                 "current_focus_id": "goal-research",
                 "current_focus": "Prepare the next evidence digest",
-                "current_goal": "Prepare the next evidence digest",
             }
         return None
 

@@ -54,6 +54,14 @@ def test_retired_runtime_and_goal_frontdoors_are_removed_from_openapi() -> None:
     assert "/goals/{goal_id}/dispatch" not in paths
     assert "/goals/automation/dispatch-active" not in paths
     assert "/goals/{goal_id}/detail" in paths
+    assert "/workflow-templates" not in paths
+    assert "/workflow-templates/{template_id}" not in paths
+    assert "/workflow-templates/{template_id}/preview" not in paths
+    assert "/workflow-templates/{template_id}/presets" not in paths
+    assert "/workflow-runs" not in paths
+    assert "/workflow-runs/{run_id}" not in paths
+    assert "/workflow-runs/{run_id}/cancel" not in paths
+    assert "/workflow-runs/{run_id}/steps/{step_id}" not in paths
     assert "/learning/patches/{patch_id}/approve" not in paths
     assert "/learning/patches/{patch_id}/reject" not in paths
     assert "/learning/patches/{patch_id}/apply" not in paths
@@ -106,6 +114,18 @@ def test_retired_runtime_and_goal_frontdoors_return_404() -> None:
     assert client.get("/goals/goal-1/detail").status_code == 503
     assert client.post("/goals/goal-1/dispatch", json={"trigger": "manual"}).status_code == 404
     assert client.post("/goals/automation/dispatch-active", json={"source": "runtime-center"}).status_code == 404
+    assert client.get("/workflow-templates").status_code == 404
+    assert client.get("/workflow-templates/template-1").status_code == 404
+    assert client.post(
+        "/workflow-templates/template-1/preview",
+        json={"goal_id": "goal-1"},
+    ).status_code == 404
+    assert client.get("/workflow-runs").status_code == 404
+    assert client.get("/workflow-runs/run-1").status_code == 404
+    assert client.post(
+        "/workflow-runs/run-1/cancel",
+        json={"actor": "ops", "reason": "retired"},
+    ).status_code == 404
     assert client.post("/learning/patches/patch-1/approve", json={"actor": "ops"}).status_code == 404
     assert client.post("/learning/patches/patch-1/reject", json={"actor": "ops"}).status_code == 404
     assert client.post("/learning/patches/patch-1/apply", json={"actor": "ops"}).status_code == 404

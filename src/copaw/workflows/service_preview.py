@@ -158,9 +158,6 @@ class _WorkflowServicePreviewMixin:
             decisions=decisions,
             evidence=evidence,
             routes={
-                "template": f"/api/workflow-templates/{template.template_id}",
-                "run": f"/api/workflow-runs/{run.run_id}",
-                "cancel": f"/api/workflow-runs/{run.run_id}/cancel",
                 "goals": [
                     f"/api/goals/{goal_id}/detail"
                     for goal_id in run.goal_ids
@@ -286,11 +283,7 @@ class _WorkflowServicePreviewMixin:
                     blocked_reason_message=blocker.message if blocker is not None else None,
                     summary=step.summary,
                     last_event_at=last_event_at,
-                    routes={
-                        "template": f"/api/workflow-templates/{run.template_id}",
-                        "run": f"/api/workflow-runs/{run.run_id}",
-                        "detail": f"/api/workflow-runs/{run.run_id}/steps/{step.step_id}",
-                    },
+                    routes={},
                 ),
             )
         return step_records
@@ -384,8 +377,6 @@ class _WorkflowServicePreviewMixin:
             schedule_statuses=schedule_statuses,
             host_snapshot=dict(host_snapshot or {}),
             routes={
-                "run": f"/api/workflow-runs/{run.run_id}",
-                "template": f"/api/workflow-templates/{run.template_id}",
                 "decisions": "/api/runtime-center/decisions",
             },
         )

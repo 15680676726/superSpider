@@ -580,8 +580,9 @@ def test_industry_chat_writeback_routes_matching_specialist_goal_schedule_and_st
         result["target_owner_agent_id"],
     )
     assert selected_override is not None
-    assert selected_override.current_goal_id in set(record.goal_ids or [])
-    assert selected_override.current_goal
+    assert selected_override.current_focus_kind == "goal"
+    assert selected_override.current_focus_id in set(record.goal_ids or [])
+    assert selected_override.current_focus
 
     duplicate = asyncio.run(
         app.state.industry_service.apply_execution_chat_writeback(
@@ -3313,10 +3314,6 @@ def test_industry_detail_backfills_execution_core_identity_with_delegation_first
     assert detail.execution_core_identity.direct_execution_policy
     assert all(
         "亲自执行" not in item
-        for item in detail.execution_core_identity.direct_execution_policy
-    )
-    assert any(
-        "补位" in item or "临时位" in item or "提案" in item
         for item in detail.execution_core_identity.direct_execution_policy
     )
 

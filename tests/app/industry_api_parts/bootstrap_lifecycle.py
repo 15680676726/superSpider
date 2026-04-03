@@ -1044,7 +1044,8 @@ def test_run_operating_cycle_dispatches_materialized_execution_assignment(tmp_pa
     )
     assert override is not None
     assert override.status in {"waiting", "assigned", "queued", "claimed", "executing"}
-    assert override.current_goal
+    assert override.current_focus_kind == "goal"
+    assert override.current_focus
 
 
 def test_run_operating_cycle_persists_graph_focus_into_formal_planning_sidecar(tmp_path) -> None:

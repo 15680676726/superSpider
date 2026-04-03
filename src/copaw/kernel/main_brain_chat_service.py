@@ -402,7 +402,7 @@ def _format_team_roster(
                 f"{_first_non_empty(getattr(profile, 'role_name', None), '未标注职责')} | "
                 f"职责：{_clip_text(getattr(profile, 'role_summary', ''), limit=70) or '未提供'} | "
                 f"能力范围：{_clip_text(capability_summary, limit=70)} | "
-                f"当前焦点：{_clip_text(_first_non_empty(getattr(profile, 'current_focus', None), getattr(profile, 'current_goal', '')), limit=50) or '当前无显式焦点'} | "
+                f"当前焦点：{_clip_text(_first_non_empty(getattr(profile, 'current_focus', None)), limit=50) or '当前无显式焦点'} | "
                 "回报时机：跨角色冲突/高风险/需要主脑拍板时回到主脑"
             )
         )
@@ -419,7 +419,6 @@ def _format_runtime_snapshot(detail: object | None) -> str:
         current_cycle.get("title"),
         current_cycle.get("summary"),
         execution.get("current_focus"),
-        execution.get("current_goal"),
     ) or "暂无明确 cycle"
     lane_lines = [
         _clip_text(
@@ -806,23 +805,30 @@ class MainBrainChatService:
             snapshot=snapshot,
         )
 
-    async def execute_stream(
+    def _prepare_turn_session_state(
         self,
         *,
-        msgs: list[Any],
         request: Any,
-    ) -> AsyncIterator[tuple[Msg, bool]]:
-        turn_started_at = time.perf_counter()
-        query = extract_main_brain_intake_text(msgs)
+        now: float,
+    ) -> tuple[
+        str,
+        str,
+        bool,
+        _PureChatSessionCacheEntry | None,
+        dict[str, Any],
+        ReMeInMemoryMemory,
+    ]:
         session_id = str(getattr(request, "session_id", "") or "").strip()
         user_id = _resolve_snapshot_user_id(request)
         cache_key = (session_id, user_id) if session_id and user_id else None
         has_session_snapshot = bool(session_id and user_id)
-        now = time.time()
         cache_entry: _PureChatSessionCacheEntry | None = None
         if cache_key is not None:
             cache_entry = self._session_cache.get(cache_key)
-            if cache_entry is not None and now - cache_entry.last_used_at > _PURE_CHAT_SESSION_CACHE_TTL_SECONDS:
+            if (
+                cache_entry is not None
+                and now - cache_entry.last_used_at > _PURE_CHAT_SESSION_CACHE_TTL_SECONDS
+            ):
                 self._persist_cache_entry_if_needed(
                     session_id=session_id,
                     user_id=user_id,
@@ -850,7 +856,123 @@ class MainBrainChatService:
             cache_entry.last_used_at = now
             snapshot = cache_entry.snapshot
             memory = cache_entry.memory
+        return session_id, user_id, has_session_snapshot, cache_entry, snapshot, memory
 
+    async def _persist_incoming_messages(
+        self,
+        *,
+        msgs: list[Any],
+        request: Any,
+        session_id: str,
+        user_id: str,
+        has_session_snapshot: bool,
+        cache_entry: _PureChatSessionCacheEntry | None,
+        snapshot: dict[str, Any],
+        memory: ReMeInMemoryMemory,
+        now: float,
+    ) -> tuple[dict[str, Any], float]:
+        if not msgs:
+            return snapshot, now
+        await memory.add(msgs, allow_duplicates=False)
+        updated_snapshot = self._snapshot_with_memory(
+            snapshot=snapshot,
+            memory=memory,
+        )
+        if cache_entry is not None:
+            cache_entry.snapshot = updated_snapshot
+            cache_entry.memory = memory
+            cache_entry.last_used_at = now
+            cache_entry.dirty = True
+        if has_session_snapshot:
+            persist_now = time.time()
+            self._persist_cache_entry_if_needed(
+                session_id=session_id,
+                user_id=user_id,
+                cache_entry=cache_entry,
+                force=True,
+                now=persist_now,
+            )
+            update_request_runtime_context(
+                request,
+                accepted_persistence=build_accepted_persistence(
+                    request=request,
+                    source="main_brain_chat_service",
+                    boundary="pre_model_snapshot",
+                ),
+            )
+            now = persist_now
+        return updated_snapshot, now
+
+    async def _persist_assistant_snapshot(
+        self,
+        *,
+        assistant_message: Msg,
+        session_id: str,
+        user_id: str,
+        has_session_snapshot: bool,
+        cache_entry: _PureChatSessionCacheEntry | None,
+        snapshot: dict[str, Any],
+        memory: ReMeInMemoryMemory,
+        now: float,
+    ) -> tuple[dict[str, Any], float]:
+        await memory.add(assistant_message, allow_duplicates=False)
+        updated_snapshot = self._snapshot_with_memory(
+            snapshot=snapshot,
+            memory=memory,
+        )
+        if cache_entry is not None:
+            cache_entry.snapshot = updated_snapshot
+            cache_entry.memory = memory
+            cache_entry.last_used_at = now
+            cache_entry.dirty = True
+        persist_now = time.time()
+        self._persist_cache_entry_if_needed(
+            session_id=session_id,
+            user_id=user_id,
+            cache_entry=cache_entry,
+            force=has_session_snapshot or cache_entry is None,
+            now=persist_now,
+        )
+        return updated_snapshot, persist_now
+
+    def _cache_commit_state(
+        self,
+        *,
+        cache_entry: _PureChatSessionCacheEntry | None,
+        commit_state: MainBrainCommitState,
+    ) -> None:
+        if cache_entry is None:
+            return
+        if (
+            commit_state.status == "commit_deferred"
+            and commit_state.reason == "no_commit_action"
+        ):
+            return
+        main_brain_payload = _safe_mapping(cache_entry.snapshot.get("main_brain"))
+        main_brain_payload["phase2_commit"] = commit_state.model_dump(mode="json")
+        cache_entry.snapshot["main_brain"] = main_brain_payload
+        cache_entry.dirty = True
+
+    async def execute_stream(
+        self,
+        *,
+        msgs: list[Any],
+        request: Any,
+    ) -> AsyncIterator[tuple[Msg, bool]]:
+        turn_started_at = time.perf_counter()
+        query = extract_main_brain_intake_text(msgs)
+        now = time.time()
+        (
+            session_id,
+            user_id,
+            has_session_snapshot,
+            cache_entry,
+            snapshot,
+            memory,
+        ) = self._prepare_turn_session_state(
+            request=request,
+            now=now,
+        )
         persisted_commit_state = self._read_commit_state_from_snapshot(snapshot)
         if persisted_commit_state is not None:
             self._set_request_runtime_value(
@@ -878,34 +1000,17 @@ class MainBrainChatService:
         first_output_at: float | None = None
         try:
             if msgs:
-                await memory.add(msgs, allow_duplicates=False)
-                snapshot = self._snapshot_with_memory(
+                snapshot, now = await self._persist_incoming_messages(
+                    msgs=msgs,
+                    request=request,
+                    session_id=session_id,
+                    user_id=user_id,
+                    has_session_snapshot=has_session_snapshot,
+                    cache_entry=cache_entry,
                     snapshot=snapshot,
                     memory=memory,
+                    now=now,
                 )
-                if cache_entry is not None:
-                    cache_entry.snapshot = snapshot
-                    cache_entry.memory = memory
-                    cache_entry.last_used_at = now
-                    cache_entry.dirty = True
-                if has_session_snapshot:
-                    persist_now = time.time()
-                    self._persist_cache_entry_if_needed(
-                        session_id=session_id,
-                        user_id=user_id,
-                        cache_entry=cache_entry,
-                        force=True,
-                        now=persist_now,
-                    )
-                    update_request_runtime_context(
-                        request,
-                        accepted_persistence=build_accepted_persistence(
-                            request=request,
-                            source="main_brain_chat_service",
-                            boundary="pre_model_snapshot",
-                        ),
-                    )
-                    now = persist_now
         except Exception:
             logger.exception("Failed to persist incoming main-brain chat messages")
         try:
@@ -1079,26 +1184,16 @@ class MainBrainChatService:
             usage=assistant_usage,
         )
         try:
-            await memory.add(assistant_message, allow_duplicates=False)
-            updated_snapshot = self._snapshot_with_memory(
-                snapshot=snapshot,
-                memory=memory,
-            )
-
-            if cache_entry is not None:
-                cache_entry.snapshot = updated_snapshot
-                cache_entry.memory = memory
-                cache_entry.last_used_at = now
-                cache_entry.dirty = True
-            persist_now = time.time()
-            self._persist_cache_entry_if_needed(
+            snapshot, now = await self._persist_assistant_snapshot(
+                assistant_message=assistant_message,
                 session_id=session_id,
                 user_id=user_id,
+                has_session_snapshot=has_session_snapshot,
                 cache_entry=cache_entry,
-                force=has_session_snapshot or cache_entry is None,
-                now=persist_now,
+                snapshot=snapshot,
+                memory=memory,
+                now=now,
             )
-            now = persist_now
         except Exception:
             logger.exception("Failed to persist main-brain chat snapshot")
         commit_state = await self._commit_service.commit_turn_result_async(
@@ -1112,14 +1207,10 @@ class MainBrainChatService:
             and commit_state.reason == "no_commit_action"
         ):
             effective_commit_state = persisted_commit_state
-        if cache_entry is not None and not (
-            commit_state.status == "commit_deferred"
-            and commit_state.reason == "no_commit_action"
-        ):
-            main_brain_payload = _safe_mapping(cache_entry.snapshot.get("main_brain"))
-            main_brain_payload["phase2_commit"] = commit_state.model_dump(mode="json")
-            cache_entry.snapshot["main_brain"] = main_brain_payload
-            cache_entry.dirty = True
+        self._cache_commit_state(
+            cache_entry=cache_entry,
+            commit_state=commit_state,
+        )
         self._set_request_runtime_value(
             request,
             "_copaw_main_brain_turn_result",

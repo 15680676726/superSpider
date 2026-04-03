@@ -353,6 +353,80 @@ def test_report_replan_engine_promotes_strategy_change_payload_into_top_level_su
     assert strategy_change == _strategy_change(decision)
 
 
+def test_report_replan_engine_round_trips_top_level_strategy_change_fields() -> None:
+    engine = ReportReplanEngine()
+
+    decision = engine.compile(
+        {
+            "replan_decision": {
+                "decision_id": "report-synthesis:needs-replan:warehouse-approval",
+                "status": "needs-replan",
+                "summary": "Repeated contradiction requires main-brain judgment.",
+                "reason_ids": ["activation:contradictions", "failed-report:report-6"],
+                "source_report_ids": ["report-6"],
+                "topic_keys": ["warehouse-approval"],
+                "trigger_rule_ids": ["review-rule:warehouse-approval"],
+                "trigger_context": {
+                    "review_window": "weekly",
+                    "source_scope": "industry-1",
+                },
+            },
+            "activation": {
+                "contradiction_count": 2,
+            },
+            "strategy_change_context": {
+                "trigger_rule_ids": ["activation-rule:contradiction-repeat"],
+                "trigger_context": {
+                    "strategic_uncertainty_ids": ["uncertainty-warehouse-approval"],
+                },
+                "evidence_contradictions": [
+                    {
+                        "topic_key": "warehouse-approval",
+                        "source_families": ["synthesis", "activation", "report"],
+                        "repeat_count": 3,
+                        "source_report_ids": ["report-6"],
+                        "summary": "Repeated contradiction spans synthesis, activation, and report evidence.",
+                    },
+                ],
+            },
+        },
+    )
+
+    payload = _payload(decision)
+    round_tripped = type(decision).model_validate(payload)
+
+    assert getattr(round_tripped, "trigger_context", None) == {
+        "review_window": "weekly",
+        "source_scope": "industry-1",
+        "strategic_uncertainty_ids": ["uncertainty-warehouse-approval"],
+        "trigger_families": ["repeated_evidence_contradiction"],
+    }
+    assert _top_level_strategy_change(round_tripped) == {
+        "decision_kind": "strategy_review_required",
+        "trigger_family": "repeated_evidence_contradiction",
+        "trigger_rule_ids": [
+            "review-rule:warehouse-approval",
+            "activation-rule:contradiction-repeat",
+        ],
+        "trigger_context": {
+            "review_window": "weekly",
+            "source_scope": "industry-1",
+            "strategic_uncertainty_ids": ["uncertainty-warehouse-approval"],
+            "trigger_families": ["repeated_evidence_contradiction"],
+        },
+        "rationale": "Repeated contradiction spans synthesis, activation, and report evidence.",
+        "trigger_evidence": [
+            {
+                "topic_key": "warehouse-approval",
+                "source_families": ["synthesis", "activation", "report"],
+                "repeat_count": 3,
+                "source_report_ids": ["report-6"],
+                "summary": "Repeated contradiction spans synthesis, activation, and report evidence.",
+            },
+        ],
+    }
+
+
 def test_report_replan_engine_returns_clear_when_synthesis_is_missing() -> None:
     engine = ReportReplanEngine()
 

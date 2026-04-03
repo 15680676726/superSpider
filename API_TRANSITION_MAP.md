@@ -93,7 +93,7 @@
   - `GET /goals/{goal_id}` 也已从 `goals` 公开 router 退役；public leaf read 只保留 `/goals/{goal_id}/detail`，不再继续暴露旧 `GoalRecord` 裸读面
   - `GET /runtime-center/industry/{instance_id}` 的正式 Current Focus 读面也已同步从 legacy goal 文本退场；当 live `assignment / backlog` 存在时，`execution.current_focus` 与 `main_chain.current_focus` 优先投影 live focus，节点 route 统一锚定到 `industry detail + assignment_id/backlog_item_id`，并通过 `focus_selection + selected assignment/backlog` 呈现 focused subview，不再回跳旧 goal detail
   - `Runtime Center / /industry / 行业 kickoff prompt` 现也已把 `strategy / lanes / current cycle / assignments / agent reports` 升成正式 planning surface：`Runtime Center` 的行业 focus section 已新增 `Main-Brain Planning` 卡，`/industry` 已新增 `工作泳道` 正式展示，kickoff prompt 会显式带出 `lane/backlog/cycle/assignment/report` 计数与 lane 摘要
-  - `AgentProfile / AgentProfileOverrideRecord / runtime chat meta` 也已开始从 legacy `current_goal` 收口到 `current_focus_kind / current_focus_id / current_focus`；prompt appendix、Runtime Center conversations、overview agent meta 与主脑 roster 已优先消费 focus 字段，`current_goal / current_goal_id` 暂时只保留 leaf backlink 兼容
+  - `AgentProfile / AgentProfileOverrideRecord / runtime chat meta` 已完成从 legacy `current_goal` 向 `current_focus_kind / current_focus_id / current_focus` 的正式收口；prompt appendix、Runtime Center conversations、overview agent meta、主脑 roster、Agent Workbench 与 Knowledge 前台现已统一消费 focus 字段，`current_goal / current_goal_id` 已从正式模型、仓储、服务与前台读面移除
   - execution-side `host_twin` 也已开始作为正式前台 section 消费：`Runtime Center` detail drawer 现在会把 continuity / legal recovery / coordination / app-family twins / blocked surfaces 升成结构化 `Host Twin` section，而不是继续只递归展示 raw projection metadata
   - `RuntimeCenterStateQueryService` / task-review projection / overview governance` 也已开始消费 `host_twin_summary` 这类派生摘要，首屏读面优先显示 `seat_owner_ref / recommended_scheduler_action / active_app_family_keys / blocked_surface_count / legal_recovery_mode`，而不是继续靠 raw `host_twin` JSON 自行拼摘要
   - execution-side canonical host truth 现在也已补上“当前事实优先于历史 blocker 文案”的收口：stale blocker / stale handoff history 只会在当前 host/session 事实已 clean 且 latest handoff event 明确进入 `return-ready / return-complete` 时才会被抑制，不再因为残留 recovery metadata 就把 live blocker 吞掉
@@ -337,7 +337,7 @@
   - Runtime Center 当前只保留 `/api/runtime-center/goals/{id}/compile`；旧 `/dispatch` 入口已删除，不再给 operator 暴露第二条派工 HTTP 路径
   - `GET /goals/{id}/detail` 已成为 Goal detail 的唯一正式 HTTP 读面；`GET /api/runtime-center/goals/{id}` runtime-center alias 已退役，Agent Workbench 与 Runtime Center 统一改走稳定的 leaf detail route
   - compiler 现已把 `compiler/task_seed/evidence_refs` 与 `feedback_summary / feedback_items / feedback_patch_ids / feedback_growth_ids / feedback_evidence_refs / next_plan_hints` 一并持久化到 state-backed `system:dispatch_query` task spec
-  - learning proposal/patch/growth 现已自动补全 compiler seed 的 `goal_id / task_id / agent_id / source_evidence_id / evidence_refs`，且 approved/applied patch 与 recent growth 会反哺下一轮 planning/compile；`AgentProfile.current_focus_id` 已作为新的前台 focus 深链路主口径，`current_goal_id` 仅保留叶子 goal backlink 兼容
+  - learning proposal/patch/growth 现已自动补全 compiler seed 的 `goal_id / task_id / agent_id / source_evidence_id / evidence_refs`，且 approved/applied patch 与 recent growth 会反哺下一轮 planning/compile；`AgentProfile.current_focus_id` 已作为新的前台 focus 深链路主口径，正式主链已不再保留 `current_goal_id` backlink 兼容字段
 - `2026-03-25` hard-cut 补充：`Goal` 现在应被视为 cycle 下游的 phase/leaf object，而不是主脑长期规划入口；operator 主入口应优先消费 `strategy / lane / backlog / cycle / assignment / report`
 - `2026-03-25` hard-cut 完成补充：旧 goal dispatch 只允许保留在执行层或 system capability 内部；前台不再暴露 direct delegate / goal-dispatch 心智
 
@@ -475,8 +475,8 @@
 
 ### 4.13a `workflow-templates`（planned） -> `WorkflowTemplateService` + existing `Goal/Schedule/Kernel` surfaces
 
-- 当前 router：`not landed`
-- 当前职责：无；今天的 workflow 逻辑仍分散在 `GoalService / Runtime Center Automation / Delegation / Industry bootstrap`
+- 当前 router：`src/copaw/app/routers/workflow_templates.py`（仅专项 service/test app 显式挂载，assembled root-router 不再 include）
+- 当前职责：workflow service 的专用读面与 materialization preview；不再作为公开 root front-door 承接 operator 心智
 - 未来归属：
   - `WorkflowTemplateService`
   - `GoalService`
@@ -487,6 +487,7 @@
 - 策略：`add-on-top-of-existing`
 - 迁移说明：
   - 这是在现有主链上的产品化对象补充，不是新运行内核
+  - 公开 root front-door 已退休；现役 operator 入口应统一通过 `Runtime Center -> Automation`、industry runtime surface 与既有 kernel/schedule 写链
   - 建议新增：
     - `GET /api/workflow-templates`
     - `GET /api/workflow-templates/{template_id}`

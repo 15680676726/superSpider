@@ -1360,8 +1360,6 @@ def test_sqlite_override_repositories_crud_round_trip(tmp_path) -> None:
         current_focus_kind="goal",
         current_focus_id="goal-1",
         current_focus="Launch runtime center",
-        current_goal_id="goal-1",
-        current_goal="Launch runtime center",
         industry_instance_id="industry-v1-ops",
         industry_role_id="operations",
         environment_constraints=["workspace draft/edit allowed"],
@@ -1379,7 +1377,8 @@ def test_sqlite_override_repositories_crud_round_trip(tmp_path) -> None:
     assert stored_agent.current_focus_kind == "goal"
     assert stored_agent.current_focus_id == "goal-1"
     assert stored_agent.current_focus == "Launch runtime center"
-    assert stored_agent.current_goal_id == "goal-1"
+    assert hasattr(stored_agent, "current_goal_id") is False
+    assert hasattr(stored_agent, "current_goal") is False
     assert stored_agent.industry_instance_id == "industry-v1-ops"
     assert stored_agent.environment_constraints == ["workspace draft/edit allowed"]
     assert stored_agent.capabilities == [

@@ -189,8 +189,6 @@ class PatchExecutor:
             current_focus_kind=metadata.get("current_focus_kind"),
             current_focus_id=metadata.get("current_focus_id"),
             current_focus=metadata.get("current_focus"),
-            current_goal_id=metadata.get("current_goal_id"),
-            current_goal=metadata.get("current_goal"),
             current_task_id=metadata.get("current_task_id"),
             environment_summary=metadata.get("environment_summary"),
             today_output_summary=metadata.get("today_output_summary"),

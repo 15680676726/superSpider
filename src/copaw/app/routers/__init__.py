@@ -14,7 +14,6 @@ from .goals import public_router as goals_public_router
 from .routines import router as routines_router
 from .runtime_center import router as runtime_center_router
 from .system import router as system_router
-from .workflow_templates import router as workflow_templates_router, run_router as workflow_runs_router
 from .workspace import router as workspace_router
 from .envs import router as envs_router
 from .industry import router as industry_router
@@ -42,8 +41,6 @@ router.include_router(providers_router)
 router.include_router(routines_router)
 router.include_router(runtime_center_router)
 router.include_router(system_router)
-router.include_router(workflow_templates_router)
-router.include_router(workflow_runs_router)
 router.include_router(workspace_router)
 router.include_router(envs_router)
 router.include_router(goals_public_router)

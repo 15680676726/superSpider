@@ -697,9 +697,14 @@ class _QueryExecutionTeamMixin:
             or owner_agent_id
         )
         channel = _first_non_empty(getattr(request, "channel", None), DEFAULT_CHANNEL) or DEFAULT_CHANNEL
-        current_goal_id = _first_non_empty(
+        goal_focus_id = _first_non_empty(
             getattr(request, "goal_id", None),
-            getattr(agent_profile, "current_goal_id", None) if agent_profile is not None else None,
+            (
+                getattr(agent_profile, "current_focus_id", None)
+                if agent_profile is not None
+                and getattr(agent_profile, "current_focus_kind", None) == "goal"
+                else None
+            ),
         )
         actor_owner_id = _first_non_empty(
             getattr(agent_profile, "actor_key", None) if agent_profile is not None else None,
@@ -714,7 +719,7 @@ class _QueryExecutionTeamMixin:
         )
         task = KernelTask(
             title=f"{surface_label}待确认：{action_label}",
-            goal_id=current_goal_id,
+            goal_id=goal_focus_id,
             parent_task_id=_first_non_empty(kernel_task_id),
             capability_ref=None,
             environment_ref=f"session:{channel}:{session_id}",

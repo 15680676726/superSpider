@@ -79,8 +79,6 @@ class AgentProfileOverrideRecord(UpdatedRecord):
     current_focus_kind: str | None = None
     current_focus_id: str | None = None
     current_focus: str | None = None
-    current_goal_id: str | None = None
-    current_goal: str | None = None
     current_task_id: str | None = None
     industry_instance_id: str | None = None
     industry_role_id: str | None = None
@@ -92,22 +90,6 @@ class AgentProfileOverrideRecord(UpdatedRecord):
     capabilities: list[str] | None = None
     reason: str | None = None
     source_patch_id: str | None = None
-
-    @model_validator(mode="after")
-    def _sync_focus_goal_backlinks(self) -> "AgentProfileOverrideRecord":
-        if self.current_focus_kind is None and (self.current_goal_id or self.current_goal):
-            self.current_focus_kind = "goal"
-        if self.current_focus_id is None and self.current_goal_id is not None:
-            self.current_focus_id = self.current_goal_id
-        if self.current_focus is None and self.current_goal is not None:
-            self.current_focus = self.current_goal
-        if self.current_focus_kind == "goal":
-            if self.current_goal_id is None and self.current_focus_id is not None:
-                self.current_goal_id = self.current_focus_id
-            if self.current_goal is None and self.current_focus is not None:
-                self.current_goal = self.current_focus
-        return self
-
 
 class GoalOverrideRecord(UpdatedRecord):
     """Persistent overrides applied to goal projections and plan views."""

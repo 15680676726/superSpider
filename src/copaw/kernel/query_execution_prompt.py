@@ -116,10 +116,6 @@ class _QueryExecutionPromptMixin:
             getattr(profile, "current_focus_id", None) if profile is not None else None
         )
         current_focus = getattr(profile, "current_focus", None) if profile is not None else None
-        current_goal_id = (
-            getattr(profile, "current_goal_id", None) if profile is not None else None
-        )
-        current_goal = getattr(profile, "current_goal", None) if profile is not None else None
         current_task_id = (
             getattr(profile, "current_task_id", None) if profile is not None else None
         )
@@ -174,17 +170,23 @@ class _QueryExecutionPromptMixin:
             industry_role_id=industry_role_id,
             allow_execution_core_alias=is_execution_core_runtime,
         )
+        goal_focus_id = None
+        goal_focus_title = None
         if goal_focus is not None:
-            current_goal_id = _first_non_empty(goal_focus.get("goal_id"), current_goal_id)
-            current_goal = _first_non_empty(goal_focus.get("title"), current_goal)
+            goal_focus_id = _first_non_empty(goal_focus.get("goal_id"))
+            goal_focus_title = _first_non_empty(goal_focus.get("title"))
         current_focus_kind = (
             current_focus_kind
-            or ("goal" if current_goal_id or current_goal else None)
+            or ("goal" if goal_focus_id or goal_focus_title else None)
         )
-        current_focus_id = _first_non_empty(current_focus_id, current_goal_id)
-        current_focus = _first_non_empty(current_focus, current_goal)
+        current_focus_id = _first_non_empty(current_focus_id, goal_focus_id)
+        current_focus = _first_non_empty(current_focus, goal_focus_title)
         execution_feedback = self._resolve_recent_execution_feedback(
-            goal_id=_first_non_empty(getattr(request, "goal_id", None), current_goal_id),
+            goal_id=_first_non_empty(
+                getattr(request, "goal_id", None),
+                goal_focus_id,
+                current_focus_id if current_focus_kind == "goal" else None,
+            ),
             task_id=_first_non_empty(
                 getattr(request, "task_id", None),
                 current_task_id,
@@ -873,7 +875,6 @@ class _QueryExecutionPromptMixin:
             mission = _first_non_empty(_field_value(agent, "mission"))
             current_focus = _first_non_empty(
                 _field_value(agent, "current_focus"),
-                _field_value(agent, "current_goal"),
             )
             allowed_capabilities = _string_list(
                 _field_value(agent, "allowed_capabilities", "capabilities"),

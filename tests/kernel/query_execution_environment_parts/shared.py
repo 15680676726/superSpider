@@ -396,8 +396,6 @@ class _FakeAgentProfileService:
             current_focus_kind="goal",
             current_focus_id="goal-1",
             current_focus="Launch runtime center",
-            current_goal_id="goal-1",
-            current_goal="Launch runtime center",
             current_task_id="task-1",
             industry_instance_id="industry-v1-ops",
             industry_role_id="execution-core",
@@ -659,7 +657,6 @@ class _FakeIndustryService:
                         "tool:browser_use",
                     ],
                     "current_focus": "Launch runtime center",
-                    "current_goal": "Launch runtime center",
                 },
                 {
                     "agent_id": "ops-researcher",
@@ -671,7 +668,6 @@ class _FakeIndustryService:
                         "tool:browser_use",
                     ],
                     "current_focus": "Gather operator research",
-                    "current_goal": "Gather operator research",
                 },
             ],
             profile=SimpleNamespace(

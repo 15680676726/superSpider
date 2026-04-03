@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from ...state import BacklogItemRecord, OperatingLaneRecord
 from .models import AssignmentPlanEnvelope, PlanningStrategyConstraints
 
@@ -59,6 +61,128 @@ def _contract_entries(
         if text is not None:
             entries.append({string_key: text})
     return entries
+
+
+class _AssignmentPlanningInput(BaseModel):
+    """Typed bridge from loose compiler context into assignment planning input."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    assignment_id: str
+    backlog_item_id: str | None = None
+    industry_instance_id: str = "compiler-context"
+    lane_id: str | None = None
+    cycle_id: str | None = None
+    goal_title: str | None = None
+    title: str | None = None
+    goal_summary: str | None = None
+    summary: str | None = None
+    assignment_metadata: dict[str, Any] = Field(default_factory=dict)
+    plan_steps: list[str] = Field(default_factory=list)
+    plan_acceptance_criteria: list[str] = Field(default_factory=list)
+    plan_dependencies: list[dict[str, Any]] = Field(default_factory=list)
+    plan_resource_requirements: list[dict[str, Any]] = Field(default_factory=list)
+    plan_capacity_requirements: list[dict[str, Any]] = Field(default_factory=list)
+    plan_retry_policy: dict[str, Any] = Field(default_factory=dict)
+    plan_local_replan_policy: dict[str, Any] = Field(default_factory=dict)
+    report_back_mode: str | None = None
+    lane_title: str | None = None
+    owner_agent_id: str | None = None
+    industry_role_id: str | None = None
+
+    @classmethod
+    def from_context(
+        cls,
+        context: Mapping[str, object],
+    ) -> _AssignmentPlanningInput | None:
+        assignment_id = _string(context.get("assignment_id"))
+        if assignment_id is None:
+            return None
+        assignment_metadata = (
+            dict(context.get("assignment_metadata"))
+            if isinstance(context.get("assignment_metadata"), Mapping)
+            else {}
+        )
+        return cls(
+            assignment_id=assignment_id,
+            backlog_item_id=_string(context.get("backlog_item_id")),
+            industry_instance_id=_string(context.get("industry_instance_id")) or "compiler-context",
+            lane_id=_string(context.get("lane_id")),
+            cycle_id=_string(context.get("cycle_id")),
+            goal_title=_string(context.get("goal_title")),
+            title=_string(context.get("title")),
+            goal_summary=_string(context.get("goal_summary")),
+            summary=_string(context.get("summary")),
+            assignment_metadata=assignment_metadata,
+            plan_steps=_string_list(context.get("plan_steps")),
+            plan_acceptance_criteria=_string_list(context.get("plan_acceptance_criteria")),
+            plan_dependencies=_contract_entries(
+                context.get("plan_dependencies"),
+                string_key="label",
+            ),
+            plan_resource_requirements=_contract_entries(
+                context.get("plan_resource_requirements"),
+                string_key="resource_ref",
+            ),
+            plan_capacity_requirements=_contract_entries(
+                context.get("plan_capacity_requirements"),
+                string_key="capacity_ref",
+            ),
+            plan_retry_policy=_mapping(context.get("plan_retry_policy")),
+            plan_local_replan_policy=_mapping(context.get("plan_local_replan_policy")),
+            report_back_mode=_string(context.get("report_back_mode")),
+            lane_title=_string(context.get("lane_title")),
+            owner_agent_id=_string(context.get("owner_agent_id")),
+            industry_role_id=_string(context.get("industry_role_id")),
+        )
+
+    def resolved_assignment_metadata(self) -> dict[str, Any]:
+        metadata = dict(self.assignment_metadata)
+        if "plan_steps" not in metadata and self.plan_steps:
+            metadata["plan_steps"] = list(self.plan_steps)
+        if "acceptance_criteria" not in metadata and self.plan_acceptance_criteria:
+            metadata["acceptance_criteria"] = list(self.plan_acceptance_criteria)
+        if "dependencies" not in metadata and self.plan_dependencies:
+            metadata["dependencies"] = list(self.plan_dependencies)
+        if "resource_requirements" not in metadata and self.plan_resource_requirements:
+            metadata["resource_requirements"] = list(self.plan_resource_requirements)
+        if "capacity_requirements" not in metadata and self.plan_capacity_requirements:
+            metadata["capacity_requirements"] = list(self.plan_capacity_requirements)
+        if "retry_policy" not in metadata and self.plan_retry_policy:
+            metadata["retry_policy"] = dict(self.plan_retry_policy)
+        if "local_replan_policy" not in metadata and self.plan_local_replan_policy:
+            metadata["local_replan_policy"] = dict(self.plan_local_replan_policy)
+        if "report_back_mode" not in metadata and self.report_back_mode is not None:
+            metadata["report_back_mode"] = self.report_back_mode
+        return metadata
+
+    def backlog_item(self) -> BacklogItemRecord:
+        return BacklogItemRecord(
+            id=self.backlog_item_id or f"assignment:{self.assignment_id}",
+            industry_instance_id=self.industry_instance_id,
+            lane_id=self.lane_id,
+            cycle_id=self.cycle_id,
+            assignment_id=self.assignment_id,
+            title=self.goal_title or self.title or "Assignment",
+            summary=self.goal_summary or self.summary or "",
+            metadata=self.resolved_assignment_metadata(),
+        )
+
+    def lane(self, *, industry_instance_id: str) -> OperatingLaneRecord | None:
+        if (
+            self.lane_id is None
+            and self.owner_agent_id is None
+            and self.industry_role_id is None
+        ):
+            return None
+        return OperatingLaneRecord(
+            id=self.lane_id or f"lane:{self.assignment_id}",
+            industry_instance_id=industry_instance_id,
+            lane_key=self.lane_id or "assignment",
+            title=self.lane_title or "Assignment lane",
+            owner_agent_id=self.owner_agent_id,
+            owner_role_id=self.industry_role_id,
+        )
 
 
 class AssignmentPlanningCompiler:
@@ -196,101 +320,15 @@ class AssignmentPlanningCompiler:
         *,
         strategy_constraints: PlanningStrategyConstraints | None = None,
     ) -> AssignmentPlanEnvelope | None:
-        assignment_id = _string(context.get("assignment_id"))
-        if assignment_id is None:
+        planning_input = _AssignmentPlanningInput.from_context(context)
+        if planning_input is None:
             return None
-        assignment_metadata = (
-            dict(context.get("assignment_metadata"))
-            if isinstance(context.get("assignment_metadata"), dict)
-            else {}
-        )
-        if "plan_steps" not in assignment_metadata and context.get("plan_steps") is not None:
-            assignment_metadata["plan_steps"] = list(_string_list(context.get("plan_steps")))
-        if (
-            "acceptance_criteria" not in assignment_metadata
-            and context.get("plan_acceptance_criteria") is not None
-        ):
-            assignment_metadata["acceptance_criteria"] = list(
-                _string_list(context.get("plan_acceptance_criteria")),
-            )
-        if (
-            "dependencies" not in assignment_metadata
-            and context.get("plan_dependencies") is not None
-        ):
-            assignment_metadata["dependencies"] = _contract_entries(
-                context.get("plan_dependencies"),
-                string_key="label",
-            )
-        if (
-            "resource_requirements" not in assignment_metadata
-            and context.get("plan_resource_requirements") is not None
-        ):
-            assignment_metadata["resource_requirements"] = _contract_entries(
-                context.get("plan_resource_requirements"),
-                string_key="resource_ref",
-            )
-        if (
-            "capacity_requirements" not in assignment_metadata
-            and context.get("plan_capacity_requirements") is not None
-        ):
-            assignment_metadata["capacity_requirements"] = _contract_entries(
-                context.get("plan_capacity_requirements"),
-                string_key="capacity_ref",
-            )
-        if (
-            "retry_policy" not in assignment_metadata
-            and isinstance(context.get("plan_retry_policy"), Mapping)
-        ):
-            assignment_metadata["retry_policy"] = dict(context.get("plan_retry_policy"))
-        if (
-            "local_replan_policy" not in assignment_metadata
-            and isinstance(context.get("plan_local_replan_policy"), Mapping)
-        ):
-            assignment_metadata["local_replan_policy"] = dict(
-                context.get("plan_local_replan_policy"),
-            )
-        if (
-            "report_back_mode" not in assignment_metadata
-            and _string(context.get("report_back_mode")) is not None
-        ):
-            assignment_metadata["report_back_mode"] = _string(context.get("report_back_mode"))
-        backlog_item = BacklogItemRecord(
-            id=_string(context.get("backlog_item_id")) or f"assignment:{assignment_id}",
-            industry_instance_id=_string(context.get("industry_instance_id")) or "compiler-context",
-            lane_id=_string(context.get("lane_id")),
-            cycle_id=_string(context.get("cycle_id")),
-            assignment_id=assignment_id,
-            title=(
-                _string(context.get("goal_title"))
-                or _string(context.get("title"))
-                or "Assignment"
-            ),
-            summary=(
-                _string(context.get("goal_summary"))
-                or _string(context.get("summary"))
-                or ""
-            ),
-            metadata=assignment_metadata,
-        )
-        lane_id = _string(context.get("lane_id"))
-        lane = (
-            OperatingLaneRecord(
-                id=lane_id or f"lane:{assignment_id}",
-                industry_instance_id=backlog_item.industry_instance_id,
-                lane_key=lane_id or "assignment",
-                title=_string(context.get("lane_title")) or "Assignment lane",
-                owner_agent_id=_string(context.get("owner_agent_id")),
-                owner_role_id=_string(context.get("industry_role_id")),
-            )
-            if lane_id is not None
-            or _string(context.get("owner_agent_id")) is not None
-            or _string(context.get("industry_role_id")) is not None
-            else None
-        )
+        backlog_item = planning_input.backlog_item()
+        lane = planning_input.lane(industry_instance_id=backlog_item.industry_instance_id)
         return self.plan(
-            assignment_id=assignment_id,
-            cycle_id=_string(context.get("cycle_id")),
+            assignment_id=planning_input.assignment_id,
+            cycle_id=planning_input.cycle_id,
             backlog_item=backlog_item,
             lane=lane,
-            strategy_constraints=strategy_constraints,
+            strategy_constraints=PlanningStrategyConstraints.from_value(strategy_constraints),
         )

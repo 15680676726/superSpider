@@ -487,10 +487,8 @@ def test_patch_executor_applies_profile_role_and_plan_side_effects(tmp_path):
             "agent_id=ops-agent;"
             "current_focus_kind=goal;"
             "current_focus_id=goal-1;"
-            "current_goal_id=goal-1;"
             "role_summary=Owns runtime closeout;"
             "current_focus=Launch runtime center;"
-            "current_goal=Launch runtime center;"
             "capabilities=system:dispatch_query|system:dispatch_goal"
         ),
     )
@@ -509,8 +507,6 @@ def test_patch_executor_applies_profile_role_and_plan_side_effects(tmp_path):
     assert profile_override.current_focus_kind == "goal"
     assert profile_override.current_focus_id == "goal-1"
     assert profile_override.current_focus == "Launch runtime center"
-    assert profile_override.current_goal_id == "goal-1"
-    assert profile_override.current_goal == "Launch runtime center"
     assert profile_override.capabilities == [
         "system:dispatch_query",
         "system:dispatch_goal",

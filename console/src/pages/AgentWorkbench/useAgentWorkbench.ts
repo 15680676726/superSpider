@@ -149,8 +149,6 @@ export interface AgentProfile {
   current_focus_kind?: string | null;
   current_focus_id?: string | null;
   current_focus?: string | null;
-  current_goal_id?: string | null;
-  current_goal?: string | null;
   current_task_id: string | null;
   current_mailbox_id?: string | null;
   queue_depth?: number;

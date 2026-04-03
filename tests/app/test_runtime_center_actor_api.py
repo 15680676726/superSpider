@@ -275,6 +275,30 @@ def test_runtime_center_actor_focus_ignores_terminal_history(tmp_path) -> None:
     assert detail_response.json()["focus"] is None
 
 
+def test_runtime_center_actor_focus_supports_async_review_lookup(tmp_path) -> None:
+    app, _mailbox_service, _supervisor, _item = _build_actor_app(tmp_path)
+
+    class AsyncStateQueryService:
+        async def get_task_review(self, task_id: str) -> dict[str, object]:
+            return {
+                "route": f"/api/runtime-center/tasks/{task_id}/governed-review",
+                "review": {
+                    "task_id": task_id,
+                    "status": "reviewing",
+                },
+            }
+
+    app.state.state_query_service = AsyncStateQueryService()
+    client = TestClient(app)
+
+    detail_response = client.get("/runtime-center/actors/agent-1")
+    assert detail_response.status_code == 200
+    focus = detail_response.json()["focus"]
+    assert focus["task_id"] == "task-1"
+    assert focus["route"] == "/api/runtime-center/tasks/task-1/governed-review"
+    assert focus["review"]["status"] == "reviewing"
+
+
 def test_runtime_center_actor_control_routes(tmp_path) -> None:
     app, mailbox_service, supervisor, item = _build_actor_app(tmp_path)
     client = TestClient(app)

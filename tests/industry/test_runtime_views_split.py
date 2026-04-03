@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from pathlib import Path
 
 from copaw.compiler.planning.strategy_compiler import StrategyPlanningCompiler
@@ -87,6 +88,12 @@ class _RuntimeViewsHarness(_IndustryRuntimeViewsMixin):
         replan_synthesis: dict[str, object] | None,
     ) -> dict[str, object]:
         return {}
+
+    def _evidence_summary(self, evidence: dict[str, object] | None) -> str | None:
+        if not isinstance(evidence, dict):
+            return None
+        summary = str(evidence.get("summary") or "").strip()
+        return summary or None
 
 
 def test_runtime_views_mixin_owns_instance_detail_builder() -> None:
@@ -212,3 +219,49 @@ def test_main_brain_planning_surface_exposes_uncertainty_register_from_durable_s
             ],
         }
     ]
+
+
+def test_execution_summary_without_live_runtime_focus_does_not_fallback_to_goal_title() -> None:
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+    )
+    runtime_views = _RuntimeViewsHarness(strategy)
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind Robotics",
+        owner_scope="industry:northwind",
+        autonomy_status="active",
+    )
+
+    summary = runtime_views._build_instance_execution_summary(
+        record=record,
+        goals=[
+            {
+                "goal_id": "goal-legacy-focus",
+                "title": "Legacy goal title",
+                "status": "active",
+                "owner_agent_id": "copaw-agent-runner",
+                "role_id": "execution-core",
+                "updated_at": "2026-04-03T00:00:00Z",
+            }
+        ],
+        agents=[
+            {
+                "agent_id": "copaw-agent-runner",
+                "role_name": "Execution Core",
+                "risk_level": "guarded",
+            }
+        ],
+        tasks=[],
+        evidence=[],
+    )
+
+    assert summary.status == "idle"
+    assert summary.current_focus_id is None
+    assert summary.current_focus is None
+    assert summary.current_owner_agent_id is None
+    assert summary.current_owner is None
+    assert "目标" not in (summary.next_step or "")

@@ -102,6 +102,18 @@ def test_usage_runtime_helpers_are_sourced_from_usage_module() -> None:
         assert getattr(KernelQueryExecutionService, helper_name).__module__ == expected_module
 
 
+def test_execution_context_runtime_helpers_are_sourced_from_context_module() -> None:
+    expected_module = "copaw.kernel.query_execution_context_runtime"
+    helper_names = (
+        "_merge_main_brain_runtime_contexts",
+        "_resolve_request_main_brain_runtime_context",
+        "_resolve_execution_task_context",
+        "_resolve_execution_degradation_context",
+    )
+    for helper_name in helper_names:
+        assert getattr(KernelQueryExecutionService, helper_name).__module__ == expected_module
+
+
 def test_query_execution_runtime_drops_legacy_memory_manager_alias() -> None:
     assert not hasattr(KernelQueryExecutionService, "set_memory_manager")
 

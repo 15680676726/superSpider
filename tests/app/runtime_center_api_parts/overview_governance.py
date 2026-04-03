@@ -21,6 +21,7 @@ from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.main_brain_orchestrator import MainBrainOrchestrator
 from copaw.kernel.main_brain_turn_result import MainBrainCommitState
 from copaw.media import MediaService
+from copaw.app.runtime_center.overview_cards import _RuntimeCenterOverviewCardsSupport
 from copaw.app.routers.runtime_center_shared import _encode_sse_event
 from copaw.state import SQLiteStateStore
 from copaw.state import MediaAnalysisRecord
@@ -98,6 +99,19 @@ class _BrokenPydanticEvent(BaseModel):
     object: str = "message"
     status: str = "completed"
     payload: object
+
+
+def test_runtime_center_overview_support_inherits_entry_builder_mixin() -> None:
+    base_modules = {base.__module__ for base in _RuntimeCenterOverviewCardsSupport.__bases__}
+    assert "copaw.app.runtime_center.overview_entry_builders" in base_modules
+    assert (
+        _RuntimeCenterOverviewCardsSupport._build_task_entry.__module__
+        == "copaw.app.runtime_center.overview_entry_builders"
+    )
+    assert (
+        _RuntimeCenterOverviewCardsSupport._build_industry_entry.__module__
+        == "copaw.app.runtime_center.overview_entry_builders"
+    )
 
 
 def _build_media_service() -> MediaService:

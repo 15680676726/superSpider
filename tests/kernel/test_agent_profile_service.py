@@ -366,8 +366,8 @@ def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp
     assert profile.current_focus_kind == "goal"
     assert profile.current_focus_id == "goal-runtime"
     assert profile.current_focus == "Runtime projected goal"
-    assert profile.current_goal_id == "goal-runtime"
-    assert profile.current_goal == "Runtime projected goal"
+    assert hasattr(profile, "current_goal_id") is False
+    assert hasattr(profile, "current_goal") is False
     assert profile.current_task_id == "task-runtime"
     assert profile.current_mailbox_id == "mailbox-1"
     assert profile.current_environment_id == "session:industry:ops"

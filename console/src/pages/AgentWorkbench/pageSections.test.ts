@@ -83,8 +83,6 @@ describe("pageSections decomposition", () => {
           current_focus_kind: "goal",
           current_focus_id: "goal-focus",
           current_focus: "Focused Goal Summary",
-          current_goal_id: "goal-legacy",
-          current_goal: "Legacy Goal Summary",
           current_task_id: null,
           industry_instance_id: null,
           industry_role_id: null,
