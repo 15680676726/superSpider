@@ -21,6 +21,7 @@ from ..download_task_store import (
     update_status,
 )
 from ...providers import ProviderManager
+from ...providers.provider_admin_service import ProviderAdminService
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,10 @@ async def _register_background_task(task_id: str, task: asyncio.Task) -> None:
 async def _pop_background_task(task_id: str) -> Optional[asyncio.Task]:
     async with _background_tasks_lock:
         return _background_tasks.pop(task_id, None)
+
+
+def _get_provider_admin_service() -> ProviderAdminService:
+    return ProviderAdminService(ProviderManager.get_instance())
 
 
 @router.get(
@@ -235,7 +240,7 @@ async def _run_download_in_background(
             "console",
             f"Model downloaded: {info.display_name}",
         )
-        ProviderManager.get_instance().update_local_models()
+        _get_provider_admin_service().refresh_local_model_catalog()
     except asyncio.CancelledError:
         await update_status(task_id, DownloadTaskStatus.CANCELLED)
         logger.info("Local model download task %s cancelled", task_id)
@@ -285,7 +290,7 @@ async def delete_local(model_id: str) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    ProviderManager.get_instance().update_local_models()
+    _get_provider_admin_service().refresh_local_model_catalog()
 
     return {"status": "deleted", "model_id": model_id}
 

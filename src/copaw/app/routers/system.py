@@ -94,8 +94,8 @@ async def get_system_overview(request: Request) -> dict[str, object]:
                 else active_model
             ),
             "fallback_slots": fallback_slots,
-            "fallback_route": "/api/models/fallback",
-            "active_route": "/api/models/active",
+            "fallback_route": "/api/providers/admin/fallback",
+            "active_route": "/api/providers/admin/active",
         },
         "runtime": {
             "governance_route": "/api/runtime-center/governance/status",

@@ -28,6 +28,10 @@ export async function requestRuntimeOverview<T>(): Promise<T> {
   return request<T>("/runtime-center/overview");
 }
 
+export async function requestRuntimeSurface<T>(): Promise<T> {
+  return request<T>("/runtime-center/surface");
+}
+
 export async function requestRuntimeRecord<T>(path: string): Promise<T> {
   return request<T>(normalizeRuntimePath(path));
 }

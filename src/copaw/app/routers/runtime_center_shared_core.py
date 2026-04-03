@@ -16,6 +16,7 @@ from ...kernel.query_execution_shared import (
 from ...predictions import PredictionCapabilityOptimizationOverview
 from ..runtime_center import (
     RuntimeCenterQueryService,
+    RuntimeCenterSurfaceResponse,
     RuntimeMainBrainResponse,
     RuntimeOverviewResponse,
     apply_runtime_center_surface_headers,
@@ -71,6 +72,7 @@ __all__ = [
     "Request",
     "Response",
     "RuntimeCenterQueryService",
+    "RuntimeCenterSurfaceResponse",
     "RuntimeMainBrainResponse",
     "RuntimeOverviewResponse",
     "StreamingResponse",

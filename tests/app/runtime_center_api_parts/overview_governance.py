@@ -16,12 +16,33 @@ from copaw.capabilities import CapabilityService
 from copaw.app.startup_recovery import StartupRecoverySummary
 from copaw.environments.models import SessionMount
 from copaw.evidence import EvidenceLedger
-from copaw.kernel import KernelDispatcher, KernelTaskStore, KernelTurnExecutor
+from copaw.kernel import (
+    KernelDispatcher,
+    KernelQueryExecutionService,
+    KernelTaskStore,
+    KernelTurnExecutor,
+)
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.main_brain_orchestrator import MainBrainOrchestrator
 from copaw.kernel.main_brain_turn_result import MainBrainCommitState
+from copaw.memory.conversation_compaction_service import ConversationCompactionService
 from copaw.media import MediaService
 from copaw.app.runtime_center.overview_cards import _RuntimeCenterOverviewCardsSupport
+from copaw.app.runtime_center.models import (
+    RuntimeCenterAppStateView,
+    RuntimeCenterSurfaceResponse,
+    RuntimeCenterSurfaceInfo,
+    RuntimeMainBrainFocusedAssignmentPlan,
+    RuntimeMainBrainGovernancePayload,
+    RuntimeMainBrainPlanningDecision,
+    RuntimeMainBrainPlanningPayload,
+    RuntimeMainBrainReplanPayload,
+    RuntimeMainBrainResponse,
+    RuntimeOverviewResponse,
+    RuntimePlanningShell,
+    RuntimeQueryRuntimeEntropyPayload,
+)
+from copaw.app.runtime_center.service import RuntimeCenterQueryService
 from copaw.app.routers.runtime_center_shared import _encode_sse_event
 from copaw.state import SQLiteStateStore
 from copaw.state import MediaAnalysisRecord
@@ -112,6 +133,244 @@ def test_runtime_center_overview_support_inherits_entry_builder_mixin() -> None:
         _RuntimeCenterOverviewCardsSupport._build_industry_entry.__module__
         == "copaw.app.runtime_center.overview_entry_builders"
     )
+
+
+def test_runtime_main_brain_response_coerces_typed_planning_and_entropy_contracts() -> None:
+    payload = RuntimeMainBrainResponse.model_validate(
+        {
+            "surface": RuntimeCenterSurfaceInfo(
+                status="state-service",
+                source="runtime-center-test",
+            ).model_dump(mode="json"),
+            "main_brain_planning": {
+                "is_truth_store": False,
+                "source": "industry-runtime-read-model",
+                "strategy_constraints": {
+                    "planning_policy": ["prefer-followup-before-net-new"],
+                },
+                "latest_cycle_decision": {
+                    "summary": "Cycle shell for Runtime Center.",
+                    "planning_shell": {
+                        "mode": "cycle-planning-shell",
+                        "scope": "operating-cycle",
+                        "plan_id": "cycle:1",
+                        "resume_key": "industry:industry-v1-ops:cycle-1",
+                        "fork_key": "cycle:daily",
+                        "verify_reminder": "Verify cycle lane pressure before materializing assignments.",
+                    },
+                },
+                "focused_assignment_plan": {
+                    "summary": "Assignment shell keeps the browser follow-up on the same control thread.",
+                    "planning_shell": {
+                        "mode": "assignment-planning-shell",
+                        "scope": "assignment",
+                        "plan_id": "assignment:1",
+                        "resume_key": "assignment:assignment-1",
+                        "fork_key": "assignment:followup",
+                        "verify_reminder": "Verify browser evidence before closing the assignment.",
+                    },
+                },
+                "replan": {
+                    "status": "needs-replan",
+                    "decision_kind": "lane_reweight",
+                    "summary": "Replan shell is waiting for main-brain judgment.",
+                    "planning_shell": {
+                        "mode": "report-replan-shell",
+                        "scope": "report-replan",
+                        "plan_id": "report:1",
+                        "resume_key": "report:report-1",
+                        "fork_key": "decision:lane_reweight",
+                        "verify_reminder": "Verify synthesis pressure before mutating planning truth.",
+                    },
+                },
+            },
+            "governance": {
+                "status": "blocked",
+                "summary": "Compaction is degraded.",
+                "route": "/api/runtime-center/governance/status",
+                "query_runtime_entropy": {
+                    "status": "degraded",
+                    "runtime_entropy": {
+                        "status": "degraded",
+                        "carry_forward_contract": "canonical-state-only",
+                    },
+                    "compaction_state": {
+                        "mode": "microcompact",
+                    },
+                    "tool_result_budget": {
+                        "remaining_budget": 600,
+                    },
+                    "tool_use_summary": {
+                        "artifact_refs": ["artifact://tool-result-1"],
+                    },
+                    "sidecar_memory": {
+                        "status": "degraded",
+                    },
+                },
+            },
+        },
+    )
+
+    assert isinstance(payload.main_brain_planning, RuntimeMainBrainPlanningPayload)
+    assert isinstance(
+        payload.main_brain_planning.latest_cycle_decision,
+        RuntimeMainBrainPlanningDecision,
+    )
+    assert isinstance(
+        payload.main_brain_planning.latest_cycle_decision.planning_shell,
+        RuntimePlanningShell,
+    )
+    assert isinstance(
+        payload.main_brain_planning.focused_assignment_plan,
+        RuntimeMainBrainFocusedAssignmentPlan,
+    )
+    assert isinstance(
+        payload.main_brain_planning.replan,
+        RuntimeMainBrainReplanPayload,
+    )
+    assert isinstance(
+        payload.main_brain_planning.replan.planning_shell,
+        RuntimePlanningShell,
+    )
+    assert isinstance(payload.governance, RuntimeMainBrainGovernancePayload)
+    assert isinstance(
+        payload.governance.query_runtime_entropy,
+        RuntimeQueryRuntimeEntropyPayload,
+    )
+    assert (
+        payload.governance.query_runtime_entropy.runtime_entropy["carry_forward_contract"]
+        == "canonical-state-only"
+    )
+
+
+def test_runtime_center_overview_routes_use_prebound_query_service() -> None:
+    app = build_runtime_center_app()
+    calls: list[str] = []
+
+    class _StubRuntimeCenterQueryService:
+        async def get_overview(self, app_state):
+            assert isinstance(app_state, RuntimeCenterAppStateView)
+            calls.append("overview")
+            return RuntimeOverviewResponse(
+                surface=RuntimeCenterSurfaceInfo(
+                    status="state-service",
+                    source="stub-query-service",
+                ),
+                cards=[],
+            )
+
+        async def get_main_brain(self, app_state):
+            assert isinstance(app_state, RuntimeCenterAppStateView)
+            calls.append("main-brain")
+            return RuntimeMainBrainResponse(
+                surface=RuntimeCenterSurfaceInfo(
+                    status="state-service",
+                    source="stub-query-service",
+                ),
+            )
+
+        async def get_surface(self, app_state):
+            assert isinstance(app_state, RuntimeCenterAppStateView)
+            calls.append("surface")
+            return RuntimeCenterSurfaceResponse(
+                surface=RuntimeCenterSurfaceInfo(
+                    status="state-service",
+                    source="stub-query-service",
+                ),
+                cards=[],
+                main_brain=RuntimeMainBrainResponse(
+                    surface=RuntimeCenterSurfaceInfo(
+                        status="state-service",
+                        source="stub-query-service",
+                    ),
+                ),
+            )
+
+    app.state.runtime_center_query_service = _StubRuntimeCenterQueryService()
+
+    client = TestClient(app)
+    overview_response = client.get("/runtime-center/overview")
+    surface_response = client.get("/runtime-center/surface")
+    main_brain_response = client.get("/runtime-center/main-brain")
+
+    assert overview_response.status_code == 200
+    assert surface_response.status_code == 200
+    assert main_brain_response.status_code == 200
+    assert calls == ["overview", "surface", "main-brain"]
+
+
+def test_runtime_center_query_service_accepts_prebuilt_state_view() -> None:
+    class _StubOverviewBuilder:
+        def __init__(self) -> None:
+            self.cards_calls: list[RuntimeCenterAppStateView] = []
+            self.main_brain_calls: list[RuntimeCenterAppStateView] = []
+
+        async def build_cards(self, app_state: RuntimeCenterAppStateView):
+            self.cards_calls.append(app_state)
+            return []
+
+        async def build_main_brain_payload(self, app_state: RuntimeCenterAppStateView):
+            self.main_brain_calls.append(app_state)
+            return RuntimeMainBrainResponse(
+                surface=RuntimeCenterSurfaceInfo(
+                    status="state-service",
+                    source="stub-query-service",
+                ),
+            )
+
+    app = build_runtime_center_app()
+    builder = _StubOverviewBuilder()
+    service = RuntimeCenterQueryService(overview_builder=builder)
+    runtime_state = RuntimeCenterAppStateView.from_object(app.state)
+
+    overview = asyncio.run(service.get_overview(runtime_state))
+    main_brain = asyncio.run(service.get_main_brain(runtime_state))
+
+    assert overview.cards == []
+    assert overview.surface.status == "unavailable"
+    assert main_brain.surface.source == "stub-query-service"
+    assert builder.cards_calls == [runtime_state]
+    assert builder.main_brain_calls == [runtime_state]
+
+
+def test_runtime_center_query_service_prefers_canonical_surface_builder() -> None:
+    class _StubOverviewBuilder:
+        def __init__(self) -> None:
+            self.surface_calls: list[RuntimeCenterAppStateView] = []
+
+        async def build_surface_payload(self, app_state: RuntimeCenterAppStateView):
+            self.surface_calls.append(app_state)
+            return RuntimeCenterSurfaceResponse(
+                surface=RuntimeCenterSurfaceInfo(
+                    status="state-service",
+                    source="stub-canonical-surface",
+                ),
+                cards=[],
+                main_brain=RuntimeMainBrainResponse(
+                    surface=RuntimeCenterSurfaceInfo(
+                        status="state-service",
+                        source="stub-canonical-surface",
+                    ),
+                ),
+            )
+
+        async def build_cards(self, app_state: RuntimeCenterAppStateView):
+            raise AssertionError("surface should not be glued from build_cards")
+
+        async def build_main_brain_payload(self, app_state: RuntimeCenterAppStateView):
+            raise AssertionError("surface should not be glued from build_main_brain_payload")
+
+    app = build_runtime_center_app()
+    builder = _StubOverviewBuilder()
+    service = RuntimeCenterQueryService(overview_builder=builder)
+    runtime_state = RuntimeCenterAppStateView.from_object(app.state)
+
+    surface = asyncio.run(service.get_surface(runtime_state))
+
+    assert surface.surface.source == "stub-canonical-surface"
+    assert surface.main_brain is not None
+    assert surface.main_brain.surface.source == "stub-canonical-surface"
+    assert builder.surface_calls == [runtime_state]
 
 
 def _build_media_service() -> MediaService:
@@ -226,6 +485,74 @@ class _CognitiveFakeIndustryService(FakeIndustryService):
             ],
             "needs_replan": True,
         }
+        payload["main_brain_planning"] = {
+            "is_truth_store": False,
+            "source": "industry-runtime-read-model",
+            "strategy_constraints": {
+                "planning_policy": ["prefer-followup-before-net-new"],
+                "strategic_uncertainties": [
+                    {
+                        "uncertainty_id": "uncertainty-followup-pressure",
+                        "statement": "Follow-up pressure may exceed the current lane mix.",
+                    }
+                ],
+                "lane_budgets": [
+                    {
+                        "lane_id": "lane-ops",
+                        "budget": 2,
+                    }
+                ],
+            },
+            "latest_cycle_decision": {
+                "cycle_id": "cycle-1",
+                "summary": "Cycle shell for Runtime Center.",
+                "selected_backlog_item_ids": ["backlog-followup-1"],
+                "selected_assignment_ids": ["assignment-1"],
+                "planning_shell": {
+                    "resume_key": "industry:industry-v1-ops:cycle-1",
+                    "fork_key": "cycle:daily",
+                    "verify_reminder": "Verify cycle lane pressure before materializing assignments.",
+                },
+            },
+            "focused_assignment_plan": {
+                "summary": "Assignment shell keeps the browser follow-up on the same control thread.",
+                "checkpoints": [{"kind": "verify", "label": "Verify browser evidence."}],
+                "acceptance_criteria": ["Browser evidence captured and linked."],
+                "planning_shell": {
+                    "resume_key": "assignment:assignment-1",
+                    "fork_key": "assignment:followup",
+                    "verify_reminder": "Verify browser evidence before closing the assignment.",
+                },
+            },
+            "replan": {
+                "status": "needs-replan",
+                "decision_kind": "lane_reweight",
+                "summary": "Replan shell is waiting for main-brain judgment.",
+                "strategy_trigger_rules": [
+                    {"rule_id": "review-rule:0"},
+                    {"rule_id": "uncertainty:uncertainty-followup-pressure:confidence-drop"},
+                ],
+                "uncertainty_register": {
+                    "summary": {
+                        "uncertainty_count": 1,
+                        "lane_budget_count": 1,
+                        "trigger_rule_count": 2,
+                    },
+                    "items": [
+                        {
+                            "uncertainty_id": "uncertainty-followup-pressure",
+                            "statement": "Follow-up pressure may exceed the current lane mix.",
+                        }
+                    ],
+                },
+                "planning_shell": {
+                    "resume_key": "report:report-1",
+                    "fork_key": "decision:lane_reweight",
+                    "verify_reminder": "Verify synthesis pressure before mutating planning truth.",
+                },
+            },
+        }
+        payload["current_cycle"]["main_brain_planning"] = payload["main_brain_planning"]
         payload["backlog"] = [
             {
                 "backlog_item_id": "backlog-followup-1",
@@ -366,6 +693,60 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
     )
 
 
+def test_runtime_center_surface_route_uses_one_canonical_surface_contract():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.prediction_service = FakePredictionService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/surface")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["surface"]["status"] == "state-service"
+    assert payload["main_brain"]["surface"] == payload["surface"]
+
+
+def test_runtime_center_main_brain_route_does_not_fabricate_strategy_or_carrier_from_overview_entry():
+    class _NoDetailIndustryService(FakeIndustryService):
+        def get_instance_detail(self, instance_id: str):
+            _ = instance_id
+            return None
+
+    class _NoStrategyMemoryService:
+        async def list_strategies(self, limit: int | None = 5):
+            _ = limit
+            return []
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = _NoDetailIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = _NoStrategyMemoryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"]["industry_instance_id"] == "industry-v1-ops"
+    assert payload["strategy"] == {}
+    assert payload["carrier"] == {}
+
+
 def test_runtime_center_main_brain_route_exposes_industry_stats():
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()
@@ -435,12 +816,12 @@ def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
         "Reports disagree on whether the handoff is cleared.",
         "Supervisor review is still missing for the handoff return.",
     ]
-    assert cognition["decision_kind"] == "follow_up_backlog"
+    assert cognition["decision_kind"] == "lane_reweight"
     assert cognition["judgment"]["status"] == "attention"
-    assert cognition["judgment"]["decision_kind"] == "follow_up_backlog"
+    assert cognition["judgment"]["decision_kind"] == "lane_reweight"
     assert "decide whether to dispatch follow-up work" in cognition["judgment"]["summary"]
     assert cognition["next_action"]["kind"] == "followup-backlog"
-    assert cognition["next_action"]["decision_kind"] == "follow_up_backlog"
+    assert cognition["next_action"]["decision_kind"] == "lane_reweight"
     assert cognition["next_action"]["title"] == "Resolve handoff return evidence gap"
     assert cognition["next_action"]["route"] == (
         "/api/runtime-center/industry/industry-v1-ops?backlog_item_id=backlog-followup-1"
@@ -460,10 +841,20 @@ def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
     )
     assert payload["reports"][0]["report_consumed"] is False
     assert payload["signals"]["report_cognition"]["status"] == "attention"
-    assert payload["signals"]["report_cognition"]["decision_kind"] == "follow_up_backlog"
+    assert payload["signals"]["report_cognition"]["decision_kind"] == "lane_reweight"
     assert payload["signals"]["report_cognition"]["count"] == 4
     assert payload["meta"]["agent_reports"]["unconsumed_count"] == 1
     assert payload["meta"]["report_cognition"]["needs_replan"] is True
+    planning = payload["main_brain_planning"]
+    assert planning["latest_cycle_decision"]["summary"] == "Cycle shell for Runtime Center."
+    assert planning["latest_cycle_decision"]["planning_shell"]["resume_key"] == (
+        "industry:industry-v1-ops:cycle-1"
+    )
+    assert planning["focused_assignment_plan"]["planning_shell"]["fork_key"] == (
+        "assignment:followup"
+    )
+    assert planning["replan"]["decision_kind"] == "lane_reweight"
+    assert planning["replan"]["uncertainty_register"]["summary"]["uncertainty_count"] == 1
 
 
 def test_runtime_center_main_brain_route_exposes_unified_operator_sections():
@@ -575,7 +966,6 @@ def test_runtime_center_main_brain_route_exposes_unified_operator_sections():
     assert payload["signals"]["automation"]["count"] == 1
     assert payload["signals"]["recovery"]["count"] == 1
 
-
 def test_runtime_center_main_brain_route_prefers_canonical_latest_recovery_report():
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()
@@ -678,6 +1068,291 @@ def test_runtime_center_overview_capabilities_card_exposes_skill_mcp_governance_
     assert capabilities["meta"]["package_bound_mcp_count"] == 1
     assert capabilities["meta"]["delta"]["missing_capability_count"] == 1
     assert capabilities["meta"]["degraded"] is True
+
+
+def test_runtime_center_main_brain_route_exposes_query_runtime_entropy_contract():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    query_execution_service = KernelQueryExecutionService(
+        session_backend=object(),
+        conversation_compaction_service=None,
+    )
+    expected_entropy = query_execution_service._resolve_execution_task_context(  # pylint: disable=protected-access
+        request=SimpleNamespace(),
+        agent_id="ops-agent",
+        kernel_task_id=None,
+        conversation_thread_id="industry-chat:industry-v1-ops:execution-core",
+    )["query_runtime_entropy"]
+    app.state.query_execution_service = SimpleNamespace(
+        get_query_runtime_entropy_contract=lambda: expected_entropy,
+    )
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["governance"]["query_runtime_entropy"] == expected_entropy
+    assert payload["governance"]["sidecar_memory"] == expected_entropy["sidecar_memory"]
+    assert payload["governance"]["query_runtime_entropy"]["runtime_entropy"]["status"] == "degraded"
+    assert (
+        payload["governance"]["query_runtime_entropy"]["runtime_entropy"]["carry_forward_contract"]
+        == "canonical-state-only"
+    )
+    assert payload["governance"]["sidecar_memory"]["failure_source"] == "sidecar-memory"
+ 
+
+def test_runtime_center_main_brain_route_exposes_compaction_visibility_from_query_runtime_entropy():
+    class _CompactionService:
+        @staticmethod
+        def build_visibility_payload(source: dict[str, object] | None = None) -> dict[str, object]:
+            return ConversationCompactionService.build_visibility_payload(source)
+
+        def runtime_health_payload(self) -> dict[str, object]:
+            return {
+                "compaction_state": {
+                    "mode": "microcompact",
+                    "summary": "Compacted 2 oversized tool results.",
+                    "spill_count": 1,
+                },
+                "tool_result_budget": {
+                    "message_budget": 2400,
+                    "remaining_budget": 600,
+                },
+                "tool_use_summary": {
+                    "summary": "2 tool results compacted into artifact previews.",
+                    "artifact_refs": ["artifact://tool-result-1"],
+                },
+            }
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.query_execution_service = KernelQueryExecutionService(
+        session_backend=object(),
+        conversation_compaction_service=_CompactionService(),
+    )
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    entropy = payload["governance"]["query_runtime_entropy"]
+    assert entropy["compaction_state"] == {
+        "mode": "microcompact",
+        "summary": "Compacted 2 oversized tool results.",
+        "spill_count": 1,
+    }
+    assert entropy["tool_result_budget"] == {
+        "message_budget": 2400,
+        "remaining_budget": 600,
+    }
+    assert entropy["tool_use_summary"] == {
+        "summary": "2 tool results compacted into artifact previews.",
+        "artifact_refs": ["artifact://tool-result-1"],
+    }
+
+
+def test_runtime_center_main_brain_route_exposes_query_runtime_compaction_visibility():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.query_execution_service = SimpleNamespace(
+        get_query_runtime_entropy_contract=lambda: {
+            "status": "available",
+            "runtime_entropy": {
+                "status": "available",
+                "carry_forward_contract": "private-compaction-sidecar",
+            },
+            "sidecar_memory": {
+                "status": "available",
+                "availability": "attached",
+            },
+            "degradation": {},
+            "compaction_state": {
+                "mode": "microcompact",
+                "summary": "Compacted 2 oversized tool results.",
+                "spill_count": 1,
+            },
+            "tool_result_budget": {
+                "message_budget": 2400,
+                "remaining_budget": 600,
+            },
+            "tool_use_summary": {
+                "summary": "2 tool results compacted into artifact previews.",
+                "artifact_refs": ["artifact://tool-result-1"],
+            },
+        },
+    )
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    entropy = payload["governance"]["query_runtime_entropy"]
+    assert entropy["compaction_state"]["mode"] == "microcompact"
+    assert entropy["tool_result_budget"]["remaining_budget"] == 600
+    assert entropy["tool_use_summary"]["artifact_refs"] == ["artifact://tool-result-1"]
+
+
+def test_runtime_center_main_brain_route_falls_back_to_runtime_contract_sidecar_when_entropy_absent():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.actor_worker = SimpleNamespace(
+        runtime_contract={
+            "sidecar_memory": {
+                "status": "available",
+                "availability": "attached",
+                "summary": "legacy runtime-contract fallback should stay hidden",
+            },
+        },
+    )
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["governance"]["query_runtime_entropy"] == {}
+    assert payload["governance"]["sidecar_memory"] == {
+        "status": "available",
+        "availability": "attached",
+        "summary": "legacy runtime-contract fallback should stay hidden",
+    }
+
+
+def test_runtime_center_main_brain_route_prefers_entropy_sidecar_over_runtime_contract_fallback():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.query_execution_service = SimpleNamespace(
+        get_query_runtime_entropy_contract=lambda: {
+            "status": "degraded",
+            "runtime_entropy": {
+                "status": "degraded",
+                "carry_forward_contract": "canonical-state-only",
+            },
+            "sidecar_memory": {
+                "status": "degraded",
+                "failure_source": "entropy-sidecar",
+                "blocked_next_step": "Restore the query runtime entropy sidecar.",
+                "summary": "Query runtime entropy sidecar is degraded and should take precedence.",
+            },
+        },
+    )
+    app.state.actor_worker = SimpleNamespace(
+        runtime_contract={
+            "sidecar_memory": {
+                "status": "degraded",
+                "failure_source": "runtime-contract-sidecar",
+                "blocked_next_step": "This runtime-contract fallback should not win.",
+                "summary": "runtime_contract fallback should stay hidden when entropy exists",
+            },
+        },
+    )
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    governance = payload["governance"]
+    assert governance["query_runtime_entropy"]["status"] == "degraded"
+    assert governance["sidecar_memory"] == {
+        "status": "degraded",
+        "failure_source": "entropy-sidecar",
+        "blocked_next_step": "Restore the query runtime entropy sidecar.",
+        "summary": "Query runtime entropy sidecar is degraded and should take precedence.",
+    }
+    assert governance["sidecar_memory"]["failure_source"] == "entropy-sidecar"
+    assert governance["sidecar_memory"]["blocked_next_step"] == (
+        "Restore the query runtime entropy sidecar."
+    )
+    assert governance["summary"] == (
+        "Query runtime entropy sidecar is degraded and should take precedence."
+    )
+
+
+def test_runtime_center_main_brain_route_exposes_degraded_runtime_contract_sidecar_without_entropy_service():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.actor_supervisor = SimpleNamespace(
+        runtime_contract={
+            "sidecar_memory": {
+                "status": "degraded",
+                "failure_source": "runtime-contract-sidecar",
+                "blocked_next_step": "Reattach the runtime-contract sidecar before resuming autonomy.",
+                "summary": "Runtime contract fallback reports degraded sidecar memory.",
+            },
+        },
+    )
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    governance = payload["governance"]
+    assert governance["query_runtime_entropy"] == {}
+    assert governance["status"] == "blocked"
+    assert governance["sidecar_memory"] == {
+        "status": "degraded",
+        "failure_source": "runtime-contract-sidecar",
+        "blocked_next_step": "Reattach the runtime-contract sidecar before resuming autonomy.",
+        "summary": "Runtime contract fallback reports degraded sidecar memory.",
+    }
+    assert governance["sidecar_memory"]["failure_source"] == "runtime-contract-sidecar"
+    assert governance["sidecar_memory"]["blocked_next_step"] == (
+        "Reattach the runtime-contract sidecar before resuming autonomy."
+    )
+    assert governance["summary"] == "Runtime contract fallback reports degraded sidecar memory."
 
 
 def test_runtime_center_main_brain_route_exposes_automation_loop_and_supervisor_health():

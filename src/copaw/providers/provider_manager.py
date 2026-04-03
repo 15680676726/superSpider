@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Compatibility facade for provider management."""
+"""Compatibility facade for provider administration and legacy callers."""
 from __future__ import annotations
 
 import logging
@@ -36,7 +36,11 @@ logger = logging.getLogger(__name__)
 
 
 class ProviderManager:
-    """Compatibility facade that delegates provider concerns to sub-services."""
+    """Compatibility facade that delegates provider concerns to sub-services.
+
+    Runtime/execution callers should prefer ``runtime_provider_facade`` instead
+    of depending on this facade directly.
+    """
 
     _instance = None
 
@@ -259,6 +263,11 @@ class ProviderManager:
     def get_preferred_chat_model_class(self) -> type[ChatModelBase]:
         return self._chat_model_factory.get_preferred_chat_model_class()
 
+    def create_runtime_facade(self):
+        from .runtime_provider_facade import ProviderRuntimeFacade
+
+        return ProviderRuntimeFacade(self)
+
     @staticmethod
     def get_instance() -> "ProviderManager":
         if ProviderManager._instance is None:
@@ -268,7 +277,8 @@ class ProviderManager:
     @staticmethod
     def get_active_chat_model() -> ChatModelBase:
         manager = ProviderManager.get_instance()
-        factory = getattr(manager, "_chat_model_factory", None)
-        if factory is not None and hasattr(factory, "get_active_chat_model"):
-            return factory.get_active_chat_model()
-        return build_active_chat_model(manager)
+        from .runtime_provider_facade import get_runtime_provider_facade
+
+        return get_runtime_provider_facade(
+            provider_manager=manager,
+        ).get_active_chat_model()

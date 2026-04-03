@@ -89,6 +89,7 @@ def list_tool_capabilities() -> list[CapabilityMount]:
                     "execution_policy": {
                         "action_mode": "write",
                         "evidence_owner": "tool-bridge",
+                        "writer_scope_source": "file_path",
                     },
                 },
             },

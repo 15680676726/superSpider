@@ -164,27 +164,8 @@ class _QueryExecutionPromptMixin:
             evidence_expectations = _string_list(
                 strategy_memory.get("evidence_requirements"),
             ) or evidence_expectations
-        goal_focus = self._resolve_industry_goal_focus(
-            industry_instance_id=industry_instance_id,
-            owner_agent_id=owner_agent_id,
-            industry_role_id=industry_role_id,
-            allow_execution_core_alias=is_execution_core_runtime,
-        )
-        goal_focus_id = None
-        goal_focus_title = None
-        if goal_focus is not None:
-            goal_focus_id = _first_non_empty(goal_focus.get("goal_id"))
-            goal_focus_title = _first_non_empty(goal_focus.get("title"))
-        current_focus_kind = (
-            current_focus_kind
-            or ("goal" if goal_focus_id or goal_focus_title else None)
-        )
-        current_focus_id = _first_non_empty(current_focus_id, goal_focus_id)
-        current_focus = _first_non_empty(current_focus, goal_focus_title)
         execution_feedback = self._resolve_recent_execution_feedback(
             goal_id=_first_non_empty(
-                getattr(request, "goal_id", None),
-                goal_focus_id,
                 current_focus_id if current_focus_kind == "goal" else None,
             ),
             task_id=_first_non_empty(

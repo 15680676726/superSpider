@@ -96,6 +96,39 @@ function readRecordText(
   return null;
 }
 
+function agentMetaText(
+  meta: Record<string, unknown> | undefined,
+  key: string,
+): string | null {
+  if (!meta) {
+    return null;
+  }
+  const value = meta[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function deriveAgentsFromOverview(
+  overview: ReturnType<typeof useRuntimeCenter>["data"] | null,
+): RuntimeCenterAgentSummary[] {
+  const agentsCard = overview?.cards.find((card) => card.key === "agents");
+  if (!agentsCard) {
+    return [];
+  }
+  return agentsCard.entries.map((entry) => ({
+    agent_id: entry.id,
+    name: entry.title || entry.id,
+    role_name: agentMetaText(entry.meta, "role_name") ?? entry.owner ?? null,
+    role_summary: entry.summary ?? null,
+    agent_class: agentMetaText(entry.meta, "agent_class"),
+    status: entry.status ?? null,
+    current_focus: agentMetaText(entry.meta, "current_focus"),
+    current_focus_kind: agentMetaText(entry.meta, "current_focus_kind"),
+    current_focus_id: agentMetaText(entry.meta, "current_focus_id"),
+    reports_to: agentMetaText(entry.meta, "reports_to"),
+    industry_role_id: agentMetaText(entry.meta, "industry_role_id"),
+  }));
+}
+
 function mainBrainHeadline(
   mainBrainData: ReturnType<typeof useRuntimeCenter>["mainBrainData"],
   options: {
@@ -156,8 +189,6 @@ export default function RuntimeCenterPage() {
     mainBrainLoading,
     mainBrainUnavailable,
     businessAgents,
-    businessAgentsLoading,
-    businessAgentsError,
     busyActionId,
     detail,
     detailLoading,
@@ -185,10 +216,16 @@ export default function RuntimeCenterPage() {
     [data],
   );
   const surface = overviewData?.surface;
+  const canonicalAgents = useMemo(() => {
+    const derivedAgents = deriveAgentsFromOverview(overviewData);
+    return derivedAgents.length > 0 ? derivedAgents : businessAgents;
+  }, [businessAgents, overviewData]);
   const professionalAgents = useMemo(
-    () => businessAgents.filter((agent) => isProfessionalAgent(agent)),
-    [businessAgents],
+    () => canonicalAgents.filter((agent) => isProfessionalAgent(agent)),
+    [canonicalAgents],
   );
+  const agentStripLoading = loading && !overviewData;
+  const agentStripError = !overviewData ? error : null;
   const overviewCards = overviewData?.cards ?? [];
 
   const decisionEntries = useMemo(
@@ -379,19 +416,19 @@ export default function RuntimeCenterPage() {
                 </p>
               </div>
               <Space size={8} wrap>
-                {businessAgentsLoading ? <Tag>加载中</Tag> : null}
-                {businessAgentsError ? <Tag color="warning">智能体摘要暂不可用</Tag> : null}
+                {agentStripLoading ? <Tag>加载中</Tag> : null}
+                {agentStripError ? <Tag color="warning">智能体摘要暂不可用</Tag> : null}
                 <Tag color="blue">主脑</Tag>
                 {professionalAgents.length > 0 ? (
                   <Tag>{`职业智能体 ${professionalAgents.length}`}</Tag>
                 ) : null}
               </Space>
             </div>
-            {businessAgentsError ? (
+            {agentStripError ? (
               <Alert
                 showIcon
                 type="warning"
-                message={businessAgentsError}
+                message={agentStripError}
                 style={{ marginBottom: 16 }}
               />
             ) : null}
@@ -470,7 +507,7 @@ export default function RuntimeCenterPage() {
                 </Card>
               ))}
             </div>
-            {!businessAgentsLoading && professionalAgents.length === 0 ? (
+            {!agentStripLoading && professionalAgents.length === 0 ? (
               <div className={styles.emptyWrap}>
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}

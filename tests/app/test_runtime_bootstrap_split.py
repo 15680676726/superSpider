@@ -188,6 +188,11 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
         _fake_domain_builder,
     )
     monkeypatch.setattr(
+        runtime_service_graph_module,
+        "_resolve_runtime_provider_facade",
+        lambda provider_manager: "provider-runtime-facade",
+    )
+    monkeypatch.setattr(
         runtime_service_graph_module.ProviderManager,
         "get_instance",
         staticmethod(lambda: "provider-manager"),
@@ -211,6 +216,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
 
     assert calls["domain_builder_kwargs"]["work_context_service"] == "work-context-service"
     assert calls["domain_builder_kwargs"]["capability_service"] is capability_service
+    assert calls["domain_builder_kwargs"]["runtime_provider"] == "provider-runtime-facade"
     assert calls["governance_environment_service"] == "environment-service"
     assert calls["governance_industry_service"] == "industry-service"
     assert (
@@ -227,6 +233,8 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     assert bootstrap.goal_service == "goal-service"
     assert bootstrap.memory_activation_service == "memory-activation-service"
     assert bootstrap.main_brain_orchestrator == "main-brain-orchestrator"
+    assert bootstrap.runtime_provider == "provider-runtime-facade"
+    assert not hasattr(bootstrap, "provider_manager")
     assert bootstrap.turn_executor == "turn-executor"
 
 
@@ -330,13 +338,13 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
         def set_kernel_dispatcher(self, value) -> None:
             captured["environment_kernel_dispatcher"] = value
 
-    class _ProviderManager(SimpleNamespace):
+    class _RuntimeProvider(SimpleNamespace):
         @property
         def get_active_chat_model(self):
             return lambda *args, **kwargs: None
 
     environment_service = _EnvironmentService()
-    provider_manager = _ProviderManager()
+    runtime_provider = _RuntimeProvider()
 
     class _RepoBag(SimpleNamespace):
         def __getattr__(self, name: str):
@@ -538,7 +546,7 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
         evidence_ledger=object(),
         environment_service=environment_service,
         runtime_event_bus=object(),
-        provider_manager=provider_manager,
+        runtime_provider=runtime_provider,
         state_query_service=_StateQueryService(),
         strategy_memory_service=object(),
         knowledge_service=object(),

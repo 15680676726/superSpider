@@ -829,3 +829,19 @@ def test_runtime_center_work_context_detail_reads_runtime_owner_from_state(tmp_p
             "route": "/api/runtime-center/tasks/task-api-1",
         },
     ]
+
+
+def test_runtime_center_kernel_tasks_requires_canonical_state_query_method() -> None:
+    app = build_runtime_center_app()
+
+    class _LegacyOnlyStateQueryService:
+        def get_tasks(self, **_kwargs):
+            return [{"id": "legacy-task"}]
+
+    app.state.state_query_service = _LegacyOnlyStateQueryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/kernel/tasks")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Kernel task queries are not available"

@@ -6,6 +6,7 @@ from typing import AsyncIterator
 from agentscope_runtime.engine.schemas.agent_schemas import AgentRequest, SequenceNumberGenerator
 
 from ..kernel.main_brain_intent_shell import read_attached_main_brain_intent_shell
+from ..memory.conversation_compaction_service import ConversationCompactionService
 from .routers.runtime_center_sse import _encode_sse_event
 
 
@@ -94,6 +95,15 @@ def _summarize_runtime_context(runtime_context: dict[str, object] | None) -> dic
         intake_summary = _summarize_intake_contract(intake_contract)
         if intake_summary:
             summary["intake_contract"] = intake_summary
+    compaction_visibility = ConversationCompactionService.build_visibility_payload(
+        runtime_context,
+    )
+    if not compaction_visibility and isinstance(query_runtime_state, dict):
+        compaction_visibility = ConversationCompactionService.build_visibility_payload(
+            query_runtime_state,
+        )
+    if compaction_visibility:
+        summary.update(compaction_visibility)
     return summary
 
 

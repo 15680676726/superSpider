@@ -777,6 +777,13 @@ def test_operator_runtime_overview_surfaces_sidecar_memory_degradation(
     entropy = governance["meta"]["query_runtime_entropy"]
     assert entropy == expected_entropy
     assert entry["meta"]["query_runtime_entropy"] == expected_entropy
+    assert entropy["budget"]["tool_result_budget"]["state_channel"] == "query_runtime_state"
+    assert entropy["budget"]["tool_result_budget"]["summary_surface"] == "runtime-center"
+    assert entropy["budget"]["tool_result_budget"]["spill_surface"] == "runtime-center"
+    assert entropy["budget"]["tool_result_budget"]["replay_surface"] == "runtime-conversation"
+    assert entry["meta"]["query_runtime_entropy"]["runtime_entropy"]["tool_result_budget"] == (
+        entropy["budget"]["tool_result_budget"]
+    )
     sidecar_memory = governance["meta"]["sidecar_memory"]
     assert sidecar_memory == expected_entropy["sidecar_memory"]
     assert entry["meta"]["sidecar_memory"] == expected_entropy["sidecar_memory"]
@@ -784,3 +791,60 @@ def test_operator_runtime_overview_surfaces_sidecar_memory_degradation(
     assert "canonical state only" in sidecar_memory["summary"]
     assert "Restore the compaction sidecar" in sidecar_memory["blocked_next_step"]
     assert governance["summary"] == expected_entropy["sidecar_memory"]["summary"]
+
+
+def test_operator_runtime_overview_falls_back_to_runtime_contract_sidecar_diagnostics(
+    tmp_path,
+) -> None:
+    app = _build_operator_app(tmp_path)
+    app.state.governance_service = SimpleNamespace(
+        get_status=lambda: SimpleNamespace(
+            control_id="runtime",
+            emergency_stop_active=False,
+            emergency_reason=None,
+            emergency_actor=None,
+            pending_decisions=0,
+            pending_patches=0,
+            paused_schedule_ids=[],
+            channel_shutdown_applied=False,
+            handoff={},
+            staffing={},
+            human_assist={},
+            host_twin={},
+            host_companion_session={},
+            host_twin_summary={},
+            updated_at=None,
+        )
+    )
+    degraded_sidecar_memory = {
+        "status": "degraded",
+        "failure_source": "runtime-contract-sidecar",
+        "blocked_next_step": "Restore the runtime-contract sidecar before scheduling the next turn.",
+        "summary": "Runtime contract fallback is degraded and canonical state is the only safe carry-forward path.",
+    }
+    app.state.actor_worker = SimpleNamespace(
+        runtime_contract={"sidecar_memory": degraded_sidecar_memory},
+    )
+    client = TestClient(app)
+
+    response = client.get("/runtime-center/overview")
+
+    assert response.status_code == 200
+    cards = {card["key"]: card for card in response.json()["cards"]}
+    governance = cards["governance"]
+    entry = governance["entries"][0]
+    assert entry["status"] == "blocked"
+    assert governance["meta"]["query_runtime_entropy"] is None
+    assert governance["meta"]["sidecar_memory"] == degraded_sidecar_memory
+    assert entry["meta"]["sidecar_memory"] == degraded_sidecar_memory
+    assert governance["meta"]["failure_source"] == "runtime-contract-sidecar"
+    assert governance["meta"]["blocked_next_step"] == (
+        "Restore the runtime-contract sidecar before scheduling the next turn."
+    )
+    assert entry["meta"]["failure_source"] == "runtime-contract-sidecar"
+    assert entry["meta"]["blocked_next_step"] == (
+        "Restore the runtime-contract sidecar before scheduling the next turn."
+    )
+    assert governance["summary"] == (
+        "Runtime contract fallback is degraded and canonical state is the only safe carry-forward path."
+    )

@@ -19,6 +19,8 @@ from copaw.agents.tools.evidence_runtime import (
     bind_shell_evidence_sink,
 )
 from copaw.agents.tools.file_io import read_file
+from copaw.memory.conversation_compaction_service import ConversationCompactionService
+from copaw.agents.tools.file_io import read_file
 from copaw.kernel import KernelTask
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.query_execution import KernelQueryExecutionService
@@ -293,9 +295,100 @@ def test_query_execution_runtime_exposes_attached_entropy_budget_from_config(
             "replay_surface": "runtime-conversation",
         },
     }
+    assert entropy["runtime_entropy"]["tool_result_budget"] == entropy["budget"]["tool_result_budget"]
     assert entropy["sidecar_memory"]["status"] == "available"
     assert entropy["sidecar_memory"]["availability"] == "attached"
     assert entropy["degradation"] == {}
+
+
+def test_query_execution_runtime_projects_compaction_visibility_into_entropy_contract() -> None:
+    class _CompactionService:
+        @staticmethod
+        def build_visibility_payload(source: dict[str, object] | None = None) -> dict[str, object]:
+            return ConversationCompactionService.build_visibility_payload(source)
+
+        def runtime_health_payload(self) -> dict[str, object]:
+            return {
+                "compaction_state": {
+                    "mode": "microcompact",
+                    "summary": "Compacted 2 oversized tool results.",
+                    "spill_count": 1,
+                },
+                "tool_result_budget": {
+                    "message_budget": 2400,
+                    "remaining_budget": 600,
+                },
+                "tool_use_summary": {
+                    "summary": "2 tool results compacted into artifact previews.",
+                    "artifact_refs": ["artifact://tool-result-1"],
+                },
+            }
+
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        conversation_compaction_service=_CompactionService(),
+    )
+
+    entropy = service.get_query_runtime_entropy_contract()
+
+    assert entropy["compaction_state"] == {
+        "mode": "microcompact",
+        "summary": "Compacted 2 oversized tool results.",
+        "spill_count": 1,
+    }
+    assert entropy["tool_result_budget"] == {
+        "message_budget": 2400,
+        "remaining_budget": 600,
+    }
+    assert entropy["tool_use_summary"] == {
+        "summary": "2 tool results compacted into artifact previews.",
+        "artifact_refs": ["artifact://tool-result-1"],
+    }
+
+
+def test_query_execution_runtime_projects_compaction_visibility_when_available() -> None:
+    class _FakeCompactionService:
+        @staticmethod
+        def build_visibility_payload(payload: dict[str, object] | None) -> dict[str, object]:
+            return dict(payload or {})
+
+        def runtime_visibility_payload(self) -> dict[str, object]:
+            return {
+                "compaction_state": {
+                    "mode": "microcompact",
+                    "summary": "Compacted 2 oversized tool results.",
+                    "spill_count": 1,
+                },
+                "tool_result_budget": {
+                    "message_budget": 2400,
+                    "remaining_budget": 600,
+                },
+                "tool_use_summary": {
+                    "summary": "2 tool results compacted into artifact previews.",
+                    "artifact_refs": ["artifact://tool-result-1"],
+                },
+            }
+
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        conversation_compaction_service=_FakeCompactionService(),
+    )
+
+    entropy = service.get_query_runtime_entropy_contract()
+
+    assert entropy["compaction_state"] == {
+        "mode": "microcompact",
+        "summary": "Compacted 2 oversized tool results.",
+        "spill_count": 1,
+    }
+    assert entropy["tool_result_budget"] == {
+        "message_budget": 2400,
+        "remaining_budget": 600,
+    }
+    assert entropy["tool_use_summary"] == {
+        "summary": "2 tool results compacted into artifact previews.",
+        "artifact_refs": ["artifact://tool-result-1"],
+    }
 
 
 @pytest.mark.asyncio

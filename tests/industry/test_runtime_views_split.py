@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
 
+from copaw.industry.models import IndustryExecutionSummary
 from copaw.compiler.planning.strategy_compiler import StrategyPlanningCompiler
 from copaw.industry.service_runtime_views import _IndustryRuntimeViewsMixin
 from copaw.state import IndustryInstanceRecord, StrategyMemoryRecord
@@ -33,6 +34,16 @@ class _RuntimeViewsHarness(_IndustryRuntimeViewsMixin):
         self._strategy_compiler = StrategyPlanningCompiler()
         self._strategy_memory_service = _StrategyServiceStub(strategy)
         self._report_replan_engine = _ReportReplanEngineStub()
+
+    def _rank_materializable_backlog_items(
+        self,
+        items: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        return items
+
+    def _backlog_item_is_report_followup(self, item: dict[str, object]) -> bool:
+        del item
+        return False
 
     def _planner_sidecar_payload(self, value: object | None) -> dict[str, object]:
         if hasattr(value, "model_dump"):
@@ -264,4 +275,173 @@ def test_execution_summary_without_live_runtime_focus_does_not_fallback_to_goal_
     assert summary.current_focus is None
     assert summary.current_owner_agent_id is None
     assert summary.current_owner is None
-    assert "目标" not in (summary.next_step or "")
+    assert summary.next_step == "当前没有可继续的执行链。"
+
+
+def test_execution_summary_does_not_invent_focus_from_live_task_title() -> None:
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+    )
+    runtime_views = _RuntimeViewsHarness(strategy)
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind Robotics",
+        owner_scope="industry:northwind",
+        autonomy_status="active",
+    )
+
+    summary = runtime_views._build_instance_execution_summary(
+        record=record,
+        goals=[
+            {
+                "goal_id": "goal-legacy-focus",
+                "title": "Legacy goal title",
+                "status": "active",
+                "owner_agent_id": "ops-agent",
+                "updated_at": "2026-04-03T00:00:00Z",
+            }
+        ],
+        agents=[
+            {
+                "agent_id": "ops-agent",
+                "role_name": "Operator",
+                "risk_level": "guarded",
+            }
+        ],
+        tasks=[
+            {
+                "task": {
+                    "id": "task-live-focus",
+                    "title": "Verify storefront copy",
+                    "summary": "Verify storefront copy before publish",
+                    "status": "running",
+                    "owner_agent_id": "ops-agent",
+                    "goal_id": "goal-legacy-focus",
+                    "acceptance_criteria": '{"kind":"kernel-task-meta-v1","payload":{}}',
+                    "updated_at": "2999-04-03T00:01:00Z",
+                },
+                "runtime": {
+                    "runtime_status": "running",
+                    "current_phase": "executing",
+                    "updated_at": "2999-04-03T00:02:00Z",
+                },
+                "route": "/api/runtime-center/kernel/tasks/task-live-focus",
+                "evidence_count": 0,
+            }
+        ],
+        evidence=[],
+    )
+
+    assert summary.status == "executing"
+    assert summary.current_focus_id is None
+    assert summary.current_focus is None
+    assert summary.current_task_id == "task-live-focus"
+
+
+def test_execution_summary_coordinating_without_live_focus_does_not_fallback_to_goal_title() -> None:
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+    )
+    runtime_views = _RuntimeViewsHarness(strategy)
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind Robotics",
+        owner_scope="industry:northwind",
+        autonomy_status="coordinating",
+    )
+
+    summary = runtime_views._build_instance_execution_summary(
+        record=record,
+        goals=[
+            {
+                "goal_id": "goal-legacy-focus",
+                "title": "Legacy goal title",
+                "status": "active",
+                "owner_agent_id": "ops-agent",
+                "updated_at": "2026-04-03T00:00:00Z",
+            }
+        ],
+        agents=[
+            {
+                "agent_id": "ops-agent",
+                "role_name": "Operator",
+                "risk_level": "guarded",
+            }
+        ],
+        tasks=[],
+        evidence=[],
+    )
+
+    assert summary.status == "coordinating"
+    assert summary.current_focus_id is None
+    assert summary.current_focus is None
+    assert summary.next_step == "主脑正在协调执行位与 backlog，命中条件后会自动继续执行。"
+
+
+def test_live_focus_payload_does_not_invent_focus_from_assignment_or_backlog() -> None:
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+    )
+    runtime_views = _RuntimeViewsHarness(strategy)
+    execution = IndustryExecutionSummary(
+        status="executing",
+        current_focus_id=None,
+        current_focus=None,
+        current_owner_agent_id="ops-agent",
+        current_owner="Operator",
+        current_risk="guarded",
+        evidence_count=0,
+    )
+
+    payload = runtime_views._resolve_live_focus_payload(
+        execution=execution,
+        assignments=[
+            {
+                "assignment_id": "assignment-1",
+                "task_id": "task-1",
+                "backlog_item_id": "backlog-1",
+                "title": "Assignment title",
+                "summary": "Assignment summary",
+                "status": "active",
+            }
+        ],
+        backlog=[
+            {
+                "backlog_item_id": "backlog-1",
+                "title": "Backlog title",
+                "summary": "Backlog summary",
+                "status": "open",
+            }
+        ],
+        tasks=[
+            {
+                "task": {
+                    "id": "task-1",
+                    "assignment_id": "assignment-1",
+                    "title": "Task title",
+                    "summary": "Task summary",
+                    "status": "running",
+                    "updated_at": "2999-04-03T00:01:00Z",
+                },
+                "runtime": {
+                    "runtime_status": "running",
+                    "current_phase": "executing",
+                    "updated_at": "2999-04-03T00:02:00Z",
+                },
+            }
+        ],
+    )
+
+    assert payload["current_assignment_id"] == "assignment-1"
+    assert payload["current_backlog_id"] == "backlog-1"
+    assert payload["current_focus_id"] is None
+    assert payload["current_focus_title"] is None

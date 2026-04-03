@@ -106,6 +106,49 @@ class ConversationCompactionService(ReMeLight):
             )
             return default
 
+    @staticmethod
+    def _normalize_visibility_dict(
+        value: Any,
+        *,
+        allowed_keys: tuple[str, ...],
+    ) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        normalized = {
+            key: item
+            for key, item in value.items()
+            if key in allowed_keys and item is not None
+        }
+        return normalized or None
+
+    @classmethod
+    def build_visibility_payload(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        payload: dict[str, Any] = {}
+        compaction_state = cls._normalize_visibility_dict(
+            value.get("compaction_state"),
+            allowed_keys=("mode", "summary", "spill_count", "replacement_count"),
+        )
+        if compaction_state is not None:
+            payload["compaction_state"] = compaction_state
+        tool_result_budget = cls._normalize_visibility_dict(
+            value.get("tool_result_budget"),
+            allowed_keys=("message_budget", "used_budget", "remaining_budget"),
+        )
+        if tool_result_budget is not None:
+            payload["tool_result_budget"] = tool_result_budget
+        tool_use_summary = cls._normalize_visibility_dict(
+            value.get("tool_use_summary"),
+            allowed_keys=("summary", "artifact_refs"),
+        )
+        if tool_use_summary is not None:
+            payload["tool_use_summary"] = tool_use_summary
+        return payload
+
     async def start(self) -> None:
         starter = getattr(super(), "start", None)
         if callable(starter):

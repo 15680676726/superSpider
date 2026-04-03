@@ -593,7 +593,7 @@ def test_query_execution_service_injects_execution_core_industry_identity(
     assert "Role: 白泽执行中枢" in prompt_appendix
     assert "Role summary: Operate as the execution brain for this ops team." in prompt_appendix
     assert "Mission: Turn the ops brief into the next coordinated move." in prompt_appendix
-    assert "Current focus: Launch runtime center (goal-1)" in prompt_appendix
+    assert "Current focus:" not in prompt_appendix
     assert "# Execution Core Identity" in prompt_appendix
     assert "# Team Operating Model" in prompt_appendix
     assert "Identity label: Ops Industry Team / 白泽执行中枢" in prompt_appendix
@@ -1391,6 +1391,145 @@ def test_query_execution_service_injects_recent_execution_feedback_into_prompt(
     assert "Review previous execution brief" in prompt_appendix
     assert "Do not repeat these patterns:" in prompt_appendix
     assert "failed 2 times" in prompt_appendix
+
+
+def test_query_execution_service_does_not_use_request_goal_id_as_focus_truth_for_feedback(
+    monkeypatch,
+) -> None:
+    class _LegacyGoalOnlyAgentProfileService:
+        def get_agent(self, agent_id: str):
+            if agent_id != "ops-agent":
+                return None
+            return SimpleNamespace(
+                agent_id="ops-agent",
+                actor_key="industry:ops:execution-core",
+                actor_fingerprint="fp-ops-v1",
+                name="Ops Agent",
+                role_name="Operations lead",
+                role_summary="Owns runtime closeout.",
+                mission="Turn the industry brief into an executable operating loop.",
+                current_focus_kind=None,
+                current_focus_id=None,
+                current_focus="",
+                current_task_id=None,
+                industry_instance_id="industry-v1-ops",
+                industry_role_id="execution-core",
+            )
+
+        def list_agents(self):
+            return [self.get_agent("ops-agent")]
+
+    class _FeedbackTaskRepository:
+        def __init__(self) -> None:
+            self._tasks = [
+                SimpleNamespace(
+                    id="task-legacy-1",
+                    goal_id="goal-legacy-only",
+                    title="Inspect legacy goal feedback",
+                    status="running",
+                    task_type="dispatch-query",
+                    updated_at="2026-03-17T09:15:00+00:00",
+                ),
+            ]
+
+        def get_task(self, task_id: str):
+            for task in self._tasks:
+                if task.id == task_id:
+                    return task
+            return None
+
+        def list_tasks(
+            self,
+            *,
+            goal_id: str | None = None,
+            parent_task_id: str | None = None,
+            limit: int | None = None,
+            **_: object,
+        ):
+            items = list(self._tasks)
+            if goal_id is not None:
+                items = [task for task in items if getattr(task, "goal_id", None) == goal_id]
+            if parent_task_id is not None:
+                items = [
+                    task for task in items if getattr(task, "parent_task_id", None) == parent_task_id
+                ]
+            if isinstance(limit, int):
+                items = items[:limit]
+            return items
+
+    class _FeedbackTaskRuntimeRepository:
+        def get_runtime(self, task_id: str):
+            if task_id != "task-legacy-1":
+                return None
+            return SimpleNamespace(
+                task_id="task-legacy-1",
+                current_phase="legacy-goal-phase",
+                updated_at="2026-03-17T09:30:00+00:00",
+            )
+
+    class _FeedbackEvidenceLedger:
+        def list_recent(self, *, limit: int = 80):
+            _ = limit
+            return [
+                SimpleNamespace(
+                    id="evidence-legacy-1",
+                    task_id="task-legacy-1",
+                    capability_ref="read_file",
+                    action_summary="Review legacy goal brief",
+                    result_summary="Recovered a stale goal-linked summary.",
+                    created_at="2026-03-17T09:10:00+00:00",
+                ),
+            ]
+
+    _FakeAgent.created.clear()
+    monkeypatch.setattr(query_execution_module, "CoPawAgent", _FakeAgent)
+    monkeypatch.setattr(
+        query_execution_module,
+        "stream_printing_messages",
+        _fake_stream_printing_messages,
+    )
+    monkeypatch.setattr(
+        query_execution_module,
+        "load_config",
+        lambda: SimpleNamespace(
+            agents=SimpleNamespace(
+                running=SimpleNamespace(max_iters=1, max_input_length=512),
+            ),
+        ),
+    )
+
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=_FakeCapabilityService(),
+        agent_profile_service=_LegacyGoalOnlyAgentProfileService(),
+        industry_service=_FakeIndustryService(),
+        task_repository=_FeedbackTaskRepository(),
+        task_runtime_repository=_FeedbackTaskRuntimeRepository(),
+        evidence_ledger=_FeedbackEvidenceLedger(),
+    )
+
+    async def _run():
+        async for _msg, _last in service.execute_stream(
+            msgs=[SimpleNamespace(get_text_content=lambda: "plan the next move")],
+            request=SimpleNamespace(
+                session_id="industry-chat:industry-v1-ops:execution-core",
+                user_id="default",
+                channel="console",
+                industry_instance_id="industry-v1-ops",
+                industry_role_id="execution-core",
+                session_kind="industry-agent-chat",
+                goal_id="goal-legacy-only",
+            ),
+            kernel_task_id="task-legacy-goal-feedback",
+        ):
+            pass
+
+    asyncio.run(_run())
+
+    prompt_appendix = _FakeAgent.created[0].kwargs["prompt_appendix"]
+    assert "Current focus:" not in prompt_appendix
+    assert "# Execution Feedback" not in prompt_appendix
+    assert "Inspect legacy goal feedback" not in prompt_appendix
 
 
 def test_query_execution_service_kicks_off_pending_industry_execution_from_chat(

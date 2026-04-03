@@ -716,6 +716,7 @@ export interface IndustryInstanceDetail extends IndustryInstanceSummary {
   backlog: IndustryRuntimeBacklogItem[];
   staffing: IndustryStaffingState;
   current_cycle?: IndustryRuntimeCycle | null;
+  main_brain_planning?: Record<string, unknown> | null;
   cycles: IndustryRuntimeCycle[];
   assignments: IndustryRuntimeAssignment[];
   agent_reports: IndustryRuntimeAgentReport[];

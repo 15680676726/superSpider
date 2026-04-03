@@ -340,6 +340,49 @@ function isTerminalRuntimeResponseEvent(
   return TERMINAL_RUNTIME_RESPONSE_STATUSES.has(status);
 }
 
+function buildRuntimeCompactionDetails(
+  payload: Record<string, unknown>,
+): string | null {
+  const toolUseSummary =
+    payload.tool_use_summary && typeof payload.tool_use_summary === "object"
+      ? (payload.tool_use_summary as Record<string, unknown>)
+      : null;
+  const compactionState =
+    payload.compaction_state && typeof payload.compaction_state === "object"
+      ? (payload.compaction_state as Record<string, unknown>)
+      : null;
+  const toolResultBudget =
+    payload.tool_result_budget && typeof payload.tool_result_budget === "object"
+      ? (payload.tool_result_budget as Record<string, unknown>)
+      : null;
+  const summary =
+    typeof toolUseSummary?.summary === "string" && toolUseSummary.summary.trim()
+      ? toolUseSummary.summary.trim()
+      : typeof compactionState?.summary === "string" &&
+          compactionState.summary.trim()
+        ? compactionState.summary.trim()
+        : null;
+  const spillCount =
+    typeof compactionState?.spill_count === "number"
+      ? compactionState.spill_count
+      : null;
+  const remainingBudget =
+    typeof toolResultBudget?.remaining_budget === "number"
+      ? toolResultBudget.remaining_budget
+      : null;
+  const parts = [summary];
+  if (spillCount !== null) {
+    parts.push(`spill:${spillCount}`);
+  }
+  if (remainingBudget !== null) {
+    parts.push(`budget-left:${remainingBudget}`);
+  }
+  const filtered = parts.filter(
+    (item): item is string => typeof item === "string" && item.trim().length > 0,
+  );
+  return filtered.length > 0 ? filtered.join(" ") : null;
+}
+
 function resolveRuntimeLifecycleState(
   eventName: string,
   event: RuntimeSidecarRecord,
@@ -360,7 +403,6 @@ function resolveRuntimeLifecycleState(
         : typeof payload.summary === "string" && payload.summary.trim().length > 0
           ? payload.summary.trim()
           : null;
-
   switch (eventName) {
     case "accepted":
       return {
@@ -496,7 +538,19 @@ function consumeRuntimeSidecarEvent(
     return;
   }
 
-  const lifecycleState = resolveRuntimeLifecycleState(eventName, normalized);
+  const payload =
+    normalized.payload && typeof normalized.payload === "object"
+      ? (normalized.payload as Record<string, unknown>)
+      : {};
+  const compactionDetails = buildRuntimeCompactionDetails(payload);
+  const lifecycleStateBase = resolveRuntimeLifecycleState(eventName, normalized);
+  const lifecycleState =
+    lifecycleStateBase && compactionDetails
+      ? {
+          ...lifecycleStateBase,
+          description: `${lifecycleStateBase.description} ${compactionDetails}`.trim(),
+        }
+      : lifecycleStateBase;
   if (eventName === "accepted" || eventName === "turn_reply_done") {
     setRuntimeWaitState(null);
     setRuntimeHealthNotice(null);
@@ -521,10 +575,6 @@ function consumeRuntimeSidecarEvent(
   }
 
   if (eventName === "commit_failed") {
-    const payload =
-      normalized.payload && typeof normalized.payload === "object"
-        ? (normalized.payload as Record<string, unknown>)
-        : {};
     const details =
       payload.details && typeof payload.details === "object"
         ? (payload.details as Record<string, unknown>)

@@ -126,7 +126,8 @@ def test_system_overview_hides_memory_backend_surface(tmp_path: Path) -> None:
     payload = response.json()
     assert payload["backup"]["download_route"] == "/api/system/backup/download"
     assert payload["backup"]["restore_route"] == "/api/system/backup/restore"
-    assert payload["providers"]["fallback_route"] == "/api/models/fallback"
+    assert payload["providers"]["fallback_route"] == "/api/providers/admin/fallback"
+    assert payload["providers"]["active_route"] == "/api/providers/admin/active"
     assert payload["runtime"]["governance_route"] == "/api/runtime-center/governance/status"
     assert "memory" not in payload
 

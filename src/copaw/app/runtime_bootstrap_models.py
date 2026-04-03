@@ -35,7 +35,7 @@ if TYPE_CHECKING:
         MemoryRetainService,
     )
     from ..predictions import PredictionService
-    from ..providers.provider_manager import ProviderManager
+    from ..providers.runtime_provider_facade import ProviderRuntimeSurface
     from ..routines import RoutineService
     from ..sop_kernel import FixedSopService
     from ..state import SQLiteStateStore
@@ -172,7 +172,7 @@ class RuntimeBootstrap:
     environment_service: EnvironmentService
     runtime_event_bus: RuntimeEventBus
     runtime_health_service: RuntimeHealthService
-    provider_manager: ProviderManager
+    runtime_provider: ProviderRuntimeSurface
     state_query_service: RuntimeCenterStateQueryService
     evidence_query_service: RuntimeCenterEvidenceQueryService
     human_assist_task_service: HumanAssistTaskService

@@ -19,7 +19,13 @@ from .task_review_projection import (
     host_twin_summary_ready,
 )
 from .models import (
+    RuntimeCenterAppStateView,
+    RuntimeCenterSurfaceInfo,
+    RuntimeCenterSurfaceResponse,
+    RuntimeMainBrainGovernancePayload,
+    RuntimeMainBrainPlanningPayload,
     RuntimeMainBrainResponse,
+    RuntimeQueryRuntimeEntropyPayload,
     RuntimeMainBrainSection,
     RuntimeOverviewCard,
     RuntimeOverviewEntry,
@@ -38,7 +44,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         self._missing_sentinel = _MISSING
         self._main_brain_assembly = RuntimeCenterMainBrainAssembly(self)
 
-    async def build_cards(self, app_state: Any) -> list[RuntimeOverviewCard]:
+    async def build_cards(self, app_state: RuntimeCenterAppStateView) -> list[RuntimeOverviewCard]:
         return [
             await self._build_tasks_card(app_state),
             await self._build_work_contexts_card(app_state),
@@ -99,7 +105,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             "truncated": total > len(items),
         }
 
-    async def _build_tasks_card(self, app_state: Any) -> RuntimeOverviewCard:
+    async def _build_tasks_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:
         return await self._state_card(
             app_state=app_state,
             key="tasks",
@@ -109,7 +115,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             mapper=self._map_task_entries,
         )
 
-    async def _build_work_contexts_card(self, app_state: Any) -> RuntimeOverviewCard:
+    async def _build_work_contexts_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:
         return await self._state_card(
             app_state=app_state,
             key="work-contexts",
@@ -120,8 +126,8 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             mapper=self._map_work_context_entries,
         )
 
-    async def _build_routines_card(self, app_state: Any) -> RuntimeOverviewCard:
-        routine_service = getattr(app_state, "routine_service", None)
+    async def _build_routines_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:
+        routine_service = app_state.routine_service
         getter = getattr(routine_service, "get_runtime_center_overview", None)
         if not callable(getter):
             return self._unavailable_card("routines", "例行", "Routine 视图暂未接入。")
@@ -182,9 +188,9 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             },
         )
 
-    async def _build_agents_card(self, app_state: Any) -> RuntimeOverviewCard:
+    async def _build_agents_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:
         return await self._service_card(
-            target=getattr(app_state, "agent_profile_service", None),
+            target=app_state.agent_profile_service,
             key="agents",
             title="智能体",
             source="agent_profile_service",
@@ -193,9 +199,9 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             mapper=self._map_agent_entries,
         )
 
-    async def _build_industry_card(self, app_state: Any) -> RuntimeOverviewCard:
+    async def _build_industry_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:
         return await self._service_card(
-            target=getattr(app_state, "industry_service", None),
+            target=app_state.industry_service,
             key="industry",
             title="行业团队",
             source="industry_service",
@@ -205,11 +211,11 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             mapper=self._map_industry_entries,
         )
 
-    async def _build_main_brain_card(self, app_state: Any) -> RuntimeOverviewCard:
+    async def _build_main_brain_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:
         return await self._main_brain_assembly.build_main_brain_card(app_state)
 
-    async def _build_capabilities_card(self, app_state: Any) -> RuntimeOverviewCard:
-        capability_service = getattr(app_state, "capability_service", None)
+    async def _build_capabilities_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:
+        capability_service = app_state.capability_service
         if capability_service is None:
             return self._unavailable_card(
                 "capabilities",
@@ -235,9 +241,9 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             meta=summary,
         )
 
-    async def _build_predictions_card(self, app_state: Any) -> RuntimeOverviewCard:
+    async def _build_predictions_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:
         return await self._service_card(
-            target=getattr(app_state, "prediction_service", None),
+            target=app_state.prediction_service,
             key="predictions",
             title="预测",
             source="prediction_service",
@@ -246,8 +252,8 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             mapper=self._map_prediction_entries,
         )
 
-    async def _build_governance_card(self, app_state: Any) -> RuntimeOverviewCard:
-        service = getattr(app_state, "governance_service", None)
+    async def _build_governance_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:
+        service = app_state.governance_service
         status_getter = getattr(service, "get_status", None)
         if not callable(status_getter):
             return self._unavailable_card(
@@ -313,6 +319,11 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             query_runtime_entropy=query_runtime_entropy,
             app_state=app_state,
         )
+        query_runtime_entropy_payload = (
+            query_runtime_entropy.model_dump(mode="json")
+            if isinstance(query_runtime_entropy, RuntimeQueryRuntimeEntropyPayload)
+            else {}
+        )
         current_status = "active" if emergency_active else ("blocked" if runtime_blocked else "idle")
         summary = payload.get("emergency_reason")
         failure_source = None
@@ -348,6 +359,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             failure_source = self._string(sidecar_memory.get("failure_source")) or "sidecar-memory"
             blocked_next_step = self._string(sidecar_memory.get("blocked_next_step"))
             summary = summary or self._string(sidecar_memory.get("summary"))
+            current_status = "blocked"
         if (
             not summary
             and isinstance(host_twin_summary_payload, dict)
@@ -416,7 +428,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 "host_twin": payload.get("host_twin"),
                 "host_companion_session": payload.get("host_companion_session"),
                 "host_twin_summary": host_twin_summary_payload,
-                "query_runtime_entropy": query_runtime_entropy,
+                "query_runtime_entropy": query_runtime_entropy_payload,
                 "sidecar_memory": sidecar_memory,
                 "handoff": handoff,
                 "staffing": staffing,
@@ -437,7 +449,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             meta={
                 **payload,
                 "host_twin_summary": host_twin_summary_payload,
-                "query_runtime_entropy": query_runtime_entropy,
+                "query_runtime_entropy": query_runtime_entropy_payload,
                 "sidecar_memory": sidecar_memory,
                 "failure_source": diagnostics["failure_source"],
                 "blocked_next_step": diagnostics["blocked_next_step"],
@@ -445,8 +457,20 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             },
         )
 
-    def _resolve_query_runtime_entropy(self, app_state: Any) -> dict[str, Any] | None:
-        service = getattr(app_state, "query_execution_service", None)
+    def _runtime_query_entropy_payload(
+        self,
+        value: object | None,
+    ) -> RuntimeQueryRuntimeEntropyPayload:
+        payload = self._mapping(value)
+        if not payload:
+            return RuntimeQueryRuntimeEntropyPayload()
+        return RuntimeQueryRuntimeEntropyPayload.model_validate(payload)
+
+    def _resolve_query_runtime_entropy(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> RuntimeQueryRuntimeEntropyPayload | None:
+        service = app_state.query_execution_service
         getter = getattr(service, "get_query_runtime_entropy_contract", None)
         if not callable(getter):
             return None
@@ -456,22 +480,28 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             logger.debug("runtime_center query runtime entropy lookup failed", exc_info=True)
             return None
         entropy = self._mapping(payload)
-        return entropy or None
+        return self._runtime_query_entropy_payload(entropy) if entropy else None
 
     def _resolve_governance_sidecar_memory(
         self,
         *,
-        query_runtime_entropy: dict[str, Any] | None,
-        app_state: Any,
+        query_runtime_entropy: RuntimeQueryRuntimeEntropyPayload | None,
+        app_state: RuntimeCenterAppStateView,
     ) -> dict[str, Any] | None:
-        sidecar_memory = self._mapping((query_runtime_entropy or {}).get("sidecar_memory"))
+        sidecar_memory = (
+            query_runtime_entropy.sidecar_memory
+            if isinstance(query_runtime_entropy, RuntimeQueryRuntimeEntropyPayload)
+            else {}
+        )
         if sidecar_memory:
-            return sidecar_memory
+            return dict(sidecar_memory)
         return self._resolve_runtime_contract_sidecar_memory(app_state)
 
-    def _resolve_runtime_contract_sidecar_memory(self, app_state: Any) -> dict[str, Any] | None:
-        for attr_name in ("actor_worker", "actor_supervisor"):
-            target = getattr(app_state, attr_name, None)
+    def _resolve_runtime_contract_sidecar_memory(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> dict[str, Any] | None:
+        for target in (app_state.actor_worker, app_state.actor_supervisor):
             runtime_contract = self._mapping(getattr(target, "runtime_contract", None))
             if not runtime_contract:
                 continue
@@ -480,8 +510,8 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 return sidecar_memory
         return None
 
-    async def _build_evidence_card(self, app_state: Any) -> RuntimeOverviewCard:
-        target = getattr(app_state, "evidence_query_service", None)
+    async def _build_evidence_card(self, app_state: RuntimeCenterAppStateView) -> RuntimeOverviewCard:
+        target = app_state.evidence_query_service
         items = await self._call_list_method(
             target,
             "list_recent_records",
@@ -513,7 +543,10 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             },
         )
 
-    async def _build_decisions_card(self, app_state: Any) -> RuntimeOverviewCard:
+    async def _build_decisions_card(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> RuntimeOverviewCard:
         return await self._state_card(
             app_state=app_state,
             key="decisions",
@@ -523,7 +556,10 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             mapper=self._map_decision_entries,
         )
 
-    async def _build_patches_card(self, app_state: Any) -> RuntimeOverviewCard:
+    async def _build_patches_card(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> RuntimeOverviewCard:
         return await self._service_card(
             target=self._learning_source(app_state),
             key="patches",
@@ -534,7 +570,10 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             mapper=self._map_patch_entries,
         )
 
-    async def _build_growth_card(self, app_state: Any) -> RuntimeOverviewCard:
+    async def _build_growth_card(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> RuntimeOverviewCard:
         return await self._service_card(
             target=self._learning_source(app_state),
             key="growth",
@@ -548,7 +587,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
     async def _state_card(
         self,
         *,
-        app_state: Any,
+        app_state: RuntimeCenterAppStateView,
         key: str,
         title: str,
         summary: str,
@@ -557,7 +596,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         mapper,
     ) -> RuntimeOverviewCard:
         return await self._service_card(
-            target=getattr(app_state, "state_query_service", None),
+            target=app_state.state_query_service,
             key=key,
             title=title,
             source="state_query_service",
@@ -687,16 +726,45 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             return list(value)
         return [value]
 
-    async def build_main_brain_payload(self, app_state: Any) -> RuntimeMainBrainResponse:
-        main_brain_card = await self._build_main_brain_card(app_state)
-        evidence_card = await self._build_evidence_card(app_state)
-        decisions_card = await self._build_decisions_card(app_state)
-        patches_card = await self._build_patches_card(app_state)
-        governance_card = await self._build_governance_card(app_state)
+    def _select_prebuilt_card(
+        self,
+        prebuilt_cards: Sequence[RuntimeOverviewCard] | None,
+        key: str,
+    ) -> RuntimeOverviewCard | None:
+        if not prebuilt_cards:
+            return None
+        for card in prebuilt_cards:
+            if card.key == key:
+                return card
+        return None
+
+    async def build_main_brain_payload(
+        self,
+        app_state: RuntimeCenterAppStateView,
+        *,
+        prebuilt_cards: Sequence[RuntimeOverviewCard] | None = None,
+        surface: RuntimeCenterSurfaceInfo | None = None,
+    ) -> RuntimeMainBrainResponse:
+        main_brain_card = self._select_prebuilt_card(prebuilt_cards, "main-brain")
+        if main_brain_card is None:
+            main_brain_card = await self._build_main_brain_card(app_state)
+        evidence_card = self._select_prebuilt_card(prebuilt_cards, "evidence")
+        if evidence_card is None:
+            evidence_card = await self._build_evidence_card(app_state)
+        decisions_card = self._select_prebuilt_card(prebuilt_cards, "decisions")
+        if decisions_card is None:
+            decisions_card = await self._build_decisions_card(app_state)
+        patches_card = self._select_prebuilt_card(prebuilt_cards, "patches")
+        if patches_card is None:
+            patches_card = await self._build_patches_card(app_state)
+        governance_card = self._select_prebuilt_card(prebuilt_cards, "governance")
+        if governance_card is None:
+            governance_card = await self._build_governance_card(app_state)
         governance = await self._build_main_brain_governance_payload(
             governance_card,
             app_state,
         )
+        governance_payload = governance.model_dump(mode="json")
         recovery = self._build_main_brain_recovery_payload(app_state)
         automation = await self._build_main_brain_automation_payload(app_state)
         signals = dict(main_brain_card.meta.get("signals") or {})
@@ -704,10 +772,10 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             {
                 "governance": self._build_main_brain_operator_signal(
                     "governance",
-                    governance,
-                    count=self._int(governance.get("pending_patches"), 0)
-                    + self._int(governance.get("pending_decisions"), 0)
-                    + (1 if governance.get("handoff_active") else 0),
+                    governance_payload,
+                    count=self._int(governance.pending_patches, 0)
+                    + self._int(governance.pending_decisions, 0)
+                    + (1 if governance.handoff_active else 0),
                 ),
                 "automation": self._build_main_brain_operator_signal(
                     "automation",
@@ -758,11 +826,11 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         entry_meta = dict(entry.meta or {}) if entry is not None else {}
         industry_instance_id = self._string(entry_meta.get("industry_instance_id"))
         industry_detail = await self._load_industry_detail_payload(
-            getattr(app_state, "industry_service", None),
+            app_state.industry_service,
             industry_instance_id,
         )
         strategy = await self._resolve_main_brain_strategy_payload(
-            getattr(app_state, "strategy_memory_service", None),
+            app_state.strategy_memory_service,
             industry_instance_id=industry_instance_id,
             entry=entry,
             entry_meta=entry_meta,
@@ -789,6 +857,9 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             industry_instance_id=industry_instance_id,
             normalized_reports=normalized_reports,
         )
+        main_brain_planning = RuntimeMainBrainPlanningPayload.model_validate(
+            self._mapping(industry_detail.get("main_brain_planning")) or {},
+        )
         signals["report_cognition"] = self._build_main_brain_report_cognition_signal(
             report_cognition,
         )
@@ -798,14 +869,16 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             for key in control_chain_order + ["report_cognition"]
             if isinstance(signal_map.get(key), dict)
         ]
+        surface_cards = list(prebuilt_cards) if prebuilt_cards is not None else cards
         return RuntimeMainBrainResponse(
-            surface=build_runtime_surface(cards),
+            surface=surface or build_runtime_surface(surface_cards),
             strategy=strategy,
             carrier=carrier,
             lanes=self._normalize_list(industry_detail.get("lanes")),
             cycles=self._normalize_list(industry_detail.get("cycles")),
             backlog=normalized_backlog,
             current_cycle=self._mapping(industry_detail.get("current_cycle")),
+            main_brain_planning=main_brain_planning,
             assignments=self._normalize_list(industry_detail.get("assignments")),
             reports=normalized_reports,
             report_cognition=report_cognition,
@@ -831,7 +904,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 "evidence_count": self._int(entry_meta.get("evidence_count"), 0),
                 "agent_reports": signals.get("agent_reports") or {},
                 "report_cognition": report_cognition,
-                "governance_summary": governance,
+                "governance_summary": governance_payload,
                 "recovery_summary": recovery,
                 "automation_summary": automation,
             },
@@ -858,37 +931,41 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
     async def _build_main_brain_governance_payload(
         self,
         governance_card: RuntimeOverviewCard,
-        app_state: Any,
-    ) -> dict[str, Any]:
+        app_state: RuntimeCenterAppStateView,
+    ) -> RuntimeMainBrainGovernancePayload:
         entry = governance_card.entries[0] if governance_card.entries else None
         meta = dict(governance_card.meta or {})
         handoff = self._mapping(meta.get("handoff")) or {}
         staffing = self._mapping(meta.get("staffing")) or {}
         human_assist = self._mapping(meta.get("human_assist")) or {}
         capability_governance = await self._build_capability_governance_projection(app_state)
-        return {
-            "status": entry.status if entry is not None else governance_card.status,
-            "summary": governance_card.summary,
-            "route": (entry.route if entry is not None else None)
+        query_runtime_entropy = self._runtime_query_entropy_payload(
+            meta.get("query_runtime_entropy"),
+        )
+        sidecar_memory = self._mapping(meta.get("sidecar_memory")) or {}
+        return RuntimeMainBrainGovernancePayload(
+            status=entry.status if entry is not None else governance_card.status,
+            summary=governance_card.summary,
+            route=(entry.route if entry is not None else None)
             or "/api/runtime-center/governance/status",
-            "pending_decisions": self._int(meta.get("pending_decisions"), 0),
-            "pending_patches": self._int(meta.get("pending_patches"), 0),
-            "proposed_patches": self._int(meta.get("proposed_patches"), 0),
-            "decision_provenance": self._mapping(meta.get("decision_provenance")) or {},
-            "paused_schedule_count": len(list(meta.get("paused_schedule_ids") or [])),
-            "emergency_stop_active": bool(meta.get("emergency_stop_active")),
-            "handoff_active": bool(handoff.get("active")),
-            "staffing_pending_count": self._int(
+            pending_decisions=self._int(meta.get("pending_decisions"), 0),
+            pending_patches=self._int(meta.get("pending_patches"), 0),
+            proposed_patches=self._int(meta.get("proposed_patches"), 0),
+            decision_provenance=self._mapping(meta.get("decision_provenance")) or {},
+            paused_schedule_count=len(list(meta.get("paused_schedule_ids") or [])),
+            emergency_stop_active=bool(meta.get("emergency_stop_active")),
+            handoff_active=bool(handoff.get("active")),
+            staffing_pending_count=self._int(
                 staffing.get("pending_confirmation_count"),
                 0,
             ),
-            "human_assist_blocked_count": self._int(
+            human_assist_blocked_count=self._int(
                 human_assist.get("blocked_count"),
                 0,
             ),
-            "host_twin_summary": self._mapping(meta.get("host_twin_summary")) or {},
-            "capability_governance": capability_governance,
-            "explain": {
+            host_twin_summary=self._mapping(meta.get("host_twin_summary")) or {},
+            capability_governance=capability_governance,
+            explain={
                 "failure_source": self._string(meta.get("failure_source")),
                 "blocked_next_step": self._string(meta.get("blocked_next_step")),
                 "remediation_summary": self._string(meta.get("remediation_summary")),
@@ -897,13 +974,18 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                     capability_governance.get("degraded_components") or [],
                 ),
             },
-        }
+            query_runtime_entropy=query_runtime_entropy,
+            sidecar_memory=sidecar_memory,
+        )
 
-    def _build_main_brain_recovery_payload(self, app_state: Any) -> dict[str, Any]:
-        summary = getattr(app_state, "latest_recovery_report", None)
+    def _build_main_brain_recovery_payload(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> dict[str, Any]:
+        summary = app_state.latest_recovery_report
         source = "latest"
         if summary is None:
-            summary = getattr(app_state, "startup_recovery_summary", None)
+            summary = app_state.startup_recovery_summary
             source = "startup"
         route = "/api/runtime-center/recovery/latest"
         if summary is None:
@@ -940,10 +1022,10 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
 
     async def _build_main_brain_automation_payload(
         self,
-        app_state: Any,
+        app_state: RuntimeCenterAppStateView,
     ) -> dict[str, Any]:
         schedules = await self._call_list_method(
-            getattr(app_state, "state_query_service", None),
+            app_state.state_query_service,
             "list_schedules",
         )
         schedule_entries = [] if schedules is _MISSING else list(schedules)
@@ -964,7 +1046,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         )
         heartbeat_config = get_heartbeat_config()
         heartbeat_payload = heartbeat_config.model_dump(mode="json", by_alias=True)
-        manager = getattr(app_state, "cron_manager", None)
+        manager = app_state.cron_manager
         state_getter = getattr(manager, "get_heartbeat_state", None)
         heartbeat_state = state_getter() if callable(state_getter) else None
         last_status = self._string(getattr(heartbeat_state, "last_status", None))
@@ -1051,10 +1133,13 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             return "completed"
         return "running"
 
-    def _build_automation_loop_payloads(self, app_state: Any) -> list[dict[str, Any]]:
-        tasks = list(getattr(app_state, "automation_tasks", []) or [])
+    def _build_automation_loop_payloads(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> list[dict[str, Any]]:
+        tasks = list(app_state.automation_tasks or [])
         snapshot_map: dict[str, dict[str, Any]] = {}
-        loop_snapshots = getattr(getattr(app_state, "automation_tasks", None), "loop_snapshots", None)
+        loop_snapshots = getattr(app_state.automation_tasks, "loop_snapshots", None)
         if callable(loop_snapshots):
             try:
                 raw_snapshots = loop_snapshots()
@@ -1096,8 +1181,11 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             )
         return payloads
 
-    def _build_actor_supervisor_payload(self, app_state: Any) -> dict[str, Any]:
-        supervisor = getattr(app_state, "actor_supervisor", None)
+    def _build_actor_supervisor_payload(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> dict[str, Any]:
+        supervisor = app_state.actor_supervisor
         if supervisor is None:
             return {
                 "available": False,
@@ -1200,6 +1288,8 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         entry: RuntimeOverviewEntry | None,
         entry_meta: Mapping[str, Any],
     ) -> dict[str, Any]:
+        _ = entry
+        _ = entry_meta
         records = await self._call_list_method(strategy_service, "list_strategies")
         strategies = [] if records is _MISSING else list(records)
         if industry_instance_id is not None:
@@ -1210,20 +1300,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 == industry_instance_id
             ] or strategies
         strategy = strategies[0] if strategies else None
-        payload = self._model_dump(strategy)
-        if not payload and entry is not None:
-            payload = {
-                "strategy_id": entry_meta.get("strategy_id"),
-                "title": entry.title,
-                "summary": entry.summary,
-                "status": entry.status,
-                "owner_agent_id": entry.owner,
-                "route": entry.route,
-            }
-        else:
-            payload.setdefault("strategy_id", entry_meta.get("strategy_id"))
-            payload.setdefault("route", entry.route if entry is not None else None)
-        return payload
+        return self._model_dump(strategy)
 
     def _resolve_main_brain_carrier_payload(
         self,
@@ -1232,35 +1309,20 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         entry_meta: Mapping[str, Any],
         industry_detail: Mapping[str, Any],
     ) -> dict[str, Any]:
-        if industry_detail:
-            routes = self._mapping(industry_detail.get("routes")) or {}
-            return {
-                "industry_instance_id": self._string(
-                    industry_detail.get("instance_id") or entry_meta.get("industry_instance_id"),
-                ),
-                "label": self._string(industry_detail.get("label"))
-                or self._string(entry_meta.get("carrier_label")),
-                "summary": self._string(industry_detail.get("summary"))
-                or (entry.summary if entry is not None else None),
-                "status": self._string(industry_detail.get("status"))
-                or self._string(entry_meta.get("carrier_status"))
-                or (entry.status if entry is not None else None),
-                "owner_scope": self._string(industry_detail.get("owner_scope"))
-                or (entry.owner if entry is not None else None),
-                "route": self._string(routes.get("runtime_detail"))
-                or self._string(entry_meta.get("industry_route"))
-                or (entry.route if entry is not None else None),
-            }
-        return {
-            "industry_instance_id": self._string(entry_meta.get("industry_instance_id")),
-            "label": self._string(entry_meta.get("carrier_label")),
-            "summary": entry.summary if entry is not None else None,
-            "status": self._string(entry_meta.get("carrier_status"))
-            or (entry.status if entry is not None else None),
-            "owner_scope": entry.owner if entry is not None else None,
-            "route": self._string(entry_meta.get("industry_route"))
-            or (entry.route if entry is not None else None),
+        _ = entry
+        _ = entry_meta
+        if not industry_detail:
+            return {}
+        routes = self._mapping(industry_detail.get("routes")) or {}
+        payload = {
+            "industry_instance_id": self._string(industry_detail.get("instance_id")),
+            "label": self._string(industry_detail.get("label")),
+            "summary": self._string(industry_detail.get("summary")),
+            "status": self._string(industry_detail.get("status")),
+            "owner_scope": self._string(industry_detail.get("owner_scope")),
+            "route": self._string(routes.get("runtime_detail")),
         }
+        return {key: value for key, value in payload.items() if value is not None}
 
     def _build_main_brain_environment_payload(
         self,
@@ -1419,9 +1481,9 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
 
     async def _build_capability_governance_projection(
         self,
-        app_state: Any,
+        app_state: RuntimeCenterAppStateView,
     ) -> dict[str, Any]:
-        capability_service = getattr(app_state, "capability_service", None)
+        capability_service = app_state.capability_service
         if capability_service is None:
             return {
                 "status": "unavailable",
@@ -1450,7 +1512,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             )
             or []
         )
-        prediction_service = getattr(app_state, "prediction_service", None)
+        prediction_service = app_state.prediction_service
         optimization_overview = {}
         get_runtime_capability_optimization_overview = getattr(
             prediction_service,
@@ -1592,14 +1654,17 @@ class RuntimeCenterOverviewBuilder:
     def __init__(self, *, item_limit: int = 5) -> None:
         self._item_limit = item_limit
 
-    async def build_cards(self, app_state: Any) -> list[RuntimeOverviewCard]:
+    async def _build_cards_with_support(
+        self,
+        support: _RuntimeCenterOverviewCardsSupport,
+        app_state: RuntimeCenterAppStateView,
+    ) -> list[RuntimeOverviewCard]:
         from .overview_groups import (
             RuntimeCenterControlCardsBuilder,
             RuntimeCenterLearningCardsBuilder,
             RuntimeCenterOperationsCardsBuilder,
         )
 
-        support = _RuntimeCenterOverviewCardsSupport(item_limit=self._item_limit)
         builders = (
             RuntimeCenterOperationsCardsBuilder(item_limit=self._item_limit),
             RuntimeCenterControlCardsBuilder(item_limit=self._item_limit),
@@ -1610,17 +1675,48 @@ class RuntimeCenterOverviewBuilder:
             cards.extend(await builder.build_cards(app_state))
         return cards
 
-    async def build_main_brain_card(self, app_state: Any) -> RuntimeOverviewCard:
+    async def build_cards(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> list[RuntimeOverviewCard]:
+        support = _RuntimeCenterOverviewCardsSupport(item_limit=self._item_limit)
+        return await self._build_cards_with_support(support, app_state)
+
+    async def build_main_brain_card(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> RuntimeOverviewCard:
         support = _RuntimeCenterOverviewCardsSupport(item_limit=self._item_limit)
         return await support._build_main_brain_card(app_state)
 
-    async def build_main_brain_payload(self, app_state: Any) -> RuntimeMainBrainResponse:
+    async def build_main_brain_payload(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> RuntimeMainBrainResponse:
         support = _RuntimeCenterOverviewCardsSupport(item_limit=self._item_limit)
         return await support.build_main_brain_payload(app_state)
 
+    async def build_surface_payload(
+        self,
+        app_state: RuntimeCenterAppStateView,
+    ) -> RuntimeCenterSurfaceResponse:
+        support = _RuntimeCenterOverviewCardsSupport(item_limit=self._item_limit)
+        cards = await self._build_cards_with_support(support, app_state)
+        surface = build_runtime_surface(cards)
+        main_brain = await support.build_main_brain_payload(
+            app_state,
+            prebuilt_cards=cards,
+            surface=surface,
+        )
+        return RuntimeCenterSurfaceResponse(
+            surface=surface,
+            cards=cards,
+            main_brain=main_brain,
+        )
+
 
 async def build_runtime_capability_governance_projection(
-    app_state: Any,
+    app_state: RuntimeCenterAppStateView,
     *,
     item_limit: int = 5,
 ) -> dict[str, Any]:

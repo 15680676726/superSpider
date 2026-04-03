@@ -20,6 +20,8 @@ class CapabilityExecutionContext:
     risk_level: str = "auto"
     action_mode: str | None = None
     concurrency_class: str | None = None
+    writer_lock_scope: str | None = None
+    writer_lock_required: bool = False
     preflight_policy: str | None = None
     evidence_mode: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)
@@ -35,6 +37,8 @@ class CapabilityExecutionContext:
         *,
         action_mode: str | None = None,
         concurrency_class: str | None = None,
+        writer_lock_scope: str | None = None,
+        writer_lock_required: bool = False,
         preflight_policy: str | None = None,
         evidence_mode: str | None = None,
         payload: dict[str, Any] | None = None,
@@ -50,6 +54,8 @@ class CapabilityExecutionContext:
             risk_level=task.risk_level,
             action_mode=action_mode,
             concurrency_class=concurrency_class,
+            writer_lock_scope=writer_lock_scope,
+            writer_lock_required=writer_lock_required,
             preflight_policy=preflight_policy,
             evidence_mode=evidence_mode,
             payload=dict(payload or {}),

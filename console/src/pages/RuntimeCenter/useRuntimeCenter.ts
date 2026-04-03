@@ -1,15 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { message } from "antd";
-import { isApiError } from "../../api/errors";
 import { request } from "../../api";
 import { subscribe } from "../../runtime/eventBus";
-import type { RuntimeMainBrainResponse } from "../../api/modules/runtimeCenter";
+import type {
+  RuntimeCenterSurfaceResponse,
+  RuntimeMainBrainResponse,
+} from "../../api/modules/runtimeCenter";
 import {
   normalizeRuntimePath,
-  requestRuntimeBusinessAgents,
-  requestRuntimeMainBrain,
-  requestRuntimeOverview,
   requestRuntimeRecord,
+  requestRuntimeSurface,
 } from "../../runtime/runtimeSurfaceClient";
 import {
   formatRuntimeActionLabel,
@@ -130,6 +136,41 @@ function normalizeOverview(
   };
 }
 
+function metaString(
+  meta: Record<string, unknown> | undefined,
+  key: string,
+): string | null {
+  if (!meta) {
+    return null;
+  }
+  const value = meta[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function deriveBusinessAgents(
+  payload: RuntimeCenterOverviewPayload,
+): RuntimeCenterAgentSummary[] {
+  const agentsCard = (payload.cards ?? []).find((card) => card.key === "agents");
+  if (!agentsCard) {
+    return [];
+  }
+  return (agentsCard.entries ?? [])
+    .map((entry) => ({
+      agent_id: entry.id,
+      name: entry.title || entry.id,
+      role_name: metaString(entry.meta, "role_name") ?? entry.owner ?? null,
+      role_summary: entry.summary ?? null,
+      agent_class: metaString(entry.meta, "agent_class"),
+      status: entry.status ?? null,
+      current_focus: metaString(entry.meta, "current_focus"),
+      current_focus_kind: metaString(entry.meta, "current_focus_kind"),
+      current_focus_id: metaString(entry.meta, "current_focus_id"),
+      reports_to: metaString(entry.meta, "reports_to"),
+      industry_role_id: metaString(entry.meta, "industry_role_id"),
+    } satisfies RuntimeCenterAgentSummary))
+    .filter((agent) => !isMainBrainAgent(agent));
+}
+
 function buildActionBody(
   cardKey: string,
   actionKey: string,
@@ -175,128 +216,98 @@ function isMainBrainAgent(agent: RuntimeCenterAgentSummary | null | undefined): 
 }
 
 export function useRuntimeCenter() {
-  const [data, setData] = useState<RuntimeCenterOverviewPayload | null>(null);
+  const [surfaceData, setSurfaceData] =
+    useState<RuntimeCenterSurfaceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mainBrainData, setMainBrainData] =
-    useState<RuntimeMainBrainResponse | null>(null);
-  const [mainBrainLoading, setMainBrainLoading] = useState(true);
-  const [mainBrainError, setMainBrainError] = useState<string | null>(null);
-  const [mainBrainUnavailable, setMainBrainUnavailable] = useState(false);
-  const [businessAgents, setBusinessAgents] = useState<RuntimeCenterAgentSummary[]>([]);
-  const [businessAgentsLoading, setBusinessAgentsLoading] = useState(true);
-  const [businessAgentsError, setBusinessAgentsError] = useState<string | null>(null);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [detail, setDetail] = useState<RuntimeCenterDetailState | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const reloadTimerRef = useRef<number | null>(null);
+  const surfaceReloadTimerRef = useRef<number | null>(null);
 
-  const load = useCallback(async (mode: "initial" | "refresh" = "refresh") => {
-    if (mode === "initial") {
-      setLoading(true);
-    } else {
-      setRefreshing(true);
+  const data = useMemo<RuntimeCenterOverviewPayload | null>(() => {
+    if (!surfaceData) {
+      return null;
     }
-    setMainBrainLoading(true);
-    setMainBrainError(null);
-    setMainBrainUnavailable(false);
-    setBusinessAgentsLoading(true);
-    setBusinessAgentsError(null);
-    const overviewPromise =
-      requestRuntimeOverview<RuntimeCenterOverviewPayload>();
-    const mainBrainPromise = requestRuntimeMainBrain<RuntimeMainBrainResponse>();
-    const businessAgentsPromise =
-      requestRuntimeBusinessAgents<RuntimeCenterAgentSummary[]>();
+    return normalizeOverview({
+      generated_at: surfaceData.generated_at,
+      surface: surfaceData.surface,
+      cards: surfaceData.cards,
+    });
+  }, [surfaceData]);
+  const mainBrainData = useMemo<RuntimeMainBrainResponse | null>(
+    () => surfaceData?.main_brain ?? null,
+    [surfaceData],
+  );
+  const businessAgents = useMemo<RuntimeCenterAgentSummary[]>(
+    () => (data ? deriveBusinessAgents(data) : []),
+    [data],
+  );
+  const mainBrainUnavailable = surfaceData !== null && surfaceData.main_brain == null;
+  const mainBrainLoading = loading;
+  const businessAgentsLoading = loading;
+  const mainBrainError = mainBrainUnavailable ? null : error;
+  const businessAgentsError = data ? null : error;
 
-    try {
-      const payload = await overviewPromise;
-      setData(normalizeOverview(payload));
-      setError(null);
-    } catch (err) {
-      setError(
-        localizeRuntimeText(err instanceof Error ? err.message : String(err)),
-      );
+  const loadSurface = useCallback(
+    async (mode: "initial" | "refresh" = "refresh") => {
       if (mode === "initial") {
-        setData(null);
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-
-    try {
-      const payload = await mainBrainPromise;
-      setMainBrainData(payload);
-      setMainBrainError(null);
-      setMainBrainUnavailable(false);
-    } catch (err) {
-      if (isApiError(err) && err.isNotFound) {
-        setMainBrainUnavailable(true);
-        setMainBrainData(null);
-        setMainBrainError(null);
+        setLoading(true);
       } else {
+        setRefreshing(true);
+      }
+      try {
+        const payload = await requestRuntimeSurface<RuntimeCenterSurfaceResponse>();
+        setSurfaceData(payload);
+        setError(null);
+      } catch (err) {
         const detail = localizeRuntimeText(
           err instanceof Error ? err.message : String(err),
         );
-        setMainBrainError(detail);
-        setMainBrainData(null);
+        setError(detail);
+        if (mode === "initial") {
+          setSurfaceData(null);
+        }
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-    } finally {
-      setMainBrainLoading(false);
-    }
-
-    try {
-      const payload = await businessAgentsPromise;
-      setBusinessAgents(
-        Array.isArray(payload) ? payload.filter((agent) => !isMainBrainAgent(agent)) : [],
-      );
-      setBusinessAgentsError(null);
-    } catch (err) {
-      setBusinessAgents([]);
-      setBusinessAgentsError(
-        localizeRuntimeText(err instanceof Error ? err.message : String(err)),
-      );
-    } finally {
-      setBusinessAgentsLoading(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
-    void load("initial");
-  }, [load]);
+    void loadSurface("initial");
+  }, [loadSurface]);
 
   // Subscribe to the global event bus instead of opening a dedicated SSE
   // connection. The global bus (started in main.tsx) already connects to
   // /runtime-center/events and handles reconnection with back-off.
   useEffect(() => {
     const scheduleReload = () => {
-      if (reloadTimerRef.current !== null) {
-        window.clearTimeout(reloadTimerRef.current);
+      if (surfaceReloadTimerRef.current !== null) {
+        window.clearTimeout(surfaceReloadTimerRef.current);
       }
-      reloadTimerRef.current = window.setTimeout(() => {
-        reloadTimerRef.current = null;
-        void load();
+      surfaceReloadTimerRef.current = window.setTimeout(() => {
+        surfaceReloadTimerRef.current = null;
+        void loadSurface();
       }, 250);
     };
 
-    // Listen to all runtime-center related events via prefix match
-    const unsub = subscribe("*", (event) => {
-      // Any non-heartbeat event triggers a debounced reload
-      if (!event.event_name.endsWith(".heartbeat")) {
-        scheduleReload();
-      }
+    const unsub = subscribe("*", () => {
+      scheduleReload();
     });
 
     return () => {
       unsub();
-      if (reloadTimerRef.current !== null) {
-        window.clearTimeout(reloadTimerRef.current);
-        reloadTimerRef.current = null;
+      if (surfaceReloadTimerRef.current !== null) {
+        window.clearTimeout(surfaceReloadTimerRef.current);
+        surfaceReloadTimerRef.current = null;
       }
     };
-  }, [load]);
+  }, [loadSurface]);
 
   const invokeAction = useCallback(
     async (
@@ -341,7 +352,7 @@ export function useRuntimeCenter() {
             ),
           );
         }
-        await load();
+        await loadSurface("refresh");
       } catch (err) {
         const detail = localizeRuntimeText(
           err instanceof Error ? err.message : String(err),
@@ -351,7 +362,7 @@ export function useRuntimeCenter() {
         setBusyActionId(null);
       }
     },
-    [load],
+    [loadSurface],
   );
 
   const openDetail = useCallback(async (route: string, title: string) => {
@@ -396,7 +407,7 @@ export function useRuntimeCenter() {
     detail,
     detailLoading,
     detailError,
-    reload: () => load(),
+    reload: () => loadSurface(),
     invokeAction,
     openDetail,
     closeDetail,

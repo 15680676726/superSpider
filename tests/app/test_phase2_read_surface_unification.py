@@ -66,6 +66,16 @@ def test_retired_runtime_and_goal_frontdoors_are_removed_from_openapi() -> None:
     assert "/learning/patches/{patch_id}/reject" not in paths
     assert "/learning/patches/{patch_id}/apply" not in paths
     assert "/learning/patches/{patch_id}/rollback" not in paths
+    assert "/models/{provider_id}/config" not in paths
+    assert "/models/custom-providers" not in paths
+    assert "/models/custom-providers/{provider_id}" not in paths
+    assert "/models/{provider_id}/models" not in paths
+    assert "/models/{provider_id}/models/{model_id}" not in paths
+    assert set(paths["/models/active"].keys()) == {"get"}
+    assert set(paths["/models/fallback"].keys()) == {"get"}
+    assert "/providers/admin/{provider_id}/config" in paths
+    assert "/providers/admin/active" in paths
+    assert "/providers/admin/fallback" in paths
 
 
 def test_retired_runtime_and_goal_frontdoors_return_404() -> None:
@@ -125,6 +135,19 @@ def test_retired_runtime_and_goal_frontdoors_return_404() -> None:
     assert client.post(
         "/workflow-runs/run-1/cancel",
         json={"actor": "ops", "reason": "retired"},
+    ).status_code == 404
+    assert client.put("/models/active", json={"provider_id": "openai", "model": "gpt-5"}).status_code == 405
+    assert client.put(
+        "/models/fallback",
+        json={"enabled": True, "candidates": []},
+    ).status_code == 405
+    assert client.put(
+        "/models/openai/config",
+        json={"api_key": "sk-test"},
+    ).status_code == 404
+    assert client.post(
+        "/models/custom-providers",
+        json={"id": "custom", "name": "Custom"},
     ).status_code == 404
     assert client.post("/learning/patches/patch-1/approve", json={"actor": "ops"}).status_code == 404
     assert client.post("/learning/patches/patch-1/reject", json={"actor": "ops"}).status_code == 404

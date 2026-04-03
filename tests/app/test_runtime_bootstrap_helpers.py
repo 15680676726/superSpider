@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from types import SimpleNamespace
 from typing import get_args
@@ -23,7 +24,6 @@ from copaw.app import runtime_service_graph as runtime_service_graph_module
 from copaw.app.runtime_bootstrap_query import build_runtime_query_services
 from copaw.app.runtime_service_graph import (
     _build_kernel_runtime,
-    _resolve_provider_manager,
     _resolve_state_store,
     _warm_runtime_memory_services,
     _resolve_default_memory_recall_backend,
@@ -129,7 +129,7 @@ def _build_bootstrap() -> RuntimeBootstrap:
         environment_service=object(),
         runtime_event_bus=object(),
         runtime_health_service=object(),
-        provider_manager=object(),
+        runtime_provider=object(),
         state_query_service=object(),
         evidence_query_service=object(),
         human_assist_task_service=object(),
@@ -253,6 +253,8 @@ def test_attach_runtime_state_binds_bootstrap_and_manager_stack() -> None:
     assert app.state.main_brain_chat_service is bootstrap.main_brain_chat_service
     assert app.state.capability_service is bootstrap.capability_service
     assert app.state.runtime_health_service is bootstrap.runtime_health_service
+    assert app.state.runtime_provider is bootstrap.runtime_provider
+    assert app.state.provider_manager is bootstrap.runtime_provider
     assert app.state.channel_manager is manager_stack.channel_manager
     assert app.state.job_repository is manager_stack.job_repository
     assert app.state.schedule_repository is bootstrap.repositories.schedule_repository
@@ -337,6 +339,9 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
         is bootstrap.conversation_compaction_service
     )
     assert "memory_manager" not in bindings
+    assert "provider_manager" in bindings
+    assert bindings["runtime_provider"] is bootstrap.runtime_provider
+    assert bindings["provider_manager"] is bootstrap.runtime_provider
     assert bindings["schedule_repository"] is bootstrap.repositories.schedule_repository
     assert (
         bindings["human_assist_task_repository"]
@@ -729,15 +734,36 @@ def test_formal_memory_backend_kind_excludes_vector_and_legacy_sidecar_variants(
     assert backend_kinds == {"lexical", "hybrid-local"}
 
 
-def test_resolve_provider_manager_uses_singleton_facade(monkeypatch) -> None:
+def test_runtime_bootstrap_formal_contract_exposes_runtime_provider_only() -> None:
+    bootstrap = _build_bootstrap()
+
+    assert bootstrap.runtime_provider is not None
+    assert not hasattr(bootstrap, "provider_manager")
+
+
+def test_resolve_runtime_provider_facade_wraps_compatibility_provider_manager(
+    monkeypatch,
+) -> None:
+    provider_manager = object()
     sentinel = object()
     monkeypatch.setattr(
-        runtime_service_graph_module.ProviderManager,
-        "get_instance",
-        staticmethod(lambda: sentinel),
+        runtime_service_graph_module,
+        "get_runtime_provider_facade",
+        lambda *, provider_manager=None: sentinel,
     )
 
-    assert _resolve_provider_manager() is sentinel
+    assert runtime_service_graph_module._resolve_runtime_provider_facade(
+        provider_manager,
+    ) is sentinel
+
+
+def test_domain_builder_formal_signature_uses_runtime_provider_only() -> None:
+    parameters = inspect.signature(
+        runtime_service_graph_module.build_runtime_domain_services,
+    ).parameters
+
+    assert "runtime_provider" in parameters
+    assert "provider_manager" not in parameters
 
 
 def test_resolve_state_store_uses_runtime_working_dir_layout(monkeypatch, tmp_path) -> None:

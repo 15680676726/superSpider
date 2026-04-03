@@ -33,13 +33,15 @@ import {
   renderTraceBlock,
 } from "./mainBrainCockpitSections";
 import {
-  buildRuntimeEnvironmentCockpitSignals,
-} from "./runtimeEnvironmentSections";
-import {
-  buildRuntimeIndustryCockpitSignals,
   type RuntimeCockpitSignal,
 } from "./runtimeIndustrySections";
-import type { RuntimeMainBrainResponse } from "../../api/modules/runtimeCenter";
+import type {
+  RuntimeMainBrainEnvironment,
+  RuntimeMainBrainQueryRuntimeEntropy,
+  RuntimeMainBrainRecord,
+  RuntimeMainBrainResponse,
+  RuntimeMainBrainSection,
+} from "../../api/modules/runtimeCenter";
 
 type MainBrainCockpitPanelProps = {
   data: RuntimeCenterOverviewPayload | null;
@@ -113,7 +115,29 @@ function toneFromStatus(value: unknown): RuntimeCockpitSignal["tone"] {
   return "default";
 }
 
-function detailFromSignal(record: Record<string, unknown>): string | null {
+function cardStatusFromValue(value: unknown): "state-service" | "degraded" | "unavailable" {
+  if (typeof value !== "string") {
+    return "unavailable";
+  }
+  const normalized = value.trim().toLowerCase();
+  if (
+    ["state-service", "success", "ready", "active", "clear", "proceed", "ok", "available"].some(
+      (token) => normalized.includes(token),
+    )
+  ) {
+    return "state-service";
+  }
+  if (
+    ["degraded", "warning", "caution", "pending", "blocked", "error", "danger", "retry"].some(
+      (token) => normalized.includes(token),
+    )
+  ) {
+    return "degraded";
+  }
+  return "unavailable";
+}
+
+function detailFromSignal(record: RuntimeMainBrainRecord): string | null {
   const value = firstString(
     record.detail,
     record.note,
@@ -125,7 +149,7 @@ function detailFromSignal(record: Record<string, unknown>): string | null {
   return value ? localizeRuntimeText(value) : null;
 }
 
-function routeFromSignal(record: Record<string, unknown>): string | null {
+function routeFromSignal(record: RuntimeMainBrainRecord): string | null {
   return (
     stringOrNumber(record.route) ??
     stringOrNumber(record.route_title) ??
@@ -133,11 +157,11 @@ function routeFromSignal(record: Record<string, unknown>): string | null {
   );
 }
 
-function routeTitleFromSignal(record: Record<string, unknown>): string | null {
+function routeTitleFromSignal(record: RuntimeMainBrainRecord): string | null {
   return stringOrNumber(record.route_title) ?? stringOrNumber(record.routeTitle);
 }
 
-function valueFromSignal(record: Record<string, unknown>): string {
+function valueFromSignal(record: RuntimeMainBrainRecord): string {
   const value =
     firstString(
       record.value,
@@ -157,7 +181,7 @@ function convertDedicatedSignal(
   key: string,
   data: unknown,
 ): RuntimeCockpitSignal {
-  const record = isRecord(data) ? (data as Record<string, unknown>) : {};
+  const record = isRecord(data) ? (data as RuntimeMainBrainRecord) : {};
   const tone =
     typeof record.tone === "string"
       ? (record.tone as RuntimeCockpitSignal["tone"])
@@ -185,23 +209,11 @@ function buildDedicatedSignals(payload: RuntimeMainBrainResponse | null): Runtim
 function buildDedicatedChainSignals(
   payload: RuntimeMainBrainResponse | null,
 ): RuntimeCockpitSignal[] | null {
-  const chain = payload?.meta?.control_chain;
-  if (!Array.isArray(chain) || chain.length === 0) {
+  const chain = payload?.meta.control_chain;
+  if (!chain || chain.length === 0) {
     return null;
   }
-  const signals = chain
-    .map((item) => {
-      if (!isRecord(item)) {
-        return null;
-      }
-      const record = item as Record<string, unknown>;
-      const key = typeof record.key === "string" && record.key ? record.key : null;
-      if (!key) {
-        return null;
-      }
-      return convertDedicatedSignal(key, record);
-    })
-    .filter((signal): signal is RuntimeCockpitSignal => signal !== null);
+  const signals = chain.map((item) => convertDedicatedSignal(item.key, item));
   return signals.length > 0 ? signals : null;
 }
 
@@ -250,14 +262,6 @@ function renderSignalCard(
       </Space>
     </Card>
   );
-}
-
-function overviewCardMeta(
-  payload: RuntimeCenterOverviewPayload | null,
-  cardKey: string,
-): Record<string, unknown> {
-  const card = payload?.cards?.find((entry) => entry.key === cardKey);
-  return isRecord(card?.meta) ? card!.meta : {};
 }
 
 function firstString(...values: unknown[]): string | null {
@@ -343,9 +347,9 @@ function utcDayKey(value: string | null): string | null {
 }
 
 function sliceRecordsForGeneratedDay(
-  records: Record<string, unknown>[],
+  records: RuntimeMainBrainRecord[],
   generatedAt: string | null,
-): { records: Record<string, unknown>[]; hasTimestampEvidence: boolean } {
+): { records: RuntimeMainBrainRecord[]; hasTimestampEvidence: boolean } {
   const anchorDay = utcDayKey(generatedAt);
   if (!anchorDay) {
     return { records: [], hasTimestampEvidence: false };
@@ -363,10 +367,10 @@ function sliceRecordsForGeneratedDay(
 }
 
 function scopeTraceSectionToGeneratedDay(
-  section: Record<string, unknown> | null,
+  section: RuntimeMainBrainSection | null,
   generatedAt: string | null,
   emptySummary: string,
-): Record<string, unknown> | null {
+): RuntimeMainBrainSection | null {
   if (!section) {
     return null;
   }
@@ -434,7 +438,7 @@ function extractFocusCount(value: unknown): number | null {
 }
 
 function deriveUnconsumedReportCount(
-  payload: RuntimeCenterOverviewPayload | null,
+  _payload: RuntimeCenterOverviewPayload | null,
   mainBrainPayload?: RuntimeMainBrainResponse | null,
 ): number | null {
   if (mainBrainPayload?.meta) {
@@ -452,33 +456,14 @@ function deriveUnconsumedReportCount(
       }
     }
   }
-  const mainBrainMeta = overviewCardMeta(payload, "main-brain");
-  const reportsSignal = isRecord(mainBrainMeta.agent_reports) ? mainBrainMeta.agent_reports : null;
-  if (reportsSignal) {
-    for (const key of ["unconsumed_count", "unconsumed_reports", "pending_count"] as const) {
-      const value = reportsSignal[key];
-      if (typeof value === "number" && Number.isFinite(value)) {
-        return value;
-      }
-    }
-  }
-
-  const reportCards = (payload?.cards ?? []).filter((card) =>
-    ["agent_reports", "agent-reports", "reports"].includes(card.key),
-  );
-  if (reportCards.length === 0) {
+  if (!mainBrainPayload) {
     return null;
   }
-  const entries = reportCards.flatMap((card) => card.entries ?? []);
-  const unconsumed = entries.filter((entry) => {
-    const meta = isRecord(entry.meta) ? entry.meta : {};
-    if (meta.processed === false) {
+  const unconsumed = mainBrainPayload.reports.filter((entry) => {
+    if (entry.report_consumed === false || entry.consumed === false) {
       return true;
     }
-    if (meta.report_consumed === false || meta.consumed === false) {
-      return true;
-    }
-    if (meta.unconsumed === true) {
+    if (entry.processed === false || entry.unconsumed === true) {
       return true;
     }
     return false;
@@ -486,13 +471,11 @@ function deriveUnconsumedReportCount(
   return unconsumed.length;
 }
 
-function coordinationFallback(value: Record<string, unknown> | null): string | null {
+function coordinationFallback(value: RuntimeMainBrainEnvironment | null): string | null {
   if (!value) {
     return null;
   }
-  const hostTwinSummary = isRecord(value.host_twin_summary)
-    ? (value.host_twin_summary as Record<string, unknown>)
-    : null;
+  const hostTwinSummary = value.host_twin_summary;
   if (!hostTwinSummary) {
     return null;
   }
@@ -503,11 +486,49 @@ function coordinationFallback(value: Record<string, unknown> | null): string | n
   );
 }
 
+function buildDefaultSignalsFromPayload(
+  payload: RuntimeMainBrainResponse | null,
+): RuntimeCockpitSignal[] {
+  if (!payload) {
+    return [];
+  }
+  const fallbackSignals: Array<[string, RuntimeMainBrainRecord | null]> = [
+    ["carrier", payload.carrier],
+    ["strategy", payload.strategy],
+    ["lanes", { count: payload.lanes.length, summary: String(payload.lanes.length) }],
+    ["backlog", { count: payload.backlog.length, summary: String(payload.backlog.length) }],
+    ["current_cycle", payload.current_cycle],
+    [
+      "assignments",
+      { count: payload.assignments.length, summary: String(payload.assignments.length) },
+    ],
+    ["agent_reports", { count: payload.reports.length, summary: String(payload.reports.length) }],
+    ["environment", payload.environment],
+    ["governance", payload.governance],
+    ["automation", payload.automation],
+    ["recovery", payload.recovery],
+    [
+      "evidence",
+      { count: payload.evidence.count, summary: payload.evidence.summary, route: payload.evidence.route },
+    ],
+    [
+      "decisions",
+      { count: payload.decisions.count, summary: payload.decisions.summary, route: payload.decisions.route },
+    ],
+    [
+      "patches",
+      { count: payload.patches.count, summary: payload.patches.summary, route: payload.patches.route },
+    ],
+  ];
+  return fallbackSignals
+    .filter(([, record]) => record !== null)
+    .map(([key, record]) => convertDedicatedSignal(key, record));
+}
+
 export default function MainBrainCockpitPanel({
   data,
   loading,
   refreshing,
-  error,
   mainBrainData,
   mainBrainLoading,
   mainBrainError,
@@ -516,13 +537,10 @@ export default function MainBrainCockpitPanel({
   onOpenRoute,
 }: MainBrainCockpitPanelProps) {
   const dedicatedSignals = buildDedicatedSignals(mainBrainData);
-  const hasDedicatedSignals = dedicatedSignals.length > 0;
-  const environmentSignals = hasDedicatedSignals ? [] : buildRuntimeEnvironmentCockpitSignals(data);
-  const industrySignals = hasDedicatedSignals ? [] : buildRuntimeIndustryCockpitSignals(data);
   const signalCards =
-    hasDedicatedSignals && dedicatedSignals.length > 0
+    dedicatedSignals.length > 0
       ? dedicatedSignals
-      : [...environmentSignals, ...industrySignals];
+      : buildDefaultSignalsFromPayload(mainBrainData);
   const chainOrder = [
     "carrier",
     "strategy",
@@ -544,41 +562,103 @@ export default function MainBrainCockpitPanel({
 
   const carrierSignal = signalCards.find((signal) => signal.key === "carrier") ?? null;
   const strategySignal = signalCards.find((signal) => signal.key === "strategy") ?? null;
-  const mainBrainMeta = overviewCardMeta(data, "main-brain");
-  const industryMeta = overviewCardMeta(data, "industry");
-  const surface = mainBrainData?.surface ?? data?.surface;
-  const generatedAt = mainBrainData?.generated_at ?? data?.generated_at;
-  const errorMessage = mainBrainError ?? error;
-  const cycleSignal =
-    mainBrainData?.current_cycle ??
-    (isRecord(mainBrainMeta.current_cycle) ? mainBrainMeta.current_cycle : null) ??
-    (isRecord(industryMeta.current_cycle) ? industryMeta.current_cycle : null);
+  const surface = mainBrainData?.surface;
+  const generatedAt = mainBrainData?.generated_at;
+  const errorMessage = mainBrainError;
+  const cycleSignal = mainBrainData?.current_cycle ?? null;
   const cycleDeadline = formatUtcMinute(extractTimestamp(cycleSignal));
   const focusCountValue = extractFocusCount(cycleSignal);
   const focusCount =
     focusCountValue === null ? RUNTIME_CENTER_TEXT.emptyValue : String(focusCountValue);
-  const unconsumedReportsValue = deriveUnconsumedReportCount(data, mainBrainData);
+  const unconsumedReportsValue = deriveUnconsumedReportCount(null, mainBrainData);
   const unconsumedReports =
     unconsumedReportsValue === null
       ? RUNTIME_CENTER_TEXT.emptyValue
       : String(unconsumedReportsValue);
-  const governancePayload = isRecord(mainBrainData?.governance)
-    ? (mainBrainData?.governance as Record<string, unknown>)
-    : null;
-  const recoveryPayload = isRecord(mainBrainData?.recovery)
-    ? (mainBrainData?.recovery as Record<string, unknown>)
-    : null;
-  const automationPayload = isRecord(mainBrainData?.automation)
-    ? (mainBrainData?.automation as Record<string, unknown>)
-    : null;
-  const environmentPayload = isRecord(mainBrainData?.environment)
-    ? (mainBrainData?.environment as Record<string, unknown>)
-    : null;
-  const reportCognitionPayload = isRecord(mainBrainData?.report_cognition)
-    ? (mainBrainData?.report_cognition as Record<string, unknown>)
-    : isRecord(mainBrainData?.meta?.report_cognition)
-      ? (mainBrainData?.meta?.report_cognition as Record<string, unknown>)
+  const governancePayload = mainBrainData?.governance ?? null;
+  const queryRuntimeEntropy: RuntimeMainBrainQueryRuntimeEntropy | null =
+    governancePayload?.query_runtime_entropy ?? null;
+  const queryRuntimeEntropyState = queryRuntimeEntropy?.runtime_entropy ?? null;
+  const queryRuntimeCompactionState = queryRuntimeEntropy?.compaction_state ?? null;
+  const queryRuntimeBudget = queryRuntimeEntropy?.tool_result_budget ?? null;
+  const queryRuntimeToolUseSummary = queryRuntimeEntropy?.tool_use_summary ?? null;
+  const queryRuntimeArtifactRefs = Array.isArray(queryRuntimeToolUseSummary?.artifact_refs)
+    ? queryRuntimeToolUseSummary.artifact_refs
+        .map((value) => firstString(value))
+        .filter((value): value is string => Boolean(value))
+    : [];
+  const queryRuntimeBudgetRemaining = firstString(
+    queryRuntimeBudget?.remaining_budget,
+    queryRuntimeBudget?.remaining,
+    queryRuntimeBudget?.budget_remaining,
+  );
+  const queryRuntimeBudgetCapacity = firstString(
+    queryRuntimeBudget?.message_budget,
+    queryRuntimeBudget?.budget,
+  );
+  const queryRuntimeBudgetSummary =
+    queryRuntimeBudgetRemaining && queryRuntimeBudgetCapacity
+      ? `${queryRuntimeBudgetRemaining} / ${queryRuntimeBudgetCapacity}`
       : null;
+  const queryRuntimeEntropySummary =
+    firstString(
+      queryRuntimeCompactionState?.summary,
+      queryRuntimeToolUseSummary?.summary,
+      queryRuntimeEntropyState?.carry_forward_contract,
+      queryRuntimeEntropy?.status,
+    ) ?? null;
+  const recoveryPayload = mainBrainData?.recovery ?? null;
+  const automationPayload = mainBrainData?.automation ?? null;
+  const environmentPayload = mainBrainData?.environment ?? null;
+  const reportCognitionPayload = mainBrainData?.report_cognition ?? null;
+  const planningPayload = mainBrainData?.main_brain_planning ?? null;
+  const planningStrategyConstraints = planningPayload?.strategy_constraints ?? null;
+  const planningLatestCycleDecision = planningPayload?.latest_cycle_decision ?? null;
+  const planningAssignmentPlan = planningPayload?.focused_assignment_plan ?? null;
+  const planningReplan = planningPayload?.replan ?? null;
+  const planningCycleShell = planningLatestCycleDecision?.planning_shell ?? null;
+  const planningAssignmentShell = planningAssignmentPlan?.planning_shell ?? null;
+  const planningReplanShell = planningReplan?.planning_shell ?? null;
+  const planningPolicy = Array.isArray(planningStrategyConstraints?.planning_policy)
+    ? planningStrategyConstraints.planning_policy
+        .map((item) => firstString(item))
+        .filter((item): item is string => Boolean(item))
+        .join(", ")
+    : null;
+  const planningUncertaintyCount = Array.isArray(
+    planningStrategyConstraints?.strategic_uncertainties,
+  )
+    ? planningStrategyConstraints.strategic_uncertainties.length
+    : null;
+  const planningLaneBudgetCount = Array.isArray(planningStrategyConstraints?.lane_budgets)
+    ? planningStrategyConstraints.lane_budgets.length
+    : null;
+  const planningBacklogCount = Array.isArray(
+    planningLatestCycleDecision?.selected_backlog_item_ids,
+  )
+    ? planningLatestCycleDecision.selected_backlog_item_ids.length
+    : null;
+  const planningAssignmentCount = Array.isArray(
+    planningLatestCycleDecision?.selected_assignment_ids,
+  )
+    ? planningLatestCycleDecision.selected_assignment_ids.length
+    : null;
+  const planningCheckpointCount = Array.isArray(planningAssignmentPlan?.checkpoints)
+    ? planningAssignmentPlan.checkpoints.length
+    : null;
+  const planningAcceptanceCount = Array.isArray(planningAssignmentPlan?.acceptance_criteria)
+    ? planningAssignmentPlan.acceptance_criteria.length
+    : null;
+  const planningTriggerRuleCount = Array.isArray(planningReplan?.strategy_trigger_rules)
+    ? planningReplan.strategy_trigger_rules.length
+    : null;
+  const planningUncertaintyRegister = planningReplan?.uncertainty_register ?? null;
+  const planningUncertaintyRegisterSummary = planningUncertaintyRegister?.summary ?? null;
+  const planningUncertaintyRegisterCount =
+    firstString(planningUncertaintyRegisterSummary?.uncertainty_count) ??
+    (Array.isArray(planningUncertaintyRegister?.items)
+      ? String(planningUncertaintyRegister.items.length)
+      : null);
   const assignmentRecords = recordList(mainBrainData?.assignments);
   const backlogRecords = recordList(mainBrainData?.backlog);
   const laneRecords = recordList(mainBrainData?.lanes);
@@ -593,27 +673,17 @@ export default function MainBrainCockpitPanel({
   const followupBacklogRecords = recordList(reportCognitionPayload?.followup_backlog);
   const unconsumedReportRecords = recordList(reportCognitionPayload?.unconsumed_reports);
   const needsFollowupReportRecords = recordList(reportCognitionPayload?.needs_followup_reports);
-  const cognitionJudgment = isRecord(reportCognitionPayload?.judgment)
-    ? (reportCognitionPayload?.judgment as Record<string, unknown>)
-    : null;
-  const cognitionNextAction = isRecord(reportCognitionPayload?.next_action)
-    ? (reportCognitionPayload?.next_action as Record<string, unknown>)
-    : null;
+  const cognitionJudgment = reportCognitionPayload?.judgment ?? null;
+  const cognitionNextAction = reportCognitionPayload?.next_action ?? null;
   const cognitionReasons = Array.isArray(reportCognitionPayload?.replan_reasons)
     ? (reportCognitionPayload?.replan_reasons as unknown[])
         .map((item) => firstString(item))
         .filter((item): item is string => item !== null)
     : [];
   const needsReplan = reportCognitionPayload?.needs_replan === true;
-  const evidenceSection = isRecord(mainBrainData?.evidence)
-    ? (mainBrainData?.evidence as Record<string, unknown>)
-    : null;
-  const decisionsSection = isRecord(mainBrainData?.decisions)
-    ? (mainBrainData?.decisions as Record<string, unknown>)
-    : null;
-  const patchesSection = isRecord(mainBrainData?.patches)
-    ? (mainBrainData?.patches as Record<string, unknown>)
-    : null;
+  const evidenceSection = mainBrainData?.evidence ?? null;
+  const decisionsSection = mainBrainData?.decisions ?? null;
+  const patchesSection = mainBrainData?.patches ?? null;
   const todayTraceEmptyCopy = "今天暂无新增记录。";
   const todayCompletedEmptyCopy = "今天暂无新完成记录。";
   const generatedDayAnchor = generatedAt ?? null;
@@ -639,13 +709,11 @@ export default function MainBrainCockpitPanel({
   const scopedDecisionRecords = recordList(scopedDecisionsSection?.entries);
   const scopedPatchRecords = recordList(scopedPatchesSection?.entries);
   const staffingPendingCount =
-    isRecord(environmentPayload?.staffing) &&
-    typeof environmentPayload.staffing.pending_confirmation_count === "number"
+    typeof environmentPayload?.staffing?.pending_confirmation_count === "number"
       ? environmentPayload.staffing.pending_confirmation_count
       : 0;
   const humanAssistBlockedCount =
-    isRecord(environmentPayload?.human_assist) &&
-    typeof environmentPayload.human_assist.blocked_count === "number"
+    typeof environmentPayload?.human_assist?.blocked_count === "number"
       ? environmentPayload.human_assist.blocked_count
       : 0;
   const todayGoalItems = [
@@ -736,8 +804,7 @@ export default function MainBrainCockpitPanel({
         .filter((item): item is string => Boolean(item)),
     },
   ];
-  const industryRoute =
-    firstString(mainBrainData?.carrier?.route) ?? firstString(mainBrainMeta.industry_route);
+  const industryRoute = firstString(mainBrainData?.carrier?.route);
 
   const isInitialLoading =
     (loading && !data) ||
@@ -752,6 +819,37 @@ export default function MainBrainCockpitPanel({
           </div>
         </div>
         <Skeleton active paragraph={{ rows: 4 }} />
+      </Card>
+    );
+  }
+
+  if (!mainBrainData) {
+    return (
+      <Card className="baize-card">
+        <div className={styles.panelHeader}>
+          <div>
+            <h2 className={styles.cardTitle}>{MAIN_BRAIN_COCKPIT_TEXT.title}</h2>
+            <p className={styles.cardSummary}>{MAIN_BRAIN_COCKPIT_TEXT.description}</p>
+          </div>
+          <Space size={8} wrap>
+            <Button
+              className="baize-btn baize-btn-primary"
+              icon={<RefreshCw size={16} />}
+              loading={refreshing || mainBrainLoading}
+              onClick={() => {
+                onRefresh();
+              }}
+            >
+              刷新
+            </Button>
+          </Space>
+        </div>
+        <Alert
+          type={errorMessage ? "error" : "info"}
+          showIcon
+          message={errorMessage ?? "主脑驾驶舱暂未接入正式读面。"}
+          description="Runtime Center 当前只认 dedicated main-brain cockpit contract，不再从 overview 卡片回填主脑运行事实。"
+        />
       </Card>
     );
   }
@@ -963,6 +1061,217 @@ export default function MainBrainCockpitPanel({
             </div>
           </Card>
 
+          {planningPayload ? (
+            <Card size="small" title="正式规划壳" style={{ marginBottom: 16 }}>
+              <div className={styles.metaGrid}>
+                <div className={styles.controlCard}>
+                  <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                    <div>
+                      <h3 className={styles.entryTitle}>策略约束</h3>
+                      {firstString(planningPayload?.source) ? (
+                        <p className={styles.selectionSummary}>
+                          {firstString(planningPayload?.source)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <Descriptions
+                    size="small"
+                    column={1}
+                    items={[
+                      {
+                        key: "planning_policy",
+                        label: "规划策略",
+                        children: planningPolicy ?? RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                      {
+                        key: "uncertainty_count",
+                        label: "战略不确定项",
+                        children:
+                          planningUncertaintyCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningUncertaintyCount),
+                      },
+                      {
+                        key: "lane_budget_count",
+                        label: "赛道预算",
+                        children:
+                          planningLaneBudgetCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningLaneBudgetCount),
+                      },
+                    ]}
+                  />
+                </div>
+                <div className={styles.controlCard}>
+                  <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                    <div>
+                      <h3 className={styles.entryTitle}>周期壳</h3>
+                      {firstString(planningLatestCycleDecision?.summary) ? (
+                        <p className={styles.selectionSummary}>
+                          {firstString(planningLatestCycleDecision?.summary)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <Descriptions
+                    size="small"
+                    column={1}
+                    items={[
+                      {
+                        key: "cycle_backlog_count",
+                        label: "选中待办",
+                        children:
+                          planningBacklogCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningBacklogCount),
+                      },
+                      {
+                        key: "cycle_assignment_count",
+                        label: "选中派工",
+                        children:
+                          planningAssignmentCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningAssignmentCount),
+                      },
+                      {
+                        key: "cycle_resume_key",
+                        label: "Resume key",
+                        children:
+                          firstString(planningCycleShell?.resume_key) ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                      {
+                        key: "cycle_fork_key",
+                        label: "Fork key",
+                        children:
+                          firstString(planningCycleShell?.fork_key) ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                    ]}
+                  />
+                  {firstString(planningCycleShell?.verify_reminder) ? (
+                    <p className={styles.selectionSummary} style={{ marginTop: 12 }}>
+                      {firstString(planningCycleShell?.verify_reminder)}
+                    </p>
+                  ) : null}
+                </div>
+                <div className={styles.controlCard}>
+                  <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                    <div>
+                      <h3 className={styles.entryTitle}>派工壳</h3>
+                      {firstString(planningAssignmentPlan?.summary) ? (
+                        <p className={styles.selectionSummary}>
+                          {firstString(planningAssignmentPlan?.summary)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <Descriptions
+                    size="small"
+                    column={1}
+                    items={[
+                      {
+                        key: "assignment_checkpoint_count",
+                        label: "检查点",
+                        children:
+                          planningCheckpointCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningCheckpointCount),
+                      },
+                      {
+                        key: "assignment_acceptance_count",
+                        label: "验收条件",
+                        children:
+                          planningAcceptanceCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningAcceptanceCount),
+                      },
+                      {
+                        key: "assignment_resume_key",
+                        label: "Resume key",
+                        children:
+                          firstString(planningAssignmentShell?.resume_key) ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                      {
+                        key: "assignment_fork_key",
+                        label: "Fork key",
+                        children:
+                          firstString(planningAssignmentShell?.fork_key) ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                    ]}
+                  />
+                  {firstString(planningAssignmentShell?.verify_reminder) ? (
+                    <p className={styles.selectionSummary} style={{ marginTop: 12 }}>
+                      {firstString(planningAssignmentShell?.verify_reminder)}
+                    </p>
+                  ) : null}
+                </div>
+                <div className={styles.controlCard}>
+                  <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+                    <div>
+                      <div className={styles.cardTitleRow}>
+                        <h3 className={styles.entryTitle}>重规划壳</h3>
+                        {firstString(planningReplan?.status) ? (
+                          <Tag color={surfaceTagColor(cardStatusFromValue(planningReplan?.status))}>
+                            {firstString(planningReplan?.status)}
+                          </Tag>
+                        ) : null}
+                      </div>
+                      {firstString(planningReplan?.summary) ? (
+                        <p className={styles.selectionSummary}>
+                          {firstString(planningReplan?.summary)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <Descriptions
+                    size="small"
+                    column={1}
+                    items={[
+                      {
+                        key: "replan_decision_kind",
+                        label: "决策类型",
+                        children:
+                          firstString(planningReplan?.decision_kind) ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                      {
+                        key: "replan_trigger_rule_count",
+                        label: "触发规则",
+                        children:
+                          planningTriggerRuleCount === null
+                            ? RUNTIME_CENTER_TEXT.emptyValue
+                            : String(planningTriggerRuleCount),
+                      },
+                      {
+                        key: "replan_uncertainty_count",
+                        label: "不确定项登记",
+                        children:
+                          planningUncertaintyRegisterCount ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                      {
+                        key: "replan_resume_key",
+                        label: "Resume key",
+                        children:
+                          firstString(planningReplanShell?.resume_key) ??
+                          RUNTIME_CENTER_TEXT.emptyValue,
+                      },
+                    ]}
+                  />
+                  {firstString(planningReplanShell?.verify_reminder) ? (
+                    <p className={styles.selectionSummary} style={{ marginTop: 12 }}>
+                      {firstString(planningReplanShell?.verify_reminder)}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </Card>
+          ) : null}
+
           {reportCognitionPayload ? (
             <Card size="small" title="汇报认知" style={{ marginBottom: 16 }}>
               <div className={styles.metaGrid}>
@@ -1140,6 +1449,30 @@ export default function MainBrainCockpitPanel({
                 onOpenRoute,
               })}
               {renderOperatorBlock({
+                title: "Query runtime entropy",
+                summary: queryRuntimeEntropySummary,
+                status: firstString(queryRuntimeEntropy?.status, queryRuntimeEntropyState?.status),
+                route: firstString(governancePayload?.route),
+                routeTitle: "运行治理",
+                details: [
+                  ["状态", firstString(queryRuntimeEntropy?.status, queryRuntimeEntropyState?.status)],
+                  [
+                    "压缩模式",
+                    firstString(
+                      queryRuntimeCompactionState?.mode,
+                      queryRuntimeCompactionState?.status,
+                    ),
+                  ],
+                  ["预算余量", queryRuntimeBudgetSummary],
+                  ["工具摘要", firstString(queryRuntimeToolUseSummary?.summary)],
+                  [
+                    "Artifacts",
+                    queryRuntimeArtifactRefs.length > 0 ? queryRuntimeArtifactRefs.join(", ") : null,
+                  ],
+                ],
+                onOpenRoute,
+              })}
+              {renderOperatorBlock({
                 title: "恢复",
                 summary: firstString(recoveryPayload?.summary),
                 status: recoveryPayload?.status,
@@ -1167,19 +1500,11 @@ export default function MainBrainCockpitPanel({
                   ],
                   [
                     "心跳",
-                    firstString(
-                      isRecord(automationPayload?.heartbeat)
-                        ? automationPayload?.heartbeat.status
-                        : null,
-                    ),
+                    firstString(automationPayload?.heartbeat?.status),
                   ],
                   [
                     "心跳间隔",
-                    firstString(
-                      isRecord(automationPayload?.heartbeat)
-                        ? automationPayload?.heartbeat.every
-                        : null,
-                    ),
+                    firstString(automationPayload?.heartbeat?.every),
                   ],
                 ],
                 onOpenRoute,
@@ -1193,61 +1518,39 @@ export default function MainBrainCockpitPanel({
                 details: [
                   [
                     "已选席位",
-                    firstString(
-                      isRecord(environmentPayload?.host_twin_summary)
-                        ? environmentPayload?.host_twin_summary.selected_seat_ref
-                        : null,
-                    ),
+                    firstString(environmentPayload?.host_twin_summary?.selected_seat_ref),
                   ],
                   [
                     "调度动作",
                     firstString(
-                      isRecord(environmentPayload?.host_twin_summary)
-                        ? environmentPayload?.host_twin_summary.recommended_scheduler_action
-                        : null,
+                      environmentPayload?.host_twin_summary?.recommended_scheduler_action,
                     ),
                   ],
                   [
                     "连续性状态",
                     formatContinuityState(
-                      isRecord(environmentPayload?.host_twin_summary)
-                        ? environmentPayload?.host_twin_summary.continuity_state
-                        : null,
+                      environmentPayload?.host_twin_summary?.continuity_state,
                     ),
                   ],
                   [
                     "活动宿主族",
                     firstString(
-                      isRecord(environmentPayload?.host_twin_summary)
-                        ? Array.isArray(environmentPayload?.host_twin_summary.active_app_family_keys)
-                          ? environmentPayload?.host_twin_summary.active_app_family_keys.join(", ")
-                          : null
+                      Array.isArray(environmentPayload?.host_twin_summary?.active_app_family_keys)
+                        ? environmentPayload.host_twin_summary.active_app_family_keys.join(", ")
                         : null,
                     ),
                   ],
                   [
                     "交接是否激活",
-                    firstString(
-                      isRecord(environmentPayload?.handoff)
-                        ? environmentPayload?.handoff.active
-                        : null,
-                    ),
+                    firstString(environmentPayload?.handoff?.active),
                   ],
                   [
                     "待确认补位",
-                    firstString(
-                      isRecord(environmentPayload?.staffing)
-                        ? environmentPayload?.staffing.pending_confirmation_count
-                        : null,
-                    ),
+                    firstString(environmentPayload?.staffing?.pending_confirmation_count),
                   ],
                   [
                     "人工协作阻塞",
-                    firstString(
-                      isRecord(environmentPayload?.human_assist)
-                        ? environmentPayload?.human_assist.blocked_count
-                        : null,
-                    ),
+                    firstString(environmentPayload?.human_assist?.blocked_count),
                   ],
                 ],
                 onOpenRoute,

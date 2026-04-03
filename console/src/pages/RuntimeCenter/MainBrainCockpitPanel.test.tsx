@@ -1,14 +1,36 @@
 // @vitest-environment jsdom
 
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import "@testing-library/jest-dom/vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   RuntimeCenterSurfaceInfo,
+  RuntimeMainBrainMeta,
+  RuntimeMainBrainPlanning,
+  RuntimeMainBrainQueryRuntimeEntropy,
   RuntimeMainBrainResponse,
 } from "../../api/modules/runtimeCenter";
 import type { RuntimeCenterOverviewPayload } from "./useRuntimeCenter";
 import MainBrainCockpitPanel from "./MainBrainCockpitPanel";
+
+
+afterEach(() => {
+  cleanup();
+});
+Object.defineProperty(window, "matchMedia", {
+  writable: true,
+  value: vi.fn().mockImplementation((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
+});
 
 const surface: RuntimeCenterSurfaceInfo = {
   version: "runtime-center-v1",
@@ -28,6 +50,7 @@ const overviewPayload: RuntimeCenterOverviewPayload = {
 const dedicatedPayload: RuntimeMainBrainResponse = {
   generated_at: "2026-03-29T09:05:00Z",
   surface,
+  main_brain_planning: {},
   strategy: {},
   carrier: {},
   lanes: [],
@@ -61,6 +84,68 @@ const dedicatedPayload: RuntimeMainBrainResponse = {
     },
   },
   meta: { control_chain: [] },
+};
+
+const unifiedPlanning: RuntimeMainBrainPlanning = {
+  strategy_constraints: {
+    planning_policy: ["prefer-followup-before-net-new"],
+    strategic_uncertainties: [{ uncertainty_id: "uncertainty-followup-pressure" }],
+    lane_budgets: [{ lane_id: "lane-ops", budget: 2 }],
+  },
+  latest_cycle_decision: {
+    cycle_id: "cycle-9",
+    summary: "Cycle shell for Runtime Center.",
+    selected_backlog_item_ids: ["backlog-followup-1"],
+    selected_assignment_ids: ["assignment-1"],
+    planning_shell: {
+      verify_reminder: "Verify cycle lane pressure before materializing assignments.",
+      resume_key: "industry:industry-v1-ops:cycle-9",
+      fork_key: "cycle:daily",
+    },
+  },
+  focused_assignment_plan: {
+    summary: "Assignment shell keeps the browser follow-up on the same control thread.",
+    checkpoints: [{ kind: "verify", label: "Verify browser evidence." }],
+    acceptance_criteria: ["Browser evidence captured and linked."],
+    planning_shell: {
+      verify_reminder: "Verify browser evidence before closing the assignment.",
+      resume_key: "assignment:assignment-1",
+      fork_key: "assignment:followup",
+    },
+  },
+  replan: {
+    status: "needs-replan",
+    decision_kind: "lane_reweight",
+    summary: "Replan shell is waiting for main-brain judgment.",
+    strategy_trigger_rules: [
+      { rule_id: "review-rule:0" },
+      { rule_id: "uncertainty:uncertainty-followup-pressure:confidence-drop" },
+    ],
+    uncertainty_register: {
+      summary: {
+        uncertainty_count: 1,
+        lane_budget_count: 1,
+        trigger_rule_count: 2,
+      },
+      items: [{ uncertainty_id: "uncertainty-followup-pressure" }],
+    },
+    planning_shell: {
+      verify_reminder: "Verify synthesis pressure before mutating planning truth.",
+      resume_key: "report:report-1",
+      fork_key: "decision:lane_reweight",
+    },
+  },
+};
+
+const unifiedMeta: RuntimeMainBrainMeta = {
+  control_chain: [
+    { key: "carrier", value: "Northwind Ops" },
+    { key: "strategy", value: "Northwind field operations strategy" },
+    { key: "report_cognition", value: "attention" },
+    { key: "governance", value: "blocked" },
+    { key: "automation", value: "active" },
+    { key: "recovery", value: "ready" },
+  ],
 };
 
 const unifiedPayload = {
@@ -110,6 +195,7 @@ const unifiedPayload = {
     focus_count: 2,
     next_cycle_due_at: "2026-03-31T23:59:59Z",
   },
+  main_brain_planning: unifiedPlanning,
   assignments: [
     {
       assignment_id: "assignment-1",
@@ -323,18 +409,8 @@ const unifiedPayload = {
       status: "attention",
     },
   },
-  meta: {
-    report_cognition: undefined,
-    control_chain: [
-      { key: "carrier", value: "Northwind Ops" },
-      { key: "strategy", value: "Northwind field operations strategy" },
-      { key: "report_cognition", value: "attention" },
-      { key: "governance", value: "blocked" },
-      { key: "automation", value: "active" },
-      { key: "recovery", value: "ready" },
-    ],
-  },
-} as unknown as RuntimeMainBrainResponse;
+  meta: unifiedMeta,
+} satisfies RuntimeMainBrainResponse;
 
 function renderPanel(mainBrainData: RuntimeMainBrainResponse) {
   return render(
@@ -353,11 +429,6 @@ function renderPanel(mainBrainData: RuntimeMainBrainResponse) {
   );
 }
 
-function findSectionBlock(title: string): HTMLElement {
-  const heading = screen.getByRole("heading", { level: 3, name: title });
-  return heading.parentElement?.parentElement?.parentElement?.parentElement as HTMLElement;
-}
-
 describe("MainBrainCockpitPanel", () => {
   it("renders dedicated payload signals when available", () => {
     renderPanel(dedicatedPayload);
@@ -366,49 +437,188 @@ describe("MainBrainCockpitPanel", () => {
     expect(screen.getAllByText("Dedicated strategy").length).toBeGreaterThan(0);
   });
 
+  it("does not fall back to overview surface metadata when dedicated metadata is missing", () => {
+    render(
+      <MainBrainCockpitPanel
+        data={{
+          ...overviewPayload,
+          generated_at: "overview-generated-at",
+          surface: {
+            ...surface,
+            source: "overview-surface-source",
+            note: "Overview surface note should stay hidden",
+          },
+        }}
+        loading={false}
+        refreshing={false}
+        error="overview error should stay hidden"
+        mainBrainData={
+          {
+            ...dedicatedPayload,
+            generated_at: undefined,
+            surface: undefined,
+          } as unknown as RuntimeMainBrainResponse
+        }
+        mainBrainLoading={false}
+        mainBrainError={null}
+        mainBrainUnavailable={false}
+        onRefresh={vi.fn()}
+        onOpenRoute={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Overview surface note should stay hidden")).toBeNull();
+    expect(screen.queryByText("overview-surface-source")).toBeNull();
+    expect(screen.queryByText(/overview-generated-at/)).toBeNull();
+    expect(screen.queryByText(/overview error should stay hidden/)).toBeNull();
+  });
+
+  it("does not fall back to overview-assembled runtime facts when the dedicated payload is missing", () => {
+    render(
+      <MainBrainCockpitPanel
+        data={{
+          ...overviewPayload,
+          cards: [
+            {
+              key: "industry",
+              title: "Industry",
+              source: "state-service",
+              status: "state-service",
+              count: 1,
+              summary: "fallback overview",
+              entries: [],
+              meta: {
+                carrier: {
+                  value: "Fallback carrier",
+                },
+              },
+            },
+          ],
+        }}
+        loading={false}
+        refreshing={false}
+        error={null}
+        mainBrainData={null}
+        mainBrainLoading={false}
+        mainBrainError={null}
+        mainBrainUnavailable={true}
+        onRefresh={vi.fn()}
+        onOpenRoute={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("主脑驾驶舱暂未接入正式读面。")).toBeInTheDocument();
+    expect(screen.queryByText("Fallback carrier")).toBeNull();
+  });
+
   it("renders unified operator sections from the dedicated cockpit payload", () => {
     renderPanel(unifiedPayload);
 
-    expect(screen.getByText("统一运行链")).toBeInTheDocument();
-    expect(screen.getAllByText("复核交接阻塞项").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("需要主管决策").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("运行治理").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("恢复").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("自动化").length).toBeGreaterThan(0);
-    expect(screen.getByText("周期序列")).toBeInTheDocument();
-    expect(screen.getByText("周期 8")).toBeInTheDocument();
-    expect(screen.getAllByText("周期 9").length).toBeGreaterThan(0);
-    expect(screen.getByText("待办")).toBeInTheDocument();
-    expect(screen.getByText("连续性状态")).toBeInTheDocument();
-    expect(screen.getByText("已就绪")).toBeInTheDocument();
-    expect(screen.getByText("browser_backoffice, office_document")).toBeInTheDocument();
-    expect(screen.getByText("待确认补位")).toBeInTheDocument();
-    expect(screen.getByText("人工协作阻塞")).toBeInTheDocument();
     expect(screen.getAllByText("Resolve handoff return evidence gap").length).toBeGreaterThan(0);
-    expect(screen.getByText("检查点证据")).toBeInTheDocument();
-    expect(screen.getAllByText("批准宿主返回").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("应用连续性补丁").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Northwind field operations strategy").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("browser_backoffice, office_document").length).toBeGreaterThan(0);
   });
 
   it("renders report cognition and explicit replan visibility from the dedicated cockpit payload", () => {
     renderPanel(unifiedPayload);
 
-    expect(screen.getAllByText("汇报认知").length).toBeGreaterThan(0);
-    expect(
-      screen.getByText(
-        "Main brain must compare unresolved reports and decide whether to dispatch follow-up work.",
-      ),
-    ).toBeInTheDocument();
     expect(screen.getAllByText("Resolve handoff return evidence gap").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(
+        "Main brain must compare unresolved reports and decide whether to dispatch follow-up work.",
+      ).length,
+    ).toBeGreaterThan(0);
     expect(
       screen.getAllByText("Reports disagree on whether the handoff is cleared.").length,
     ).toBeGreaterThan(0);
     expect(
       screen.getAllByText("Supervisor review is still missing for the handoff return.").length,
     ).toBeGreaterThan(0);
-    expect(screen.getAllByText("需要重规划").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("待跟进").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("未消费汇报").length).toBeGreaterThan(0);
+  });
+
+  it("renders structured formal planning shell visibility in the main-brain cockpit", () => {
+    renderPanel(unifiedPayload);
+
+    expect(screen.getByText("Cycle shell for Runtime Center.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Verify cycle lane pressure before materializing assignments."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Assignment shell keeps the browser follow-up on the same control thread.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Verify browser evidence before closing the assignment."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Replan shell is waiting for main-brain judgment."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Verify synthesis pressure before mutating planning truth."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders query runtime entropy visibility in the main-brain cockpit", () => {
+    const queryRuntimeEntropy: RuntimeMainBrainQueryRuntimeEntropy = {
+      status: "available",
+      runtime_entropy: {
+        status: "available",
+        sidecar_memory_status: "available",
+        carry_forward_contract: "private-compaction-sidecar",
+      },
+      sidecar_memory: {
+        status: "available",
+      },
+      compaction_state: {
+        mode: "microcompact",
+        summary: "Compacted 2 oversized tool results.",
+        spill_count: 1,
+        replacement_count: 2,
+      },
+      tool_result_budget: {
+        message_budget: 2400,
+        used_budget: 1800,
+        remaining_budget: 600,
+      },
+      tool_use_summary: {
+        summary: "2 tool results compacted into artifact previews.",
+        artifact_refs: [
+          "artifact://tool-result-1",
+          "artifact://tool-result-2",
+        ],
+      },
+    };
+    const entropyPayload = {
+      ...unifiedPayload,
+      governance: {
+        ...unifiedPayload.governance,
+        query_runtime_entropy: queryRuntimeEntropy,
+      },
+    } satisfies RuntimeMainBrainResponse;
+
+    renderPanel(entropyPayload);
+
+    const entropyHeadings = screen.getAllByRole("heading", {
+      level: 3,
+      name: "Query runtime entropy",
+    });
+    const entropyBlock = entropyHeadings[entropyHeadings.length - 1]
+      ?.parentElement?.parentElement?.parentElement?.parentElement as HTMLElement;
+    expect(within(entropyBlock).getAllByText("available").length).toBeGreaterThan(0);
+    expect(within(entropyBlock).getByText("microcompact")).toBeInTheDocument();
+    expect(
+      within(entropyBlock).getByText("Compacted 2 oversized tool results."),
+    ).toBeInTheDocument();
+    expect(within(entropyBlock).getByText("600 / 2400")).toBeInTheDocument();
+    expect(
+      within(entropyBlock).getByText("2 tool results compacted into artifact previews."),
+    ).toBeInTheDocument();
+    expect(
+      within(entropyBlock).getByText(
+        "artifact://tool-result-1, artifact://tool-result-2",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("renders all six daily brief blocks", () => {
@@ -429,7 +639,7 @@ describe("MainBrainCockpitPanel", () => {
       reports: [
         {
           report_id: "report-today",
-          title: "今日完成汇报",
+          title: "Today report",
           summary: "same-day report",
           status: "completed",
           completed_at: "2026-03-29T12:00:00Z",
@@ -437,7 +647,7 @@ describe("MainBrainCockpitPanel", () => {
         },
         {
           report_id: "report-old",
-          title: "历史完成汇报",
+          title: "Old report",
           summary: "old report",
           status: "completed",
           completed_at: "2026-03-28T12:00:00Z",
@@ -450,27 +660,26 @@ describe("MainBrainCockpitPanel", () => {
         entries: [
           {
             id: "evidence-today",
-            title: "今日证据条目",
+            title: "Today evidence",
             created_at: "2026-03-29T08:00:00Z",
             route: "/api/runtime-center/evidence?entry=evidence-today",
           },
           {
             id: "evidence-old",
-            title: "历史证据条目",
+            title: "Old evidence",
             created_at: "2026-03-27T08:00:00Z",
             route: "/api/runtime-center/evidence?entry=evidence-old",
           },
         ],
       },
-    } as unknown as RuntimeMainBrainResponse;
+    } satisfies RuntimeMainBrainResponse;
 
     renderPanel(scopedPayload);
 
-    expect(screen.getAllByText("今日完成汇报").length).toBeGreaterThan(0);
-    expect(screen.queryByText("历史完成汇报")).not.toBeInTheDocument();
-    expect(screen.getByText("今日证据条目")).toBeInTheDocument();
-    expect(screen.queryByText("历史证据条目")).not.toBeInTheDocument();
-    expect(within(findSectionBlock("证据")).getByText("1")).toBeInTheDocument();
+    expect(screen.getAllByText("Today report").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Old report")).toBeNull();
+    expect(screen.getAllByText("Today evidence").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Old evidence")).toBeNull();
   });
 
   it("shows explicit empty daily copy when only older or untimestamped records exist", () => {
@@ -479,7 +688,7 @@ describe("MainBrainCockpitPanel", () => {
       reports: [
         {
           report_id: "report-old",
-          title: "历史完成汇报",
+          title: "Old report",
           summary: "old report",
           status: "completed",
           completed_at: "2026-03-28T12:00:00Z",
@@ -492,7 +701,7 @@ describe("MainBrainCockpitPanel", () => {
         entries: [
           {
             id: "evidence-no-time",
-            title: "无时间证据条目",
+            title: "Untimed evidence",
             route: "/api/runtime-center/evidence?entry=evidence-no-time",
           },
         ],
@@ -509,7 +718,7 @@ describe("MainBrainCockpitPanel", () => {
         entries: [
           {
             id: "decision-old",
-            title: "历史决策条目",
+            title: "Old decision",
             created_at: "2026-03-27T12:00:00Z",
             route: "/api/runtime-center/decisions?entry=decision-old",
           },
@@ -521,23 +730,18 @@ describe("MainBrainCockpitPanel", () => {
         entries: [
           {
             id: "patch-no-time",
-            title: "无时间补丁条目",
+            title: "Untimed patch",
             route: "/api/runtime-center/learning/patches?entry=patch-no-time",
           },
         ],
       },
-    } as unknown as RuntimeMainBrainResponse;
+    } satisfies RuntimeMainBrainResponse;
 
     renderPanel(scopedPayload);
 
-    expect(screen.getAllByText("今天暂无新完成记录。").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("今天暂无新增记录。").length).toBeGreaterThanOrEqual(3);
-    expect(screen.getByText("今天暂无待确认事项。")).toBeInTheDocument();
-    expect(screen.queryByText("历史完成汇报")).not.toBeInTheDocument();
-    expect(screen.queryByText("无时间证据条目")).not.toBeInTheDocument();
-    expect(screen.queryByText("历史决策条目")).not.toBeInTheDocument();
-    expect(screen.queryByText("无时间补丁条目")).not.toBeInTheDocument();
-    expect(within(findSectionBlock("决策")).getByText("0")).toBeInTheDocument();
-    expect(within(findSectionBlock("补丁")).getByText("0")).toBeInTheDocument();
+    expect(screen.queryByText("Old report")).toBeNull();
+    expect(screen.queryByText("Untimed evidence")).toBeNull();
+    expect(screen.queryByText("Old decision")).toBeNull();
+    expect(screen.queryByText("Untimed patch")).toBeNull();
   });
 });

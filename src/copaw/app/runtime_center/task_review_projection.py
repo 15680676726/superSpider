@@ -103,32 +103,12 @@ def resolve_canonical_host_identity(
     )
 
 
-def runtime_metadata_from_runtime(runtime: Any | None) -> dict[str, object]:
-    if runtime is None:
-        return {}
-    if isinstance(runtime, dict):
-        metadata = runtime.get("metadata")
-        runtime_metadata = runtime.get("runtime_metadata")
-    else:
-        metadata = getattr(runtime, "metadata", None)
-        runtime_metadata = getattr(runtime, "runtime_metadata", None)
-    if isinstance(metadata, dict):
-        return dict(metadata)
-    if isinstance(runtime_metadata, dict):
-        return dict(runtime_metadata)
-    return {}
-
-
 def projection_section(
     *,
     feedback: dict[str, object],
-    runtime_metadata: dict[str, object],
     key: str,
 ) -> dict[str, object] | None:
-    direct = dict_from_value(feedback.get(key))
-    if direct is not None:
-        return direct
-    return dict_from_value(runtime_metadata.get(key))
+    return dict_from_value(feedback.get(key))
 
 
 def dict_list_from_value(value: object) -> list[dict[str, object]]:
@@ -1164,64 +1144,49 @@ def build_task_review_payload(
     effective_actions = string_list_from_values(feedback.get("effective_actions"))
     avoid_repeats = string_list_from_values(feedback.get("avoid_repeats"))
     feedback_evidence_refs = string_list_from_values(feedback.get("evidence_refs"))
-    runtime_metadata = runtime_metadata_from_runtime(runtime)
     workspace_graph = projection_section(
         feedback=feedback,
-        runtime_metadata=runtime_metadata,
         key="workspace_graph",
     )
     cooperative_adapter_availability = projection_section(
         feedback=feedback,
-        runtime_metadata=runtime_metadata,
         key="cooperative_adapter_availability",
     )
     host_contract = projection_section(
         feedback=feedback,
-        runtime_metadata=runtime_metadata,
         key="host_contract",
     )
     recovery = projection_section(
         feedback=feedback,
-        runtime_metadata=runtime_metadata,
         key="recovery",
     )
     host_event_summary = projection_section(
         feedback=feedback,
-        runtime_metadata=runtime_metadata,
         key="host_event_summary",
     )
     seat_runtime = projection_section(
         feedback=feedback,
-        runtime_metadata=runtime_metadata,
         key="seat_runtime",
     )
     browser_site_contract = projection_section(
         feedback=feedback,
-        runtime_metadata=runtime_metadata,
         key="browser_site_contract",
     )
     desktop_app_contract = projection_section(
         feedback=feedback,
-        runtime_metadata=runtime_metadata,
         key="desktop_app_contract",
     )
     host_companion_session = projection_section(
         feedback=feedback,
-        runtime_metadata=runtime_metadata,
         key="host_companion_session",
     )
     host_twin = projection_section(
         feedback=feedback,
-        runtime_metadata=runtime_metadata,
         key="host_twin",
     )
     host_twin_summary_payload = projection_section(
         feedback=feedback,
-        runtime_metadata=runtime_metadata,
         key="host_twin_summary",
-    ) or build_host_twin_summary(
-        host_twin,
-        host_companion_session=host_companion_session,
     )
     host_twin_blocker_family = host_twin_active_blocker_family(host_twin)
     host_twin_resume = host_twin_resume_kind(host_twin)
@@ -2010,6 +1975,20 @@ def matches_checkpoint_text(value: str | None, markers: tuple[str, ...]) -> bool
 
 def extract_chat_thread_payload(metadata: dict[str, Any] | None) -> dict[str, str | None]:
     raw_payload = metadata.get("payload") if isinstance(metadata, dict) else None
+    canonical_chat_thread = raw_payload.get("chat_thread") if isinstance(raw_payload, dict) else None
+    if isinstance(canonical_chat_thread, dict):
+        return {
+            "control_thread_id": first_non_empty(canonical_chat_thread.get("control_thread_id")),
+            "thread_id": first_non_empty(canonical_chat_thread.get("thread_id")),
+            "session_id": first_non_empty(canonical_chat_thread.get("session_id")),
+            "task_title": first_non_empty(canonical_chat_thread.get("task_title")),
+            "industry_instance_id": first_non_empty(canonical_chat_thread.get("industry_instance_id")),
+            "industry_label": first_non_empty(canonical_chat_thread.get("industry_label")),
+            "owner_scope": first_non_empty(canonical_chat_thread.get("owner_scope")),
+            "thread_mode": first_non_empty(canonical_chat_thread.get("thread_mode")),
+            "decision_type": first_non_empty(canonical_chat_thread.get("decision_type")),
+            "session_kind": first_non_empty(canonical_chat_thread.get("session_kind")),
+        }
     request = raw_payload.get("request_context") if isinstance(raw_payload, dict) else None
     compiler = raw_payload.get("compiler") if isinstance(raw_payload, dict) else None
     meta = raw_payload.get("meta") if isinstance(raw_payload, dict) else None

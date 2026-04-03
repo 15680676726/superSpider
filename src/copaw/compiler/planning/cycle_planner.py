@@ -8,7 +8,13 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from ...state import AgentReportRecord, BacklogItemRecord, IndustryInstanceRecord, OperatingCycleRecord
-from .models import CyclePlanningDecision, PlanningLaneBudget, PlanningStrategyConstraints, StrategyTriggerRule
+from .models import (
+    CyclePlanningDecision,
+    PlanningLaneBudget,
+    PlanningStrategyConstraints,
+    StrategyTriggerRule,
+    build_planning_shell_payload,
+)
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_-]{1,}")
 
@@ -97,6 +103,19 @@ def _backlog_followup_overdue_score(item: BacklogItemRecord) -> float:
 class CyclePlanningCompiler:
     """Pure planner for whether the next operating cycle should start."""
 
+    @staticmethod
+    def _planning_shell(record: IndustryInstanceRecord, cycle_kind: str) -> dict[str, str]:
+        return build_planning_shell_payload(
+            mode="cycle-planning-shell",
+            scope="operating-cycle",
+            plan_id=f"industry:{record.instance_id}:cycle-plan",
+            resume_key=f"industry:{record.instance_id}:next-cycle",
+            fork_key=f"cycle:{cycle_kind}",
+            verify_reminder=(
+                "Verify backlog selection and lane pressure before materializing assignments."
+            ),
+        )
+
     def plan(
         self,
         *,
@@ -158,6 +177,10 @@ class CyclePlanningCompiler:
                     else "Force requested a cycle launch but no materializable backlog or pending report remained."
                 ),
                 planning_policy=list(constraints.planning_policy or []),
+                planning_shell=self._planning_shell(
+                    record,
+                    current_cycle.cycle_kind if current_cycle is not None else cycle_kind,
+                ),
                 metadata=self._decision_metadata(
                     record=record,
                     open_backlog=open_backlog,
@@ -182,6 +205,7 @@ class CyclePlanningCompiler:
                 max_assignment_count=0,
                 summary="A formal cycle is already active, so planner launch is held.",
                 planning_policy=list(constraints.planning_policy or []),
+                planning_shell=self._planning_shell(record, current_cycle.cycle_kind),
                 metadata=self._decision_metadata(
                     record=record,
                     open_backlog=open_backlog,
@@ -227,6 +251,7 @@ class CyclePlanningCompiler:
             affected_relation_kinds=relation_projection["relation_kinds"],
             summary=summary,
             planning_policy=list(constraints.planning_policy or []),
+            planning_shell=self._planning_shell(record, cycle_kind),
             metadata=self._decision_metadata(
                 record=record,
                 open_backlog=open_backlog,

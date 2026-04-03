@@ -28,7 +28,7 @@ from .main_brain_result_committer import (
 )
 from .main_brain_scope_snapshot_service import MainBrainScopeSnapshotService
 from .main_brain_turn_result import MainBrainCommitState, MainBrainTurnResult
-from ..providers.provider_manager import ProviderManager
+from ..providers.runtime_provider_facade import get_runtime_provider_facade
 from .query_execution_shared import (
     _first_non_empty,
     _materialize_model_response,
@@ -710,7 +710,9 @@ class MainBrainChatService:
         self._industry_service = industry_service
         self._agent_profile_service = agent_profile_service
         self._memory_recall_service = memory_recall_service
-        self._model_factory = model_factory or ProviderManager.get_active_chat_model
+        self._model_factory = (
+            model_factory or get_runtime_provider_facade().get_active_chat_model
+        )
         self._scope_snapshot_service = scope_snapshot_service or MainBrainScopeSnapshotService(
             stable_prefix_builder=self._build_stable_prompt_prefix,
             stable_prefix_signature_builder=self._build_prompt_context_signature,

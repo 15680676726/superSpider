@@ -56,6 +56,27 @@ _RUNTIME_ENTROPY_DEGRADED_NEXT_STEP = (
     "Restore the compaction sidecar if long-horizon scratch recall is required."
 )
 _RUNTIME_ENTROPY_AVAILABLE_SUMMARY = "The private compaction memory sidecar is attached."
+_COMPACTION_VISIBILITY_KEYS = (
+    "compaction_state",
+    "tool_result_budget",
+    "tool_use_summary",
+)
+
+
+def _build_tool_result_budget_contract(
+    *,
+    enabled: bool,
+    keep_recent_tool_results: int,
+) -> dict[str, Any]:
+    return {
+        "enabled": bool(enabled),
+        "keep_recent_messages": MEMORY_COMPACT_KEEP_RECENT,
+        "keep_recent_tool_results": int(keep_recent_tool_results or 0),
+        "state_channel": "query_runtime_state",
+        "summary_surface": "runtime-center",
+        "spill_surface": "runtime-center",
+        "replay_surface": "runtime-conversation",
+    }
 
 _QUERY_TOOL_CAPABILITY_IDS_BY_NAME = {
     "browser_use": "tool:browser_use",
@@ -120,30 +141,24 @@ def _resolve_runtime_entropy_budget_payload(
                 * float(getattr(running, "memory_compact_ratio", 0) or 0),
             ),
         )
-    keep_recent_messages = MEMORY_COMPACT_KEEP_RECENT
+    tool_result_compact_enabled = bool(
+        getattr(running, "enable_tool_result_compact", False),
+    )
     tool_result_compact_keep_n = int(
         getattr(running, "tool_result_compact_keep_n", 0) or 0,
-    )
-    enable_tool_result_compact = bool(
-        getattr(running, "enable_tool_result_compact", False),
     )
     return {
         "max_input_length": int(getattr(running, "max_input_length", 0) or 0),
         "memory_compact_ratio": float(getattr(running, "memory_compact_ratio", 0) or 0),
         "memory_compact_threshold": int(compact_threshold or 0),
         "memory_compact_reserve": int(getattr(running, "memory_compact_reserve", 0) or 0),
-        "enable_tool_result_compact": enable_tool_result_compact,
+        "enable_tool_result_compact": tool_result_compact_enabled,
         "tool_result_compact_keep_n": tool_result_compact_keep_n,
-        "keep_recent_messages": keep_recent_messages,
-        "tool_result_budget": {
-            "enabled": enable_tool_result_compact,
-            "keep_recent_messages": keep_recent_messages,
-            "keep_recent_tool_results": tool_result_compact_keep_n,
-            "state_channel": "query_runtime_state",
-            "summary_surface": "runtime-center",
-            "spill_surface": "runtime-center",
-            "replay_surface": "runtime-conversation",
-        },
+        "keep_recent_messages": MEMORY_COMPACT_KEEP_RECENT,
+        "tool_result_budget": _build_tool_result_budget_contract(
+            enabled=tool_result_compact_enabled,
+            keep_recent_tool_results=tool_result_compact_keep_n,
+        ),
     }
 
 
@@ -231,6 +246,9 @@ def build_runtime_entropy_contract_payload(
             if status == "degraded"
             else ""
         ),
+        "tool_result_budget": dict(
+            resolved_budget.get("tool_result_budget") or {},
+        ),
         **resolved_budget,
     }
 
@@ -241,6 +259,7 @@ def build_query_runtime_entropy_contract_payload(
     degradation: dict[str, Any] | None = None,
     budget: dict[str, Any] | None = None,
     runtime_entropy: dict[str, Any] | None = None,
+    compaction_visibility: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     resolved_budget = dict(budget or _resolve_runtime_entropy_budget_payload())
     resolved_degradation = _normalize_runtime_entropy_degradation(
@@ -266,7 +285,53 @@ def build_query_runtime_entropy_contract_payload(
             degradation=resolved_degradation,
         ),
         "degradation": resolved_degradation,
+        **_normalize_runtime_compaction_visibility(compaction_visibility),
     }
+
+
+def _normalize_runtime_compaction_visibility(
+    payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    source = dict(payload or {})
+    normalized: dict[str, Any] = {}
+    for key in _COMPACTION_VISIBILITY_KEYS:
+        value = _mapping_value(source.get(key))
+        if value:
+            normalized[key] = value
+    return normalized
+
+
+def _resolve_runtime_compaction_visibility_payload(
+    conversation_compaction_service: Any | None,
+) -> dict[str, Any]:
+    if conversation_compaction_service is None:
+        return {}
+    visibility_source: dict[str, Any] = {}
+    for getter_name in ("runtime_visibility_payload", "runtime_health_payload"):
+        getter = getattr(conversation_compaction_service, getter_name, None)
+        if not callable(getter):
+            continue
+        try:
+            payload = getter()
+        except Exception:
+            logger.debug("Runtime compaction visibility getter failed", exc_info=True)
+            continue
+        payload_mapping = _mapping_value(payload)
+        if payload_mapping:
+            visibility_source.update(payload_mapping)
+    builder = getattr(conversation_compaction_service, "build_visibility_payload", None)
+    if callable(builder):
+        try:
+            payload = builder(visibility_source or None)
+        except TypeError:
+            payload = builder()
+        except Exception:
+            logger.debug("Runtime compaction visibility builder failed", exc_info=True)
+        else:
+            payload_mapping = _mapping_value(payload)
+            if payload_mapping:
+                return _normalize_runtime_compaction_visibility(payload_mapping)
+    return _normalize_runtime_compaction_visibility(visibility_source)
 
 
 class _QueryExecutionRuntimeMixin(
@@ -448,6 +513,9 @@ class _QueryExecutionRuntimeMixin(
             degradation=degradation,
             budget=budget,
             runtime_entropy=resolved_runtime_entropy,
+            compaction_visibility=_resolve_runtime_compaction_visibility_payload(
+                self._conversation_compaction_service,
+            ),
         )
 
     def _build_governance_control_record(

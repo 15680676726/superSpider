@@ -38,7 +38,7 @@ from ..memory import (
     MemoryRetainService,
 )
 from ..predictions import PredictionService
-from ..providers import ProviderManager
+from ..providers.runtime_provider_facade import ProviderRuntimeSurface
 from ..routines import RoutineService
 from ..sop_kernel import FixedSopService
 from ..state import SQLiteStateStore
@@ -109,7 +109,7 @@ def build_runtime_domain_services(
     evidence_ledger: EvidenceLedger,
     environment_service: EnvironmentService,
     runtime_event_bus: RuntimeEventBus,
-    provider_manager: ProviderManager,
+    runtime_provider: ProviderRuntimeSurface,
     state_query_service: RuntimeCenterStateQueryService,
     strategy_memory_service: StateStrategyMemoryService,
     knowledge_service: StateKnowledgeService,
@@ -264,7 +264,7 @@ def build_runtime_domain_services(
         capability_service=capability_service,
         strategy_memory_service=strategy_memory_service,
         state_store=state_store,
-        draft_generator=IndustryDraftGenerator(provider_manager=provider_manager),
+        draft_generator=IndustryDraftGenerator(provider_manager=runtime_provider),
         runtime_bindings=industry_runtime_bindings,
         memory_retain_service=memory_retain_service,
         memory_activation_service=memory_activation_service,
@@ -384,14 +384,14 @@ def build_runtime_domain_services(
         task_repository=repositories.task_repository,
         task_runtime_repository=repositories.task_runtime_repository,
         evidence_ledger=evidence_ledger,
-        provider_manager=provider_manager,
+        provider_manager=runtime_provider,
     )
     main_brain_chat_service = MainBrainChatService(
         session_backend=session_backend,
         industry_service=industry_service,
         agent_profile_service=agent_profile_service,
         memory_recall_service=memory_recall_service,
-        model_factory=provider_manager.get_active_chat_model,
+        model_factory=runtime_provider.get_active_chat_model,
     )
     main_brain_orchestrator = MainBrainOrchestrator(
         query_execution_service=query_execution_service,

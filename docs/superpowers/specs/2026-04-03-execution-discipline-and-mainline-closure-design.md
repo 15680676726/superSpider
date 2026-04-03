@@ -274,3 +274,7 @@
 ## 10. 一句话结论
 
 这轮不再允许把“继续优化”当作完成口径。只有把执行纪律补成硬壳、把主链收成单线、把旧入口和旧命名删掉、把运行中心读面和删除账本补齐，CoPaw 才能被称为真正接近 `95%+` 收口。
+## 11. `2026-04-03` 落地补充
+
+- `current_focus` writer 迁移已跨过 live runtime metadata 这条最后双写线；industry runtime sync 现在只持久化 `current_focus_*`
+- planning shell 已进入 Runtime Center 正式消费面：`/runtime-center/main-brain` 有 dedicated `main_brain_planning` contract，主脑 cockpit 直接展示 cycle / assignment / replan shell 的 `resume_key / fork_key / verify_reminder`

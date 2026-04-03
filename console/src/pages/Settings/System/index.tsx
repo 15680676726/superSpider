@@ -20,50 +20,29 @@ import {
   Activity,
   Download,
   HardDriveDownload,
+  Layers3,
+  Plus,
+  RefreshCw,
+  ServerCrash,
   ShieldCheck,
   ShieldX,
-  RefreshCw,
-  UploadCloud,
-  ServerCrash,
-  Layers3,
   Trash2,
-  Plus,
+  UploadCloud,
 } from "lucide-react";
-import api, { request } from "../../../api";
-import { runtimeRiskColor, runtimeRiskLabel } from "../../../runtime/tagSemantics";
+
+import api from "../../../api";
 import type {
   ProviderFallbackConfig,
   ProviderInfo,
   SystemOverview,
   SystemSelfCheck,
-  StartupRecoverySummary,
 } from "../../../api/types";
 import styles from "./index.module.less";
-
-interface SystemAgentProfile {
-  agent_id: string;
-  name: string;
-  role_name: string;
-  role_summary: string;
-  status: string;
-  risk_level: string;
-  current_focus?: string | null;
-}
-
-const SYSTEM_AGENTS_ROUTE = "/runtime-center/agents?view=system";
 
 function statusColor(status: string) {
   if (status === "pass") return "success";
   if (status === "warn") return "warning";
   if (status === "fail") return "error";
-  return "default";
-}
-
-function runtimeStatusColor(status: string) {
-  if (status === "running" || status === "active") return "success";
-  if (status === "needs-confirm") return "warning";
-  if (status === "waiting" || status === "paused") return "processing";
-  if (status === "blocked" || status === "failed" || status === "degraded") return "error";
   return "default";
 }
 
@@ -95,23 +74,10 @@ function parseCandidate(value: string) {
   return { provider_id, model };
 }
 
-function formatDateTime(value: string) {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(parsed);
-}
-
 function humanizeToken(value: string) {
   return value
     .replace(/_/g, " ")
-    .replace(/\w/g, (chunk) => chunk.toUpperCase());
+    .replace(/\b\w/g, (chunk) => chunk.toUpperCase());
 }
 
 function localizeSystemStatus(status: string) {
@@ -123,44 +89,20 @@ function localizeSystemStatus(status: string) {
   return map[status] || humanizeToken(status);
 }
 
-function localizeRuntimeStatus(status: string) {
-  const map: Record<string, string> = {
-    running: "运行中",
-    active: "运行中",
-    idle: "空闲",
-    paused: "已暂停",
-    scheduled: "已调度",
-    persistent: "常驻",
-    "on-demand": "按需",
-    waiting: "等待中",
-    blocked: "阻塞",
-    failed: "失败",
-    degraded: "降级",
-    "needs-confirm": "待确认",
-  };
-  return map[status] || humanizeToken(status);
-}
-
-function localizeRiskLevel(level: string) {
-  return runtimeRiskLabel(level) || humanizeToken(level);
-}
-
 function localizeCheckName(name: string) {
   const map: Record<string, string> = {
     working_dir: "工作目录",
     state_store: "状态存储",
     evidence_ledger: "证据账本",
     core_runtime_ready: "核心运行时就绪",
-    memory_vector_ready: "记忆向量检索就绪",
-    memory_embedding_config: "记忆嵌入配置",
-    browser_surface_ready: "浏览器执行面就绪",
-    desktop_surface_ready: "桌面执行面就绪",
+    browser_surface_ready: "浏览器执行面",
+    desktop_surface_ready: "桌面执行面",
     kernel_dispatcher: "内核分发器",
     runtime_event_bus: "运行事件总线",
     cron_manager: "定时任务管理",
     provider_active_model: "当前激活模型",
-    provider_fallback: "提供方回退",
-    startup_recovery: "启动恢复",
+    provider_fallback: "提供商回退",
+    startup_recovery: "启动恢复检查",
   };
   return map[name] || humanizeToken(name);
 }
@@ -168,9 +110,7 @@ function localizeCheckName(name: string) {
 function localizeCheckSummary(item: SystemSelfCheck["checks"][number]) {
   const meta = item.meta || {};
   if (item.name === "working_dir") {
-    return item.status === "pass"
-      ? "工作目录存在。"
-      : "工作目录缺失。";
+    return item.status === "pass" ? "工作目录可用。" : "工作目录缺失。";
   }
   if (item.name === "state_store") {
     return item.status === "pass"
@@ -186,71 +126,31 @@ function localizeCheckSummary(item: SystemSelfCheck["checks"][number]) {
         ? "证据账本存在警告。"
         : "证据账本不可用。";
   }
-  if (
-    item.name.endsWith("_service") ||
-    item.name === "state_store" ||
-    item.name === "evidence_ledger" ||
-    item.name === "kernel_dispatcher" ||
-    item.name === "runtime_event_bus" ||
-    item.name === "cron_manager"
-  ) {
-    return `${localizeCheckName(item.name)}?${localizeSystemStatus(item.status)}`;
-  }
   if (item.name === "provider_active_model") {
     const activeModel = meta.active_model as { provider_id?: string | null } | undefined;
     return item.status === "pass"
-      ? `当前激活模型提供方?${activeModel?.provider_id || "-"}`
-      : "未检测到激活模型提供方。";
+      ? `当前激活模型提供商：${activeModel?.provider_id || "-"}`
+      : "未检测到激活模型提供商。";
   }
   if (item.name === "provider_fallback") {
     return item.status === "pass"
-      ? "提供方回退链路可用。"
+      ? "提供商回退链路可用。"
       : item.status === "warn"
-        ? "提供方回退链路存在警告。"
-        : "提供方回退链路不可用。";
+        ? "提供商回退链路存在警告。"
+        : "提供商回退链路不可用。";
   }
   if (item.name === "startup_recovery") {
     return item.status === "pass"
       ? "启动恢复检查正常。"
       : item.status === "warn"
-        ? "启动恢复存在警告。"
+        ? "启动恢复检查存在警告。"
         : "启动恢复检查失败。";
   }
   return item.summary;
 }
 
-function localizeRecoveryField(key: string) {
-  const map: Record<string, string> = {
-    last_attempt_at: "上次尝试时间",
-    recovered_at: "恢复时间",
-    pending_actions: "待处理项",
-    pending_decisions: "待确认项",
-    last_error: "上次错误",
-    summary: "摘要",
-    status: "状态",
-  };
-  return map[key] || humanizeToken(key);
-}
-
-function localizeRecoveryValue(key: string, value: unknown) {
-  if (value == null) {
-    return "无";
-  }
-  if (Array.isArray(value)) {
-    return value.length > 0 ? value.map((item) => String(item)).join(", ") : "无";
-  }
-  if (typeof value === "string" && key.endsWith("_at")) {
-    return formatDateTime(value);
-  }
-  if (typeof value === "object") {
-    return JSON.stringify(value);
-  }
-  return String(value);
-}
-
 export default function SystemSettingsPage() {
   const [overview, setOverview] = useState<SystemOverview | null>(null);
-  const [systemAgents, setSystemAgents] = useState<SystemAgentProfile[]>([]);
   const [selfCheck, setSelfCheck] = useState<SystemSelfCheck | null>(null);
   const [fallbackConfig, setFallbackConfig] = useState<ProviderFallbackConfig>({
     enabled: false,
@@ -266,18 +166,6 @@ export default function SystemSettingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const modelOptions = useMemo(() => providerModelOptions(providers), [providers]);
-  const recoverySummary: StartupRecoverySummary | null = overview?.runtime.startup_recovery ?? null;
-  const localizedRecoveryEntries = useMemo(
-    () =>
-      recoverySummary
-        ? Object.entries(recoverySummary).map(([key, value]) => ({
-            key,
-            label: localizeRecoveryField(key),
-            value: localizeRecoveryValue(key, value),
-          }))
-        : [],
-    [recoverySummary],
-  );
   const localizedChecks = useMemo(
     () =>
       selfCheck?.checks.map((item) => ({
@@ -296,24 +184,17 @@ export default function SystemSettingsPage() {
       setRefreshing(true);
     }
     try {
-      const [
-        overviewPayload,
-        selfCheckPayload,
-        fallbackPayload,
-        providerPayload,
-        systemAgentPayload,
-      ] = await Promise.all([
-        api.getSystemOverview(),
-        api.runSystemSelfCheck(),
-        api.getProviderFallback(),
-        api.listProviders(),
-        request<SystemAgentProfile[]>(SYSTEM_AGENTS_ROUTE).catch(() => []),
-      ]);
+      const [overviewPayload, selfCheckPayload, fallbackPayload, providerPayload] =
+        await Promise.all([
+          api.getSystemOverview(),
+          api.runSystemSelfCheck(),
+          api.getProviderFallback(),
+          api.listProviders(),
+        ]);
       setOverview(overviewPayload);
       setSelfCheck(selfCheckPayload);
       setFallbackConfig(fallbackPayload);
       setProviders(providerPayload);
-      setSystemAgents(Array.isArray(systemAgentPayload) ? systemAgentPayload : []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -390,7 +271,10 @@ export default function SystemSettingsPage() {
     const first = modelOptions[0];
     setFallbackConfig((current) => ({
       ...current,
-      candidates: [...current.candidates, { provider_id: first.provider_id, model: first.model }],
+      candidates: [
+        ...current.candidates,
+        { provider_id: first.provider_id, model: first.model },
+      ],
     }));
   };
 
@@ -428,14 +312,24 @@ export default function SystemSettingsPage() {
       <Card className="baize-page-header">
         <div className="baize-page-header-content">
           <div>
-            <h1 className="baize-page-header-title">系统</h1>
-            <p className="baize-page-header-description">管理备份恢复、启动自检和模型回退链。</p>
+            <h1 className="baize-page-header-title">系统维护</h1>
+            <p className="baize-page-header-description">
+              管理备份恢复、自检健康和提供商回退。正式运行事实、治理和恢复闭环统一前往 Runtime Center。
+            </p>
           </div>
           <div className="baize-page-header-actions">
-            <Button icon={<RefreshCw size={14} />} loading={refreshing} onClick={() => void loadAll()}>
+            <Button
+              icon={<RefreshCw size={14} />}
+              loading={refreshing}
+              onClick={() => void loadAll()}
+            >
               刷新
             </Button>
-            <Button icon={<Activity size={14} />} loading={runningSelfCheck} onClick={() => void runSelfCheck()}>
+            <Button
+              icon={<Activity size={14} />}
+              loading={runningSelfCheck}
+              onClick={() => void runSelfCheck()}
+            >
               执行自检
             </Button>
           </div>
@@ -446,36 +340,50 @@ export default function SystemSettingsPage() {
         <Alert
           type="error"
           showIcon
-          message={"系统页面当前不可用"}
+          message="系统页面当前不可用"
           description={error}
         />
       ) : null}
 
+      <Alert
+        type="info"
+        showIcon
+        message="运行事实请前往 Runtime Center"
+        description={
+          <Space size={12} wrap>
+            <span>System 页只保留维护、自检和回退设置，不再承载正式运行事实摘要。</span>
+            <Button type="link" href="/runtime-center" style={{ paddingInline: 0 }}>
+              前往 Runtime Center
+            </Button>
+          </Space>
+        }
+      />
+
       <section className={styles.metrics}>
         <Card className={`${styles.metricCard} baize-card baize-depth-card`}>
           <Statistic
-            title={"备份文件数"}
+            title="备份文件数"
             value={overview?.backup.file_count ?? 0}
             prefix={<HardDriveDownload size={16} />}
           />
         </Card>
         <Card className={`${styles.metricCard} baize-card baize-depth-card`}>
           <Statistic
-            title={"工作区大小"}
+            title="工作区大小"
             value={formatBytes(overview?.backup.total_size)}
             prefix={<Layers3 size={16} />}
           />
         </Card>
         <Card className={`${styles.metricCard} baize-card baize-depth-card`}>
           <Statistic
-            title={"回退候选数"}
+            title="回退候选数"
             value={fallbackConfig.candidates.length}
             prefix={<ServerCrash size={16} />}
           />
         </Card>
         <Card className={`${styles.metricCard} baize-card baize-depth-card`}>
           <Statistic
-            title={"健康检查项"}
+            title="健康检查项"
             value={selfCheck?.checks.length ?? 0}
             prefix={<ShieldCheck size={16} />}
           />
@@ -487,74 +395,34 @@ export default function SystemSettingsPage() {
           <Space direction="vertical" size={18} style={{ width: "100%" }}>
             <div>
               <Typography.Title level={4} className={styles.sectionTitle}>
-                {"平台中枢"}
+                备份与恢复
               </Typography.Title>
               <Typography.Paragraph className={styles.sectionDescription}>
-                {"系统页现在只保留调度与治理中枢；Spider Mesh 主脑已经收口到身份工作面。"}
-              </Typography.Paragraph>
-            </div>
-            {systemAgents.length > 0 ? (
-              <List
-                dataSource={systemAgents}
-                renderItem={(agent) => (
-                  <List.Item className={styles.checkRow}>
-                    <Space direction="vertical" size={4} style={{ width: "100%" }}>
-                      <Space size={8} wrap>
-                        <span className={styles.checkTitle}>{agent.name}</span>
-                        <Tag>{agent.role_name}</Tag>
-                        <Tag color={runtimeStatusColor(agent.status)}>
-                          {localizeRuntimeStatus(agent.status)}
-                        </Tag>
-                        <Tag color={runtimeRiskColor(agent.risk_level)}>
-                          {localizeRiskLevel(agent.risk_level)}
-                        </Tag>
-                      </Space>
-                      <Typography.Text type="secondary">
-                        {agent.current_focus || agent.role_summary}
-                      </Typography.Text>
-                      <Typography.Text type="secondary">
-                        {agent.agent_id}
-                      </Typography.Text>
-                    </Space>
-                  </List.Item>
-                )}
-              />
-            ) : (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={"当前没有可见的平台中枢。"}
-              />
-            )}
-          </Space>
-        </Card>
-
-        <Card className={`${styles.panelCard} baize-card baize-depth-card`}>
-          <Space direction="vertical" size={18} style={{ width: "100%" }}>
-            <div>
-              <Typography.Title level={4} className={styles.sectionTitle}>
-                {"备份与恢复"}
-              </Typography.Title>
-              <Typography.Paragraph className={styles.sectionDescription}>
-                {"把当前工作区下载为系统备份，或把历史归档恢复回本地运行时。"}
+                下载当前工作区的系统备份，或把历史归档恢复回本地运行时。
               </Typography.Paragraph>
             </div>
             <div className={styles.kvList}>
               <div>
-                <span>{"工作区"}</span>
+                <span>工作区</span>
                 <code>{overview?.backup.root_path}</code>
               </div>
               <div>
-                <span>{"状态库"}</span>
+                <span>状态库</span>
                 <code>{overview?.self_check.state_db_path}</code>
               </div>
               <div>
-                <span>{"证据库"}</span>
+                <span>证据库</span>
                 <code>{overview?.self_check.evidence_db_path}</code>
               </div>
             </div>
             <Space wrap>
-              <Button type="primary" className="baize-btn" icon={<Download size={14} />} onClick={() => void downloadBackup()}>
-                {"下载"}
+              <Button
+                type="primary"
+                className="baize-btn"
+                icon={<Download size={14} />}
+                onClick={() => void downloadBackup()}
+              >
+                下载
               </Button>
               <Upload
                 beforeUpload={(file) => {
@@ -575,12 +443,16 @@ export default function SystemSettingsPage() {
                 }}
                 maxCount={1}
               >
-                <Button icon={<UploadCloud size={14} />}>
-                  {"上传"}
-                </Button>
+                <Button icon={<UploadCloud size={14} />}>上传</Button>
               </Upload>
-              <Button type="primary" className="baize-btn" ghost loading={restoringBackup} onClick={() => void restoreBackup()}>
-                {"恢复备份"}
+              <Button
+                type="primary"
+                className="baize-btn"
+                ghost
+                loading={restoringBackup}
+                onClick={() => void restoreBackup()}
+              >
+                恢复备份
               </Button>
             </Space>
           </Space>
@@ -590,28 +462,12 @@ export default function SystemSettingsPage() {
           <Space direction="vertical" size={18} style={{ width: "100%" }}>
             <div>
               <Typography.Title level={4} className={styles.sectionTitle}>
-                {"启动恢复与健康状态"}
+                健康自检与维护
               </Typography.Title>
               <Typography.Paragraph className={styles.sectionDescription}>
-                {"在恢复运行或排查问题前，先查看最近一次恢复摘要和当前自检矩阵。"}
+                这里只保留系统维护需要的自检结果；正式恢复事实、治理状态和运行闭环请去 Runtime Center 查看。
               </Typography.Paragraph>
             </div>
-            {recoverySummary ? (
-              <div className={styles.recoveryGrid}>
-                {localizedRecoveryEntries.map(({ key, label, value }) => (
-                  <div key={key} className={styles.recoveryItem}>
-                    <span className={styles.recoveryLabel}>{label}</span>
-                    <strong>{value}</strong>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <Alert
-                showIcon
-                type="warning"
-                message={"当前没有启动恢复摘要"}
-              />
-            )}
             {selfCheck ? (
               <>
                 <Tag color={statusColor(selfCheck.overall_status)} className={styles.statusTag}>
@@ -635,7 +491,7 @@ export default function SystemSettingsPage() {
                 />
               </>
             ) : (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={"当前没有自检结果"} />
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有自检结果" />
             )}
           </Space>
         </Card>
@@ -646,92 +502,69 @@ export default function SystemSettingsPage() {
           <Space direction="vertical" size={18} style={{ width: "100%" }}>
             <div>
               <Typography.Title level={4} className={styles.sectionTitle}>
-                {"提供商回退"}
+                提供商回退
               </Typography.Title>
               <Typography.Paragraph className={styles.sectionDescription}>
-                {"定义当当前模型不可用时，运行时可以接管的提供商 / 模型链。"}
+                定义当前模型不可用时，系统可接管的提供商 / 模型链路。
               </Typography.Paragraph>
             </div>
             <div className={styles.toggleRow}>
               <Space size={10}>
                 {fallbackConfig.enabled ? <ShieldCheck size={16} /> : <ShieldX size={16} />}
-                <span>{"启用回退链"}</span>
+                <span>启用回退链</span>
               </Space>
               <Switch
                 checked={fallbackConfig.enabled}
-                onChange={(checked) => setFallbackConfig((current) => ({ ...current, enabled: checked }))}
+                onChange={(checked) =>
+                  setFallbackConfig((current) => ({ ...current, enabled: checked }))
+                }
               />
             </div>
             <div className={styles.candidateStack}>
               {fallbackConfig.candidates.map((candidate, index) => {
                 const currentValue = `${candidate.provider_id}::${candidate.model}`;
                 return (
-                  <div key={`${candidate.provider_id}:${candidate.model}:${index}`} className={styles.candidateRow}>
+                  <div
+                    key={`${candidate.provider_id}:${candidate.model}:${index}`}
+                    className={styles.candidateRow}
+                  >
                     <Select
                       value={currentValue}
                       options={modelOptions}
                       style={{ flex: 1 }}
                       onChange={(value) => updateCandidate(index, value)}
                     />
-                    <Button danger icon={<Trash2 size={14} />} onClick={() => removeCandidate(index)} />
+                    <Button
+                      danger
+                      icon={<Trash2 size={14} />}
+                      onClick={() => removeCandidate(index)}
+                    />
                   </div>
                 );
               })}
               {fallbackConfig.candidates.length === 0 ? (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={"还没有配置回退候选"}
+                  description="还没有配置回退候选。"
                 />
               ) : null}
             </div>
             <Space wrap>
               <Button icon={<Plus size={14} />} onClick={addCandidate}>
-                {"添加候选"}
+                添加候选
               </Button>
-              <Button type="primary" className="baize-btn" loading={savingFallback} onClick={() => void saveFallback()}>
-                {"保存"}
+              <Button
+                type="primary"
+                className="baize-btn"
+                loading={savingFallback}
+                onClick={() => void saveFallback()}
+              >
+                保存回退策略
               </Button>
             </Space>
-          </Space>
-        </Card>
-
-        <Card className={`${styles.panelCard} baize-card baize-depth-card`}>
-          <Space direction="vertical" size={18} style={{ width: "100%" }}>
-            <div>
-              <Typography.Title level={4} className={styles.sectionTitle}>
-                {"运行时链接"}
-              </Typography.Title>
-              <Typography.Paragraph className={styles.sectionDescription}>
-                {"V3 后端当前暴露的治理、恢复和事件流正式路由。"}
-              </Typography.Paragraph>
-            </div>
-            <div className={styles.kvList}>
-              <div>
-                <span>{"当前模型"}</span>
-                <code>
-                  {overview?.providers.active_model
-                    ? `${overview.providers.active_model.provider_id} / ${overview.providers.active_model.model}`
-                    : "-"}
-                </code>
-              </div>
-              <div>
-                <span>{"治理"}</span>
-                <code>{overview?.runtime.governance_route}</code>
-              </div>
-              <div>
-                <span>{"恢复"}</span>
-                <code>{overview?.runtime.recovery_route}</code>
-              </div>
-              <div>
-                <span>{"事件流"}</span>
-                <code>{overview?.runtime.events_route}</code>
-              </div>
-            </div>
           </Space>
         </Card>
       </section>
     </div>
   );
 }
-
-

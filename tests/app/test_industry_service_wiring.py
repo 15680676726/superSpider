@@ -448,7 +448,7 @@ def test_runtime_domain_builder_passes_memory_activation_service_to_industry_ser
         evidence_ledger=object(),
         environment_service=_EnvironmentService(),
         runtime_event_bus=object(),
-        provider_manager=_ProviderManager(),
+        runtime_provider=_ProviderManager(),
         state_query_service=_StateQueryService(),
         strategy_memory_service=object(),
         knowledge_service=object(),

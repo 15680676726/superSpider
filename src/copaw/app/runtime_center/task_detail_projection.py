@@ -64,6 +64,9 @@ class RuntimeCenterTaskDetailProjector:
         self._memory_activation_service = memory_activation_service
         self._task_route_builder = task_route_builder
 
+    def set_memory_activation_service(self, service: object | None) -> None:
+        self._memory_activation_service = service
+
     def get_task_detail(self, task_id: str) -> dict[str, object] | None:
         task = self._task_repository.get_task(task_id)
         if task is None:
