@@ -28,6 +28,7 @@ from ..download_task_store import (
 
 from ...providers.provider import ModelInfo
 from ...providers.provider_manager import PROVIDER_OLLAMA
+from ...providers.runtime_provider_facade import get_runtime_provider_facade
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,13 @@ async def _register_background_task(task_id: str, task: asyncio.Task) -> None:
 async def _pop_background_task(task_id: str) -> Optional[asyncio.Task]:
     async with _background_tasks_lock:
         return _background_tasks.pop(task_id, None)
+
+
+def _get_runtime_provider(request: Request):
+    runtime_provider = getattr(request.app.state, "runtime_provider", None)
+    if runtime_provider is not None:
+        return runtime_provider
+    return get_runtime_provider_facade()
 
 
 async def _run_ollama_download_in_background(
@@ -161,7 +169,7 @@ async def list_ollama_models(
 
     If the Ollama SDK is not installed, returns HTTP 501.
     """
-    p = request.app.state.provider_manager.get_provider(
+    p = _get_runtime_provider(request).get_provider(
         PROVIDER_OLLAMA.id,
     )
     try:
@@ -204,7 +212,7 @@ async def download_ollama_model(
     Returns a task_id immediately; the frontend can poll /download-status
     to track progress.
     """
-    ollama_provider = request.app.state.provider_manager.get_provider(
+    ollama_provider = _get_runtime_provider(request).get_provider(
         PROVIDER_OLLAMA.id,
     )
 
@@ -272,7 +280,7 @@ async def delete_ollama_model(
     name: str,
 ) -> dict:
     """Delete an Ollama model via the SDK."""
-    ollama_provider = request.app.state.provider_manager.get_provider(
+    ollama_provider = _get_runtime_provider(request).get_provider(
         PROVIDER_OLLAMA.id,
     )
 

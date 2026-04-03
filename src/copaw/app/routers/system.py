@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, File, Request, UploadFile
 
 from ...constant import WORKING_DIR
-from ...providers.provider_manager import ProviderManager
+from ...providers.runtime_provider_facade import get_runtime_provider_facade
 from ..runtime_health_service import RuntimeHealthService
 from .workspace import _dir_stats, download_workspace, upload_workspace
 
@@ -50,18 +50,23 @@ def _get_runtime_health_service(app_state: Any) -> RuntimeHealthService:
     return RuntimeHealthService.from_app_state(app_state)
 
 
+def _get_runtime_provider(app_state: Any) -> object:
+    runtime_provider = getattr(app_state, "runtime_provider", None)
+    if runtime_provider is not None:
+        return runtime_provider
+    return get_runtime_provider_facade()
+
+
 @router.get("/overview", response_model=dict[str, object])
 async def get_system_overview(request: Request) -> dict[str, object]:
     app_state = request.app.state
-    provider_manager = getattr(app_state, "provider_manager", None)
-    if provider_manager is None:
-        provider_manager = ProviderManager.get_instance()
+    runtime_provider = _get_runtime_provider(app_state)
     active_model = None
-    get_active_model = getattr(provider_manager, "get_active_model", None)
+    get_active_model = getattr(runtime_provider, "get_active_model", None)
     if callable(get_active_model):
         active_model = get_active_model()
     fallback_slots = []
-    get_fallback_slots = getattr(provider_manager, "get_fallback_slots", None)
+    get_fallback_slots = getattr(runtime_provider, "get_fallback_slots", None)
     if callable(get_fallback_slots):
         fallback_slots = [
             slot.model_dump(mode="json")
@@ -112,9 +117,7 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
     app_state = request.app.state
     runtime_health_service = _get_runtime_health_service(app_state)
     runtime_summary = await runtime_health_service.build_runtime_summary()
-    provider_manager = getattr(app_state, "provider_manager", None)
-    if provider_manager is None:
-        provider_manager = ProviderManager.get_instance()
+    runtime_provider = _get_runtime_provider(app_state)
 
     checks: list[dict[str, object]] = []
 
@@ -168,12 +171,12 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
             f"{service_name} {'is available' if present else 'is not available'}.",
         )
     active_model = None
-    get_active_model = getattr(provider_manager, "get_active_model", None)
+    get_active_model = getattr(runtime_provider, "get_active_model", None)
     if callable(get_active_model):
         active_model = get_active_model()
     provider_ok = False
     if active_model is not None and getattr(active_model, "provider_id", None):
-        get_provider = getattr(provider_manager, "get_provider", None)
+        get_provider = getattr(runtime_provider, "get_provider", None)
         if callable(get_provider):
             provider_ok = get_provider(active_model.provider_id) is not None
     add_check(
@@ -192,7 +195,7 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
     )
 
     fallback_slots = []
-    get_fallback_slots = getattr(provider_manager, "get_fallback_slots", None)
+    get_fallback_slots = getattr(runtime_provider, "get_fallback_slots", None)
     if callable(get_fallback_slots):
         fallback_slots = get_fallback_slots() or []
     add_check(

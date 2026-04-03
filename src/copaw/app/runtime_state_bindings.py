@@ -8,6 +8,15 @@ from fastapi import FastAPI
 from .runtime_bootstrap_models import RuntimeBootstrap, RuntimeManagerStack
 
 
+def _materialize_automation_tasks(automation_tasks: list[Any] | None) -> Any:
+    if automation_tasks is None:
+        return []
+    loop_snapshots = getattr(automation_tasks, "loop_snapshots", None)
+    if callable(loop_snapshots):
+        return automation_tasks
+    return list(automation_tasks or [])
+
+
 def build_runtime_state_bindings(
     *,
     runtime_host: object,
@@ -29,8 +38,6 @@ def build_runtime_state_bindings(
         "mcp_manager": manager_stack.mcp_manager,
         "mcp_watcher": manager_stack.mcp_watcher,
         "runtime_provider": bootstrap.runtime_provider,
-        # Compatibility mirror for legacy app.state readers outside the narrowed runtime contract.
-        "provider_manager": bootstrap.runtime_provider,
         "state_store": bootstrap.state_store,
         "task_repository": repositories.task_repository,
         "task_runtime_repository": repositories.task_runtime_repository,
@@ -122,7 +129,7 @@ def build_runtime_state_bindings(
         "actor_mailbox_service": bootstrap.actor_mailbox_service,
         "actor_worker": bootstrap.actor_worker,
         "actor_supervisor": bootstrap.actor_supervisor,
-        "automation_tasks": list(automation_tasks or []),
+        "automation_tasks": _materialize_automation_tasks(automation_tasks),
     }
 
 

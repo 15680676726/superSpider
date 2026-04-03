@@ -12,6 +12,7 @@ from copaw.app.routers.providers import admin_router as providers_admin_router
 from copaw.app.routers.providers import router as providers_router
 from copaw.providers.provider import ProviderInfo
 from copaw.providers.provider_manager import ModelSlotConfig, ProviderManager
+from copaw.providers.runtime_provider_facade import get_runtime_provider_facade
 
 
 @pytest.fixture
@@ -25,7 +26,9 @@ def build_client(manager: ProviderManager) -> TestClient:
     app = FastAPI()
     app.include_router(providers_router)
     app.include_router(providers_admin_router)
-    app.state.provider_manager = manager
+    app.state.runtime_provider = get_runtime_provider_facade(
+        provider_manager=manager,
+    )
     return TestClient(app)
 
 
@@ -166,7 +169,7 @@ def test_provider_test_route_avoids_python_deepcopy_for_provider_clones() -> Non
 
     app = FastAPI()
     app.include_router(providers_router)
-    app.state.provider_manager = _BrittleManager()
+    app.state.runtime_provider = _BrittleManager()
     client = TestClient(app)
 
     response = client.post(

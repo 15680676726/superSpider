@@ -107,7 +107,7 @@ def build_app(tmp_path: Path) -> FastAPI:
     app.state.cron_manager = object()
     app.state.memory_manager = FakeMemoryManager()
     app.state.startup_recovery_summary = {"reason": "startup", "hydrated_tasks": 2}
-    app.state.provider_manager = FakeProviderManager()
+    app.state.runtime_provider = FakeProviderManager()
     return app
 
 

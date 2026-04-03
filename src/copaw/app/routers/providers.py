@@ -16,6 +16,10 @@ from ...providers.provider_manager import (
     ProviderFallbackConfig,
     ProviderManager,
 )
+from ...providers.runtime_provider_facade import (
+    ProviderRuntimeSurface,
+    get_runtime_provider_facade,
+)
 
 router = APIRouter(prefix="/models", tags=["models"])
 admin_router = APIRouter(prefix="/providers/admin", tags=["provider-admin"])
@@ -23,16 +27,22 @@ admin_router = APIRouter(prefix="/providers/admin", tags=["provider-admin"])
 ChatModelName = Literal["OpenAIChatModel", "AnthropicChatModel"]
 
 
-def get_provider_manager(request: Request) -> ProviderManager:
-    """Get the provider manager from app state.
+def get_runtime_provider(request: Request) -> ProviderRuntimeSurface:
+    """Get the canonical runtime provider surface from app state."""
+    runtime_provider = getattr(request.app.state, "runtime_provider", None)
+    if runtime_provider is not None:
+        return runtime_provider
+    return get_runtime_provider_facade()
 
-    Args:
-        request: FastAPI request object
-    """
-    provider_manager = getattr(request.app.state, "provider_manager", None)
-    if provider_manager is None:
-        provider_manager = ProviderManager.get_instance()
-    return provider_manager
+
+def _get_provider_manager_for_admin(request: Request) -> ProviderManager:
+    runtime_provider = getattr(request.app.state, "runtime_provider", None)
+    provider_manager = getattr(runtime_provider, "provider_manager", None)
+    if isinstance(provider_manager, ProviderManager):
+        return provider_manager
+    if isinstance(runtime_provider, ProviderManager):
+        return runtime_provider
+    return ProviderManager.get_instance()
 
 
 def get_provider_admin_service(request: Request) -> object:
@@ -40,7 +50,7 @@ def get_provider_admin_service(request: Request) -> object:
     service = getattr(request.app.state, "provider_admin_service", None)
     if service is not None:
         return service
-    return ProviderAdminService(get_provider_manager(request))
+    return ProviderAdminService(_get_provider_manager_for_admin(request))
 
 
 def _clone_provider_for_test(provider: object) -> object:
@@ -84,8 +94,9 @@ class AddModelRequest(BaseModel):
     summary="List all providers",
 )
 async def list_all_providers(
-    manager: ProviderManager = Depends(get_provider_manager),
+    request: Request,
 ) -> List[ProviderInfo]:
+    manager = _get_provider_manager_for_admin(request)
     return await manager.list_provider_info()
 
 
@@ -198,13 +209,13 @@ class DiscoverModelsResponse(BaseModel):
     summary="Test provider connection",
 )
 async def test_provider(
-    manager: ProviderManager = Depends(get_provider_manager),
+    runtime_provider: ProviderRuntimeSurface = Depends(get_runtime_provider),
     provider_id: str = Path(...),
     body: Optional[TestProviderRequest] = Body(default=None),
 ) -> TestConnectionResponse:
     """Test if a provider's URL and API key are valid."""
     try:
-        provider = manager.get_provider(provider_id)
+        provider = runtime_provider.get_provider(provider_id)
         if provider is None:
             raise ValueError(f"Provider '{provider_id}' not found")
         # Ensure we don't accidentally modify provider config during test
@@ -255,13 +266,13 @@ async def discover_models(
     summary="Test a specific model",
 )
 async def test_model(
-    manager: ProviderManager = Depends(get_provider_manager),
+    runtime_provider: ProviderRuntimeSurface = Depends(get_runtime_provider),
     provider_id: str = Path(...),
     body: TestModelRequest = Body(...),
 ) -> TestConnectionResponse:
     """Test if a specific model works with the configured provider."""
     try:
-        provider = manager.get_provider(provider_id)
+        provider = runtime_provider.get_provider(provider_id)
         if provider is None:
             raise ValueError(f"Provider '{provider_id}' not found")
         ok = await provider.check_model_connection(model_id=body.model_id)
@@ -281,7 +292,6 @@ async def test_model(
 async def delete_custom_provider_endpoint(
     request: Request,
     admin_service: object = Depends(get_provider_admin_service),
-    manager: ProviderManager = Depends(get_provider_manager),
     provider_id: str = Path(...),
 ) -> List[ProviderInfo]:
     try:
@@ -291,6 +301,7 @@ async def delete_custom_provider_endpoint(
             raise ValueError(f"Custom Provider '{provider_id}' not found")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    manager = _get_provider_manager_for_admin(request)
     return await manager.list_provider_info()
 
 
@@ -342,9 +353,22 @@ async def remove_model_endpoint(
     summary="Get active LLM",
 )
 async def get_active_models(
-    manager: ProviderManager = Depends(get_provider_manager),
+    runtime_provider: ProviderRuntimeSurface = Depends(get_runtime_provider),
 ) -> ActiveModelsInfo:
-    return manager.get_active_models_info()
+    active_model = runtime_provider.get_active_model()
+    resolved_slot, fallback_applied, resolution_reason, unavailable_candidates = (
+        runtime_provider.resolve_model_slot()
+    )
+    fallback_config = runtime_provider.get_fallback_config()
+    return ActiveModelsInfo(
+        active_llm=active_model,
+        resolved_llm=resolved_slot,
+        fallback_enabled=fallback_config.enabled,
+        fallback_chain=list(fallback_config.candidates),
+        fallback_applied=fallback_applied,
+        resolution_reason=resolution_reason,
+        unavailable_candidates=unavailable_candidates,
+    )
 
 
 @admin_router.put(
@@ -377,9 +401,9 @@ async def set_active_model(
     summary="Get provider fallback policy",
 )
 async def get_provider_fallback(
-    manager: ProviderManager = Depends(get_provider_manager),
+    runtime_provider: ProviderRuntimeSurface = Depends(get_runtime_provider),
 ) -> ProviderFallbackConfig:
-    return manager.get_fallback_config()
+    return runtime_provider.get_fallback_config()
 
 
 @admin_router.put(

@@ -254,7 +254,7 @@ def test_attach_runtime_state_binds_bootstrap_and_manager_stack() -> None:
     assert app.state.capability_service is bootstrap.capability_service
     assert app.state.runtime_health_service is bootstrap.runtime_health_service
     assert app.state.runtime_provider is bootstrap.runtime_provider
-    assert app.state.provider_manager is bootstrap.runtime_provider
+    assert not hasattr(app.state, "provider_manager")
     assert app.state.channel_manager is manager_stack.channel_manager
     assert app.state.job_repository is manager_stack.job_repository
     assert app.state.schedule_repository is bootstrap.repositories.schedule_repository
@@ -339,9 +339,8 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
         is bootstrap.conversation_compaction_service
     )
     assert "memory_manager" not in bindings
-    assert "provider_manager" in bindings
+    assert "provider_manager" not in bindings
     assert bindings["runtime_provider"] is bootstrap.runtime_provider
-    assert bindings["provider_manager"] is bootstrap.runtime_provider
     assert bindings["schedule_repository"] is bootstrap.repositories.schedule_repository
     assert (
         bindings["human_assist_task_repository"]
@@ -387,6 +386,42 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
     assert bindings["startup_recovery_summary"] == startup_recovery_summary
     assert bindings["automation_tasks"] == automation_tasks
     assert bindings["automation_tasks"] is not automation_tasks
+
+
+def test_build_runtime_state_bindings_preserves_automation_group_contract() -> None:
+    class _AutomationTasks(list):
+        def loop_snapshots(self) -> dict[str, dict[str, object]]:
+            return {
+                "operating-cycle": {
+                    "task_name": "operating-cycle",
+                    "coordinator_contract": "automation-coordinator/v1",
+                }
+            }
+
+    bootstrap = _build_bootstrap()
+    manager_stack = RuntimeManagerStack(
+        mcp_manager=object(),
+        channel_manager=object(),
+        cron_manager=object(),
+        job_repository=object(),
+        config_watcher=object(),
+        mcp_watcher=object(),
+    )
+    automation_tasks = _AutomationTasks([object()])
+
+    bindings = build_runtime_state_bindings(
+        runtime_host=object(),
+        bootstrap=bootstrap,
+        manager_stack=manager_stack,
+        startup_recovery_summary={"reason": "restart"},
+        automation_tasks=automation_tasks,
+    )
+
+    assert bindings["automation_tasks"] is automation_tasks
+    assert callable(bindings["automation_tasks"].loop_snapshots)
+    assert bindings["automation_tasks"].loop_snapshots()["operating-cycle"][
+        "coordinator_contract"
+    ] == "automation-coordinator/v1"
 
 
 def test_build_runtime_repositories_keeps_bootstrap_schedule_repo_separate(
