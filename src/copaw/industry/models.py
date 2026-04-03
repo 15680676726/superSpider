@@ -32,6 +32,18 @@ def _normalize_text_list(value: object) -> list[str]:
     return normalized
 
 
+def _merge_text_lists(*values: object) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for item in _normalize_text_list(value):
+            if item in seen:
+                continue
+            seen.add(item)
+            merged.append(item)
+    return merged
+
+
 def _normalize_recommendation_source_kind(value: object | None) -> str:
     text = _normalize_text(value)
     if text is None:
@@ -254,6 +266,55 @@ class IndustryExecutionCoreIdentity(BaseModel):
     @classmethod
     def _normalize_identity_lists(cls, value: object) -> list[str]:
         return _normalize_text_list(value)
+
+
+class IndustrySeatCapabilityLayers(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    schema_version: Literal["industry-seat-capability-layers-v1"] = (
+        "industry-seat-capability-layers-v1"
+    )
+    role_prototype_capability_ids: list[str] = Field(default_factory=list)
+    seat_instance_capability_ids: list[str] = Field(default_factory=list)
+    cycle_delta_capability_ids: list[str] = Field(default_factory=list)
+    session_overlay_capability_ids: list[str] = Field(default_factory=list)
+    effective_capability_ids: list[str] = Field(default_factory=list)
+
+    @field_validator(
+        "role_prototype_capability_ids",
+        "seat_instance_capability_ids",
+        "cycle_delta_capability_ids",
+        "session_overlay_capability_ids",
+        "effective_capability_ids",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_capability_lists(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
+
+    def merged_capability_ids(self) -> list[str]:
+        return _merge_text_lists(
+            self.role_prototype_capability_ids,
+            self.seat_instance_capability_ids,
+            self.cycle_delta_capability_ids,
+            self.session_overlay_capability_ids,
+        )
+
+    def to_metadata_payload(self) -> dict[str, Any]:
+        payload = self.model_dump(mode="python")
+        payload["effective_capability_ids"] = self.merged_capability_ids()
+        return payload
+
+    @classmethod
+    def from_metadata(
+        cls,
+        value: object | None,
+    ) -> "IndustrySeatCapabilityLayers":
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, dict):
+            return cls.model_validate(value)
+        return cls()
 
 
 class IndustryDraftGoal(BaseModel):

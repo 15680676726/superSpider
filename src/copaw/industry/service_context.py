@@ -126,6 +126,7 @@ from .models import (
     IndustryDraftSchedule,
     IndustryBootstrapScheduleResult,
     IndustryExecutionCoreIdentity,
+    IndustrySeatCapabilityLayers,
     IndustryMainChainGraph,
     IndustryMainChainNode,
     IndustryExecutionSummary,

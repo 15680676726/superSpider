@@ -7,6 +7,26 @@ from .service_recommendation_pack import *  # noqa: F401,F403
 
 
 class _IndustryTeamRuntimeMixin:
+    def _build_actor_runtime_capability_layers(
+        self,
+        *,
+        agent: IndustryRoleBlueprint,
+        existing_metadata: dict[str, object],
+    ) -> dict[str, object]:
+        existing_layers = IndustrySeatCapabilityLayers.from_metadata(
+            existing_metadata.get("capability_layers"),
+        )
+        return IndustrySeatCapabilityLayers(
+            role_prototype_capability_ids=list(agent.allowed_capabilities),
+            seat_instance_capability_ids=list(
+                existing_layers.seat_instance_capability_ids,
+            ),
+            cycle_delta_capability_ids=list(existing_layers.cycle_delta_capability_ids),
+            session_overlay_capability_ids=list(
+                existing_layers.session_overlay_capability_ids,
+            ),
+        ).to_metadata_payload()
+
     def _ensure_execution_core_work_context(
         self,
         *,
@@ -369,6 +389,10 @@ class _IndustryTeamRuntimeMixin:
                 "allowed_capabilities": list(agent.allowed_capabilities),
                 "environment_constraints": list(agent.environment_constraints),
                 "evidence_expectations": list(agent.evidence_expectations),
+                "capability_layers": self._build_actor_runtime_capability_layers(
+                    agent=agent,
+                    existing_metadata=metadata,
+                ),
                 "retired": status == "retired",
             },
         )

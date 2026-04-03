@@ -18,6 +18,7 @@ from copaw.industry.service_context import (
     build_industry_service_runtime_bindings,
 )
 from copaw.state import (
+    AgentRuntimeRecord,
     GoalRecord,
     IndustryInstanceRecord,
     SQLiteStateStore,
@@ -27,10 +28,12 @@ from copaw.state import (
 from copaw.state.repositories import (
     SqliteAgentProfileOverrideRepository,
     SqliteAgentReportRepository,
+    SqliteAgentRuntimeRepository,
     SqliteGoalOverrideRepository,
     SqliteIndustryInstanceRepository,
     SqliteTaskRepository,
 )
+from copaw.industry.models import IndustryRoleBlueprint
 
 
 class _DummyGoalService:
@@ -926,3 +929,87 @@ async def test_team_service_update_does_not_delegate_back_to_lifecycle(
     assert captured["execute"] is True
     assert captured["goal_priority"] == 7
     assert captured["install_plan"] == ["pkg-a"]
+
+
+def test_industry_service_syncs_formal_capability_layers_into_actor_runtime(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "industry-runtime-capability-layers.db")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-support",
+            actor_key="industry-1:support-specialist",
+            actor_fingerprint="fingerprint-old",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            metadata={
+                "capability_layers": {
+                    "schema_version": "industry-seat-capability-layers-v1",
+                    "role_prototype_capability_ids": ["tool:read_file"],
+                    "seat_instance_capability_ids": ["skill:crm-seat-playbook"],
+                    "cycle_delta_capability_ids": ["mcp:campaign-dashboard"],
+                    "session_overlay_capability_ids": ["mcp:browser-temp"],
+                    "effective_capability_ids": [
+                        "tool:read_file",
+                        "skill:crm-seat-playbook",
+                        "mcp:campaign-dashboard",
+                        "mcp:browser-temp",
+                    ],
+                },
+            },
+        ),
+    )
+    runtime_bindings = build_industry_service_runtime_bindings(
+        agent_runtime_repository=runtime_repository,
+    )
+    industry_service = IndustryService(
+        goal_service=_DummyGoalService(),
+        industry_instance_repository=SqliteIndustryInstanceRepository(state_store),
+        goal_override_repository=SqliteGoalOverrideRepository(state_store),
+        agent_profile_override_repository=SqliteAgentProfileOverrideRepository(
+            state_store,
+        ),
+        runtime_bindings=runtime_bindings,
+    )
+    role = IndustryRoleBlueprint(
+        role_id="support-specialist",
+        agent_id="agent-support",
+        name="Support Specialist",
+        role_name="Support Specialist",
+        role_summary="Handle support and follow-up work.",
+        mission="Close support work with the correct capability pack.",
+        goal_kind="support-specialist",
+        allowed_capabilities=["tool:read_file", "mcp:salesforce"],
+    )
+
+    industry_service._sync_actor_runtime_surface(  # pylint: disable=protected-access
+        agent=role,
+        instance_id="industry-1",
+        owner_scope="industry:industry-1",
+        goal_id=None,
+        goal_title=None,
+        status="waiting",
+        assignment_id="assignment-1",
+        assignment_title="Handle support follow-up",
+        assignment_summary="Review the support queue and prepare the next action.",
+        assignment_status="queued",
+    )
+
+    runtime = runtime_repository.get_runtime("agent-support")
+    assert runtime is not None
+    assert runtime.metadata["capability_layers"] == {
+        "schema_version": "industry-seat-capability-layers-v1",
+        "role_prototype_capability_ids": ["tool:read_file", "mcp:salesforce"],
+        "seat_instance_capability_ids": ["skill:crm-seat-playbook"],
+        "cycle_delta_capability_ids": ["mcp:campaign-dashboard"],
+        "session_overlay_capability_ids": ["mcp:browser-temp"],
+        "effective_capability_ids": [
+            "tool:read_file",
+            "mcp:salesforce",
+            "skill:crm-seat-playbook",
+            "mcp:campaign-dashboard",
+            "mcp:browser-temp",
+        ],
+    }
