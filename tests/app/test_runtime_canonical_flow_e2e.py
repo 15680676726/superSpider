@@ -484,3 +484,218 @@ def test_runtime_canonical_flow_auto_writeback_requested_actions_still_closes_re
     )
     assert backlog_item["metadata"]["control_thread_id"] == control_thread_id
     assert backlog_item["metadata"]["source"] == "chat-writeback"
+
+
+def test_runtime_canonical_flow_auto_frontdoor_replan_materializes_followup_assignment_on_same_thread(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+
+    instruction = (
+        "Please turn this into a governed execution chain, keep the same control thread, "
+        "and carry any follow-up on the same thread as well."
+    )
+    control_ack = "Recorded. I will keep this on the governed execution chain."
+
+    chat_service = MainBrainChatService(
+        session_backend=app.state.session_backend,
+        industry_service=app.state.industry_service,
+        agent_profile_service=app.state.agent_profile_service,
+        model_factory=lambda: _StaticResponseModel(control_ack),
+    )
+    query_execution_service = _CanonicalFlowQueryExecutionService(
+        chat_service=chat_service,
+        industry_service=app.state.industry_service,
+    )
+
+    async def _resolve_intake_contract(**_kwargs):
+        return MainBrainIntakeContract(
+            message_text=instruction,
+            decision=SimpleNamespace(intent_kind="execute-task", kickoff_allowed=False),
+            intent_kind="execute-task",
+            writeback_requested=True,
+            writeback_plan=build_chat_writeback_plan(
+                instruction,
+                approved_classifications=["backlog"],
+                goal_title="Canonical follow-up continuity handoff",
+                goal_summary="Keep the entire governed execution and follow-up chain on one control thread.",
+                goal_plan_steps=[
+                    "Write this into the governed execution backlog.",
+                    "Carry report follow-up on the same control thread and work context.",
+                    "Materialize the next assignment without dropping continuity.",
+                ],
+            ),
+            should_kickoff=False,
+        )
+
+    app.state.turn_executor = KernelTurnExecutor(
+        session_backend=app.state.session_backend,
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=chat_service,
+        main_brain_orchestrator=MainBrainOrchestrator(
+            query_execution_service=query_execution_service,
+            session_backend=app.state.session_backend,
+            intake_contract_resolver=_resolve_intake_contract,
+        ),
+    )
+
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Customer Operations",
+            "company_name": "Northwind Robotics",
+            "product": "guided customer follow-up",
+        },
+    )
+    assert preview.status_code == 200
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview.json()["profile"],
+            "draft": preview.json()["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+    binding = app.state.agent_thread_binding_repository.get_binding(control_thread_id)
+    assert binding is not None
+    work_context_id = binding.work_context_id
+    assert work_context_id is not None
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-auto-followup-continuity",
+            "session_id": control_thread_id,
+            "thread_id": control_thread_id,
+            "user_id": "copaw-agent-runner",
+            "channel": "console",
+            "agent_id": "copaw-agent-runner",
+            "industry_instance_id": instance_id,
+            "industry_role_id": "execution-core",
+            "session_kind": "industry-control-thread",
+            "control_thread_id": control_thread_id,
+            "interaction_mode": "auto",
+            "requested_actions": ["writeback_backlog"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": instruction}],
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert query_execution_service.writeback_result is not None
+
+    writeback = query_execution_service.writeback_result
+    initial_backlog_id = str(writeback["created_backlog_ids"][0])
+
+    first_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:auto-frontdoor-cycle",
+            force=True,
+            backlog_item_ids=[initial_backlog_id],
+            auto_dispatch_materialized_goals=False,
+        ),
+    )
+    first_assignment_id = first_cycle["processed_instances"][0]["created_assignment_ids"][0]
+    cycle_id = first_cycle["processed_instances"][0]["started_cycle_id"]
+    first_assignment = app.state.assignment_repository.get_assignment(first_assignment_id)
+    assert first_assignment is not None
+
+    evidence = app.state.evidence_ledger.append(
+        EvidenceRecord(
+            task_id=first_assignment_id,
+            actor_ref="copaw-agent-runner",
+            capability_ref="system:dispatch_query",
+            risk_level="guarded",
+            action_summary="Auto frontdoor continuity execution",
+            result_summary="Work reached checkpoint but needs governed follow-up on the same thread.",
+            metadata={
+                "industry_instance_id": instance_id,
+                "control_thread_id": control_thread_id,
+                "assignment_id": first_assignment_id,
+            },
+        ),
+    )
+    report = AgentReportRecord(
+        industry_instance_id=instance_id,
+        cycle_id=cycle_id,
+        assignment_id=first_assignment_id,
+        owner_agent_id=first_assignment.owner_agent_id,
+        owner_role_id=first_assignment.owner_role_id,
+        headline="Same-thread follow-up still required",
+        summary="The governed execution reached checkpoint, but the remaining move must stay on the same control thread.",
+        status="recorded",
+        result="failed",
+        findings=["The next move still needs same-thread supervisor continuity."],
+        recommendation="Materialize the next assignment on the same control thread and work context.",
+        evidence_ids=[evidence.id],
+        work_context_id=work_context_id,
+        metadata={
+            "control_thread_id": control_thread_id,
+            "session_id": control_thread_id,
+            "environment_ref": "session:console:industry-control",
+            "evidence_id": evidence.id,
+        },
+        processed=False,
+    )
+    app.state.agent_report_repository.upsert_report(report)
+
+    second_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:auto-frontdoor-replan",
+            force=True,
+        ),
+    )
+    processed_instance = second_cycle["processed_instances"][0]
+    assert report.id in processed_instance["processed_report_ids"]
+    assert processed_instance["created_assignment_ids"]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    followup_backlog = next(
+        item
+        for item in detail.backlog
+        if item["metadata"].get("source_report_id") == report.id
+    )
+    followup_assignment_id = str(followup_backlog["assignment_id"])
+    assert followup_assignment_id in processed_instance["created_assignment_ids"]
+    followup_assignment = app.state.assignment_repository.get_assignment(followup_assignment_id)
+    assert followup_assignment is not None
+    assert followup_assignment.metadata["control_thread_id"] == control_thread_id
+    assert followup_assignment.metadata["session_id"] == control_thread_id
+    assert followup_assignment.metadata["work_context_id"] == work_context_id
+    assert followup_assignment.metadata["source_report_id"] == report.id
+
+    if followup_assignment.task_id:
+        followup_task = app.state.task_repository.get_task(followup_assignment.task_id or "")
+        assert followup_task is not None
+        kernel_metadata = decode_kernel_task_metadata(followup_task.acceptance_criteria)
+        assert kernel_metadata is not None
+        payload = dict(kernel_metadata.get("payload") or {})
+        compiler_meta = dict(payload.get("compiler") or {})
+        task_seed = dict(payload.get("task_seed") or {})
+
+        assert compiler_meta["control_thread_id"] == control_thread_id
+        assert task_seed["request_context"]["control_thread_id"] == control_thread_id
+        assert task_seed["request_context"]["work_context_id"] == work_context_id
+
+    runtime_detail = client.get(f"/runtime-center/industry/{instance_id}")
+    assert runtime_detail.status_code == 200
+    runtime_payload = runtime_detail.json()
+    runtime_assignment = next(
+        item
+        for item in runtime_payload["assignments"]
+        if item["assignment_id"] == followup_assignment_id
+    )
+    assert runtime_assignment["metadata"]["control_thread_id"] == control_thread_id
+    assert runtime_assignment["metadata"]["work_context_id"] == work_context_id
