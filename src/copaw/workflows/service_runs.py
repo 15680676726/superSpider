@@ -2,7 +2,71 @@
 from __future__ import annotations
 
 from .service_shared import *  # noqa: F401,F403
-from ..app.runtime_center.task_review_projection import resolve_canonical_host_identity
+
+
+def _workflow_first_non_empty(*values: object) -> str | None:
+    for value in values:
+        normalized = _string(value)
+        if normalized is not None:
+            return normalized
+    return None
+
+
+def _workflow_mapping(value: object) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _resolve_canonical_host_identity(
+    host_payload: dict[str, Any] | None,
+    *,
+    metadata: dict[str, Any] | None = None,
+    fallback_environment_ref: str | None = None,
+    fallback_environment_id: str | None = None,
+    fallback_session_mount_id: str | None = None,
+) -> tuple[str | None, str | None, str | None]:
+    host_payload = _workflow_mapping(host_payload)
+    metadata = _workflow_mapping(metadata)
+    scheduler_inputs = _workflow_mapping(host_payload.get("scheduler_inputs"))
+    host_twin_summary = _workflow_mapping(host_payload.get("host_twin_summary"))
+    coordination = _workflow_mapping(host_payload.get("coordination"))
+    canonical_environment_ref = _workflow_first_non_empty(
+        scheduler_inputs.get("environment_ref"),
+        scheduler_inputs.get("environment_id"),
+        host_twin_summary.get("selected_seat_ref"),
+        coordination.get("selected_seat_ref"),
+        host_payload.get("environment_ref"),
+        host_payload.get("environment_id"),
+        metadata.get("environment_ref"),
+        metadata.get("environment_id"),
+        fallback_environment_ref,
+        fallback_environment_id,
+    )
+    canonical_environment_id = _workflow_first_non_empty(
+        scheduler_inputs.get("environment_id"),
+        scheduler_inputs.get("environment_ref"),
+        host_twin_summary.get("selected_seat_ref"),
+        coordination.get("selected_seat_ref"),
+        host_payload.get("environment_id"),
+        host_payload.get("environment_ref"),
+        metadata.get("environment_id"),
+        metadata.get("environment_ref"),
+        fallback_environment_id,
+        fallback_environment_ref,
+        canonical_environment_ref,
+    )
+    canonical_session_mount_id = _workflow_first_non_empty(
+        scheduler_inputs.get("session_mount_id"),
+        host_twin_summary.get("selected_session_mount_id"),
+        coordination.get("selected_session_mount_id"),
+        host_payload.get("session_mount_id"),
+        metadata.get("session_mount_id"),
+        fallback_session_mount_id,
+    )
+    return (
+        canonical_environment_ref,
+        canonical_environment_id,
+        canonical_session_mount_id,
+    )
 
 
 class _WorkflowServiceRunMixin:
@@ -630,7 +694,7 @@ class _WorkflowServiceRunMixin:
         fallback_environment_id: str | None = None,
         fallback_session_mount_id: str | None = None,
     ) -> tuple[str | None, str | None, str | None]:
-        return resolve_canonical_host_identity(
+        return _resolve_canonical_host_identity(
             host_snapshot,
             metadata=dict(metadata or {}),
             fallback_environment_ref=fallback_environment_id,

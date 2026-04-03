@@ -2,6 +2,27 @@
 from __future__ import annotations
 
 from .runtime_center_shared_core import *  # noqa: F401,F403
+from ..runtime_center.models import RuntimeCenterAppStateView
+
+
+def _get_runtime_center_query_service(request: Request) -> RuntimeCenterQueryService:
+    service = getattr(request.app.state, "runtime_center_query_service", None)
+    if isinstance(service, RuntimeCenterQueryService):
+        return service
+    if (
+        service is not None
+        and callable(getattr(service, "get_overview", None))
+        and callable(getattr(service, "get_surface", None))
+        and callable(getattr(service, "get_main_brain", None))
+    ):
+        return service
+    service = RuntimeCenterQueryService()
+    request.app.state.runtime_center_query_service = service
+    return service
+
+
+def _get_runtime_center_state_view(request: Request) -> RuntimeCenterAppStateView:
+    return RuntimeCenterAppStateView.from_object(request.app.state)
 
 
 @router.get("/overview", response_model=RuntimeOverviewResponse)
@@ -11,8 +32,19 @@ async def get_runtime_overview(
 ) -> RuntimeOverviewResponse:
     """Return the Runtime Center operator overview."""
     apply_runtime_center_surface_headers(response, surface="runtime-center")
-    service = RuntimeCenterQueryService()
-    return await service.get_overview(request.app.state)
+    service = _get_runtime_center_query_service(request)
+    return await service.get_overview(_get_runtime_center_state_view(request))
+
+
+@router.get("/surface", response_model=RuntimeCenterSurfaceResponse)
+async def get_runtime_surface(
+    request: Request,
+    response: Response,
+) -> RuntimeCenterSurfaceResponse:
+    """Return the canonical Runtime Center page surface."""
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_runtime_center_query_service(request)
+    return await service.get_surface(_get_runtime_center_state_view(request))
 
 
 @router.get("/main-brain", response_model=RuntimeMainBrainResponse)
@@ -22,8 +54,8 @@ async def get_runtime_main_brain(
 ) -> RuntimeMainBrainResponse:
     """Return the dedicated Runtime Center main-brain cockpit payload."""
     apply_runtime_center_surface_headers(response, surface="runtime-center")
-    service = RuntimeCenterQueryService()
-    return await service.get_main_brain(request.app.state)
+    service = _get_runtime_center_query_service(request)
+    return await service.get_main_brain(_get_runtime_center_state_view(request))
 
 
 @router.get("/events")

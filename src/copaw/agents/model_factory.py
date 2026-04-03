@@ -30,7 +30,10 @@ except ImportError:  # pragma: no cover - compatibility fallback
 
 from copaw.config import load_config
 from .utils.tool_message_utils import _sanitize_tool_messages
-from ..providers import ProviderManager
+from ..providers.runtime_provider_facade import (
+    ProviderRuntimeSurface,
+    get_runtime_provider_facade,
+)
 
 
 def _file_url_to_path(url: str) -> str:
@@ -287,7 +290,10 @@ def _slot_payload(slot: object | None) -> dict[str, str]:
     }
 
 
-def _provider_payload(manager: ProviderManager, provider_id: str) -> dict[str, object]:
+def _provider_payload(
+    manager: ProviderRuntimeSurface,
+    provider_id: str,
+) -> dict[str, object]:
     provider = manager.get_provider(provider_id)
     if provider is None:
         return {"provider_missing": True}
@@ -307,7 +313,7 @@ def _provider_payload(manager: ProviderManager, provider_id: str) -> dict[str, o
 
 
 def _slot_fingerprint_payload(
-    manager: ProviderManager,
+    manager: ProviderRuntimeSurface,
     slot: object | None,
 ) -> dict[str, object]:
     payload = _slot_payload(slot)
@@ -317,7 +323,7 @@ def _slot_fingerprint_payload(
     return payload
 
 
-def _runtime_fallback_payload(manager: ProviderManager) -> dict[str, object]:
+def _runtime_fallback_payload(manager: ProviderRuntimeSurface) -> dict[str, object]:
     return {
         "kind": "runtime-fallback",
         "active": _slot_fingerprint_payload(manager, manager.get_active_model()),
@@ -329,11 +335,13 @@ def _runtime_fallback_payload(manager: ProviderManager) -> dict[str, object]:
     }
 
 
-def describe_runtime_model_surface() -> dict[str, object]:
+def describe_runtime_model_surface(
+    runtime_provider: ProviderRuntimeSurface | None = None,
+) -> dict[str, object]:
     """Describe the current runtime model surface for caching/observability."""
     config = load_config()
     routing_cfg = getattr(getattr(config, "agents", None), "llm_routing", None)
-    manager = ProviderManager()
+    manager = runtime_provider or get_runtime_provider_facade()
     if not bool(getattr(routing_cfg, "enabled", False)):
         return _runtime_fallback_payload(manager)
 
@@ -365,23 +373,30 @@ def describe_runtime_model_surface() -> dict[str, object]:
     }
 
 
-def build_runtime_model_fingerprint() -> str:
-    payload = describe_runtime_model_surface()
+def build_runtime_model_fingerprint(
+    runtime_provider: ProviderRuntimeSurface | None = None,
+) -> str:
+    payload = describe_runtime_model_surface(runtime_provider=runtime_provider)
     return hashlib.sha1(
         json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"),
     ).hexdigest()
 
 
-def create_runtime_chat_model() -> ChatModelBase:
+def create_runtime_chat_model(
+    runtime_provider: ProviderRuntimeSurface | None = None,
+) -> ChatModelBase:
     """Create the runtime chat model surface.
 
-    This delegates to ProviderManager.get_active_chat_model(), which is
-    routing-aware when `agents.llm_routing.enabled` is enabled.
+    This delegates to the runtime provider facade, which remains routing-aware
+    when `agents.llm_routing.enabled` is enabled.
     """
-    return ProviderManager.get_active_chat_model()
+    manager = runtime_provider or get_runtime_provider_facade()
+    return manager.get_active_chat_model()
 
 
-def create_model_and_formatter() -> Tuple[ChatModelBase, FormatterBase]:
+def create_model_and_formatter(
+    runtime_provider: ProviderRuntimeSurface | None = None,
+) -> Tuple[ChatModelBase, FormatterBase]:
     """Factory method to create model and formatter instances.
 
     This method handles both local and remote models, selecting the
@@ -397,7 +412,7 @@ def create_model_and_formatter() -> Tuple[ChatModelBase, FormatterBase]:
     Example:
         >>> model, formatter = create_model_and_formatter()
     """
-    model = create_runtime_chat_model()
+    model = create_runtime_chat_model(runtime_provider=runtime_provider)
 
     # Create the formatter based on chat_model_class
     formatter_model_class = getattr(

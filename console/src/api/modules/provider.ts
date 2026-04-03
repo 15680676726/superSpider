@@ -17,7 +17,7 @@ export const providerApi = {
   listProviders: () => request<ProviderInfo[]>("/models"),
 
   configureProvider: (providerId: string, body: ProviderConfigRequest) =>
-    request<ProviderInfo>(`/models/${encodeURIComponent(providerId)}/config`, {
+    request<ProviderInfo>(`/providers/admin/${encodeURIComponent(providerId)}/config`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
@@ -25,7 +25,7 @@ export const providerApi = {
   getActiveModels: () => request<ActiveModelsInfo>("/models/active"),
 
   setActiveLlm: (body: ModelSlotRequest) =>
-    request<ActiveModelsInfo>("/models/active", {
+    request<ActiveModelsInfo>("/providers/admin/active", {
       method: "PUT",
       body: JSON.stringify(body),
     }),
@@ -34,7 +34,7 @@ export const providerApi = {
     request<ProviderFallbackConfig>("/models/fallback"),
 
   setProviderFallback: (body: ProviderFallbackConfig) =>
-    request<ProviderFallbackConfig>("/models/fallback", {
+    request<ProviderFallbackConfig>("/providers/admin/fallback", {
       method: "PUT",
       body: JSON.stringify(body),
     }),
@@ -42,28 +42,28 @@ export const providerApi = {
   /* ---- Custom provider CRUD ---- */
 
   createCustomProvider: (body: CreateCustomProviderRequest) =>
-    request<ProviderInfo>("/models/custom-providers", {
+    request<ProviderInfo>("/providers/admin/custom-providers", {
       method: "POST",
       body: JSON.stringify(body),
     }),
 
   deleteCustomProvider: (providerId: string) =>
     request<ProviderInfo[]>(
-      `/models/custom-providers/${encodeURIComponent(providerId)}`,
+      `/providers/admin/custom-providers/${encodeURIComponent(providerId)}`,
       { method: "DELETE" },
     ),
 
   /* ---- Model CRUD (works for both built-in and custom providers) ---- */
 
   addModel: (providerId: string, body: AddModelRequest) =>
-    request<ProviderInfo>(`/models/${encodeURIComponent(providerId)}/models`, {
+    request<ProviderInfo>(`/providers/admin/${encodeURIComponent(providerId)}/models`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
 
   removeModel: (providerId: string, modelId: string) =>
     request<ProviderInfo>(
-      `/models/${encodeURIComponent(providerId)}/models/${encodeURIComponent(
+      `/providers/admin/${encodeURIComponent(providerId)}/models/${encodeURIComponent(
         modelId,
       )}`,
       { method: "DELETE" },
@@ -91,7 +91,7 @@ export const providerApi = {
 
   discoverModels: (providerId: string, body?: TestProviderRequest) =>
     request<DiscoverModelsResponse>(
-      `/models/${encodeURIComponent(providerId)}/discover`,
+      `/providers/admin/${encodeURIComponent(providerId)}/discover`,
       {
         method: "POST",
         body: body ? JSON.stringify(body) : undefined,

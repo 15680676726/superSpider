@@ -28,6 +28,21 @@ from copaw.kernel.main_brain_turn_result import MainBrainCommitState
 from copaw.memory.conversation_compaction_service import ConversationCompactionService
 from copaw.media import MediaService
 from copaw.app.runtime_center.overview_cards import _RuntimeCenterOverviewCardsSupport
+from copaw.app.runtime_center.models import (
+    RuntimeCenterAppStateView,
+    RuntimeCenterSurfaceResponse,
+    RuntimeCenterSurfaceInfo,
+    RuntimeMainBrainFocusedAssignmentPlan,
+    RuntimeMainBrainGovernancePayload,
+    RuntimeMainBrainPlanningDecision,
+    RuntimeMainBrainPlanningPayload,
+    RuntimeMainBrainReplanPayload,
+    RuntimeMainBrainResponse,
+    RuntimeOverviewResponse,
+    RuntimePlanningShell,
+    RuntimeQueryRuntimeEntropyPayload,
+)
+from copaw.app.runtime_center.service import RuntimeCenterQueryService
 from copaw.app.routers.runtime_center_shared import _encode_sse_event
 from copaw.state import SQLiteStateStore
 from copaw.state import MediaAnalysisRecord
@@ -118,6 +133,244 @@ def test_runtime_center_overview_support_inherits_entry_builder_mixin() -> None:
         _RuntimeCenterOverviewCardsSupport._build_industry_entry.__module__
         == "copaw.app.runtime_center.overview_entry_builders"
     )
+
+
+def test_runtime_main_brain_response_coerces_typed_planning_and_entropy_contracts() -> None:
+    payload = RuntimeMainBrainResponse.model_validate(
+        {
+            "surface": RuntimeCenterSurfaceInfo(
+                status="state-service",
+                source="runtime-center-test",
+            ).model_dump(mode="json"),
+            "main_brain_planning": {
+                "is_truth_store": False,
+                "source": "industry-runtime-read-model",
+                "strategy_constraints": {
+                    "planning_policy": ["prefer-followup-before-net-new"],
+                },
+                "latest_cycle_decision": {
+                    "summary": "Cycle shell for Runtime Center.",
+                    "planning_shell": {
+                        "mode": "cycle-planning-shell",
+                        "scope": "operating-cycle",
+                        "plan_id": "cycle:1",
+                        "resume_key": "industry:industry-v1-ops:cycle-1",
+                        "fork_key": "cycle:daily",
+                        "verify_reminder": "Verify cycle lane pressure before materializing assignments.",
+                    },
+                },
+                "focused_assignment_plan": {
+                    "summary": "Assignment shell keeps the browser follow-up on the same control thread.",
+                    "planning_shell": {
+                        "mode": "assignment-planning-shell",
+                        "scope": "assignment",
+                        "plan_id": "assignment:1",
+                        "resume_key": "assignment:assignment-1",
+                        "fork_key": "assignment:followup",
+                        "verify_reminder": "Verify browser evidence before closing the assignment.",
+                    },
+                },
+                "replan": {
+                    "status": "needs-replan",
+                    "decision_kind": "lane_reweight",
+                    "summary": "Replan shell is waiting for main-brain judgment.",
+                    "planning_shell": {
+                        "mode": "report-replan-shell",
+                        "scope": "report-replan",
+                        "plan_id": "report:1",
+                        "resume_key": "report:report-1",
+                        "fork_key": "decision:lane_reweight",
+                        "verify_reminder": "Verify synthesis pressure before mutating planning truth.",
+                    },
+                },
+            },
+            "governance": {
+                "status": "blocked",
+                "summary": "Compaction is degraded.",
+                "route": "/api/runtime-center/governance/status",
+                "query_runtime_entropy": {
+                    "status": "degraded",
+                    "runtime_entropy": {
+                        "status": "degraded",
+                        "carry_forward_contract": "canonical-state-only",
+                    },
+                    "compaction_state": {
+                        "mode": "microcompact",
+                    },
+                    "tool_result_budget": {
+                        "remaining_budget": 600,
+                    },
+                    "tool_use_summary": {
+                        "artifact_refs": ["artifact://tool-result-1"],
+                    },
+                    "sidecar_memory": {
+                        "status": "degraded",
+                    },
+                },
+            },
+        },
+    )
+
+    assert isinstance(payload.main_brain_planning, RuntimeMainBrainPlanningPayload)
+    assert isinstance(
+        payload.main_brain_planning.latest_cycle_decision,
+        RuntimeMainBrainPlanningDecision,
+    )
+    assert isinstance(
+        payload.main_brain_planning.latest_cycle_decision.planning_shell,
+        RuntimePlanningShell,
+    )
+    assert isinstance(
+        payload.main_brain_planning.focused_assignment_plan,
+        RuntimeMainBrainFocusedAssignmentPlan,
+    )
+    assert isinstance(
+        payload.main_brain_planning.replan,
+        RuntimeMainBrainReplanPayload,
+    )
+    assert isinstance(
+        payload.main_brain_planning.replan.planning_shell,
+        RuntimePlanningShell,
+    )
+    assert isinstance(payload.governance, RuntimeMainBrainGovernancePayload)
+    assert isinstance(
+        payload.governance.query_runtime_entropy,
+        RuntimeQueryRuntimeEntropyPayload,
+    )
+    assert (
+        payload.governance.query_runtime_entropy.runtime_entropy["carry_forward_contract"]
+        == "canonical-state-only"
+    )
+
+
+def test_runtime_center_overview_routes_use_prebound_query_service() -> None:
+    app = build_runtime_center_app()
+    calls: list[str] = []
+
+    class _StubRuntimeCenterQueryService:
+        async def get_overview(self, app_state):
+            assert isinstance(app_state, RuntimeCenterAppStateView)
+            calls.append("overview")
+            return RuntimeOverviewResponse(
+                surface=RuntimeCenterSurfaceInfo(
+                    status="state-service",
+                    source="stub-query-service",
+                ),
+                cards=[],
+            )
+
+        async def get_main_brain(self, app_state):
+            assert isinstance(app_state, RuntimeCenterAppStateView)
+            calls.append("main-brain")
+            return RuntimeMainBrainResponse(
+                surface=RuntimeCenterSurfaceInfo(
+                    status="state-service",
+                    source="stub-query-service",
+                ),
+            )
+
+        async def get_surface(self, app_state):
+            assert isinstance(app_state, RuntimeCenterAppStateView)
+            calls.append("surface")
+            return RuntimeCenterSurfaceResponse(
+                surface=RuntimeCenterSurfaceInfo(
+                    status="state-service",
+                    source="stub-query-service",
+                ),
+                cards=[],
+                main_brain=RuntimeMainBrainResponse(
+                    surface=RuntimeCenterSurfaceInfo(
+                        status="state-service",
+                        source="stub-query-service",
+                    ),
+                ),
+            )
+
+    app.state.runtime_center_query_service = _StubRuntimeCenterQueryService()
+
+    client = TestClient(app)
+    overview_response = client.get("/runtime-center/overview")
+    surface_response = client.get("/runtime-center/surface")
+    main_brain_response = client.get("/runtime-center/main-brain")
+
+    assert overview_response.status_code == 200
+    assert surface_response.status_code == 200
+    assert main_brain_response.status_code == 200
+    assert calls == ["overview", "surface", "main-brain"]
+
+
+def test_runtime_center_query_service_accepts_prebuilt_state_view() -> None:
+    class _StubOverviewBuilder:
+        def __init__(self) -> None:
+            self.cards_calls: list[RuntimeCenterAppStateView] = []
+            self.main_brain_calls: list[RuntimeCenterAppStateView] = []
+
+        async def build_cards(self, app_state: RuntimeCenterAppStateView):
+            self.cards_calls.append(app_state)
+            return []
+
+        async def build_main_brain_payload(self, app_state: RuntimeCenterAppStateView):
+            self.main_brain_calls.append(app_state)
+            return RuntimeMainBrainResponse(
+                surface=RuntimeCenterSurfaceInfo(
+                    status="state-service",
+                    source="stub-query-service",
+                ),
+            )
+
+    app = build_runtime_center_app()
+    builder = _StubOverviewBuilder()
+    service = RuntimeCenterQueryService(overview_builder=builder)
+    runtime_state = RuntimeCenterAppStateView.from_object(app.state)
+
+    overview = asyncio.run(service.get_overview(runtime_state))
+    main_brain = asyncio.run(service.get_main_brain(runtime_state))
+
+    assert overview.cards == []
+    assert overview.surface.status == "unavailable"
+    assert main_brain.surface.source == "stub-query-service"
+    assert builder.cards_calls == [runtime_state]
+    assert builder.main_brain_calls == [runtime_state]
+
+
+def test_runtime_center_query_service_prefers_canonical_surface_builder() -> None:
+    class _StubOverviewBuilder:
+        def __init__(self) -> None:
+            self.surface_calls: list[RuntimeCenterAppStateView] = []
+
+        async def build_surface_payload(self, app_state: RuntimeCenterAppStateView):
+            self.surface_calls.append(app_state)
+            return RuntimeCenterSurfaceResponse(
+                surface=RuntimeCenterSurfaceInfo(
+                    status="state-service",
+                    source="stub-canonical-surface",
+                ),
+                cards=[],
+                main_brain=RuntimeMainBrainResponse(
+                    surface=RuntimeCenterSurfaceInfo(
+                        status="state-service",
+                        source="stub-canonical-surface",
+                    ),
+                ),
+            )
+
+        async def build_cards(self, app_state: RuntimeCenterAppStateView):
+            raise AssertionError("surface should not be glued from build_cards")
+
+        async def build_main_brain_payload(self, app_state: RuntimeCenterAppStateView):
+            raise AssertionError("surface should not be glued from build_main_brain_payload")
+
+    app = build_runtime_center_app()
+    builder = _StubOverviewBuilder()
+    service = RuntimeCenterQueryService(overview_builder=builder)
+    runtime_state = RuntimeCenterAppStateView.from_object(app.state)
+
+    surface = asyncio.run(service.get_surface(runtime_state))
+
+    assert surface.surface.source == "stub-canonical-surface"
+    assert surface.main_brain is not None
+    assert surface.main_brain.surface.source == "stub-canonical-surface"
+    assert builder.surface_calls == [runtime_state]
 
 
 def _build_media_service() -> MediaService:
@@ -438,6 +691,60 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
         cards["patches"]["entries"][0]["actions"]["apply"]
         == "/api/runtime-center/learning/patches/patch-1/apply"
     )
+
+
+def test_runtime_center_surface_route_uses_one_canonical_surface_contract():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.prediction_service = FakePredictionService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/surface")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["surface"]["status"] == "state-service"
+    assert payload["main_brain"]["surface"] == payload["surface"]
+
+
+def test_runtime_center_main_brain_route_does_not_fabricate_strategy_or_carrier_from_overview_entry():
+    class _NoDetailIndustryService(FakeIndustryService):
+        def get_instance_detail(self, instance_id: str):
+            _ = instance_id
+            return None
+
+    class _NoStrategyMemoryService:
+        async def list_strategies(self, limit: int | None = 5):
+            _ = limit
+            return []
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = _NoDetailIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = _NoStrategyMemoryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/main-brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"]["industry_instance_id"] == "industry-v1-ops"
+    assert payload["strategy"] == {}
+    assert payload["carrier"] == {}
 
 
 def test_runtime_center_main_brain_route_exposes_industry_stats():

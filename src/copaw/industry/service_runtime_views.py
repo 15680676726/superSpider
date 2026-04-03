@@ -175,11 +175,6 @@ class _IndustryRuntimeViewsMixin:
             if isinstance(current_backlog, dict)
             else None
         )
-        current_focus_title = (
-            _string(execution.current_focus)
-            if execution is not None
-            else None
-        )
         if (
             selected_assignment_id is None
             and selected_backlog_item_id is None
@@ -188,11 +183,6 @@ class _IndustryRuntimeViewsMixin:
         ):
             current_backlog = report_followup_backlog
             current_backlog_id = _string(current_backlog.get("backlog_item_id"))
-            current_focus_title = (
-                _string(current_backlog.get("title"))
-                or _string(current_backlog.get("summary"))
-                or current_focus_title
-            )
         current_backlog_status = (
             _string(current_backlog.get("status"))
             if isinstance(current_backlog, dict)
@@ -215,62 +205,16 @@ class _IndustryRuntimeViewsMixin:
             and _string(current_assignment.get("backlog_item_id")) == current_backlog_id
             and current_assignment_status not in {"blocked", "cancelled", "completed", "failed"}
         )
-        assignment_backlog_live = (
-            assignment_backlog_attached
-            and current_backlog_status in {"open", "selected", "materialized"}
-        )
         current_focus_title = (
-            (
-                _string(current_assignment.get("title"))
-                or _string(current_assignment.get("summary"))
-                if assignment_backlog_live
-                else None
-            )
-            or (
-                _string(current_backlog.get("title"))
-                or _string(current_backlog.get("summary"))
-                if isinstance(current_backlog, dict)
-                else None
-            )
-            or (
-                _string(execution.current_focus)
-                if execution is not None
-                else None
-            )
+            _string(execution.current_focus)
+            if execution is not None
+            else None
         )
         current_focus_id = (
-            current_backlog_id
-            or (current_assignment_id if assignment_backlog_live else None)
-            or (
-                _string(execution.current_focus_id)
-                if execution is not None
-                else None
-            )
+            _string(execution.current_focus_id)
+            if execution is not None
+            else None
         )
-        selection_assignment_live = (
-            selected_assignment_id is not None
-            and current_assignment_id == selected_assignment_id
-            and isinstance(current_assignment, dict)
-        )
-        selection_backlog_live = (
-            selected_backlog_item_id is not None
-            and current_backlog_id == selected_backlog_item_id
-            and isinstance(current_backlog, dict)
-        )
-        if selection_assignment_live:
-            current_focus_title = (
-                _string(current_assignment.get("title"))
-                or _string(current_assignment.get("summary"))
-                or current_focus_title
-            )
-            current_focus_id = current_assignment_id or current_focus_id
-        elif selection_backlog_live:
-            current_focus_title = (
-                _string(current_backlog.get("title"))
-                or _string(current_backlog.get("summary"))
-                or current_focus_title
-            )
-            current_focus_id = current_backlog_id or current_focus_id
         if (
             selected_assignment_id is None
             and selected_backlog_item_id is None
@@ -284,12 +228,6 @@ class _IndustryRuntimeViewsMixin:
         ):
             current_backlog = open_backlog_items[0]
             current_backlog_id = _string(current_backlog.get("backlog_item_id"))
-            current_focus_title = (
-                _string(current_backlog.get("title"))
-                or _string(current_backlog.get("summary"))
-                or current_focus_title
-            )
-            current_focus_id = current_backlog_id or current_focus_id
         return {
             "current_assignment": current_assignment,
             "current_assignment_id": current_assignment_id,
@@ -1975,48 +1913,16 @@ class _IndustryRuntimeViewsMixin:
             ),
             None,
         )
-        fallback_goal = self._resolve_execution_core_goal(goals) or next(
-            (goal for goal in goals if _string(goal.get("status")) == "active"),
-            waiting_confirm_goal or (goals[0] if goals else None),
-        )
         focus_task = self._pick_execution_focus_task(tasks)
         if focus_task is None:
             if autonomy_status == "learning":
-                pending_goal = fallback_goal or waiting_confirm_goal
-                fallback_owner_agent_id = (
-                    _string(pending_goal.get("owner_agent_id"))
-                    if isinstance(pending_goal, dict)
-                    else None
-                )
-                fallback_owner = (
-                    agents_by_id.get(fallback_owner_agent_id)
-                    if fallback_owner_agent_id is not None
-                    else None
-                )
                 return IndustryExecutionSummary(
                     status="learning",
-                    current_focus_id=(
-                        _string(pending_goal.get("goal_id"))
-                        if isinstance(pending_goal, dict)
-                        else None
-                    ),
-                    current_focus=(
-                        _string(pending_goal.get("title"))
-                        if isinstance(pending_goal, dict)
-                        else None
-                    ),
-                    current_owner_agent_id=fallback_owner_agent_id,
-                    current_owner=(
-                        _string(fallback_owner.get("role_name"))
-                        or _string(fallback_owner.get("name"))
-                        if isinstance(fallback_owner, dict)
-                        else None
-                    ),
-                    current_risk=(
-                        _string(fallback_owner.get("risk_level"))
-                        if isinstance(fallback_owner, dict)
-                        else None
-                    ),
+                    current_focus_id=None,
+                    current_focus=None,
+                    current_owner_agent_id=None,
+                    current_owner=None,
+                    current_risk=None,
                     evidence_count=len(evidence),
                     latest_evidence_summary=self._evidence_summary(latest_evidence),
                     next_step="系统正在补齐行业学习材料，完成后会自动转入执行阶段。",
@@ -2026,49 +1932,16 @@ class _IndustryRuntimeViewsMixin:
                             if isinstance(latest_evidence, dict)
                             else None
                         )
-                        or (
-                            pending_goal.get("updated_at")
-                            if isinstance(pending_goal, dict)
-                            else None
-                        ),
                     ),
                 )
             if autonomy_status == "coordinating":
-                pending_goal = fallback_goal or waiting_confirm_goal
-                fallback_owner_agent_id = (
-                    _string(pending_goal.get("owner_agent_id"))
-                    if isinstance(pending_goal, dict)
-                    else None
-                )
-                fallback_owner = (
-                    agents_by_id.get(fallback_owner_agent_id)
-                    if fallback_owner_agent_id is not None
-                    else None
-                )
                 return IndustryExecutionSummary(
                     status="coordinating",
-                    current_focus_id=(
-                        _string(pending_goal.get("goal_id"))
-                        if isinstance(pending_goal, dict)
-                        else None
-                    ),
-                    current_focus=(
-                        _string(pending_goal.get("title"))
-                        if isinstance(pending_goal, dict)
-                        else None
-                    ),
-                    current_owner_agent_id=fallback_owner_agent_id,
-                    current_owner=(
-                        _string(fallback_owner.get("role_name"))
-                        or _string(fallback_owner.get("name"))
-                        if isinstance(fallback_owner, dict)
-                        else None
-                    ),
-                    current_risk=(
-                        _string(fallback_owner.get("risk_level"))
-                        if isinstance(fallback_owner, dict)
-                        else None
-                    ),
+                    current_focus_id=None,
+                    current_focus=None,
+                    current_owner_agent_id=None,
+                    current_owner=None,
+                    current_risk=None,
                     evidence_count=len(evidence),
                     latest_evidence_summary=self._evidence_summary(latest_evidence),
                     next_step="主脑正在协调执行位与 backlog，命中条件后会自动继续执行。",
@@ -2078,11 +1951,6 @@ class _IndustryRuntimeViewsMixin:
                             if isinstance(latest_evidence, dict)
                             else None
                         )
-                        or (
-                            pending_goal.get("updated_at")
-                            if isinstance(pending_goal, dict)
-                            else None
-                        ),
                     ),
                 )
             if (
@@ -2090,29 +1958,20 @@ class _IndustryRuntimeViewsMixin:
                 or waiting_confirm_goal is not None
                 or waiting_confirm_agent is not None
             ):
-                pending_goal = waiting_confirm_goal or fallback_goal
                 fallback_owner_agent_id = (
-                    _string(pending_goal.get("owner_agent_id"))
-                    if isinstance(pending_goal, dict)
+                    _string(waiting_confirm_agent.get("agent_id"))
+                    if isinstance(waiting_confirm_agent, dict)
                     else None
                 )
                 fallback_owner = (
                     agents_by_id.get(fallback_owner_agent_id)
                     if fallback_owner_agent_id is not None
-                    else waiting_confirm_agent
+                    else None
                 )
                 return IndustryExecutionSummary(
                     status="waiting-confirm",
-                    current_focus_id=(
-                        _string(pending_goal.get("goal_id"))
-                        if isinstance(pending_goal, dict)
-                        else None
-                    ),
-                    current_focus=(
-                        _string(pending_goal.get("title"))
-                        if isinstance(pending_goal, dict)
-                        else None
-                    ),
+                    current_focus_id=None,
+                    current_focus=None,
                     current_owner_agent_id=fallback_owner_agent_id,
                     current_owner=(
                         _string(fallback_owner.get("role_name"))
@@ -2135,11 +1994,6 @@ class _IndustryRuntimeViewsMixin:
                             if isinstance(latest_evidence, dict)
                             else None
                         )
-                        or (
-                            pending_goal.get("updated_at")
-                            if isinstance(pending_goal, dict)
-                            else None
-                        ),
                     ),
                 )
             return IndustryExecutionSummary(
@@ -2151,11 +2005,7 @@ class _IndustryRuntimeViewsMixin:
                 current_risk=None,
                 evidence_count=len(evidence),
                 latest_evidence_summary=self._evidence_summary(latest_evidence),
-                next_step=(
-                    "当前未自动续跑，等待手动触发或计划触发。"
-                    if fallback_goal is not None
-                    else "当前还没有可执行任务。"
-                ),
+                next_step="当前没有可继续的执行链。",
                 updated_at=_parse_datetime(
                     latest_evidence.get("created_at")
                     if isinstance(latest_evidence, dict)
@@ -2166,14 +2016,9 @@ class _IndustryRuntimeViewsMixin:
         task_payload = _mapping(focus_task.get("task"))
         runtime_payload = _mapping(focus_task.get("runtime"))
         focus_state = self._derive_execution_task_state(focus_task)
-        task_goal_id = _string(task_payload.get("goal_id"))
-        goal_focus = goals_by_id.get(task_goal_id) if task_goal_id is not None else None
-        if goal_focus is None:
-            goal_focus = fallback_goal
         owner_agent_id = (
             _string(runtime_payload.get("last_owner_agent_id"))
             or _string(task_payload.get("owner_agent_id"))
-            or (_string(goal_focus.get("owner_agent_id")) if isinstance(goal_focus, dict) else None)
         )
         owner_payload = agents_by_id.get(owner_agent_id) if owner_agent_id is not None else None
         latest_evidence_id = _string(focus_task.get("latest_evidence_id"))
@@ -2193,6 +2038,8 @@ class _IndustryRuntimeViewsMixin:
             ),
         )
         focus_status = str(focus_state["status"])
+        runtime_focus_id = _string(runtime_payload.get("current_focus_id"))
+        runtime_focus = _string(runtime_payload.get("current_focus"))
         if focus_status == "idle" and autonomy_status in {"learning", "coordinating"}:
             next_step = (
                 "系统正在补齐行业学习材料，完成后会自动转入执行阶段。"
@@ -2201,16 +2048,8 @@ class _IndustryRuntimeViewsMixin:
             )
             return IndustryExecutionSummary(
                 status=autonomy_status,
-                current_focus_id=(
-                    _string(goal_focus.get("goal_id"))
-                    if isinstance(goal_focus, dict)
-                    else task_goal_id
-                ),
-                current_focus=(
-                    _string(goal_focus.get("title"))
-                    if isinstance(goal_focus, dict)
-                    else None
-                ),
+                current_focus_id=runtime_focus_id,
+                current_focus=runtime_focus,
                 current_owner_agent_id=owner_agent_id,
                 current_owner=(
                     _string(owner_payload.get("role_name"))
@@ -2240,8 +2079,8 @@ class _IndustryRuntimeViewsMixin:
             )
         return IndustryExecutionSummary(
             status=focus_status,
-            current_focus_id=_string(goal_focus.get("goal_id")) if isinstance(goal_focus, dict) else task_goal_id,
-            current_focus=_string(goal_focus.get("title")) if isinstance(goal_focus, dict) else None,
+            current_focus_id=runtime_focus_id,
+            current_focus=runtime_focus,
             current_owner_agent_id=owner_agent_id,
             current_owner=(
                 _string(owner_payload.get("role_name"))
@@ -2262,7 +2101,6 @@ class _IndustryRuntimeViewsMixin:
             latest_evidence_summary=self._evidence_summary(latest_task_evidence),
             next_step=self._execution_next_step(
                 status=str(focus_state["status"]),
-                goal_focus=goal_focus,
             ),
             current_task_id=_string(task_payload.get("id")),
             current_task_route=_string(focus_task.get("route")),
@@ -3230,14 +3068,6 @@ class _IndustryRuntimeViewsMixin:
             selected_backlog_item_id=selected_backlog_item_id,
         )
         live_focus_title = _string(live_focus.get("current_focus_title"))
-        live_focus_id = _string(live_focus.get("current_focus_id"))
-        if execution is not None and live_focus_title:
-            execution = execution.model_copy(
-                update={
-                    "current_focus": live_focus_title,
-                    "current_focus_id": live_focus_id or execution.current_focus_id,
-                },
-            )
 
         focused_assignment = (
             next(
@@ -3750,7 +3580,6 @@ class _IndustryRuntimeViewsMixin:
         self,
         *,
         status: str,
-        goal_focus: dict[str, Any] | None,
     ) -> str:
         if status == "waiting-verification":
             return "等待用户完成验证码、短信、设备确认或其他人工验证后继续。"
@@ -3764,6 +3593,4 @@ class _IndustryRuntimeViewsMixin:
             return "先处理失败原因，再决定重试、改派或终止。"
         if status == "executing":
             return "继续当前执行，并把关键动作和证据持续回写。"
-        if goal_focus is not None:
-            return "当前未自动续跑，等待手动触发目标或计划触发。"
         return "当前没有可继续的执行链。"

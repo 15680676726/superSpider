@@ -35,6 +35,10 @@ from ..memory import (
 )
 from ..predictions import PredictionService
 from ..providers.provider_manager import ProviderManager
+from ..providers.runtime_provider_facade import (
+    ProviderRuntimeFacade,
+    get_runtime_provider_facade,
+)
 from ..routines import RoutineService
 from ..sop_kernel import FixedSopService
 from ..state import SQLiteStateStore
@@ -159,8 +163,16 @@ def _resolve_state_store() -> SQLiteStateStore:
     return SQLiteStateStore(WORKING_DIR / "state" / "phase1.sqlite3")
 
 
-def _resolve_provider_manager() -> ProviderManager:
+def _resolve_compatibility_provider_manager() -> ProviderManager:
     return ProviderManager.get_instance()
+
+
+def _resolve_runtime_provider_facade(
+    compatibility_provider_manager: ProviderManager,
+) -> ProviderRuntimeFacade:
+    return get_runtime_provider_facade(
+        provider_manager=compatibility_provider_manager,
+    )
 
 
 def _build_runtime_observability(
@@ -308,7 +320,10 @@ def build_runtime_bootstrap(
         runtime_event_bus=runtime_event_bus,
     )
 
-    provider_manager = _resolve_provider_manager()
+    compatibility_provider_manager = _resolve_compatibility_provider_manager()
+    runtime_provider = _resolve_runtime_provider_facade(
+        compatibility_provider_manager,
+    )
     (
         state_query_service,
         evidence_query_service,
@@ -362,7 +377,7 @@ def build_runtime_bootstrap(
         evidence_ledger=evidence_ledger,
         environment_service=environment_service,
         runtime_event_bus=runtime_event_bus,
-        provider_manager=provider_manager,
+        runtime_provider=runtime_provider,
         state_query_service=state_query_service,
         strategy_memory_service=strategy_memory_service,
         knowledge_service=knowledge_service,
@@ -440,7 +455,7 @@ def build_runtime_bootstrap(
         environment_service=environment_service,
         runtime_event_bus=runtime_event_bus,
         runtime_health_service=runtime_health_service,
-        provider_manager=provider_manager,
+        runtime_provider=runtime_provider,
         state_query_service=state_query_service,
         evidence_query_service=evidence_query_service,
         human_assist_task_service=human_assist_task_service,

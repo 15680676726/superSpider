@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   RuntimeCenterSurfaceInfo,
+  RuntimeMainBrainMeta,
+  RuntimeMainBrainPlanning,
+  RuntimeMainBrainQueryRuntimeEntropy,
   RuntimeMainBrainResponse,
 } from "../../api/modules/runtimeCenter";
 import type { RuntimeCenterOverviewPayload } from "./useRuntimeCenter";
@@ -47,6 +50,7 @@ const overviewPayload: RuntimeCenterOverviewPayload = {
 const dedicatedPayload: RuntimeMainBrainResponse = {
   generated_at: "2026-03-29T09:05:00Z",
   surface,
+  main_brain_planning: {},
   strategy: {},
   carrier: {},
   lanes: [],
@@ -80,6 +84,68 @@ const dedicatedPayload: RuntimeMainBrainResponse = {
     },
   },
   meta: { control_chain: [] },
+};
+
+const unifiedPlanning: RuntimeMainBrainPlanning = {
+  strategy_constraints: {
+    planning_policy: ["prefer-followup-before-net-new"],
+    strategic_uncertainties: [{ uncertainty_id: "uncertainty-followup-pressure" }],
+    lane_budgets: [{ lane_id: "lane-ops", budget: 2 }],
+  },
+  latest_cycle_decision: {
+    cycle_id: "cycle-9",
+    summary: "Cycle shell for Runtime Center.",
+    selected_backlog_item_ids: ["backlog-followup-1"],
+    selected_assignment_ids: ["assignment-1"],
+    planning_shell: {
+      verify_reminder: "Verify cycle lane pressure before materializing assignments.",
+      resume_key: "industry:industry-v1-ops:cycle-9",
+      fork_key: "cycle:daily",
+    },
+  },
+  focused_assignment_plan: {
+    summary: "Assignment shell keeps the browser follow-up on the same control thread.",
+    checkpoints: [{ kind: "verify", label: "Verify browser evidence." }],
+    acceptance_criteria: ["Browser evidence captured and linked."],
+    planning_shell: {
+      verify_reminder: "Verify browser evidence before closing the assignment.",
+      resume_key: "assignment:assignment-1",
+      fork_key: "assignment:followup",
+    },
+  },
+  replan: {
+    status: "needs-replan",
+    decision_kind: "lane_reweight",
+    summary: "Replan shell is waiting for main-brain judgment.",
+    strategy_trigger_rules: [
+      { rule_id: "review-rule:0" },
+      { rule_id: "uncertainty:uncertainty-followup-pressure:confidence-drop" },
+    ],
+    uncertainty_register: {
+      summary: {
+        uncertainty_count: 1,
+        lane_budget_count: 1,
+        trigger_rule_count: 2,
+      },
+      items: [{ uncertainty_id: "uncertainty-followup-pressure" }],
+    },
+    planning_shell: {
+      verify_reminder: "Verify synthesis pressure before mutating planning truth.",
+      resume_key: "report:report-1",
+      fork_key: "decision:lane_reweight",
+    },
+  },
+};
+
+const unifiedMeta: RuntimeMainBrainMeta = {
+  control_chain: [
+    { key: "carrier", value: "Northwind Ops" },
+    { key: "strategy", value: "Northwind field operations strategy" },
+    { key: "report_cognition", value: "attention" },
+    { key: "governance", value: "blocked" },
+    { key: "automation", value: "active" },
+    { key: "recovery", value: "ready" },
+  ],
 };
 
 const unifiedPayload = {
@@ -129,58 +195,7 @@ const unifiedPayload = {
     focus_count: 2,
     next_cycle_due_at: "2026-03-31T23:59:59Z",
   },
-  main_brain_planning: {
-    strategy_constraints: {
-      planning_policy: ["prefer-followup-before-net-new"],
-      strategic_uncertainties: [
-        { uncertainty_id: "uncertainty-followup-pressure" },
-      ],
-      lane_budgets: [{ lane_id: "lane-ops", budget: 2 }],
-    },
-    latest_cycle_decision: {
-      cycle_id: "cycle-9",
-      summary: "Cycle shell for Runtime Center.",
-      selected_backlog_item_ids: ["backlog-followup-1"],
-      selected_assignment_ids: ["assignment-1"],
-      planning_shell: {
-        verify_reminder: "Verify cycle lane pressure before materializing assignments.",
-        resume_key: "industry:industry-v1-ops:cycle-9",
-        fork_key: "cycle:daily",
-      },
-    },
-    focused_assignment_plan: {
-      summary: "Assignment shell keeps the browser follow-up on the same control thread.",
-      checkpoints: [{ kind: "verify", label: "Verify browser evidence." }],
-      acceptance_criteria: ["Browser evidence captured and linked."],
-      planning_shell: {
-        verify_reminder: "Verify browser evidence before closing the assignment.",
-        resume_key: "assignment:assignment-1",
-        fork_key: "assignment:followup",
-      },
-    },
-    replan: {
-      status: "needs-replan",
-      decision_kind: "lane_reweight",
-      summary: "Replan shell is waiting for main-brain judgment.",
-      strategy_trigger_rules: [
-        { rule_id: "review-rule:0" },
-        { rule_id: "uncertainty:uncertainty-followup-pressure:confidence-drop" },
-      ],
-      uncertainty_register: {
-        summary: {
-          uncertainty_count: 1,
-          lane_budget_count: 1,
-          trigger_rule_count: 2,
-        },
-        items: [{ uncertainty_id: "uncertainty-followup-pressure" }],
-      },
-      planning_shell: {
-        verify_reminder: "Verify synthesis pressure before mutating planning truth.",
-        resume_key: "report:report-1",
-        fork_key: "decision:lane_reweight",
-      },
-    },
-  },
+  main_brain_planning: unifiedPlanning,
   assignments: [
     {
       assignment_id: "assignment-1",
@@ -394,18 +409,8 @@ const unifiedPayload = {
       status: "attention",
     },
   },
-  meta: {
-    report_cognition: undefined,
-    control_chain: [
-      { key: "carrier", value: "Northwind Ops" },
-      { key: "strategy", value: "Northwind field operations strategy" },
-      { key: "report_cognition", value: "attention" },
-      { key: "governance", value: "blocked" },
-      { key: "automation", value: "active" },
-      { key: "recovery", value: "ready" },
-    ],
-  },
-} as unknown as RuntimeMainBrainResponse;
+  meta: unifiedMeta,
+} satisfies RuntimeMainBrainResponse;
 
 function renderPanel(mainBrainData: RuntimeMainBrainResponse) {
   return render(
@@ -424,17 +429,86 @@ function renderPanel(mainBrainData: RuntimeMainBrainResponse) {
   );
 }
 
-function findSectionBlock(title: string): HTMLElement {
-  const heading = screen.getByRole("heading", { level: 3, name: title });
-  return heading.parentElement?.parentElement?.parentElement?.parentElement as HTMLElement;
-}
-
 describe("MainBrainCockpitPanel", () => {
   it("renders dedicated payload signals when available", () => {
     renderPanel(dedicatedPayload);
 
     expect(screen.getAllByText("Dedicated carrier value").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Dedicated strategy").length).toBeGreaterThan(0);
+  });
+
+  it("does not fall back to overview surface metadata when dedicated metadata is missing", () => {
+    render(
+      <MainBrainCockpitPanel
+        data={{
+          ...overviewPayload,
+          generated_at: "overview-generated-at",
+          surface: {
+            ...surface,
+            source: "overview-surface-source",
+            note: "Overview surface note should stay hidden",
+          },
+        }}
+        loading={false}
+        refreshing={false}
+        error="overview error should stay hidden"
+        mainBrainData={
+          {
+            ...dedicatedPayload,
+            generated_at: undefined,
+            surface: undefined,
+          } as unknown as RuntimeMainBrainResponse
+        }
+        mainBrainLoading={false}
+        mainBrainError={null}
+        mainBrainUnavailable={false}
+        onRefresh={vi.fn()}
+        onOpenRoute={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Overview surface note should stay hidden")).toBeNull();
+    expect(screen.queryByText("overview-surface-source")).toBeNull();
+    expect(screen.queryByText(/overview-generated-at/)).toBeNull();
+    expect(screen.queryByText(/overview error should stay hidden/)).toBeNull();
+  });
+
+  it("does not fall back to overview-assembled runtime facts when the dedicated payload is missing", () => {
+    render(
+      <MainBrainCockpitPanel
+        data={{
+          ...overviewPayload,
+          cards: [
+            {
+              key: "industry",
+              title: "Industry",
+              source: "state-service",
+              status: "state-service",
+              count: 1,
+              summary: "fallback overview",
+              entries: [],
+              meta: {
+                carrier: {
+                  value: "Fallback carrier",
+                },
+              },
+            },
+          ],
+        }}
+        loading={false}
+        refreshing={false}
+        error={null}
+        mainBrainData={null}
+        mainBrainLoading={false}
+        mainBrainError={null}
+        mainBrainUnavailable={true}
+        onRefresh={vi.fn()}
+        onOpenRoute={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("主脑驾驶舱暂未接入正式读面。")).toBeInTheDocument();
+    expect(screen.queryByText("Fallback carrier")).toBeNull();
   });
 
   it("renders unified operator sections from the dedicated cockpit payload", () => {
@@ -486,45 +560,51 @@ describe("MainBrainCockpitPanel", () => {
   });
 
   it("renders query runtime entropy visibility in the main-brain cockpit", () => {
+    const queryRuntimeEntropy: RuntimeMainBrainQueryRuntimeEntropy = {
+      status: "available",
+      runtime_entropy: {
+        status: "available",
+        sidecar_memory_status: "available",
+        carry_forward_contract: "private-compaction-sidecar",
+      },
+      sidecar_memory: {
+        status: "available",
+      },
+      compaction_state: {
+        mode: "microcompact",
+        summary: "Compacted 2 oversized tool results.",
+        spill_count: 1,
+        replacement_count: 2,
+      },
+      tool_result_budget: {
+        message_budget: 2400,
+        used_budget: 1800,
+        remaining_budget: 600,
+      },
+      tool_use_summary: {
+        summary: "2 tool results compacted into artifact previews.",
+        artifact_refs: [
+          "artifact://tool-result-1",
+          "artifact://tool-result-2",
+        ],
+      },
+    };
     const entropyPayload = {
       ...unifiedPayload,
       governance: {
         ...unifiedPayload.governance,
-        query_runtime_entropy: {
-          status: "available",
-          runtime_entropy: {
-            status: "available",
-            sidecar_memory_status: "available",
-            carry_forward_contract: "private-compaction-sidecar",
-          },
-          sidecar_memory: {
-            status: "available",
-          },
-          compaction_state: {
-            mode: "microcompact",
-            summary: "Compacted 2 oversized tool results.",
-            spill_count: 1,
-            replacement_count: 2,
-          },
-          tool_result_budget: {
-            message_budget: 2400,
-            used_budget: 1800,
-            remaining_budget: 600,
-          },
-          tool_use_summary: {
-            summary: "2 tool results compacted into artifact previews.",
-            artifact_refs: [
-              "artifact://tool-result-1",
-              "artifact://tool-result-2",
-            ],
-          },
-        },
+        query_runtime_entropy: queryRuntimeEntropy,
       },
-    } as unknown as RuntimeMainBrainResponse;
+    } satisfies RuntimeMainBrainResponse;
 
     renderPanel(entropyPayload);
 
-    const entropyBlock = screen.getAllByRole("heading", { level: 3, name: "Query runtime entropy" }).at(-1)?.parentElement?.parentElement?.parentElement?.parentElement as HTMLElement;
+    const entropyHeadings = screen.getAllByRole("heading", {
+      level: 3,
+      name: "Query runtime entropy",
+    });
+    const entropyBlock = entropyHeadings[entropyHeadings.length - 1]
+      ?.parentElement?.parentElement?.parentElement?.parentElement as HTMLElement;
     expect(within(entropyBlock).getAllByText("available").length).toBeGreaterThan(0);
     expect(within(entropyBlock).getByText("microcompact")).toBeInTheDocument();
     expect(
@@ -592,7 +672,7 @@ describe("MainBrainCockpitPanel", () => {
           },
         ],
       },
-    } as unknown as RuntimeMainBrainResponse;
+    } satisfies RuntimeMainBrainResponse;
 
     renderPanel(scopedPayload);
 
@@ -655,7 +735,7 @@ describe("MainBrainCockpitPanel", () => {
           },
         ],
       },
-    } as unknown as RuntimeMainBrainResponse;
+    } satisfies RuntimeMainBrainResponse;
 
     renderPanel(scopedPayload);
 

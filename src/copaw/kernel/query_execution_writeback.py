@@ -9,7 +9,7 @@ from agentscope.message import Msg, TextBlock
 from pydantic import BaseModel, Field
 
 from ..industry.chat_writeback import ChatWritebackPlan, build_chat_writeback_plan_from_payload
-from ..providers.provider_manager import ProviderManager
+from ..providers.runtime_provider_facade import get_runtime_provider_facade
 from .query_execution_intent_policy import (
     is_hypothetical_control_text as _is_hypothetical_control_text,
     looks_like_goal_setting_text as _looks_like_goal_setting_text,
@@ -960,7 +960,7 @@ async def resolve_chat_writeback_model_decision(
 
     heuristic = _heuristic_chat_writeback_model_decision(normalized)
     try:
-        model = ProviderManager.get_active_chat_model()
+        model = get_runtime_provider_facade().get_active_chat_model()
         response = await model(
             messages=_decision_messages(normalized),
             structured_model=_ChatWritebackModelDecision,

@@ -8,7 +8,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import copaw.providers.provider_manager as provider_manager_module
+from copaw.app.routers.providers import admin_router as providers_admin_router
 from copaw.app.routers.providers import router as providers_router
+from copaw.providers.provider import ProviderInfo
 from copaw.providers.provider_manager import ModelSlotConfig, ProviderManager
 
 
@@ -22,6 +24,7 @@ def isolated_secret_dir(monkeypatch, tmp_path: Path) -> Path:
 def build_client(manager: ProviderManager) -> TestClient:
     app = FastAPI()
     app.include_router(providers_router)
+    app.include_router(providers_admin_router)
     app.state.provider_manager = manager
     return TestClient(app)
 
@@ -77,7 +80,7 @@ def test_provider_fallback_api_round_trips_config(
     assert initial.json() == {"enabled": True, "candidates": []}
 
     updated = client.put(
-        "/models/fallback",
+        "/providers/admin/fallback",
         json={
             "enabled": True,
             "candidates": [
@@ -100,6 +103,7 @@ def test_provider_fallback_api_round_trips_config(
 
     assert fetched.status_code == 200
     assert fetched.json() == updated.json()
+    assert client.put("/models/fallback", json=updated.json()).status_code == 405
 
 
 @pytest.mark.parametrize(
@@ -124,7 +128,7 @@ def test_provider_fallback_api_rejects_invalid_candidates(
     client = build_client(manager)
 
     response = client.put(
-        "/models/fallback",
+        "/providers/admin/fallback",
         json={
             "enabled": True,
             "candidates": [candidate],
@@ -175,3 +179,61 @@ def test_provider_test_route_avoids_python_deepcopy_for_provider_clones() -> Non
         "success": True,
         "message": "Connection successful",
     }
+
+
+def test_provider_admin_config_route_uses_canonical_service() -> None:
+    calls: list[tuple[str, dict[str, str | None]]] = []
+
+    class _FakeProviderAdminService:
+        async def configure_provider(
+            self,
+            provider_id: str,
+            *,
+            api_key: str | None,
+            base_url: str | None,
+            chat_model: str | None,
+        ) -> ProviderInfo:
+            calls.append(
+                (
+                    provider_id,
+                    {
+                        "api_key": api_key,
+                        "base_url": base_url,
+                        "chat_model": chat_model,
+                    },
+                ),
+            )
+            return ProviderInfo(
+                id=provider_id,
+                name="OpenAI",
+                base_url=base_url or "",
+                api_key=api_key or "",
+                chat_model=chat_model or "OpenAIChatModel",
+            )
+
+    app = FastAPI()
+    app.include_router(providers_admin_router)
+    app.state.provider_admin_service = _FakeProviderAdminService()
+    client = TestClient(app)
+
+    response = client.put(
+        "/providers/admin/openai/config",
+        json={
+            "api_key": "sk-test",
+            "base_url": "https://example.test/v1",
+            "chat_model": "OpenAIChatModel",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "openai"
+    assert calls == [
+        (
+            "openai",
+            {
+                "api_key": "sk-test",
+                "base_url": "https://example.test/v1",
+                "chat_model": "OpenAIChatModel",
+            },
+        ),
+    ]

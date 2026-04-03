@@ -3,8 +3,9 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError } from "../../api/errors";
 import type {
+  RuntimeCenterSurfaceCard,
+  RuntimeCenterSurfaceResponse,
   RuntimeCenterSurfaceInfo,
   RuntimeMainBrainResponse,
 } from "../../api/modules/runtimeCenter";
@@ -25,9 +26,25 @@ const mockOverview = {
   cards: [],
 };
 
+function createAgentsCard(
+  ...entries: RuntimeCenterSurfaceCard["entries"]
+): RuntimeCenterSurfaceCard {
+  return {
+    key: "agents",
+    title: "Agents",
+    source: "agent_profile_service",
+    status: "state-service" as const,
+    count: entries.length,
+    summary: "agent roster",
+    entries,
+    meta: {},
+  };
+}
+
 const mockMainBrain: RuntimeMainBrainResponse = {
   generated_at: "2026-03-29T09:00:00Z",
   surface,
+  main_brain_planning: {},
   strategy: {},
   carrier: {},
   lanes: [],
@@ -45,67 +62,92 @@ const mockMainBrain: RuntimeMainBrainResponse = {
   decisions: { count: 0, summary: "", route: null, entries: [], meta: {} },
   patches: { count: 0, summary: "", route: null, entries: [], meta: {} },
   signals: {},
-  meta: {},
+  meta: { control_chain: [] },
 };
 
-const requestRuntimeOverviewMock = vi.fn();
-const requestRuntimeMainBrainMock = vi.fn();
-const requestRuntimeBusinessAgentsMock = vi.fn();
+const mockSurface = (
+  overrides?: Partial<RuntimeCenterSurfaceResponse>,
+): RuntimeCenterSurfaceResponse => ({
+  generated_at: mockOverview.generated_at,
+  surface,
+  cards: mockOverview.cards,
+  main_brain: mockMainBrain,
+  ...overrides,
+});
+
+const requestRuntimeSurfaceMock = vi.fn();
+let runtimeEventHandler:
+  | ((event: { event_name: string; payload: Record<string, unknown> }) => void)
+  | null = null;
 
 vi.mock("../../runtime/runtimeSurfaceClient", () => ({
   normalizeRuntimePath: vi.fn((path: string) => path),
-  requestRuntimeOverview: () => requestRuntimeOverviewMock(),
+  requestRuntimeSurface: () => requestRuntimeSurfaceMock(),
   requestRuntimeRecord: vi.fn(),
-  requestRuntimeBusinessAgents: () => requestRuntimeBusinessAgentsMock(),
-  requestRuntimeMainBrain: () => requestRuntimeMainBrainMock(),
 }));
 
 vi.mock("../../runtime/eventBus", () => ({
-  subscribe: vi.fn(() => () => {}),
+  subscribe: vi.fn((_topic: string, handler: typeof runtimeEventHandler) => {
+    runtimeEventHandler = handler;
+    return () => {
+      runtimeEventHandler = null;
+    };
+  }),
 }));
 
 describe("useRuntimeCenter", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    requestRuntimeBusinessAgentsMock.mockResolvedValue([]);
+    runtimeEventHandler = null;
+    requestRuntimeSurfaceMock.mockResolvedValue(mockSurface());
   });
 
-  it("loads both overview and dedicated main-brain payloads", async () => {
-    requestRuntimeOverviewMock.mockResolvedValue({
-      ...mockOverview,
-      cards: [
-        {
-          key: "main-brain",
-          title: "Main-Brain",
-          source: "state_query_service",
-          status: "state-service",
-          count: 1,
-          summary: "main brain",
-          entries: [],
-          meta: {},
-        },
-      ],
-    });
-    requestRuntimeMainBrainMock.mockResolvedValue(mockMainBrain);
-    requestRuntimeBusinessAgentsMock.mockResolvedValue([
-      {
-        agent_id: "copaw-agent-runner",
-        name: "Spider Mesh",
-      },
-      {
-        agent_id: "agent-ops-1",
-        name: "Closer Nine",
-      },
-    ]);
+  it("loads canonical surface once and derives business agents from overview cards", async () => {
+    let resolveSurface!: (value: RuntimeCenterSurfaceResponse) => void;
+    requestRuntimeSurfaceMock.mockReturnValue(
+      new Promise<RuntimeCenterSurfaceResponse>((resolve) => {
+        resolveSurface = resolve;
+      }),
+    );
 
     const { result } = renderHook(() => useRuntimeCenter());
 
-    await waitFor(
-      () =>
-        !result.current.loading &&
-        !result.current.mainBrainLoading &&
-        !result.current.businessAgentsLoading,
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+
+    resolveSurface(
+      mockSurface({
+        cards: [
+          createAgentsCard(
+            {
+              id: "copaw-agent-runner",
+              title: "Spider Mesh",
+              kind: "agent",
+              status: "active",
+              owner: "Execution Core",
+              summary: "System seat",
+              actions: {},
+              meta: {},
+            },
+            {
+              id: "agent-ops-1",
+              title: "Closer Nine",
+              kind: "agent",
+              status: "active",
+              owner: "Closer",
+              summary: "Closing backlog",
+              actions: {},
+              meta: {
+                current_focus_kind: "assignment",
+                current_focus_id: "assignment-1",
+                current_focus: "Close pipeline backlog",
+              },
+            },
+          ),
+        ],
+      }),
     );
+
+    await waitFor(() => !result.current.loading);
 
     expect(result.current.data).toEqual(
       expect.objectContaining({ surface: mockOverview.surface }),
@@ -113,23 +155,19 @@ describe("useRuntimeCenter", () => {
     expect(result.current.mainBrainData).toEqual(mockMainBrain);
     expect(result.current.mainBrainUnavailable).toBe(false);
     expect(result.current.mainBrainError).toBeNull();
-    expect(result.current.data?.cards.some((card) => card.key === "main-brain")).toBe(false);
     expect(result.current.businessAgents).toEqual([
       expect.objectContaining({
         agent_id: "agent-ops-1",
+        current_focus_kind: "assignment",
+        current_focus_id: "assignment-1",
+        current_focus: "Close pipeline backlog",
       }),
     ]);
     expect(result.current.businessAgentsError).toBeNull();
   });
 
-  it("falls back when the dedicated payload is unavailable (404)", async () => {
-    requestRuntimeOverviewMock.mockResolvedValue(mockOverview);
-    requestRuntimeMainBrainMock.mockRejectedValue(
-      new ApiError({
-        status: 404,
-        statusText: "Not Found",
-      }),
-    );
+  it("marks main-brain surface unavailable when canonical surface omits it", async () => {
+    requestRuntimeSurfaceMock.mockResolvedValue(mockSurface({ main_brain: null }));
 
     const { result } = renderHook(() => useRuntimeCenter());
 
@@ -145,10 +183,10 @@ describe("useRuntimeCenter", () => {
     expect(result.current.mainBrainError).toBeNull();
   });
 
-  it("filters retired goals, schedules, and main-brain overview cards while returning business agents", async () => {
-    requestRuntimeOverviewMock.mockResolvedValue({
-      ...mockOverview,
-      cards: [
+  it("filters retired goals, schedules, and main-brain overview cards while returning business agents from overview", async () => {
+    requestRuntimeSurfaceMock.mockResolvedValue(
+      mockSurface({
+        cards: [
         {
           key: "goals",
           title: "Goals",
@@ -179,6 +217,20 @@ describe("useRuntimeCenter", () => {
           entries: [],
           meta: {},
         },
+        createAgentsCard({
+          id: "agent-ops-2",
+          title: "Closer Nine",
+          kind: "agent",
+          status: "active",
+          owner: "Closer",
+          summary: "Working backlog",
+          actions: {},
+          meta: {
+            current_focus_kind: "backlog_item",
+            current_focus_id: "backlog-2",
+            current_focus: "Follow up warm leads",
+          },
+        }),
         {
           key: "tasks",
           title: "Tasks",
@@ -189,15 +241,9 @@ describe("useRuntimeCenter", () => {
           entries: [],
           meta: {},
         },
-      ],
-    });
-    requestRuntimeMainBrainMock.mockResolvedValue(mockMainBrain);
-    requestRuntimeBusinessAgentsMock.mockResolvedValue([
-      {
-        agent_id: "agent-ops-2",
-        name: "Closer Nine",
-      },
-    ]);
+        ],
+      }),
+    );
 
     const { result } = renderHook(() => useRuntimeCenter());
 
@@ -208,9 +254,108 @@ describe("useRuntimeCenter", () => {
         !result.current.businessAgentsLoading,
     );
 
-    expect(result.current.data?.cards.map((card) => card.key)).toEqual(["tasks"]);
+    expect(result.current.data?.cards.map((card) => card.key)).toEqual(["agents", "tasks"]);
     expect(result.current.businessAgents.map((agent) => agent.agent_id)).toEqual([
       "agent-ops-2",
     ]);
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes only the dedicated main-brain payload on main-brain events", async () => {
+    const { result } = renderHook(() => useRuntimeCenter());
+
+    await waitFor(
+      () =>
+        !result.current.loading &&
+        !result.current.mainBrainLoading &&
+        !result.current.businessAgentsLoading,
+    );
+
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    runtimeEventHandler?.({
+      event_name: "assignment.updated",
+      payload: { assignment_id: "assignment-1" },
+    });
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("refreshes only the canonical overview surface on heartbeat events", async () => {
+    const { result } = renderHook(() => useRuntimeCenter());
+
+    await waitFor(
+      () =>
+        !result.current.loading &&
+        !result.current.mainBrainLoading &&
+        !result.current.businessAgentsLoading,
+    );
+
+    vi.useFakeTimers();
+    runtimeEventHandler?.({
+      event_name: "runtime.heartbeat",
+      payload: {},
+    });
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("refreshes the canonical overview surface on agent events instead of calling the retired business-agent endpoint", async () => {
+    const { result } = renderHook(() => useRuntimeCenter());
+
+    await waitFor(
+      () =>
+        !result.current.loading &&
+        !result.current.mainBrainLoading &&
+        !result.current.businessAgentsLoading,
+    );
+
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    runtimeEventHandler?.({
+      event_name: "agent.updated",
+      payload: { agent_id: "agent-ops-2" },
+    });
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("coalesces mixed runtime events into one canonical surface reload per debounce window", async () => {
+    const { result } = renderHook(() => useRuntimeCenter());
+
+    await waitFor(
+      () =>
+        !result.current.loading &&
+        !result.current.mainBrainLoading &&
+        !result.current.businessAgentsLoading,
+    );
+
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    runtimeEventHandler?.({
+      event_name: "runtime.heartbeat",
+      payload: {},
+    });
+    runtimeEventHandler?.({
+      event_name: "agent.updated",
+      payload: { agent_id: "agent-ops-2" },
+    });
+    runtimeEventHandler?.({
+      event_name: "assignment.updated",
+      payload: { assignment_id: "assignment-1" },
+    });
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 });

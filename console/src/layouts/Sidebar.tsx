@@ -130,29 +130,29 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       children: [
         {
           key: "chat",
-          label: "聊天",
+          label: "聊天前台",
           icon: <MessageSquare size={16} />,
         },
       ],
     },
     {
       key: "runtime-group",
-      label: "运行",
+      label: "运行中心",
       icon: <Radar size={16} />,
       children: [
         {
           key: "runtime-center",
-          label: "运行中心",
+          label: "主脑驾驶舱",
           icon: <Radar size={16} />,
         },
         {
           key: "agents",
-          label: "智能体",
+          label: "执行位",
           icon: <Briefcase size={16} />,
         },
         {
           key: "industry",
-          label: "行业中枢",
+          label: "行业工作台",
           icon: <Building2 size={16} />,
         },
         {
@@ -208,7 +208,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       children: [
         {
           key: "system",
-          label: "系统",
+          label: "系统维护",
           icon: <ShieldCheck size={16} />,
         },
         {

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from copaw.app.runtime_center.task_review_projection import (
     build_host_twin_summary,
     build_task_review_payload,
+    extract_chat_thread_payload,
     resolve_canonical_host_identity,
     trace_id_from_kernel_meta,
 )
@@ -398,7 +399,7 @@ def test_build_task_review_payload_projects_execution_runtime_visibility_from_fe
     assert any("host blocker" in risk.lower() for risk in payload["risks"])
 
 
-def test_build_task_review_payload_uses_runtime_metadata_for_visibility_fallback() -> None:
+def test_build_task_review_payload_does_not_fallback_to_runtime_metadata_sections() -> None:
     now = datetime(2026, 3, 26, 10, 0, tzinfo=timezone.utc)
     task = SimpleNamespace(
         id="task-host-2",
@@ -492,67 +493,104 @@ def test_build_task_review_payload_uses_runtime_metadata_for_visibility_fallback
         task_route=task_route("task-host-2"),
     )
 
-    assert payload["execution_runtime"]["workspace"]["workspace_id"] == "ws-meta"
-    assert (
-        payload["execution_runtime"]["workspace"]["projection_kind"]
-        == "workspace_graph_projection"
+    assert payload["execution_runtime"]["workspace"] is None
+    assert payload["execution_runtime"]["cooperative_adapter_availability"] is None
+    assert payload["execution_runtime"]["host"] is None
+    assert payload["execution_runtime"]["recovery"] is None
+    assert payload["execution_runtime"]["host_event_summary"] is None
+    assert payload["execution_runtime"]["seat_runtime"] is None
+    assert payload["execution_runtime"]["browser_site_contract"] is None
+    assert payload["execution_runtime"]["desktop_app_contract"] is None
+
+
+def test_build_task_review_payload_does_not_derive_host_twin_summary_from_host_payload() -> None:
+    now = datetime(2026, 3, 26, 10, 30, tzinfo=timezone.utc)
+    task = SimpleNamespace(
+        id="task-host-summary-1",
+        title="Host summary stays upstream",
+        summary="Projection should not derive host twin summary during read",
+        owner_agent_id="agent-1",
+        status="running",
+        acceptance_criteria='{"kernel":"meta"}',
+        updated_at=now,
     )
-    assert (
-        payload["execution_runtime"]["workspace"]["locks"][0]["resource_ref"]
-        == "notion:writer-lock"
+    runtime = SimpleNamespace(
+        current_phase="executing",
+        last_result_summary="Host twin payload exists without canonical summary",
+        last_error_summary=None,
+        updated_at=now,
+        risk_level="auto",
     )
-    assert (
-        payload["execution_runtime"]["workspace"]["locks"][0]["writer_lock"]["status"]
-        == "held"
+
+    payload = build_task_review_payload(
+        task=task,
+        runtime=runtime,
+        decisions=[],
+        evidence=[],
+        execution_feedback={
+            "host_companion_session": {
+                "session_mount_id": "session-host-1",
+                "continuity_status": "restorable",
+            },
+            "host_twin": {
+                "coordination": {
+                    "recommended_scheduler_action": "continue",
+                    "selected_seat_ref": "env:seat-1",
+                },
+                "legal_recovery": {
+                    "path": "resume",
+                    "resume_kind": "resume-runtime",
+                },
+            },
+        },
+        child_results=[],
+        owner_agent={"name": "Seat Operator"},
+        task_route=task_route("task-host-summary-1"),
     )
-    assert (
-        payload["execution_runtime"]["workspace"]["locks"][0]["writer_lock"]["owner_agent_id"]
-        == "agent-1"
-    )
-    assert (
-        payload["execution_runtime"]["workspace"]["surfaces"]["browser"]["active_tab"]["site"]
-        == "shopify:admin"
-    )
-    assert (
-        payload["execution_runtime"]["workspace"]["surfaces"]["desktop"]["active_window"]["window_scope"]
-        == "window:notion:main"
-    )
-    assert (
-        payload["execution_runtime"]["workspace"]["latest_host_event_summary"]["event_name"]
-        == "resume_attached"
-    )
-    assert (
-        payload["execution_runtime"]["workspace"]["surface_contracts"]["desktop_app_identity"]
-        == "notion"
-    )
-    assert (
-        payload["execution_runtime"]["workspace"]["surface_contracts"]["desktop_app_contract_status"]
-        == "ready"
-    )
-    assert (
-        payload["execution_runtime"]["cooperative_adapter_availability"]["status"]
-        == "degraded"
-    )
-    assert payload["execution_runtime"]["host"]["host_mode"] == "symbiotic"
-    assert payload["execution_runtime"]["recovery"]["mode"] == "attach-environment"
-    assert payload["execution_runtime"]["host_event_summary"]["last_event"] == "resume_attached"
-    assert (
-        payload["execution_runtime"]["host_event_summary"]["latest_event"]["action"]
-        == "attach"
-    )
-    assert (
-        payload["execution_runtime"]["host_event_summary"]["counts_by_topic"]["runtime"]
-        == 1
-    )
-    assert payload["execution_runtime"]["seat_runtime"]["seat_id"] == "seat-meta"
-    assert (
-        payload["execution_runtime"]["browser_site_contract"]["browser_mode"]
-        == "managed-isolated"
-    )
-    assert (
-        payload["execution_runtime"]["desktop_app_contract"]["window_scope"]
-        == "window:notion:main"
-    )
+
+    assert payload["execution_runtime"]["host_twin"]["coordination"]["selected_seat_ref"] == "env:seat-1"
+    assert payload["execution_runtime"]["host_twin_summary"] is None
+
+
+def test_extract_chat_thread_payload_prefers_canonical_chat_thread_payload() -> None:
+    assert extract_chat_thread_payload(
+        {
+            "payload": {
+                "chat_thread": {
+                    "control_thread_id": "control-thread:canonical",
+                    "thread_id": "thread:canonical",
+                    "session_id": "session:canonical",
+                    "task_title": "Canonical task title",
+                    "industry_instance_id": "industry-canonical",
+                    "industry_label": "Canonical Industry",
+                    "owner_scope": "canonical-scope",
+                    "thread_mode": "plan-shell",
+                    "decision_type": "approve",
+                    "session_kind": "industry-agent-chat",
+                },
+                "request": {
+                    "control_thread_id": "control-thread:legacy",
+                    "session_id": "session:legacy",
+                    "industry_instance_id": "industry-legacy",
+                },
+                "meta": {
+                    "control_thread_id": "control-thread:meta",
+                    "task_title": "Meta task title",
+                },
+            },
+        },
+    ) == {
+        "control_thread_id": "control-thread:canonical",
+        "thread_id": "thread:canonical",
+        "session_id": "session:canonical",
+        "task_title": "Canonical task title",
+        "industry_instance_id": "industry-canonical",
+        "industry_label": "Canonical Industry",
+        "owner_scope": "canonical-scope",
+        "thread_mode": "plan-shell",
+        "decision_type": "approve",
+        "session_kind": "industry-agent-chat",
+    }
 
 
 def test_build_task_review_payload_prefers_host_twin_visibility_when_present() -> None:
@@ -689,6 +727,29 @@ def test_build_task_review_payload_prefers_host_twin_visibility_when_present() -
                         },
                     },
                 },
+            },
+            "host_twin_summary": {
+                "seat_owner_ref": "ops-agent",
+                "active_app_family_count": 1,
+                "active_app_family_keys": ["office_document"],
+                "ready_app_family_keys": ["office_document"],
+                "host_companion_status": "restorable",
+                "host_companion_source": "live-handle",
+                "seat_count": 2,
+                "multi_seat_coordination": {
+                    "selected_seat_ref": "env:session:session:web:main",
+                },
+                "app_family_readiness": {
+                    "ready_family_keys": ["office_document"],
+                },
+                "recommended_scheduler_action": "handoff",
+                "continuity_state": "blocked",
+                "contention_severity": "blocked",
+                "contention_reason": "captcha-required",
+                "legal_recovery_mode": "handoff",
+                "handoff_owner_ref": "human-operator:alice",
+                "selected_seat_ref": "env:session:session:web:main",
+                "seat_selection_policy": "sticky-active-seat",
             },
             "host_contract": {
                 "status": "blocked",

@@ -202,36 +202,233 @@ export interface RuntimeCenterSurfaceInfo {
   services?: string[];
 }
 
+export interface RuntimeMainBrainRecord {
+  route?: string | null;
+  title?: string | null;
+  label?: string | null;
+  name?: string | null;
+  summary?: string | null;
+  detail?: string | null;
+  status?: string | null;
+  count?: number | null;
+  value?: string | number | null;
+  route_title?: string | null;
+  tone?: "default" | "success" | "warning" | "danger";
+  [key: string]: unknown;
+}
+
+export interface RuntimeMainBrainSignal extends RuntimeMainBrainRecord {
+  key: string;
+}
+
+export interface RuntimeMainBrainShell {
+  verify_reminder?: string | null;
+  resume_key?: string | null;
+  fork_key?: string | null;
+}
+
+export interface RuntimeMainBrainPlanningConstraints extends RuntimeMainBrainRecord {
+  planning_policy?: string[];
+  strategic_uncertainties?: RuntimeMainBrainRecord[];
+  lane_budgets?: RuntimeMainBrainRecord[];
+}
+
+export interface RuntimeMainBrainCycleDecision extends RuntimeMainBrainRecord {
+  selected_backlog_item_ids?: string[];
+  selected_assignment_ids?: string[];
+  planning_shell?: RuntimeMainBrainShell | null;
+}
+
+export interface RuntimeMainBrainAssignmentPlan extends RuntimeMainBrainRecord {
+  checkpoints?: RuntimeMainBrainRecord[];
+  acceptance_criteria?: string[];
+  planning_shell?: RuntimeMainBrainShell | null;
+}
+
+export interface RuntimeMainBrainUncertaintyRegister {
+  status?: string | null;
+  detail?: string | null;
+  note?: string | null;
+  route?: string | null;
+  summary?: {
+    uncertainty_count?: number | null;
+    lane_budget_count?: number | null;
+    trigger_rule_count?: number | null;
+  } | null;
+  items?: RuntimeMainBrainRecord[];
+  [key: string]: unknown;
+}
+
+export interface RuntimeMainBrainReplan extends RuntimeMainBrainRecord {
+  decision_kind?: string | null;
+  strategy_trigger_rules?: RuntimeMainBrainRecord[];
+  uncertainty_register?: RuntimeMainBrainUncertaintyRegister | null;
+  planning_shell?: RuntimeMainBrainShell | null;
+}
+
+export interface RuntimeMainBrainPlanning extends RuntimeMainBrainRecord {
+  strategy_constraints?: RuntimeMainBrainPlanningConstraints | null;
+  latest_cycle_decision?: RuntimeMainBrainCycleDecision | null;
+  focused_assignment_plan?: RuntimeMainBrainAssignmentPlan | null;
+  replan?: RuntimeMainBrainReplan | null;
+}
+
+export interface RuntimeMainBrainReportCognition extends RuntimeMainBrainRecord {
+  needs_replan?: boolean;
+  replan_reasons?: string[];
+  judgment?: RuntimeMainBrainRecord | null;
+  next_action?: RuntimeMainBrainRecord | null;
+  latest_findings?: RuntimeMainBrainRecord[];
+  conflicts?: RuntimeMainBrainRecord[];
+  holes?: RuntimeMainBrainRecord[];
+  followup_backlog?: RuntimeMainBrainRecord[];
+  unconsumed_reports?: RuntimeMainBrainRecord[];
+  needs_followup_reports?: RuntimeMainBrainRecord[];
+}
+
+export interface RuntimeMainBrainHostTwinSummary extends RuntimeMainBrainRecord {
+  selected_seat_ref?: string | null;
+  recommended_scheduler_action?: string | null;
+  continuity_state?: string | null;
+  active_app_family_keys?: string[];
+  blocked_surface_count?: number | null;
+  legal_recovery_mode?: string | null;
+}
+
+export interface RuntimeMainBrainHandoff extends RuntimeMainBrainRecord {
+  active?: boolean | null;
+}
+
+export interface RuntimeMainBrainStaffing extends RuntimeMainBrainRecord {
+  pending_confirmation_count?: number | null;
+}
+
+export interface RuntimeMainBrainHumanAssist extends RuntimeMainBrainRecord {
+  blocked_count?: number | null;
+}
+
+export interface RuntimeMainBrainEnvironment extends RuntimeMainBrainRecord {
+  host_twin_summary?: RuntimeMainBrainHostTwinSummary | null;
+  handoff?: RuntimeMainBrainHandoff | null;
+  staffing?: RuntimeMainBrainStaffing | null;
+  human_assist?: RuntimeMainBrainHumanAssist | null;
+}
+
+export interface RuntimeMainBrainEntropyState extends RuntimeMainBrainRecord {
+  sidecar_memory_status?: string | null;
+  carry_forward_contract?: string | null;
+}
+
+export interface RuntimeMainBrainCompactionState extends RuntimeMainBrainRecord {
+  mode?: string | null;
+  spill_count?: number | null;
+  replacement_count?: number | null;
+}
+
+export interface RuntimeMainBrainToolResultBudget extends RuntimeMainBrainRecord {
+  message_budget?: number | null;
+  used_budget?: number | null;
+  remaining_budget?: number | null;
+  remaining?: number | null;
+  budget_remaining?: number | null;
+}
+
+export interface RuntimeMainBrainToolUseSummary extends RuntimeMainBrainRecord {
+  artifact_refs?: string[];
+}
+
+export interface RuntimeMainBrainQueryRuntimeEntropy extends RuntimeMainBrainRecord {
+  runtime_entropy?: RuntimeMainBrainEntropyState | null;
+  sidecar_memory?: RuntimeMainBrainRecord | null;
+  compaction_state?: RuntimeMainBrainCompactionState | null;
+  tool_result_budget?: RuntimeMainBrainToolResultBudget | null;
+  tool_use_summary?: RuntimeMainBrainToolUseSummary | null;
+}
+
+export interface RuntimeMainBrainGovernance extends RuntimeMainBrainRecord {
+  pending_decisions?: number | null;
+  pending_patches?: number | null;
+  paused_schedule_count?: number | null;
+  handoff_active?: boolean | null;
+  query_runtime_entropy?: RuntimeMainBrainQueryRuntimeEntropy | null;
+}
+
+export interface RuntimeMainBrainHeartbeat extends RuntimeMainBrainRecord {
+  enabled?: boolean | null;
+  every?: string | null;
+}
+
+export interface RuntimeMainBrainAutomation extends RuntimeMainBrainRecord {
+  schedule_count?: number | null;
+  active_schedule_count?: number | null;
+  heartbeat?: RuntimeMainBrainHeartbeat | null;
+}
+
 export interface RuntimeMainBrainSection {
   count: number;
   summary?: string | null;
   route?: string | null;
-  entries: Record<string, unknown>[];
+  entries: RuntimeMainBrainRecord[];
+  meta: RuntimeMainBrainRecord;
+  [key: string]: unknown;
+}
+
+export interface RuntimeMainBrainMeta {
+  control_chain: RuntimeMainBrainSignal[];
+  agent_reports?: RuntimeMainBrainRecord | null;
+}
+
+export interface RuntimeCenterSurfaceCard {
+  key: string;
+  title: string;
+  source: string;
+  status: "state-service" | "degraded" | "unavailable";
+  count: number;
+  summary: string;
+  entries: Array<{
+    id: string;
+    title: string;
+    kind: string;
+    status: string;
+    owner?: string | null;
+    summary?: string | null;
+    updated_at?: string | null;
+    route?: string | null;
+    actions: Record<string, string>;
+    meta: Record<string, unknown>;
+  }>;
   meta: Record<string, unknown>;
 }
 
 export interface RuntimeMainBrainResponse {
   generated_at: string;
   surface: RuntimeCenterSurfaceInfo;
-  strategy: Record<string, unknown>;
-  carrier: Record<string, unknown>;
-  lanes: Record<string, unknown>[];
-  cycles: Record<string, unknown>[];
-  backlog: Record<string, unknown>[];
-  current_cycle: Record<string, unknown> | null;
-  main_brain_planning: Record<string, unknown>;
-  assignments: Record<string, unknown>[];
-  reports: Record<string, unknown>[];
-  report_cognition: Record<string, unknown>;
-  environment: Record<string, unknown>;
-  governance: Record<string, unknown>;
-  recovery: Record<string, unknown>;
-  automation: Record<string, unknown>;
+  strategy: RuntimeMainBrainRecord;
+  carrier: RuntimeMainBrainRecord;
+  lanes: RuntimeMainBrainRecord[];
+  cycles: RuntimeMainBrainRecord[];
+  backlog: RuntimeMainBrainRecord[];
+  current_cycle: RuntimeMainBrainRecord | null;
+  main_brain_planning: RuntimeMainBrainPlanning;
+  assignments: RuntimeMainBrainRecord[];
+  reports: RuntimeMainBrainRecord[];
+  report_cognition: RuntimeMainBrainReportCognition;
+  environment: RuntimeMainBrainEnvironment;
+  governance: RuntimeMainBrainGovernance;
+  recovery: RuntimeMainBrainRecord;
+  automation: RuntimeMainBrainAutomation;
   evidence: RuntimeMainBrainSection;
   decisions: RuntimeMainBrainSection;
   patches: RuntimeMainBrainSection;
-  signals: Record<string, unknown>;
-  meta: Record<string, unknown>;
+  signals: Record<string, RuntimeMainBrainSignal>;
+  meta: RuntimeMainBrainMeta;
+}
+
+export interface RuntimeCenterSurfaceResponse {
+  generated_at: string;
+  surface: RuntimeCenterSurfaceInfo;
+  cards: RuntimeCenterSurfaceCard[];
+  main_brain: RuntimeMainBrainResponse | null;
 }
 
 export const runtimeCenterApi = {

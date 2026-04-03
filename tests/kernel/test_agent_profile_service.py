@@ -385,7 +385,7 @@ def test_agent_profile_service_prefers_runtime_mailbox_checkpoint_projection(tmp
     assert profile.last_checkpoint_id == "checkpoint-1"
 
 
-def test_agent_profile_service_preserves_legacy_goal_focus_backfill_until_writers_migrate(
+def test_agent_profile_service_ignores_runtime_legacy_goal_focus_and_keeps_mailbox_checkpoint_compat(
     tmp_path,
 ) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
@@ -446,9 +446,67 @@ def test_agent_profile_service_preserves_legacy_goal_focus_backfill_until_writer
     profile = service.get_agent("agent-1")
 
     assert profile is not None
-    assert profile.current_focus_kind == "goal"
-    assert profile.current_focus_id == "goal-runtime"
-    assert profile.current_focus == "Legacy runtime goal"
+    assert profile.current_focus_kind is None
+    assert profile.current_focus_id is None
+    assert profile.current_focus == ""
+
+
+def test_agent_profile_service_does_not_overlay_current_focus_with_legacy_goal_metadata(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    override_repo = SqliteAgentProfileOverrideRepository(store)
+    mailbox_repo = SqliteAgentMailboxRepository(store)
+    checkpoint_repo = SqliteAgentCheckpointRepository(store)
+
+    override_repo.upsert_override(
+        AgentProfileOverrideRecord(
+            agent_id="agent-1",
+            name="Ops Agent",
+            role_name="Operations",
+            current_focus_kind="assignment",
+            current_focus_id="assignment-stale",
+            current_focus="Stale assignment",
+        ),
+    )
+    mailbox_repo.upsert_item(
+        AgentMailboxRecord(
+            id="mailbox-1",
+            agent_id="agent-1",
+            title="Mailbox task",
+            summary="Mailbox summary",
+            status="running",
+            capability_ref="system:dispatch_query",
+            metadata={"goal_id": "goal-mailbox", "goal_title": "Legacy mailbox goal"},
+        ),
+    )
+    checkpoint_repo.upsert_checkpoint(
+        AgentCheckpointRecord(
+            id="checkpoint-1",
+            agent_id="agent-1",
+            mailbox_id="mailbox-1",
+            checkpoint_kind="worker-step",
+            status="ready",
+            phase="query-streaming",
+            summary="Checkpoint summary",
+            resume_payload={
+                "goal_id": "goal-checkpoint",
+                "goal_title": "Legacy checkpoint goal",
+            },
+        ),
+    )
+
+    service = AgentProfileService(
+        override_repository=override_repo,
+        agent_mailbox_repository=mailbox_repo,
+        agent_checkpoint_repository=checkpoint_repo,
+    )
+    profile = service.get_agent("agent-1")
+
+    assert profile is not None
+    assert profile.current_focus_kind == "assignment"
+    assert profile.current_focus_id == "assignment-stale"
+    assert profile.current_focus == "Stale assignment"
 
 
 def test_agent_profile_service_uses_mailbox_current_focus_when_runtime_focus_missing(

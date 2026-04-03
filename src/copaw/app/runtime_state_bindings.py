@@ -28,7 +28,9 @@ def build_runtime_state_bindings(
         "config_watcher": manager_stack.config_watcher,
         "mcp_manager": manager_stack.mcp_manager,
         "mcp_watcher": manager_stack.mcp_watcher,
-        "provider_manager": bootstrap.provider_manager,
+        "runtime_provider": bootstrap.runtime_provider,
+        # Compatibility mirror for legacy app.state readers outside the narrowed runtime contract.
+        "provider_manager": bootstrap.runtime_provider,
         "state_store": bootstrap.state_store,
         "task_repository": repositories.task_repository,
         "task_runtime_repository": repositories.task_runtime_repository,

@@ -6,7 +6,10 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
-from ..providers.provider_manager import ProviderManager
+from ..providers.runtime_provider_facade import (
+    ProviderRuntimeSurface,
+    get_runtime_provider_facade,
+)
 from .compiler import canonicalize_industry_draft
 from .models import (
     IndustryDraftGoal,
@@ -134,17 +137,15 @@ class IndustryDraftGenerator:
         self,
         *,
         model_factory: Callable[[], object] | None = None,
-        provider_manager: ProviderManager | None = None,
+        provider_runtime: ProviderRuntimeSurface | None = None,
+        provider_manager: ProviderRuntimeSurface | None = None,
     ) -> None:
-        self._provider_manager = provider_manager
-        self._model_factory = (
-            model_factory
-            or (
-                provider_manager.get_active_chat_model
-                if provider_manager is not None
-                else ProviderManager.get_active_chat_model
-            )
+        self._provider_runtime = (
+            provider_runtime
+            or provider_manager
+            or get_runtime_provider_facade()
         )
+        self._model_factory = model_factory or self._provider_runtime.get_active_chat_model
 
     async def generate(
         self,
@@ -272,8 +273,7 @@ class IndustryDraftGenerator:
 
     def describe(self) -> dict[str, str]:
         try:
-            manager = self._provider_manager or ProviderManager()
-            active = manager.get_active_model()
+            active = self._provider_runtime.get_active_model()
         except Exception:
             return {}
         if active is None:

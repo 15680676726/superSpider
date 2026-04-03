@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -23,7 +24,7 @@ describe("Sidebar", () => {
     vi.clearAllMocks();
   });
 
-  it("renders localized sidebar labels in Chinese", async () => {
+  it("renders runtime-center-first navigation labels", async () => {
     render(
       <MemoryRouter>
         <Sidebar selectedKey="runtime-center" />
@@ -31,13 +32,13 @@ describe("Sidebar", () => {
     );
 
     expect(screen.getByText("对话")).toBeInTheDocument();
-    expect(screen.getByText("聊天")).toBeInTheDocument();
-    expect(screen.getByText("运行")).toBeInTheDocument();
+    expect(screen.getByText("聊天前台")).toBeInTheDocument();
     expect(screen.getByText("运行中心")).toBeInTheDocument();
-    expect(screen.getByText("智能体")).toBeInTheDocument();
-    expect(screen.getByText("行业中枢")).toBeInTheDocument();
+    expect(screen.getByText("主脑驾驶舱")).toBeInTheDocument();
+    expect(screen.getByText("执行位")).toBeInTheDocument();
+    expect(screen.getByText("行业工作台")).toBeInTheDocument();
     expect(screen.getByText("设置")).toBeInTheDocument();
-    expect(screen.getByText("系统")).toBeInTheDocument();
+    expect(screen.getByText("系统维护")).toBeInTheDocument();
     expect(screen.getByText("渠道")).toBeInTheDocument();
     expect(screen.getByText("模型")).toBeInTheDocument();
     expect(screen.getByText("环境")).toBeInTheDocument();
@@ -55,9 +56,8 @@ describe("Sidebar", () => {
       expect(screen.getByText("预测")).toBeInTheDocument();
     });
 
-    expect(screen.queryByText("Chat")).not.toBeInTheDocument();
     expect(screen.queryByText("Runtime Center")).not.toBeInTheDocument();
-    expect(screen.queryByText("Capability Market")).not.toBeInTheDocument();
     expect(screen.queryByText("Settings")).not.toBeInTheDocument();
+    expect(screen.queryByText("系统与健康")).toBeNull();
   });
 });

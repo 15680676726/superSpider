@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..capabilities.install_templates import build_install_template_doctor
+from .runtime_center.models import RuntimeCenterAppStateView
 from .runtime_center.overview_cards import _RuntimeCenterOverviewCardsSupport
 
 
@@ -162,8 +163,9 @@ class RuntimeHealthService:
             }
 
         support = _RuntimeCenterOverviewCardsSupport()
-        automation = await support._build_main_brain_automation_payload(app_state)
-        startup_recovery = support._build_main_brain_recovery_payload(app_state)
+        runtime_state = RuntimeCenterAppStateView.from_object(app_state)
+        automation = await support._build_main_brain_automation_payload(runtime_state)
+        startup_recovery = support._build_main_brain_recovery_payload(runtime_state)
         automation_status = str(automation.get("status") or "unavailable").strip().lower()
         recovery_status = str(startup_recovery.get("status") or "unavailable").strip().lower()
         summary_status = "idle"

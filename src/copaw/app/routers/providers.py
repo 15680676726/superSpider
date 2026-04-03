@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, Field
 
 from ...providers.provider import ProviderInfo, ModelInfo
+from ...providers.provider_admin_service import ProviderAdminService
 from ...providers.provider_manager import (
     ActiveModelsInfo,
     ProviderFallbackConfig,
@@ -17,6 +18,7 @@ from ...providers.provider_manager import (
 )
 
 router = APIRouter(prefix="/models", tags=["models"])
+admin_router = APIRouter(prefix="/providers/admin", tags=["provider-admin"])
 
 ChatModelName = Literal["OpenAIChatModel", "AnthropicChatModel"]
 
@@ -31,6 +33,14 @@ def get_provider_manager(request: Request) -> ProviderManager:
     if provider_manager is None:
         provider_manager = ProviderManager.get_instance()
     return provider_manager
+
+
+def get_provider_admin_service(request: Request) -> object:
+    """Get the canonical provider admin service from app state."""
+    service = getattr(request.app.state, "provider_admin_service", None)
+    if service is not None:
+        return service
+    return ProviderAdminService(get_provider_manager(request))
 
 
 def _clone_provider_for_test(provider: object) -> object:
@@ -79,51 +89,39 @@ async def list_all_providers(
     return await manager.list_provider_info()
 
 
-@router.put(
+@admin_router.put(
     "/{provider_id}/config",
     response_model=ProviderInfo,
     summary="Configure a provider",
 )
 async def configure_provider(
-    manager: ProviderManager = Depends(get_provider_manager),
+    admin_service: object = Depends(get_provider_admin_service),
     provider_id: str = Path(...),
     body: ProviderConfigRequest = Body(...),
 ) -> ProviderInfo:
-    ok = manager.update_provider(
-        provider_id,
-        {
-            "api_key": body.api_key,
-            "base_url": body.base_url,
-            "chat_model": body.chat_model,
-        },
-    )
-    if not ok:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Provider '{provider_id}' not found",
+    try:
+        return await admin_service.configure_provider(
+            provider_id,
+            api_key=body.api_key,
+            base_url=body.base_url,
+            chat_model=body.chat_model,
         )
-
-    provider_info = await manager.get_provider_info(provider_id)
-    if provider_info is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Provider '{provider_id}' not found after update",
-        )
-    return provider_info
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post(
+@admin_router.post(
     "/custom-providers",
     response_model=ProviderInfo,
     summary="Create a custom provider",
     status_code=201,
 )
 async def create_custom_provider_endpoint(
-    manager: ProviderManager = Depends(get_provider_manager),
+    admin_service: object = Depends(get_provider_admin_service),
     body: CreateCustomProviderRequest = Body(...),
 ) -> ProviderInfo:
     try:
-        provider_info = await manager.add_custom_provider(
+        provider_info = await admin_service.create_custom_provider(
             ProviderInfo(
                 id=body.id,
                 name=body.name,
@@ -224,33 +222,23 @@ async def test_provider(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post(
+@admin_router.post(
     "/{provider_id}/discover",
     response_model=DiscoverModelsResponse,
     summary="Discover available models from provider",
 )
 async def discover_models(
-    manager: ProviderManager = Depends(get_provider_manager),
+    admin_service: object = Depends(get_provider_admin_service),
     provider_id: str = Path(...),
     body: Optional[DiscoverModelsRequest] = Body(default=None),
 ) -> DiscoverModelsResponse:
     try:
-        ok = manager.update_provider(
-            provider_id,
-            {
-                "api_key": body.api_key if body else None,
-                "base_url": body.base_url if body else None,
-            },
-        )
-        if not ok:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Provider '{provider_id}' not found",
-            )
         try:
-            result = await manager.fetch_provider_models(
+            result = await admin_service.discover_provider_models(
                 provider_id,
-                update_target="extra_models",
+                api_key=body.api_key if body else None,
+                base_url=body.base_url if body else None,
+                chat_model=body.chat_model if body else None,
             )
             success = True
         except Exception:
@@ -285,17 +273,20 @@ async def test_model(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.delete(
+@admin_router.delete(
     "/custom-providers/{provider_id}",
     response_model=List[ProviderInfo],
     summary="Delete a custom provider",
 )
 async def delete_custom_provider_endpoint(
+    request: Request,
+    admin_service: object = Depends(get_provider_admin_service),
     manager: ProviderManager = Depends(get_provider_manager),
     provider_id: str = Path(...),
 ) -> List[ProviderInfo]:
     try:
-        ok = manager.remove_custom_provider(provider_id)
+        _ = request
+        ok = admin_service.remove_custom_provider(provider_id)
         if not ok:
             raise ValueError(f"Custom Provider '{provider_id}' not found")
     except ValueError as exc:
@@ -303,42 +294,43 @@ async def delete_custom_provider_endpoint(
     return await manager.list_provider_info()
 
 
-@router.post(
+@admin_router.post(
     "/{provider_id}/models",
     response_model=ProviderInfo,
     summary="Add a model to a provider",
     status_code=201,
 )
 async def add_model_endpoint(
-    manager: ProviderManager = Depends(get_provider_manager),
+    admin_service: object = Depends(get_provider_admin_service),
     provider_id: str = Path(...),
     body: AddModelRequest = Body(...),
 ) -> ProviderInfo:
     try:
-        provider = await manager.add_model_to_provider(
-            provider_id=provider_id,
-            model_info=ModelInfo(id=body.id, name=body.name),
-        )  # Validate provider exists and add model
+        provider = await admin_service.add_provider_model(
+            provider_id,
+            model_id=body.id,
+            name=body.name,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return provider
 
 
-@router.delete(
+@admin_router.delete(
     "/{provider_id}/models/{model_id:path}",
     response_model=ProviderInfo,
     summary="Remove a model from a provider",
 )
 async def remove_model_endpoint(
-    manager: ProviderManager = Depends(get_provider_manager),
+    admin_service: object = Depends(get_provider_admin_service),
     provider_id: str = Path(...),
     model_id: str = Path(...),
 ) -> ProviderInfo:
     try:
-        provider = await manager.delete_model_from_provider(
-            provider_id=provider_id,
+        provider = await admin_service.remove_provider_model(
+            provider_id,
             model_id=model_id,
-        )  # Validate provider and model exist and delete
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return provider
@@ -355,17 +347,20 @@ async def get_active_models(
     return manager.get_active_models_info()
 
 
-@router.put(
+@admin_router.put(
     "/active",
     response_model=ActiveModelsInfo,
     summary="Set active LLM",
 )
 async def set_active_model(
-    manager: ProviderManager = Depends(get_provider_manager),
+    admin_service: object = Depends(get_provider_admin_service),
     body: ModelSlotRequest = Body(...),
 ) -> ActiveModelsInfo:
     try:
-        await manager.activate_model(body.provider_id, body.model)
+        return await admin_service.set_active_model(
+            provider_id=body.provider_id,
+            model_id=body.model,
+        )
     except ValueError as exc:
         message = str(exc)
         lower_msg = message.lower()
@@ -374,7 +369,6 @@ async def set_active_model(
             raise HTTPException(status_code=404, detail=message) from exc
         # Invalid model, unreachable provider, or other configuration error
         raise HTTPException(status_code=400, detail=message) from exc
-    return manager.get_active_models_info()
 
 
 @router.get(
@@ -388,17 +382,17 @@ async def get_provider_fallback(
     return manager.get_fallback_config()
 
 
-@router.put(
+@admin_router.put(
     "/fallback",
     response_model=ProviderFallbackConfig,
     summary="Set provider fallback policy",
 )
 async def set_provider_fallback(
-    manager: ProviderManager = Depends(get_provider_manager),
+    admin_service: object = Depends(get_provider_admin_service),
     body: ProviderFallbackConfig = Body(...),
 ) -> ProviderFallbackConfig:
     try:
-        return manager.set_fallback_config(
+        return admin_service.set_fallback_config(
             enabled=body.enabled,
             candidates=list(body.candidates),
         )

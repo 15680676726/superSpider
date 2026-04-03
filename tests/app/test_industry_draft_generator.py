@@ -210,3 +210,95 @@ def test_industry_draft_generator_includes_operator_planning_context() -> None:
     assert "Planning mode: operator-guided" in combined
     assert "客服聊天闭环" in combined
     assert "近 7 天线索质量" in combined
+
+
+def test_industry_draft_generator_uses_runtime_provider_facade_by_default(
+    monkeypatch,
+) -> None:
+    payload = {
+        "team": {
+            "label": "Northwind Robotics AI Draft",
+            "summary": "Editable AI-generated team draft.",
+            "topology": "solo",
+            "agents": [
+                {
+                    "role_id": "execution-core",
+                    "name": "白泽执行中枢",
+                    "role_name": "白泽执行中枢",
+                    "role_summary": "Owns the operating brief.",
+                    "mission": "Choose the next move.",
+                    "goal_kind": "execution-core",
+                    "agent_class": "business",
+                    "activation_mode": "persistent",
+                    "suspendable": False,
+                    "risk_level": "guarded",
+                },
+                {
+                    "role_id": "solution-lead",
+                    "name": "Northwind Solution Lead",
+                    "role_name": "Solution Lead",
+                    "role_summary": "Shapes the operating design.",
+                    "mission": "Turn the brief into a rollout-ready solution.",
+                    "goal_kind": "solution",
+                    "agent_class": "business",
+                    "activation_mode": "persistent",
+                    "suspendable": False,
+                    "reports_to": "execution-core",
+                    "risk_level": "guarded",
+                }
+            ],
+        },
+        "goals": [
+            {
+                "goal_id": "execution-core-goal",
+                "kind": "execution-core",
+                "owner_agent_id": "copaw-agent-runner",
+                "title": "Operate Northwind Robotics",
+                "summary": "Create the next operating brief.",
+                "plan_steps": ["Review the brief", "Choose the next move"],
+            },
+            {
+                "goal_id": "solution-goal",
+                "kind": "solution",
+                "owner_agent_id": "solution-lead",
+                "title": "Shape the rollout",
+                "summary": "Define the rollout path.",
+                "plan_steps": ["Clarify the offer", "List dependencies"],
+            }
+        ],
+        "schedules": [],
+        "generation_summary": "AI draft response.",
+    }
+    runtime_provider = SimpleNamespace(
+        get_active_chat_model=lambda: _StreamingStructuredModel(payload),
+        get_active_model=lambda: SimpleNamespace(
+            provider_id="openai",
+            model="gpt-5.2",
+        ),
+    )
+    monkeypatch.setattr(
+        "copaw.industry.draft_generator.get_runtime_provider_facade",
+        lambda provider_manager=None: runtime_provider,
+    )
+    generator = IndustryDraftGenerator()
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Industrial Equipment",
+            company_name="Northwind Robotics",
+            product="factory monitoring copilots",
+            goals=["launch two pilot deployments"],
+        ),
+    )
+
+    draft = asyncio.run(
+        generator.generate(
+            profile=profile,
+            owner_scope="industry-v1-northwind-robotics",
+        ),
+    )
+
+    assert draft.team.label == "Northwind Robotics AI Draft"
+    assert generator.describe() == {
+        "provider_id": "openai",
+        "model": "gpt-5.2",
+    }
