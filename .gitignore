@@ -86,6 +86,7 @@ openspec
 CLAUDE.md
 # External donor/reference source tree, not part of CoPaw
 claude-code-source-code-main/
+cc/
 *.tmp
 codex_desktop_smoke_*.txt
 
