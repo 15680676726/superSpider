@@ -345,11 +345,17 @@ def test_fixed_sop_service_records_host_snapshot_in_run_and_evidence(tmp_path) -
     assert detail.environment_id == "env-desktop-1"
     assert detail.session_mount_id == "session-desktop-1"
     assert detail.host_requirement["app_family"] == "office_document"
+    assert detail.run.metadata["coordinator_contract"] == "durable-runtime-coordinator/v1"
+    assert detail.run.metadata["coordinator_entrypoint"] == "fixed-sop-run"
+    assert detail.run.metadata["coordinator_id"] == detail.run.run_id
 
     evidence = service._evidence_ledger.list_by_task(response.workflow_run_id or "")
     assert len(evidence) == 1
     assert evidence[0].environment_ref == "env-desktop-1"
     assert evidence[0].metadata["session_mount_id"] == "session-desktop-1"
+    assert evidence[0].metadata["coordinator_contract"] == "durable-runtime-coordinator/v1"
+    assert evidence[0].metadata["coordinator_entrypoint"] == "fixed-sop-run"
+    assert evidence[0].metadata["coordinator_id"] == detail.run.run_id
     assert evidence[0].metadata["host_requirement"]["app_family"] == "office_document"
     assert evidence[0].metadata["host_preflight"]["coordination"][
         "recommended_scheduler_action"

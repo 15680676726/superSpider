@@ -1036,6 +1036,9 @@ def test_workflow_template_service_launch_materializes_run(tmp_path) -> None:
     assert "cancel" not in (detail_payload.get("routes") or {})
     assert "resume" not in (detail_payload.get("routes") or {})
     assert detail_payload["diagnosis"]["status"] == "planned"
+    assert detail_payload["run"]["metadata"]["coordinator_contract"] == "durable-runtime-coordinator/v1"
+    assert detail_payload["run"]["metadata"]["coordinator_entrypoint"] == "workflow-run"
+    assert detail_payload["run"]["metadata"]["coordinator_id"] == run_id
     assert detail_payload["diagnosis"]["host_snapshot"]["coordination"][
         "recommended_scheduler_action"
     ] == "continue"
@@ -1046,6 +1049,9 @@ def test_workflow_template_service_launch_materializes_run(tmp_path) -> None:
         for item in detail_payload["step_execution"]
     )
     schedule_payload = detail_payload["schedules"][0]["spec_payload"]
+    assert schedule_payload["meta"]["coordinator_contract"] == "durable-runtime-coordinator/v1"
+    assert schedule_payload["meta"]["coordinator_entrypoint"] == "workflow-run"
+    assert schedule_payload["meta"]["coordinator_id"] == run_id
     assert schedule_payload["meta"]["environment_id"] == detail["environment_id"]
     assert schedule_payload["meta"]["session_mount_id"] == detail["session_mount_id"]
     assert schedule_payload["meta"]["host_requirement"]["app_family"] == "browser_backoffice"

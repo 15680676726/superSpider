@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .service_shared import *  # noqa: F401,F403
+from ..kernel.runtime_coordination import build_durable_runtime_coordination
 
 
 def _workflow_first_non_empty(*values: object) -> str | None:
@@ -272,9 +273,25 @@ class _WorkflowServiceRunMixin:
                 "session_mount_id": resolved_session_mount_id,
                 "host_snapshot": dict(host_snapshot or {}),
                 "step_execution_seed": step_execution_seed,
+                **build_durable_runtime_coordination(
+                    entrypoint="workflow-run",
+                    coordinator_id=None,
+                ),
             },
         )
         run = self._workflow_run_repository.upsert_run(run)
+        run = run.model_copy(
+            update={
+                "metadata": {
+                    **dict(run.metadata or {}),
+                    **build_durable_runtime_coordination(
+                        entrypoint="workflow-run",
+                        coordinator_id=run.run_id,
+                    ),
+                }
+            }
+        )
+        self._workflow_run_repository.upsert_run(run)
         goal_ids: list[str] = []
         schedule_ids: list[str] = []
 
@@ -679,6 +696,10 @@ class _WorkflowServiceRunMixin:
                     "environment_ref": resolved_environment_ref,
                     "environment_id": resolved_environment_id,
                     "session_mount_id": resolved_session_mount_id,
+                    **build_durable_runtime_coordination(
+                        entrypoint="workflow-run",
+                        coordinator_id=run.run_id,
+                    ),
                 },
                 "updated_at": _utc_now(),
             },
@@ -777,6 +798,10 @@ class _WorkflowServiceRunMixin:
             "workflow_run_id": run.run_id,
             "workflow_template_id": template.template_id,
             "workflow_step_id": step.step_id,
+            **build_durable_runtime_coordination(
+                entrypoint="workflow-run",
+                coordinator_id=run.run_id,
+            ),
         }
         if environment_ref is not None:
             schedule_meta["environment_ref"] = environment_ref

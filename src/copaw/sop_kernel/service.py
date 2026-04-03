@@ -17,6 +17,7 @@ from ..app.runtime_center.task_review_projection import (
     host_twin_summary_ready,
     resolve_canonical_host_identity,
 )
+from ..kernel.runtime_coordination import build_durable_runtime_coordination
 from .builtin_templates import builtin_fixed_sop_templates
 from .models import (
     FixedSopBindingCreateRequest,
@@ -375,6 +376,10 @@ class FixedSopService:
                     "session_mount_id": host_context["session_mount_id"],
                     "host_requirement": dict(host_context["host_requirement"] or {}),
                     "host_preflight": dict(host_preflight or {}),
+                    **build_durable_runtime_coordination(
+                        entrypoint="fixed-sop-run",
+                        coordinator_id=workflow_run_id,
+                    ),
                 },
             )
         else:
@@ -388,6 +393,10 @@ class FixedSopService:
                         "session_mount_id": host_context["session_mount_id"],
                         "host_requirement": dict(host_context["host_requirement"] or {}),
                         "host_preflight": dict(host_preflight or {}),
+                        **build_durable_runtime_coordination(
+                            entrypoint="fixed-sop-run",
+                            coordinator_id=workflow_run_id,
+                        ),
                     },
                 }
             )
@@ -413,6 +422,10 @@ class FixedSopService:
                         "session_mount_id": host_context["session_mount_id"],
                         "host_requirement": dict(host_context["host_requirement"] or {}),
                         "host_preflight": dict(host_preflight or {}),
+                        **build_durable_runtime_coordination(
+                            entrypoint="fixed-sop-run",
+                            coordinator_id=run.run_id,
+                        ),
                     },
                 )
             )

@@ -9,6 +9,7 @@ from .main_brain_environment_coordinator import MainBrainEnvironmentBinding
 from .main_brain_execution_planner import MainBrainExecutionPlan
 from .main_brain_intake import MainBrainIntakeContract
 from .main_brain_recovery_coordinator import MainBrainRecoveryState
+from .runtime_coordination import build_durable_runtime_coordination
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +250,13 @@ class MainBrainResultCommitter:
             "resume_environment_session_id": recovery_state.resume_environment_session_id,
             "recovery_continuity_token": recovery_state.continuity_token,
             "kernel_task_id": kernel_task_id,
+            **build_durable_runtime_coordination(
+                entrypoint="main-brain-execute",
+                coordinator_id=kernel_task_id
+                or _string(getattr(request, "control_thread_id", None))
+                or _string(getattr(request, "session_id", None))
+                or _string(getattr(request, "id", None)),
+            ),
         }
         set_request_runtime_value(
             request,

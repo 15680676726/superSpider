@@ -7,6 +7,7 @@ from typing import Any, Dict, TYPE_CHECKING
 
 from ..runtime_center.task_review_projection import resolve_canonical_host_identity
 from ..runtime_commands import infer_turn_capability_and_risk
+from ...kernel.runtime_coordination import build_durable_runtime_coordination
 from .models import CronJobSpec
 
 if TYPE_CHECKING:
@@ -322,6 +323,12 @@ class CronExecutor:
             host_meta["host_snapshot"] = host_snapshot
         if scheduler_inputs:
             host_meta["scheduler_inputs"] = scheduler_inputs
+        host_meta.update(
+            build_durable_runtime_coordination(
+                entrypoint="cron-job",
+                coordinator_id=job.id,
+            )
+        )
         return host_meta
 
 

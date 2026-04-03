@@ -117,6 +117,9 @@ def test_cron_executor_uses_scheduler_inputs_from_host_snapshot_before_session_f
     submitted = dispatcher.tasks[0]
     assert submitted.environment_ref == "env:from-scheduler-inputs"
     assert submitted.payload["meta"]["session_mount_id"] == "session:from-scheduler-inputs"
+    assert submitted.payload["meta"]["coordinator_contract"] == "durable-runtime-coordinator/v1"
+    assert submitted.payload["meta"]["coordinator_entrypoint"] == "cron-job"
+    assert submitted.payload["meta"]["coordinator_id"] == "cron-job-1"
     assert submitted.payload["meta"]["host_snapshot"]["environment_id"] == "env:host-snapshot"
     assert submitted.payload["meta"]["host_snapshot"]["host_twin_summary"]["recommended_scheduler_action"] == "continue"
     assert submitted.payload["meta"]["host_snapshot"]["host_twin_summary"]["blocked_surface_count"] == 0

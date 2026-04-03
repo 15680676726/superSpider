@@ -94,6 +94,9 @@ async def test_orchestrator_ingest_operator_turn_classifies_environment_bound_ex
     assert runtime_context["recovery_mode"] == "resume-environment"
     assert runtime_context["recovery_reason"] == "session-lease"
     assert runtime_context["resume_environment_session_id"] == persisted_session.id
+    assert runtime_context["coordinator_contract"] == "durable-runtime-coordinator/v1"
+    assert runtime_context["coordinator_entrypoint"] == "main-brain-execute"
+    assert runtime_context["coordinator_id"] == "kernel-task-env"
 
 
 @pytest.mark.asyncio
