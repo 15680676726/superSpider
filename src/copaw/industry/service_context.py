@@ -147,6 +147,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class IndustryServiceRuntimeBindings:
+    kernel_dispatcher: object | None = None
     operating_lane_repository: SqliteOperatingLaneRepository | None = None
     backlog_item_repository: SqliteBacklogItemRepository | None = None
     operating_cycle_repository: SqliteOperatingCycleRepository | None = None
@@ -181,6 +182,7 @@ class IndustryServiceRuntimeBindings:
 def build_industry_service_runtime_bindings(
     *,
     state_store: SQLiteStateStore | None = None,
+    kernel_dispatcher: object | None = None,
     operating_lane_repository: SqliteOperatingLaneRepository | None = None,
     backlog_item_repository: SqliteBacklogItemRepository | None = None,
     operating_cycle_repository: SqliteOperatingCycleRepository | None = None,
@@ -266,6 +268,7 @@ def build_industry_service_runtime_bindings(
     )
     browser_service = browser_runtime_service
     return IndustryServiceRuntimeBindings(
+        kernel_dispatcher=kernel_dispatcher,
         operating_lane_repository=lane_repository,
         backlog_item_repository=backlog_repository,
         operating_cycle_repository=cycle_repository,

@@ -220,6 +220,7 @@ def build_runtime_domain_services(
         memory_retain_service=memory_retain_service,
     )
     industry_runtime_bindings = build_industry_service_runtime_bindings(
+        kernel_dispatcher=kernel_dispatcher,
         operating_lane_repository=repositories.operating_lane_repository,
         backlog_item_repository=repositories.backlog_item_repository,
         operating_cycle_repository=repositories.operating_cycle_repository,

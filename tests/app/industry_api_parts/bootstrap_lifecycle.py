@@ -7,9 +7,12 @@ from .shared import *  # noqa: F401,F403
 from ..test_capability_market_api import FakeMcpRegistryCatalog
 from copaw.app.console_push_store import take_all
 from copaw.capabilities.system_team_handlers import SystemTeamCapabilityFacade
-from copaw.industry import IndustryBootstrapInstallItem
+from copaw.industry import IndustryBootstrapInstallItem, IndustryCapabilityRecommendation
 from copaw.memory.activation_models import ActivationResult
-from copaw.state import AgentReportRecord, AssignmentRecord
+from copaw.state import (
+    AgentReportRecord,
+    AssignmentRecord,
+)
 
 
 def test_industry_service_facade_delegates_bootstrap_to_bootstrap_service() -> None:
@@ -554,6 +557,420 @@ def test_industry_bootstrap_executes_browser_runtime_install_plan(
     default_profile = app.state.browser_runtime_service.get_default_profile()
     assert default_profile is not None
     assert default_profile.profile_id == "browser-local-default"
+
+
+def test_industry_auto_gap_closure_reuses_installed_capability_and_assigns_target_agent(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(
+        tmp_path,
+        draft_generator=DesktopIndustryDraftGenerator(),
+    )
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    draft = preview_payload["draft"]
+    target_role = next(
+        agent
+        for agent in draft["team"]["agents"]
+        if agent["agent_class"] == "business" and agent["role_id"] != "execution-core"
+    )
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": draft,
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    install_item = IndustryBootstrapInstallItem(
+        install_kind="mcp-template",
+        template_id="desktop-windows",
+        client_key="desktop_windows",
+        capability_ids=["mcp:desktop_windows"],
+    )
+    recommendation = IndustryCapabilityRecommendation(
+        recommendation_id="desktop-windows-gap",
+        install_kind="mcp-template",
+        template_id="desktop-windows",
+        title="Desktop Windows Runtime",
+        default_client_key="desktop_windows",
+        capability_ids=["mcp:desktop_windows"],
+        target_agent_ids=[target_role["agent_id"]],
+        risk_level="auto",
+        source_kind="install-template",
+        installed=True,
+    )
+
+    with (
+        patch("copaw.capabilities.service.load_config") as mock_load,
+        patch("copaw.capabilities.service.save_config"),
+        patch("copaw.capabilities.sources.mcp.load_config") as mock_mcp_load,
+        patch("copaw.industry.service_activation.load_config") as mock_industry_load,
+    ):
+        config = SimpleNamespace(mcp=SimpleNamespace(clients={}))
+        mock_load.return_value = config
+        mock_mcp_load.return_value = config
+        mock_industry_load.return_value = config
+        first_results = asyncio.run(
+            app.state.industry_service.execute_install_plan_for_instance(
+                instance_id,
+                [install_item],
+            ),
+        )
+        result = asyncio.run(
+            app.state.industry_service.auto_close_capability_gap_for_instance(
+                instance_id,
+                recommendation,
+                target_agent_ids=[target_role["agent_id"]],
+                capability_assignment_mode="merge",
+            ),
+        )
+
+    assert first_results[0].status == "installed"
+    assert result.status == "already-installed"
+    assert result.assignment_results[0].agent_id == target_role["agent_id"]
+    override = app.state.agent_profile_override_repository.get_override(
+        target_role["agent_id"],
+    )
+    assert override is not None
+    assert "mcp:desktop_windows" in (override.capabilities or [])
+    runtime = app.state.agent_runtime_repository.get_runtime(target_role["agent_id"])
+    assert runtime is not None
+    capability_layers = runtime.metadata["capability_layers"]
+    assert "mcp:desktop_windows" in capability_layers["role_prototype_capability_ids"]
+    assert capability_layers["seat_instance_capability_ids"] == []
+    assert "mcp:desktop_windows" in capability_layers["effective_capability_ids"]
+
+
+def test_industry_auto_gap_closure_installs_auto_recommendation_for_target_agent(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(
+        tmp_path,
+        draft_generator=BrowserIndustryDraftGenerator(),
+    )
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Customer Operations",
+            "company_name": "Northwind Robotics",
+            "product": "browser onboarding workflows",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    draft = preview_payload["draft"]
+    target_role = next(
+        agent
+        for agent in draft["team"]["agents"]
+        if agent["agent_class"] == "business" and agent["role_id"] != "execution-core"
+    )
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": draft,
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    recommendation = IndustryCapabilityRecommendation(
+        recommendation_id="browser-local-gap",
+        install_kind="builtin-runtime",
+        template_id="browser-local",
+        title="Browser Local Runtime",
+        default_client_key="browser-local-default",
+        capability_ids=["tool:browser_use"],
+        target_agent_ids=[target_role["agent_id"]],
+        risk_level="auto",
+        source_kind="install-template",
+    )
+
+    result = asyncio.run(
+        app.state.industry_service.auto_close_capability_gap_for_instance(
+            instance_id,
+            recommendation,
+            target_agent_ids=[target_role["agent_id"]],
+            capability_assignment_mode="merge",
+        ),
+    )
+
+    assert result.status == "installed"
+    assert result.assignment_results[0].agent_id == target_role["agent_id"]
+    override = app.state.agent_profile_override_repository.get_override(
+        target_role["agent_id"],
+    )
+    assert override is not None
+    assert "tool:browser_use" in (override.capabilities or [])
+
+
+def test_industry_auto_gap_closure_uses_governed_kernel_tasks_for_mcp_install(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(
+        tmp_path,
+        draft_generator=DesktopIndustryDraftGenerator(),
+    )
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Field Operations",
+            "company_name": "Northwind Robotics",
+            "product": "desktop follow-up workflows",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    draft = preview_payload["draft"]
+    target_role = next(
+        agent
+        for agent in draft["team"]["agents"]
+        if agent["agent_class"] == "business" and agent["role_id"] != "execution-core"
+    )
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": draft,
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    recommendation = IndustryCapabilityRecommendation(
+        recommendation_id="desktop-windows-governed-gap",
+        install_kind="mcp-template",
+        template_id="desktop-windows",
+        title="Desktop Windows Runtime",
+        default_client_key="desktop_windows",
+        capability_ids=["mcp:desktop_windows"],
+        target_agent_ids=[target_role["agent_id"]],
+        risk_level="auto",
+        source_kind="install-template",
+    )
+
+    with (
+        patch("copaw.capabilities.service.load_config") as mock_load,
+        patch("copaw.capabilities.service.save_config"),
+        patch("copaw.capabilities.sources.mcp.load_config") as mock_mcp_load,
+        patch("copaw.industry.service_activation.load_config") as mock_industry_load,
+    ):
+        config = SimpleNamespace(mcp=SimpleNamespace(clients={}))
+        mock_load.return_value = config
+        mock_mcp_load.return_value = config
+        mock_industry_load.return_value = config
+        result = asyncio.run(
+            app.state.industry_service.auto_close_capability_gap_for_instance(
+                instance_id,
+                recommendation,
+                target_agent_ids=[target_role["agent_id"]],
+                capability_assignment_mode="merge",
+            ),
+        )
+
+    assert result.status == "installed"
+    assert app.state.capability_service.get_mcp_client_info("desktop_windows") is not None
+    install_tasks = app.state.task_repository.list_tasks(
+        task_type="system:create_mcp_client",
+    )
+    assignment_tasks = app.state.task_repository.list_tasks(
+        task_type="system:apply_role",
+    )
+    assert install_tasks
+    assert assignment_tasks
+    assert any(task.owner_agent_id == "copaw-agent-runner" for task in install_tasks)
+    assert any(task.owner_agent_id == "copaw-agent-runner" for task in assignment_tasks)
+
+
+def test_industry_auto_gap_closure_replace_mode_swaps_seat_delta_capabilities(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(
+        tmp_path,
+        draft_generator=BrowserIndustryDraftGenerator(),
+    )
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Customer Operations",
+            "company_name": "Northwind Robotics",
+            "product": "browser onboarding workflows",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    draft = preview_payload["draft"]
+    target_role = next(
+        agent
+        for agent in draft["team"]["agents"]
+        if agent["agent_class"] == "business" and agent["role_id"] != "execution-core"
+    )
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": draft,
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    legacy_override = app.state.agent_profile_override_repository.get_override(
+        target_role["agent_id"],
+    )
+    assert legacy_override is not None
+    app.state.agent_profile_override_repository.upsert_override(
+        legacy_override.model_copy(
+            update={
+                "capabilities": ["skill:legacy-seat-pack"],
+                "reason": "seed legacy seat delta",
+            },
+        ),
+    )
+    app.state.industry_service.sync_agent_runtime_capability_override(
+        agent_id=target_role["agent_id"],
+        capability_ids=["skill:legacy-seat-pack"],
+    )
+
+    recommendation = IndustryCapabilityRecommendation(
+        recommendation_id="desktop-windows-replace-gap",
+        install_kind="mcp-template",
+        template_id="desktop-windows",
+        title="Desktop Windows Runtime",
+        default_client_key="desktop_windows",
+        capability_ids=["mcp:desktop_windows"],
+        target_agent_ids=[target_role["agent_id"]],
+        risk_level="auto",
+        source_kind="install-template",
+    )
+
+    with (
+        patch("copaw.capabilities.service.load_config") as mock_load,
+        patch("copaw.capabilities.service.save_config"),
+        patch("copaw.capabilities.sources.mcp.load_config") as mock_mcp_load,
+        patch("copaw.industry.service_activation.load_config") as mock_industry_load,
+    ):
+        config = SimpleNamespace(mcp=SimpleNamespace(clients={}))
+        mock_load.return_value = config
+        mock_mcp_load.return_value = config
+        mock_industry_load.return_value = config
+        result = asyncio.run(
+            app.state.industry_service.auto_close_capability_gap_for_instance(
+                instance_id,
+                recommendation,
+                target_agent_ids=[target_role["agent_id"]],
+                capability_assignment_mode="replace",
+            ),
+        )
+
+    assert result.status == "installed"
+    override = app.state.agent_profile_override_repository.get_override(
+        target_role["agent_id"],
+    )
+    assert override is not None
+    assert "mcp:desktop_windows" in (override.capabilities or [])
+    assert "skill:legacy-seat-pack" not in (override.capabilities or [])
+    assert "tool:browser_use" in (override.capabilities or [])
+    runtime = app.state.agent_runtime_repository.get_runtime(target_role["agent_id"])
+    assert runtime is not None
+    capability_layers = runtime.metadata["capability_layers"]
+    assert "mcp:desktop_windows" not in capability_layers["role_prototype_capability_ids"]
+    assert capability_layers["seat_instance_capability_ids"] == ["mcp:desktop_windows"]
+    assert "skill:legacy-seat-pack" not in capability_layers["seat_instance_capability_ids"]
+    assert "tool:browser_use" in capability_layers["role_prototype_capability_ids"]
+
+
+def test_industry_auto_gap_closure_skips_guarded_recommendation(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    draft = preview_payload["draft"]
+    target_role = next(
+        agent
+        for agent in draft["team"]["agents"]
+        if agent["agent_class"] == "business" and agent["role_id"] != "execution-core"
+    )
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": draft,
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    recommendation = IndustryCapabilityRecommendation(
+        recommendation_id="guarded-skill-gap",
+        install_kind="hub-skill",
+        template_id="research-pack",
+        title="Research Pack",
+        capability_ids=["skill:research-pack"],
+        target_agent_ids=[target_role["agent_id"]],
+        risk_level="guarded",
+        source_kind="skillhub-curated",
+        source_url="https://example.com/research-pack.zip",
+        version="1.0.0",
+        review_required=True,
+    )
+
+    result = asyncio.run(
+        app.state.industry_service.auto_close_capability_gap_for_instance(
+            instance_id,
+            recommendation,
+            target_agent_ids=[target_role["agent_id"]],
+            capability_assignment_mode="merge",
+        ),
+    )
+
+    assert result.status == "skipped"
+    assert result.installed is False
+    assert result.assignment_results == []
+    override = app.state.agent_profile_override_repository.get_override(
+        target_role["agent_id"],
+    )
+    assert override is None or "skill:research-pack" not in (override.capabilities or [])
 
 
 def test_industry_rebootstrap_prunes_stale_agents_and_archives_superseded_goals(

@@ -42,6 +42,7 @@ from copaw.environments import (
 )
 from copaw.app.runtime_events import RuntimeEventBus
 from copaw.industry import IndustryProfile, IndustryRoleBlueprint
+from .industry_api_parts.shared import _build_industry_app
 from copaw.kernel import KernelDispatcher, KernelTaskStore
 from copaw.state import SQLiteStateStore
 from copaw.state.repositories import (
@@ -1446,3 +1447,47 @@ def test_capability_market_browser_local_install_defaults_to_visible_profile(
         item for item in profiles.json() if item["profile_id"] == "browser-local-default"
     )
     assert profile["headed"] is True
+
+
+def test_capability_market_install_template_assignment_requires_existing_target_agents(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    app.include_router(capability_market_router)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Customer Operations",
+            "company_name": "Northwind Robotics",
+            "product": "browser onboarding workflows",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    target_agent_id = next(
+        role["agent_id"]
+        for role in preview_payload["draft"]["team"]["agents"]
+        if role["role_id"] != "execution-core"
+    )
+
+    response = client.post(
+        "/capability-market/install-templates/browser-local/install",
+        json={
+            "target_agent_ids": [target_agent_id, "agent-does-not-exist"],
+            "capability_assignment_mode": "merge",
+        },
+    )
+
+    assert response.status_code == 404
+    assert "Target agents not found" in response.json()["detail"]

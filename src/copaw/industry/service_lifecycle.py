@@ -77,6 +77,7 @@ class _IndustryLifecycleMixin:
         self._prediction_service = prediction_service
         self._state_store = state_store
         bindings = runtime_bindings or IndustryServiceRuntimeBindings()
+        self._kernel_dispatcher = bindings.kernel_dispatcher
         self._operating_lane_repository = bindings.operating_lane_repository
         self._backlog_item_repository = bindings.backlog_item_repository
         self._operating_cycle_repository = bindings.operating_cycle_repository
@@ -148,6 +149,12 @@ class _IndustryLifecycleMixin:
         capability_linker = getattr(self._capability_service, "set_industry_service", None)
         if callable(capability_linker):
             capability_linker(self)
+
+    def _get_industry_kernel_dispatcher(self) -> object | None:
+        dispatcher = self._kernel_dispatcher
+        if dispatcher is not None:
+            return dispatcher
+        return getattr(self._goal_service, "_dispatcher", None)
     def set_agent_profile_service(self, agent_profile_service: object | None) -> None:
         self._agent_profile_service = agent_profile_service
     def _get_capability_discovery_service(self) -> object | None:
@@ -1018,7 +1025,7 @@ class _IndustryLifecycleMixin:
         risk_level: str,
         human_confirmation_required: bool,
     ) -> dict[str, Any]:
-        dispatcher = getattr(self._goal_service, "_dispatcher", None)
+        dispatcher = self._get_industry_kernel_dispatcher()
         if dispatcher is None:
             return {
                 "success": False,
@@ -1062,6 +1069,55 @@ class _IndustryLifecycleMixin:
             "phase": result.phase,
             "output": output,
         }
+
+    async def _auto_close_temporary_seat_capability_gap(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        profile: IndustryProfile,
+        role: IndustryRoleBlueprint,
+        plan: ChatWritebackPlan,
+    ) -> list[IndustryBootstrapInstallResult]:
+        goal_context_by_agent = self._build_instance_goal_context_by_agent(
+            record=record,
+        )
+        goal_context_by_agent[role.agent_id] = _unique_strings(
+            list(goal_context_by_agent.get(role.agent_id, [])),
+            plan.normalized_text,
+            plan.goal.title if plan.goal is not None else None,
+            plan.goal.summary if plan.goal is not None else None,
+            list(plan.goal.plan_steps) if plan.goal is not None else [],
+            list(plan.classifications),
+        )
+        recommendations = self._build_install_template_recommendations(
+            profile=profile,
+            target_roles=[role],
+            goal_context_by_agent=goal_context_by_agent,
+        )
+        results: list[IndustryBootstrapInstallResult] = []
+        for recommendation in recommendations:
+            auto_recommendation = recommendation.model_copy(
+                update={
+                    "risk_level": "auto",
+                    "review_required": False,
+                    "review_summary": "",
+                    "review_notes": _unique_strings(
+                        list(recommendation.review_notes or []),
+                        [
+                            "Auto-approved because seat-gap policy already classified this request as low-risk local work.",
+                        ],
+                    ),
+                },
+            )
+            results.append(
+                await self.auto_close_capability_gap_for_instance(
+                    record.instance_id,
+                    auto_recommendation,
+                    target_agent_ids=[role.agent_id],
+                    capability_assignment_mode="merge",
+                ),
+            )
+        return results
     async def _search_hub_skills_cached(
         self,
         *,
@@ -2280,6 +2336,7 @@ class _IndustryLifecycleMixin:
         )
         decision_request_id: str | None = None
         proposal_status: str | None = None
+        capability_gap_closure_results: list[IndustryBootstrapInstallResult] = []
         target_role = matched_role
         dispatch_role = matched_role
         if seat_resolution_kind != "existing-role":
@@ -2320,10 +2377,52 @@ class _IndustryLifecycleMixin:
                     agent_id=seat_resolution.target_agent_id,
                 ) or seat_resolution.role
                 dispatch_role = target_role
-                target_match_signals = _unique_strings(
-                    list(target_match_signals),
-                    ["temporary seat was created through the governed team updater"],
+                if target_role is not None:
+                    capability_gap_closure_results = (
+                        await self._auto_close_temporary_seat_capability_gap(
+                            record=record,
+                            profile=profile,
+                            role=target_role,
+                            plan=plan,
+                        )
+                    )
+                failed_capability_result = next(
+                    (
+                        item
+                        for item in capability_gap_closure_results
+                        if item.status == "failed"
+                    ),
+                    None,
                 )
+                if failed_capability_result is not None:
+                    target_role = None
+                    dispatch_role = None
+                    seat_resolution_kind = "routing-pending"
+                    seat_resolution_reason = (
+                        _string(failed_capability_result.detail)
+                        or "Temporary seat capability gap could not be closed automatically."
+                    )
+                    plan.classifications = _unique_strings(
+                        list(plan.classifications),
+                        ["routing-pending", "capability-gap"],
+                    )
+                    target_match_signals = _unique_strings(
+                        list(target_match_signals),
+                        [
+                            "temporary seat was created but the runtime capability gap is still unresolved",
+                            seat_resolution_reason,
+                        ],
+                    )
+                else:
+                    target_match_signals = _unique_strings(
+                        list(target_match_signals),
+                        ["temporary seat was created through the governed team updater"],
+                        [
+                            _string(item.detail)
+                            for item in capability_gap_closure_results
+                            if _string(item.detail)
+                        ],
+                    )
             else:
                 target_role = None
                 dispatch_role = None
@@ -2535,6 +2634,10 @@ class _IndustryLifecycleMixin:
                         "chat_writeback_target_role_name": target_role_name,
                         "chat_writeback_target_match_signals": list(target_match_signals),
                         "chat_writeback_requested_surfaces": list(requested_surfaces),
+                        "capability_gap_closure_results": [
+                            item.model_dump(mode="json")
+                            for item in capability_gap_closure_results
+                        ],
                         "chat_writeback_channel": chat_writeback_channel,
                         "control_thread_id": control_thread_id,
                         "session_id": control_thread_id,
@@ -2705,6 +2808,10 @@ class _IndustryLifecycleMixin:
             "seat_resolution_kind": seat_resolution_kind,
             "seat_resolution_reason": seat_resolution_reason or None,
             "seat_requested_surfaces": list(requested_surfaces),
+            "capability_gap_closure_results": [
+                item.model_dump(mode="json")
+                for item in capability_gap_closure_results
+            ],
             "decision_request_id": decision_request_id,
             "proposal_status": proposal_status,
             "dispatch_deferred": dispatch_deferred,
