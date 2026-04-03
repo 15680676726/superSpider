@@ -495,6 +495,41 @@ async def test_document_action_runs_frontmost_and_clipboard_guardrails_before_ex
     assert call_order == ["frontmost", "clipboard", "execute"]
 
 
+@pytest.mark.asyncio
+async def test_document_action_acquires_and_releases_shared_writer_lease(
+    tmp_path,
+) -> None:
+    service, _, _, _event_bus = _build_environment_service(tmp_path)
+    lease = _acquire_document_session(service)
+    service.register_document_bridge(
+        session_mount_id=lease.id,
+        bridge_ref="document-bridge:office",
+        status="ready",
+        supported_families=["documents"],
+    )
+
+    class _Executor:
+        async def __call__(self, **_kwargs):
+            active_lease = service.get_shared_writer_lease(writer_lock_scope=lease.id)
+            assert active_lease is not None
+            assert active_lease.lease_status == "leased"
+            return {"success": True, "message": "document ok"}
+
+    service.register_document_bridge_executor("document-bridge:office", _Executor())
+
+    result = await service.execute_document_action(
+        session_mount_id=lease.id,
+        action="write_document",
+        document_family="documents",
+        contract={},
+    )
+
+    assert result["success"] is True
+    released = service.get_shared_writer_lease(writer_lock_scope=lease.id)
+    assert released is not None
+    assert released.lease_status == "released"
+
+
 def test_document_action_publishes_guardrail_block_event(tmp_path) -> None:
     service, _, _, event_bus = _build_environment_service(tmp_path)
     lease = _acquire_document_session(service)

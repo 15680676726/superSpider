@@ -78,6 +78,10 @@ def _filter_executor_kwargs(executor, payload: dict[str, object]) -> dict[str, A
     signature = inspect.signature(executor)
     filtered: dict[str, Any] = {}
     wants_payload = "payload" in signature.parameters
+    accepts_var_kwargs = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
     for name, parameter in signature.parameters.items():
         if parameter.kind not in (
             inspect.Parameter.POSITIONAL_OR_KEYWORD,
@@ -89,6 +93,11 @@ def _filter_executor_kwargs(executor, payload: dict[str, object]) -> dict[str, A
         if name not in payload:
             continue
         filtered[name] = payload[name]
+    if accepts_var_kwargs:
+        for name, value in payload.items():
+            if name == "payload" or name in filtered:
+                continue
+            filtered[name] = value
     if wants_payload and "payload" not in filtered:
         filtered["payload"] = payload
     return filtered

@@ -239,6 +239,13 @@ def test_runtime_execution_contract_tracks_compaction_sidecar_instead_of_experie
 
     assert degraded["sidecar_memory"]["status"] == "degraded"
     assert available["sidecar_memory"]["status"] == "available"
+    assert degraded["runtime_entropy"]["status"] == "degraded"
+    assert available["runtime_entropy"]["status"] == "available"
+    assert degraded["runtime_entropy"]["sidecar_memory_status"] == "degraded"
+    assert available["runtime_entropy"]["sidecar_memory_status"] == "available"
+    assert degraded["runtime_entropy"]["carry_forward_contract"] == "canonical-state-only"
+    assert available["runtime_entropy"]["carry_forward_contract"] == "private-compaction-sidecar"
+    assert degraded["runtime_entropy"]["max_input_length"] > 0
 
 
 def test_environment_service_rebinds_cooperative_facade_after_late_bootstrap_injection(

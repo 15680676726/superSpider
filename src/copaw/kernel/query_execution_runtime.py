@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib
 
+from ..constant import MEMORY_COMPACT_KEEP_RECENT
 from ..memory.conversation_compaction_service import ConversationCompactionService
 from .main_brain_intake import (
     build_industry_chat_action_kwargs,
@@ -44,6 +45,167 @@ _EXECUTION_CORE_ALLOWED_LOCAL_TOOL_CAPABILITY_IDS = {
     "tool:read_file",
     "tool:write_file",
 }
+
+_RUNTIME_ENTROPY_FAILURE_SOURCE = "sidecar-memory"
+_RUNTIME_ENTROPY_DEGRADED_SUMMARY = (
+    "The private compaction memory sidecar is unavailable; "
+    "runtime continues on canonical state only."
+)
+_RUNTIME_ENTROPY_DEGRADED_NEXT_STEP = (
+    "Restore the compaction sidecar if long-horizon scratch recall is required."
+)
+_RUNTIME_ENTROPY_AVAILABLE_SUMMARY = "The private compaction memory sidecar is attached."
+
+
+def _resolve_runtime_entropy_budget_payload(
+    *,
+    running_config: Any | None = None,
+) -> dict[str, Any]:
+    running = running_config if running_config is not None else load_config().agents.running
+    compact_threshold = getattr(running, "memory_compact_threshold", None)
+    if compact_threshold is None:
+        compact_threshold = int(
+            max(
+                0,
+                float(getattr(running, "max_input_length", 0) or 0)
+                * float(getattr(running, "memory_compact_ratio", 0) or 0),
+            ),
+        )
+    return {
+        "max_input_length": int(getattr(running, "max_input_length", 0) or 0),
+        "memory_compact_ratio": float(getattr(running, "memory_compact_ratio", 0) or 0),
+        "memory_compact_threshold": int(compact_threshold or 0),
+        "memory_compact_reserve": int(getattr(running, "memory_compact_reserve", 0) or 0),
+        "enable_tool_result_compact": bool(
+            getattr(running, "enable_tool_result_compact", False),
+        ),
+        "tool_result_compact_keep_n": int(
+            getattr(running, "tool_result_compact_keep_n", 0) or 0,
+        ),
+        "keep_recent_messages": MEMORY_COMPACT_KEEP_RECENT,
+    }
+
+
+def _normalize_runtime_entropy_degradation(
+    *,
+    sidecar_memory_available: bool,
+    degradation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved = {
+        key: value for key, value in dict(degradation or {}).items() if value is not None
+    }
+    sidecar_memory = _mapping_value(resolved.get("sidecar_memory"))
+    if sidecar_memory or sidecar_memory_available:
+        return resolved
+    resolved["sidecar_memory"] = build_execution_diagnostics(
+        failure_source=_RUNTIME_ENTROPY_FAILURE_SOURCE,
+        remediation_summary=_RUNTIME_ENTROPY_DEGRADED_SUMMARY,
+    )
+    return resolved
+
+
+def build_runtime_entropy_sidecar_memory_projection(
+    *,
+    sidecar_memory_available: bool,
+    degradation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved_degradation = _normalize_runtime_entropy_degradation(
+        sidecar_memory_available=sidecar_memory_available,
+        degradation=degradation,
+    )
+    sidecar_memory = _mapping_value(resolved_degradation.get("sidecar_memory"))
+    if sidecar_memory:
+        remediation_summary = _first_non_empty(
+            sidecar_memory.get("remediation_summary"),
+            _RUNTIME_ENTROPY_DEGRADED_SUMMARY,
+        )
+        blocked_next_step = _first_non_empty(
+            sidecar_memory.get("blocked_next_step"),
+            _RUNTIME_ENTROPY_DEGRADED_NEXT_STEP,
+        )
+        failure_source = _first_non_empty(
+            sidecar_memory.get("failure_source"),
+            _RUNTIME_ENTROPY_FAILURE_SOURCE,
+        )
+        return {
+            "status": "degraded",
+            "availability": "missing",
+            "failure_source": failure_source,
+            "summary": remediation_summary,
+            "blocked_next_step": blocked_next_step,
+            "remediation_summary": remediation_summary,
+        }
+    return {
+        "status": "available",
+        "availability": "attached",
+        "failure_source": _RUNTIME_ENTROPY_FAILURE_SOURCE,
+        "summary": _RUNTIME_ENTROPY_AVAILABLE_SUMMARY,
+        "blocked_next_step": "",
+        "remediation_summary": _RUNTIME_ENTROPY_AVAILABLE_SUMMARY,
+    }
+
+
+def build_runtime_entropy_contract_payload(
+    *,
+    sidecar_memory_available: bool,
+    degradation: dict[str, Any] | None = None,
+    budget: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved_budget = dict(budget or _resolve_runtime_entropy_budget_payload())
+    sidecar_memory = build_runtime_entropy_sidecar_memory_projection(
+        sidecar_memory_available=sidecar_memory_available,
+        degradation=degradation,
+    )
+    status = "degraded" if sidecar_memory["status"] == "degraded" else "available"
+    return {
+        "status": status,
+        "sidecar_memory_status": sidecar_memory["status"],
+        "carry_forward_contract": (
+            "canonical-state-only"
+            if status == "degraded"
+            else "private-compaction-sidecar"
+        ),
+        "failure_source": (
+            sidecar_memory["failure_source"]
+            if status == "degraded"
+            else ""
+        ),
+        **resolved_budget,
+    }
+
+
+def build_query_runtime_entropy_contract_payload(
+    *,
+    sidecar_memory_available: bool,
+    degradation: dict[str, Any] | None = None,
+    budget: dict[str, Any] | None = None,
+    runtime_entropy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved_budget = dict(budget or _resolve_runtime_entropy_budget_payload())
+    resolved_degradation = _normalize_runtime_entropy_degradation(
+        sidecar_memory_available=sidecar_memory_available,
+        degradation=degradation,
+    )
+    resolved_runtime_entropy = dict(
+        runtime_entropy
+        or build_runtime_entropy_contract_payload(
+            sidecar_memory_available=sidecar_memory_available,
+            degradation=resolved_degradation,
+            budget=resolved_budget,
+        ),
+    )
+    return {
+        # Compatibility wrapper: keep the historical query_runtime_entropy surface
+        # while projecting the canonical runtime_entropy contract verbatim.
+        "status": resolved_runtime_entropy["status"],
+        "runtime_entropy": resolved_runtime_entropy,
+        "budget": resolved_budget,
+        "sidecar_memory": build_runtime_entropy_sidecar_memory_projection(
+            sidecar_memory_available=sidecar_memory_available,
+            degradation=resolved_degradation,
+        ),
+        "degradation": resolved_degradation,
+    }
 
 
 class _QueryExecutionRuntimeMixin(
@@ -179,6 +341,52 @@ class _QueryExecutionRuntimeMixin(
 
     def set_evidence_ledger(self, evidence_ledger: Any | None) -> None:
         self._evidence_ledger = evidence_ledger
+
+    def get_query_runtime_entropy_contract(self) -> dict[str, Any]:
+        return self._build_query_runtime_entropy_contract()
+
+    def _resolve_query_runtime_entropy_budget(self) -> dict[str, Any]:
+        return _resolve_runtime_entropy_budget_payload()
+
+    def _build_query_runtime_sidecar_memory_contract(
+        self,
+        *,
+        degradation: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return build_runtime_entropy_sidecar_memory_projection(
+            sidecar_memory_available=self._conversation_compaction_service is not None,
+            degradation=degradation,
+        )
+
+    def _build_runtime_entropy_contract(
+        self,
+        *,
+        degradation: dict[str, Any] | None = None,
+        budget: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return build_runtime_entropy_contract_payload(
+            sidecar_memory_available=self._conversation_compaction_service is not None,
+            degradation=degradation,
+            budget=budget,
+        )
+
+    def _build_query_runtime_entropy_contract(
+        self,
+        *,
+        degradation: dict[str, Any] | None = None,
+        runtime_entropy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        budget = self._resolve_query_runtime_entropy_budget()
+        resolved_runtime_entropy = runtime_entropy or self._build_runtime_entropy_contract(
+            degradation=degradation,
+            budget=budget,
+        )
+        return build_query_runtime_entropy_contract_payload(
+            sidecar_memory_available=self._conversation_compaction_service is not None,
+            degradation=degradation,
+            budget=budget,
+            runtime_entropy=resolved_runtime_entropy,
+        )
 
     def _build_governance_control_record(
         self,
@@ -1301,6 +1509,14 @@ class _QueryExecutionRuntimeMixin(
         degradation = self._resolve_execution_degradation_context(
             request=request,
             agent_id=agent_id,
+        )
+        runtime_entropy = self._build_runtime_entropy_contract(
+            degradation=degradation,
+        )
+        context["runtime_entropy"] = runtime_entropy
+        context["query_runtime_entropy"] = self._build_query_runtime_entropy_contract(
+            degradation=degradation,
+            runtime_entropy=runtime_entropy,
         )
         if degradation:
             context["degradation"] = degradation

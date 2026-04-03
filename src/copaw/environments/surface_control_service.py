@@ -2,6 +2,7 @@
 """Executable routing for cooperative/app-native/semantic surface control."""
 from __future__ import annotations
 
+import asyncio
 import inspect
 from dataclasses import asdict
 from pathlib import Path
@@ -153,15 +154,17 @@ class SurfaceControlService:
                 browser_site_contract.get("site_contract_ref"),
             ),
         )
-        result = await self._execute_selected_path(
-            resolution.selected_path,
-            cooperative_executor=cooperative_executor,
-            semantic_executor=None,
-            host_executor=host_executor,
+        result = await self._execute_live_action(
+            surface_kind="browser",
             session_mount_id=session_mount_id,
             action=action,
             contract=contract,
             snapshot=snapshot,
+            detail=detail,
+            resolution_selected_path=resolution.selected_path,
+            cooperative_executor=cooperative_executor,
+            semantic_executor=None,
+            host_executor=host_executor,
             transport_ref=transport_ref,
             provider_session_ref=provider_session_ref,
         )
@@ -217,16 +220,19 @@ class SurfaceControlService:
             bridge_ref=bridge_ref,
             document_family=resolved_family,
         )
-        result = await self._execute_selected_path(
-            resolution.selected_path,
-            cooperative_executor=cooperative_executor,
-            semantic_executor=None,
-            host_executor=host_executor,
+        detail = self._service.get_session_detail(session_mount_id, limit=limit) or {}
+        result = await self._execute_live_action(
+            surface_kind="document",
             session_mount_id=session_mount_id,
             action=action,
             contract=contract,
-            document_family=resolved_family,
             snapshot=snapshot,
+            detail=detail,
+            resolution_selected_path=resolution.selected_path,
+            cooperative_executor=cooperative_executor,
+            semantic_executor=None,
+            host_executor=host_executor,
+            document_family=resolved_family,
         )
         return self._decorate_result(result=result, resolution=resolution)
 
@@ -291,19 +297,193 @@ class SurfaceControlService:
             app_identity=app_identity,
             control_channel=control_channel,
         )
-        result = await self._execute_selected_path(
-            resolution.selected_path,
-            cooperative_executor=cooperative_executor,
-            semantic_executor=semantic_executor,
-            host_executor=host_executor,
+        result = await self._execute_live_action(
+            surface_kind="windows-app",
             session_mount_id=session_mount_id,
             action=action,
             contract=contract,
             snapshot=snapshot,
+            detail=snapshot,
+            resolution_selected_path=resolution.selected_path,
+            cooperative_executor=cooperative_executor,
+            semantic_executor=semantic_executor,
+            host_executor=host_executor,
             app_identity=app_identity,
             control_channel=control_channel,
         )
         return self._decorate_result(result=result, resolution=resolution)
+
+    async def _execute_live_action(
+        self,
+        *,
+        surface_kind: str,
+        session_mount_id: str,
+        action: str,
+        contract: dict[str, Any],
+        snapshot: dict[str, Any],
+        detail: dict[str, Any],
+        resolution_selected_path: str | None,
+        cooperative_executor: object | None,
+        semantic_executor: object | None,
+        host_executor: object | None,
+        **kwargs,
+    ) -> dict[str, Any]:
+        if resolution_selected_path is None:
+            return await self._execute_selected_path(
+                resolution_selected_path,
+                cooperative_executor=cooperative_executor,
+                semantic_executor=semantic_executor,
+                host_executor=host_executor,
+                session_mount_id=session_mount_id,
+                action=action,
+                contract=contract,
+                snapshot=snapshot,
+                **kwargs,
+            )
+
+        acquire = getattr(self._service, "acquire_shared_writer_lease", None)
+        release = getattr(self._service, "release_shared_writer_lease", None)
+        if not callable(acquire) or not callable(release):
+            return await self._execute_selected_path(
+                resolution_selected_path,
+                cooperative_executor=cooperative_executor,
+                semantic_executor=semantic_executor,
+                host_executor=host_executor,
+                session_mount_id=session_mount_id,
+                action=action,
+                contract=contract,
+                snapshot=snapshot,
+                **kwargs,
+            )
+
+        writer_lock_scope = self._resolve_live_surface_writer_scope(
+            session_mount_id=session_mount_id,
+            contract=contract,
+            snapshot=snapshot,
+            detail=detail,
+        )
+        writer_owner, lease_metadata = self._build_live_surface_writer_lease_payload(
+            surface_kind=surface_kind,
+            session_mount_id=session_mount_id,
+            action=action,
+            writer_lock_scope=writer_lock_scope,
+            contract=contract,
+            snapshot=snapshot,
+            detail=detail,
+        )
+
+        try:
+            lease = acquire(
+                writer_lock_scope=writer_lock_scope,
+                owner=writer_owner,
+                metadata=lease_metadata,
+            )
+        except RuntimeError as exc:
+            message = str(exc).lower()
+            if "already leased by" in message:
+                raise RuntimeError(
+                    f"Writer scope '{writer_lock_scope}' is already reserved.",
+                ) from exc
+            raise
+
+        release_reason = f"{surface_kind} action completed"
+        try:
+            return await self._execute_selected_path(
+                resolution_selected_path,
+                cooperative_executor=cooperative_executor,
+                semantic_executor=semantic_executor,
+                host_executor=host_executor,
+                session_mount_id=session_mount_id,
+                action=action,
+                contract=contract,
+                snapshot=snapshot,
+                **kwargs,
+            )
+        except asyncio.CancelledError:
+            release_reason = f"{surface_kind} action cancelled"
+            raise
+        except Exception:
+            release_reason = f"{surface_kind} action failed"
+            raise
+        finally:
+            release(
+                lease_id=lease.id,
+                lease_token=lease.lease_token,
+                reason=release_reason,
+            )
+
+    def _resolve_live_surface_writer_scope(
+        self,
+        *,
+        session_mount_id: str,
+        contract: dict[str, Any],
+        snapshot: dict[str, Any],
+        detail: dict[str, Any],
+    ) -> str:
+        session = self._service.get_session(session_mount_id)
+        session_metadata = self._mapping(getattr(session, "metadata", None))
+        snapshot_mapping = self._mapping(snapshot)
+        detail_mapping = self._mapping(detail)
+        contract_surface = self._mapping(contract.get("surface_contract"))
+        desktop_from_snapshot = self._mapping(snapshot_mapping.get("desktop_app_contract"))
+        desktop_from_detail = self._mapping(detail_mapping.get("desktop_app_contract"))
+        return self._normalize_string(
+            contract.get("writer_lock_scope"),
+            contract.get("lock_scope_ref"),
+            contract.get("scope_ref"),
+            contract_surface.get("writer_lock_scope"),
+            desktop_from_snapshot.get("writer_lock_scope"),
+            desktop_from_detail.get("writer_lock_scope"),
+            session_metadata.get("writer_lock_scope"),
+            session_mount_id,
+        ) or session_mount_id
+
+    def _build_live_surface_writer_lease_payload(
+        self,
+        *,
+        surface_kind: str,
+        session_mount_id: str,
+        action: str,
+        writer_lock_scope: str,
+        contract: dict[str, Any],
+        snapshot: dict[str, Any],
+        detail: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        session = self._service.get_session(session_mount_id)
+        environment = None
+        environment_id = self._normalize_string(getattr(session, "environment_id", None))
+        if environment_id is not None:
+            environment = self._service.get_environment(environment_id)
+        session_metadata = self._mapping(getattr(session, "metadata", None))
+        environment_metadata = self._mapping(
+            getattr(environment, "metadata", None) if environment is not None else None,
+        )
+        detail_mapping = self._mapping(detail)
+        snapshot_mapping = self._mapping(snapshot)
+        owner = self._normalize_string(
+            getattr(session, "lease_owner", None),
+            contract.get("owner_agent_id"),
+            contract.get("owner"),
+            session_metadata.get("lease_owner"),
+            "live-surface",
+        ) or "live-surface"
+        metadata = {
+            "access_mode": "writer",
+            "lease_class": "exclusive-writer",
+            "writer_lock_scope": writer_lock_scope,
+            "surface_kind": surface_kind,
+            "action_name": action,
+            "session_mount_id": session_mount_id,
+            "environment_ref": self._normalize_string(
+                contract.get("environment_ref"),
+                detail_mapping.get("environment_id"),
+                snapshot_mapping.get("environment_id"),
+                environment_id,
+                session_metadata.get("environment_ref"),
+                environment_metadata.get("environment_ref"),
+            ) or f"resource-slot:shared-writer:{writer_lock_scope}",
+        }
+        return owner, metadata
 
     async def _execute_selected_path(
         self,

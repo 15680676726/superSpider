@@ -308,7 +308,11 @@ class _RuntimeCenterOverviewCardsSupport:
             or int(human_assist.get("blocked_count") or 0) > 0
             or host_twin_blocked
         )
-        sidecar_memory = self._resolve_runtime_contract_sidecar_memory(app_state)
+        query_runtime_entropy = self._resolve_query_runtime_entropy(app_state)
+        sidecar_memory = self._resolve_governance_sidecar_memory(
+            query_runtime_entropy=query_runtime_entropy,
+            app_state=app_state,
+        )
         current_status = "active" if emergency_active else ("blocked" if runtime_blocked else "idle")
         summary = payload.get("emergency_reason")
         failure_source = None
@@ -412,6 +416,7 @@ class _RuntimeCenterOverviewCardsSupport:
                 "host_twin": payload.get("host_twin"),
                 "host_companion_session": payload.get("host_companion_session"),
                 "host_twin_summary": host_twin_summary_payload,
+                "query_runtime_entropy": query_runtime_entropy,
                 "sidecar_memory": sidecar_memory,
                 "handoff": handoff,
                 "staffing": staffing,
@@ -432,12 +437,37 @@ class _RuntimeCenterOverviewCardsSupport:
             meta={
                 **payload,
                 "host_twin_summary": host_twin_summary_payload,
+                "query_runtime_entropy": query_runtime_entropy,
                 "sidecar_memory": sidecar_memory,
                 "failure_source": diagnostics["failure_source"],
                 "blocked_next_step": diagnostics["blocked_next_step"],
                 "remediation_summary": diagnostics["remediation_summary"],
             },
         )
+
+    def _resolve_query_runtime_entropy(self, app_state: Any) -> dict[str, Any] | None:
+        service = getattr(app_state, "query_execution_service", None)
+        getter = getattr(service, "get_query_runtime_entropy_contract", None)
+        if not callable(getter):
+            return None
+        try:
+            payload = getter()
+        except Exception:
+            logger.debug("runtime_center query runtime entropy lookup failed", exc_info=True)
+            return None
+        entropy = self._mapping(payload)
+        return entropy or None
+
+    def _resolve_governance_sidecar_memory(
+        self,
+        *,
+        query_runtime_entropy: dict[str, Any] | None,
+        app_state: Any,
+    ) -> dict[str, Any] | None:
+        sidecar_memory = self._mapping((query_runtime_entropy or {}).get("sidecar_memory"))
+        if sidecar_memory:
+            return sidecar_memory
+        return self._resolve_runtime_contract_sidecar_memory(app_state)
 
     def _resolve_runtime_contract_sidecar_memory(self, app_state: Any) -> dict[str, Any] | None:
         for attr_name in ("actor_worker", "actor_supervisor"):

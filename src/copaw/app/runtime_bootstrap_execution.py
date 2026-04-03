@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 from ..capabilities import CapabilityService
 from ..evidence import EvidenceLedger
@@ -14,6 +14,10 @@ from ..kernel import (
     KernelDispatcher,
     KernelTaskStore,
     KernelToolBridge,
+)
+from ..kernel.query_execution_runtime import (
+    build_runtime_entropy_contract_payload,
+    build_runtime_entropy_sidecar_memory_projection,
 )
 from ..learning import LearningService, PatchExecutor
 from ..state import SQLiteStateStore
@@ -40,28 +44,15 @@ RuntimeExecutionStack: TypeAlias = tuple[
 def _build_runtime_contract(
     *,
     conversation_compaction_service: object | None,
-) -> dict[str, dict[str, str]]:
-    if conversation_compaction_service is None:
-        return {
-            "sidecar_memory": {
-                "status": "degraded",
-                "failure_source": "sidecar-memory",
-                "summary": (
-                    "The private compaction memory sidecar is unavailable; "
-                    "runtime continues on canonical state only."
-                ),
-                "blocked_next_step": (
-                    "Restore the compaction sidecar if long-horizon scratch recall is required."
-                ),
-            }
-        }
+) -> dict[str, Any]:
+    sidecar_memory_available = conversation_compaction_service is not None
     return {
-        "sidecar_memory": {
-            "status": "available",
-            "failure_source": "sidecar-memory",
-            "summary": "The private compaction memory sidecar is attached.",
-            "blocked_next_step": "",
-        }
+        "runtime_entropy": build_runtime_entropy_contract_payload(
+            sidecar_memory_available=sidecar_memory_available,
+        ),
+        "sidecar_memory": build_runtime_entropy_sidecar_memory_projection(
+            sidecar_memory_available=sidecar_memory_available,
+        ),
     }
 
 

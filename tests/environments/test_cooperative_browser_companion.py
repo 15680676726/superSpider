@@ -556,3 +556,49 @@ async def test_browser_action_runs_frontmost_and_clipboard_guardrails_before_exe
 
     assert result["success"] is True
     assert call_order == ["frontmost", "clipboard", "execute"]
+
+
+@pytest.mark.asyncio
+async def test_browser_action_blocks_when_shared_writer_scope_is_already_reserved(
+    tmp_path,
+) -> None:
+    (
+        environment_service,
+        _env_repo,
+        _session_repo,
+        _event_bus,
+        environment,
+        session,
+        companion_runtime,
+        _browser_runtime,
+    ) = _build_services(tmp_path)
+
+    companion_runtime.register_companion(
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+    )
+    environment_service.acquire_shared_writer_lease(
+        writer_lock_scope=session.id,
+        owner="other-agent",
+        ttl_seconds=60,
+        metadata={"environment_ref": session.environment_id},
+    )
+
+    class _Executor:
+        async def __call__(self, **_kwargs):
+            raise AssertionError("browser executor should not run when writer scope is reserved")
+
+    environment_service.register_browser_companion_executor(
+        "transport:browser-companion:localhost",
+        _Executor(),
+    )
+
+    with pytest.raises(RuntimeError, match="reserved"):
+        await environment_service.execute_browser_action(
+            session_mount_id=session.id,
+            action="click",
+            contract={},
+        )

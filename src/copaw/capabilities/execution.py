@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import inspect
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from ..agents.tools import (
@@ -15,6 +17,11 @@ from ..agents.tools import (
     read_file,
     send_file_to_user,
     write_file,
+)
+from ..kernel.child_run_shell import (
+    ChildRunWriterContract,
+    ChildRunWriterLeaseConflict,
+    run_child_task_with_writer_lease,
 )
 from ..kernel.runtime_outcome import (
     classify_runtime_outcome,
@@ -80,6 +87,8 @@ _TOOL_BRIDGE_EVIDENCE_CONTRACTS = frozenset(
         "shell-command",
     },
 )
+_DIRECT_WRITER_LEASE_TTL_SECONDS = 60
+_DIRECT_WRITER_LEASE_HEARTBEAT_SECONDS = 20.0
 
 
 class CapabilityExecutionFacade:
@@ -93,6 +102,7 @@ class CapabilityExecutionFacade:
         append_execution_evidence_fn: Callable[..., str | None],
         skill_service: CapabilitySkillService,
         tool_bridge: "KernelToolBridge | None" = None,
+        environment_service: object | None = None,
         mcp_manager: object | None = None,
         system_handler: "SystemCapabilityHandler | None" = None,
     ) -> None:
@@ -105,11 +115,15 @@ class CapabilityExecutionFacade:
         self._append_execution_evidence = append_execution_evidence_fn
         self._skill_service = skill_service
         self._tool_bridge = tool_bridge
+        self._environment_service = environment_service
         self._mcp_manager = mcp_manager
         self._system_handler = system_handler
 
     def set_tool_bridge(self, tool_bridge: "KernelToolBridge | None") -> None:
         self._tool_bridge = tool_bridge
+
+    def set_environment_service(self, environment_service: object | None) -> None:
+        self._environment_service = environment_service
 
     def set_mcp_manager(self, mcp_manager: object | None) -> None:
         self._mcp_manager = mcp_manager
@@ -286,7 +300,35 @@ class CapabilityExecutionFacade:
                     self._make_browser_evidence_sink(task.id),
                 ):
                     try:
-                        response = await executor(**kwargs)
+                        response = await self._execute_direct_path(
+                            executor=executor,
+                            kwargs=kwargs,
+                            execution_context=execution_context,
+                            mount=mount,
+                        )
+                    except ChildRunWriterLeaseConflict as exc:
+                        summary = str(exc)
+                        error_kind = "blocked"
+                        evidence_id = self._append_execution_evidence(
+                            task=task,
+                            mount=mount,
+                            result_summary=summary,
+                            status=evidence_status_for_outcome(error_kind),
+                            metadata={
+                                **metadata,
+                                "error_class": exc.__class__.__name__,
+                                "error_kind": error_kind,
+                            },
+                        )
+                        return self._build_execution_result(
+                            execution_context=execution_context,
+                            mount=mount,
+                            payload=json_safe_kwargs,
+                            success=False,
+                            summary=summary,
+                            error_kind=error_kind,
+                            evidence_id=evidence_id,
+                        )
                     except Exception as exc:
                         summary = f"{exc.__class__.__name__}: {exc}"
                         error_kind = classify_runtime_outcome(summary, success=False)
@@ -370,6 +412,93 @@ class CapabilityExecutionFacade:
             action_mode=self._resolve_action_mode(mount),
             payload=payload,
         )
+
+    async def _execute_direct_path(
+        self,
+        *,
+        executor: object,
+        kwargs: dict[str, object],
+        execution_context: CapabilityExecutionContext,
+        mount: "CapabilityMount",
+    ) -> object:
+        writer_contract = self._resolve_writer_contract(
+            mount=mount,
+            execution_context=execution_context,
+        )
+        return await run_child_task_with_writer_lease(
+            label="capability-direct-execution",
+            execute=lambda: self._invoke_executor(executor, **kwargs),
+            environment_service=self._environment_service,
+            owner_agent_id=execution_context.owner_agent_id,
+            worker_id=execution_context.owner_agent_id,
+            contract=writer_contract,
+            mcp_manager=None,
+            mcp_overlay_contract=None,
+            ttl_seconds=_DIRECT_WRITER_LEASE_TTL_SECONDS,
+            heartbeat_interval_seconds=_DIRECT_WRITER_LEASE_HEARTBEAT_SECONDS,
+        )
+
+    async def _invoke_executor(self, executor: object, **kwargs) -> object:
+        result = executor(**kwargs)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+    def _resolve_writer_contract(
+        self,
+        *,
+        mount: "CapabilityMount | None",
+        execution_context: CapabilityExecutionContext,
+    ) -> ChildRunWriterContract | None:
+        if mount is None or execution_context.action_mode != "write":
+            return None
+        writer_lock_scope = self._resolve_writer_lock_scope(
+            mount=mount,
+            payload=execution_context.payload,
+            environment_ref=execution_context.environment_ref,
+        )
+        if writer_lock_scope is None:
+            return None
+        return ChildRunWriterContract(
+            access_mode="writer",
+            lease_class="exclusive-writer",
+            writer_lock_scope=writer_lock_scope,
+            environment_ref=execution_context.environment_ref,
+        )
+
+    @classmethod
+    def _resolve_writer_lock_scope(
+        cls,
+        *,
+        mount: "CapabilityMount",
+        payload: dict[str, object],
+        environment_ref: str | None,
+    ) -> str | None:
+        declared_scope = cls._execution_policy_value(mount, "writer_lock_scope")
+        if declared_scope is not None:
+            return declared_scope
+        scope_source = cls._execution_policy_value(mount, "writer_scope_source")
+        if scope_source == "file_path":
+            return cls._file_writer_lock_scope(payload.get("file_path"))
+        if scope_source == "environment_ref":
+            return cls._normalize_writer_scope(environment_ref)
+        return None
+
+    @staticmethod
+    def _file_writer_lock_scope(value: object | None) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        return f"file:{Path(text).resolve()}"
+
+    @staticmethod
+    def _normalize_writer_scope(value: object | None) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
     @staticmethod
     def _resolve_action_mode(mount: "CapabilityMount | None") -> str | None:

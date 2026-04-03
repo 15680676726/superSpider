@@ -20,6 +20,7 @@ from copaw.agents.tools.evidence_runtime import (
 from copaw.kernel import KernelTask
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.query_execution import KernelQueryExecutionService
+from copaw.constant import MEMORY_COMPACT_KEEP_RECENT
 from copaw.state import AgentRuntimeRecord, SQLiteStateStore
 from copaw.state.repositories import SqliteAgentRuntimeRepository
 
@@ -192,6 +193,86 @@ def test_query_execution_runtime_marks_sidecar_memory_boundary_as_degraded_when_
     assert sidecar_memory["failure_source"] == "sidecar-memory"
     assert "private compaction memory sidecar" in sidecar_memory["remediation_summary"]
     assert "Restore the compaction sidecar" in sidecar_memory["blocked_next_step"]
+    runtime_entropy = resolved.get("runtime_entropy")
+    assert isinstance(runtime_entropy, dict)
+    assert runtime_entropy["status"] == "degraded"
+    assert runtime_entropy["sidecar_memory_status"] == "degraded"
+    assert runtime_entropy["carry_forward_contract"] == "canonical-state-only"
+    assert runtime_entropy["failure_source"] == "sidecar-memory"
+    entropy = resolved.get("query_runtime_entropy")
+    assert isinstance(entropy, dict)
+    assert entropy["status"] == "degraded"
+    assert entropy["runtime_entropy"] == runtime_entropy
+    assert entropy["sidecar_memory"]["status"] == "degraded"
+    assert entropy["degradation"]["sidecar_memory"]["failure_source"] == "sidecar-memory"
+
+
+def test_query_execution_runtime_resolves_runtime_entropy_contract_when_sidecar_is_available() -> None:
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        conversation_compaction_service=SimpleNamespace(),
+    )
+
+    resolved = service._resolve_execution_task_context(  # pylint: disable=protected-access
+        request=SimpleNamespace(),
+        agent_id="ops-agent",
+        kernel_task_id=None,
+        conversation_thread_id="industry-chat:industry-v1-ops:execution-core",
+    )
+
+    runtime_entropy = resolved.get("runtime_entropy")
+    assert isinstance(runtime_entropy, dict)
+    assert runtime_entropy["status"] == "available"
+    assert runtime_entropy["sidecar_memory_status"] == "available"
+    assert runtime_entropy["carry_forward_contract"] == "private-compaction-sidecar"
+    assert runtime_entropy["max_input_length"] > 0
+    entropy = resolved.get("query_runtime_entropy")
+    assert isinstance(entropy, dict)
+    assert entropy["status"] == "available"
+    assert entropy["runtime_entropy"] == runtime_entropy
+    assert entropy["sidecar_memory"]["status"] == "available"
+    assert entropy["sidecar_memory"]["availability"] == "attached"
+    assert entropy["degradation"] == {}
+
+
+def test_query_execution_runtime_exposes_attached_entropy_budget_from_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    running = SimpleNamespace(
+        max_input_length=4096,
+        memory_compact_ratio=0.5,
+        memory_compact_threshold=2048,
+        memory_compact_reserve=512,
+        enable_tool_result_compact=True,
+        tool_result_compact_keep_n=7,
+    )
+    monkeypatch.setattr(
+        "copaw.kernel.query_execution_runtime.load_config",
+        lambda: SimpleNamespace(agents=SimpleNamespace(running=running)),
+    )
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        conversation_compaction_service=object(),
+    )
+
+    entropy = service.get_query_runtime_entropy_contract()
+
+    assert entropy["status"] == "available"
+    assert entropy["runtime_entropy"]["status"] == "available"
+    assert entropy["runtime_entropy"]["carry_forward_contract"] == "private-compaction-sidecar"
+    assert entropy["runtime_entropy"]["max_input_length"] == 4096
+    assert entropy["budget"] == {
+        "max_input_length": 4096,
+        "memory_compact_ratio": 0.5,
+        "memory_compact_threshold": 2048,
+        "memory_compact_reserve": 512,
+        "enable_tool_result_compact": True,
+        "tool_result_compact_keep_n": 7,
+        "keep_recent_messages": MEMORY_COMPACT_KEEP_RECENT,
+    }
+    assert entropy["sidecar_memory"]["status"] == "available"
+    assert entropy["sidecar_memory"]["availability"] == "attached"
+    assert entropy["degradation"] == {}
 
 
 @pytest.mark.asyncio

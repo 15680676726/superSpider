@@ -853,6 +853,38 @@ def test_execute_windows_app_action_publishes_guardrail_block_event(
     assert blocked[-1].payload["reason"] == "global-esc"
 
 
+@pytest.mark.asyncio
+async def test_execute_windows_app_action_blocks_when_shared_writer_scope_is_already_reserved(
+    tmp_path,
+) -> None:
+    service, _, _ = _build_environment_service(tmp_path)
+    lease = _acquire_desktop_session(service)
+    service.register_windows_app_adapter(
+        session_mount_id=lease.id,
+        adapter_refs=["app-adapter:excel"],
+        app_identity="excel",
+        control_channel="accessibility-tree",
+    )
+    service.acquire_shared_writer_lease(
+        writer_lock_scope=lease.id,
+        owner="other-agent",
+        ttl_seconds=60,
+        metadata={"environment_ref": lease.environment_id},
+    )
+
+    def _executor(**_kwargs):
+        raise AssertionError("windows executor should not run when writer scope is reserved")
+
+    service.register_windows_app_executor("excel", _executor)
+
+    with pytest.raises(RuntimeError, match="reserved"):
+        await service.execute_windows_app_action(
+            session_mount_id=lease.id,
+            action="write_cells",
+            contract={"app_identity": "excel"},
+        )
+
+
 @pytest.mark.parametrize("surface_kind", ["browser", "document", "windows-app"])
 def test_execution_path_resolver_prefers_native_semantic_then_ui(
     surface_kind: str,

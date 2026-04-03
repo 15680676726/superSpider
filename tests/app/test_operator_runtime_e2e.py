@@ -26,6 +26,7 @@ from copaw.goals import GoalService
 from copaw.kernel import (
     AgentProfileService,
     KernelDispatcher,
+    KernelQueryExecutionService,
     KernelResult,
     KernelTask,
     KernelTaskStore,
@@ -752,15 +753,18 @@ def test_operator_runtime_overview_surfaces_sidecar_memory_degradation(
             updated_at=None,
         )
     )
-    app.state.actor_worker = SimpleNamespace(
-        runtime_contract={
-            "sidecar_memory": {
-                "status": "degraded",
-                "failure_source": "sidecar-memory",
-                "summary": "The private compaction memory sidecar is unavailable; runtime continues on canonical state only.",
-                "blocked_next_step": "Restore the compaction sidecar if long-horizon scratch recall is required.",
-            }
-        }
+    query_execution_service = KernelQueryExecutionService(
+        session_backend=object(),
+        conversation_compaction_service=None,
+    )
+    expected_entropy = query_execution_service._resolve_execution_task_context(  # pylint: disable=protected-access
+        request=SimpleNamespace(),
+        agent_id="ops-agent",
+        kernel_task_id=None,
+        conversation_thread_id="industry-chat:industry-v1-ops:execution-core",
+    )["query_runtime_entropy"]
+    app.state.query_execution_service = SimpleNamespace(
+        get_query_runtime_entropy_contract=lambda: expected_entropy,
     )
     client = TestClient(app)
 
@@ -769,7 +773,14 @@ def test_operator_runtime_overview_surfaces_sidecar_memory_degradation(
     assert response.status_code == 200
     cards = {card["key"]: card for card in response.json()["cards"]}
     governance = cards["governance"]
+    entry = governance["entries"][0]
+    entropy = governance["meta"]["query_runtime_entropy"]
+    assert entropy == expected_entropy
+    assert entry["meta"]["query_runtime_entropy"] == expected_entropy
     sidecar_memory = governance["meta"]["sidecar_memory"]
+    assert sidecar_memory == expected_entropy["sidecar_memory"]
+    assert entry["meta"]["sidecar_memory"] == expected_entropy["sidecar_memory"]
     assert sidecar_memory["failure_source"] == "sidecar-memory"
     assert "canonical state only" in sidecar_memory["summary"]
     assert "Restore the compaction sidecar" in sidecar_memory["blocked_next_step"]
+    assert governance["summary"] == expected_entropy["sidecar_memory"]["summary"]

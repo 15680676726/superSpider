@@ -130,6 +130,7 @@ class CapabilityService:
             append_execution_evidence_fn=self._append_execution_evidence,
             skill_service=self._skill_service,
             tool_bridge=self._tool_bridge,
+            environment_service=self._environment_service,
             mcp_manager=self._mcp_manager,
             system_handler=self._system_handler,
         )
@@ -185,6 +186,11 @@ class CapabilityService:
     def set_mcp_manager(self, mcp_manager: "MCPClientManager | None") -> None:
         self._mcp_manager = mcp_manager
         self._execution.set_mcp_manager(mcp_manager)
+
+    def set_environment_service(self, environment_service: object | None) -> None:
+        self._environment_service = environment_service
+        self._system_handler.set_environment_service(environment_service)
+        self._execution.set_environment_service(environment_service)
 
     def set_channel_manager(self, channel_manager: "ChannelManager | None") -> None:
         self._channel_manager = channel_manager
@@ -260,10 +266,6 @@ class CapabilityService:
     def set_actor_supervisor(self, actor_supervisor: object | None) -> None:
         self._actor_supervisor = actor_supervisor
         self._system_handler.set_actor_supervisor(actor_supervisor)
-
-    def set_environment_service(self, environment_service: object | None) -> None:
-        self._environment_service = environment_service
-        self._system_handler.set_environment_service(environment_service)
 
     def set_cron_manager(self, cron_manager: object | None) -> None:
         self._cron_manager = cron_manager

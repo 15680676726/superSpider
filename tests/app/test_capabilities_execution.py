@@ -14,6 +14,7 @@ from copaw.app.routers.capabilities import router as capabilities_router
 from copaw.app.routers.capability_market import router as capability_market_router
 from copaw.app.routers.routines import router as routines_router
 from copaw.app.routers.runtime_center import router as runtime_center_router
+import copaw.capabilities.execution as capability_execution_module
 from copaw.capabilities import CapabilityMount, CapabilityService
 from copaw.capabilities.system_team_handlers import SystemTeamCapabilityFacade
 from copaw.capabilities.remote_skill_contract import RemoteSkillCandidate
@@ -174,6 +175,82 @@ class FakeAgentProfileService:
                 "role_summary": self._role_summary,
             },
         )()
+
+
+class RecordingSharedWriterEnvironmentService:
+    def __init__(self, *, conflict_scope: str | None = None) -> None:
+        self.acquire_calls: list[dict[str, object]] = []
+        self.heartbeat_calls: list[dict[str, object]] = []
+        self.release_calls: list[dict[str, object]] = []
+        self._conflict_scope = conflict_scope
+        self._lease = SimpleNamespace(
+            id="lease:shared-writer:1",
+            lease_token="lease-token-1",
+        )
+
+    def acquire_shared_writer_lease(
+        self,
+        *,
+        writer_lock_scope: str,
+        owner: str,
+        ttl_seconds: int | None = None,
+        metadata: dict[str, object] | None = None,
+        handle: object | None = None,
+    ):
+        self.acquire_calls.append(
+            {
+                "writer_lock_scope": writer_lock_scope,
+                "owner": owner,
+                "ttl_seconds": ttl_seconds,
+                "metadata": dict(metadata or {}),
+                "handle": handle,
+            },
+        )
+        if self._conflict_scope == writer_lock_scope:
+            raise RuntimeError(
+                f"Writer scope '{writer_lock_scope}' is already leased by other-worker",
+            )
+        return self._lease
+
+    def heartbeat_shared_writer_lease(
+        self,
+        lease_id: str,
+        *,
+        lease_token: str,
+        ttl_seconds: int | None = None,
+        metadata: dict[str, object] | None = None,
+        handle: object | None = None,
+    ):
+        self.heartbeat_calls.append(
+            {
+                "lease_id": lease_id,
+                "lease_token": lease_token,
+                "ttl_seconds": ttl_seconds,
+                "metadata": dict(metadata or {}),
+                "handle": handle,
+            },
+        )
+        return self._lease
+
+    def release_shared_writer_lease(
+        self,
+        *,
+        lease_id: str,
+        lease_token: str | None = None,
+        reason: str | None = None,
+        release_status: str = "released",
+        validate_token: bool = True,
+    ):
+        self.release_calls.append(
+            {
+                "lease_id": lease_id,
+                "lease_token": lease_token,
+                "reason": reason,
+                "release_status": release_status,
+                "validate_token": validate_token,
+            },
+        )
+        return self._lease
 
 
 def _execute_capability_direct(
@@ -1094,6 +1171,255 @@ def test_mount_declared_action_mode_falls_back_when_metadata_missing(
 
     assert result["success"] is True
     assert result["action_mode"] == "read"
+
+
+def test_mount_declared_writer_scope_source_acquires_and_releases_shared_writer_lease_for_direct_write(
+    tmp_path,
+) -> None:
+    target = tmp_path / "notes.txt"
+
+    class FakeEnvironmentService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, object]] = []
+            self._leases: dict[str, SimpleNamespace] = {}
+
+        def acquire_shared_writer_lease(
+            self,
+            *,
+            writer_lock_scope: str,
+            owner: str,
+            ttl_seconds: int | None = None,
+            handle: object | None = None,
+            metadata: dict[str, object] | None = None,
+        ):
+            self.calls.append(
+                (
+                    "acquire",
+                    {
+                        "writer_lock_scope": writer_lock_scope,
+                        "owner": owner,
+                        "ttl_seconds": ttl_seconds,
+                        "handle": handle,
+                        "metadata": dict(metadata or {}),
+                    },
+                ),
+            )
+            lease = SimpleNamespace(
+                id="lease-1",
+                lease_token="token-1",
+                lease_status="leased",
+                metadata=dict(metadata or {}),
+            )
+            self._leases[writer_lock_scope] = lease
+            return lease
+
+        def heartbeat_shared_writer_lease(
+            self,
+            lease_id: str,
+            *,
+            lease_token: str,
+            ttl_seconds: int | None = None,
+            handle: object | None = None,
+            metadata: dict[str, object] | None = None,
+        ):
+            self.calls.append(
+                (
+                    "heartbeat",
+                    {
+                        "lease_id": lease_id,
+                        "lease_token": lease_token,
+                        "ttl_seconds": ttl_seconds,
+                        "handle": handle,
+                        "metadata": dict(metadata or {}),
+                    },
+                ),
+            )
+            return SimpleNamespace(
+                id=lease_id,
+                lease_token=lease_token,
+                lease_status="leased",
+                metadata=dict(metadata or {}),
+            )
+
+        def release_shared_writer_lease(
+            self,
+            *,
+            lease_id: str,
+            lease_token: str | None = None,
+            reason: str | None = None,
+            release_status: str = "released",
+            validate_token: bool = True,
+        ):
+            self.calls.append(
+                (
+                    "release",
+                    {
+                        "lease_id": lease_id,
+                        "lease_token": lease_token,
+                        "reason": reason,
+                        "release_status": release_status,
+                        "validate_token": validate_token,
+                    },
+                ),
+            )
+            for lease in self._leases.values():
+                if lease.id == lease_id:
+                    lease.lease_status = release_status
+                    return lease
+            return None
+
+        def get_shared_writer_lease(self, *, writer_lock_scope: str):
+            return self._leases.get(writer_lock_scope)
+
+    fake_environment_service = FakeEnvironmentService()
+    capability_service = CapabilityService(
+        registry=StaticCapabilityRegistry(
+            CapabilityMount(
+                id="tool:write_file",
+                name="write_file",
+                summary="Write a file.",
+                kind="local-tool",
+                source_kind="tool",
+                risk_level="guarded",
+                environment_requirements=["workspace", "file-view"],
+                evidence_contract=["file-write"],
+                role_access_policy=["all"],
+                enabled=True,
+                metadata={
+                    "execution_policy": {
+                        "action_mode": "write",
+                        "evidence_owner": "execution-facade",
+                        "writer_scope_source": "file_path",
+                    },
+                },
+            ),
+        ),
+        evidence_ledger=EvidenceLedger(),
+        environment_service=fake_environment_service,
+    )
+
+    async def _fake_write_executor(**kwargs):
+        active_lease = fake_environment_service.get_shared_writer_lease(
+            writer_lock_scope=f"file:{target.resolve()}",
+        )
+        assert active_lease is not None
+        assert active_lease.lease_status == "leased"
+        return {
+            "success": True,
+            "summary": f"wrote {kwargs['file_path']}",
+        }
+
+    with patch.dict(
+        capability_execution_module._TOOL_EXECUTORS,
+        {"tool:write_file": _fake_write_executor},
+    ):
+        result = asyncio.run(
+            capability_service.execute_task(
+                KernelTask(
+                    title="Write file with writer lease",
+                    capability_ref="tool:write_file",
+                    owner_agent_id="copaw-operator",
+                    environment_ref="session:console:test",
+                    payload={
+                        "file_path": str(target),
+                        "content": "hello writer lease",
+                    },
+                ),
+            ),
+        )
+
+    assert result["success"] is True
+    assert fake_environment_service.calls[0][0] == "acquire"
+    assert (
+        fake_environment_service.calls[0][1]["writer_lock_scope"]
+        == f"file:{target.resolve()}"
+    )
+    assert fake_environment_service.calls[-1][0] == "release"
+    released = fake_environment_service.get_shared_writer_lease(
+        writer_lock_scope=f"file:{target.resolve()}",
+    )
+    assert released is not None
+    assert released.lease_status == "released"
+
+
+def test_mount_declared_writer_scope_conflict_blocks_direct_write_before_executor_runs(
+    tmp_path,
+) -> None:
+    target = tmp_path / "notes.txt"
+    executor_calls: list[dict[str, object]] = []
+
+    class FakeEnvironmentService:
+        def acquire_shared_writer_lease(
+            self,
+            *,
+            writer_lock_scope: str,
+            owner: str,
+            ttl_seconds: int | None = None,
+            handle: object | None = None,
+            metadata: dict[str, object] | None = None,
+        ):
+            _ = (owner, ttl_seconds, handle, metadata)
+            raise RuntimeError(f"writer scope '{writer_lock_scope}' already leased by another actor")
+
+        def heartbeat_shared_writer_lease(self, *args, **kwargs):
+            raise AssertionError("heartbeat should not run when acquire already failed")
+
+        def release_shared_writer_lease(self, *args, **kwargs):
+            raise AssertionError("release should not run when acquire already failed")
+
+    capability_service = CapabilityService(
+        registry=StaticCapabilityRegistry(
+            CapabilityMount(
+                id="tool:write_file",
+                name="write_file",
+                summary="Write a file.",
+                kind="local-tool",
+                source_kind="tool",
+                risk_level="guarded",
+                environment_requirements=["workspace", "file-view"],
+                evidence_contract=["file-write"],
+                role_access_policy=["all"],
+                enabled=True,
+                metadata={
+                    "execution_policy": {
+                        "action_mode": "write",
+                        "evidence_owner": "execution-facade",
+                        "writer_scope_source": "file_path",
+                    },
+                },
+            ),
+        ),
+        evidence_ledger=EvidenceLedger(),
+        environment_service=FakeEnvironmentService(),
+    )
+
+    async def _fake_write_executor(**kwargs):
+        executor_calls.append(dict(kwargs))
+        return {"success": True, "summary": "should not run"}
+
+    with patch.dict(
+        capability_execution_module._TOOL_EXECUTORS,
+        {"tool:write_file": _fake_write_executor},
+    ):
+        result = asyncio.run(
+            capability_service.execute_task(
+                KernelTask(
+                    title="Blocked write file with writer lease conflict",
+                    capability_ref="tool:write_file",
+                    owner_agent_id="copaw-operator",
+                    environment_ref="session:console:test",
+                    payload={
+                        "file_path": str(target),
+                        "content": "blocked",
+                    },
+                ),
+            ),
+        )
+
+    assert executor_calls == []
+    assert result["success"] is False
+    assert result["error_kind"] == "blocked"
+    assert "writer scope" in result["summary"].lower()
 
 
 def test_mount_declared_evidence_owner_can_prefer_execution_facade_over_tool_bridge(
