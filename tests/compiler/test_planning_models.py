@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from copaw.compiler.planning.models import (
     AssignmentPlanEnvelope,
     CyclePlanningDecision,
+    PlanningLaneBudget,
     PlanningStrategyConstraints,
     ReportReplanDecision,
 )
@@ -110,6 +111,24 @@ def test_strategy_constraints_keep_typed_strategy_truth_and_trigger_contracts() 
     assert constraints.strategy_trigger_rules[0].trigger_family == "confidence_collapse"
     assert replan.strategy_change_decision == "lane_reweight"
     assert replan.trigger_rule_ids == ["uncertainty:uncertainty-1:confidence-drop"]
+
+
+def test_lane_budget_reads_durable_underinvestment_debt_from_metadata() -> None:
+    budget = PlanningLaneBudget(
+        lane_id="lane-retention",
+        budget_window="next-3-cycles",
+        target_share=0.6,
+        min_share=0.4,
+        max_share=0.75,
+        completed_cycles=3,
+        consumed_cycles=1,
+        metadata={
+            "missed_target_cycles": 2,
+            "consecutive_missed_cycles": 1,
+        },
+    )
+
+    assert budget.underinvested_cycle_count() == 2
 
 
 def test_strategy_constraints_from_context_coerces_attr_payloads_without_dict_round_trip() -> None:

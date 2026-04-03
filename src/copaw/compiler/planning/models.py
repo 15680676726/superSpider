@@ -184,6 +184,7 @@ class PlanningLaneBudget(BaseModel):
 
     def underinvested_cycle_count(self) -> int:
         payload = self._budget_window_mapping()
+        counts: list[int] = []
         for key in ("consecutive_missed_cycles", "missed_target_cycles", "underinvested_cycles"):
             raw = payload.get(key) if payload else None
             try:
@@ -191,7 +192,26 @@ class PlanningLaneBudget(BaseModel):
             except (TypeError, ValueError):
                 count = 0
             if count > 0:
-                return count
+                counts.append(count)
+        metadata = _mapping(self.metadata)
+        for key in ("consecutive_missed_cycles", "missed_target_cycles", "underinvested_cycles"):
+            raw = metadata.get(key)
+            try:
+                count = int(raw)
+            except (TypeError, ValueError):
+                count = 0
+            if count > 0:
+                counts.append(count)
+        if counts:
+            return max(counts)
+        completed_cycles = self.completed_cycles_or_default()
+        consumed_cycles = self.consumed_cycles_or_default()
+        if completed_cycles > 0 and self.target_share > 0.0:
+            try:
+                target_cycles = int(round(self.target_share * completed_cycles))
+            except (TypeError, ValueError):
+                target_cycles = 0
+            return max(target_cycles - consumed_cycles, 0)
         return 0
 
 

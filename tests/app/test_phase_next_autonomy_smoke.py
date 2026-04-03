@@ -867,6 +867,35 @@ def test_phase_next_same_thread_cognitive_closure_smoke_updates_visible_judgment
     assert cycle_formal_planning["report_replan"]["trigger_context"][
         "strategic_uncertainty_ids"
     ] == ["uncertainty-same-thread-publish"]
+    uncertainty_register = cycle_formal_planning["report_replan"]["uncertainty_register"]
+    assert uncertainty_register["is_truth_store"] is False
+    assert uncertainty_register["source"] == "formal-planning-sidecar"
+    assert uncertainty_register["durable_source"] == "strategy-memory"
+    assert uncertainty_register["summary"]["uncertainty_count"] == 1
+    assert uncertainty_register["summary"]["lane_budget_count"] == 1
+    assert uncertainty_register["summary"]["trigger_rule_count"] >= 2
+    assert uncertainty_register["summary"]["review_cycle_ids"] == ["cycle-weekly-1"]
+    assert "repeated_blocker" in uncertainty_register["summary"]["trigger_families"]
+    assert "target_miss" in uncertainty_register["summary"]["trigger_families"]
+    assert uncertainty_register["items"] == [
+        {
+            "uncertainty_id": "uncertainty-same-thread-publish",
+            "statement": "Same-thread publish may still require governed browser follow-up.",
+            "scope": "strategy",
+            "impact_level": "high",
+            "current_confidence": 0.38,
+            "review_by_cycle": "cycle-weekly-1",
+            "escalate_when": ["repeated-blocker", "target-miss"],
+            "trigger_rule_ids": [
+                "uncertainty:uncertainty-same-thread-publish:repeated-blocker",
+                "uncertainty:uncertainty-same-thread-publish:target-miss",
+            ],
+            "trigger_families": [
+                "repeated_blocker",
+                "target_miss",
+            ],
+        },
+    ]
     current_assignment_record = app.state.assignment_repository.get_assignment(
         detail.current_cycle["assignment_ids"][0],
     )

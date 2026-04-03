@@ -402,9 +402,16 @@ class CyclePlanningCompiler:
                 continue
             budget_window = entry.budget_window
             current_share = self._budget_current_share(entry)
+            completed_cycles = entry.completed_cycles_or_default()
+            consumed_cycles = entry.consumed_cycles_or_default()
+            underinvested_cycles = entry.underinvested_cycle_count()
             target_share = max(_number(entry.target_share), 0.0)
             min_share = max(_number(entry.min_share), 0.0)
             max_share = max(_number(entry.max_share), 0.0)
+            target_cycle_count = 0
+            if completed_cycles > 0 and target_share > 0.0:
+                target_cycle_count = max(1, int(round(target_share * completed_cycles)))
+            multi_cycle_gap = max(target_cycle_count - consumed_cycles, underinvested_cycles, 0)
             force_include_reason = _string(entry.force_include_reason)
             if force_include_reason is None and min_share > 0.0 and current_share < min_share:
                 force_include_reason = "lane-below-min-share"
@@ -424,6 +431,11 @@ class CyclePlanningCompiler:
                 "review_pressure": _string(entry.review_pressure) or "",
                 "defer_reason": _string(entry.defer_reason),
                 "force_include_reason": force_include_reason,
+                "completed_cycles": completed_cycles,
+                "consumed_cycles": consumed_cycles,
+                "underinvested_cycles": underinvested_cycles,
+                "target_cycle_count": target_cycle_count,
+                "multi_cycle_gap": multi_cycle_gap,
             }
         return budgets
 
@@ -623,6 +635,8 @@ class CyclePlanningCompiler:
                 default=0.0,
             ),
             1 if items and any(_backlog_is_report_followup(item) for item in items[:1]) else 0,
+            _number((budget or {}).get("multi_cycle_gap")),
+            _number((budget or {}).get("underinvested_cycles")),
             max(target_share - projected_share, 0.0),
             self._review_pressure_score((budget or {}).get("review_pressure")),
             self._item_sort_key(
@@ -732,6 +746,11 @@ class CyclePlanningCompiler:
             "min_share": _number((budget or {}).get("min_share")),
             "max_share": _number((budget or {}).get("max_share")),
             "remaining_headroom": remaining_headroom,
+            "completed_cycles": int(_number((budget or {}).get("completed_cycles"))),
+            "consumed_cycles": int(_number((budget or {}).get("consumed_cycles"))),
+            "underinvested_cycles": int(_number((budget or {}).get("underinvested_cycles"))),
+            "target_cycle_count": int(_number((budget or {}).get("target_cycle_count"))),
+            "multi_cycle_gap": int(_number((budget or {}).get("multi_cycle_gap"))),
             "review_pressure": (budget or {}).get("review_pressure"),
             "defer_reason": (budget or {}).get("defer_reason"),
             "force_include_reason": (budget or {}).get("force_include_reason"),

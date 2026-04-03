@@ -2326,6 +2326,22 @@ class _IndustryStrategyMixin:
                 float(lane_cycle_counts.get(lane.id, 0)) / float(total_recent_cycles),
                 4,
             )
+            target_cycle_count = max(1, int(round(target_share * total_recent_cycles)))
+            consumed_cycles = lane_cycle_counts.get(lane.id, 0)
+            missed_target_cycles = max(target_cycle_count - consumed_cycles, 0)
+            consecutive_missed_cycles = 0
+            if target_share > 0.0:
+                for cycle in recent_cycles:
+                    focus_lane_ids = {
+                        normalized_lane_id
+                        for normalized_lane_id in (
+                            _string(item) for item in list(cycle.focus_lane_ids or [])
+                        )
+                        if normalized_lane_id is not None
+                    }
+                    if lane.id in focus_lane_ids:
+                        break
+                    consecutive_missed_cycles += 1
             pressure_count = (
                 open_backlog_counts.get(lane.id, 0)
                 + pending_report_counts.get(lane.id, 0)
@@ -2358,7 +2374,15 @@ class _IndustryStrategyMixin:
                     defer_reason=defer_reason,
                     force_include_reason=force_include_reason,
                     completed_cycles=total_recent_cycles,
-                    consumed_cycles=lane_cycle_counts.get(lane.id, 0),
+                    consumed_cycles=consumed_cycles,
+                    metadata={
+                        "target_cycle_count": target_cycle_count,
+                        "missed_target_cycles": missed_target_cycles,
+                        "consecutive_missed_cycles": consecutive_missed_cycles,
+                        "open_backlog_count": open_backlog_counts.get(lane.id, 0),
+                        "pending_report_count": pending_report_counts.get(lane.id, 0),
+                        "uncertainty_count": uncertainty_counts.get(lane.id, 0),
+                    },
                 ),
             )
         return budgets

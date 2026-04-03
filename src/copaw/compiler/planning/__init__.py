@@ -10,6 +10,7 @@ from .assignment_planner import AssignmentPlanningCompiler
 from .cycle_planner import CyclePlanningCompiler
 from .report_replan_engine import ReportReplanEngine
 from .strategy_compiler import StrategyPlanningCompiler
+from .uncertainty_register import build_uncertainty_register_payload
 
 __all__ = [
     "AssignmentPlanEnvelope",
@@ -20,4 +21,5 @@ __all__ = [
     "ReportReplanEngine",
     "ReportReplanDecision",
     "StrategyPlanningCompiler",
+    "build_uncertainty_register_payload",
 ]

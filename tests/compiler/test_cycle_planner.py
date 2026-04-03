@@ -717,6 +717,74 @@ def test_cycle_planner_force_includes_multi_cycle_underinvested_lane() -> None:
     )
 
 
+def test_cycle_planner_prefers_larger_multi_cycle_investment_gap_when_immediate_pressure_ties() -> None:
+    planner = CyclePlanningCompiler()
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind",
+        summary="Northwind execution shell",
+        owner_scope="industry:northwind",
+    )
+
+    decision = planner.plan(
+        record=record,
+        current_cycle=None,
+        next_cycle_due_at=None,
+        open_backlog=[
+            _backlog_item("growth-gap-small", lane_id="lane-growth", priority=3),
+            _backlog_item("retention-gap-large", lane_id="lane-retention", priority=3),
+        ],
+        pending_reports=[],
+        force=False,
+        strategy_constraints=_constraints(
+            planning_policy=["single-assignment-cycle"],
+            lane_budgets=[
+                _lane_budget(
+                    "lane-growth",
+                    current_share=0.0,
+                    target_share=0.5,
+                    min_share=0.0,
+                    max_share=0.9,
+                    review_pressure="steady",
+                    completed_cycles=2,
+                )
+                | {
+                    "budget_window": {
+                        "completed_cycles": 2,
+                        "current_share": 0.0,
+                        "allocated_cycles": 0,
+                    },
+                },
+                _lane_budget(
+                    "lane-retention",
+                    current_share=0.0,
+                    target_share=0.5,
+                    min_share=0.0,
+                    max_share=0.9,
+                    review_pressure="steady",
+                    completed_cycles=4,
+                )
+                | {
+                    "budget_window": {
+                        "completed_cycles": 4,
+                        "current_share": 0.0,
+                        "allocated_cycles": 0,
+                    },
+                },
+            ],
+        ),
+    )
+
+    assert decision.should_start is True
+    assert decision.selected_backlog_item_ids == ["retention-gap-large"]
+    lane_outcomes = decision.metadata["lane_budget_outcomes"]
+    assert lane_outcomes["lane-retention"]["multi_cycle_gap"] > lane_outcomes["lane-growth"][
+        "multi_cycle_gap"
+    ]
+    assert lane_outcomes["lane-retention"]["target_cycle_count"] == 2
+    assert lane_outcomes["lane-growth"]["target_cycle_count"] == 1
+
+
 def test_cycle_planner_force_includes_overdue_followup_even_when_lane_is_throttled() -> None:
     planner = CyclePlanningCompiler()
     record = IndustryInstanceRecord(

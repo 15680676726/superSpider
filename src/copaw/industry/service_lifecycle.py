@@ -12,6 +12,7 @@ from ..compiler.planning import (
     PlanningStrategyConstraints,
     ReportReplanEngine,
     StrategyPlanningCompiler,
+    build_uncertainty_register_payload,
 )
 from ..compiler.models import CompilationUnit
 from ..kernel import KernelTask
@@ -498,6 +499,9 @@ class _IndustryLifecycleMixin:
         lane_budgets = self._mapping_list(
             _mapping(strategy_constraints_payload).get("lane_budgets"),
         )
+        strategy_trigger_rules = self._mapping_list(
+            _mapping(strategy_constraints_payload).get("strategy_trigger_rules"),
+        )
         conflict_items = list(resolved.get("conflicts") or [])
         hole_items = list(resolved.get("holes") or [])
         replan_reasons = _unique_strings(
@@ -577,6 +581,14 @@ class _IndustryLifecycleMixin:
         activation = _mapping(resolved.get("activation"))
         if activation:
             payload["activation"] = dict(activation)
+        uncertainty_register = build_uncertainty_register_payload(
+            strategic_uncertainties=strategic_uncertainties,
+            lane_budgets=lane_budgets,
+            strategy_trigger_rules=strategy_trigger_rules,
+            source="formal-planning-sidecar",
+        )
+        if uncertainty_register:
+            payload["uncertainty_register"] = uncertainty_register
         return payload
 
     def _stable_assignment_id(

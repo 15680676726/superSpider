@@ -8,6 +8,7 @@ from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
 from .main_brain_cognitive_surface import build_main_brain_cognitive_surface
 from .models import IndustryMainBrainPlanningSurface
+from ..compiler.planning import build_uncertainty_register_payload
 from ..state.strategy_memory_service import resolve_strategy_payload
 
 
@@ -423,59 +424,12 @@ class _IndustryRuntimeViewsMixin:
         lane_budgets: Sequence[dict[str, Any]],
         strategy_trigger_rules: Sequence[dict[str, Any]],
     ) -> dict[str, Any]:
-        if not strategic_uncertainties and not lane_budgets and not strategy_trigger_rules:
-            return {}
-        trigger_rules_by_source: dict[str, list[dict[str, Any]]] = {}
-        for rule in strategy_trigger_rules:
-            source_ref = _string(rule.get("source_ref"))
-            if source_ref is None:
-                continue
-            trigger_rules_by_source.setdefault(source_ref, []).append(dict(rule))
-        items: list[dict[str, Any]] = []
-        for uncertainty in strategic_uncertainties:
-            uncertainty_id = _string(uncertainty.get("uncertainty_id"))
-            matched_rules = trigger_rules_by_source.get(uncertainty_id or "", [])
-            items.append(
-                {
-                    "uncertainty_id": uncertainty_id,
-                    "statement": _string(uncertainty.get("statement")) or "",
-                    "scope": _string(uncertainty.get("scope")) or "strategy",
-                    "impact_level": _string(uncertainty.get("impact_level")) or "medium",
-                    "current_confidence": float(uncertainty.get("current_confidence") or 0.0),
-                    "review_by_cycle": _string(uncertainty.get("review_by_cycle")),
-                    "escalate_when": _unique_strings(uncertainty.get("escalate_when")),
-                    "trigger_rule_ids": _unique_strings(
-                        [rule.get("rule_id") for rule in matched_rules],
-                    ),
-                    "trigger_families": sorted(
-                        _unique_strings([rule.get("trigger_family") for rule in matched_rules]),
-                    ),
-                },
-            )
-        return {
-            "is_truth_store": False,
-            "source": "industry-runtime-read-model",
-            "durable_source": "strategy-memory",
-            "summary": {
-                "uncertainty_count": len(strategic_uncertainties),
-                "lane_budget_count": len(lane_budgets),
-                "trigger_rule_count": len(strategy_trigger_rules),
-                "review_cycle_ids": sorted(
-                    _unique_strings(
-                        [
-                            item.get("review_by_cycle")
-                            for item in strategic_uncertainties
-                        ],
-                    ),
-                ),
-                "trigger_families": sorted(
-                    _unique_strings(
-                        [rule.get("trigger_family") for rule in strategy_trigger_rules],
-                    ),
-                ),
-            },
-            "items": items,
-        }
+        return build_uncertainty_register_payload(
+            strategic_uncertainties=strategic_uncertainties,
+            lane_budgets=lane_budgets,
+            strategy_trigger_rules=strategy_trigger_rules,
+            source="industry-runtime-read-model",
+        )
 
     def _strategy_constraints_surface_payload(
         self,
@@ -869,6 +823,9 @@ class _IndustryRuntimeViewsMixin:
             lane_budgets=self._mapping_list(strategy_constraints.get("lane_budgets")),
             strategy_trigger_rules=strategy_trigger_rules,
         )
+        persisted_uncertainty_register = _mapping(replan.get("uncertainty_register"))
+        if persisted_uncertainty_register:
+            uncertainty_register = persisted_uncertainty_register
         if strategy_trigger_rules:
             replan = {
                 **replan,
