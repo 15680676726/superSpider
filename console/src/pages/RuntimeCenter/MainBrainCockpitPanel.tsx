@@ -36,6 +36,7 @@ import {
   type RuntimeCockpitSignal,
 } from "./runtimeIndustrySections";
 import type {
+  RuntimeMainBrainBuddySummary,
   RuntimeMainBrainEnvironment,
   RuntimeMainBrainQueryRuntimeEntropy,
   RuntimeMainBrainRecord,
@@ -48,6 +49,7 @@ type MainBrainCockpitPanelProps = {
   loading: boolean;
   refreshing: boolean;
   error: string | null;
+  buddySummary: RuntimeMainBrainBuddySummary | null;
   mainBrainData: RuntimeMainBrainResponse | null;
   mainBrainLoading: boolean;
   mainBrainError: string | null;
@@ -529,6 +531,7 @@ export default function MainBrainCockpitPanel({
   data,
   loading,
   refreshing,
+  buddySummary,
   mainBrainData,
   mainBrainLoading,
   mainBrainError,
@@ -914,6 +917,52 @@ export default function MainBrainCockpitPanel({
           ))}
         </div>
       </Card>
+
+      {buddySummary ? (
+        <Card size="small" title="Buddy summary" style={{ marginBottom: 16 }}>
+          <div className={styles.briefGrid}>
+            <div className={styles.briefCard}>
+              <div className={styles.briefTitle}>{buddySummary.buddy_name}</div>
+              <div className={styles.briefList}>
+                <div className={styles.briefItem}>
+                  {localizeRuntimeText(
+                    `${buddySummary.evolution_stage} / mood ${buddySummary.mood_state}`,
+                  )}
+                </div>
+                <div className={styles.briefItem}>
+                  {localizeRuntimeText(
+                    `level ${buddySummary.growth_level} / intimacy ${buddySummary.intimacy} / affinity ${buddySummary.affinity}`,
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className={styles.briefCard}>
+              <div className={styles.briefTitle}>Final goal</div>
+              <div className={styles.briefList}>
+                <div className={styles.briefItem}>
+                  {localizeRuntimeText(buddySummary.current_goal_summary)}
+                </div>
+              </div>
+            </div>
+            <div className={styles.briefCard}>
+              <div className={styles.briefTitle}>Current task</div>
+              <div className={styles.briefList}>
+                <div className={styles.briefItem}>
+                  {localizeRuntimeText(buddySummary.current_task_summary)}
+                </div>
+              </div>
+            </div>
+            <div className={styles.briefCard}>
+              <div className={styles.briefTitle}>Why now</div>
+              <div className={styles.briefList}>
+                <div className={styles.briefItem}>
+                  {localizeRuntimeText(buddySummary.why_now_summary)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       <Descriptions
         size="small"

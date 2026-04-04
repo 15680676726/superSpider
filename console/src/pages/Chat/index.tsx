@@ -26,6 +26,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import api from "../../api";
 import type { GovernanceStatus } from "../../api";
+import type { BuddySurfaceResponse } from "../../api/modules/buddy";
 import type { IndustryInstanceSummary } from "../../api/modules/industry";
 import type {
   MediaAnalysisSummary,
@@ -55,6 +56,8 @@ import {
 } from "./runtimeDiagnostics";
 import sessionApi from "./sessionApi";
 import { ChatComposerAdapter } from "./ChatComposerAdapter";
+import { BuddyCompanion } from "./BuddyCompanion";
+import { BuddyPanel } from "./BuddyPanel";
 import { ChatCommitConfirmationCard } from "./ChatCommitConfirmationCard";
 import { ChatHumanAssistPanel } from "./ChatHumanAssistPanel";
 import { ChatIntentShellCard } from "./ChatIntentShellCard";
@@ -280,6 +283,14 @@ export default function ChatPage() {
     () => normalizeThreadId(new URLSearchParams(location.search).get("threadId")),
     [location.search],
   );
+  const buddySessionId = useMemo(
+    () => new URLSearchParams(location.search).get("buddy_session"),
+    [location.search],
+  );
+  const needsBuddyNaming = useMemo(
+    () => new URLSearchParams(location.search).get("buddy_needs_name") === "1",
+    [location.search],
+  );
 
   const [showModelPrompt, setShowModelPrompt] = useState(false);
   const [suggestedTeams, setSuggestedTeams] = useState<IndustryInstanceSummary[]>([]);
@@ -314,6 +325,12 @@ export default function ChatPage() {
     useState<RuntimeLifecycleState | null>(null);
   const [runtimeWaitClock, setRuntimeWaitClock] = useState(() => Date.now());
   const [governanceStatus, setGovernanceStatus] = useState<GovernanceStatus | null>(null);
+  const [buddySurface, setBuddySurface] = useState<BuddySurfaceResponse | null>(null);
+  const [buddyPanelOpen, setBuddyPanelOpen] = useState(false);
+  const [buddyLoading, setBuddyLoading] = useState(false);
+  const [buddyError, setBuddyError] = useState<string | null>(null);
+  const [buddyNameDraft, setBuddyNameDraft] = useState("");
+  const [buddyNamingBusy, setBuddyNamingBusy] = useState(false);
   const recoveryAttemptsRef = useRef<Set<string>>(new Set());
   const defaultAutoBindAttemptedRef = useRef(false);
   const optionsConfig: OptionsConfig = defaultConfig;
@@ -368,6 +385,27 @@ export default function ChatPage() {
   }, [requestedThreadId]);
 
   useEffect(() => { void refreshActiveModels(); }, [refreshActiveModels]);
+
+  const loadBuddySurface = useCallback(async () => {
+    setBuddyLoading(true);
+    setBuddyError(null);
+    try {
+      const surface = await api.getBuddySurface();
+      setBuddySurface(surface);
+      setBuddyNameDraft("");
+    } catch (error) {
+      setBuddySurface(null);
+      if (error instanceof Error) {
+        setBuddyError(error.message);
+      }
+    } finally {
+      setBuddyLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBuddySurface();
+  }, [loadBuddySurface]);
 
   useEffect(() => {
     if (location.pathname !== "/chat") return;
@@ -543,6 +581,27 @@ export default function ChatPage() {
     [activeAgentId, activeIndustryId, activeIndustryRoleId, requestedThreadId],
   );
 
+  const submitBuddyNaming = useCallback(async () => {
+    if (!buddySessionId || !buddyNameDraft.trim()) return;
+    setBuddyNamingBusy(true);
+    try {
+      await api.nameBuddy({
+        session_id: buddySessionId,
+        buddy_name: buddyNameDraft.trim(),
+      });
+      await loadBuddySurface();
+      const params = new URLSearchParams(location.search);
+      params.delete("buddy_needs_name");
+      params.delete("buddy_session");
+      const nextSearch = params.toString();
+      navigate(nextSearch ? `/chat?${nextSearch}` : "/chat", { replace: true });
+    } catch (error) {
+      setBuddyError(error instanceof Error ? error.message : "Buddy naming failed");
+    } finally {
+      setBuddyNamingBusy(false);
+    }
+  }, [buddyNameDraft, buddySessionId, loadBuddySurface, location.search, navigate]);
+
   // ============================================================
   return (
     <div className={styles.page}>
@@ -595,6 +654,34 @@ export default function ChatPage() {
             activeChatThreadId={activeChatThreadId}
             threadMeta={threadMeta}
           />
+          {needsBuddyNaming && buddySessionId ? (
+            <Alert
+              type="info"
+              showIcon
+              className={styles.inlineAlert}
+              message="请给你的伙伴起个名字"
+              description={(
+                <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                  <Input
+                    value={buddyNameDraft}
+                    onChange={(event) => setBuddyNameDraft(event.target.value)}
+                    placeholder="它以后会一直以这个名字陪着你"
+                    maxLength={40}
+                  />
+                  <Space>
+                    <Button
+                      type="primary"
+                      onClick={() => void submitBuddyNaming()}
+                      loading={buddyNamingBusy}
+                      disabled={!buddyNameDraft.trim()}
+                    >
+                      确认名字
+                    </Button>
+                  </Space>
+                </Space>
+              )}
+            />
+          ) : null}
           <ChatIntentShellCard shell={runtimeIntentShell} />
           <ChatCommitConfirmationCard
             state={runtimeCommitState}
@@ -617,6 +704,15 @@ export default function ChatPage() {
 
           {/* 聊天画布 */}
           <div className={styles.canvas}>
+            {buddyLoading ? (
+              <div className={styles.buddyLoading}>Buddy 正在靠近你…</div>
+            ) : null}
+            {buddySurface ? (
+              <BuddyCompanion
+                surface={buddySurface}
+                onOpen={() => setBuddyPanelOpen(true)}
+              />
+            ) : null}
             <ChatComposerAdapter chatUiKey={chatUiKey} options={options} />
 
             {/* 媒体附件区 */}
@@ -636,6 +732,19 @@ export default function ChatPage() {
               uploadMediaInputRef={uploadMediaInputRef}
             />
           </div>
+          <BuddyPanel
+            open={buddyPanelOpen}
+            surface={buddySurface}
+            onClose={() => setBuddyPanelOpen(false)}
+          />
+          {buddyError ? (
+            <Alert
+              type="warning"
+              showIcon
+              message={buddyError}
+              className={styles.inlineAlert}
+            />
+          ) : null}
         </div>
       ) : null}
 

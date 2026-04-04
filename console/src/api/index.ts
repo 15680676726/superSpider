@@ -23,6 +23,7 @@ import { ollamaModelApi } from "./modules/ollamaModel";
 import { industryApi } from "./modules/industry";
 import { fixedSopsApi } from "./modules/fixedSops";
 import { predictionsApi } from "./modules/predictions";
+import { buddyApi } from "./modules/buddy";
 
 export const api = {
   // Root
@@ -75,6 +76,9 @@ export const api = {
 
   // Predictions
   ...predictionsApi,
+
+  // Buddy
+  ...buddyApi,
 };
 
 export default api;

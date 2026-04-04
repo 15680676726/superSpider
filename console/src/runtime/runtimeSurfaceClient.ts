@@ -35,6 +35,15 @@ export async function requestRuntimeSurface<T>(options?: {
   return request<T>(`/runtime-center/surface${query}`);
 }
 
+export async function requestRuntimeBuddySummary<T>(
+  profileId?: string | null,
+): Promise<T> {
+  const suffix = profileId
+    ? `?profile_id=${encodeURIComponent(profileId)}`
+    : "";
+  return request<T>(`/runtime-center/main-brain/buddy-summary${suffix}`);
+}
+
 export async function requestRuntimeRecord<T>(path: string): Promise<T> {
   return request<T>(normalizeRuntimePath(path));
 }

@@ -7,6 +7,7 @@ import type {
   RuntimeCenterSurfaceCard,
   RuntimeCenterSurfaceResponse,
   RuntimeCenterSurfaceInfo,
+  RuntimeMainBrainBuddySummary,
   RuntimeMainBrainResponse,
 } from "../../api/modules/runtimeCenter";
 import { useRuntimeCenter } from "./useRuntimeCenter";
@@ -76,13 +77,30 @@ const mockSurface = (
 });
 
 const requestRuntimeSurfaceMock = vi.fn();
+const requestRuntimeBuddySummaryMock = vi.fn();
 let runtimeEventHandler:
   | ((event: { event_name: string; payload: Record<string, unknown> }) => void)
   | null = null;
 
+const mockBuddySummary: RuntimeMainBrainBuddySummary = {
+  buddy_name: "Nova",
+  lifecycle_state: "named",
+  presence_state: "available",
+  mood_state: "warm",
+  evolution_stage: "bonded",
+  growth_level: 4,
+  intimacy: 24,
+  affinity: 19,
+  current_goal_summary: "Build an independent creator-business growth path",
+  current_task_summary: "Write the first meaningful piece today",
+  why_now_summary: "This is the smallest move that keeps momentum real.",
+};
+
 vi.mock("../../runtime/runtimeSurfaceClient", () => ({
   normalizeRuntimePath: vi.fn((path: string) => path),
   requestRuntimeSurface: (...args: unknown[]) => requestRuntimeSurfaceMock(...args),
+  requestRuntimeBuddySummary: (...args: unknown[]) =>
+    requestRuntimeBuddySummaryMock(...args),
   requestRuntimeRecord: vi.fn(),
 }));
 
@@ -100,6 +118,7 @@ describe("useRuntimeCenter", () => {
     vi.resetAllMocks();
     runtimeEventHandler = null;
     requestRuntimeSurfaceMock.mockResolvedValue(mockSurface());
+    requestRuntimeBuddySummaryMock.mockResolvedValue(mockBuddySummary);
   });
 
   it("loads canonical surface once and derives business agents from overview cards", async () => {
@@ -153,6 +172,7 @@ describe("useRuntimeCenter", () => {
       expect.objectContaining({ surface: mockOverview.surface }),
     );
     expect(result.current.mainBrainData).toEqual(mockMainBrain);
+    expect(result.current.buddySummary).toEqual(mockBuddySummary);
     expect(result.current.mainBrainUnavailable).toBe(false);
     expect(result.current.mainBrainError).toBeNull();
     expect(result.current.businessAgents).toEqual([
@@ -179,6 +199,7 @@ describe("useRuntimeCenter", () => {
     );
 
     expect(result.current.mainBrainData).toBeNull();
+    expect(result.current.buddySummary).toEqual(mockBuddySummary);
     expect(result.current.mainBrainUnavailable).toBe(true);
     expect(result.current.mainBrainError).toBeNull();
   });
@@ -259,6 +280,7 @@ describe("useRuntimeCenter", () => {
       "agent-ops-2",
     ]);
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+    expect(requestRuntimeBuddySummaryMock).toHaveBeenCalledTimes(1);
   });
 
   it("refreshes only the main-brain section on assignment events", async () => {
@@ -284,6 +306,7 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
       sections: ["main_brain"],
     });
+    expect(requestRuntimeBuddySummaryMock).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
 
@@ -331,6 +354,7 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
       sections: ["cards"],
     });
+    expect(requestRuntimeBuddySummaryMock).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 

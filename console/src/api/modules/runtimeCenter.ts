@@ -202,6 +202,20 @@ export interface RuntimeCenterSurfaceInfo {
   services?: string[];
 }
 
+export interface RuntimeMainBrainBuddySummary {
+  buddy_name: string;
+  lifecycle_state: string;
+  presence_state: string;
+  mood_state: string;
+  evolution_stage: string;
+  growth_level: number;
+  intimacy: number;
+  affinity: number;
+  current_goal_summary: string;
+  current_task_summary: string;
+  why_now_summary: string;
+}
+
 export interface RuntimeMainBrainRecord {
   route?: string | null;
   title?: string | null;

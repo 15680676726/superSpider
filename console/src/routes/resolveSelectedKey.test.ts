@@ -4,6 +4,7 @@ import { resolveSelectedKey } from "../routes";
 describe("resolveSelectedKey", () => {
   it("maps exact paths to correct keys", () => {
     expect(resolveSelectedKey("/chat")).toBe("chat");
+    expect(resolveSelectedKey("/buddy-onboarding")).toBe("chat");
     expect(resolveSelectedKey("/runtime-center")).toBe("runtime-center");
     expect(resolveSelectedKey("/agents")).toBe("runtime-center");
     expect(resolveSelectedKey("/industry")).toBe("industry");
