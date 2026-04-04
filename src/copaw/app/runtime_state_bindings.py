@@ -87,6 +87,7 @@ def build_runtime_state_bindings(
         "environment_service": bootstrap.environment_service,
         "runtime_event_bus": bootstrap.runtime_event_bus,
         "runtime_health_service": bootstrap.runtime_health_service,
+        "provider_admin_service": bootstrap.provider_admin_service,
         "startup_recovery_summary": startup_recovery_summary,
         "latest_recovery_report": startup_recovery_summary,
         "session_mount_repository": repositories.session_mount_repository,

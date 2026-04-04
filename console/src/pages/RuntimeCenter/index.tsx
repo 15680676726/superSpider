@@ -442,7 +442,10 @@ export default function RuntimeCenterPage() {
                   type="button"
                   className={styles.agentStripButton}
                   onClick={() => {
-                    void openSurfaceRoute("/api/runtime-center/main-brain", "主脑驾驶舱");
+                    void openSurfaceRoute(
+                      "/api/runtime-center/surface?sections=main_brain",
+                      "主脑驾驶舱",
+                    );
                   }}
                 >
                   <div className={styles.agentStripHeader}>

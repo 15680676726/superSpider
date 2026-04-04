@@ -17,14 +17,13 @@ from ...utils.runtime_routes import task_route
 from .environment_feedback_projection import RuntimeCenterEnvironmentFeedbackProjector
 from .goal_decision_projection import RuntimeCenterGoalDecisionProjector
 from .models import RuntimeActivationSummary
+from .projection_utils import first_non_empty, string_list_from_values
 from .task_review_projection import (
     build_task_review_payload,
-    first_non_empty,
     serialize_child_rollup,
     serialize_evidence_record,
     serialize_kernel_meta,
     serialize_task_knowledge_context,
-    string_list_from_values,
     trace_id_from_kernel_meta,
 )
 from .work_context_projection import RuntimeCenterWorkContextProjector

@@ -12,7 +12,7 @@ export const localModelApi = {
   },
 
   downloadModel: (body: DownloadModelRequest) =>
-    request<DownloadTaskResponse>("/local-models/download", {
+    request<DownloadTaskResponse>("/providers/admin/local-models/download", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -26,13 +26,13 @@ export const localModelApi = {
 
   cancelDownload: (taskId: string) =>
     request<{ status: string; task_id: string }>(
-      `/local-models/cancel-download/${encodeURIComponent(taskId)}`,
+      `/providers/admin/local-models/cancel-download/${encodeURIComponent(taskId)}`,
       { method: "POST" },
     ),
 
   deleteLocalModel: (modelId: string) =>
     request<{ status: string; model_id: string }>(
-      `/local-models/${encodeURIComponent(modelId)}`,
+      `/providers/admin/local-models/${encodeURIComponent(modelId)}`,
       { method: "DELETE" },
     ),
 };

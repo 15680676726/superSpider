@@ -15,6 +15,7 @@ import type {
 import {
   normalizeRuntimePath,
   requestRuntimeRecord,
+  type RuntimeSurfaceSection,
   requestRuntimeSurface,
 } from "../../runtime/runtimeSurfaceClient";
 import {
@@ -226,6 +227,7 @@ export function useRuntimeCenter() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const surfaceReloadTimerRef = useRef<number | null>(null);
+  const pendingSectionsRef = useRef<Set<RuntimeSurfaceSection>>(new Set());
 
   const data = useMemo<RuntimeCenterOverviewPayload | null>(() => {
     if (!surfaceData) {
@@ -252,15 +254,30 @@ export function useRuntimeCenter() {
   const businessAgentsError = data ? null : error;
 
   const loadSurface = useCallback(
-    async (mode: "initial" | "refresh" = "refresh") => {
+    async (
+      mode: "initial" | "refresh" = "refresh",
+      options?: { sections?: RuntimeSurfaceSection[] },
+    ) => {
       if (mode === "initial") {
         setLoading(true);
       } else {
         setRefreshing(true);
       }
       try {
-        const payload = await requestRuntimeSurface<RuntimeCenterSurfaceResponse>();
-        setSurfaceData(payload);
+        const payload = await requestRuntimeSurface<RuntimeCenterSurfaceResponse>(options);
+        const requestedSections = new Set<RuntimeSurfaceSection>(
+          options?.sections ?? ["cards", "main_brain"],
+        );
+        setSurfaceData((previous) => ({
+          generated_at: payload.generated_at,
+          surface: payload.surface,
+          cards: requestedSections.has("cards")
+            ? payload.cards
+            : previous?.cards ?? [],
+          main_brain: requestedSections.has("main_brain")
+            ? payload.main_brain
+            : previous?.main_brain ?? null,
+        }));
         setError(null);
       } catch (err) {
         const detail = localizeRuntimeText(
@@ -286,18 +303,54 @@ export function useRuntimeCenter() {
   // connection. The global bus (started in main.tsx) already connects to
   // /runtime-center/events and handles reconnection with back-off.
   useEffect(() => {
-    const scheduleReload = () => {
+    const scheduleReload = (sections: RuntimeSurfaceSection[]) => {
+      sections.forEach((section) => pendingSectionsRef.current.add(section));
       if (surfaceReloadTimerRef.current !== null) {
         window.clearTimeout(surfaceReloadTimerRef.current);
       }
       surfaceReloadTimerRef.current = window.setTimeout(() => {
         surfaceReloadTimerRef.current = null;
-        void loadSurface();
+        const pendingSections = Array.from(pendingSectionsRef.current);
+        pendingSectionsRef.current.clear();
+        void loadSurface("refresh", { sections: pendingSections });
       }, 250);
     };
 
-    const unsub = subscribe("*", () => {
-      scheduleReload();
+    const unsub = subscribe("*", (event) => {
+      if (event.event_name.endsWith(".heartbeat")) {
+        return;
+      }
+      const topic = event.event_name.split(".", 1)[0] ?? "";
+      const sections = new Set<RuntimeSurfaceSection>();
+      if (topic === "agent" || topic === "actor" || topic === "task") {
+        sections.add("cards");
+      }
+      if (
+        topic === "assignment" ||
+        topic === "report" ||
+        topic === "industry" ||
+        topic === "cycle" ||
+        topic === "backlog" ||
+        topic === "strategy"
+      ) {
+        sections.add("main_brain");
+      }
+      if (
+        topic === "governance" ||
+        topic === "decision" ||
+        topic === "patch" ||
+        topic === "learning" ||
+        topic === "recovery" ||
+        topic === "automation" ||
+        topic === "schedule"
+      ) {
+        sections.add("cards");
+        sections.add("main_brain");
+      }
+      if (sections.size === 0) {
+        return;
+      }
+      scheduleReload(Array.from(sections));
     });
 
     return () => {

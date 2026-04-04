@@ -34,6 +34,10 @@ from ..memory import (
     MemoryRetainService,
 )
 from ..predictions import PredictionService
+from ..providers.provider_admin_service import (
+    ProviderAdminService,
+    build_provider_admin_service,
+)
 from ..providers.provider_manager import ProviderManager
 from ..providers.runtime_provider_facade import (
     ProviderRuntimeFacade,
@@ -163,16 +167,10 @@ def _resolve_state_store() -> SQLiteStateStore:
     return SQLiteStateStore(WORKING_DIR / "state" / "phase1.sqlite3")
 
 
-def _resolve_compatibility_provider_manager() -> ProviderManager:
-    return ProviderManager.get_instance()
-
-
 def _resolve_runtime_provider_facade(
-    compatibility_provider_manager: ProviderManager,
+    provider_manager: ProviderManager,
 ) -> ProviderRuntimeFacade:
-    return get_runtime_provider_facade(
-        provider_manager=compatibility_provider_manager,
-    )
+    return get_runtime_provider_facade(provider_manager=provider_manager)
 
 
 def _build_runtime_observability(
@@ -320,9 +318,10 @@ def build_runtime_bootstrap(
         runtime_event_bus=runtime_event_bus,
     )
 
-    compatibility_provider_manager = _resolve_compatibility_provider_manager()
-    runtime_provider = _resolve_runtime_provider_facade(
-        compatibility_provider_manager,
+    provider_manager = ProviderManager()
+    runtime_provider = _resolve_runtime_provider_facade(provider_manager)
+    provider_admin_service: ProviderAdminService = build_provider_admin_service(
+        provider_manager,
     )
     (
         state_query_service,
@@ -456,6 +455,7 @@ def build_runtime_bootstrap(
         runtime_event_bus=runtime_event_bus,
         runtime_health_service=runtime_health_service,
         runtime_provider=runtime_provider,
+        provider_admin_service=provider_admin_service,
         state_query_service=state_query_service,
         evidence_query_service=evidence_query_service,
         human_assist_task_service=human_assist_task_service,

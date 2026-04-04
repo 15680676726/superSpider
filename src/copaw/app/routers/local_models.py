@@ -7,7 +7,7 @@ import asyncio
 import logging
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..download_task_store import (
@@ -20,12 +20,12 @@ from ..download_task_store import (
     get_tasks,
     update_status,
 )
-from ...providers import ProviderManager
 from ...providers.provider_admin_service import ProviderAdminService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/local-models", tags=["local-models"])
+admin_router = APIRouter(prefix="/providers/admin/local-models", tags=["provider-admin"])
 
 _background_tasks: Dict[str, asyncio.Task] = {}
 _background_tasks_lock = asyncio.Lock()
@@ -92,8 +92,17 @@ async def _pop_background_task(task_id: str) -> Optional[asyncio.Task]:
         return _background_tasks.pop(task_id, None)
 
 
-def _get_provider_admin_service() -> ProviderAdminService:
-    return ProviderAdminService(ProviderManager.get_instance())
+def _get_provider_admin_service_from_request(request: Request | None) -> ProviderAdminService:
+    if request is not None:
+        service = getattr(request.app.state, "provider_admin_service", None)
+        if isinstance(service, ProviderAdminService):
+            return service
+        if service is not None and hasattr(service, "refresh_local_model_catalog"):
+            return service
+    raise HTTPException(
+        status_code=500,
+        detail="provider_admin_service is not attached to app.state",
+    )
 
 
 @router.get(
@@ -125,12 +134,13 @@ async def list_local(
     ]
 
 
-@router.post(
+@admin_router.post(
     "/download",
     response_model=DownloadTaskResponse,
     summary="Start a background model download",
 )
 async def download_model(
+    request: Request,
     body: DownloadRequest,
 ) -> DownloadTaskResponse:
     """Start a background download. Returns a task_id immediately."""
@@ -164,6 +174,7 @@ async def download_model(
         _run_download_in_background(
             task_id=task.task_id,
             body=body,
+            provider_admin_service=_get_provider_admin_service_from_request(request),
         ),
         name=f"model-download-{task.task_id}",
     )
@@ -175,6 +186,7 @@ async def download_model(
 async def _run_download_in_background(
     task_id: str,
     body: DownloadRequest,
+    provider_admin_service: ProviderAdminService | object | None = None,
 ) -> None:
     """Execute the download in a thread and update task status."""
     from ..console_push_store import append as push_store_append
@@ -240,7 +252,9 @@ async def _run_download_in_background(
             "console",
             f"Model downloaded: {info.display_name}",
         )
-        _get_provider_admin_service().refresh_local_model_catalog()
+        if provider_admin_service is None:
+            provider_admin_service = _get_provider_admin_service_from_request(None)
+        provider_admin_service.refresh_local_model_catalog()
     except asyncio.CancelledError:
         await update_status(task_id, DownloadTaskStatus.CANCELLED)
         logger.info("Local model download task %s cancelled", task_id)
@@ -272,11 +286,11 @@ async def get_download_status(
     return [_task_to_response(t) for t in tasks]
 
 
-@router.delete(
+@admin_router.delete(
     "/{model_id:path}",
     summary="Delete a downloaded local model",
 )
-async def delete_local(model_id: str) -> dict:
+async def delete_local(request: Request, model_id: str) -> dict:
     try:
         from ...local_models import delete_local_model
     except ImportError as exc:
@@ -290,7 +304,7 @@ async def delete_local(model_id: str) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    _get_provider_admin_service().refresh_local_model_catalog()
+    _get_provider_admin_service_from_request(request).refresh_local_model_catalog()
 
     return {"status": "deleted", "model_id": model_id}
 
@@ -315,7 +329,7 @@ async def _cancel_download_task(task_id: str) -> dict:
     return {"status": "cancelled", "task_id": task_id}
 
 
-@router.post(
+@admin_router.post(
     "/cancel-download/{task_id}",
     summary="Cancel an active download task",
 )

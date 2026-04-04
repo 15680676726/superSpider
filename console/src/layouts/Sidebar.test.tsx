@@ -35,7 +35,7 @@ describe("Sidebar", () => {
     expect(screen.getByText("聊天前台")).toBeInTheDocument();
     expect(screen.getByText("运行中心")).toBeInTheDocument();
     expect(screen.getByText("主脑驾驶舱")).toBeInTheDocument();
-    expect(screen.getByText("执行位")).toBeInTheDocument();
+    expect(screen.queryByText("执行位")).toBeNull();
     expect(screen.getByText("行业工作台")).toBeInTheDocument();
     expect(screen.getByText("设置")).toBeInTheDocument();
     expect(screen.getByText("系统维护")).toBeInTheDocument();

@@ -9,7 +9,6 @@ from agentscope.message import Msg, TextBlock
 from pydantic import BaseModel, Field
 
 from ..industry.chat_writeback import ChatWritebackPlan, build_chat_writeback_plan_from_payload
-from ..providers.runtime_provider_facade import get_runtime_provider_facade
 from .query_execution_intent_policy import (
     is_hypothetical_control_text as _is_hypothetical_control_text,
     looks_like_goal_setting_text as _looks_like_goal_setting_text,
@@ -959,22 +958,7 @@ async def resolve_chat_writeback_model_decision(
         return cached
 
     heuristic = _heuristic_chat_writeback_model_decision(normalized)
-    try:
-        model = get_runtime_provider_facade().get_active_chat_model()
-        response = await model(
-            messages=_decision_messages(normalized),
-            structured_model=_ChatWritebackModelDecision,
-        )
-        response = await _materialize_response(response)
-        model_decision = _ChatWritebackModelDecision.model_validate(
-            _response_to_payload(response),
-        )
-        return _cache_chat_writeback_decision(
-            normalized,
-            _merge_model_decision_with_heuristic(model_decision, heuristic),
-        )
-    except Exception:
-        return _cache_chat_writeback_decision(normalized, heuristic)
+    return _cache_chat_writeback_decision(normalized, heuristic)
 
 
 def resolve_chat_writeback_model_decision_sync(

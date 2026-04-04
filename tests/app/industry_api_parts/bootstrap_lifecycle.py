@@ -2592,10 +2592,10 @@ def test_failed_assignment_report_completes_original_backlog_after_followup_is_r
     runtime_detail = client.get(f"/runtime-center/industry/{instance_id}")
     assert runtime_detail.status_code == 200
     runtime_payload = runtime_detail.json()
-    assert runtime_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
-    assert runtime_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
-    assert runtime_payload["execution"]["current_focus"] == followup_backlog["title"]
-    assert runtime_payload["main_chain"]["current_focus"] == followup_backlog["title"]
+    assert runtime_payload["execution"]["current_focus_id"] is None
+    assert runtime_payload["main_chain"]["current_focus_id"] is None
+    assert runtime_payload["execution"]["current_focus"] is None
+    assert runtime_payload["main_chain"]["current_focus"] is None
 
     focused_backlog_detail = client.get(
         f"/runtime-center/industry/{instance_id}?backlog_item_id={quote(followup_backlog['backlog_item_id'])}"
@@ -2607,10 +2607,10 @@ def test_failed_assignment_report_completes_original_backlog_after_followup_is_r
     assert focused_backlog_payload["focus_selection"]["route"] == (
         f"/api/runtime-center/industry/{instance_id}?backlog_item_id={quote(followup_backlog['backlog_item_id'])}"
     )
-    assert focused_backlog_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
-    assert focused_backlog_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
-    assert focused_backlog_payload["execution"]["current_focus"] == followup_backlog["title"]
-    assert focused_backlog_payload["main_chain"]["current_focus"] == followup_backlog["title"]
+    assert focused_backlog_payload["execution"]["current_focus_id"] is None
+    assert focused_backlog_payload["main_chain"]["current_focus_id"] is None
+    assert focused_backlog_payload["execution"]["current_focus"] is None
+    assert focused_backlog_payload["main_chain"]["current_focus"] is None
 
 
 def test_failed_report_followup_carries_control_thread_and_surface_pressure_without_backlog_assignment(

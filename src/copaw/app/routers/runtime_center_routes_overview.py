@@ -11,9 +11,7 @@ def _get_runtime_center_query_service(request: Request) -> RuntimeCenterQuerySer
         return service
     if (
         service is not None
-        and callable(getattr(service, "get_overview", None))
         and callable(getattr(service, "get_surface", None))
-        and callable(getattr(service, "get_main_brain", None))
     ):
         return service
     service = RuntimeCenterQueryService()
@@ -25,37 +23,42 @@ def _get_runtime_center_state_view(request: Request) -> RuntimeCenterAppStateVie
     return RuntimeCenterAppStateView.from_object(request.app.state)
 
 
-@router.get("/overview", response_model=RuntimeOverviewResponse)
-async def get_runtime_overview(
-    request: Request,
-    response: Response,
-) -> RuntimeOverviewResponse:
-    """Return the Runtime Center operator overview."""
-    apply_runtime_center_surface_headers(response, surface="runtime-center")
-    service = _get_runtime_center_query_service(request)
-    return await service.get_overview(_get_runtime_center_state_view(request))
+def _normalize_surface_sections(raw_sections: str | None) -> tuple[bool, bool]:
+    if raw_sections is None or not raw_sections.strip():
+        return True, True
+    requested = {
+        value.strip().lower()
+        for value in raw_sections.split(",")
+        if value.strip()
+    }
+    if not requested or "all" in requested:
+        return True, True
+    include_cards = "cards" in requested
+    include_main_brain = "main_brain" in requested or "main-brain" in requested
+    if not include_cards and not include_main_brain:
+        return True, True
+    return include_cards, include_main_brain
 
 
 @router.get("/surface", response_model=RuntimeCenterSurfaceResponse)
 async def get_runtime_surface(
     request: Request,
     response: Response,
+    sections: str | None = None,
 ) -> RuntimeCenterSurfaceResponse:
     """Return the canonical Runtime Center page surface."""
     apply_runtime_center_surface_headers(response, surface="runtime-center")
     service = _get_runtime_center_query_service(request)
-    return await service.get_surface(_get_runtime_center_state_view(request))
-
-
-@router.get("/main-brain", response_model=RuntimeMainBrainResponse)
-async def get_runtime_main_brain(
-    request: Request,
-    response: Response,
-) -> RuntimeMainBrainResponse:
-    """Return the dedicated Runtime Center main-brain cockpit payload."""
-    apply_runtime_center_surface_headers(response, surface="runtime-center")
-    service = _get_runtime_center_query_service(request)
-    return await service.get_main_brain(_get_runtime_center_state_view(request))
+    include_cards, include_main_brain = _normalize_surface_sections(sections)
+    runtime_state = _get_runtime_center_state_view(request)
+    try:
+        return await service.get_surface(
+            runtime_state,
+            include_cards=include_cards,
+            include_main_brain=include_main_brain,
+        )
+    except TypeError:
+        return await service.get_surface(runtime_state)
 
 
 @router.get("/events")

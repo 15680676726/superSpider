@@ -82,7 +82,7 @@ let runtimeEventHandler:
 
 vi.mock("../../runtime/runtimeSurfaceClient", () => ({
   normalizeRuntimePath: vi.fn((path: string) => path),
-  requestRuntimeSurface: () => requestRuntimeSurfaceMock(),
+  requestRuntimeSurface: (...args: unknown[]) => requestRuntimeSurfaceMock(...args),
   requestRuntimeRecord: vi.fn(),
 }));
 
@@ -261,7 +261,7 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
   });
 
-  it("refreshes only the dedicated main-brain payload on main-brain events", async () => {
+  it("refreshes only the main-brain section on assignment events", async () => {
     const { result } = renderHook(() => useRuntimeCenter());
 
     await waitFor(
@@ -281,10 +281,13 @@ describe("useRuntimeCenter", () => {
     await vi.advanceTimersByTimeAsync(300);
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
+    expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
+      sections: ["main_brain"],
+    });
     vi.useRealTimers();
   });
 
-  it("refreshes only the canonical overview surface on heartbeat events", async () => {
+  it("ignores heartbeat events instead of reloading the full surface", async () => {
     const { result } = renderHook(() => useRuntimeCenter());
 
     await waitFor(
@@ -301,11 +304,11 @@ describe("useRuntimeCenter", () => {
     });
     await vi.advanceTimersByTimeAsync(300);
 
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 
-  it("refreshes the canonical overview surface on agent events instead of calling the retired business-agent endpoint", async () => {
+  it("refreshes only the cards section on agent events", async () => {
     const { result } = renderHook(() => useRuntimeCenter());
 
     await waitFor(
@@ -325,10 +328,13 @@ describe("useRuntimeCenter", () => {
     await vi.advanceTimersByTimeAsync(300);
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
+    expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
+      sections: ["cards"],
+    });
     vi.useRealTimers();
   });
 
-  it("coalesces mixed runtime events into one canonical surface reload per debounce window", async () => {
+  it("coalesces mixed runtime events into one canonical section refresh per debounce window", async () => {
     const { result } = renderHook(() => useRuntimeCenter());
 
     await waitFor(
@@ -341,10 +347,6 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
 
     vi.useFakeTimers();
-    runtimeEventHandler?.({
-      event_name: "runtime.heartbeat",
-      payload: {},
-    });
     runtimeEventHandler?.({
       event_name: "agent.updated",
       payload: { agent_id: "agent-ops-2" },
@@ -356,6 +358,30 @@ describe("useRuntimeCenter", () => {
     await vi.advanceTimersByTimeAsync(300);
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
+    expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
+      sections: ["cards", "main_brain"],
+    });
+    vi.useRealTimers();
+  });
+
+  it("ignores unknown runtime events instead of falling back to a full surface reload", async () => {
+    const { result } = renderHook(() => useRuntimeCenter());
+
+    await waitFor(
+      () =>
+        !result.current.loading &&
+        !result.current.mainBrainLoading &&
+        !result.current.businessAgentsLoading,
+    );
+
+    vi.useFakeTimers();
+    runtimeEventHandler?.({
+      event_name: "tool.updated",
+      payload: { tool_id: "browser" },
+    });
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 });

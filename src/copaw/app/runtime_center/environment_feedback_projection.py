@@ -6,9 +6,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ...state.execution_feedback import collect_recent_execution_feedback
-from .task_review_projection import (
+from .execution_runtime_projection import (
+    attach_execution_runtime_projection,
     build_host_twin_summary,
     derive_host_twin_continuity_state,
+)
+from .projection_utils import (
     first_non_empty,
 )
 
@@ -57,10 +60,10 @@ class RuntimeCenterEnvironmentFeedbackProjector:
             related_tasks=related_tasks,
         )
         if not runtime_feedback:
-            return feedback
+            return attach_execution_runtime_projection(feedback)
         merged_feedback = dict(runtime_feedback)
         merged_feedback.update(feedback)
-        return merged_feedback
+        return attach_execution_runtime_projection(merged_feedback)
 
     def _collect_environment_runtime_feedback(
         self,

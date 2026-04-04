@@ -627,6 +627,42 @@ def test_agent_profile_service_uses_checkpoint_current_focus_when_runtime_and_ma
     assert profile.current_focus == "Checkpoint projected assignment"
 
 
+def test_agent_profile_service_ignores_legacy_focus_alias_fields_without_current_focus_contract(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    runtime_repo = SqliteAgentRuntimeRepository(store)
+
+    runtime_repo.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-legacy-focus",
+            actor_key="industry-v1-ops:operator",
+            actor_fingerprint="fp-legacy-focus",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="operator",
+            display_name="Ops Agent",
+            role_name="Operations",
+            metadata={
+                "focus_kind": "goal",
+                "focus_id": "goal-legacy",
+                "focus_title": "Legacy focus title",
+                "focus": "Legacy focus summary",
+            },
+        ),
+    )
+
+    service = AgentProfileService(agent_runtime_repository=runtime_repo)
+    profile = service.get_agent("agent-legacy-focus")
+
+    assert profile is not None
+    assert profile.current_focus_kind is None
+    assert profile.current_focus_id is None
+    assert profile.current_focus == ""
+
+
 def test_agent_profile_service_detail_stats_drop_goal_count(tmp_path) -> None:
     store = SQLiteStateStore(tmp_path / "state.db")
     runtime_repo = SqliteAgentRuntimeRepository(store)

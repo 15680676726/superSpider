@@ -1470,7 +1470,7 @@ def test_runtime_center_patch_actions_are_first_class_routes(tmp_path) -> None:
 
     client = TestClient(app)
 
-    overview = client.get("/runtime-center/overview")
+    overview = client.get("/runtime-center/surface")
     assert overview.status_code == 200
     cards = {card["key"]: card for card in overview.json()["cards"]}
     assert (

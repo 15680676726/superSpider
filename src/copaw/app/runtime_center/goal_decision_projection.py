@@ -12,8 +12,8 @@ from ...kernel.decision_policy import (
 from ...kernel.persistence import decode_kernel_task_metadata
 from ...utils.runtime_action_links import build_decision_actions
 from ...utils.runtime_routes import decision_route, goal_route, task_route
+from .chat_thread_projection import extract_chat_thread_payload
 from .task_review_projection import (
-    extract_chat_thread_payload,
     trace_id_from_kernel_meta,
 )
 

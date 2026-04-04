@@ -36,6 +36,21 @@ def test_trace_id_from_kernel_meta_prefers_explicit_trace_id() -> None:
     assert trace_id_from_kernel_meta("task-1", {}) == "trace:task-1"
 
 
+def test_runtime_projection_helpers_live_in_split_projection_modules() -> None:
+    assert (
+        resolve_canonical_host_identity.__module__
+        == "copaw.app.runtime_center.execution_runtime_projection"
+    )
+    assert (
+        build_host_twin_summary.__module__
+        == "copaw.app.runtime_center.execution_runtime_projection"
+    )
+    assert (
+        extract_chat_thread_payload.__module__
+        == "copaw.app.runtime_center.chat_thread_projection"
+    )
+
+
 def test_resolve_canonical_host_identity_prefers_scheduler_inputs_environment_ref() -> None:
     assert resolve_canonical_host_identity(
         {

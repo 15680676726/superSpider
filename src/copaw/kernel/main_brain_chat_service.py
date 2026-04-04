@@ -28,7 +28,6 @@ from .main_brain_result_committer import (
 )
 from .main_brain_scope_snapshot_service import MainBrainScopeSnapshotService
 from .main_brain_turn_result import MainBrainCommitState, MainBrainTurnResult
-from ..providers.runtime_provider_facade import get_runtime_provider_facade
 from .query_execution_shared import (
     _first_non_empty,
     _materialize_model_response,
@@ -41,6 +40,12 @@ if TYPE_CHECKING:
     from .agent_profile_service import AgentProfileService
 
 logger = logging.getLogger(__name__)
+
+
+def _missing_main_brain_chat_model() -> object:
+    raise RuntimeError(
+        "MainBrainChatService requires an injected runtime chat model factory.",
+    )
 
 _PURE_CHAT_MEMORY_MAX_ITEMS = 24
 _PURE_CHAT_SESSION_CACHE_TTL_SECONDS = 20 * 60
@@ -710,9 +715,7 @@ class MainBrainChatService:
         self._industry_service = industry_service
         self._agent_profile_service = agent_profile_service
         self._memory_recall_service = memory_recall_service
-        self._model_factory = (
-            model_factory or get_runtime_provider_facade().get_active_chat_model
-        )
+        self._model_factory = model_factory or _missing_main_brain_chat_model
         self._scope_snapshot_service = scope_snapshot_service or MainBrainScopeSnapshotService(
             stable_prefix_builder=self._build_stable_prompt_prefix,
             stable_prefix_signature_builder=self._build_prompt_context_signature,

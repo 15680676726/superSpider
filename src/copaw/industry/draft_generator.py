@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from ..providers.runtime_provider_facade import (
     ProviderRuntimeSurface,
-    get_runtime_provider_facade,
+    build_compat_runtime_provider_facade,
 )
 from .compiler import canonicalize_industry_draft
 from .models import (
@@ -143,7 +143,7 @@ class IndustryDraftGenerator:
         self._provider_runtime = (
             provider_runtime
             or provider_manager
-            or get_runtime_provider_facade()
+            or build_compat_runtime_provider_facade()
         )
         self._model_factory = model_factory or self._provider_runtime.get_active_chat_model
 

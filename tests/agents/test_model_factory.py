@@ -10,8 +10,8 @@ def test_create_runtime_chat_model_uses_runtime_provider_facade(monkeypatch) -> 
     sentinel = object()
     monkeypatch.setattr(
         model_factory,
-        "get_runtime_provider_facade",
-        lambda provider_manager=None: SimpleNamespace(
+        "build_compat_runtime_provider_facade",
+        lambda: SimpleNamespace(
             get_active_chat_model=lambda: sentinel,
         ),
     )
@@ -36,8 +36,8 @@ def test_describe_runtime_model_surface_uses_runtime_provider_facade(monkeypatch
     )
     monkeypatch.setattr(
         model_factory,
-        "get_runtime_provider_facade",
-        lambda provider_manager=None: runtime_provider,
+        "build_compat_runtime_provider_facade",
+        lambda: runtime_provider,
     )
     monkeypatch.setattr(
         model_factory,

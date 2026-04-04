@@ -35,7 +35,7 @@ from .environment_feedback_projection import RuntimeCenterEnvironmentFeedbackPro
 from .goal_decision_projection import RuntimeCenterGoalDecisionProjector
 from .task_detail_projection import RuntimeCenterTaskDetailProjector
 from .task_list_projection import RuntimeCenterTaskListProjector
-from .task_review_projection import first_non_empty, string_list_from_values
+from .projection_utils import first_non_empty, string_list_from_values
 from .work_context_projection import RuntimeCenterWorkContextProjector
 
 

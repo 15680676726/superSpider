@@ -39,6 +39,7 @@ export interface SystemOverview {
     governance_route: string;
     recovery_route: string;
     events_route: string;
+    recovery_source?: "latest" | "startup";
     startup_recovery?: StartupRecoverySummary | null;
   };
 }
