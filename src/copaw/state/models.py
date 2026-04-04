@@ -10,6 +10,13 @@ from .models_agents_runtime import (
     AgentThreadBindingRecord,
     AutomationLoopRuntimeRecord,
 )
+from .models_buddy import (
+    BuddyGrowthProjection,
+    BuddyPresentation,
+    CompanionRelationship,
+    GrowthTarget,
+    HumanProfile,
+)
 from .models_capability_evolution import (
     CapabilityCandidateRecord,
     CapabilityDonorRecord,
@@ -126,6 +133,9 @@ __all__ = [
     "AgentThreadBindingKind",
     "AgentThreadBindingRecord",
     "AutomationLoopRuntimeRecord",
+    "BuddyGrowthProjection",
+    "BuddyPresentation",
+    "CompanionRelationship",
     "AssignmentRecord",
     "AssignmentStatus",
     "BacklogItemRecord",
@@ -143,7 +153,9 @@ __all__ = [
     "FixedSopTemplateRecord",
     "GoalOverrideRecord",
     "GoalRecord",
+    "GrowthTarget",
     "HumanAssistTaskRecord",
+    "HumanProfile",
     "GoalStatus",
     "GovernanceControlRecord",
     "IndustryInstanceRecord",
