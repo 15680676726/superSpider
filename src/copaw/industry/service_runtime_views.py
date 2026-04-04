@@ -3208,6 +3208,24 @@ class _IndustryRuntimeViewsMixin:
                 "status": _string(focused_backlog.get("status")),
                 "route": _string(focused_backlog.get("route")),
             }
+        if execution is not None and focus_selection is not None:
+            current_focus_id = _string(execution.current_focus_id)
+            current_focus = _string(execution.current_focus)
+            if current_focus_id is None and current_focus is None:
+                fallback_focus_id = (
+                    _string(focus_selection.get("assignment_id"))
+                    if focus_selection.get("selection_kind") == "assignment"
+                    else _string(focus_selection.get("backlog_item_id"))
+                )
+                fallback_focus = _string(focus_selection.get("title")) or _string(
+                    focus_selection.get("summary"),
+                )
+                execution = execution.model_copy(
+                    update={
+                        "current_focus_id": fallback_focus_id,
+                        "current_focus": fallback_focus,
+                    },
+                )
 
         main_chain = self._build_instance_main_chain(
 
