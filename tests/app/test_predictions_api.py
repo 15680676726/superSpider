@@ -1689,3 +1689,43 @@ def test_prediction_remote_skill_trial_and_retirement_loop(
     )
     skill_service.delete_skill("legacy_outreach")
     skill_service.delete_skill("nextgen_outreach")
+
+
+def test_predictions_api_assignment_gap_recommendation_uses_capability_lifecycle(
+    tmp_path,
+) -> None:
+    app = _build_predictions_app(tmp_path)
+    run = app.state.workflow_run_repository.get_run("run-desktop-gap")
+    assert run is not None
+    preview_payload = dict(run.preview_payload or {})
+    dependencies = list(preview_payload.get("dependencies") or [])
+    dependencies[0] = {
+        **dict(dependencies[0]),
+        "installed": True,
+        "available": True,
+        "enabled": True,
+    }
+    preview_payload["dependencies"] = dependencies
+    preview_payload["missing_capability_ids"] = []
+    preview_payload["assignment_gap_capability_ids"] = ["mcp:desktop_windows"]
+    app.state.workflow_run_repository.upsert_run(
+        run.model_copy(update={"preview_payload": preview_payload}),
+    )
+    client = TestClient(app)
+
+    created = _create_prediction_case(client)
+    recommendation = next(
+        item
+        for item in created["recommendations"]
+        if item["recommendation"]["metadata"].get("capability_id") == "mcp:desktop_windows"
+        and item["recommendation"]["target_agent_id"] == "industry-solution-lead-demo"
+    )
+
+    assert recommendation["recommendation"]["action_kind"] == "system:apply_capability_lifecycle"
+    assert recommendation["recommendation"]["action_payload"]["decision_kind"] == "promote_to_role"
+    assert recommendation["recommendation"]["action_payload"]["target_agent_id"] == (
+        "industry-solution-lead-demo"
+    )
+    assert recommendation["recommendation"]["action_payload"]["target_capability_ids"] == [
+        "mcp:desktop_windows",
+    ]

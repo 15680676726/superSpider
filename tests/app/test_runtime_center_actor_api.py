@@ -198,6 +198,15 @@ def _build_actor_app(tmp_path):
     return app, mailbox_service, supervisor, item
 
 
+def _list_lifecycle_kernel_tasks(app: FastAPI) -> list[object]:
+    task_store = app.state.kernel_dispatcher.task_store
+    return [
+        task
+        for task in task_store.list_tasks(limit=50)
+        if getattr(task, "capability_ref", None) == "system:apply_capability_lifecycle"
+    ]
+
+
 def test_runtime_center_actor_read_routes(tmp_path) -> None:
     app, _mailbox_service, _supervisor, item = _build_actor_app(tmp_path)
     client = TestClient(app)
@@ -379,6 +388,10 @@ def test_runtime_center_actor_capability_assignment_route(tmp_path) -> None:
     }
     assert "tool:send_file_to_user" in accessible
     assert "system:dispatch_query" in accessible
+    lifecycle_tasks = _list_lifecycle_kernel_tasks(app)
+    assert len(lifecycle_tasks) == 1
+    assert lifecycle_tasks[0].payload["target_agent_id"] == "agent-1"
+    assert app.state.task_repository.list_tasks(task_type="system:apply_role") == []
 
 
 def test_runtime_center_actor_capability_surface_and_governed_assignment(tmp_path) -> None:
@@ -417,6 +430,10 @@ def test_runtime_center_actor_capability_surface_and_governed_assignment(tmp_pat
     refreshed_payload = refreshed_surface.json()
     assert refreshed_payload["pending_decisions"] == []
     assert "tool:send_file_to_user" in refreshed_payload["effective_capabilities"]
+    lifecycle_tasks = _list_lifecycle_kernel_tasks(app)
+    assert len(lifecycle_tasks) == 1
+    assert lifecycle_tasks[0].payload["target_agent_id"] == "agent-1"
+    assert app.state.task_repository.list_tasks(task_type="system:apply_role") == []
 
 
 def test_runtime_center_agent_capability_assignment_route_for_execution_core(tmp_path) -> None:
@@ -448,6 +465,10 @@ def test_runtime_center_agent_capability_assignment_route_for_execution_core(tmp
     assert "system:dispatch_goal" not in profile.capabilities
     assert "system:discover_capabilities" in profile.capabilities
     assert "tool:send_file_to_user" not in profile.capabilities
+    lifecycle_tasks = _list_lifecycle_kernel_tasks(app)
+    assert len(lifecycle_tasks) == 1
+    assert lifecycle_tasks[0].payload["target_agent_id"] == "copaw-agent-runner"
+    assert app.state.task_repository.list_tasks(task_type="system:apply_role") == []
 
 
 def test_runtime_center_agent_governed_capability_assignment_route_for_execution_core(tmp_path) -> None:
@@ -471,3 +492,7 @@ def test_runtime_center_agent_governed_capability_assignment_route_for_execution
     assert payload["decision"]["status"] == "approved"
     assert payload["decision"]["requested_by"] == "copaw-main-brain"
     assert payload["capability_surface"]["default_mode"] == "governed"
+    lifecycle_tasks = _list_lifecycle_kernel_tasks(app)
+    assert len(lifecycle_tasks) == 1
+    assert lifecycle_tasks[0].payload["target_agent_id"] == "copaw-agent-runner"
+    assert app.state.task_repository.list_tasks(task_type="system:apply_role") == []

@@ -10,6 +10,7 @@ from copaw.app.runtime_center.state_query import RuntimeCenterStateQueryService
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.app.startup_recovery import StartupRecoverySummary
 from copaw.memory.conversation_compaction_service import ConversationCompactionService
+from copaw.state.capability_portfolio_service import CapabilityPortfolioService
 
 
 def _build_app() -> FastAPI:
@@ -413,26 +414,20 @@ def test_runtime_center_state_query_portfolio_summary_filters_local_and_baseline
         def list_trust_records(self, *, limit: int | None = None):
             return []
 
-    class _PortfolioService:
-        def get_runtime_portfolio_summary(self) -> dict[str, object]:
-            return {
-                "donor_count": 4,
-                "active_donor_count": 3,
-                "candidate_donor_count": 1,
-                "trial_donor_count": 1,
-                "trusted_source_count": 3,
-                "watchlist_source_count": 1,
-                "degraded_donor_count": 0,
-                "replace_pressure_count": 0,
-                "retire_pressure_count": 0,
-                "over_budget_scope_count": 1,
-                "planning_actions": [
-                    {
-                        "action": "compact_over_budget_scope",
-                        "summary": "Inflated by baseline-import and local-authored candidates.",
-                    },
-                ],
-            }
+    class _TrialService:
+        def list_trials(self, *, candidate_id: str | None = None, limit: int | None = None):
+            return []
+
+    class _DecisionService:
+        def list_decisions(self, *, candidate_id: str | None = None, limit: int | None = None):
+            return []
+
+    portfolio_service = CapabilityPortfolioService(
+        donor_service=_DonorService(),
+        candidate_service=_CandidateService(),
+        skill_trial_service=_TrialService(),
+        skill_lifecycle_decision_service=_DecisionService(),
+    )
 
     state_query = RuntimeCenterStateQueryService(
         task_repository=object(),
@@ -444,7 +439,7 @@ def test_runtime_center_state_query_portfolio_summary_filters_local_and_baseline
         decision_request_repository=object(),
         capability_candidate_service=_CandidateService(),
         capability_donor_service=_DonorService(),
-        capability_portfolio_service=_PortfolioService(),
+        capability_portfolio_service=portfolio_service,
     )
 
     payload = state_query.get_capability_portfolio_summary()
@@ -539,6 +534,21 @@ def test_runtime_center_state_query_discovery_summary_filters_fallback_only_sour
         def list_trust_records(self, *, limit: int | None = None):
             return []
 
+    class _TrialService:
+        def list_trials(self, *, candidate_id: str | None = None, limit: int | None = None):
+            return []
+
+    class _DecisionService:
+        def list_decisions(self, *, candidate_id: str | None = None, limit: int | None = None):
+            return []
+
+    portfolio_service = CapabilityPortfolioService(
+        donor_service=_DonorService(),
+        candidate_service=_CandidateService(),
+        skill_trial_service=_TrialService(),
+        skill_lifecycle_decision_service=_DecisionService(),
+    )
+
     state_query = RuntimeCenterStateQueryService(
         task_repository=object(),
         task_runtime_repository=object(),
@@ -549,6 +559,7 @@ def test_runtime_center_state_query_discovery_summary_filters_fallback_only_sour
         decision_request_repository=object(),
         capability_candidate_service=_CandidateService(),
         capability_donor_service=_DonorService(),
+        capability_portfolio_service=portfolio_service,
     )
 
     payload = state_query.get_capability_discovery_summary()

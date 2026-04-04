@@ -7,6 +7,9 @@ from fastapi import HTTPException, Request
 
 from agentscope_runtime.engine.schemas.agent_schemas import AgentRequest
 
+from ...capabilities.lifecycle_assignment import (
+    build_capability_lifecycle_assignment_payload,
+)
 from .runtime_center_dependencies import (
     _get_agent_profile_service,
     _get_agent_runtime_repository,
@@ -126,17 +129,19 @@ async def _assign_agent_capabilities(
         runtime = runtime_repository.get_runtime(agent_id)
         if runtime is None:
             raise HTTPException(404, detail=f"Actor '{agent_id}' not found")
+    lifecycle_payload = build_capability_lifecycle_assignment_payload(
+        agent_profile_service=profile_service,
+        target_agent_id=agent_id,
+        capability_ids=list(payload.capabilities),
+        capability_assignment_mode=payload.mode,
+        reason=payload.reason,
+        actor=payload.actor,
+    )
     result = await _dispatch_runtime_mutation(
         request,
-        capability_ref="system:apply_role",
+        capability_ref="system:apply_capability_lifecycle",
         title=f"Update capability allowlist for agent '{agent_id}'",
-        payload={
-            "actor": payload.actor,
-            "agent_id": agent_id,
-            "capabilities": list(payload.capabilities),
-            "capability_assignment_mode": payload.mode,
-            "reason": payload.reason,
-        },
+        payload=lifecycle_payload,
     )
     if not result.get("success"):
         if result.get("phase") == "waiting-confirm":
@@ -188,17 +193,19 @@ async def _submit_governed_capabilities(
         if payload.use_recommended
         else "Submit capability allowlist change"
     )
+    lifecycle_payload = build_capability_lifecycle_assignment_payload(
+        agent_profile_service=profile_service,
+        target_agent_id=agent_id,
+        capability_ids=requested_capabilities,
+        capability_assignment_mode=payload.mode,
+        reason=reason,
+        actor=payload.actor,
+    )
     result = await _dispatch_runtime_mutation(
         request,
-        capability_ref="system:apply_role",
+        capability_ref="system:apply_capability_lifecycle",
         title=f"Govern capability allowlist for agent '{agent_id}'",
-        payload={
-            "actor": payload.actor,
-            "agent_id": agent_id,
-            "capabilities": requested_capabilities,
-            "capability_assignment_mode": payload.mode,
-            "reason": reason,
-        },
+        payload=lifecycle_payload,
         fallback_risk="confirm",
         risk_level_override="confirm",
     )

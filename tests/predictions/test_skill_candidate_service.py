@@ -288,6 +288,79 @@ def test_capability_candidate_service_materializes_donor_truth_and_portfolio_sum
     )
 
 
+def test_capability_portfolio_service_reports_runtime_discovery_and_package_metadata(
+    tmp_path: Path,
+) -> None:
+    (
+        candidate_service,
+        _donor_service,
+        _trial_service,
+        _decision_service,
+        portfolio_service,
+    ) = _build_portfolio_services(tmp_path)
+
+    candidate_service.normalize_candidate_source(
+        candidate_kind="skill",
+        target_scope="seat",
+        target_role_id="researcher",
+        target_seat_ref="seat-1",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://example.com/skills/research-pack.zip",
+        candidate_source_version="1.2.3",
+        ingestion_mode="prediction-recommendation",
+        proposed_skill_name="research_pack",
+        summary="Governed remote research pack candidate.",
+        status="active",
+        lifecycle_stage="active",
+    )
+    candidate_service.normalize_candidate_source(
+        candidate_kind="skill",
+        target_scope="seat",
+        target_role_id="researcher",
+        target_seat_ref="seat-1",
+        candidate_source_kind="local_authored",
+        candidate_source_ref=str(tmp_path / "skills" / "local_research" / "SKILL.md"),
+        candidate_source_version="draft-v1",
+        ingestion_mode="manual",
+        proposed_skill_name="local_research",
+        summary="Local authored fallback skill.",
+        status="active",
+        lifecycle_stage="active",
+    )
+    candidate_service.normalize_candidate_source(
+        candidate_kind="mcp-bundle",
+        target_scope="seat",
+        target_role_id="researcher",
+        target_seat_ref="seat-1",
+        candidate_source_kind="external_catalog",
+        candidate_source_ref="registry://browser",
+        candidate_source_version="2026.04.04",
+        ingestion_mode="baseline-import",
+        proposed_skill_name="browser_registry",
+        summary="Baseline browser runtime.",
+        status="active",
+        lifecycle_stage="baseline",
+    )
+
+    portfolio = portfolio_service.get_runtime_portfolio_summary()
+    discovery = portfolio_service.get_runtime_discovery_summary()
+
+    assert portfolio["donor_count"] == 1
+    assert portfolio["active_donor_count"] == 1
+    assert portfolio["fallback_only_candidate_count"] == 2
+    assert portfolio["package_kind_count"] == {"skill": 1}
+    assert portfolio["candidate_source_kind_count"] == {"external_remote": 1}
+    assert portfolio["routes"]["discovery"] == "/api/runtime-center/capabilities/discovery"
+
+    assert discovery["status"] == "degraded"
+    assert discovery["source_profile_count"] == 1
+    assert discovery["trusted_source_count"] == 0
+    assert discovery["active_source_count"] == 1
+    assert discovery["watchlist_source_count"] == 1
+    assert discovery["fallback_only_source_count"] == 2
+    assert discovery["by_source_kind"] == {"external_remote": 1}
+
+
 def test_capability_candidate_service_persists_candidate_attribution_fields(
     tmp_path: Path,
 ) -> None:

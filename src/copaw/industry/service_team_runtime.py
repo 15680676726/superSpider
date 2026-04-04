@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from ..capabilities.lifecycle_assignment import (
+    build_capability_lifecycle_assignment_payload,
+)
 from .service_context import *  # noqa: F401,F403
 from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
@@ -373,9 +376,11 @@ class _IndustryTeamRuntimeMixin:
     ) -> None:
         if not install_plan or not install_results:
             return
-        apply_role = self._resolve_system_executor("system:apply_role")
-        if apply_role is None:
-            raise ValueError("Capability assignment executor is not available.")
+        apply_capability_lifecycle = self._resolve_system_executor(
+            "system:apply_capability_lifecycle",
+        )
+        if apply_capability_lifecycle is None:
+            raise ValueError("Capability lifecycle executor is not available.")
         recommendation_by_id = {
             item.recommendation_id: item
             for item in plan.recommendation_pack.items
@@ -410,13 +415,16 @@ class _IndustryTeamRuntimeMixin:
                 )
             assignment_results: list[IndustryBootstrapInstallAssignmentResult] = []
             for agent_id in target_agent_ids:
-                assignment_response = await apply_role(
-                    payload={
-                        "agent_id": agent_id,
-                        "capabilities": capability_ids,
-                        "capability_assignment_mode": item.capability_assignment_mode,
-                        "reason": f"Industry bootstrap install plan: {item.template_id}",
-                    },
+                lifecycle_payload = build_capability_lifecycle_assignment_payload(
+                    agent_profile_service=self._agent_profile_service,
+                    target_agent_id=agent_id,
+                    capability_ids=capability_ids,
+                    capability_assignment_mode=item.capability_assignment_mode,
+                    reason=f"Industry bootstrap install plan: {item.template_id}",
+                    actor="copaw-main-brain",
+                )
+                assignment_response = await apply_capability_lifecycle(
+                    payload=lifecycle_payload,
                 )
                 assignment_success = bool(assignment_response.get("success"))
                 assignment_detail = str(
