@@ -13,6 +13,9 @@ class CapabilityCandidateRecord(UpdatedRecord):
     """Top-level governed capability-evolution candidate truth."""
 
     candidate_id: str = Field(default_factory=_new_record_id, min_length=1)
+    donor_id: str | None = None
+    package_id: str | None = None
+    source_profile_id: str | None = None
     candidate_kind: str = Field(default="skill", min_length=1)
     industry_instance_id: str | None = None
     target_role_id: str | None = None
@@ -78,8 +81,68 @@ class SkillLifecycleDecisionRecord(UpdatedRecord):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class CapabilityDonorRecord(UpdatedRecord):
+    """Formal donor truth backing external capability assimilation."""
+
+    donor_id: str = Field(default_factory=_new_record_id, min_length=1)
+    donor_kind: str = Field(default="skill", min_length=1)
+    normalized_key: str = Field(..., min_length=1)
+    source_kind: str = Field(default="local_authored", min_length=1)
+    primary_source_ref: str | None = None
+    candidate_source_lineage: str | None = None
+    display_name: str | None = None
+    status: str = Field(default="candidate", min_length=1)
+    trust_status: str = Field(default="observing", min_length=1)
+    package_count: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CapabilityPackageRecord(UpdatedRecord):
+    """Formal package truth attached to a donor."""
+
+    package_id: str = Field(default_factory=_new_record_id, min_length=1)
+    donor_id: str = Field(..., min_length=1)
+    source_profile_id: str | None = None
+    package_ref: str | None = None
+    package_version: str | None = None
+    package_kind: str = Field(default="package", min_length=1)
+    status: str = Field(default="available", min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CapabilitySourceProfileRecord(UpdatedRecord):
+    """Governed source-chain/trust posture for a donor source."""
+
+    source_profile_id: str = Field(default_factory=_new_record_id, min_length=1)
+    source_kind: str = Field(default="local_authored", min_length=1)
+    source_key: str = Field(..., min_length=1)
+    display_name: str | None = None
+    trust_posture: str = Field(default="watchlist", min_length=1)
+    active: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CapabilityDonorTrustRecord(UpdatedRecord):
+    """Governance memory that tracks donor trust and lifecycle pressure."""
+
+    donor_id: str = Field(..., min_length=1)
+    source_profile_id: str | None = None
+    trust_status: str = Field(default="observing", min_length=1)
+    trial_success_count: int = 0
+    trial_failure_count: int = 0
+    rollback_count: int = 0
+    retirement_count: int = 0
+    last_trial_verdict: str | None = None
+    last_decision_kind: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 __all__ = [
     "CapabilityCandidateRecord",
+    "CapabilityDonorRecord",
+    "CapabilityDonorTrustRecord",
+    "CapabilityPackageRecord",
+    "CapabilitySourceProfileRecord",
     "SkillLifecycleDecisionRecord",
     "SkillTrialRecord",
 ]

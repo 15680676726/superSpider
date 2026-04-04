@@ -70,8 +70,14 @@ def _mount_protection_flags(mount: object) -> list[str]:
 
 
 class CapabilityCandidateService:
-    def __init__(self, *, state_store: SQLiteStateStore) -> None:
+    def __init__(
+        self,
+        *,
+        state_store: SQLiteStateStore,
+        donor_service: object | None = None,
+    ) -> None:
         self._state_store = state_store
+        self._donor_service = donor_service
         self._state_store.initialize()
 
     def list_candidates(
@@ -129,6 +135,9 @@ class CapabilityCandidateService:
         metadata: dict[str, Any] | None = None,
     ) -> CapabilityCandidateRecord:
         record = CapabilityCandidateRecord(
+            donor_id=None,
+            package_id=None,
+            source_profile_id=None,
             candidate_kind=_string(candidate_kind) or "skill",
             target_scope=_string(target_scope) or "seat",
             target_role_id=_string(target_role_id),
@@ -153,6 +162,20 @@ class CapabilityCandidateService:
             metadata=dict(metadata or {}),
         )
         record.lineage_root_id = _string(lineage_root_id) or record.candidate_id
+        register_candidate_source = getattr(
+            self._donor_service,
+            "register_candidate_source",
+            None,
+        )
+        if callable(register_candidate_source):
+            donor_id, package_id, source_profile_id = register_candidate_source(record)
+            record = record.model_copy(
+                update={
+                    "donor_id": donor_id,
+                    "package_id": package_id,
+                    "source_profile_id": source_profile_id,
+                },
+            )
         self._upsert_record(record)
         return record
 
@@ -254,6 +277,9 @@ class CapabilityCandidateService:
                 """
                 INSERT INTO capability_candidates (
                     candidate_id,
+                    donor_id,
+                    package_id,
+                    source_profile_id,
                     candidate_kind,
                     industry_instance_id,
                     target_role_id,
@@ -286,6 +312,9 @@ class CapabilityCandidateService:
                     updated_at
                 ) VALUES (
                     :candidate_id,
+                    :donor_id,
+                    :package_id,
+                    :source_profile_id,
                     :candidate_kind,
                     :industry_instance_id,
                     :target_role_id,
@@ -318,6 +347,9 @@ class CapabilityCandidateService:
                     :updated_at
                 )
                 ON CONFLICT(candidate_id) DO UPDATE SET
+                    donor_id = excluded.donor_id,
+                    package_id = excluded.package_id,
+                    source_profile_id = excluded.source_profile_id,
                     candidate_kind = excluded.candidate_kind,
                     industry_instance_id = excluded.industry_instance_id,
                     target_role_id = excluded.target_role_id,
@@ -350,6 +382,9 @@ class CapabilityCandidateService:
                 """,
                 {
                     "candidate_id": record.candidate_id,
+                    "donor_id": record.donor_id,
+                    "package_id": record.package_id,
+                    "source_profile_id": record.source_profile_id,
                     "candidate_kind": record.candidate_kind,
                     "industry_instance_id": record.industry_instance_id,
                     "target_role_id": record.target_role_id,
@@ -386,6 +421,9 @@ class CapabilityCandidateService:
     def _row_to_record(self, row) -> CapabilityCandidateRecord:
         return CapabilityCandidateRecord(
             candidate_id=row["candidate_id"],
+            donor_id=row["donor_id"],
+            package_id=row["package_id"],
+            source_profile_id=row["source_profile_id"],
             candidate_kind=row["candidate_kind"],
             industry_instance_id=row["industry_instance_id"],
             target_role_id=row["target_role_id"],

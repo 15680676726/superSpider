@@ -319,6 +319,8 @@ class RuntimeCenterAppStateView:
     state_query_service: Any = None
     evidence_query_service: Any = None
     capability_candidate_service: Any = None
+    capability_donor_service: Any = None
+    capability_portfolio_service: Any = None
     skill_trial_service: Any = None
     skill_lifecycle_decision_service: Any = None
     capability_service: Any = None
@@ -355,6 +357,16 @@ class RuntimeCenterAppStateView:
             capability_candidate_service=getattr(
                 app_state,
                 "capability_candidate_service",
+                None,
+            ),
+            capability_donor_service=getattr(
+                app_state,
+                "capability_donor_service",
+                None,
+            ),
+            capability_portfolio_service=getattr(
+                app_state,
+                "capability_portfolio_service",
                 None,
             ),
             skill_trial_service=getattr(app_state, "skill_trial_service", None),

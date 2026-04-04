@@ -54,6 +54,8 @@ class RuntimeCenterStateQueryService:
         goal_service: object | None = None,
         decision_request_repository: SqliteDecisionRequestRepository,
         capability_candidate_service: object | None = None,
+        capability_donor_service: object | None = None,
+        capability_portfolio_service: object | None = None,
         skill_trial_service: object | None = None,
         skill_lifecycle_decision_service: object | None = None,
         evidence_ledger: EvidenceLedger | None = None,
@@ -72,6 +74,8 @@ class RuntimeCenterStateQueryService:
         self._goal_service = goal_service
         self._decision_request_repository = decision_request_repository
         self._capability_candidate_service = capability_candidate_service
+        self._capability_donor_service = capability_donor_service
+        self._capability_portfolio_service = capability_portfolio_service
         self._skill_trial_service = skill_trial_service
         self._skill_lifecycle_decision_service = skill_lifecycle_decision_service
         self._evidence_ledger = evidence_ledger
@@ -270,6 +274,50 @@ class RuntimeCenterStateQueryService:
             if isinstance(serialized, dict):
                 payload.append(serialized)
         return payload
+
+    def list_capability_donors(
+        self,
+        *,
+        limit: int | None = 20,
+    ) -> list[dict[str, object]]:
+        service = getattr(self, "_capability_donor_service", None)
+        lister = getattr(service, "list_donors", None)
+        if not callable(lister):
+            return []
+        items = lister(limit=limit)
+        payload: list[dict[str, object]] = []
+        for item in items:
+            model_dump = getattr(item, "model_dump", None)
+            serialized = model_dump(mode="json") if callable(model_dump) else None
+            if isinstance(serialized, dict):
+                payload.append(serialized)
+        return payload
+
+    def list_capability_source_profiles(
+        self,
+        *,
+        limit: int | None = 20,
+    ) -> list[dict[str, object]]:
+        service = getattr(self, "_capability_donor_service", None)
+        lister = getattr(service, "list_source_profiles", None)
+        if not callable(lister):
+            return []
+        items = lister(limit=limit)
+        payload: list[dict[str, object]] = []
+        for item in items:
+            model_dump = getattr(item, "model_dump", None)
+            serialized = model_dump(mode="json") if callable(model_dump) else None
+            if isinstance(serialized, dict):
+                payload.append(serialized)
+        return payload
+
+    def get_capability_portfolio_summary(self) -> dict[str, object]:
+        service = getattr(self, "_capability_portfolio_service", None)
+        getter = getattr(service, "get_runtime_portfolio_summary", None)
+        if not callable(getter):
+            return {}
+        payload = getter()
+        return dict(payload) if isinstance(payload, Mapping) else {}
 
     def list_capability_lifecycle_decisions(
         self,

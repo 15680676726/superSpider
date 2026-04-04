@@ -179,6 +179,8 @@ class RuntimeBootstrap:
     state_query_service: RuntimeCenterStateQueryService
     evidence_query_service: RuntimeCenterEvidenceQueryService
     capability_candidate_service: Any | None
+    capability_donor_service: Any | None
+    capability_portfolio_service: Any | None
     skill_trial_service: Any | None
     skill_lifecycle_decision_service: Any | None
     human_assist_task_service: HumanAssistTaskService

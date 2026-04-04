@@ -19,6 +19,10 @@ from .models import (
     AgentThreadBindingRecord,
     BacklogItemRecord,
     CapabilityCandidateRecord,
+    CapabilityDonorRecord,
+    CapabilityDonorTrustRecord,
+    CapabilityPackageRecord,
+    CapabilitySourceProfileRecord,
     CapabilityOverrideRecord,
     DecisionRequestRecord,
     ExecutionRoutineRecord,
@@ -74,6 +78,8 @@ from .main_brain_service import (
     OperatingCycleService,
     OperatingLaneService,
 )
+from .capability_donor_service import CapabilityDonorService
+from .capability_portfolio_service import CapabilityPortfolioService
 from .skill_lifecycle_decision_service import SkillLifecycleDecisionService
 from .skill_trial_service import SkillTrialService
 from .store import SQLiteStateStore, STATE_SCHEMA_VERSION
@@ -93,7 +99,13 @@ __all__ = [
     "BacklogService",
     "BacklogItemRecord",
     "CapabilityCandidateRecord",
+    "CapabilityDonorRecord",
+    "CapabilityDonorService",
+    "CapabilityDonorTrustRecord",
     "CapabilityOverrideRecord",
+    "CapabilityPackageRecord",
+    "CapabilityPortfolioService",
+    "CapabilitySourceProfileRecord",
     "DecisionRequestRecord",
     "ExecutionRoutineRecord",
     "FixedSopBindingRecord",

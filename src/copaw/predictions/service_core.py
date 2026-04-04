@@ -53,6 +53,7 @@ class _PredictionServiceCoreMixin:
         strategy_memory_service: object | None = None,
         capability_service: object | None = None,
         capability_candidate_service: object | None = None,
+        capability_portfolio_service: object | None = None,
         skill_trial_service: object | None = None,
         skill_lifecycle_decision_service: object | None = None,
         agent_profile_service: object | None = None,
@@ -76,6 +77,7 @@ class _PredictionServiceCoreMixin:
         self._strategy_memory_service = strategy_memory_service
         self._capability_service = capability_service
         self._capability_candidate_service = capability_candidate_service
+        self._capability_portfolio_service = capability_portfolio_service
         self._skill_trial_service = skill_trial_service
         self._skill_lifecycle_decision_service = skill_lifecycle_decision_service
         self._agent_profile_service = agent_profile_service
@@ -968,10 +970,22 @@ class _PredictionServiceCoreMixin:
                 == "executed"
             ),
         )
+        portfolio: dict[str, Any] = {}
+        portfolio_service = getattr(self, "_capability_portfolio_service", None)
+        get_runtime_portfolio_summary = getattr(
+            portfolio_service,
+            "get_runtime_portfolio_summary",
+            None,
+        )
+        if callable(get_runtime_portfolio_summary):
+            payload = get_runtime_portfolio_summary()
+            if isinstance(payload, Mapping):
+                portfolio = dict(payload)
         return PredictionCapabilityOptimizationOverview(
             summary=summary,
             actionable=actionable[: max(1, limit)],
             history=history[: max(1, history_limit)],
+            portfolio=portfolio,
             routes={
                 "predictions": "/api/predictions",
             },

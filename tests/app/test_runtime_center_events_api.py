@@ -196,6 +196,69 @@ def test_runtime_center_capability_trials_endpoint_returns_state_query_projectio
     ]
 
 
+def test_runtime_center_capability_donors_endpoint_returns_state_query_projection() -> None:
+    app = _build_app()
+
+    class FakeStateQueryService:
+        def list_capability_donors(self, *, limit: int | None = None):
+            return [
+                {
+                    "donor_id": "donor-1",
+                    "donor_kind": "skill",
+                    "status": "active",
+                    "trust_status": "trusted",
+                },
+            ][: limit or 20]
+
+    app.state.state_query_service = FakeStateQueryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/capabilities/donors", params={"limit": 5})
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "donor_id": "donor-1",
+            "donor_kind": "skill",
+            "status": "active",
+            "trust_status": "trusted",
+        },
+    ]
+
+
+def test_runtime_center_capability_source_profiles_endpoint_returns_state_query_projection() -> None:
+    app = _build_app()
+
+    class FakeStateQueryService:
+        def list_capability_source_profiles(self, *, limit: int | None = None):
+            return [
+                {
+                    "source_profile_id": "source-1",
+                    "source_kind": "external_catalog",
+                    "trust_posture": "trusted",
+                    "active": True,
+                },
+            ][: limit or 20]
+
+    app.state.state_query_service = FakeStateQueryService()
+
+    client = TestClient(app)
+    response = client.get(
+        "/runtime-center/capabilities/source-profiles",
+        params={"limit": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "source_profile_id": "source-1",
+            "source_kind": "external_catalog",
+            "trust_posture": "trusted",
+            "active": True,
+        },
+    ]
+
+
 def test_runtime_center_capability_lifecycle_decisions_endpoint_returns_state_query_projection() -> None:
     app = _build_app()
 

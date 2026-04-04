@@ -1934,6 +1934,8 @@ def test_runtime_center_capability_optimizations_endpoint() -> None:
         ]
         == "retire"
     )
+    assert payload["portfolio"]["donor_count"] == 2
+    assert payload["portfolio"]["retire_pressure_count"] == 1
     assert payload["routes"]["predictions"] == "/api/predictions"
 
 
@@ -2065,6 +2067,29 @@ def test_runtime_center_governance_status_includes_capability_governance_project
     app.state.capability_service = FakeCapabilityService()
     app.state.prediction_service = FakePredictionService()
 
+    class _PortfolioService:
+        def summarize_portfolio(self) -> dict[str, object]:
+            return {
+                "donor_count": 2,
+                "active_donor_count": 1,
+                "candidate_donor_count": 1,
+                "trial_donor_count": 1,
+                "trusted_source_count": 1,
+                "watchlist_source_count": 1,
+                "degraded_donor_count": 1,
+                "replace_pressure_count": 0,
+                "retire_pressure_count": 1,
+                "over_budget_scope_count": 1,
+                "planning_actions": [
+                    {
+                        "action": "compact_over_budget_scope",
+                        "summary": "One scope exceeded donor density budget.",
+                    },
+                ],
+            }
+
+    app.state.capability_portfolio_service = _PortfolioService()
+
     client = TestClient(app)
     response = client.get("/runtime-center/governance/status")
 
@@ -2079,8 +2104,15 @@ def test_runtime_center_governance_status_includes_capability_governance_project
     assert capability_governance["package_bound_mcp_count"] == 1
     assert capability_governance["delta"]["missing_capability_count"] == 1
     assert capability_governance["delta"]["trial_count"] == 1
+    assert capability_governance["portfolio"]["donor_count"] == 2
+    assert capability_governance["portfolio"]["over_budget_scope_count"] == 1
     assert capability_governance["degraded"] is True
-    assert capability_governance["degraded_components"][0]["component"] == "capability-coverage"
+    components = {
+        item["component"] for item in capability_governance["degraded_components"]
+    }
+    assert "capability-coverage" in components
+    assert "donor-trust" in components
+    assert "portfolio-density" in components
 
 
 def test_runtime_center_governance_status_projects_full_capability_delta_diagnostics() -> None:

@@ -55,6 +55,8 @@ from ..state.main_brain_service import (
     OperatingLaneService,
 )
 from ..state.agent_experience_service import AgentExperienceMemoryService
+from ..state.capability_donor_service import CapabilityDonorService
+from ..state.capability_portfolio_service import CapabilityPortfolioService
 from ..state.knowledge_service import StateKnowledgeService
 from ..state.reporting_service import StateReportingService
 from ..state.skill_lifecycle_decision_service import SkillLifecycleDecisionService
@@ -193,6 +195,8 @@ def _build_query_services(
     evidence_ledger: EvidenceLedger,
     runtime_event_bus: RuntimeEventBus,
     capability_candidate_service: CapabilityCandidateService | None,
+    capability_donor_service: CapabilityDonorService | None,
+    capability_portfolio_service: CapabilityPortfolioService | None,
     skill_trial_service: object | None,
     skill_lifecycle_decision_service: object | None,
     human_assist_task_service: HumanAssistTaskService | None,
@@ -214,6 +218,8 @@ def _build_query_services(
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
         capability_candidate_service=capability_candidate_service,
+        capability_donor_service=capability_donor_service,
+        capability_portfolio_service=capability_portfolio_service,
         skill_trial_service=skill_trial_service,
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         human_assist_task_service=human_assist_task_service,
@@ -326,14 +332,24 @@ def build_runtime_bootstrap(
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
     )
+    capability_donor_service = CapabilityDonorService(
+        state_store=state_store,
+    )
     capability_candidate_service = CapabilityCandidateService(
         state_store=state_store,
+        donor_service=capability_donor_service,
     )
     skill_trial_service = SkillTrialService(
         state_store=state_store,
     )
     skill_lifecycle_decision_service = SkillLifecycleDecisionService(
         state_store=state_store,
+    )
+    capability_portfolio_service = CapabilityPortfolioService(
+        donor_service=capability_donor_service,
+        candidate_service=capability_candidate_service,
+        skill_trial_service=skill_trial_service,
+        skill_lifecycle_decision_service=skill_lifecycle_decision_service,
     )
 
     provider_manager = ProviderManager()
@@ -357,6 +373,8 @@ def build_runtime_bootstrap(
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
         capability_candidate_service=capability_candidate_service,
+        capability_donor_service=capability_donor_service,
+        capability_portfolio_service=capability_portfolio_service,
         skill_trial_service=skill_trial_service,
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         human_assist_task_service=human_assist_task_service,
@@ -411,6 +429,8 @@ def build_runtime_bootstrap(
         learning_service=learning_service,
         capability_service=capability_service,
         capability_candidate_service=capability_candidate_service,
+        capability_donor_service=capability_donor_service,
+        capability_portfolio_service=capability_portfolio_service,
         skill_trial_service=skill_trial_service,
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         kernel_dispatcher=kernel_dispatcher,
@@ -489,6 +509,8 @@ def build_runtime_bootstrap(
         state_query_service=state_query_service,
         evidence_query_service=evidence_query_service,
         capability_candidate_service=capability_candidate_service,
+        capability_donor_service=capability_donor_service,
+        capability_portfolio_service=capability_portfolio_service,
         skill_trial_service=skill_trial_service,
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         human_assist_task_service=human_assist_task_service,

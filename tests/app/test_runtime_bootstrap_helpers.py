@@ -135,6 +135,8 @@ def _build_bootstrap() -> RuntimeBootstrap:
         state_query_service=object(),
         evidence_query_service=object(),
         capability_candidate_service=object(),
+        capability_donor_service=object(),
+        capability_portfolio_service=object(),
         skill_trial_service=object(),
         skill_lifecycle_decision_service=object(),
         human_assist_task_service=object(),

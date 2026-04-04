@@ -101,6 +101,8 @@ def build_runtime_state_bindings(
         "state_query_service": bootstrap.state_query_service,
         "evidence_query_service": bootstrap.evidence_query_service,
         "capability_candidate_service": bootstrap.capability_candidate_service,
+        "capability_donor_service": bootstrap.capability_donor_service,
+        "capability_portfolio_service": bootstrap.capability_portfolio_service,
         "skill_trial_service": bootstrap.skill_trial_service,
         "skill_lifecycle_decision_service": bootstrap.skill_lifecycle_decision_service,
         "human_assist_task_service": bootstrap.human_assist_task_service,

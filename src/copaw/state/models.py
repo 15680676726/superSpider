@@ -12,6 +12,10 @@ from .models_agents_runtime import (
 )
 from .models_capability_evolution import (
     CapabilityCandidateRecord,
+    CapabilityDonorRecord,
+    CapabilityDonorTrustRecord,
+    CapabilityPackageRecord,
+    CapabilitySourceProfileRecord,
     SkillLifecycleDecisionRecord,
     SkillTrialRecord,
 )
@@ -127,6 +131,10 @@ __all__ = [
     "BacklogItemRecord",
     "BacklogItemStatus",
     "CapabilityCandidateRecord",
+    "CapabilityDonorRecord",
+    "CapabilityDonorTrustRecord",
+    "CapabilityPackageRecord",
+    "CapabilitySourceProfileRecord",
     "CapabilityOverrideRecord",
     "DecisionRequestRecord",
     "DecisionRequestStatus",

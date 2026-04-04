@@ -1634,6 +1634,19 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 get_runtime_capability_optimization_overview(),
             ) or {}
         delta = self._mapping(optimization_overview.get("summary")) or {}
+        portfolio_service = getattr(app_state, "capability_portfolio_service", None)
+        portfolio_summary = {}
+        get_runtime_portfolio_summary = getattr(
+            portfolio_service,
+            "get_runtime_portfolio_summary",
+            None,
+        )
+        if callable(get_runtime_portfolio_summary):
+            portfolio_summary = self._mapping(get_runtime_portfolio_summary()) or {}
+        else:
+            summarize_portfolio = getattr(portfolio_service, "summarize_portfolio", None)
+            if callable(summarize_portfolio):
+                portfolio_summary = self._mapping(summarize_portfolio()) or {}
         package_bound_skill_count = sum(
             1
             for item in skills
@@ -1649,6 +1662,11 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         missing_capability_count = self._int(delta.get("missing_capability_count"), 0)
         underperforming_capability_count = self._int(
             delta.get("underperforming_capability_count"),
+            0,
+        )
+        degraded_donor_count = self._int(portfolio_summary.get("degraded_donor_count"), 0)
+        over_budget_scope_count = self._int(
+            portfolio_summary.get("over_budget_scope_count"),
             0,
         )
         waiting_confirm_count = self._int(delta.get("waiting_confirm_count"), 0)
@@ -1697,6 +1715,28 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                     "route": governance_route,
                 },
             )
+        if degraded_donor_count > 0:
+            degraded_components.append(
+                {
+                    "component": "donor-trust",
+                    "status": "degraded",
+                    "summary": (
+                        f"{degraded_donor_count} active donor profiles are degraded or carry replacement pressure."
+                    ),
+                    "route": governance_route,
+                },
+            )
+        if over_budget_scope_count > 0:
+            degraded_components.append(
+                {
+                    "component": "portfolio-density",
+                    "status": "degraded",
+                    "summary": (
+                        f"{over_budget_scope_count} scopes exceeded the governed donor density budget."
+                    ),
+                    "route": governance_route,
+                },
+            )
         return {
             "status": "degraded" if degraded_components else "ready",
             "route": governance_route,
@@ -1727,6 +1767,44 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 "manual_only_count": manual_only_count,
                 "executed_count": self._int(delta.get("executed_count"), 0),
                 "actionable_count": self._int(delta.get("actionable_count"), 0),
+            },
+            "portfolio": {
+                "donor_count": self._int(portfolio_summary.get("donor_count"), 0),
+                "active_donor_count": self._int(
+                    portfolio_summary.get("active_donor_count"),
+                    0,
+                ),
+                "candidate_donor_count": self._int(
+                    portfolio_summary.get("candidate_donor_count"),
+                    0,
+                ),
+                "trial_donor_count": self._int(
+                    portfolio_summary.get("trial_donor_count"),
+                    0,
+                ),
+                "trusted_source_count": self._int(
+                    portfolio_summary.get("trusted_source_count"),
+                    0,
+                ),
+                "watchlist_source_count": self._int(
+                    portfolio_summary.get("watchlist_source_count"),
+                    0,
+                ),
+                "degraded_donor_count": degraded_donor_count,
+                "replace_pressure_count": self._int(
+                    portfolio_summary.get("replace_pressure_count"),
+                    0,
+                ),
+                "retire_pressure_count": self._int(
+                    portfolio_summary.get("retire_pressure_count"),
+                    0,
+                ),
+                "over_budget_scope_count": over_budget_scope_count,
+                "planning_actions": list(
+                    portfolio_summary.get("planning_actions")
+                    if isinstance(portfolio_summary.get("planning_actions"), list)
+                    else []
+                ),
             },
             "degraded": bool(degraded_components),
             "degraded_components": degraded_components,

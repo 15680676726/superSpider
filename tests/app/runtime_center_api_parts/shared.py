@@ -2515,6 +2515,24 @@ class FakePredictionService:
                 "manual_only_count": 0,
                 "executed_count": 1,
             },
+            "portfolio": {
+                "donor_count": 2,
+                "active_donor_count": 1,
+                "candidate_donor_count": 1,
+                "trial_donor_count": 1,
+                "trusted_source_count": 1,
+                "watchlist_source_count": 1,
+                "degraded_donor_count": 0,
+                "replace_pressure_count": 0,
+                "retire_pressure_count": 1,
+                "over_budget_scope_count": 0,
+                "planning_actions": [
+                    {
+                        "action": "review_retirement_pressure",
+                        "summary": "A donor is pending retirement governance.",
+                    },
+                ],
+            },
             "actionable": [
                 {
                     "case": {

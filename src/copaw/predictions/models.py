@@ -144,4 +144,5 @@ class PredictionCapabilityOptimizationOverview(BaseModel):
     history: list[PredictionCapabilityOptimizationItem] = Field(
         default_factory=list,
     )
+    portfolio: dict[str, Any] = Field(default_factory=dict)
     routes: dict[str, str] = Field(default_factory=dict)

@@ -798,6 +798,36 @@ async def list_runtime_center_capability_trials(
     )
 
 
+@router.get("/capabilities/donors", response_model=list[dict[str, object]])
+async def list_runtime_center_capability_donors(
+    request: Request,
+    response: Response,
+    limit: int = 20,
+) -> list[dict[str, object]]:
+    return await _runtime_center_list_query(
+        request=request,
+        response=response,
+        query_methods=("list_capability_donors",),
+        not_available_detail="Capability donor view is not available.",
+        limit=limit,
+    )
+
+
+@router.get("/capabilities/source-profiles", response_model=list[dict[str, object]])
+async def list_runtime_center_capability_source_profiles(
+    request: Request,
+    response: Response,
+    limit: int = 20,
+) -> list[dict[str, object]]:
+    return await _runtime_center_list_query(
+        request=request,
+        response=response,
+        query_methods=("list_capability_source_profiles",),
+        not_available_detail="Capability source profile view is not available.",
+        limit=limit,
+    )
+
+
 @router.get("/capabilities/lifecycle-decisions", response_model=list[dict[str, object]])
 async def list_runtime_center_capability_lifecycle_decisions(
     request: Request,
