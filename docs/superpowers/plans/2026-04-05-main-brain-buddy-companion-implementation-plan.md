@@ -4,7 +4,7 @@
 
 **Goal:** Replace the old industry-first first-entry and plain chat shell with a Buddy-first companion system where Buddy is the main brain's only external personality shell, chat is the primary companionship surface, and Buddy growth/evolution stays derived from formal runtime truth.
 
-**Architecture:** Introduce a human-first onboarding chain, formal Buddy projection/read-model services, and a chat-first front-end shell that consumes Buddy presentation and growth projections. Keep canonical truth in main-brain/state objects, derive Buddy presentation/growth from that truth, and retire first-entry reliance on the old `industry-profile-v1` mindset.
+**Architecture:** This is an upgrade on top of the existing main-brain/runtime/human-assist system, not a greenfield rewrite. Introduce a human-first onboarding chain, formal Buddy projection/read-model services, and a chat-first front-end shell that consumes Buddy presentation and growth projections. Keep canonical truth in main-brain/state objects, derive Buddy presentation/growth from that truth, retain existing human-assist/task truth backstage, and retire first-entry reliance on the old `industry-profile-v1` mindset.
 
 **Tech Stack:** FastAPI, Pydantic, Python state/kernel services, React + TypeScript + Ant Design, Less, pytest, frontend unit tests
 
@@ -588,9 +588,12 @@ git commit -m "docs: sync buddy companion rollout"
 
 ## Notes For Execution
 
+- Do not rebuild the main brain from scratch; upgrade existing runtime and naming/interaction surfaces.
 - Do not create a second Buddy truth database.
 - Do not let Buddy become a second speaking persona in prompts.
 - Do not let the old industry bootstrap remain the default first human entry.
+- Do not delete existing `HumanAssistTask` / human-assist truth just because front-stage interaction moves into chat.
+- Do demote standalone human task UI from primary interaction surface to supporting detail/history/read surface.
 - Keep the human default read surface simple: final goal + current task.
 - Prefer TDD per task; avoid batching many unverified edits together.
 - Frequent commits are required because this rollout touches onboarding, chat, runtime cockpit, and formal truth seams.
