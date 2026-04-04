@@ -766,7 +766,313 @@ In CoPaw, Buddy must be integrated into the main-brain truth chain from day one.
 
 ---
 
-## 10. Non-Goals
+## 10. Implementation-Facing Attribute Formulas
+
+The first implementation should not treat Buddy growth values as decorative labels only.
+
+They need stable, explainable formula families.
+
+Exact weights may still be tuned in implementation, but the formula structure should be fixed up front.
+
+### 10.1 Attribute Input Sources
+
+Recommended source families:
+
+- `interaction truth`
+  - message count
+  - conversation continuity
+  - accepted support prompts
+  - completed pull-back loops
+- `planning/execution truth`
+  - current-task completion count
+  - milestone completion count
+  - replan success count
+  - support-driven recovery count
+- `memory truth`
+  - profile completeness
+  - goal clarity
+  - constraint clarity
+  - relationship-preference stability
+
+### 10.2 First-Version Formula Guidance
+
+The following formulas should be used as implementation guidance.
+
+1. `intimacy`
+   - highest weight: continuity of interaction over time
+   - medium weight: completed support loops
+   - lower weight: raw message volume
+   - penalty: prolonged disengagement without intentional pause
+
+2. `affinity`
+   - highest weight: how often Buddy's suggested current step is accepted
+   - medium weight: how often Buddy's pull-back/replan guidance helps the human return to the primary direction
+   - penalty: repeated rejection of alignment prompts without later recovery
+
+3. `growth_level`
+   - driven by aggregate growth score across relationship, cognition, and execution
+   - should use thresholded stages rather than purely linear growth
+
+4. `knowledge_value`
+   - driven by profile completeness, current-goal comprehension, target explanation success, and memory stability
+   - should not rise primarily from message count alone
+
+5. `skill_value`
+   - driven by completed support runs, completed assisted closures, and successful replans
+   - should reward useful action and recovery, not verbosity
+
+6. `pleasant_interaction_score`
+   - should use a rolling window
+   - should be smoothed to avoid one-turn spikes
+   - should reflect whether interactions are received as helpful rather than merely frequent
+
+### 10.3 Implementation Rules
+
+- all values should be normalized to stable ranges
+- all values should be recalculable from formal truth
+- all values should support future rebalance without rewriting historical truth
+- the implementation should store raw contributing facts separately from display scores when possible
+
+---
+
+## 11. Buddy Visual Asset And Evolution Mapping
+
+The evolution system needs a concrete asset strategy.
+
+This must not be left as "we will style it later."
+
+### 11.1 Donor Asset Strategy
+
+The first version should borrow from `cc` at the shell/mechanic level:
+
+- sprite body shell
+- facial expression shell
+- idle / blink / focus / pet reaction mechanics
+- part slots such as eye / accessory / rarity indicators
+
+But CoPaw should not inherit:
+
+- `/buddy` command entry
+- config-owned companion state
+- second-speaking-persona prompt logic
+
+### 11.2 Recommended CoPaw Asset Taxonomy
+
+The first implementation should define a dedicated Buddy asset namespace, for example:
+
+- `base_form`
+- `eyes`
+- `mouth_or_emotion`
+- `head_accessory`
+- `aura_or_rarity_ring`
+- `focus_effect`
+- `support_effect`
+- `celebration_effect`
+
+Recommended directory shape:
+
+- `console/src/assets/buddy/base/*`
+- `console/src/assets/buddy/parts/*`
+- `console/src/assets/buddy/effects/*`
+- `console/src/assets/buddy/forms/*`
+
+### 11.3 Stage-To-Asset Mapping
+
+Each evolution stage should map to a stable visual bundle:
+
+1. `Seed Form`
+   - minimal shell
+   - lighter emotion range
+   - fewer accessory slots
+
+2. `Bonded Form`
+   - one stable accessory slot opens
+   - stronger eye expression set
+   - clearer rarity ring
+
+3. `Capable Form`
+   - richer idle/focus variants
+   - stronger support-mode effect
+   - clearer experienced-partner feel
+
+4. `Seasoned Form`
+   - mature form silhouette
+   - higher-detail parts
+   - stronger celebration/recovery effects
+
+5. `Signature Form`
+   - strongest visual identity
+   - richest expression/effect pack
+   - visually obvious long-term bond status
+
+### 11.4 Asset Rules
+
+- evolution should primarily change silhouette, detail richness, and emotional readability
+- rarity should be readable but should not dominate companionship warmth
+- visual upgrades should feel like partner growth, not loot unlock spam
+
+---
+
+## 12. Backend Objects And API Mapping
+
+The Buddy design should not stay at the level of front-end flavor.
+
+It needs explicit backend landing points.
+
+### 12.1 Recommended Formal Projection Objects
+
+The first implementation should introduce two explicit projection/read-model objects:
+
+1. `BuddyPresentation`
+   - buddy_name
+   - lifecycle_state
+   - presence_state
+   - mood_state
+   - current_form
+   - rarity
+   - small_sprite_ref
+   - expanded_sprite_ref
+   - active_effect_refs
+   - current_support_prompt
+   - current_goal_summary
+   - current_task_summary
+   - why_now_summary
+
+2. `BuddyGrowthProjection`
+   - intimacy
+   - affinity
+   - growth_level
+   - companion_experience
+   - knowledge_value
+   - skill_value
+   - pleasant_interaction_score
+   - communication_count
+   - completed_support_runs
+   - completed_assisted_closures
+   - evolution_stage
+   - progress_to_next_stage
+
+These should be projections, not canonical truth records.
+
+### 12.2 Source Mapping
+
+Recommended source-of-truth mapping:
+
+- `HumanProfile`
+  -> onboarding identity answers
+- `GrowthTarget`
+  -> confirmed primary direction + final-goal framing
+- `CurrentFocus`
+  -> current task + why-now explanation + blockers
+- `CompanionRelationship`
+  -> relationship preferences and stable accompaniment patterns
+- `Assignment / AgentReport / runtime interaction history`
+  -> support counts, completion counts, support effectiveness, continuity signals
+
+### 12.3 Frontend Surface Mapping
+
+Recommended first-version frontend consumers:
+
+1. `Chat page`
+   - consume `BuddyPresentation`
+   - consume summary portions of `BuddyGrowthProjection`
+   - show small companion + expanded buddy sheet
+
+2. `Main-brain cockpit`
+   - consume `final goal + current task + why now`
+   - consume a compact Buddy growth summary rather than the full panel
+
+3. `Onboarding flow`
+   - create/confirm `HumanProfile`
+   - create/confirm `GrowthTarget`
+   - initialize `CompanionRelationship`
+   - initialize Buddy projection state after naming
+
+### 12.4 API Guidance
+
+The first implementation should avoid scattering Buddy reads across many endpoints.
+
+Recommended API shape:
+
+- onboarding endpoints for:
+  - basic identity submit
+  - clarification dialogue turns
+  - candidate-direction resolution
+  - primary-direction confirmation
+- Buddy read surface:
+  - `chat buddy surface`
+  - `main-brain buddy cockpit summary`
+- Buddy mutation surface:
+  - first-chat naming
+  - future controlled rename flow
+
+The Buddy front-end should not be forced to reconstruct itself by calling unrelated industry/bootstrap endpoints.
+
+---
+
+## 13. Migration Cutover From Old First Entry
+
+The old first-entry flow is still industry/bootstrap-first.
+
+This is not compatible with the Buddy design.
+
+### 13.1 Current Old Entry
+
+Current old entry centers on:
+
+- `IndustryPreviewRequest`
+- `industry-profile-v1`
+- industry/company/product/customer/goals bootstrap thinking
+
+This should no longer be the first emotional or product entry for humans.
+
+### 13.2 Cutover Rule
+
+The cutover should become:
+
+- human onboarding first
+- Buddy clarification second
+- main direction confirmation third
+- industry/team/execution scaffolding afterward
+
+### 13.3 Migration Table
+
+Recommended cutover mapping:
+
+1. `old industry form`
+   -> replaced as first-entry human onboarding surface
+
+2. `industry/company/product/target_customers/goals`
+   -> no longer first-screen required fields for ordinary human entry
+
+3. `industry bootstrap preview`
+   -> retained only as downstream execution/business scaffold generator when needed
+
+4. `experience_mode`
+   -> may survive only if it meaningfully maps to Buddy/planning guidance mode
+
+### 13.4 Compatibility Guidance
+
+Migration should allow a short compatibility window, but with strict boundaries:
+
+- old industry-first flow may remain temporarily for legacy operator/business routes
+- new human-first Buddy onboarding must become the default first entry
+- no long-term dual-first-entry truth should remain
+
+### 13.5 Required Migration Tests
+
+The implementation plan should include explicit tests for:
+
+- first entry now landing on human/Buddy onboarding rather than industry bootstrap
+- clarification flow capping at 9 questions
+- candidate directions returning 2-3 options
+- exactly one primary direction being confirmed
+- Buddy naming happening inside first real chat
+- old industry bootstrap not silently reclaiming primary-entry status
+
+---
+
+## 14. Non-Goals
 
 This Buddy round should not:
 
@@ -779,7 +1085,7 @@ This Buddy round should not:
 
 ---
 
-## 11. Recommended Landing Sequence
+## 15. Recommended Landing Sequence
 
 ### Phase 1: Buddy Onboarding Replacement
 
@@ -821,7 +1127,7 @@ This Buddy round should not:
 
 ---
 
-## 12. Acceptance Standard
+## 16. Acceptance Standard
 
 This design is only considered properly landed if the following are true:
 
