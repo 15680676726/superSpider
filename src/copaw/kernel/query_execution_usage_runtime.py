@@ -216,8 +216,29 @@ class _QueryExecutionUsageRuntimeMixin:
                 payload.get("scope_type"),
                 payload.get("trial_scope"),
             ),
+            "selected_seat_ref": _first_non_empty(
+                payload.get("selected_seat_ref"),
+            ),
+            "donor_id": _first_non_empty(
+                payload.get("donor_id"),
+            ),
+            "package_id": _first_non_empty(
+                payload.get("package_id"),
+            ),
+            "source_profile_id": _first_non_empty(
+                payload.get("source_profile_id"),
+            ),
+            "candidate_source_kind": _first_non_empty(
+                payload.get("candidate_source_kind"),
+            ),
+            "resolution_kind": _first_non_empty(
+                payload.get("resolution_kind"),
+            ),
             "replacement_target_ids": _string_list(
                 payload.get("replacement_target_ids"),
+            ),
+            "rollback_target_ids": _string_list(
+                payload.get("rollback_target_ids"),
             ),
         }
 

@@ -3145,6 +3145,14 @@ class _IndustryRuntimeViewsMixin:
             evidence=list(evidence_by_id.values()),
 
         )
+        baseline_live_focus = self._resolve_live_focus_payload(
+            execution=execution,
+            assignments=assignments,
+            backlog=backlog,
+            tasks=list(tasks_by_id.values()),
+            selected_assignment_id=None,
+            selected_backlog_item_id=None,
+        )
         live_focus = self._resolve_live_focus_payload(
             execution=execution,
             assignments=assignments,
@@ -3208,7 +3216,22 @@ class _IndustryRuntimeViewsMixin:
                 "status": _string(focused_backlog.get("status")),
                 "route": _string(focused_backlog.get("route")),
             }
-        if execution is not None and focus_selection is not None:
+        selection_matches_live_focus = False
+        if focus_selection is not None:
+            selection_kind = _string(focus_selection.get("selection_kind"))
+            if selection_kind == "assignment":
+                selection_matches_live_focus = (
+                    _string(focus_selection.get("assignment_id"))
+                    == _string(baseline_live_focus.get("current_assignment_id"))
+                )
+            elif selection_kind == "backlog":
+                selected_assignment_ref = _string(focus_selection.get("assignment_id"))
+                selection_matches_live_focus = (
+                    selected_assignment_ref is not None
+                    and selected_assignment_ref
+                    == _string(baseline_live_focus.get("current_assignment_id"))
+                )
+        if execution is not None and focus_selection is not None and selection_matches_live_focus:
             current_focus_id = _string(execution.current_focus_id)
             current_focus = _string(execution.current_focus)
             if current_focus_id is None and current_focus is None:

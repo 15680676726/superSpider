@@ -77,6 +77,20 @@ def test_record_turn_usage_persists_runtime_and_evidence(tmp_path, monkeypatch) 
         input=[],
     )
     request.agent_id = "agent-1"
+    request.capability_trial_attribution = {
+        "candidate_id": "cand-browser-runtime",
+        "skill_trial_id": "trial-browser-runtime-seat-primary",
+        "skill_lifecycle_stage": "trial",
+        "selected_scope": "seat",
+        "selected_seat_ref": "seat-primary",
+        "donor_id": "donor-browser-runtime",
+        "package_id": "pkg-browser-runtime",
+        "source_profile_id": "source-browser-runtime",
+        "candidate_source_kind": "external_catalog",
+        "resolution_kind": "reuse_existing_candidate",
+        "replacement_target_ids": ["mcp:legacy_browser"],
+        "rollback_target_ids": ["mcp:legacy_browser"],
+    }
 
     service.record_turn_usage(
         request=request,
@@ -130,6 +144,18 @@ def test_record_turn_usage_persists_runtime_and_evidence(tmp_path, monkeypatch) 
     }
     assert evidence.metadata["cost_estimate"] == 0.12
     assert evidence.metadata["owner_agent_id"] == "agent-1"
+    assert evidence.metadata["skill_candidate_id"] == "cand-browser-runtime"
+    assert evidence.metadata["skill_trial_id"] == "trial-browser-runtime-seat-primary"
+    assert evidence.metadata["skill_lifecycle_stage"] == "trial"
+    assert evidence.metadata["selected_scope"] == "seat"
+    assert evidence.metadata["selected_seat_ref"] == "seat-primary"
+    assert evidence.metadata["donor_id"] == "donor-browser-runtime"
+    assert evidence.metadata["package_id"] == "pkg-browser-runtime"
+    assert evidence.metadata["source_profile_id"] == "source-browser-runtime"
+    assert evidence.metadata["candidate_source_kind"] == "external_catalog"
+    assert evidence.metadata["resolution_kind"] == "reuse_existing_candidate"
+    assert evidence.metadata["replacement_target_ids"] == ["mcp:legacy_browser"]
+    assert evidence.metadata["rollback_target_ids"] == ["mcp:legacy_browser"]
 
 
 def test_record_turn_usage_does_not_instantiate_provider_manager_fallback(
