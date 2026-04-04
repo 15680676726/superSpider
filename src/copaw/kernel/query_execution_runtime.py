@@ -93,6 +93,8 @@ _QUERY_TOOL_CAPABILITY_IDS_BY_NAME = {
 
 def _query_tool_contract_metadata(
     payload: dict[str, Any] | None,
+    *,
+    capability_trial_attribution: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     raw_payload = dict(payload or {})
     tool_name = _first_non_empty(raw_payload.get("tool_name"))
@@ -115,8 +117,49 @@ def _query_tool_contract_metadata(
         action_mode=action_mode if action_mode in {"read", "write"} else None,
     )
     metadata["preflight_policy"] = tool_contract.preflight_policy
+    if capability_trial_attribution:
+        for key in (
+            "candidate_id",
+            "skill_candidate_id",
+            "skill_trial_id",
+            "skill_lifecycle_stage",
+            "selected_scope",
+            "selected_seat_ref",
+        ):
+            resolved = _first_non_empty(capability_trial_attribution.get(key))
+            if resolved is not None:
+                metadata[key] = resolved
+        for key in ("replacement_target_ids", "rollback_target_ids", "capability_ids"):
+            resolved_items = _string_list(capability_trial_attribution.get(key))
+            if resolved_items:
+                metadata[key] = resolved_items
     raw_payload["metadata"] = metadata
     return raw_payload
+
+
+def _normalize_capability_trial_attribution(
+    payload: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    raw_payload = _mapping_value(payload)
+    if not raw_payload:
+        return {}
+    normalized: dict[str, Any] = {}
+    for key in (
+        "candidate_id",
+        "skill_candidate_id",
+        "skill_trial_id",
+        "skill_lifecycle_stage",
+        "selected_scope",
+        "selected_seat_ref",
+    ):
+        resolved = _first_non_empty(raw_payload.get(key))
+        if resolved is not None:
+            normalized[key] = resolved
+    for key in ("replacement_target_ids", "rollback_target_ids", "capability_ids"):
+        resolved_items = _string_list(raw_payload.get(key))
+        if resolved_items:
+            normalized[key] = resolved_items
+    return normalized
 
 
 def _query_environment_ref(execution_context: Mapping[str, Any] | None) -> str | None:
@@ -867,6 +910,15 @@ class _QueryExecutionRuntimeMixin(
                 kernel_task_id=kernel_task_id,
                 execution_context=execution_context,
             )
+            capability_trial_attribution = _normalize_capability_trial_attribution(
+                (execution_context or {}).get("capability_trial_attribution"),
+            )
+            if capability_trial_attribution:
+                setattr(
+                    request,
+                    "_copaw_capability_trial_attribution",
+                    dict(capability_trial_attribution),
+                )
             tool_preflight = self._build_tool_preflight(
                 delegation_guard=delegation_guard,
                 msgs=msgs,
@@ -884,10 +936,23 @@ class _QueryExecutionRuntimeMixin(
             ):
                 with bind_tool_execution_delegate(tool_execution_delegate):
                     with bind_tool_preflight(tool_preflight):
-                        with bind_shell_evidence_sink(self._make_shell_evidence_sink(kernel_task_id)):
-                            with bind_file_evidence_sink(self._make_file_evidence_sink(kernel_task_id)):
+                        with bind_shell_evidence_sink(
+                            self._make_shell_evidence_sink(
+                                kernel_task_id,
+                                capability_trial_attribution=capability_trial_attribution,
+                            ),
+                        ):
+                            with bind_file_evidence_sink(
+                                self._make_file_evidence_sink(
+                                    kernel_task_id,
+                                    capability_trial_attribution=capability_trial_attribution,
+                                ),
+                            ):
                                 with bind_browser_evidence_sink(
-                                    self._make_browser_evidence_sink(kernel_task_id),
+                                    self._make_browser_evidence_sink(
+                                        kernel_task_id,
+                                        capability_trial_attribution=capability_trial_attribution,
+                                    ),
                                 ):
                                     if heartbeat is None:
                                         async for msg, last in stream_printing_messages(
@@ -1356,28 +1421,52 @@ class _QueryExecutionRuntimeMixin(
                 if getattr(msg, "id", None) not in message_ids
             ]
 
-    def _make_shell_evidence_sink(self, kernel_task_id: str | None):
+    def _make_shell_evidence_sink(
+        self,
+        kernel_task_id: str | None,
+        *,
+        capability_trial_attribution: Mapping[str, Any] | None = None,
+    ):
         if self._tool_bridge is None or kernel_task_id is None:
             return None
         return lambda payload: self._tool_bridge.record_shell_event(
             kernel_task_id,
-            _query_tool_contract_metadata(payload),
+            _query_tool_contract_metadata(
+                payload,
+                capability_trial_attribution=capability_trial_attribution,
+            ),
         )
 
-    def _make_file_evidence_sink(self, kernel_task_id: str | None):
+    def _make_file_evidence_sink(
+        self,
+        kernel_task_id: str | None,
+        *,
+        capability_trial_attribution: Mapping[str, Any] | None = None,
+    ):
         if self._tool_bridge is None or kernel_task_id is None:
             return None
         return lambda payload: self._tool_bridge.record_file_event(
             kernel_task_id,
-            _query_tool_contract_metadata(payload),
+            _query_tool_contract_metadata(
+                payload,
+                capability_trial_attribution=capability_trial_attribution,
+            ),
         )
 
-    def _make_browser_evidence_sink(self, kernel_task_id: str | None):
+    def _make_browser_evidence_sink(
+        self,
+        kernel_task_id: str | None,
+        *,
+        capability_trial_attribution: Mapping[str, Any] | None = None,
+    ):
         if self._tool_bridge is None or kernel_task_id is None:
             return None
         return lambda payload: self._tool_bridge.record_browser_event(
             kernel_task_id,
-            _query_tool_contract_metadata(payload),
+            _query_tool_contract_metadata(
+                payload,
+                capability_trial_attribution=capability_trial_attribution,
+            ),
         )
 
     def _build_query_tool_execution_delegate(
@@ -1401,8 +1490,19 @@ class _QueryExecutionRuntimeMixin(
             _mapping_value((execution_context or {}).get("main_brain_runtime")).get("risk_level"),
             "auto",
         ) or "auto"
+        capability_trial_attribution = _normalize_capability_trial_attribution(
+            (execution_context or {}).get("capability_trial_attribution"),
+        )
 
         async def _delegate(capability_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+            resolved_payload = dict(payload or {})
+            if capability_trial_attribution:
+                metadata = dict(_mapping_value(resolved_payload.get("metadata")))
+                for key, value in capability_trial_attribution.items():
+                    if value in (None, "", []):
+                        continue
+                    metadata[key] = value
+                resolved_payload["metadata"] = metadata
             task = KernelTask(
                 id=kernel_task_id,
                 title=f"Query tool execution: {capability_id}",
@@ -1411,7 +1511,7 @@ class _QueryExecutionRuntimeMixin(
                 work_context_id=work_context_id,
                 environment_ref=environment_ref,
                 risk_level=risk_level,
-                payload=dict(payload or {}),
+                payload=resolved_payload,
             )
             return await execute_task(task)
 

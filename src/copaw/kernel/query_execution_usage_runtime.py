@@ -106,6 +106,10 @@ class _QueryExecutionUsageRuntimeMixin:
             )
             or owner_agent_id
         )
+        capability_trial_attribution = _mapping_value(
+            getattr(request, "_copaw_capability_trial_attribution", None)
+            or getattr(request, "capability_trial_attribution", None),
+        )
         record = self._evidence_ledger.append(
             EvidenceRecord(
                 task_id=kernel_task_id,
@@ -142,6 +146,7 @@ class _QueryExecutionUsageRuntimeMixin:
                         getattr(request, "industry_role_id", None),
                     ),
                     "model_context": model_context,
+                    **dict(capability_trial_attribution or {}),
                 },
             ),
         )

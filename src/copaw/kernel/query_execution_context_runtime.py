@@ -53,6 +53,30 @@ class _QueryExecutionContextRuntimeMixin:
         context: dict[str, Any] = {}
         runtime_repository = self._agent_runtime_repository
 
+        def _merge_capability_trial(value: Any) -> None:
+            payload = _mapping_value(value)
+            if not payload:
+                return
+            existing = _mapping_value(context.get("capability_trial_attribution"))
+            merged = dict(existing)
+            for key in (
+                "candidate_id",
+                "skill_candidate_id",
+                "skill_trial_id",
+                "skill_lifecycle_stage",
+                "selected_scope",
+                "selected_seat_ref",
+            ):
+                resolved = _first_non_empty(payload.get(key))
+                if resolved is not None:
+                    merged[key] = resolved
+            for key in ("replacement_target_ids", "rollback_target_ids", "capability_ids"):
+                resolved_items = _string_list(payload.get(key))
+                if resolved_items:
+                    merged[key] = resolved_items
+            if merged:
+                context["capability_trial_attribution"] = merged
+
         def _merge_main_brain_runtime(value: Any) -> None:
             merged = self._merge_main_brain_runtime_contexts(
                 context.get("main_brain_runtime"),
@@ -74,17 +98,23 @@ class _QueryExecutionContextRuntimeMixin:
                     context["work_context_id"] = task.work_context_id
                 payload = task.payload if isinstance(task.payload, dict) else {}
                 _merge_main_brain_runtime(payload.get("main_brain_runtime"))
+                _merge_capability_trial(payload.get("capability_trial_attribution"))
                 task_request_context = _mapping_value(payload.get("request_context"))
                 if task_request_context:
                     _merge_main_brain_runtime(task_request_context.get("main_brain_runtime"))
+                    _merge_capability_trial(
+                        task_request_context.get("capability_trial_attribution"),
+                    )
                 task_request = _mapping_value(payload.get("request"))
                 if task_request:
                     _merge_main_brain_runtime(task_request.get("main_brain_runtime"))
+                    _merge_capability_trial(task_request.get("capability_trial_attribution"))
         runtime = runtime_repository.get_runtime(agent_id) if runtime_repository is not None else None
         if runtime is not None:
             runtime_metadata = _mapping_value(getattr(runtime, "metadata", None))
             if runtime_metadata:
                 _merge_main_brain_runtime(runtime_metadata.get("main_brain_runtime"))
+                _merge_capability_trial(runtime_metadata.get("current_capability_trial"))
         if self._actor_mailbox_service is not None:
             list_checkpoints = getattr(self._actor_mailbox_service, "list_checkpoints", None)
             if callable(list_checkpoints):
@@ -109,6 +139,12 @@ class _QueryExecutionContextRuntimeMixin:
                         context["resume_snapshot"] = checkpoint_snapshot
         _merge_main_brain_runtime(
             self._resolve_request_main_brain_runtime_context(request=request),
+        )
+        _merge_capability_trial(
+            getattr(request, "_copaw_capability_trial_attribution", None),
+        )
+        _merge_capability_trial(
+            getattr(request, "capability_trial_attribution", None),
         )
         degradation = self._resolve_execution_degradation_context(
             request=request,
