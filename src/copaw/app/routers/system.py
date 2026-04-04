@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, File, Request, UploadFile
 
 from ...constant import WORKING_DIR
+from ...utils.cache import TTLCache
 from ..runtime_center.models import RuntimeCenterAppStateView
 from ..runtime_recovery_report import resolve_current_recovery_report
 from ..runtime_health_service import RuntimeHealthService
@@ -20,7 +21,9 @@ router = APIRouter(prefix="/system", tags=["system"])
 _STATE_DB_PATH = WORKING_DIR / "state" / "phase1.sqlite3"
 _EVIDENCE_DB_PATH = WORKING_DIR / "evidence" / "phase1.sqlite3"
 _WORKSPACE_STATS_TTL_SECONDS = 5.0
-_workspace_stats_cache: dict[str, tuple[float, tuple[int, int]]] = {}
+_workspace_stats_cache = TTLCache[str, tuple[int, int]](
+    ttl_seconds=_WORKSPACE_STATS_TTL_SECONDS,
+)
 
 
 def _utc_now_iso() -> str:
@@ -33,15 +36,15 @@ def _service_present(app_state: Any, name: str) -> bool:
 
 def _workspace_stats(root: Path) -> tuple[int, int]:
     cache_key = str(root.resolve())
-    now = time.monotonic()
     cached = _workspace_stats_cache.get(cache_key)
     if cached is not None:
-        cached_at, stats = cached
-        if now - cached_at <= _WORKSPACE_STATS_TTL_SECONDS:
-            return stats
+        return cached
     stats = _dir_stats(root)
-    _workspace_stats_cache[cache_key] = (now, stats)
-    return stats
+    return _workspace_stats_cache.set(cache_key, stats)
+
+
+def clear_workspace_stats_cache() -> None:
+    _workspace_stats_cache.clear()
 
 
 def _get_runtime_health_service(app_state: Any) -> RuntimeHealthService:

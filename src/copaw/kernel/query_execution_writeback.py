@@ -9,6 +9,7 @@ from agentscope.message import Msg, TextBlock
 from pydantic import BaseModel, Field
 
 from ..industry.chat_writeback import ChatWritebackPlan, build_chat_writeback_plan_from_payload
+from ..utils.cache import BoundedLRUCache
 from .query_execution_intent_policy import (
     is_hypothetical_control_text as _is_hypothetical_control_text,
     looks_like_goal_setting_text as _looks_like_goal_setting_text,
@@ -16,7 +17,9 @@ from .query_execution_intent_policy import (
 _CHAT_WRITEBACK_MODEL_TARGETS = frozenset({"strategy", "backlog", "schedule"})
 _CHAT_WRITEBACK_MODEL_CACHE_MAX = 128
 _CHAT_WRITEBACK_MODEL_CACHE_LOCK = threading.Lock()
-_CHAT_WRITEBACK_MODEL_CACHE: dict[str, "_ChatWritebackModelDecision"] = {}
+_CHAT_WRITEBACK_MODEL_CACHE = BoundedLRUCache[str, "_ChatWritebackModelDecision"](
+    max_entries=_CHAT_WRITEBACK_MODEL_CACHE_MAX,
+)
 _CHAT_WRITEBACK_MODEL_PLANNER_PROMPT = """
 You are the governed execution-core chat frontdoor for CoPaw.
 
@@ -459,10 +462,9 @@ def _cache_chat_writeback_decision(
 ) -> _ChatWritebackModelDecision:
     key = text.strip()
     with _CHAT_WRITEBACK_MODEL_CACHE_LOCK:
-        _CHAT_WRITEBACK_MODEL_CACHE[key] = decision
-        while len(_CHAT_WRITEBACK_MODEL_CACHE) > _CHAT_WRITEBACK_MODEL_CACHE_MAX:
-            oldest_key = next(iter(_CHAT_WRITEBACK_MODEL_CACHE))
-            _CHAT_WRITEBACK_MODEL_CACHE.pop(oldest_key, None)
+        if _CHAT_WRITEBACK_MODEL_CACHE._max_entries != _CHAT_WRITEBACK_MODEL_CACHE_MAX:
+            _CHAT_WRITEBACK_MODEL_CACHE._max_entries = _CHAT_WRITEBACK_MODEL_CACHE_MAX
+        _CHAT_WRITEBACK_MODEL_CACHE.set(key, decision)
     return decision
 
 
@@ -474,6 +476,11 @@ def _get_cached_chat_writeback_decision(
         return None
     with _CHAT_WRITEBACK_MODEL_CACHE_LOCK:
         return _CHAT_WRITEBACK_MODEL_CACHE.get(normalized)
+
+
+def clear_chat_writeback_decision_cache() -> None:
+    with _CHAT_WRITEBACK_MODEL_CACHE_LOCK:
+        _CHAT_WRITEBACK_MODEL_CACHE.clear()
 
 
 def _contains_any(text: str, needles: tuple[str, ...]) -> bool:

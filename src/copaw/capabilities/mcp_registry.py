@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Literal
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -13,12 +13,13 @@ from urllib.request import Request, urlopen
 from pydantic import BaseModel, Field
 
 from ..config.config import MCPClientConfig, MCPRegistryProvenance
+from ..utils.cache import TTLCache
 
 _REGISTRY_BASE_URL = "https://registry.modelcontextprotocol.io"
 _LIST_LIMIT_CAP = 24
 _LIST_FETCH_LIMIT = 60
 _LIST_MAX_FETCH_ROUNDS = 6
-_CACHE_TTL = timedelta(minutes=10)
+_CACHE_TTL_SECONDS = 600.0
 _HTTP_TIMEOUT_SECONDS = 20.0
 
 _CATEGORY_DEFINITIONS: list[tuple[str, str, tuple[str, ...]]] = [
@@ -42,7 +43,7 @@ _TRANSPORT_ALIAS_MAP = {
     "stdio": "stdio",
 }
 
-_CACHE: dict[str, tuple[datetime, Any]] = {}
+_CACHE = TTLCache[str, Any](ttl_seconds=_CACHE_TTL_SECONDS, max_entries=256)
 
 
 def _utc_now() -> datetime:
@@ -88,9 +89,8 @@ def _normalize_category(value: object | None) -> str:
 def _registry_request(url: str) -> Any:
     cache_key = hashlib.sha1(url.encode("utf-8")).hexdigest()
     cached = _CACHE.get(cache_key)
-    now = _utc_now()
-    if cached is not None and cached[0] >= now:
-        return cached[1]
+    if cached is not None:
+        return cached
 
     request = Request(
         url,
@@ -101,8 +101,7 @@ def _registry_request(url: str) -> Any:
     )
     with urlopen(request, timeout=_HTTP_TIMEOUT_SECONDS) as response:
         payload = json.load(response)
-    _CACHE[cache_key] = (now + _CACHE_TTL, payload)
-    return payload
+    return _CACHE.set(cache_key, payload)
 
 
 def clear_mcp_registry_cache() -> None:

@@ -1,4 +1,5 @@
 import { request } from "../request";
+import { invalidateActiveModelsCache } from "../../runtime/activeModelsCache";
 import type {
   OllamaModelResponse,
   OllamaDownloadRequest,
@@ -12,6 +13,9 @@ export const ollamaModelApi = {
     request<OllamaDownloadTaskResponse>("/providers/admin/ollama-models/download", {
       method: "POST",
       body: JSON.stringify(body),
+    }).then((payload) => {
+      invalidateActiveModelsCache();
+      return payload;
     }),
 
   getOllamaDownloadStatus: () =>
@@ -21,11 +25,17 @@ export const ollamaModelApi = {
     request<{ status: string; task_id: string }>(
       `/providers/admin/ollama-models/download/${encodeURIComponent(taskId)}`,
       { method: "DELETE" },
-    ),
+    ).then((payload) => {
+      invalidateActiveModelsCache();
+      return payload;
+    }),
 
   deleteOllamaModel: (name: string) =>
     request<{ status: string; name: string }>(
       `/providers/admin/ollama-models/${encodeURIComponent(name)}`,
       { method: "DELETE" },
-    ),
+    ).then((payload) => {
+      invalidateActiveModelsCache();
+      return payload;
+    }),
 };

@@ -1514,6 +1514,44 @@ async def test_main_brain_chat_service_rebuilds_scope_snapshot_after_dirty_mark(
 
 
 @pytest.mark.asyncio
+async def test_main_brain_chat_service_rebuilds_scope_snapshot_after_global_dirty_mark():
+    backend = _FakeSessionBackend()
+    industry_service = _SnapshotCountingIndustryService()
+    service = MainBrainChatService(
+        session_backend=backend,
+        industry_service=industry_service,
+        memory_recall_service=_TruthFirstMemoryRecallService(),
+        model_factory=lambda: _PromptCapturingResponseModel("ok"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-scope-global-dirty",
+        user_id="user-scope-global-dirty",
+        industry_instance_id="industry-v1-demo",
+        work_context_id="work-context-1",
+        agent_id="ops-agent",
+    )
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn one")],
+            request=request,
+        )
+    ]
+    service.mark_scope_snapshot_dirty()
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn two")],
+            request=request,
+        )
+    ]
+
+    snapshot_service = service._scope_snapshot_service  # pylint: disable=protected-access
+    assert snapshot_service.calls == ["work-context-1", "work-context-1"]
+
+
+@pytest.mark.asyncio
 async def test_main_brain_chat_service_persists_commit_state_and_reloads_it_from_session_snapshot():
     backend = _FakeSessionBackend()
     model = _StructuredResponseModel(

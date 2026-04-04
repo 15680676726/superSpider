@@ -1,4 +1,5 @@
 import { request } from "../request";
+import { invalidateActiveModelsCache } from "../../runtime/activeModelsCache";
 import type {
   ProviderInfo,
   ProviderConfigRequest,
@@ -20,6 +21,9 @@ export const providerApi = {
     request<ProviderInfo>(`/providers/admin/${encodeURIComponent(providerId)}/config`, {
       method: "PUT",
       body: JSON.stringify(body),
+    }).then((payload) => {
+      invalidateActiveModelsCache();
+      return payload;
     }),
 
   getActiveModels: () => request<ActiveModelsInfo>("/models/active"),
@@ -28,6 +32,9 @@ export const providerApi = {
     request<ActiveModelsInfo>("/providers/admin/active", {
       method: "PUT",
       body: JSON.stringify(body),
+    }).then((payload) => {
+      invalidateActiveModelsCache();
+      return payload;
     }),
 
   getProviderFallback: () =>
@@ -37,6 +44,9 @@ export const providerApi = {
     request<ProviderFallbackConfig>("/providers/admin/fallback", {
       method: "PUT",
       body: JSON.stringify(body),
+    }).then((payload) => {
+      invalidateActiveModelsCache();
+      return payload;
     }),
 
   /* ---- Custom provider CRUD ---- */
@@ -45,13 +55,19 @@ export const providerApi = {
     request<ProviderInfo>("/providers/admin/custom-providers", {
       method: "POST",
       body: JSON.stringify(body),
+    }).then((payload) => {
+      invalidateActiveModelsCache();
+      return payload;
     }),
 
   deleteCustomProvider: (providerId: string) =>
     request<ProviderInfo[]>(
       `/providers/admin/custom-providers/${encodeURIComponent(providerId)}`,
       { method: "DELETE" },
-    ),
+    ).then((payload) => {
+      invalidateActiveModelsCache();
+      return payload;
+    }),
 
   /* ---- Model CRUD (works for both built-in and custom providers) ---- */
 
@@ -59,6 +75,9 @@ export const providerApi = {
     request<ProviderInfo>(`/providers/admin/${encodeURIComponent(providerId)}/models`, {
       method: "POST",
       body: JSON.stringify(body),
+    }).then((payload) => {
+      invalidateActiveModelsCache();
+      return payload;
     }),
 
   removeModel: (providerId: string, modelId: string) =>
@@ -67,7 +86,10 @@ export const providerApi = {
         modelId,
       )}`,
       { method: "DELETE" },
-    ),
+    ).then((payload) => {
+      invalidateActiveModelsCache();
+      return payload;
+    }),
 
   /* ---- Test Connection ---- */
 
@@ -96,5 +118,8 @@ export const providerApi = {
         method: "POST",
         body: body ? JSON.stringify(body) : undefined,
       },
-    ),
+    ).then((payload) => {
+      invalidateActiveModelsCache();
+      return payload;
+    }),
 };

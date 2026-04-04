@@ -2,6 +2,12 @@ import { getApiToken, getApiUrl } from "../../api/config";
 import { providerApi } from "../../api/modules/provider";
 import type { MediaSourceSpec } from "../../api/modules/media";
 import type { ActiveModelsInfo } from "../../api/types/provider";
+import {
+  getCachedActiveModels,
+  invalidateActiveModelsCache,
+  resetActiveModelsCacheForTests,
+  setCachedActiveModels,
+} from "../../runtime/activeModelsCache";
 import { CHAT_RUNTIME_TEXT } from "./chatPageHelpers";
 import {
   extractRuntimeHealthNotice,
@@ -37,7 +43,10 @@ export const resolveRuntimeSessionContext = resolveRuntimeSessionContextHelper;
 export const resolveRuntimeThreadContext = resolveRuntimeThreadContextHelper;
 export const queueHumanAssistSubmissionForNextMessage =
   queueHumanAssistSubmissionForNextMessageHelper;
-export const resetRuntimeTransportForTests = resetRuntimeTransportForTestsHelper;
+export function resetRuntimeTransportForTests(): void {
+  resetRuntimeTransportForTestsHelper();
+  resetActiveModelsCacheForTests();
+}
 export const buildRuntimeChatRequest = buildRuntimeChatRequestBody;
 
 type RuntimeSidecarRecord = Record<string, unknown>;
@@ -84,7 +93,6 @@ interface SessionAbortState {
   networkStarted: boolean;
 }
 
-const ACTIVE_MODELS_CACHE_TTL_MS = 30_000;
 const TERMINAL_RUNTIME_RESPONSE_STATUSES = new Set([
   "completed",
   "failed",
@@ -735,10 +743,6 @@ export function createRuntimeTransport({
   responseParser: (rawChunk: string) => unknown;
   cancelSession: (sessionId: string) => void;
 } {
-  const activeModelsCache = {
-    fetchedAt: 0,
-    value: null as ActiveModelsInfo | null,
-  };
   const sessionAbortControllers = new Map<string, SessionAbortState>();
   const parserArgs: ParseRuntimeResponseChunkArgs = {
     setRuntimeHealthNotice,
@@ -780,19 +784,15 @@ export function createRuntimeTransport({
     try {
       let activeModels: ActiveModelsInfo | null = null;
       try {
-        const cached = activeModelsCache;
-        if (
-          cached.value &&
-          Date.now() - cached.fetchedAt < ACTIVE_MODELS_CACHE_TTL_MS
-        ) {
-          activeModels = cached.value;
+        const cached = getCachedActiveModels();
+        if (cached) {
+          activeModels = cached;
         } else {
           activeModels = await raceWithAbort(
             providerApi.getActiveModels(),
             localAbortController.signal,
           );
-          activeModelsCache.fetchedAt = Date.now();
-          activeModelsCache.value = activeModels;
+          setCachedActiveModels(activeModels);
         }
 
         const resolvedSlot = activeModels?.resolved_llm || activeModels?.active_llm;
@@ -814,8 +814,7 @@ export function createRuntimeTransport({
           throw error;
         }
 
-        activeModelsCache.fetchedAt = 0;
-        activeModelsCache.value = null;
+        invalidateActiveModelsCache();
         console.error("Failed to check model configuration:", error);
         return handleModelError(
           setRuntimeWaitState,

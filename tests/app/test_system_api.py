@@ -151,7 +151,7 @@ def test_system_overview_caches_workspace_stats(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setattr("copaw.app.routers.system._dir_stats", _counting_dir_stats)
     from copaw.app.routers import system as system_router_module
 
-    system_router_module._workspace_stats_cache.clear()
+    system_router_module.clear_workspace_stats_cache()
 
     first = client.get("/system/overview")
     second = client.get("/system/overview")

@@ -141,6 +141,10 @@ class MainBrainScopeSnapshotService:
         industry_instance_id: str | None = None,
         agent_id: str | None = None,
     ) -> None:
+        if not any((work_context_id, industry_instance_id, agent_id)):
+            for entry in self._scope_snapshot_cache.values():
+                entry.dirty = True
+            return
         candidate_keys = {
             str(work_context_id or "").strip(),
             f"industry:{str(industry_instance_id or '').strip()}",
