@@ -33,6 +33,9 @@ from ..memory import (
     MemoryReflectionService,
     MemoryRetainService,
 )
+from ..discovery.scout_service import DonorScoutService
+from ..discovery.opportunity_radar import OpportunityRadarService
+from ..discovery.models import DiscoveryActionRequest, DiscoveryHit
 from ..predictions import PredictionService
 from ..providers.provider_admin_service import (
     ProviderAdminService,
@@ -57,6 +60,9 @@ from ..state.main_brain_service import (
 from ..state.agent_experience_service import AgentExperienceMemoryService
 from ..state.capability_donor_service import CapabilityDonorService
 from ..state.capability_portfolio_service import CapabilityPortfolioService
+from ..state.donor_package_service import DonorPackageService
+from ..state.donor_source_service import DonorSourceService
+from ..state.donor_trust_service import DonorTrustService
 from ..state.knowledge_service import StateKnowledgeService
 from ..state.reporting_service import StateReportingService
 from ..state.skill_lifecycle_decision_service import SkillLifecycleDecisionService
@@ -178,6 +184,13 @@ def _resolve_runtime_provider_facade(
     return get_runtime_provider_facade(provider_manager=provider_manager)
 
 
+def _execute_runtime_discovery_action(
+    _source: object,
+    _request: DiscoveryActionRequest,
+) -> list[DiscoveryHit]:
+    return []
+
+
 def _build_runtime_observability(
     *,
     state_store: SQLiteStateStore,
@@ -194,9 +207,13 @@ def _build_query_services(
     repositories: RuntimeRepositories,
     evidence_ledger: EvidenceLedger,
     runtime_event_bus: RuntimeEventBus,
+    donor_source_service: object | None,
     capability_candidate_service: CapabilityCandidateService | None,
     capability_donor_service: CapabilityDonorService | None,
+    donor_package_service: object | None,
+    donor_trust_service: object | None,
     capability_portfolio_service: CapabilityPortfolioService | None,
+    donor_scout_service: object | None,
     skill_trial_service: object | None,
     skill_lifecycle_decision_service: object | None,
     human_assist_task_service: HumanAssistTaskService | None,
@@ -217,9 +234,13 @@ def _build_query_services(
         repositories=repositories,
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
+        donor_source_service=donor_source_service,
         capability_candidate_service=capability_candidate_service,
         capability_donor_service=capability_donor_service,
+        donor_package_service=donor_package_service,
+        donor_trust_service=donor_trust_service,
         capability_portfolio_service=capability_portfolio_service,
+        donor_scout_service=donor_scout_service,
         skill_trial_service=skill_trial_service,
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         human_assist_task_service=human_assist_task_service,
@@ -332,8 +353,14 @@ def build_runtime_bootstrap(
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
     )
+    donor_source_service = DonorSourceService(
+        state_store=state_store,
+    )
     capability_donor_service = CapabilityDonorService(
         state_store=state_store,
+    )
+    donor_package_service = DonorPackageService(
+        donor_service=capability_donor_service,
     )
     capability_candidate_service = CapabilityCandidateService(
         state_store=state_store,
@@ -345,11 +372,26 @@ def build_runtime_bootstrap(
     skill_lifecycle_decision_service = SkillLifecycleDecisionService(
         state_store=state_store,
     )
+    donor_trust_service = DonorTrustService(
+        donor_service=capability_donor_service,
+        skill_trial_service=skill_trial_service,
+        skill_lifecycle_decision_service=skill_lifecycle_decision_service,
+    )
+    donor_trust_service.refresh_trust_records()
     capability_portfolio_service = CapabilityPortfolioService(
         donor_service=capability_donor_service,
         candidate_service=capability_candidate_service,
         skill_trial_service=skill_trial_service,
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
+    )
+    opportunity_radar_service = OpportunityRadarService(
+        feeds={},
+    )
+    donor_scout_service = DonorScoutService(
+        source_service=donor_source_service,
+        candidate_service=capability_candidate_service,
+        opportunity_radar_service=opportunity_radar_service,
+        discovery_executor=_execute_runtime_discovery_action,
     )
 
     provider_manager = ProviderManager()
@@ -372,9 +414,13 @@ def build_runtime_bootstrap(
         repositories=repositories,
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
+        donor_source_service=donor_source_service,
         capability_candidate_service=capability_candidate_service,
         capability_donor_service=capability_donor_service,
+        donor_package_service=donor_package_service,
+        donor_trust_service=donor_trust_service,
         capability_portfolio_service=capability_portfolio_service,
+        donor_scout_service=donor_scout_service,
         skill_trial_service=skill_trial_service,
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         human_assist_task_service=human_assist_task_service,
@@ -508,9 +554,13 @@ def build_runtime_bootstrap(
         provider_admin_service=provider_admin_service,
         state_query_service=state_query_service,
         evidence_query_service=evidence_query_service,
+        donor_source_service=donor_source_service,
         capability_candidate_service=capability_candidate_service,
         capability_donor_service=capability_donor_service,
+        donor_package_service=donor_package_service,
+        donor_trust_service=donor_trust_service,
         capability_portfolio_service=capability_portfolio_service,
+        donor_scout_service=donor_scout_service,
         skill_trial_service=skill_trial_service,
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         human_assist_task_service=human_assist_task_service,

@@ -178,9 +178,13 @@ class RuntimeBootstrap:
     provider_admin_service: Any
     state_query_service: RuntimeCenterStateQueryService
     evidence_query_service: RuntimeCenterEvidenceQueryService
+    donor_source_service: Any | None
     capability_candidate_service: Any | None
     capability_donor_service: Any | None
+    donor_package_service: Any | None
+    donor_trust_service: Any | None
     capability_portfolio_service: Any | None
+    donor_scout_service: Any | None
     skill_trial_service: Any | None
     skill_lifecycle_decision_service: Any | None
     human_assist_task_service: HumanAssistTaskService

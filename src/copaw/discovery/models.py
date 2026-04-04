@@ -223,6 +223,58 @@ class NormalizedDiscoveryHit:
         return metadata
 
 
+@dataclass(frozen=True, slots=True)
+class OpportunityRadarItem:
+    item_id: str
+    title: str
+    summary: str = ""
+    canonical_package_id: str | None = None
+    source_ref: str | None = None
+    ecosystem: str = "unknown"
+    score: float = 0.0
+    published_at: datetime = field(default_factory=_utc_now)
+    capability_keys: tuple[str, ...] = ()
+    query_hint: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ScoutBudget:
+    max_queries: int = 3
+    max_candidates: int = 8
+
+
+@dataclass(frozen=True, slots=True)
+class ScoutRequest:
+    scout_id: str
+    mode: str
+    source_profile: str
+    target_scope: str
+    query: str | None = None
+    queries: tuple[str, ...] = ()
+    target_role_id: str | None = None
+    target_seat_ref: str | None = None
+    industry_instance_id: str | None = None
+    budget: ScoutBudget = field(default_factory=ScoutBudget)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ScoutRunResult:
+    scout_id: str
+    mode: str
+    status: str
+    attempted_queries: tuple[str, ...] = ()
+    source_run_count: int = 0
+    radar_item_count: int = 0
+    imported_candidate_ids: tuple[str, ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def imported_candidate_count(self) -> int:
+        return len(self.imported_candidate_ids)
+
+
 __all__ = [
     "DiscoveryActionRequest",
     "DiscoveryHit",
@@ -232,6 +284,10 @@ __all__ = [
     "DiscoverySourceProfile",
     "DiscoverySourceSpec",
     "NormalizedDiscoveryHit",
+    "OpportunityRadarItem",
+    "ScoutBudget",
+    "ScoutRequest",
+    "ScoutRunResult",
     "_normalize_float",
     "_string",
     "_unique_strings",

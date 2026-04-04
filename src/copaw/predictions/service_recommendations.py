@@ -4,6 +4,39 @@ from __future__ import annotations
 from .service_shared import *  # noqa: F401,F403
 
 
+def _float_from_payload(value: object | None) -> float:
+    if isinstance(value, bool) or value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = _string(value)
+    if text is None:
+        return 0.0
+    try:
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
+def rank_donor_recommendation_candidates(candidates: list[object]) -> list[object]:
+    def _sort_key(item: object) -> tuple[object, ...]:
+        source_kind = (_string(getattr(item, "candidate_source_kind", None)) or "").lower()
+        replacement_relation = _string(getattr(item, "replacement_relation", None))
+        metadata = _safe_dict(getattr(item, "metadata", None))
+        confidence_score = _float_from_payload(metadata.get("confidence_score"))
+        source_hit_count = int(metadata.get("source_hit_count") or 0)
+        is_local_authored = source_kind == "local_authored"
+        return (
+            is_local_authored,
+            replacement_relation is None,
+            -confidence_score,
+            -source_hit_count,
+            (_string(getattr(item, "title", None)) or _string(getattr(item, "proposed_skill_name", None)) or "").lower(),
+        )
+
+    return sorted(candidates, key=_sort_key)
+
+
 class _PredictionServiceRecommendationMixin:
     def _register_capability_candidate(
         self,

@@ -52,9 +52,13 @@ class RuntimeCenterStateQueryService:
         work_context_repository: SqliteWorkContextRepository | None = None,
         goal_service: object | None = None,
         decision_request_repository: SqliteDecisionRequestRepository,
+        donor_source_service: object | None = None,
         capability_candidate_service: object | None = None,
         capability_donor_service: object | None = None,
+        donor_package_service: object | None = None,
+        donor_trust_service: object | None = None,
         capability_portfolio_service: object | None = None,
+        donor_scout_service: object | None = None,
         skill_trial_service: object | None = None,
         skill_lifecycle_decision_service: object | None = None,
         evidence_ledger: EvidenceLedger | None = None,
@@ -72,9 +76,13 @@ class RuntimeCenterStateQueryService:
         self._work_context_repository = work_context_repository
         self._goal_service = goal_service
         self._decision_request_repository = decision_request_repository
+        self._donor_source_service = donor_source_service
         self._capability_candidate_service = capability_candidate_service
         self._capability_donor_service = capability_donor_service
+        self._donor_package_service = donor_package_service
+        self._donor_trust_service = donor_trust_service
         self._capability_portfolio_service = capability_portfolio_service
+        self._donor_scout_service = donor_scout_service
         self._skill_trial_service = skill_trial_service
         self._skill_lifecycle_decision_service = skill_lifecycle_decision_service
         self._evidence_ledger = evidence_ledger
@@ -310,6 +318,50 @@ class RuntimeCenterStateQueryService:
                 payload.append(serialized)
         return payload
 
+    def list_capability_packages(
+        self,
+        *,
+        donor_id: str | None = None,
+        limit: int | None = 20,
+    ) -> list[dict[str, object]]:
+        service = getattr(self, "_donor_package_service", None)
+        lister = getattr(service, "list_packages", None)
+        if not callable(lister):
+            return []
+        items = lister(donor_id=donor_id, limit=limit)
+        payload: list[dict[str, object]] = []
+        for item in items:
+            model_dump = getattr(item, "model_dump", None)
+            serialized = model_dump(mode="json") if callable(model_dump) else None
+            if isinstance(serialized, dict):
+                payload.append(serialized)
+            elif isinstance(item, dict):
+                payload.append(dict(item))
+        return payload
+
+    def list_capability_trust_records(
+        self,
+        *,
+        limit: int | None = 20,
+    ) -> list[dict[str, object]]:
+        service = getattr(self, "_donor_trust_service", None)
+        refresher = getattr(service, "refresh_trust_records", None)
+        if callable(refresher):
+            refresher()
+        lister = getattr(service, "list_trust_records", None)
+        if not callable(lister):
+            return []
+        items = lister(limit=limit)
+        payload: list[dict[str, object]] = []
+        for item in items:
+            model_dump = getattr(item, "model_dump", None)
+            serialized = model_dump(mode="json") if callable(model_dump) else None
+            if isinstance(serialized, dict):
+                payload.append(serialized)
+            elif isinstance(item, dict):
+                payload.append(dict(item))
+        return payload
+
     def get_capability_portfolio_summary(self) -> dict[str, object]:
         service = getattr(self, "_capability_portfolio_service", None)
         getter = getattr(service, "get_runtime_portfolio_summary", None)
@@ -319,6 +371,12 @@ class RuntimeCenterStateQueryService:
     def get_capability_discovery_summary(self) -> dict[str, object]:
         service = getattr(self, "_capability_portfolio_service", None)
         getter = getattr(service, "get_runtime_discovery_summary", None)
+        payload = getter() if callable(getter) else {}
+        return dict(payload) if isinstance(payload, Mapping) else {}
+
+    def get_capability_scout_summary(self) -> dict[str, object]:
+        service = getattr(self, "_donor_scout_service", None)
+        getter = getattr(service, "get_latest_summary", None)
         payload = getter() if callable(getter) else {}
         return dict(payload) if isinstance(payload, Mapping) else {}
 

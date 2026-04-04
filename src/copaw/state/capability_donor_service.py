@@ -319,6 +319,28 @@ class CapabilityDonorService:
             rows = conn.execute(query, params).fetchall()
         return [self._row_to_trust(row) for row in rows]
 
+    def get_trust_record(self, donor_id: str | None) -> CapabilityDonorTrustRecord | None:
+        if _string(donor_id) is None:
+            return None
+        with self._state_store.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM capability_donor_trust
+                WHERE donor_id = ?
+                LIMIT 1
+                """,
+                (donor_id,),
+            ).fetchone()
+        return self._row_to_trust(row) if row is not None else None
+
+    def upsert_trust_record(
+        self,
+        record: CapabilityDonorTrustRecord,
+    ) -> CapabilityDonorTrustRecord:
+        self._write_trust(record)
+        return record
+
     def _upsert_source_profile(
         self,
         candidate: CapabilityCandidateRecord,

@@ -828,6 +828,40 @@ async def list_runtime_center_capability_source_profiles(
     )
 
 
+@router.get("/capabilities/packages", response_model=list[dict[str, object]])
+async def list_runtime_center_capability_packages(
+    request: Request,
+    response: Response,
+    donor_id: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, object]]:
+    query_kwargs: dict[str, object] = {"limit": limit}
+    if donor_id is not None:
+        query_kwargs["donor_id"] = donor_id
+    return await _runtime_center_list_query(
+        request=request,
+        response=response,
+        query_methods=("list_capability_packages",),
+        not_available_detail="Capability package view is not available.",
+        **query_kwargs,
+    )
+
+
+@router.get("/capabilities/trust", response_model=list[dict[str, object]])
+async def list_runtime_center_capability_trust_records(
+    request: Request,
+    response: Response,
+    limit: int = 20,
+) -> list[dict[str, object]]:
+    return await _runtime_center_list_query(
+        request=request,
+        response=response,
+        query_methods=("list_capability_trust_records",),
+        not_available_detail="Capability trust view is not available.",
+        limit=limit,
+    )
+
+
 @router.get("/capabilities/portfolio", response_model=dict[str, object])
 async def get_runtime_center_capability_portfolio(
     request: Request,
@@ -855,6 +889,21 @@ async def get_runtime_center_capability_discovery(
         not_available_detail="Capability discovery view is not available.",
         not_found_detail="Capability discovery summary was not found.",
         payload_key="discovery",
+    )
+
+
+@router.get("/capabilities/scout", response_model=dict[str, object])
+async def get_runtime_center_capability_scout(
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    return await _runtime_center_detail_query(
+        request=request,
+        response=response,
+        query_methods=("get_capability_scout_summary",),
+        not_available_detail="Capability scout view is not available.",
+        not_found_detail="Capability scout summary was not found.",
+        payload_key="scout",
     )
 
 

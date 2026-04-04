@@ -80,6 +80,9 @@ from .main_brain_service import (
 )
 from .capability_donor_service import CapabilityDonorService
 from .capability_portfolio_service import CapabilityPortfolioService
+from .donor_package_service import DonorPackageService
+from .donor_source_service import DonorSourceService
+from .donor_trust_service import DonorTrustService
 from .skill_lifecycle_decision_service import SkillLifecycleDecisionService
 from .skill_trial_service import SkillTrialService
 from .store import SQLiteStateStore, STATE_SCHEMA_VERSION
@@ -107,6 +110,9 @@ __all__ = [
     "CapabilityPortfolioService",
     "CapabilitySourceProfileRecord",
     "DecisionRequestRecord",
+    "DonorPackageService",
+    "DonorSourceService",
+    "DonorTrustService",
     "ExecutionRoutineRecord",
     "FixedSopBindingRecord",
     "FixedSopTemplateRecord",
