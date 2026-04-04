@@ -306,6 +306,110 @@ Evolution should happen in two layers:
    - more personalized support
    - more effective recovery pull-back
 
+### 5.5 Formal Buddy State Families
+
+Buddy should expose explicit visible states.
+
+These states should remain derived from formal runtime truth and interaction truth rather than becoming an arbitrary pet simulation.
+
+Recommended state families:
+
+1. `LifecycleState`
+   - `unborn`
+   - `born-unnamed`
+   - `named`
+   - `bonded`
+   - `evolving`
+
+2. `PresenceState`
+   - `idle`
+   - `attentive`
+   - `focused`
+   - `supporting`
+   - `pulling-back`
+   - `celebrating`
+   - `resting`
+
+3. `MoodState`
+   - `calm`
+   - `warm`
+   - `concerned`
+   - `playful`
+   - `proud`
+   - `determined`
+
+Rules:
+
+- `LifecycleState` changes slowly
+- `PresenceState` changes with current runtime and chat situation
+- `MoodState` is an expression layer, not a second emotional truth database
+
+### 5.6 Evolution Stages
+
+Buddy should have visible evolution stages rather than a flat endless stat increase.
+
+First-version recommended evolution stages:
+
+1. `Seed Form`
+   - first-born companion shell
+   - simpler sprite
+   - fewer accessories
+   - lighter emotional expression
+
+2. `Bonded Form`
+   - stronger visual identity
+   - clearer eye/hat/accessory distinction
+   - more stable companionship tone
+
+3. `Capable Form`
+   - visibly more mature shell
+   - richer idle/focus expressions
+   - stronger execution-confidence feeling
+
+4. `Seasoned Form`
+   - stronger rarity/form signature
+   - more personalized support presence
+   - visibly experienced partner feeling
+
+5. `Signature Form`
+   - highest first-version evolution target
+   - strongest personal identity expression
+   - richest sprite/detail set
+   - strongest sense that this companion has grown with this human
+
+Rules:
+
+- visual evolution should not depend on random cosmetic unlocks alone
+- it should be driven by relationship, cognition, execution continuity, and support effectiveness
+- rarity/form changes should feel earned by long-term companionship
+
+### 5.7 Attribute Derivation Rules
+
+Buddy's visible attributes should be projection values with stable derivation rules.
+
+Recommended first-version derivation rules:
+
+- `intimacy`
+  - driven by communication continuity, completed support loops, reflection continuity, and companionship duration
+- `affinity`
+  - driven by how often the human accepts Buddy's pull-back/replan help and whether current focus stays aligned with the primary direction
+- `growth level`
+  - driven by total relationship, cognition, and execution growth score
+- `companion experience`
+  - driven by accumulated meaningful interaction and completed support activity
+- `knowledge value`
+  - driven by profile completeness, target understanding, recall quality, and successful explanation/support history
+- `skill value`
+  - driven by completed support runs, completed execution closures, and replan reliability
+- `pleasant interaction score`
+  - driven by rolling positive interaction quality rather than one-off emotional spikes
+
+Rules:
+
+- values should be smoothed and rolling, not wildly oscillating per turn
+- values should be explainable from formal truth
+- no value should silently override safety, governance, or risk posture
+
 ---
 
 ## 6. Interaction Model
@@ -360,6 +464,31 @@ First-version support triggers should be limited to:
 
 This keeps Buddy meaningfully present without turning it into spam.
 
+### 6.5 Visible State Transitions
+
+The state system should support clear transition logic.
+
+Recommended examples:
+
+- `born-unnamed -> named`
+  - triggered when the human gives Buddy its first real name in chat
+- `attentive -> focused`
+  - triggered when the human is actively working on the current task
+- `focused -> supporting`
+  - triggered when Buddy is guiding a concrete current-step action
+- `supporting -> pulling-back`
+  - triggered when drift, avoidance, or stagnation crosses support thresholds
+- `pulling-back -> celebrating`
+  - triggered when the human completes the recovered current task or key milestone
+- any high-activity state -> `resting`
+  - triggered after meaningful closure or when the human intentionally disengages for a period
+
+Rules:
+
+- transitions must be driven by runtime truth or interaction truth
+- transitions should not flicker excessively
+- the human should be able to feel the difference between idle presence, focused accompaniment, and strong support mode
+
 ---
 
 ## 7. Frontend Surface Design
@@ -407,6 +536,62 @@ Across front-stage Buddy surfaces, the default should stay:
 - current task
 
 Everything more complex remains behind progressive reveal.
+
+### 7.4 Expanded Buddy Panel Structure
+
+When the human clicks the small Buddy companion on the chat page, the expanded panel should open as Buddy's main attribute sheet.
+
+Recommended sections:
+
+1. `Identity`
+   - Buddy name
+   - current form
+   - rarity
+   - current mood
+   - current presence state
+
+2. `Relationship`
+   - intimacy
+   - affinity
+   - pleasant interaction score
+   - communication continuity
+
+3. `Growth`
+   - level
+   - companion experience
+   - current evolution stage
+   - progress to next evolution
+
+4. `Capability`
+   - knowledge value
+   - skill value
+   - completed support runs
+   - completed assisted task closures
+
+5. `Current Bond Context`
+   - final goal
+   - current task
+   - why now
+   - latest milestone or blocker
+
+Rules:
+
+- the expanded panel should still feel like meeting the companion, not opening an admin console
+- growth and relationship values may be game-like, but the panel should not expose deep internal planning trees by default
+
+### 7.5 Chat-First Interaction Actions
+
+The expanded Buddy panel should keep the primary interaction chat-centered.
+
+Recommended companion actions:
+
+- `start with me`
+- `I am stuck`
+- `I do not want to do this`
+- `help me rebuild the next step`
+- `show how I have grown`
+
+These actions should open or continue chat-led interaction flows rather than replacing chat with a separate button workflow.
 
 ---
 
@@ -626,6 +811,13 @@ This Buddy round should not:
 
 - align the main-brain page as Buddy's cockpit
 - keep it centered on final goal, current task, and continuity review
+
+### Phase 6: Buddy State And Evolution Calibration
+
+- land first-version lifecycle/presence/mood state transitions
+- calibrate visible attribute derivation rules
+- land first-version evolution stage mapping
+- ensure visual and expression evolution remain derived from formal truth rather than free-floating game state
 
 ---
 
