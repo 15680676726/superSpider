@@ -229,13 +229,18 @@ def test_system_self_check_exposes_runtime_summary_for_automation_and_recovery(
         FakeLoopTask(name="copaw-automation-operating-cycle", done=True),
     ]
     app.state.actor_supervisor = SimpleNamespace(
-        _loop_task=FakeLoopTask(name="copaw-actor-supervisor", done=False),
-        _poll_interval_seconds=1.25,
-        _agent_tasks={
-            "agent-1": FakeLoopTask(name="copaw-actor:agent-1", done=False),
-            "agent-2": FakeLoopTask(name="copaw-actor:agent-2", done=True),
-        },
-        _runtime_repository=FakeRuntimeRepository(),
+        snapshot=lambda: {
+            "available": True,
+            "status": "degraded",
+            "running": True,
+            "poll_interval_seconds": 1.25,
+            "loop_task_name": "copaw-actor-supervisor",
+            "active_agent_run_count": 1,
+            "blocked_runtime_count": 1,
+            "recent_failure_count": 1,
+            "last_failure_at": "2026-04-02T10:00:00+00:00",
+            "last_failure_type": "RuntimeError",
+        }
     )
     client = TestClient(app)
 

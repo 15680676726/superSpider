@@ -360,7 +360,7 @@ def test_operator_runtime_e2e_covers_feedback_governance_and_runtime_center(
         for item in capability_task_payload["evidence"]
     )
 
-    overview = client.get("/runtime-center/overview")
+    overview = client.get("/runtime-center/surface")
     assert overview.status_code == 200
     cards = {card["key"]: card for card in overview.json()["cards"]}
     assert any(
@@ -425,7 +425,7 @@ def test_operator_runtime_e2e_covers_rejection_visibility_in_runtime_center(
         for item in decisions.json()
     )
 
-    overview = client.get("/runtime-center/overview")
+    overview = client.get("/runtime-center/surface")
     assert overview.status_code == 200
     cards = {card["key"]: card for card in overview.json()["cards"]}
     assert any(
@@ -768,7 +768,7 @@ def test_operator_runtime_overview_surfaces_sidecar_memory_degradation(
     )
     client = TestClient(app)
 
-    response = client.get("/runtime-center/overview")
+    response = client.get("/runtime-center/surface")
 
     assert response.status_code == 200
     cards = {card["key"]: card for card in response.json()["cards"]}
@@ -827,14 +827,14 @@ def test_operator_runtime_overview_falls_back_to_runtime_contract_sidecar_diagno
     )
     client = TestClient(app)
 
-    response = client.get("/runtime-center/overview")
+    response = client.get("/runtime-center/surface")
 
     assert response.status_code == 200
     cards = {card["key"]: card for card in response.json()["cards"]}
     governance = cards["governance"]
     entry = governance["entries"][0]
     assert entry["status"] == "blocked"
-    assert governance["meta"]["query_runtime_entropy"] is None
+    assert governance["meta"]["query_runtime_entropy"] == {}
     assert governance["meta"]["sidecar_memory"] == degraded_sidecar_memory
     assert entry["meta"]["sidecar_memory"] == degraded_sidecar_memory
     assert governance["meta"]["failure_source"] == "runtime-contract-sidecar"

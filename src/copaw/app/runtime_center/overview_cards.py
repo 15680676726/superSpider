@@ -14,7 +14,7 @@ from .overview_entry_builders import _RuntimeCenterOverviewEntryBuildersMixin
 from .overview_helpers import build_runtime_surface
 from .overview_main_brain import RuntimeCenterMainBrainAssembly
 from .recovery_projection import project_latest_recovery_summary
-from .task_review_projection import (
+from .execution_runtime_projection import (
     build_host_twin_summary,
     derive_host_twin_continuity_state,
     host_twin_summary_ready,
@@ -821,107 +821,6 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             },
         }
 
-    def _map_task_entries(self, items: list[Any]) -> list[RuntimeOverviewEntry]:
-        return self._build_mapped_entries(
-            items,
-            "updated_at",
-            "created_at",
-            builder=self._build_task_entry,
-        )
-
-    def _build_task_entry(self, item: Any) -> RuntimeOverviewEntry:
-        task_id = self._string(self._get_field(item, "id", "task_id")) or "unknown-task"
-        work_context = self._mapping(self._get_field(item, "work_context")) or {}
-        return RuntimeOverviewEntry(
-            id=task_id,
-            title=self._string(self._get_field(item, "title", "name")) or task_id,
-            kind=self._string(self._get_field(item, "kind", "task_type")) or "task",
-            status=self._string(self._get_field(item, "status")) or "created",
-            owner=self._string(self._get_field(item, "owner_agent_id", "owner_role", "owner")),
-            summary=self._string(self._get_field(item, "summary", "current_progress_summary", "last_result_summary")),
-            updated_at=self._dt(self._get_field(item, "updated_at", "created_at")),
-            route=self._string(self._get_field(item, "route")),
-            meta={
-                "parent_task_id": self._string(self._get_field(item, "parent_task_id")),
-                "child_task_count": self._int(
-                    self._get_field(item, "child_task_count"),
-                    0,
-                ),
-                "work_context_id": self._string(
-                    self._get_field(item, "work_context_id"),
-                ),
-                "work_context_title": self._string(work_context.get("title")),
-                "work_context_key": self._string(
-                    work_context.get("context_key"),
-                ),
-            },
-        )
-
-    def _map_work_context_entries(self, items: list[Any]) -> list[RuntimeOverviewEntry]:
-        return self._build_mapped_entries(
-            items,
-            "updated_at",
-            "created_at",
-            builder=self._build_work_context_entry,
-        )
-
-    def _build_work_context_entry(self, item: Any) -> RuntimeOverviewEntry:
-        context_id = self._string(self._get_field(item, "id")) or "unknown-work-context"
-        return RuntimeOverviewEntry(
-            id=context_id,
-            title=self._string(self._get_field(item, "title")) or context_id,
-            kind="work-context",
-            status=self._string(self._get_field(item, "status")) or "active",
-            owner=self._string(
-                self._get_field(item, "owner_scope", "owner_agent_id"),
-            ),
-            summary=self._string(self._get_field(item, "summary")),
-            updated_at=self._dt(self._get_field(item, "updated_at", "created_at")),
-            route=self._string(self._get_field(item, "route"))
-            or f"/api/runtime-center/work-contexts/{context_id}",
-            meta={
-                "context_type": self._string(self._get_field(item, "context_type")),
-                "context_key": self._string(self._get_field(item, "context_key")),
-                "primary_thread_id": self._string(
-                    self._get_field(item, "primary_thread_id"),
-                ),
-                "task_count": self._int(self._get_field(item, "task_count"), 0),
-                "active_task_count": self._int(
-                    self._get_field(item, "active_task_count"),
-                    0,
-                ),
-            },
-        )
-
-    def _map_routine_entries(self, items: list[Any]) -> list[RuntimeOverviewEntry]:
-        entries = []
-        for item in self._sorted(items, "updated_at", "created_at"):
-            routine_id = self._string(self._get_field(item, "id", "routine_id")) or "unknown-routine"
-            actions = self._string_map(self._get_field(item, "actions"))
-            actions.pop("replay", None)
-            route = self._string(self._get_field(item, "route")) or f"/api/routines/{routine_id}"
-            meta = self._mapping(self._get_field(item, "meta")) or {}
-            entries.append(
-                RuntimeOverviewEntry(
-                    id=routine_id,
-                    title=self._string(self._get_field(item, "title", "name")) or routine_id,
-                    kind="routine",
-                    status=self._string(self._get_field(item, "status")) or "active",
-                    owner=self._string(self._get_field(item, "owner_agent_id", "owner_scope", "owner")),
-                    summary=self._string(self._get_field(item, "summary")),
-                    updated_at=self._dt(self._get_field(item, "updated_at", "created_at")),
-                    route=route,
-                    actions=actions,
-                    meta={
-                        "engine_kind": self._string(meta.get("engine_kind") or self._get_field(item, "engine_kind")),
-                        "trigger_kind": self._string(meta.get("trigger_kind") or self._get_field(item, "trigger_kind")),
-                        "success_rate": meta.get("success_rate") if "success_rate" in meta else self._get_field(item, "success_rate"),
-                        "last_verified_at": self._string(meta.get("last_verified_at") or self._get_field(item, "last_verified_at")),
-                    },
-                ),
-            )
-        return entries
-
     def _map_agent_entries(self, items: list[Any]) -> list[RuntimeOverviewEntry]:
         return self._build_mapped_entries(
             items,
@@ -962,14 +861,6 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                     or self._string(overlay.get("status")) == "active"
                 ),
             },
-        )
-
-    def _map_industry_entries(self, items: list[Any]) -> list[RuntimeOverviewEntry]:
-        return self._build_mapped_entries(
-            items,
-            "updated_at",
-            "created_at",
-            builder=self._build_industry_entry,
         )
 
     def _map_main_brain_entries(
@@ -1241,11 +1132,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         self,
         app_state: RuntimeCenterAppStateView,
     ) -> dict[str, Any]:
-        summary = app_state.latest_recovery_report
-        source = "latest"
-        if summary is None:
-            summary = app_state.startup_recovery_summary
-            source = "startup"
+        summary, source = app_state.resolve_recovery_summary()
         route = "/api/runtime-center/recovery/latest"
         if summary is None:
             return {
@@ -1396,6 +1283,9 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         self,
         app_state: RuntimeCenterAppStateView,
     ) -> list[dict[str, Any]]:
+        overview_payload = app_state.automation_overview_snapshot()
+        if overview_payload:
+            return overview_payload
         tasks = list(app_state.automation_tasks or [])
         snapshot_map: dict[str, dict[str, Any]] = {}
         loop_snapshots = getattr(app_state.automation_tasks, "loop_snapshots", None)
@@ -1444,76 +1334,19 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         self,
         app_state: RuntimeCenterAppStateView,
     ) -> dict[str, Any]:
-        supervisor = app_state.actor_supervisor
-        if supervisor is None:
-            return {
-                "available": False,
-                "status": "unavailable",
-                "running": False,
-                "poll_interval_seconds": None,
-                "active_agent_run_count": 0,
-                "blocked_runtime_count": 0,
-                "recent_failure_count": 0,
-                "last_failure_at": None,
-                "last_failure_type": None,
-            }
-
-        loop_task = getattr(supervisor, "_loop_task", None)
-        running = loop_task is not None and self._runtime_task_status(loop_task) == "running"
-        agent_tasks = getattr(supervisor, "_agent_tasks", None)
-        active_agent_run_count = 0
-        if isinstance(agent_tasks, dict):
-            active_agent_run_count = sum(
-                1
-                for task in agent_tasks.values()
-                if self._runtime_task_status(task) == "running"
-            )
-        blocked_runtime_count = 0
-        recent_failure_count = 0
-        last_failure_at: str | None = None
-        last_failure_type: str | None = None
-        runtime_repository = getattr(supervisor, "_runtime_repository", None)
-        list_runtimes = getattr(runtime_repository, "list_runtimes", None)
-        if callable(list_runtimes):
-            try:
-                runtimes = list(list_runtimes(limit=None))
-            except Exception:
-                logger.debug("runtime_center actor supervisor runtime scan failed", exc_info=True)
-                runtimes = []
-            for runtime in runtimes:
-                if self._string(getattr(runtime, "runtime_status", None)) == "blocked":
-                    blocked_runtime_count += 1
-                metadata = self._mapping(getattr(runtime, "metadata", None))
-                failure_at = self._string(metadata.get("supervisor_last_failure_at"))
-                if failure_at is not None:
-                    recent_failure_count += 1
-                    if last_failure_at is None or failure_at > last_failure_at:
-                        last_failure_at = failure_at
-                        last_failure_type = self._string(
-                            metadata.get("supervisor_last_failure_type"),
-                        )
-
-        status = "idle"
-        if recent_failure_count > 0 or blocked_runtime_count > 0:
-            status = "degraded"
-        elif running or active_agent_run_count > 0:
-            status = "active"
-
+        snapshot = app_state.actor_supervisor_snapshot()
+        if isinstance(snapshot, dict) and snapshot:
+            return snapshot
         return {
-            "available": True,
-            "status": status,
-            "running": running,
-            "poll_interval_seconds": getattr(supervisor, "_poll_interval_seconds", None),
-            "loop_task_name": (
-                self._runtime_task_name(loop_task, fallback="copaw-actor-supervisor")
-                if loop_task is not None
-                else None
-            ),
-            "active_agent_run_count": active_agent_run_count,
-            "blocked_runtime_count": blocked_runtime_count,
-            "recent_failure_count": recent_failure_count,
-            "last_failure_at": last_failure_at,
-            "last_failure_type": last_failure_type,
+            "available": False,
+            "status": "unavailable",
+            "running": False,
+            "poll_interval_seconds": None,
+            "active_agent_run_count": 0,
+            "blocked_runtime_count": 0,
+            "recent_failure_count": 0,
+            "last_failure_at": None,
+            "last_failure_type": None,
         }
 
     def _serialize_timestamp(self, value: object) -> str | None:
@@ -1958,15 +1791,25 @@ class RuntimeCenterOverviewBuilder:
     async def build_surface_payload(
         self,
         app_state: RuntimeCenterAppStateView,
+        *,
+        include_cards: bool = True,
+        include_main_brain: bool = True,
     ) -> RuntimeCenterSurfaceResponse:
         support = _RuntimeCenterOverviewCardsSupport(item_limit=self._item_limit)
-        cards = await self._build_cards_with_support(support, app_state)
+        cards: list[RuntimeOverviewCard] = []
         surface = build_runtime_surface(cards)
-        main_brain = await support.build_main_brain_payload(
-            app_state,
-            prebuilt_cards=cards,
-            surface=surface,
-        )
+        main_brain = None
+        if include_cards:
+            cards = await self._build_cards_with_support(support, app_state)
+            surface = build_runtime_surface(cards)
+        if include_main_brain:
+            main_brain = await support.build_main_brain_payload(
+                app_state,
+                prebuilt_cards=cards if include_cards else None,
+                surface=surface if include_cards else None,
+            )
+            if not include_cards and main_brain is not None:
+                surface = main_brain.surface
         return RuntimeCenterSurfaceResponse(
             surface=surface,
             cards=cards,

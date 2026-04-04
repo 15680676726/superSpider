@@ -71,11 +71,23 @@ def test_retired_runtime_and_goal_frontdoors_are_removed_from_openapi() -> None:
     assert "/models/custom-providers/{provider_id}" not in paths
     assert "/models/{provider_id}/models" not in paths
     assert "/models/{provider_id}/models/{model_id}" not in paths
+    assert "/local-models/download" not in paths
+    assert "/local-models/cancel-download/{task_id}" not in paths
+    assert "/local-models/{model_id}" not in paths
+    assert "/ollama-models/download" not in paths
+    assert "/ollama-models/download/{task_id}" not in paths
+    assert "/ollama-models/{name}" not in paths
     assert set(paths["/models/active"].keys()) == {"get"}
     assert set(paths["/models/fallback"].keys()) == {"get"}
     assert "/providers/admin/{provider_id}/config" in paths
     assert "/providers/admin/active" in paths
     assert "/providers/admin/fallback" in paths
+    assert "/providers/admin/local-models/download" in paths
+    assert "/providers/admin/local-models/cancel-download/{task_id}" in paths
+    assert "/providers/admin/local-models/{model_id}" in paths
+    assert "/providers/admin/ollama-models/download" in paths
+    assert "/providers/admin/ollama-models/download/{task_id}" in paths
+    assert "/providers/admin/ollama-models/{name}" in paths
 
 
 def test_retired_runtime_and_goal_frontdoors_return_404() -> None:
@@ -145,6 +157,15 @@ def test_retired_runtime_and_goal_frontdoors_return_404() -> None:
         "/models/openai/config",
         json={"api_key": "sk-test"},
     ).status_code == 404
+    assert client.post(
+        "/local-models/download",
+        json={"repo_id": "Qwen/Qwen", "backend": "llamacpp", "source": "huggingface"},
+    ).status_code == 404
+    assert client.post("/local-models/cancel-download/task-1").status_code == 404
+    assert client.delete("/local-models/runtime-only").status_code == 404
+    assert client.post("/ollama-models/download", json={"name": "qwen3:latest"}).status_code == 404
+    assert client.delete("/ollama-models/download/task-1").status_code == 404
+    assert client.delete("/ollama-models/qwen3:latest").status_code == 404
     assert client.post(
         "/models/custom-providers",
         json={"id": "custom", "name": "Custom"},

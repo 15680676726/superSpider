@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 import copaw.providers.provider_manager as provider_manager_module
 from copaw.app.routers.providers import admin_router as providers_admin_router
 from copaw.app.routers.providers import router as providers_router
+from copaw.providers.provider_admin_service import ProviderAdminService
 from copaw.providers.provider import ProviderInfo
 from copaw.providers.provider_manager import ModelSlotConfig, ProviderManager
 from copaw.providers.runtime_provider_facade import get_runtime_provider_facade
@@ -29,6 +30,7 @@ def build_client(manager: ProviderManager) -> TestClient:
     app.state.runtime_provider = get_runtime_provider_facade(
         provider_manager=manager,
     )
+    app.state.provider_admin_service = ProviderAdminService(manager)
     return TestClient(app)
 
 
@@ -239,4 +241,58 @@ def test_provider_admin_config_route_uses_canonical_service() -> None:
                 "chat_model": "OpenAIChatModel",
             },
         ),
+    ]
+
+
+def test_provider_admin_route_rejects_missing_admin_surface_instead_of_singleton_fallback(
+) -> None:
+    app = FastAPI()
+    app.include_router(providers_admin_router)
+    client = TestClient(app)
+
+    response = client.put(
+        "/providers/admin/openai/config",
+        json={"api_key": "sk-test"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "provider admin surface is not attached to app.state"
+
+
+def test_list_providers_reads_from_runtime_provider_without_provider_manager_fallback() -> None:
+    class _RuntimeProviderOnly:
+        async def list_provider_info(self):
+            return [
+                ProviderInfo(
+                    id="runtime-only",
+                    name="Runtime Only",
+                    base_url="",
+                    api_key="",
+                    chat_model="OpenAIChatModel",
+                ),
+            ]
+
+    app = FastAPI()
+    app.include_router(providers_router)
+    app.state.runtime_provider = _RuntimeProviderOnly()
+    client = TestClient(app)
+
+    response = client.get("/models")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": "runtime-only",
+            "name": "Runtime Only",
+            "base_url": "",
+            "api_key": "",
+            "chat_model": "OpenAIChatModel",
+            "models": [],
+            "extra_models": [],
+            "is_local": False,
+            "freeze_url": False,
+            "require_api_key": True,
+            "is_custom": False,
+            "api_key_prefix": "",
+        },
     ]

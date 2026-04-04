@@ -193,9 +193,9 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
         lambda provider_manager: "provider-runtime-facade",
     )
     monkeypatch.setattr(
-        runtime_service_graph_module.ProviderManager,
-        "get_instance",
-        staticmethod(lambda: "provider-manager"),
+        runtime_service_graph_module,
+        "build_provider_admin_service",
+        lambda provider_manager: "provider-admin-service",
     )
     def _fake_turn_executor(**kwargs):
         calls["turn_executor_kwargs"] = kwargs
@@ -234,6 +234,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     assert bootstrap.memory_activation_service == "memory-activation-service"
     assert bootstrap.main_brain_orchestrator == "main-brain-orchestrator"
     assert bootstrap.runtime_provider == "provider-runtime-facade"
+    assert bootstrap.provider_admin_service == "provider-admin-service"
     assert not hasattr(bootstrap, "provider_manager")
     assert bootstrap.turn_executor == "turn-executor"
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from .provider import ModelInfo, ProviderInfo
+from .provider_registry import PROVIDER_OLLAMA
 from .provider_manager import (
     ActiveModelsInfo,
     ModelSlotConfig,
@@ -116,3 +117,23 @@ class ProviderAdminService:
 
     def refresh_local_model_catalog(self) -> None:
         self._manager.update_local_models()
+
+    async def add_ollama_model(self, *, name: str) -> None:
+        provider = self._manager.get_provider(PROVIDER_OLLAMA.id)
+        if provider is None:
+            raise ValueError(f"Provider '{PROVIDER_OLLAMA.id}' not found")
+        await provider.add_model(
+            ModelInfo(id=name, name=name),
+        )
+
+    async def delete_ollama_model(self, *, name: str) -> None:
+        provider = self._manager.get_provider(PROVIDER_OLLAMA.id)
+        if provider is None:
+            raise ValueError(f"Provider '{PROVIDER_OLLAMA.id}' not found")
+        await provider.delete_model(model_id=name)
+
+
+def build_provider_admin_service(
+    provider_manager: ProviderManager,
+) -> ProviderAdminService:
+    return ProviderAdminService(provider_manager)

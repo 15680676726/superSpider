@@ -769,3 +769,45 @@ def test_runtime_views_live_focus_prefers_latest_operator_writeback_chain_when_n
 
     assert payload["current_assignment_id"] == "assignment-operator"
     assert payload["current_backlog_id"] == "backlog-operator"
+
+
+def test_live_focus_payload_keeps_focus_selection_without_overriding_runtime_focus_truth() -> None:
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+    )
+    runtime_views = _RuntimeViewsHarness(strategy)
+
+    payload = runtime_views._resolve_live_focus_payload(
+        execution=IndustryExecutionSummary(status="idle"),
+        assignments=[
+            {
+                "assignment_id": "assignment-1",
+                "backlog_item_id": "backlog-1",
+                "title": "Assignment title",
+                "summary": "Assignment summary",
+                "status": "active",
+            }
+        ],
+        backlog=[
+            {
+                "backlog_item_id": "backlog-1",
+                "title": "Backlog title",
+                "summary": "Backlog summary",
+                "status": "open",
+                "source_kind": "operator",
+                "source_ref": "chat-writeback:test",
+                "updated_at": "2026-04-03T00:10:00Z",
+                "created_at": "2026-04-03T00:05:00Z",
+            }
+        ],
+        tasks=[],
+        selected_assignment_id="assignment-1",
+    )
+
+    assert payload["current_assignment_id"] == "assignment-1"
+    assert payload["current_backlog_id"] == "backlog-1"
+    assert payload["current_focus_id"] is None
+    assert payload["current_focus_title"] is None

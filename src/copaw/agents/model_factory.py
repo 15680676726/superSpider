@@ -32,7 +32,7 @@ from copaw.config import load_config
 from .utils.tool_message_utils import _sanitize_tool_messages
 from ..providers.runtime_provider_facade import (
     ProviderRuntimeSurface,
-    get_runtime_provider_facade,
+    build_compat_runtime_provider_facade,
 )
 
 
@@ -341,7 +341,7 @@ def describe_runtime_model_surface(
     """Describe the current runtime model surface for caching/observability."""
     config = load_config()
     routing_cfg = getattr(getattr(config, "agents", None), "llm_routing", None)
-    manager = runtime_provider or get_runtime_provider_facade()
+    manager = runtime_provider or build_compat_runtime_provider_facade()
     if not bool(getattr(routing_cfg, "enabled", False)):
         return _runtime_fallback_payload(manager)
 
@@ -390,7 +390,7 @@ def create_runtime_chat_model(
     This delegates to the runtime provider facade, which remains routing-aware
     when `agents.llm_routing.enabled` is enabled.
     """
-    manager = runtime_provider or get_runtime_provider_facade()
+    manager = runtime_provider or build_compat_runtime_provider_facade()
     return manager.get_active_chat_model()
 
 

@@ -248,27 +248,6 @@ def test_runtime_center_overview_routes_use_prebound_query_service() -> None:
     calls: list[str] = []
 
     class _StubRuntimeCenterQueryService:
-        async def get_overview(self, app_state):
-            assert isinstance(app_state, RuntimeCenterAppStateView)
-            calls.append("overview")
-            return RuntimeOverviewResponse(
-                surface=RuntimeCenterSurfaceInfo(
-                    status="state-service",
-                    source="stub-query-service",
-                ),
-                cards=[],
-            )
-
-        async def get_main_brain(self, app_state):
-            assert isinstance(app_state, RuntimeCenterAppStateView)
-            calls.append("main-brain")
-            return RuntimeMainBrainResponse(
-                surface=RuntimeCenterSurfaceInfo(
-                    status="state-service",
-                    source="stub-query-service",
-                ),
-            )
-
         async def get_surface(self, app_state):
             assert isinstance(app_state, RuntimeCenterAppStateView)
             calls.append("surface")
@@ -289,14 +268,14 @@ def test_runtime_center_overview_routes_use_prebound_query_service() -> None:
     app.state.runtime_center_query_service = _StubRuntimeCenterQueryService()
 
     client = TestClient(app)
-    overview_response = client.get("/runtime-center/overview")
     surface_response = client.get("/runtime-center/surface")
+    overview_response = client.get("/runtime-center/overview")
     main_brain_response = client.get("/runtime-center/main-brain")
 
-    assert overview_response.status_code == 200
     assert surface_response.status_code == 200
-    assert main_brain_response.status_code == 200
-    assert calls == ["overview", "surface", "main-brain"]
+    assert overview_response.status_code == 404
+    assert main_brain_response.status_code == 404
+    assert calls == ["surface"]
 
 
 def test_runtime_center_query_service_accepts_prebuilt_state_view() -> None:
@@ -323,12 +302,12 @@ def test_runtime_center_query_service_accepts_prebuilt_state_view() -> None:
     service = RuntimeCenterQueryService(overview_builder=builder)
     runtime_state = RuntimeCenterAppStateView.from_object(app.state)
 
-    overview = asyncio.run(service.get_overview(runtime_state))
-    main_brain = asyncio.run(service.get_main_brain(runtime_state))
+    surface = asyncio.run(service.get_surface(runtime_state))
 
-    assert overview.cards == []
-    assert overview.surface.status == "unavailable"
-    assert main_brain.surface.source == "stub-query-service"
+    assert surface.cards == []
+    assert surface.surface.status == "unavailable"
+    assert surface.main_brain is not None
+    assert surface.main_brain.surface.source == "stub-query-service"
     assert builder.cards_calls == [runtime_state]
     assert builder.main_brain_calls == [runtime_state]
 
@@ -620,7 +599,7 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
     app.state.strategy_memory_service = FakeStrategyMemoryService()
 
     client = TestClient(app)
-    response = client.get("/runtime-center/overview")
+    response = client.get("/runtime-center/surface")
 
     assert response.status_code == 200
     assert response.headers["x-copaw-runtime-surface"] == "runtime-center"
@@ -738,10 +717,10 @@ def test_runtime_center_main_brain_route_does_not_fabricate_strategy_or_carrier_
     app.state.strategy_memory_service = _NoStrategyMemoryService()
 
     client = TestClient(app)
-    response = client.get("/runtime-center/main-brain")
+    response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
     assert payload["meta"]["industry_instance_id"] == "industry-v1-ops"
     assert payload["strategy"] == {}
     assert payload["carrier"] == {}
@@ -760,10 +739,10 @@ def test_runtime_center_main_brain_route_exposes_industry_stats():
     app.state.strategy_memory_service = FakeStrategyMemoryService()
 
     client = TestClient(app)
-    response = client.get("/runtime-center/main-brain")
+    response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
     assert payload["surface"]["status"] == "state-service"
     assert payload["strategy"]["strategy_id"] == "strategy:industry:industry-v1-ops:copaw-agent-runner"
     assert payload["carrier"]["industry_instance_id"] == "industry-v1-ops"
@@ -805,10 +784,10 @@ def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
     app.state.strategy_memory_service = FakeStrategyMemoryService()
 
     client = TestClient(app)
-    response = client.get("/runtime-center/main-brain")
+    response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
     cognition = payload["report_cognition"]
 
     assert cognition["needs_replan"] is True
@@ -915,10 +894,10 @@ def test_runtime_center_main_brain_route_exposes_unified_operator_sections():
         return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
         create=True,
     ):
-        response = client.get("/runtime-center/main-brain")
+        response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
 
     assert payload["governance"]["route"] == "/api/runtime-center/governance/status"
     assert payload["governance"]["pending_decisions"] == 0
@@ -1027,10 +1006,10 @@ def test_runtime_center_main_brain_route_prefers_canonical_latest_recovery_repor
         return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
         create=True,
     ):
-        response = client.get("/runtime-center/main-brain")
+        response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
     assert payload["recovery"]["reason"] == "runtime-recovery"
     assert payload["recovery"]["source"] == "latest"
     assert payload["recovery"]["pending_decisions"] == 1
@@ -1053,7 +1032,7 @@ def test_runtime_center_overview_capabilities_card_exposes_skill_mcp_governance_
     app.state.prediction_service = FakePredictionService()
 
     client = TestClient(app)
-    response = client.get("/runtime-center/overview")
+    response = client.get("/runtime-center/surface")
 
     assert response.status_code == 200
     payload = response.json()
@@ -1096,10 +1075,10 @@ def test_runtime_center_main_brain_route_exposes_query_runtime_entropy_contract(
     )
 
     client = TestClient(app)
-    response = client.get("/runtime-center/main-brain")
+    response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
     assert payload["governance"]["query_runtime_entropy"] == expected_entropy
     assert payload["governance"]["sidecar_memory"] == expected_entropy["sidecar_memory"]
     assert payload["governance"]["query_runtime_entropy"]["runtime_entropy"]["status"] == "degraded"
@@ -1149,10 +1128,10 @@ def test_runtime_center_main_brain_route_exposes_compaction_visibility_from_quer
     )
 
     client = TestClient(app)
-    response = client.get("/runtime-center/main-brain")
+    response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
     entropy = payload["governance"]["query_runtime_entropy"]
     assert entropy["compaction_state"] == {
         "mode": "microcompact",
@@ -1209,10 +1188,10 @@ def test_runtime_center_main_brain_route_exposes_query_runtime_compaction_visibi
     )
 
     client = TestClient(app)
-    response = client.get("/runtime-center/main-brain")
+    response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
     entropy = payload["governance"]["query_runtime_entropy"]
     assert entropy["compaction_state"]["mode"] == "microcompact"
     assert entropy["tool_result_budget"]["remaining_budget"] == 600
@@ -1241,10 +1220,10 @@ def test_runtime_center_main_brain_route_falls_back_to_runtime_contract_sidecar_
     )
 
     client = TestClient(app)
-    response = client.get("/runtime-center/main-brain")
+    response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
     assert payload["governance"]["query_runtime_entropy"] == {}
     assert payload["governance"]["sidecar_memory"] == {
         "status": "available",
@@ -1291,10 +1270,10 @@ def test_runtime_center_main_brain_route_prefers_entropy_sidecar_over_runtime_co
     )
 
     client = TestClient(app)
-    response = client.get("/runtime-center/main-brain")
+    response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
     governance = payload["governance"]
     assert governance["query_runtime_entropy"]["status"] == "degraded"
     assert governance["sidecar_memory"] == {
@@ -1335,10 +1314,10 @@ def test_runtime_center_main_brain_route_exposes_degraded_runtime_contract_sidec
     )
 
     client = TestClient(app)
-    response = client.get("/runtime-center/main-brain")
+    response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
     governance = payload["governance"]
     assert governance["query_runtime_entropy"] == {}
     assert governance["status"] == "blocked"
@@ -1419,13 +1398,18 @@ def test_runtime_center_main_brain_route_exposes_automation_loop_and_supervisor_
         _FakeLoopTask(name="copaw-automation-operating-cycle", done=True),
     ]
     app.state.actor_supervisor = SimpleNamespace(
-        _loop_task=_FakeLoopTask(name="copaw-actor-supervisor", done=False),
-        _poll_interval_seconds=1.25,
-        _agent_tasks={
-            "agent-1": _FakeLoopTask(name="copaw-actor:agent-1", done=False),
-            "agent-2": _FakeLoopTask(name="copaw-actor:agent-2", done=True),
-        },
-        _runtime_repository=_FakeRuntimeRepository(),
+        snapshot=lambda: {
+            "available": True,
+            "status": "degraded",
+            "running": True,
+            "poll_interval_seconds": 1.25,
+            "loop_task_name": "copaw-actor-supervisor",
+            "active_agent_run_count": 1,
+            "blocked_runtime_count": 1,
+            "recent_failure_count": 1,
+            "last_failure_at": "2026-04-02T10:00:00+00:00",
+            "last_failure_type": "RuntimeError",
+        }
     )
 
     client = TestClient(app)
@@ -1434,10 +1418,10 @@ def test_runtime_center_main_brain_route_exposes_automation_loop_and_supervisor_
         return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
         create=True,
     ):
-        response = client.get("/runtime-center/main-brain")
+        response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
 
     assert payload["automation"]["loop_count"] == 2
     assert payload["automation"]["active_loop_count"] == 1
@@ -1538,10 +1522,10 @@ def test_runtime_center_main_brain_route_exposes_automation_loop_snapshots():
         return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
         create=True,
     ):
-        response = client.get("/runtime-center/main-brain")
+        response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
     host_recovery = payload["automation"]["loops"][0]
     operating_cycle = payload["automation"]["loops"][1]
 
@@ -1559,6 +1543,63 @@ def test_runtime_center_main_brain_route_exposes_automation_loop_snapshots():
     assert operating_cycle["last_error_summary"] == "planner timeout"
     assert operating_cycle["submit_count"] == 3
     assert operating_cycle["consecutive_failures"] == 2
+
+
+def test_runtime_center_main_brain_route_prefers_public_runtime_snapshots():
+    class _AutomationSurface:
+        def overview_snapshot(self) -> list[dict[str, object]]:
+            return [
+                {
+                    "name": "copaw-automation-operating-cycle",
+                    "status": "running",
+                    "task_name": "operating-cycle",
+                    "loop_phase": "submitting",
+                    "health_status": "active",
+                    "submit_count": 4,
+                }
+            ]
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.cron_manager = FakeCronManager([make_job("sched-1")])
+    app.state.automation_tasks = _AutomationSurface()
+    app.state.actor_supervisor = SimpleNamespace(
+        snapshot=lambda: {
+            "available": True,
+            "status": "active",
+            "running": True,
+            "poll_interval_seconds": 2.5,
+            "active_agent_run_count": 2,
+            "blocked_runtime_count": 0,
+            "recent_failure_count": 0,
+            "last_failure_at": None,
+            "last_failure_type": None,
+        }
+    )
+
+    client = TestClient(app)
+    with patch(
+        "copaw.app.runtime_center.overview_cards.get_heartbeat_config",
+        return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
+        create=True,
+    ):
+        response = client.get("/runtime-center/surface?sections=main_brain")
+
+    assert response.status_code == 200
+    payload = response.json()["main_brain"]
+    assert payload["automation"]["loop_count"] == 1
+    assert payload["automation"]["active_loop_count"] == 1
+    assert payload["automation"]["loops"][0]["submit_count"] == 4
+    assert payload["automation"]["supervisor"]["poll_interval_seconds"] == 2.5
+    assert payload["automation"]["supervisor"]["active_agent_run_count"] == 2
 
 
 def test_runtime_center_main_brain_route_handles_object_schedule_summaries():
@@ -1579,10 +1620,10 @@ def test_runtime_center_main_brain_route_handles_object_schedule_summaries():
         return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
         create=True,
     ):
-        response = client.get("/runtime-center/main-brain")
+        response = client.get("/runtime-center/surface?sections=main_brain")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["main_brain"]
     assert payload["automation"]["schedule_count"] == 1
     assert payload["automation"]["active_schedule_count"] == 1
     assert payload["automation"]["paused_schedule_count"] == 0
@@ -1718,7 +1759,7 @@ def test_runtime_center_overview_governance_uses_canonical_host_twin_summary_for
     app.state.routine_service = FakeRoutineService()
 
     client = TestClient(app)
-    response = client.get("/runtime-center/overview")
+    response = client.get("/runtime-center/surface")
 
     assert response.status_code == 200
     cards = {card["key"]: card for card in response.json()["cards"]}
@@ -1771,7 +1812,7 @@ def test_runtime_center_overview_governance_exposes_canonical_execution_diagnost
     app.state.routine_service = FakeRoutineService()
 
     client = TestClient(app)
-    response = client.get("/runtime-center/overview")
+    response = client.get("/runtime-center/surface")
 
     assert response.status_code == 200
     cards = {card["key"]: card for card in response.json()["cards"]}
@@ -1839,7 +1880,7 @@ def test_runtime_center_overview_returns_unavailable_cards_without_backing_state
     app.state.learning_service = FakeLearningService()
     client = TestClient(app)
 
-    response = client.get("/runtime-center/overview")
+    response = client.get("/runtime-center/surface")
 
     assert response.status_code == 200
     payload = response.json()
@@ -1915,7 +1956,7 @@ def test_runtime_center_overview_prefers_limited_list_reads() -> None:
     app.state.learning_service = FakeLearningService()
 
     client = TestClient(app)
-    response = client.get("/runtime-center/overview")
+    response = client.get("/runtime-center/surface")
 
     assert response.status_code == 200
     assert state_query.calls == [5]
@@ -3392,7 +3433,7 @@ def test_cron_exposes_runtime_center_surface_headers():
     cron_response = client.get("/cron/jobs")
     assert cron_response.status_code == 200
     assert cron_response.headers["x-copaw-runtime-surface"] == "cron"
-    assert cron_response.headers["x-copaw-runtime-overview"] == "/api/runtime-center/overview"
+    assert cron_response.headers["x-copaw-runtime-overview"] == "/api/runtime-center/surface"
 
 
 def test_runtime_center_schedule_control_endpoints(tmp_path) -> None:

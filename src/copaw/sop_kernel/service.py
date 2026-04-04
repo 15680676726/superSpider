@@ -12,7 +12,7 @@ from ..state.repositories import (
     SqliteFixedSopTemplateRepository,
     SqliteWorkflowRunRepository,
 )
-from ..app.runtime_center.task_review_projection import (
+from ..app.runtime_center.execution_runtime_projection import (
     build_host_twin_summary,
     host_twin_summary_ready,
     resolve_canonical_host_identity,

@@ -125,6 +125,29 @@ class AutomationTaskGroup(list[asyncio.Task[None]]):
                 snapshots[state.task_name] = state.snapshot()
         return snapshots
 
+    def overview_snapshot(self) -> list[dict[str, object]]:
+        snapshots = self.loop_snapshots()
+        payloads: list[dict[str, object]] = []
+        for index, task in enumerate(self, start=1):
+            task_name = task.get_name() if callable(getattr(task, "get_name", None)) else None
+            if not isinstance(task_name, str) or not task_name:
+                task_name = f"automation-loop-{index}"
+            snapshot = snapshots.get(task_name.removeprefix("copaw-automation-"), {})
+            if task.cancelled():
+                status = "cancelled"
+            elif task.done():
+                status = "completed"
+            else:
+                status = "running"
+            payloads.append(
+                {
+                    "name": task_name,
+                    "status": status,
+                    **snapshot,
+                }
+            )
+        return payloads
+
 
 def _automation_task_id(
     *,

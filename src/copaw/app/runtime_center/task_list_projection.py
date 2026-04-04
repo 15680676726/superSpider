@@ -8,7 +8,8 @@ from typing import Any
 from ...kernel.task_execution_projection import resolve_visible_execution_phase
 from ...kernel.persistence import KernelTaskStore, decode_kernel_task_metadata
 from ...utils.runtime_routes import task_route
-from .task_review_projection import first_non_empty, trace_id_from_kernel_meta
+from .projection_utils import first_non_empty
+from .task_review_projection import trace_id_from_kernel_meta
 
 WorkContextLoader = Callable[[str | None], dict[str, object] | None]
 TaskRouteBuilder = Callable[[str], str]

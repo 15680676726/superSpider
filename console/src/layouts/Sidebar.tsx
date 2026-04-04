@@ -14,7 +14,6 @@ import {
   BarChart3,
   BookOpen,
   Box,
-  Briefcase,
   Building2,
   CalendarDays,
   Cpu,
@@ -48,7 +47,6 @@ const BASE_OPEN_KEYS = ["chat-group", "runtime-group", "settings-group"];
 const KEY_TO_PATH: Record<string, string> = {
   chat: "/chat",
   "runtime-center": "/runtime-center",
-  agents: "/agents",
   industry: "/industry",
   "capability-market": "/capability-market",
   knowledge: "/knowledge",
@@ -66,7 +64,6 @@ const KEY_TO_PATH: Record<string, string> = {
 const MENU_PARENT_PATHS: Record<string, string[]> = {
   chat: ["chat-group"],
   "runtime-center": ["runtime-group"],
-  agents: ["runtime-group"],
   industry: ["runtime-group"],
   "capability-market": ["runtime-group", "build-subgroup"],
   knowledge: ["runtime-group", "insight-subgroup"],
@@ -144,11 +141,6 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           key: "runtime-center",
           label: "主脑驾驶舱",
           icon: <Radar size={16} />,
-        },
-        {
-          key: "agents",
-          label: "执行位",
-          icon: <Briefcase size={16} />,
         },
         {
           key: "industry",

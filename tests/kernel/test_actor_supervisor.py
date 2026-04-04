@@ -204,3 +204,54 @@ def test_actor_supervisor_run_loop_survives_poll_cycle_exception(tmp_path) -> No
         and payload["error"] == "poll exploded"
         for topic, action, payload in event_bus.events
     )
+
+
+def test_actor_supervisor_exposes_public_snapshot_for_runtime_center(tmp_path) -> None:
+    runtime_repository = _build_runtime_repository(tmp_path)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-1",
+            actor_key="industry:test:agent-1",
+            actor_fingerprint="fp-agent-1",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="blocked",
+            metadata={
+                "supervisor_last_failure_at": "2026-04-04T00:00:00+00:00",
+                "supervisor_last_failure_type": "RuntimeError",
+            },
+        )
+    )
+    worker = _RecordingWorker()
+    supervisor = ActorSupervisor(
+        runtime_repository=runtime_repository,
+        mailbox_service=None,  # type: ignore[arg-type]
+        worker=worker,  # type: ignore[arg-type]
+        poll_interval_seconds=1.25,
+    )
+
+    async def _run() -> dict[str, object]:
+        loop_task = asyncio.create_task(asyncio.sleep(0.2), name="copaw-actor-supervisor")
+        agent_task = asyncio.create_task(asyncio.sleep(0.2), name="copaw-actor:agent-1")
+        supervisor._loop_task = loop_task
+        supervisor._agent_tasks["agent-1"] = agent_task
+        try:
+            await asyncio.sleep(0)
+            return supervisor.snapshot()
+        finally:
+            loop_task.cancel()
+            agent_task.cancel()
+            await asyncio.gather(loop_task, agent_task, return_exceptions=True)
+            supervisor._agent_tasks.clear()
+            supervisor._loop_task = None
+
+    snapshot = asyncio.run(_run())
+
+    assert snapshot["available"] is True
+    assert snapshot["status"] == "degraded"
+    assert snapshot["running"] is True
+    assert snapshot["poll_interval_seconds"] == 1.25
+    assert snapshot["active_agent_run_count"] == 1
+    assert snapshot["blocked_runtime_count"] == 1
+    assert snapshot["recent_failure_count"] == 1
+    assert snapshot["last_failure_type"] == "RuntimeError"

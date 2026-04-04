@@ -14,11 +14,9 @@ from ...providers.provider_admin_service import ProviderAdminService
 from ...providers.provider_manager import (
     ActiveModelsInfo,
     ProviderFallbackConfig,
-    ProviderManager,
 )
 from ...providers.runtime_provider_facade import (
     ProviderRuntimeSurface,
-    get_runtime_provider_facade,
 )
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -32,17 +30,10 @@ def get_runtime_provider(request: Request) -> ProviderRuntimeSurface:
     runtime_provider = getattr(request.app.state, "runtime_provider", None)
     if runtime_provider is not None:
         return runtime_provider
-    return get_runtime_provider_facade()
-
-
-def _get_provider_manager_for_admin(request: Request) -> ProviderManager:
-    runtime_provider = getattr(request.app.state, "runtime_provider", None)
-    provider_manager = getattr(runtime_provider, "provider_manager", None)
-    if isinstance(provider_manager, ProviderManager):
-        return provider_manager
-    if isinstance(runtime_provider, ProviderManager):
-        return runtime_provider
-    return ProviderManager.get_instance()
+    raise HTTPException(
+        status_code=500,
+        detail="runtime_provider is not attached to app.state",
+    )
 
 
 def get_provider_admin_service(request: Request) -> object:
@@ -50,7 +41,10 @@ def get_provider_admin_service(request: Request) -> object:
     service = getattr(request.app.state, "provider_admin_service", None)
     if service is not None:
         return service
-    return ProviderAdminService(_get_provider_manager_for_admin(request))
+    raise HTTPException(
+        status_code=500,
+        detail="provider admin surface is not attached to app.state",
+    )
 
 
 def _clone_provider_for_test(provider: object) -> object:
@@ -94,10 +88,9 @@ class AddModelRequest(BaseModel):
     summary="List all providers",
 )
 async def list_all_providers(
-    request: Request,
+    runtime_provider: ProviderRuntimeSurface = Depends(get_runtime_provider),
 ) -> List[ProviderInfo]:
-    manager = _get_provider_manager_for_admin(request)
-    return await manager.list_provider_info()
+    return await runtime_provider.list_provider_info()
 
 
 @admin_router.put(
@@ -301,8 +294,7 @@ async def delete_custom_provider_endpoint(
             raise ValueError(f"Custom Provider '{provider_id}' not found")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    manager = _get_provider_manager_for_admin(request)
-    return await manager.list_provider_info()
+    return await get_runtime_provider(request).list_provider_info()
 
 
 @admin_router.post(

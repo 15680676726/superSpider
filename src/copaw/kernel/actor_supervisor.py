@@ -71,6 +71,62 @@ class ActorSupervisor:
     def mailbox_service(self) -> ActorMailboxService:
         return self._mailbox_service
 
+    @staticmethod
+    def _task_status(task: asyncio.Task[Any] | None) -> str:
+        if task is None:
+            return "unavailable"
+        if task.cancelled():
+            return "cancelled"
+        if task.done():
+            return "completed"
+        return "running"
+
+    def snapshot(self) -> dict[str, object]:
+        loop_status = self._task_status(self._loop_task)
+        running = loop_status == "running"
+        active_agent_run_count = sum(
+            1
+            for task in self._agent_tasks.values()
+            if self._task_status(task) == "running"
+        )
+        blocked_runtime_count = 0
+        recent_failure_count = 0
+        last_failure_at: str | None = None
+        last_failure_type: str | None = None
+        for runtime in self._runtime_repository.list_runtimes(limit=None):
+            if runtime.runtime_status == "blocked":
+                blocked_runtime_count += 1
+            metadata = dict(runtime.metadata or {})
+            failure_at = metadata.get("supervisor_last_failure_at")
+            if isinstance(failure_at, str) and failure_at:
+                recent_failure_count += 1
+                if last_failure_at is None or failure_at > last_failure_at:
+                    last_failure_at = failure_at
+                    failure_type = metadata.get("supervisor_last_failure_type")
+                    last_failure_type = (
+                        str(failure_type) if failure_type is not None else None
+                    )
+
+        status = "idle"
+        if recent_failure_count > 0 or blocked_runtime_count > 0:
+            status = "degraded"
+        elif running or active_agent_run_count > 0:
+            status = "active"
+
+        return {
+            "available": True,
+            "status": status,
+            "running": running,
+            "poll_interval_seconds": self._poll_interval_seconds,
+            "loop_task_name": self._loop_task.get_name() if self._loop_task is not None else None,
+            "loop_task_status": loop_status,
+            "active_agent_run_count": active_agent_run_count,
+            "blocked_runtime_count": blocked_runtime_count,
+            "recent_failure_count": recent_failure_count,
+            "last_failure_at": last_failure_at,
+            "last_failure_type": last_failure_type,
+        }
+
     async def run_agent_once(self, agent_id: str) -> bool:
         lock = self._agent_locks.setdefault(agent_id, asyncio.Lock())
         if lock.locked():

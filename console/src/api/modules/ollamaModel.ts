@@ -9,7 +9,7 @@ export const ollamaModelApi = {
   listOllamaModels: () => request<OllamaModelResponse[]>("/ollama-models"),
 
   downloadOllamaModel: (body: OllamaDownloadRequest) =>
-    request<OllamaDownloadTaskResponse>("/ollama-models/download", {
+    request<OllamaDownloadTaskResponse>("/providers/admin/ollama-models/download", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -19,13 +19,13 @@ export const ollamaModelApi = {
 
   cancelOllamaDownload: (taskId: string) =>
     request<{ status: string; task_id: string }>(
-      `/ollama-models/download/${encodeURIComponent(taskId)}`,
+      `/providers/admin/ollama-models/download/${encodeURIComponent(taskId)}`,
       { method: "DELETE" },
     ),
 
   deleteOllamaModel: (name: string) =>
     request<{ status: string; name: string }>(
-      `/ollama-models/${encodeURIComponent(name)}`,
+      `/providers/admin/ollama-models/${encodeURIComponent(name)}`,
       { method: "DELETE" },
     ),
 };

@@ -26,13 +26,13 @@ from ..download_task_store import (
     cancel_task,
 )
 
-from ...providers.provider import ModelInfo
 from ...providers.provider_manager import PROVIDER_OLLAMA
-from ...providers.runtime_provider_facade import get_runtime_provider_facade
+from ...providers.provider_admin_service import ProviderAdminService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ollama-models", tags=["ollama-models"])
+admin_router = APIRouter(prefix="/providers/admin/ollama-models", tags=["provider-admin"])
 
 _background_tasks: Dict[str, asyncio.Task] = {}
 _background_tasks_lock = asyncio.Lock()
@@ -96,13 +96,26 @@ def _get_runtime_provider(request: Request):
     runtime_provider = getattr(request.app.state, "runtime_provider", None)
     if runtime_provider is not None:
         return runtime_provider
-    return get_runtime_provider_facade()
+    raise HTTPException(
+        status_code=500,
+        detail="runtime_provider is not attached to app.state",
+    )
+
+
+def _get_provider_admin_service(request: Request) -> ProviderAdminService | object:
+    service = getattr(request.app.state, "provider_admin_service", None)
+    if service is not None:
+        return service
+    raise HTTPException(
+        status_code=500,
+        detail="provider_admin_service is not attached to app.state",
+    )
 
 
 async def _run_ollama_download_in_background(
     task_id: str,
     model_name: str,
-    ollama_provider,
+    provider_admin_service: ProviderAdminService | object,
 ) -> None:
     task = await get_task(task_id)
     if task and task.status == DownloadTaskStatus.CANCELLED:
@@ -113,9 +126,7 @@ async def _run_ollama_download_in_background(
     await update_status(task_id, DownloadTaskStatus.DOWNLOADING)
 
     try:
-        await ollama_provider.add_model(
-            ModelInfo(id=model_name, name=model_name),
-        )
+        await provider_admin_service.add_ollama_model(name=model_name)
 
         task = await get_task(task_id)
         if task and task.status == DownloadTaskStatus.CANCELLED:
@@ -198,7 +209,7 @@ async def list_ollama_models(
     ]
 
 
-@router.post(
+@admin_router.post(
     "/download",
     response_model=OllamaDownloadTaskResponse,
     summary="Start a background Ollama model pull",
@@ -212,9 +223,7 @@ async def download_ollama_model(
     Returns a task_id immediately; the frontend can poll /download-status
     to track progress.
     """
-    ollama_provider = _get_runtime_provider(request).get_provider(
-        PROVIDER_OLLAMA.id,
-    )
+    provider_admin_service = _get_provider_admin_service(request)
 
     await clear_completed(backend=PROVIDER_OLLAMA.id)
     task = await create_task(
@@ -228,7 +237,7 @@ async def download_ollama_model(
         _run_ollama_download_in_background(
             task_id=task.task_id,
             model_name=body.name,
-            ollama_provider=ollama_provider,
+            provider_admin_service=provider_admin_service,
         ),
         name=f"ollama-download-{task.task_id}",
     )
@@ -248,7 +257,7 @@ async def get_ollama_download_status() -> List[OllamaDownloadTaskResponse]:
     return [_task_to_response(t) for t in tasks]
 
 
-@router.delete(
+@admin_router.delete(
     "/download/{task_id}",
     summary="Cancel an Ollama download task",
 )
@@ -271,7 +280,7 @@ async def cancel_ollama_download(task_id: str) -> dict:
     return {"status": "cancelled", "task_id": task_id}
 
 
-@router.delete(
+@admin_router.delete(
     "/{name:path}",
     summary="Delete an Ollama model",
 )
@@ -280,12 +289,10 @@ async def delete_ollama_model(
     name: str,
 ) -> dict:
     """Delete an Ollama model via the SDK."""
-    ollama_provider = _get_runtime_provider(request).get_provider(
-        PROVIDER_OLLAMA.id,
-    )
+    provider_admin_service = _get_provider_admin_service(request)
 
     try:
-        await ollama_provider.delete_model(model_id=name)  # type: ignore
+        await provider_admin_service.delete_ollama_model(name=name)
     except ImportError as exc:
         raise HTTPException(
             status_code=501,

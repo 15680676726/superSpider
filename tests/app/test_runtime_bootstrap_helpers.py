@@ -130,6 +130,7 @@ def _build_bootstrap() -> RuntimeBootstrap:
         runtime_event_bus=object(),
         runtime_health_service=object(),
         runtime_provider=object(),
+        provider_admin_service=object(),
         state_query_service=object(),
         evidence_query_service=object(),
         human_assist_task_service=object(),
@@ -254,6 +255,7 @@ def test_attach_runtime_state_binds_bootstrap_and_manager_stack() -> None:
     assert app.state.capability_service is bootstrap.capability_service
     assert app.state.runtime_health_service is bootstrap.runtime_health_service
     assert app.state.runtime_provider is bootstrap.runtime_provider
+    assert app.state.provider_admin_service is bootstrap.provider_admin_service
     assert not hasattr(app.state, "provider_manager")
     assert app.state.channel_manager is manager_stack.channel_manager
     assert app.state.job_repository is manager_stack.job_repository
@@ -341,6 +343,7 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
     assert "memory_manager" not in bindings
     assert "provider_manager" not in bindings
     assert bindings["runtime_provider"] is bootstrap.runtime_provider
+    assert bindings["provider_admin_service"] is bootstrap.provider_admin_service
     assert bindings["schedule_repository"] is bootstrap.repositories.schedule_repository
     assert (
         bindings["human_assist_task_repository"]
@@ -773,6 +776,7 @@ def test_runtime_bootstrap_formal_contract_exposes_runtime_provider_only() -> No
     bootstrap = _build_bootstrap()
 
     assert bootstrap.runtime_provider is not None
+    assert bootstrap.provider_admin_service is not None
     assert not hasattr(bootstrap, "provider_manager")
 
 

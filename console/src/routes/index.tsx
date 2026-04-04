@@ -75,7 +75,7 @@ const PATHNAME_TO_KEY: Array<[string, string]> = [
   ["/settings/models", "models"],
   ["/settings/environments", "environments"],
   ["/settings/agent-config", "agent-config"],
-  ["/agents", "agents"],
+  ["/agents", "runtime-center"],
   ["/industry", "industry"],
   ["/predictions", "predictions"],
   ["/knowledge", "knowledge"],

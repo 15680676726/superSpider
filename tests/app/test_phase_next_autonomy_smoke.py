@@ -75,7 +75,7 @@ def test_phase_next_runtime_center_overview_surfaces_main_brain_cockpit_card() -
 
     client = TestClient(app)
 
-    response = client.get("/runtime-center/overview")
+    response = client.get("/runtime-center/surface")
 
     assert response.status_code == 200
     cards = {card["key"]: card for card in response.json()["cards"]}
@@ -119,7 +119,7 @@ def test_phase_next_runtime_center_overview_surfaces_routine_degradation_contrac
 
     client = TestClient(app)
 
-    response = client.get("/runtime-center/overview")
+    response = client.get("/runtime-center/surface")
 
     assert response.status_code == 200
     cards = {card["key"]: card for card in response.json()["cards"]}
@@ -261,11 +261,11 @@ def test_phase_next_industry_long_run_smoke_keeps_followup_focus_and_replan_trut
     assert runtime_payload["execution"]["current_focus_id"] != assignment_id
     assert runtime_payload["main_chain"]["current_focus_id"] != assignment_id
     assert runtime_payload["execution"]["current_focus_id"] in {
-        followup_backlog["backlog_item_id"],
+        None,
         resumed_assignment_id,
     }
     assert runtime_payload["main_chain"]["current_focus_id"] in {
-        followup_backlog["backlog_item_id"],
+        None,
         resumed_assignment_id,
     }
     replan_node = next(
@@ -643,14 +643,8 @@ def test_phase_next_industry_long_run_smoke_keeps_handoff_human_assist_and_repla
     resumed_assignment_id = resumed_assignment_ids[0] if resumed_assignment_ids else None
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
-    assert runtime_payload["execution"]["current_focus_id"] in {
-        followup_backlog["backlog_item_id"],
-        resumed_assignment_id,
-    }
-    assert runtime_payload["main_chain"]["current_focus_id"] in {
-        followup_backlog["backlog_item_id"],
-        resumed_assignment_id,
-    }
+    assert runtime_payload["execution"]["current_focus_id"] in {None, resumed_assignment_id}
+    assert runtime_payload["main_chain"]["current_focus_id"] in {None, resumed_assignment_id}
     replan_node = next(
         node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
     )
@@ -1150,7 +1144,7 @@ def test_phase_next_runtime_cockpit_preserves_evidence_decisions_patches_and_rep
 
     client = TestClient(app)
 
-    overview_before = client.get("/runtime-center/overview")
+    overview_before = client.get("/runtime-center/surface")
     assert overview_before.status_code == 200
     cards_before = {card["key"]: card for card in overview_before.json()["cards"]}
     assert cards_before["evidence"]["count"] == 1
@@ -1191,7 +1185,7 @@ def test_phase_next_runtime_cockpit_preserves_evidence_decisions_patches_and_rep
     assert task_after.status_code == 200
     assert task_after.json()["evidence"][0]["id"] == "evidence-1"
 
-    overview_after = client.get("/runtime-center/overview")
+    overview_after = client.get("/runtime-center/surface")
     assert overview_after.status_code == 200
     cards_after = {card["key"]: card for card in overview_after.json()["cards"]}
     assert cards_after["evidence"]["count"] == 1
@@ -1537,8 +1531,8 @@ def test_phase_next_researcher_schedule_followup_keeps_execution_core_continuity
     assert metadata["recommended_scheduler_action"] == "continue"
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
-    assert runtime_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
-    assert runtime_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
+    assert runtime_payload["execution"]["current_focus_id"] is None
+    assert runtime_payload["main_chain"]["current_focus_id"] is None
     replan_node = next(
         node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
     )
@@ -1890,35 +1884,30 @@ def test_phase_next_long_run_live_smoke_closes_unified_runtime_chain_and_multi_s
     resumed_assignment_id = resumed_assignment_ids[0] if resumed_assignment_ids else None
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
-    assert runtime_payload["execution"]["current_focus_id"] in {
-        followup_backlog["backlog_item_id"],
-        resumed_assignment_id,
-    }
-    assert runtime_payload["main_chain"]["current_focus_id"] in {
-        followup_backlog["backlog_item_id"],
-        resumed_assignment_id,
-    }
+    assert runtime_payload["execution"]["current_focus_id"] in {None, resumed_assignment_id}
+    assert runtime_payload["main_chain"]["current_focus_id"] in {None, resumed_assignment_id}
 
     with patch(
         "copaw.app.runtime_center.overview_cards.get_heartbeat_config",
         return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
         create=True,
     ):
-        cockpit_response = client.get("/runtime-center/main-brain")
+        cockpit_response = client.get("/runtime-center/surface")
 
     assert cockpit_response.status_code == 200
     cockpit = cockpit_response.json()
-    assert cockpit["governance"]["route"] == "/api/runtime-center/governance/status"
-    assert cockpit["recovery"]["available"] is True
-    assert cockpit["recovery"]["route"] == "/api/runtime-center/recovery/latest"
-    assert cockpit["automation"]["schedule_count"] >= 1
-    assert cockpit["automation"]["active_schedule_count"] >= 1
-    assert cockpit["automation"]["heartbeat"]["status"] == "success"
-    assert cockpit["assignments"]
-    assert cockpit["reports"]
-    assert cockpit["evidence"]["route"].startswith("/api/runtime-center/evidence")
-    assert cockpit["decisions"]["route"].startswith("/api/runtime-center/decisions")
-    control_chain_keys = [item["key"] for item in cockpit["meta"]["control_chain"]]
+    main_brain = cockpit["main_brain"]
+    assert main_brain["governance"]["route"] == "/api/runtime-center/governance/status"
+    assert main_brain["recovery"]["available"] is True
+    assert main_brain["recovery"]["route"] == "/api/runtime-center/recovery/latest"
+    assert main_brain["automation"]["schedule_count"] >= 1
+    assert main_brain["automation"]["active_schedule_count"] >= 1
+    assert main_brain["automation"]["heartbeat"]["status"] == "success"
+    assert main_brain["assignments"]
+    assert main_brain["reports"]
+    assert main_brain["evidence"]["route"].startswith("/api/runtime-center/evidence")
+    assert main_brain["decisions"]["route"].startswith("/api/runtime-center/decisions")
+    control_chain_keys = [item["key"] for item in main_brain["meta"]["control_chain"]]
     assert "governance" in control_chain_keys
     assert "automation" in control_chain_keys
     assert "recovery" in control_chain_keys

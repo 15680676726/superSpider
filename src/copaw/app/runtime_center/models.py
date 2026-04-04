@@ -153,6 +153,29 @@ class RuntimeCenterAppStateView:
             startup_recovery_summary=getattr(app_state, "startup_recovery_summary", None),
         )
 
+    def resolve_recovery_summary(self) -> tuple[Any | None, str]:
+        if self.latest_recovery_report is not None:
+            return self.latest_recovery_report, "latest"
+        if self.startup_recovery_summary is not None:
+            return self.startup_recovery_summary, "startup"
+        return None, "latest"
+
+    def automation_overview_snapshot(self) -> list[dict[str, Any]]:
+        getter = getattr(self.automation_tasks, "overview_snapshot", None)
+        if callable(getter):
+            payload = getter()
+            if isinstance(payload, list):
+                return [dict(item) for item in payload if isinstance(item, dict)]
+        return []
+
+    def actor_supervisor_snapshot(self) -> dict[str, Any] | None:
+        getter = getattr(self.actor_supervisor, "snapshot", None)
+        if callable(getter):
+            payload = getter()
+            if isinstance(payload, dict):
+                return dict(payload)
+        return None
+
 
 class RuntimeMainBrainSection(BaseModel):
     """Compact section payload used by the dedicated main-brain cockpit."""

@@ -334,21 +334,21 @@ def test_runtime_canonical_flow_covers_identity_chat_execution_and_runtime_reads
     runtime_detail = client.get(f"/runtime-center/industry/{instance_id}")
     assert runtime_detail.status_code == 200
     runtime_payload = runtime_detail.json()
-    assert runtime_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
-    assert runtime_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
-    assert runtime_payload["execution"]["current_focus"] == followup_backlog["title"]
-    assert runtime_payload["main_chain"]["current_focus"] == followup_backlog["title"]
+    assert runtime_payload["execution"]["current_focus_id"] is None
+    assert runtime_payload["main_chain"]["current_focus_id"] is None
+    assert runtime_payload["execution"]["current_focus"] is None
+    assert runtime_payload["main_chain"]["current_focus"] is None
     assert followup_backlog["metadata"]["work_context_id"] == work_context_id
 
-    main_brain = client.get("/runtime-center/main-brain")
+    main_brain = client.get("/runtime-center/surface")
     assert main_brain.status_code == 200
-    main_brain_payload = main_brain.json()
+    main_brain_payload = main_brain.json()["main_brain"]
     assert main_brain_payload["carrier"]["industry_instance_id"] == instance_id
     assert main_brain_payload["meta"]["industry_instance_id"] == instance_id
     assert main_brain_payload["assignments"]
     assert main_brain_payload["reports"]
 
-    overview = client.get("/runtime-center/overview")
+    overview = client.get("/runtime-center/surface")
     assert overview.status_code == 200
     cards = {card["key"]: card for card in overview.json()["cards"]}
     assert cards["industry"]["count"] >= 1

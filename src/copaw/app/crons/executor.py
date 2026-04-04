@@ -5,7 +5,7 @@ import asyncio
 import logging
 from typing import Any, Dict, TYPE_CHECKING
 
-from ..runtime_center.task_review_projection import resolve_canonical_host_identity
+from ..runtime_center.execution_runtime_projection import resolve_canonical_host_identity
 from ..runtime_commands import infer_turn_capability_and_risk
 from ...kernel.runtime_coordination import build_durable_runtime_coordination
 from .models import CronJobSpec

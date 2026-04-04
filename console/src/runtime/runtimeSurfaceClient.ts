@@ -1,5 +1,7 @@
 import { request } from "../api";
 
+export type RuntimeSurfaceSection = "cards" | "main_brain";
+
 export function normalizeRuntimePath(path: string): string {
   if (path.startsWith("/api/")) {
     return path.slice(4);
@@ -24,12 +26,13 @@ export function buildRuntimeConversationsPath(threadId: string): string {
   return `/runtime-center/conversations/${encodeURIComponent(threadId)}`;
 }
 
-export async function requestRuntimeOverview<T>(): Promise<T> {
-  return request<T>("/runtime-center/overview");
-}
-
-export async function requestRuntimeSurface<T>(): Promise<T> {
-  return request<T>("/runtime-center/surface");
+export async function requestRuntimeSurface<T>(options?: {
+  sections?: RuntimeSurfaceSection[];
+}): Promise<T> {
+  const query = options?.sections?.length
+    ? `?sections=${encodeURIComponent(options.sections.join(","))}`
+    : "";
+  return request<T>(`/runtime-center/surface${query}`);
 }
 
 export async function requestRuntimeRecord<T>(path: string): Promise<T> {
@@ -40,10 +43,6 @@ export async function requestRuntimeBusinessAgents<T>(
   industryInstanceId?: string | null,
 ): Promise<T> {
   return request<T>(buildRuntimeBusinessAgentsPath(industryInstanceId));
-}
-
-export async function requestRuntimeMainBrain<T>(): Promise<T> {
-  return request<T>("/runtime-center/main-brain");
 }
 
 export async function requestRuntimeAgentDetail<T>(agentId: string): Promise<T> {

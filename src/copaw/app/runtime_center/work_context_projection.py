@@ -7,9 +7,9 @@ from typing import Any
 
 from ...kernel.persistence import decode_kernel_task_metadata
 from ...utils.runtime_routes import task_route, work_context_route
+from .chat_thread_projection import extract_chat_thread_payload
+from .projection_utils import first_non_empty
 from .task_review_projection import (
-    extract_chat_thread_payload,
-    first_non_empty,
     serialize_child_rollup,
 )
 

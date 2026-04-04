@@ -164,7 +164,7 @@ def _canonical_host_twin_summary(
     detail_payload: dict[str, object],
     host_twin: dict[str, object],
 ) -> dict[str, object]:
-    from ..app.runtime_center.task_review_projection import (
+    from ..app.runtime_center.execution_runtime_projection import (
         build_host_twin_summary,
         derive_host_twin_continuity_state,
     )

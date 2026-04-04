@@ -3,7 +3,7 @@
 
 from fastapi import Response
 
-RUNTIME_CENTER_OVERVIEW_PATH = "/api/runtime-center/overview"
+RUNTIME_CENTER_OVERVIEW_PATH = "/api/runtime-center/surface"
 RUNTIME_CENTER_SURFACE_VERSION = "runtime-center-v1"
 
 

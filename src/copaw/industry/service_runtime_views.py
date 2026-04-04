@@ -265,44 +265,6 @@ class _IndustryRuntimeViewsMixin:
         ):
             current_backlog = open_backlog_items[0]
             current_backlog_id = _string(current_backlog.get("backlog_item_id"))
-        if current_focus_id is None and current_focus_title is None:
-            if (
-                selected_assignment_id is not None
-                and isinstance(current_assignment, dict)
-                and selected_assignment_id == current_assignment_id
-            ):
-                current_focus_id = current_assignment_id
-                current_focus_title = (
-                    _string(current_assignment.get("title"))
-                    or _string(current_assignment.get("summary"))
-                )
-            elif (
-                selected_backlog_item_id is not None
-                and isinstance(current_backlog, dict)
-                and selected_backlog_item_id == current_backlog_id
-            ):
-                current_focus_id = current_backlog_id
-                current_focus_title = (
-                    _string(current_backlog.get("title"))
-                    or _string(current_backlog.get("summary"))
-                )
-            elif (
-                current_task_id is None
-                and isinstance(current_backlog, dict)
-                and (
-                    current_backlog_is_report_followup
-                    or (
-                        isinstance(latest_writeback, dict)
-                        and current_backlog_id
-                        == _string(latest_writeback.get("backlog_item_id"))
-                    )
-                )
-            ):
-                current_focus_id = current_backlog_id
-                current_focus_title = (
-                    _string(current_backlog.get("title"))
-                    or _string(current_backlog.get("summary"))
-                )
         return {
             "current_assignment": current_assignment,
             "current_assignment_id": current_assignment_id,

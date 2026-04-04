@@ -173,6 +173,7 @@ class RuntimeBootstrap:
     runtime_event_bus: RuntimeEventBus
     runtime_health_service: RuntimeHealthService
     runtime_provider: ProviderRuntimeSurface
+    provider_admin_service: Any
     state_query_service: RuntimeCenterStateQueryService
     evidence_query_service: RuntimeCenterEvidenceQueryService
     human_assist_task_service: HumanAssistTaskService

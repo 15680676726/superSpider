@@ -8,6 +8,7 @@ from .runtime_center_shared_core import *  # noqa: F401,F403
 from ..runtime_center.overview_cards import (
     build_runtime_capability_governance_projection,
 )
+from ..runtime_center.models import RuntimeCenterAppStateView
 from ..runtime_center.recovery_projection import project_latest_recovery_summary
 from ..runtime_chat_stream_events import stream_runtime_chat_events
 
@@ -929,11 +930,9 @@ async def get_latest_recovery_report(
     response: Response,
 ) -> dict[str, object]:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
-    summary = getattr(request.app.state, "latest_recovery_report", None)
-    source = "latest"
-    if summary is None:
-        summary = getattr(request.app.state, "startup_recovery_summary", None)
-        source = "startup"
+    summary, source = RuntimeCenterAppStateView.from_object(
+        request.app.state,
+    ).resolve_recovery_summary()
     if summary is None:
         raise HTTPException(404, detail="Startup recovery summary is not available")
     return project_latest_recovery_summary(summary, source=source)

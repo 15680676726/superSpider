@@ -1576,10 +1576,10 @@ def test_bootstrap_researcher_schedule_report_keeps_main_brain_continuity(
     assert cognitive_surface["continuity"]["work_context_ids"] == [report.work_context_id]
     assert cognitive_surface["continuity"]["control_thread_ids"] == [control_thread_id]
     assert cognitive_surface["continuity"]["environment_refs"] == [environment_ref]
-    assert runtime_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
-    assert runtime_payload["execution"]["current_focus"] == followup_backlog["title"]
-    assert runtime_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
-    assert runtime_payload["main_chain"]["current_focus"] == followup_backlog["title"]
+    assert runtime_payload["execution"]["current_focus_id"] is None
+    assert runtime_payload["execution"]["current_focus"] is None
+    assert runtime_payload["main_chain"]["current_focus_id"] is None
+    assert runtime_payload["main_chain"]["current_focus"] is None
     replan_node = next(
         node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
     )
@@ -1720,7 +1720,7 @@ def test_staffed_assignment_failure_keeps_supervisor_chain_and_replan_truth(
     for agent in runtime_payload.get("agents") or []:
         assert "current_goal_id" not in agent
         assert "current_goal" not in agent
-    assert runtime_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
+    assert runtime_payload["execution"]["current_focus_id"] is None
     replan_node = next(
         node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
     )
@@ -2287,10 +2287,10 @@ def test_report_followup_backlog_wins_next_cycle_over_unrelated_open_backlog_whe
     assert created_assignment.owner_role_id == "execution-core"
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
-    assert runtime_payload["execution"]["current_focus_id"] == followup_backlog["backlog_item_id"]
-    assert runtime_payload["main_chain"]["current_focus_id"] == followup_backlog["backlog_item_id"]
-    assert runtime_payload["execution"]["current_focus"] == followup_backlog["title"]
-    assert runtime_payload["main_chain"]["current_focus"] == followup_backlog["title"]
+    assert runtime_payload["execution"]["current_focus_id"] is None
+    assert runtime_payload["main_chain"]["current_focus_id"] is None
+    assert runtime_payload["execution"]["current_focus"] is None
+    assert runtime_payload["main_chain"]["current_focus"] is None
     replan_node = next(
         node for node in runtime_payload["main_chain"]["nodes"] if node["node_id"] == "replan"
     )
