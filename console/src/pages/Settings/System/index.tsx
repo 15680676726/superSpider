@@ -149,6 +149,26 @@ function localizeCheckSummary(item: SystemSelfCheck["checks"][number]) {
   return item.summary;
 }
 
+const MAINTENANCE_CHECK_NAMES = new Set<string>([
+  "working_dir",
+  "state_store",
+  "evidence_ledger",
+  "provider_active_model",
+  "provider_fallback",
+]);
+
+function isMaintenanceCheck(name: string) {
+  return MAINTENANCE_CHECK_NAMES.has(name);
+}
+
+function summarizeMaintenanceStatus(
+  checks: SystemSelfCheck["checks"],
+): SystemSelfCheck["overall_status"] {
+  if (checks.some((item) => item.status === "fail")) return "fail";
+  if (checks.some((item) => item.status === "warn")) return "warn";
+  return "pass";
+}
+
 export default function SystemSettingsPage() {
   const [overview, setOverview] = useState<SystemOverview | null>(null);
   const [selfCheck, setSelfCheck] = useState<SystemSelfCheck | null>(null);
@@ -166,15 +186,23 @@ export default function SystemSettingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const modelOptions = useMemo(() => providerModelOptions(providers), [providers]);
+  const maintenanceChecks = useMemo(
+    () => selfCheck?.checks.filter((item) => isMaintenanceCheck(item.name)) ?? [],
+    [selfCheck],
+  );
+  const maintenanceOverallStatus = useMemo(
+    () => summarizeMaintenanceStatus(maintenanceChecks),
+    [maintenanceChecks],
+  );
   const localizedChecks = useMemo(
     () =>
-      selfCheck?.checks.map((item) => ({
+      maintenanceChecks.map((item) => ({
         ...item,
         localizedName: localizeCheckName(item.name),
         localizedStatus: localizeSystemStatus(item.status),
         localizedSummary: localizeCheckSummary(item),
-      })) ?? [],
-    [selfCheck],
+      })),
+    [maintenanceChecks],
   );
 
   const loadAll = async (mode: "initial" | "refresh" = "refresh") => {
@@ -384,7 +412,7 @@ export default function SystemSettingsPage() {
         <Card className={`${styles.metricCard} baize-card baize-depth-card`}>
           <Statistic
             title="健康检查项"
-            value={selfCheck?.checks.length ?? 0}
+            value={maintenanceChecks.length}
             prefix={<ShieldCheck size={16} />}
           />
         </Card>
@@ -470,8 +498,8 @@ export default function SystemSettingsPage() {
             </div>
             {selfCheck ? (
               <>
-                <Tag color={statusColor(selfCheck.overall_status)} className={styles.statusTag}>
-                  {localizeSystemStatus(selfCheck.overall_status)}
+                <Tag color={statusColor(maintenanceOverallStatus)} className={styles.statusTag}>
+                  {localizeSystemStatus(maintenanceOverallStatus)}
                 </Tag>
                 <List
                   dataSource={localizedChecks}

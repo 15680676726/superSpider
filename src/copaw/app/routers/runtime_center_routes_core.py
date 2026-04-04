@@ -5,11 +5,11 @@ import asyncio
 import inspect
 
 from .runtime_center_shared_core import *  # noqa: F401,F403
+from ..runtime_center.models import RuntimeCenterAppStateView
 from ..runtime_center.overview_cards import (
     build_runtime_capability_governance_projection,
 )
 from ..runtime_center.recovery_projection import project_latest_recovery_summary
-from ..runtime_recovery_report import resolve_current_recovery_report
 from ..runtime_chat_stream_events import stream_runtime_chat_events
 
 from agentscope.message import Msg
@@ -979,10 +979,11 @@ async def get_latest_recovery_report(
     response: Response,
 ) -> dict[str, object]:
     apply_runtime_center_surface_headers(response, surface="runtime-center")
-    summary, source = resolve_current_recovery_report(request.app.state)
+    runtime_state = RuntimeCenterAppStateView.from_object(request.app.state)
+    summary, source = runtime_state.resolve_recovery_summary()
     if summary is None:
         raise HTTPException(404, detail="Startup recovery summary is not available")
-    return project_latest_recovery_summary(summary, source=source or "unknown")
+    return project_latest_recovery_summary(summary, source=source)
 
 
 async def _stream_runtime_chat_events(

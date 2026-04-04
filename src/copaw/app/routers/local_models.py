@@ -20,7 +20,7 @@ from ..download_task_store import (
     get_tasks,
     update_status,
 )
-from ...providers.provider_admin_service import ProviderAdminService
+from ...providers.provider_admin_service import ProviderAdminSurface
 
 logger = logging.getLogger(__name__)
 
@@ -92,13 +92,10 @@ async def _pop_background_task(task_id: str) -> Optional[asyncio.Task]:
         return _background_tasks.pop(task_id, None)
 
 
-def _get_provider_admin_service_from_request(request: Request | None) -> ProviderAdminService:
-    if request is not None:
-        service = getattr(request.app.state, "provider_admin_service", None)
-        if isinstance(service, ProviderAdminService):
-            return service
-        if service is not None and hasattr(service, "refresh_local_model_catalog"):
-            return service
+def _get_provider_admin_service_from_request(request: Request) -> ProviderAdminSurface:
+    service = getattr(request.app.state, "provider_admin_service", None)
+    if service is not None and hasattr(service, "refresh_local_model_catalog"):
+        return service
     raise HTTPException(
         status_code=500,
         detail="provider_admin_service is not attached to app.state",
@@ -186,7 +183,7 @@ async def download_model(
 async def _run_download_in_background(
     task_id: str,
     body: DownloadRequest,
-    provider_admin_service: ProviderAdminService | object | None = None,
+    provider_admin_service: ProviderAdminSurface,
 ) -> None:
     """Execute the download in a thread and update task status."""
     from ..console_push_store import append as push_store_append
@@ -252,8 +249,6 @@ async def _run_download_in_background(
             "console",
             f"Model downloaded: {info.display_name}",
         )
-        if provider_admin_service is None:
-            provider_admin_service = _get_provider_admin_service_from_request(None)
         provider_admin_service.refresh_local_model_catalog()
     except asyncio.CancelledError:
         await update_status(task_id, DownloadTaskStatus.CANCELLED)

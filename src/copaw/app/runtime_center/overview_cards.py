@@ -521,8 +521,12 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         self,
         app_state: RuntimeCenterAppStateView,
     ) -> dict[str, Any] | None:
-        for target in (app_state.actor_worker, app_state.actor_supervisor):
-            runtime_contract = self._mapping(getattr(target, "runtime_contract", None))
+        runtime_contracts = (
+            app_state.actor_worker_runtime_contract,
+            app_state.actor_supervisor_runtime_contract,
+        )
+        for target in runtime_contracts:
+            runtime_contract = self._mapping(target)
             if not runtime_contract:
                 continue
             sidecar_memory = self._mapping(runtime_contract.get("sidecar_memory"))
@@ -1338,129 +1342,11 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             },
         }
 
-    def _runtime_task_name(self, task: Any, *, fallback: str) -> str:
-        getter = getattr(task, "get_name", None)
-        if callable(getter):
-            resolved = self._string(getter())
-            if resolved is not None:
-                return resolved
-        return self._string(getattr(task, "name", None)) or fallback
-
-    def _runtime_task_done(self, task: Any) -> bool:
-        checker = getattr(task, "done", None)
-        if callable(checker):
-            try:
-                return bool(checker())
-            except Exception:
-                logger.debug("runtime_center task.done() failed", exc_info=True)
-        return bool(getattr(task, "done", False))
-
-    def _runtime_task_cancelled(self, task: Any) -> bool:
-        checker = getattr(task, "cancelled", None)
-        if callable(checker):
-            try:
-                return bool(checker())
-            except Exception:
-                logger.debug("runtime_center task.cancelled() failed", exc_info=True)
-        return bool(getattr(task, "cancelled", False))
-
-    def _runtime_task_status(self, task: Any) -> str:
-        if self._runtime_task_cancelled(task):
-            return "cancelled"
-        if self._runtime_task_done(task):
-            return "completed"
-        return "running"
-
     def _build_automation_loop_payloads(
         self,
         app_state: RuntimeCenterAppStateView,
     ) -> list[dict[str, Any]]:
-        overview_payload = app_state.automation_overview_snapshot()
-        if overview_payload:
-            return overview_payload
-        tasks = list(app_state.automation_tasks or [])
-        snapshot_map: dict[str, dict[str, Any]] = {}
-        repository = app_state.automation_loop_runtime_repository
-        list_loops = getattr(repository, "list_loops", None)
-        if callable(list_loops):
-            try:
-                for loop in list_loops(limit=None):
-                    payload = self._mapping(loop)
-                    if not payload:
-                        continue
-                    task_name = self._string(payload.get("task_name"))
-                    if task_name is not None:
-                        snapshot_map[task_name] = payload
-                    automation_task_id = self._string(payload.get("automation_task_id"))
-                    if automation_task_id is not None:
-                        snapshot_map[automation_task_id] = payload
-            except Exception:
-                logger.debug("runtime_center automation repository scan failed", exc_info=True)
-        loop_snapshots = getattr(app_state.automation_tasks, "loop_snapshots", None)
-        if callable(loop_snapshots):
-            try:
-                raw_snapshots = loop_snapshots()
-            except Exception:
-                logger.debug("runtime_center automation snapshot read failed", exc_info=True)
-                raw_snapshots = {}
-            if isinstance(raw_snapshots, Mapping):
-                for key, value in raw_snapshots.items():
-                    if not isinstance(value, Mapping):
-                        continue
-                    payload = dict(value)
-                    task_name = self._string(payload.get("task_name"))
-                    if task_name is not None:
-                        snapshot_map[task_name] = payload
-                    key_text = self._string(key)
-                    if key_text is not None:
-                        snapshot_map[key_text] = payload
-        payloads: list[dict[str, Any]] = []
-        for index, task in enumerate(tasks, start=1):
-            name = self._runtime_task_name(
-                task,
-                fallback=f"automation-loop-{index}",
-            )
-            lookup_keys = [
-                name,
-                name.removeprefix("copaw-automation-"),
-            ]
-            snapshot: dict[str, Any] = {}
-            for key in lookup_keys:
-                    if key in snapshot_map:
-                        snapshot = dict(snapshot_map[key])
-                        break
-            status = self._runtime_task_status(task)
-            if status == "completed" and self._string(snapshot.get("health_status")) == "degraded":
-                status = "degraded"
-            payloads.append(
-                {
-                    "name": name,
-                    "status": status,
-                    **snapshot,
-                },
-            )
-        live_names = {self._runtime_task_name(task, fallback="") for task in tasks}
-        seen_snapshot_ids: set[str] = set()
-        for snapshot in snapshot_map.values():
-            task_name = self._string(snapshot.get("task_name"))
-            snapshot_id = self._string(
-                snapshot.get("automation_task_id"),
-            ) or task_name
-            if snapshot_id in seen_snapshot_ids:
-                continue
-            seen_snapshot_ids.add(snapshot_id)
-            if task_name is None or f"copaw-automation-{task_name}" in live_names:
-                continue
-            payloads.append(
-                {
-                    "name": task_name,
-                    "status": self._string(snapshot.get("health_status"))
-                    or self._string(snapshot.get("loop_phase"))
-                    or "idle",
-                    **snapshot,
-                },
-            )
-        return payloads
+        return app_state.automation_overview_snapshot()
 
     def _build_actor_supervisor_payload(
         self,

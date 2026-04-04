@@ -2,7 +2,7 @@
 """Canonical admin write service for provider configuration."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Protocol, runtime_checkable
 
 from .provider import ModelInfo, ProviderInfo
 from .provider_registry import PROVIDER_OLLAMA
@@ -12,6 +12,68 @@ from .provider_manager import (
     ProviderFallbackConfig,
     ProviderManager,
 )
+
+
+@runtime_checkable
+class ProviderAdminSurface(Protocol):
+    """Typed write surface exposed via app.state.provider_admin_service."""
+
+    async def configure_provider(
+        self,
+        provider_id: str,
+        *,
+        api_key: Optional[str],
+        base_url: Optional[str],
+        chat_model: Optional[str],
+    ) -> ProviderInfo: ...
+
+    async def create_custom_provider(self, provider: ProviderInfo) -> ProviderInfo: ...
+
+    def remove_custom_provider(self, provider_id: str) -> bool: ...
+
+    async def discover_provider_models(
+        self,
+        provider_id: str,
+        *,
+        api_key: Optional[str],
+        base_url: Optional[str],
+        chat_model: Optional[str],
+    ) -> list[ModelInfo]: ...
+
+    async def add_provider_model(
+        self,
+        provider_id: str,
+        *,
+        model_id: str,
+        name: str,
+    ) -> ProviderInfo: ...
+
+    async def remove_provider_model(
+        self,
+        provider_id: str,
+        *,
+        model_id: str,
+    ) -> ProviderInfo: ...
+
+    async def set_active_model(
+        self,
+        *,
+        provider_id: str,
+        model_id: str,
+    ) -> ActiveModelsInfo: ...
+
+    def set_fallback_config(
+        self,
+        *,
+        enabled: bool,
+        candidates: list[ModelSlotConfig],
+    ) -> ProviderFallbackConfig: ...
+
+    def refresh_local_model_catalog(self) -> None: ...
+
+    async def add_ollama_model(self, *, name: str) -> None: ...
+
+    async def delete_ollama_model(self, *, name: str) -> None: ...
 
 
 class ProviderAdminService:
@@ -135,5 +197,5 @@ class ProviderAdminService:
 
 def build_provider_admin_service(
     provider_manager: ProviderManager,
-) -> ProviderAdminService:
+) -> ProviderAdminSurface:
     return ProviderAdminService(provider_manager)

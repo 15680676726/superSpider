@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
+from typing import get_type_hints
 
 import pytest
 from fastapi import FastAPI
@@ -10,6 +12,7 @@ from fastapi.testclient import TestClient
 from copaw.app.routers import local_models as local_models_router_module
 from copaw.app.routers.local_models import admin_router as local_models_admin_router
 from copaw.app.routers.local_models import router as local_models_router
+from copaw.providers.provider_admin_service import ProviderAdminSurface
 
 
 def build_client() -> TestClient:
@@ -31,7 +34,7 @@ def test_delete_local_model_uses_provider_admin_service_for_catalog_sync(
     monkeypatch.setattr(
         local_models_router_module,
         "_get_provider_admin_service_from_request",
-        lambda request=None: _FakeProviderAdminService(),
+        lambda request: _FakeProviderAdminService(),
     )
     monkeypatch.setattr(
         "copaw.local_models.delete_local_model",
@@ -121,7 +124,9 @@ async def test_background_download_uses_provider_admin_service_for_catalog_sync(
     monkeypatch.setattr(
         local_models_router_module,
         "_get_provider_admin_service_from_request",
-        lambda request=None: _FakeProviderAdminService(),
+        lambda request: (_ for _ in ()).throw(
+            AssertionError("background download must not fallback to request lookup"),
+        ),
     )
     monkeypatch.setattr(local_models_router_module, "get_task", _fake_get_task)
     monkeypatch.setattr(
@@ -171,3 +176,11 @@ def test_local_model_write_routes_are_not_exposed_on_read_surface() -> None:
     response = client.delete("/local-models/runtime-only")
 
     assert response.status_code == 404
+
+
+def test_background_download_requires_explicit_provider_admin_surface() -> None:
+    signature = inspect.signature(local_models_router_module._run_download_in_background)
+    hints = get_type_hints(local_models_router_module._run_download_in_background)
+
+    assert hints["provider_admin_service"] is ProviderAdminSurface
+    assert signature.parameters["provider_admin_service"].default is inspect._empty

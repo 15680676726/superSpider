@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import copaw.providers.provider_manager as provider_manager_module
+from copaw.app.routers.providers import get_provider_admin_service
 from copaw.app.routers.providers import admin_router as providers_admin_router
 from copaw.app.routers.providers import router as providers_router
-from copaw.providers.provider_admin_service import ProviderAdminService
+from copaw.providers.provider_admin_service import ProviderAdminService, ProviderAdminSurface
 from copaw.providers.provider import ProviderInfo
 from copaw.providers.provider_manager import ModelSlotConfig, ProviderManager
 from copaw.providers.runtime_provider_facade import get_runtime_provider_facade
@@ -296,3 +298,8 @@ def test_list_providers_reads_from_runtime_provider_without_provider_manager_fal
             "api_key_prefix": "",
         },
     ]
+
+
+def test_provider_admin_dependency_is_typed_surface() -> None:
+    hints = get_type_hints(get_provider_admin_service)
+    assert hints["return"] is ProviderAdminSurface

@@ -68,6 +68,18 @@ describe("SystemSettingsPage", () => {
           summary: "Fallback is not configured",
           meta: {},
         },
+        {
+          name: "startup_recovery",
+          status: "pass",
+          summary: "Recovered cleanly",
+          meta: {},
+        },
+        {
+          name: "runtime_event_bus",
+          status: "pass",
+          summary: "Runtime event bus is wired",
+          meta: {},
+        },
       ],
     });
     apiMock.getProviderFallback.mockResolvedValue({
@@ -104,6 +116,7 @@ describe("SystemSettingsPage", () => {
     expect(screen.queryByText("运行时链路")).not.toBeInTheDocument();
     expect(screen.queryByText("启动恢复与健康状态")).toBeNull();
     expect(screen.queryByText("Recovered cleanly")).toBeNull();
+    expect(screen.queryByText("Runtime event bus is wired")).toBeNull();
     expect(requestMock).not.toHaveBeenCalled();
   });
 });

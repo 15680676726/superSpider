@@ -2,7 +2,8 @@
 """Read models for the Runtime Center operator surface."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -22,6 +23,206 @@ def _compact_payload(value: dict[str, Any]) -> dict[str, Any]:
             continue
         compact[key] = item
     return compact
+
+
+def _mapping(value: object | None) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        payload = model_dump(mode="json")
+        if isinstance(payload, dict):
+            return dict(payload)
+    namespace = getattr(value, "__dict__", None)
+    if isinstance(namespace, dict):
+        return dict(namespace)
+    return {}
+
+
+def _string(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _runtime_task_name(task: object, *, fallback: str) -> str:
+    getter = getattr(task, "get_name", None)
+    if callable(getter):
+        resolved = _string(getter())
+        if resolved is not None:
+            return resolved
+    return _string(getattr(task, "name", None)) or fallback
+
+
+def _runtime_task_done(task: object) -> bool:
+    checker = getattr(task, "done", None)
+    if callable(checker):
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+    return bool(getattr(task, "done", False))
+
+
+def _runtime_task_cancelled(task: object) -> bool:
+    checker = getattr(task, "cancelled", None)
+    if callable(checker):
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+    return bool(getattr(task, "cancelled", False))
+
+
+def _runtime_task_status(task: object) -> str:
+    if _runtime_task_cancelled(task):
+        return "cancelled"
+    if _runtime_task_done(task):
+        return "completed"
+    return "running"
+
+
+def _normalize_recovery_payload(
+    app_state: Any,
+) -> tuple[dict[str, Any] | None, str]:
+    summary, source = resolve_current_recovery_report(app_state)
+    normalized = _mapping(summary)
+    return (normalized or None), (source or "latest")
+
+
+def _normalize_automation_overview_payload(
+    *,
+    automation_tasks: object | None,
+    automation_loop_runtime_repository: object | None,
+) -> list[dict[str, Any]]:
+    getter = getattr(automation_tasks, "overview_snapshot", None)
+    if callable(getter):
+        payload = getter()
+        if isinstance(payload, list):
+            return [dict(item) for item in payload if isinstance(item, dict)]
+
+    snapshot_map: dict[str, dict[str, Any]] = {}
+    list_loops = getattr(automation_loop_runtime_repository, "list_loops", None)
+    if callable(list_loops):
+        try:
+            for loop in list_loops(limit=None):
+                payload = _mapping(loop)
+                if not payload:
+                    continue
+                task_name = _string(payload.get("task_name"))
+                if task_name is not None:
+                    snapshot_map[task_name] = payload
+                automation_task_id = _string(payload.get("automation_task_id"))
+                if automation_task_id is not None:
+                    snapshot_map[automation_task_id] = payload
+        except Exception:
+            snapshot_map = {}
+    loop_snapshots = getattr(automation_tasks, "loop_snapshots", None)
+    if callable(loop_snapshots):
+        try:
+            raw = loop_snapshots()
+        except Exception:
+            raw = {}
+        if isinstance(raw, Mapping):
+            for key, value in raw.items():
+                if not isinstance(value, Mapping):
+                    continue
+                payload = dict(value)
+                task_name = _string(payload.get("task_name"))
+                if task_name is not None:
+                    snapshot_map[task_name] = payload
+                key_text = _string(key)
+                if key_text is not None:
+                    snapshot_map[key_text] = payload
+
+    try:
+        tasks = list(automation_tasks or [])
+    except Exception:
+        tasks = []
+    if not tasks:
+        payloads: list[dict[str, Any]] = []
+        seen_snapshot_ids: set[str] = set()
+        for snapshot in snapshot_map.values():
+            task_name = _string(snapshot.get("task_name"))
+            if task_name is None:
+                continue
+            snapshot_id = _string(snapshot.get("automation_task_id")) or task_name
+            if snapshot_id in seen_snapshot_ids:
+                continue
+            seen_snapshot_ids.add(snapshot_id)
+            payloads.append(
+                {
+                    "name": task_name,
+                    "status": _string(snapshot.get("health_status"))
+                    or _string(snapshot.get("loop_phase"))
+                    or "idle",
+                    **snapshot,
+                }
+            )
+        return payloads
+
+    payloads: list[dict[str, Any]] = []
+    for index, task in enumerate(tasks, start=1):
+        name = _runtime_task_name(
+            task,
+            fallback=f"automation-loop-{index}",
+        )
+        lookup_keys = [
+            name,
+            name.removeprefix("copaw-automation-"),
+        ]
+        snapshot: dict[str, Any] = {}
+        for key in lookup_keys:
+            if key in snapshot_map:
+                snapshot = dict(snapshot_map[key])
+                break
+        status = _runtime_task_status(task)
+        if status == "completed" and _string(snapshot.get("health_status")) == "degraded":
+            status = "degraded"
+        payloads.append(
+            {
+                "name": name,
+                "status": status,
+                **snapshot,
+            }
+        )
+    live_names = {_runtime_task_name(task, fallback="") for task in tasks}
+    seen_snapshot_ids: set[str] = set()
+    for snapshot in snapshot_map.values():
+        task_name = _string(snapshot.get("task_name"))
+        snapshot_id = _string(snapshot.get("automation_task_id")) or task_name
+        if snapshot_id in seen_snapshot_ids:
+            continue
+        seen_snapshot_ids.add(snapshot_id)
+        if task_name is None or f"copaw-automation-{task_name}" in live_names:
+            continue
+        payloads.append(
+            {
+                "name": task_name,
+                "status": _string(snapshot.get("health_status"))
+                or _string(snapshot.get("loop_phase"))
+                or "idle",
+                **snapshot,
+            }
+        )
+    return payloads
+
+
+def _normalize_supervisor_snapshot(
+    actor_supervisor: object | None,
+) -> dict[str, Any] | None:
+    getter = getattr(actor_supervisor, "snapshot", None)
+    if callable(getter):
+        payload = getter()
+        if isinstance(payload, dict):
+            return dict(payload)
+    return None
+
+
+def _normalize_runtime_contract(target: object | None) -> dict[str, Any] | None:
+    payload = _mapping(getattr(target, "runtime_contract", None))
+    return payload or None
 
 
 class RuntimeCenterSurfaceInfo(BaseModel):
@@ -130,16 +331,24 @@ class RuntimeCenterAppStateView:
     routine_service: Any = None
     query_execution_service: Any = None
     cron_manager: Any = None
-    automation_tasks: Any = None
-    automation_loop_runtime_repository: Any = None
-    actor_supervisor: Any = None
-    actor_worker: Any = None
-    latest_recovery_report: Any = None
-    startup_recovery_summary: Any = None
+    automation_overview: list[dict[str, Any]] = field(default_factory=list)
+    actor_supervisor_overview: dict[str, Any] | None = None
+    actor_worker_runtime_contract: dict[str, Any] | None = None
+    actor_supervisor_runtime_contract: dict[str, Any] | None = None
+    recovery_summary: dict[str, Any] | None = None
+    recovery_source: str = "latest"
 
     @classmethod
     def from_object(cls, app_state: Any) -> "RuntimeCenterAppStateView":
-        latest_recovery_report, _ = resolve_current_recovery_report(app_state)
+        automation_tasks = getattr(app_state, "automation_tasks", None)
+        automation_loop_runtime_repository = getattr(
+            app_state,
+            "automation_loop_runtime_repository",
+            None,
+        )
+        actor_supervisor = getattr(app_state, "actor_supervisor", None)
+        actor_worker = getattr(app_state, "actor_worker", None)
+        recovery_summary, recovery_source = _normalize_recovery_payload(app_state)
         return cls(
             state_query_service=getattr(app_state, "state_query_service", None),
             evidence_query_service=getattr(app_state, "evidence_query_service", None),
@@ -164,40 +373,29 @@ class RuntimeCenterAppStateView:
             routine_service=getattr(app_state, "routine_service", None),
             query_execution_service=getattr(app_state, "query_execution_service", None),
             cron_manager=getattr(app_state, "cron_manager", None),
-            automation_tasks=getattr(app_state, "automation_tasks", None),
-            automation_loop_runtime_repository=getattr(
-                app_state,
-                "automation_loop_runtime_repository",
-                None,
+            automation_overview=_normalize_automation_overview_payload(
+                automation_tasks=automation_tasks,
+                automation_loop_runtime_repository=automation_loop_runtime_repository,
             ),
-            actor_supervisor=getattr(app_state, "actor_supervisor", None),
-            actor_worker=getattr(app_state, "actor_worker", None),
-            latest_recovery_report=latest_recovery_report,
-            startup_recovery_summary=getattr(app_state, "startup_recovery_summary", None),
+            actor_supervisor_overview=_normalize_supervisor_snapshot(actor_supervisor),
+            actor_worker_runtime_contract=_normalize_runtime_contract(actor_worker),
+            actor_supervisor_runtime_contract=_normalize_runtime_contract(actor_supervisor),
+            recovery_summary=recovery_summary,
+            recovery_source=recovery_source,
         )
 
-    def resolve_recovery_summary(self) -> tuple[Any | None, str]:
-        if self.latest_recovery_report is not None:
-            return self.latest_recovery_report, "latest"
-        if self.startup_recovery_summary is not None:
-            return self.startup_recovery_summary, "startup"
-        return None, "latest"
+    def resolve_recovery_summary(self) -> tuple[dict[str, Any] | None, str]:
+        if self.recovery_summary is None:
+            return None, self.recovery_source
+        return dict(self.recovery_summary), self.recovery_source
 
     def automation_overview_snapshot(self) -> list[dict[str, Any]]:
-        getter = getattr(self.automation_tasks, "overview_snapshot", None)
-        if callable(getter):
-            payload = getter()
-            if isinstance(payload, list):
-                return [dict(item) for item in payload if isinstance(item, dict)]
-        return []
+        return [dict(item) for item in self.automation_overview]
 
     def actor_supervisor_snapshot(self) -> dict[str, Any] | None:
-        getter = getattr(self.actor_supervisor, "snapshot", None)
-        if callable(getter):
-            payload = getter()
-            if isinstance(payload, dict):
-                return dict(payload)
-        return None
+        if self.actor_supervisor_overview is None:
+            return None
+        return dict(self.actor_supervisor_overview)
 
 
 class RuntimeMainBrainSection(BaseModel):

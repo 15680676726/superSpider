@@ -10,7 +10,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, Field
 
 from ...providers.provider import ProviderInfo, ModelInfo
-from ...providers.provider_admin_service import ProviderAdminService
+from ...providers.provider_admin_service import ProviderAdminSurface
 from ...providers.provider_manager import (
     ActiveModelsInfo,
     ProviderFallbackConfig,
@@ -36,7 +36,7 @@ def get_runtime_provider(request: Request) -> ProviderRuntimeSurface:
     )
 
 
-def get_provider_admin_service(request: Request) -> object:
+def get_provider_admin_service(request: Request) -> ProviderAdminSurface:
     """Get the canonical provider admin service from app state."""
     service = getattr(request.app.state, "provider_admin_service", None)
     if service is not None:
@@ -99,7 +99,7 @@ async def list_all_providers(
     summary="Configure a provider",
 )
 async def configure_provider(
-    admin_service: object = Depends(get_provider_admin_service),
+    admin_service: ProviderAdminSurface = Depends(get_provider_admin_service),
     provider_id: str = Path(...),
     body: ProviderConfigRequest = Body(...),
 ) -> ProviderInfo:
@@ -121,7 +121,7 @@ async def configure_provider(
     status_code=201,
 )
 async def create_custom_provider_endpoint(
-    admin_service: object = Depends(get_provider_admin_service),
+    admin_service: ProviderAdminSurface = Depends(get_provider_admin_service),
     body: CreateCustomProviderRequest = Body(...),
 ) -> ProviderInfo:
     try:
@@ -232,7 +232,7 @@ async def test_provider(
     summary="Discover available models from provider",
 )
 async def discover_models(
-    admin_service: object = Depends(get_provider_admin_service),
+    admin_service: ProviderAdminSurface = Depends(get_provider_admin_service),
     provider_id: str = Path(...),
     body: Optional[DiscoverModelsRequest] = Body(default=None),
 ) -> DiscoverModelsResponse:
@@ -284,7 +284,7 @@ async def test_model(
 )
 async def delete_custom_provider_endpoint(
     request: Request,
-    admin_service: object = Depends(get_provider_admin_service),
+    admin_service: ProviderAdminSurface = Depends(get_provider_admin_service),
     provider_id: str = Path(...),
 ) -> List[ProviderInfo]:
     try:
@@ -304,7 +304,7 @@ async def delete_custom_provider_endpoint(
     status_code=201,
 )
 async def add_model_endpoint(
-    admin_service: object = Depends(get_provider_admin_service),
+    admin_service: ProviderAdminSurface = Depends(get_provider_admin_service),
     provider_id: str = Path(...),
     body: AddModelRequest = Body(...),
 ) -> ProviderInfo:
@@ -325,7 +325,7 @@ async def add_model_endpoint(
     summary="Remove a model from a provider",
 )
 async def remove_model_endpoint(
-    admin_service: object = Depends(get_provider_admin_service),
+    admin_service: ProviderAdminSurface = Depends(get_provider_admin_service),
     provider_id: str = Path(...),
     model_id: str = Path(...),
 ) -> ProviderInfo:
@@ -369,7 +369,7 @@ async def get_active_models(
     summary="Set active LLM",
 )
 async def set_active_model(
-    admin_service: object = Depends(get_provider_admin_service),
+    admin_service: ProviderAdminSurface = Depends(get_provider_admin_service),
     body: ModelSlotRequest = Body(...),
 ) -> ActiveModelsInfo:
     try:
@@ -404,7 +404,7 @@ async def get_provider_fallback(
     summary="Set provider fallback policy",
 )
 async def set_provider_fallback(
-    admin_service: object = Depends(get_provider_admin_service),
+    admin_service: ProviderAdminSurface = Depends(get_provider_admin_service),
     body: ProviderFallbackConfig = Body(...),
 ) -> ProviderFallbackConfig:
     try:
