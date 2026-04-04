@@ -372,6 +372,12 @@ class _PredictionServiceContextMixin:
                     "related_task_summaries": [task.summary for task in group_tasks[:4] if task.summary],
                 },
             )
+            detector = getattr(self, "_skill_gap_detector", None)
+            detect_runtime_pressure = getattr(detector, "detect_runtime_pressure", None)
+            if callable(detect_runtime_pressure):
+                gap_pressure = detect_runtime_pressure(payload)
+                if gap_pressure:
+                    payload["gap_pressure"] = gap_pressure
         return telemetry
 
     def _compile_remote_skill_queries(
@@ -527,14 +533,14 @@ class _PredictionServiceContextMixin:
             capability_id = str(payload.get("capability_id") or "")
             if not capability_id.startswith("skill:"):
                 continue
-            failure_rate = float(payload.get("failure_rate") or 0.0)
-            manual_rate = float(payload.get("manual_intervention_rate") or 0.0)
-            blockage_rate = float(payload.get("workflow_blockage_rate") or 0.0)
-            if (
-                failure_rate < 0.34
-                and manual_rate < 0.3
-                and blockage_rate < 0.25
-            ):
+            detector = getattr(self, "_skill_gap_detector", None)
+            detect_runtime_pressure = getattr(detector, "detect_runtime_pressure", None)
+            pressure = (
+                detect_runtime_pressure(payload)
+                if callable(detect_runtime_pressure)
+                else None
+            )
+            if pressure is None:
                 continue
             findings.append(
                 {
@@ -753,35 +759,11 @@ class _PredictionServiceContextMixin:
         new_stats: dict[str, Any],
         old_stats: dict[str, Any],
     ) -> bool:
-        if not new_stats:
-            return False
-        new_sample = max(
-            int(new_stats.get("task_count") or 0),
-            int(new_stats.get("evidence_count") or 0),
-        )
-        if new_sample <= 0:
-            return False
-        if not old_stats:
-            return (
-                float(new_stats.get("failure_rate") or 0.0) <= 0.2
-                and float(new_stats.get("manual_intervention_rate") or 0.0) <= 0.2
-            )
-        new_failure = float(new_stats.get("failure_rate") or 0.0)
-        old_failure = float(old_stats.get("failure_rate") or 0.0)
-        new_manual = float(new_stats.get("manual_intervention_rate") or 0.0)
-        old_manual = float(old_stats.get("manual_intervention_rate") or 0.0)
-        new_blockage = float(new_stats.get("workflow_blockage_rate") or 0.0)
-        old_blockage = float(old_stats.get("workflow_blockage_rate") or 0.0)
-        return (
-            new_failure <= old_failure
-            and new_manual <= old_manual
-            and new_blockage <= old_blockage
-            and (
-                old_failure - new_failure >= 0.1
-                or old_manual - new_manual >= 0.1
-                or old_blockage - new_blockage >= 0.1
-            )
-        )
+        detector = getattr(self, "_skill_gap_detector", None)
+        helper = getattr(detector, "trial_improved", None)
+        if callable(helper):
+            return bool(helper(new_stats=new_stats, old_stats=old_stats))
+        return False
 
     def _trial_underperformed(
         self,
@@ -789,22 +771,11 @@ class _PredictionServiceContextMixin:
         new_stats: dict[str, Any],
         old_stats: dict[str, Any],
     ) -> bool:
-        if not new_stats:
-            return False
-        if not old_stats:
-            return (
-                float(new_stats.get("failure_rate") or 0.0) >= 0.34
-                or float(new_stats.get("manual_intervention_rate") or 0.0) >= 0.3
-                or float(new_stats.get("workflow_blockage_rate") or 0.0) >= 0.25
-            )
-        return (
-            float(new_stats.get("failure_rate") or 0.0)
-            > float(old_stats.get("failure_rate") or 0.0)
-            or float(new_stats.get("manual_intervention_rate") or 0.0)
-            > float(old_stats.get("manual_intervention_rate") or 0.0)
-            or float(new_stats.get("workflow_blockage_rate") or 0.0)
-            > float(old_stats.get("workflow_blockage_rate") or 0.0)
-        )
+        detector = getattr(self, "_skill_gap_detector", None)
+        helper = getattr(detector, "trial_underperformed", None)
+        if callable(helper):
+            return bool(helper(new_stats=new_stats, old_stats=old_stats))
+        return False
 
     def _agents_using_capability(self, facts: _FactPack, capability_id: str) -> list[str]:
         users: list[str] = []

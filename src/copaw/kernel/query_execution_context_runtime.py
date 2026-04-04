@@ -91,6 +91,26 @@ class _QueryExecutionContextRuntimeMixin:
                     payload.get("selected_seat_ref"),
                     merged.get("selected_seat_ref"),
                 ),
+                "donor_id": _first_non_empty(
+                    payload.get("donor_id"),
+                    merged.get("donor_id"),
+                ),
+                "package_id": _first_non_empty(
+                    payload.get("package_id"),
+                    merged.get("package_id"),
+                ),
+                "source_profile_id": _first_non_empty(
+                    payload.get("source_profile_id"),
+                    merged.get("source_profile_id"),
+                ),
+                "candidate_source_kind": _first_non_empty(
+                    payload.get("candidate_source_kind"),
+                    merged.get("candidate_source_kind"),
+                ),
+                "resolution_kind": _first_non_empty(
+                    payload.get("resolution_kind"),
+                    merged.get("resolution_kind"),
+                ),
             }
             for key in ("replacement_target_ids", "rollback_target_ids", "capability_ids"):
                 resolved_items = _string_list(payload.get(key))

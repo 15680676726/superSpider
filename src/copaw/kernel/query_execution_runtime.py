@@ -81,6 +81,11 @@ _QUERY_TRIAL_ATTRIBUTION_SCALAR_FIELDS = (
     "skill_lifecycle_stage",
     "selected_scope",
     "selected_seat_ref",
+    "donor_id",
+    "package_id",
+    "source_profile_id",
+    "candidate_source_kind",
+    "resolution_kind",
 )
 _QUERY_TRIAL_ATTRIBUTION_LIST_FIELDS = (
     "replacement_target_ids",
@@ -279,6 +284,11 @@ def _query_tool_contract_metadata(
             "skill_lifecycle_stage",
             "selected_scope",
             "selected_seat_ref",
+            "donor_id",
+            "package_id",
+            "source_profile_id",
+            "candidate_source_kind",
+            "resolution_kind",
         ):
             resolved = _first_non_empty(capability_trial_attribution.get(key))
             if resolved is not None:
@@ -332,6 +342,16 @@ def _normalize_capability_trial_attribution(
     selected_seat_ref = _first_non_empty(raw_payload.get("selected_seat_ref"))
     if selected_seat_ref is not None:
         normalized["selected_seat_ref"] = selected_seat_ref
+    for key in (
+        "donor_id",
+        "package_id",
+        "source_profile_id",
+        "candidate_source_kind",
+        "resolution_kind",
+    ):
+        resolved = _first_non_empty(raw_payload.get(key))
+        if resolved is not None:
+            normalized[key] = resolved
     for key in _QUERY_TRIAL_ATTRIBUTION_LIST_FIELDS:
         resolved_items = _bounded_string_list(
             raw_payload.get(key),

@@ -1903,6 +1903,7 @@ class _IndustryRuntimeViewsMixin:
                     or ("active" if overlay_capability_ids else None)
                 ),
             }
+        current_capability_trial = _mapping(metadata.get("current_capability_trial"))
         return {
             **agent,
             "capability_governance": {
@@ -1928,6 +1929,9 @@ class _IndustryRuntimeViewsMixin:
                     ),
                 },
                 "current_session_overlay": current_session_overlay,
+                "current_capability_trial": (
+                    current_capability_trial if current_capability_trial else None
+                ),
                 "lifecycle": {
                     "employment_mode": (
                         _string(getattr(runtime, "employment_mode", None))

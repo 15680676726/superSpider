@@ -194,3 +194,56 @@ def test_skill_trial_and_lifecycle_services_persist_donor_attribution(tmp_path) 
     assert listed_decisions[0].retirement_reason == "drift"
     assert listed_decisions[0].retirement_scope == "seat"
     assert listed_decisions[0].retirement_evidence_refs == ["ev-retire"]
+
+
+def test_skill_trial_service_builds_candidate_verdict_summary_across_scopes(tmp_path) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.db")
+    candidate_service = CapabilityCandidateService(state_store=state_store)
+    trial_service = SkillTrialService(state_store=state_store)
+
+    candidate = candidate_service.normalize_candidate_source(
+        candidate_kind="skill",
+        target_scope="seat",
+        target_role_id="solution-lead",
+        target_seat_ref="seat-primary",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://example.com/skills/nextgen-outreach.zip",
+        candidate_source_version="1.0.0",
+        ingestion_mode="prediction-recommendation",
+        proposed_skill_name="nextgen_outreach",
+        summary="Governed remote skill candidate for outreach.",
+    )
+
+    trial_service.create_or_update_trial(
+        candidate_id=candidate.candidate_id,
+        scope_type="seat",
+        scope_ref="seat-primary",
+        verdict="passed",
+        success_count=3,
+        failure_count=0,
+        handoff_count=0,
+        operator_intervention_count=0,
+        summary="Primary seat trial completed cleanly.",
+    )
+    trial_service.create_or_update_trial(
+        candidate_id=candidate.candidate_id,
+        scope_type="seat",
+        scope_ref="seat-secondary",
+        verdict="failed",
+        success_count=0,
+        failure_count=2,
+        handoff_count=1,
+        operator_intervention_count=1,
+        summary="Secondary seat regressed and needed operator takeover.",
+    )
+
+    summary = trial_service.get_candidate_verdict_summary(candidate_id=candidate.candidate_id)
+
+    assert summary["candidate_id"] == candidate.candidate_id
+    assert summary["aggregate_verdict"] == "rollback_recommended"
+    assert summary["trial_count"] == 2
+    assert summary["operator_intervention_count"] == 1
+    assert summary["scope_verdicts"] == {
+        "seat-primary": "passed",
+        "seat-secondary": "failed",
+    }

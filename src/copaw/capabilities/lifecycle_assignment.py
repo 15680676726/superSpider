@@ -35,6 +35,7 @@ class CapabilityLifecycleAssignmentContext:
     target_role_id: str | None = None
     selected_seat_ref: str | None = None
     session_overlay_capability_ids: list[str] | None = None
+    role_prototype_capability_ids: list[str] | None = None
 
 
 def resolve_capability_lifecycle_assignment_context(
@@ -46,6 +47,7 @@ def resolve_capability_lifecycle_assignment_context(
     selected_seat_ref: str | None = None
     current_capability_ids: list[str] = []
     session_overlay_capability_ids: list[str] = []
+    role_prototype_capability_ids: list[str] = []
 
     detail_getter = getattr(agent_profile_service, "get_agent_detail", None)
     if callable(detail_getter):
@@ -64,6 +66,9 @@ def resolve_capability_lifecycle_assignment_context(
                         )
                         session_overlay_capability_ids = _string_list(
                             layers.get("session_overlay_capability_ids"),
+                        )
+                        role_prototype_capability_ids = _string_list(
+                            layers.get("role_prototype_capability_ids"),
                         )
 
     surface_getter = getattr(agent_profile_service, "get_capability_surface", None)
@@ -88,6 +93,7 @@ def resolve_capability_lifecycle_assignment_context(
         target_role_id=target_role_id,
         selected_seat_ref=selected_seat_ref,
         session_overlay_capability_ids=session_overlay_capability_ids,
+        role_prototype_capability_ids=role_prototype_capability_ids,
     )
 
 
@@ -114,6 +120,11 @@ def build_capability_lifecycle_assignment_payload(
         for item in list(context.session_overlay_capability_ids or [])
         if _string(item)
     }
+    protected_current.update(
+        item.lower()
+        for item in list(context.role_prototype_capability_ids or [])
+        if _string(item)
+    )
     target_lookup = {item.lower() for item in target_capability_ids}
     replacement_target_ids = [
         capability_id

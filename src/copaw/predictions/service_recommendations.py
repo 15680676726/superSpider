@@ -37,6 +37,35 @@ def rank_donor_recommendation_candidates(candidates: list[object]) -> list[objec
     return sorted(candidates, key=_sort_key)
 
 
+def _candidate_form_from_payload(
+    candidate_payload: dict[str, Any],
+    action_payload: dict[str, Any],
+) -> str:
+    explicit = (_string(candidate_payload.get("candidate_kind")) or "").lower()
+    if explicit:
+        return explicit
+    capability_ids = _string_list(
+        candidate_payload.get("capability_ids"),
+        action_payload.get("capability_ids"),
+        action_payload.get("target_capability_ids"),
+    )
+    if capability_ids and all(item.startswith("mcp:") for item in capability_ids):
+        return "mcp-bundle"
+    source_kind = (_string(candidate_payload.get("source_kind")) or "").lower()
+    if source_kind in {"mcp-registry", "install-template", "builtin-runtime"}:
+        return "mcp-bundle"
+    return "skill"
+
+
+def _candidate_source_kind_from_payload(candidate_payload: dict[str, Any]) -> str:
+    source_kind = (_string(candidate_payload.get("source_kind")) or "hub").lower()
+    if source_kind in {"curated", "mcp-registry", "install-template", "builtin-runtime"}:
+        return "external_catalog"
+    if source_kind in {"local", "local-authored"}:
+        return "local_authored"
+    return "external_remote"
+
+
 class _PredictionServiceRecommendationMixin:
     def _register_capability_candidate(
         self,
@@ -56,9 +85,8 @@ class _PredictionServiceRecommendationMixin:
         if not candidate_payload:
             return metadata, action_payload
         source_kind = (_string(candidate_payload.get("source_kind")) or "hub").lower()
-        candidate_source_kind = (
-            "external_catalog" if source_kind == "curated" else "external_remote"
-        )
+        candidate_source_kind = _candidate_source_kind_from_payload(candidate_payload)
+        candidate_kind = _candidate_form_from_payload(candidate_payload, action_payload)
         source_ref = (
             _string(candidate_payload.get("bundle_url"))
             or _string(candidate_payload.get("source_url"))
@@ -82,34 +110,70 @@ class _PredictionServiceRecommendationMixin:
             if target_role_id
             else "global"
         )
-        record = normalize_candidate_source(
-            candidate_kind="skill",
-            industry_instance_id=case.industry_instance_id,
-            target_scope=target_scope,
-            target_role_id=target_role_id,
-            target_seat_ref=target_seat_ref,
-            candidate_source_kind=candidate_source_kind,
-            candidate_source_ref=source_ref,
-            candidate_source_version=_string(candidate_payload.get("version")),
-            candidate_source_lineage=_string(candidate_payload.get("candidate_key")),
-            ingestion_mode="prediction-recommendation",
-            proposed_skill_name=(
-                _string(candidate_payload.get("install_name"))
-                or _string(candidate_payload.get("slug"))
-                or _string(candidate_payload.get("title"))
-            ),
-            summary=summary,
-            status="candidate",
-            lifecycle_stage=_string(metadata.get("lifecycle_stage")) or "candidate",
-            metadata={
-                "prediction_case_id": case.case_id,
-                "prediction_source_kind": source_kind,
-                "candidate": candidate_payload,
-            },
+        resolver = getattr(self, "_skill_evolution_service", None)
+        resolve_candidate_path = getattr(resolver, "resolve_candidate_path", None)
+        resolution = (
+            resolve_candidate_path(
+                candidate_kind=candidate_kind,
+                candidate_source_kind=candidate_source_kind,
+                candidate_source_ref=source_ref,
+                candidate_source_version=_string(candidate_payload.get("version")),
+                canonical_package_id=_string(candidate_payload.get("canonical_package_id")),
+                target_scope=target_scope,
+                target_role_id=target_role_id,
+                target_seat_ref=target_seat_ref,
+                target_capability_ids=_string_list(
+                    candidate_payload.get("capability_ids"),
+                    action_payload.get("capability_ids"),
+                    action_payload.get("target_capability_ids"),
+                ),
+            )
+            if callable(resolve_candidate_path)
+            else {}
         )
+        get_candidate = getattr(service, "get_candidate", None)
+        selected_candidate_id = _string(resolution.get("selected_candidate_id"))
+        record = (
+            get_candidate(selected_candidate_id)
+            if selected_candidate_id is not None and callable(get_candidate)
+            else None
+        )
+        if record is None:
+            record = normalize_candidate_source(
+                candidate_kind=candidate_kind,
+                industry_instance_id=case.industry_instance_id,
+                target_scope=target_scope,
+                target_role_id=target_role_id,
+                target_seat_ref=target_seat_ref,
+                candidate_source_kind=candidate_source_kind,
+                candidate_source_ref=source_ref,
+                candidate_source_version=_string(candidate_payload.get("version")),
+                candidate_source_lineage=_string(candidate_payload.get("candidate_key")),
+                ingestion_mode="prediction-recommendation",
+                proposed_skill_name=(
+                    _string(candidate_payload.get("install_name"))
+                    or _string(candidate_payload.get("slug"))
+                    or _string(candidate_payload.get("title"))
+                ),
+                summary=summary,
+                status="candidate",
+                lifecycle_stage=_string(metadata.get("lifecycle_stage")) or "candidate",
+                canonical_package_id=_string(candidate_payload.get("canonical_package_id")),
+                metadata={
+                    "prediction_case_id": case.case_id,
+                    "prediction_source_kind": source_kind,
+                    "candidate": candidate_payload,
+                    "resolution_kind": _string(resolution.get("resolution_kind")),
+                    "package_form": _string(resolution.get("package_form")),
+                    "selected_candidate_id": selected_candidate_id,
+                    "selected_package_id": _string(resolution.get("selected_package_id")),
+                    "selected_donor_id": _string(resolution.get("selected_donor_id")),
+                },
+            )
         metadata = {
             **metadata,
             "candidate_id": record.candidate_id,
+            "candidate_kind": _string(getattr(record, "candidate_kind", None)),
             "donor_id": _string(getattr(record, "donor_id", None)),
             "package_id": _string(getattr(record, "package_id", None)),
             "source_profile_id": _string(getattr(record, "source_profile_id", None)),
@@ -122,6 +186,13 @@ class _PredictionServiceRecommendationMixin:
             "candidate_source_lineage": _string(
                 getattr(record, "candidate_source_lineage", None),
             ),
+            "resolution_kind": _string(resolution.get("resolution_kind"))
+            or _string(_safe_dict(getattr(record, "metadata", None)).get("resolution_kind")),
+            "package_form": _string(resolution.get("package_form"))
+            or _string(_safe_dict(getattr(record, "metadata", None)).get("package_form")),
+            "selected_candidate_id": selected_candidate_id,
+            "selected_package_id": _string(resolution.get("selected_package_id")),
+            "selected_donor_id": _string(resolution.get("selected_donor_id")),
             "governance_path_kind": "donor-assimilation",
         }
         action_payload = {
@@ -130,6 +201,8 @@ class _PredictionServiceRecommendationMixin:
             "donor_id": _string(getattr(record, "donor_id", None)),
             "package_id": _string(getattr(record, "package_id", None)),
             "source_profile_id": _string(getattr(record, "source_profile_id", None)),
+            "candidate_kind": _string(getattr(record, "candidate_kind", None)),
+            "resolution_kind": _string(resolution.get("resolution_kind")),
         }
         return metadata, action_payload
 

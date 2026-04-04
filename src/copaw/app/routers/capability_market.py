@@ -811,14 +811,18 @@ def _template_to_install_template_response(
 async def get_capability_market_overview(request: Request) -> dict[str, object]:
     service = _get_capability_service(request)
     capabilities, summary = service.list_public_capability_inventory()
+    state_query_service = getattr(request.app.state, "state_query_service", None)
+    query_candidates = getattr(state_query_service, "list_capability_candidates", None)
     candidate_service = getattr(request.app.state, "capability_candidate_service", None)
     list_candidates = getattr(candidate_service, "list_candidates", None)
     summarize_candidates = getattr(candidate_service, "summarize_candidates", None)
-    capability_candidates = (
-        [item.model_dump(mode="json") for item in list_candidates(limit=12)]
-        if callable(list_candidates)
-        else []
-    )
+    capability_candidates = []
+    if callable(query_candidates):
+        payload = query_candidates(limit=12)
+        if isinstance(payload, list):
+            capability_candidates = [dict(item) for item in payload if isinstance(item, dict)]
+    if not capability_candidates and callable(list_candidates):
+        capability_candidates = [item.model_dump(mode="json") for item in list_candidates(limit=12)]
     candidate_summary = (
         dict(summarize_candidates())
         if callable(summarize_candidates)

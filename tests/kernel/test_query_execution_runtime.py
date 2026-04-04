@@ -407,6 +407,11 @@ def test_query_execution_runtime_exposes_bounded_donor_trial_carry_forward_contr
             "skill_lifecycle_stage",
             "selected_scope",
             "selected_seat_ref",
+            "donor_id",
+            "package_id",
+            "source_profile_id",
+            "candidate_source_kind",
+            "resolution_kind",
         ],
         "accepted_list_fields": [
             "replacement_target_ids",
@@ -650,6 +655,11 @@ def test_query_execution_runtime_evidence_sinks_attach_tool_contract_metadata() 
     )
 
     attribution = {
+        "donor_id": "donor-nextgen-outreach",
+        "package_id": "package-nextgen-outreach",
+        "source_profile_id": "source-nextgen-outreach",
+        "candidate_source_kind": "external_remote",
+        "resolution_kind": "adopt_external_donor",
         "skill_candidate_id": "candidate-nextgen-outreach",
         "skill_trial_id": "trial-nextgen-seat-1",
         "skill_lifecycle_stage": "trial",
@@ -715,6 +725,11 @@ def test_query_execution_runtime_evidence_sinks_attach_tool_contract_metadata() 
     assert shell_meta["read_only"] is True
     assert shell_meta["concurrency_class"] == "parallel-read"
     assert shell_meta["preflight_policy"] == "shell-safety"
+    assert shell_meta["donor_id"] == "donor-nextgen-outreach"
+    assert shell_meta["package_id"] == "package-nextgen-outreach"
+    assert shell_meta["source_profile_id"] == "source-nextgen-outreach"
+    assert shell_meta["candidate_source_kind"] == "external_remote"
+    assert shell_meta["resolution_kind"] == "adopt_external_donor"
     assert shell_meta["skill_candidate_id"] == "candidate-nextgen-outreach"
     assert shell_meta["skill_trial_id"] == "trial-nextgen-seat-1"
     assert shell_meta["selected_scope"] == "seat"
@@ -726,6 +741,9 @@ def test_query_execution_runtime_evidence_sinks_attach_tool_contract_metadata() 
     assert file_meta["read_only"] is False
     assert file_meta["concurrency_class"] == "serial-write"
     assert file_meta["preflight_policy"] == "inline"
+    assert file_meta["donor_id"] == "donor-nextgen-outreach"
+    assert file_meta["package_id"] == "package-nextgen-outreach"
+    assert file_meta["source_profile_id"] == "source-nextgen-outreach"
     assert file_meta["skill_candidate_id"] == "candidate-nextgen-outreach"
     assert file_meta["skill_trial_id"] == "trial-nextgen-seat-1"
     assert file_meta["selected_scope"] == "seat"
@@ -736,6 +754,9 @@ def test_query_execution_runtime_evidence_sinks_attach_tool_contract_metadata() 
     assert browser_meta["read_only"] is False
     assert browser_meta["concurrency_class"] == "serial-write"
     assert browser_meta["preflight_policy"] == "inline"
+    assert browser_meta["donor_id"] == "donor-nextgen-outreach"
+    assert browser_meta["package_id"] == "package-nextgen-outreach"
+    assert browser_meta["source_profile_id"] == "source-nextgen-outreach"
     assert browser_meta["skill_candidate_id"] == "candidate-nextgen-outreach"
     assert browser_meta["skill_trial_id"] == "trial-nextgen-seat-1"
     assert browser_meta["selected_scope"] == "seat"

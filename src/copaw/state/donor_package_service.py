@@ -35,6 +35,29 @@ class DonorPackageService:
     ) -> list[object]:
         return self.list_packages(donor_id=donor_id, limit=limit)
 
+    def find_reusable_package(
+        self,
+        *,
+        canonical_package_id: str | None = None,
+        package_ref: str | None = None,
+        package_version: str | None = None,
+    ) -> object | None:
+        normalized_canonical = _string(canonical_package_id)
+        normalized_ref = _string(package_ref)
+        normalized_version = _string(package_version)
+        for item in self.list_packages(limit=None):
+            if (
+                normalized_canonical is not None
+                and _string(getattr(item, "canonical_package_id", None)) == normalized_canonical
+            ):
+                return item
+            if (
+                _string(getattr(item, "package_ref", None)) == normalized_ref
+                and _string(getattr(item, "package_version", None)) == normalized_version
+            ):
+                return item
+        return None
+
     def summarize_packages(self) -> dict[str, Any]:
         packages = self.list_packages(limit=None)
         package_kind_count = dict(
@@ -58,4 +81,3 @@ class DonorPackageService:
 
 
 __all__ = ["DonorPackageService"]
-

@@ -4,6 +4,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from ..compiler.planning import ReportReplanEngine
+from ..capabilities.skill_evolution_service import SkillEvolutionService
+from ..learning.skill_gap_detector import SkillGapDetector
 from .service_shared import *  # noqa: F401,F403
 
 
@@ -69,6 +71,8 @@ class _PredictionServiceCoreMixin:
         capability_candidate_service: object | None = None,
         capability_donor_service: object | None = None,
         capability_portfolio_service: object | None = None,
+        skill_evolution_service: object | None = None,
+        skill_gap_detector: object | None = None,
         skill_trial_service: object | None = None,
         skill_lifecycle_decision_service: object | None = None,
         agent_profile_service: object | None = None,
@@ -94,6 +98,18 @@ class _PredictionServiceCoreMixin:
         self._capability_candidate_service = capability_candidate_service
         self._capability_donor_service = capability_donor_service
         self._capability_portfolio_service = capability_portfolio_service
+        self._skill_evolution_service = (
+            skill_evolution_service
+            if skill_evolution_service is not None
+            else SkillEvolutionService(
+                candidate_service=capability_candidate_service,
+            )
+        )
+        self._skill_gap_detector = (
+            skill_gap_detector
+            if skill_gap_detector is not None
+            else SkillGapDetector()
+        )
         self._skill_trial_service = skill_trial_service
         self._skill_lifecycle_decision_service = skill_lifecycle_decision_service
         self._agent_profile_service = agent_profile_service

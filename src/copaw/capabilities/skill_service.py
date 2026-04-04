@@ -7,6 +7,7 @@ from typing import Any, get_args
 import frontmatter
 
 from ..agents.skills_hub import install_skill_from_hub as _install_skill_from_hub
+from .skill_evolution_service import SkillEvolutionService
 from .remote_skill_contract import RemoteSkillLifecycleStage, RemoteSkillRolloutScope
 from ..skill_service import (
     SkillService,
@@ -218,6 +219,22 @@ class CapabilitySkillService:
     - capability execution no longer needs SKILL.md/script/reference disk reads
     """
 
+    def __init__(
+        self,
+        *,
+        skill_evolution_service: object | None = None,
+        candidate_service: object | None = None,
+        donor_package_service: object | None = None,
+    ) -> None:
+        self._skill_evolution_service = (
+            skill_evolution_service
+            if skill_evolution_service is not None
+            else SkillEvolutionService(
+                candidate_service=candidate_service,
+                donor_package_service=donor_package_service,
+            )
+        )
+
     def list_all_skills(self) -> list[Any]:
         return SkillService.list_all_skills()
 
@@ -414,6 +431,62 @@ class CapabilitySkillService:
 
     def create_skill(self, **kwargs: object) -> object:
         return SkillService.create_skill(**kwargs)
+
+    def resolve_candidate_materialization(
+        self,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        resolver = getattr(self, "_skill_evolution_service", None)
+        resolve = getattr(resolver, "resolve_candidate_path", None)
+        if not callable(resolve):
+            return {
+                "resolution_kind": "author_local_fallback",
+                "fallback_required": True,
+                "package_form": _normalize_package_kind(kwargs.get("candidate_kind")) or "skill",
+            }
+        return dict(resolve(**kwargs))
+
+    def materialize_fallback_skill_artifact(
+        self,
+        *,
+        candidate_kind: str,
+        candidate_source_kind: str,
+        candidate_source_ref: str | None,
+        candidate_source_version: str | None,
+        skill_name: str,
+        content: str,
+        canonical_package_id: str | None = None,
+        target_scope: str = "seat",
+        target_role_id: str | None = None,
+        target_seat_ref: str | None = None,
+        target_capability_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        resolution = self.resolve_candidate_materialization(
+            candidate_kind=candidate_kind,
+            candidate_source_kind=candidate_source_kind,
+            candidate_source_ref=candidate_source_ref,
+            candidate_source_version=candidate_source_version,
+            canonical_package_id=canonical_package_id,
+            target_scope=target_scope,
+            target_role_id=target_role_id,
+            target_seat_ref=target_seat_ref,
+            target_capability_ids=target_capability_ids,
+        )
+        if not bool(resolution.get("fallback_required")):
+            return {
+                **resolution,
+                "created": False,
+            }
+        created = SkillService.create_skill(
+            name=skill_name,
+            content=content,
+            overwrite=False,
+        )
+        return {
+            **resolution,
+            "created": bool(created),
+            "skill_name": skill_name,
+        }
 
     def install_skill_from_hub(self, **kwargs: object) -> object:
         install_kwargs = {

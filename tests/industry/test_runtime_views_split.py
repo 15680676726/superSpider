@@ -295,6 +295,64 @@ def test_runtime_views_mixin_owns_instance_detail_builder() -> None:
     assert "_IndustryRuntimeViewsMixin._build_instance_detail(" in service_strategy
 
 
+def test_capability_governance_projection_exposes_current_capability_trial(tmp_path) -> None:
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+        north_star="Keep governed follow-up visible.",
+    )
+    state_store = SQLiteStateStore(tmp_path / "runtime-views.db")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-seat",
+            actor_key="runtime:agent-seat",
+            actor_fingerprint="fp-agent-seat",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="running",
+            metadata={
+                "capability_layers": {
+                    "role_prototype_capability_ids": ["tool:read_file"],
+                    "seat_instance_capability_ids": ["mcp:browser_runtime"],
+                    "cycle_delta_capability_ids": [],
+                    "session_overlay_capability_ids": [],
+                    "effective_capability_ids": [
+                        "tool:read_file",
+                        "mcp:browser_runtime",
+                    ],
+                },
+                "current_capability_trial": {
+                    "candidate_id": "cand-browser-runtime",
+                    "skill_trial_id": "trial-browser-runtime-seat-primary",
+                    "selected_scope": "seat",
+                    "selected_seat_ref": "seat-primary",
+                    "replacement_target_ids": ["mcp:legacy_browser"],
+                },
+            },
+        ),
+    )
+    harness = _CapabilityGovernanceRuntimeViewsHarness(strategy, runtime_repository)
+
+    payload = harness._enrich_agent_capability_governance_payload(  # pylint: disable=protected-access
+        {
+            "agent_id": "agent-seat",
+            "status": "running",
+            "employment_mode": "temporary",
+            "activation_mode": "on-demand",
+        },
+    )
+
+    trial = payload["capability_governance"]["current_capability_trial"]
+    assert trial["candidate_id"] == "cand-browser-runtime"
+    assert trial["skill_trial_id"] == "trial-browser-runtime-seat-primary"
+    assert trial["selected_scope"] == "seat"
+    assert trial["selected_seat_ref"] == "seat-primary"
+    assert trial["replacement_target_ids"] == ["mcp:legacy_browser"]
+
+
 def test_main_brain_planning_surface_exposes_uncertainty_register_from_durable_strategy_truth() -> None:
     strategy = StrategyMemoryRecord(
         strategy_id="strategy-industry-1",

@@ -142,19 +142,38 @@ class CapabilityCandidateService:
             rows = conn.execute(query, params).fetchall()
         return [self._row_to_record(row) for row in rows]
 
+    def get_candidate(self, candidate_id: str) -> CapabilityCandidateRecord | None:
+        candidate_id = _string(candidate_id)
+        if candidate_id is None:
+            return None
+        with self._state_store.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM capability_candidates
+                WHERE candidate_id = ?
+                LIMIT 1
+                """,
+                (candidate_id,),
+            ).fetchone()
+        return self._row_to_record(row) if row is not None else None
+
     def summarize_candidates(self) -> dict[str, object]:
         items = self.list_candidates()
         by_kind: dict[str, int] = {}
         by_source_kind: dict[str, int] = {}
+        by_status: dict[str, int] = {}
         for item in items:
             by_kind[item.candidate_kind] = by_kind.get(item.candidate_kind, 0) + 1
             by_source_kind[item.candidate_source_kind] = (
                 by_source_kind.get(item.candidate_source_kind, 0) + 1
             )
+            by_status[item.lifecycle_stage] = by_status.get(item.lifecycle_stage, 0) + 1
         return {
             "total": len(items),
             "by_kind": by_kind,
             "by_source_kind": by_source_kind,
+            "by_status": by_status,
         }
 
     def normalize_candidate_source(

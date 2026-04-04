@@ -215,6 +215,32 @@ class SkillTrialService:
             "scope_refs": scope_refs,
         }
 
+    def get_candidate_verdict_summary(self, *, candidate_id: str) -> dict[str, object]:
+        items = self.list_trials(candidate_id=candidate_id)
+        scope_verdicts = {
+            item.scope_ref: item.verdict
+            for item in items
+            if _string(item.scope_ref) is not None
+        }
+        aggregate_verdict = "no-trials"
+        if items:
+            if any(
+                item.verdict == "failed" or item.failure_count > item.success_count
+                for item in items
+            ):
+                aggregate_verdict = "rollback_recommended"
+            elif any(item.operator_intervention_count > 0 or item.handoff_count > 0 for item in items):
+                aggregate_verdict = "continue_trial"
+            elif all(item.verdict == "passed" for item in items):
+                aggregate_verdict = "passed"
+            else:
+                aggregate_verdict = "mixed"
+        return {
+            **self.summarize_trials(candidate_id=candidate_id),
+            "aggregate_verdict": aggregate_verdict,
+            "scope_verdicts": scope_verdicts,
+        }
+
     def _upsert_record(self, record: SkillTrialRecord) -> None:
         with self._state_store.connection() as conn:
             conn.execute(

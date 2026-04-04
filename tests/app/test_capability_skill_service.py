@@ -308,6 +308,83 @@ def test_capability_skill_service_install_hub_skill_tolerates_missing_local_skil
     assert getattr(result, "source_url") == "https://example.com/research-pack.zip"
 
 
+def test_capability_skill_service_materializes_local_fallback_only_when_resolver_requires_it(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    builtin_dir = tmp_path / "builtin"
+    customized_dir = tmp_path / "customized"
+    active_dir = tmp_path / "active"
+    builtin_dir.mkdir()
+    customized_dir.mkdir()
+    active_dir.mkdir()
+    monkeypatch.setattr("copaw.skill_service.get_builtin_skills_dir", lambda: builtin_dir)
+    monkeypatch.setattr("copaw.skill_service.get_customized_skills_dir", lambda: customized_dir)
+    monkeypatch.setattr("copaw.skill_service.get_active_skills_dir", lambda: active_dir)
+
+    service = CapabilitySkillService(
+        skill_evolution_service=SimpleNamespace(
+            resolve_candidate_path=lambda **_kwargs: {
+                "resolution_kind": "author_local_fallback",
+                "fallback_required": True,
+                "package_form": "skill",
+            },
+        ),
+    )
+
+    result = service.materialize_fallback_skill_artifact(
+        candidate_kind="skill",
+        candidate_source_kind="local_authored",
+        candidate_source_ref="local://industry/private-gap",
+        candidate_source_version="draft-v1",
+        skill_name="private_gap",
+        content="---\nname: private_gap\ndescription: Private gap\n---\n# Private gap\n",
+    )
+
+    assert result["created"] is True
+    assert result["resolution_kind"] == "author_local_fallback"
+    assert (customized_dir / "private_gap" / "SKILL.md").exists()
+
+
+def test_capability_skill_service_skips_local_fallback_when_reuse_resolution_exists(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    builtin_dir = tmp_path / "builtin"
+    customized_dir = tmp_path / "customized"
+    active_dir = tmp_path / "active"
+    builtin_dir.mkdir()
+    customized_dir.mkdir()
+    active_dir.mkdir()
+    monkeypatch.setattr("copaw.skill_service.get_builtin_skills_dir", lambda: builtin_dir)
+    monkeypatch.setattr("copaw.skill_service.get_customized_skills_dir", lambda: customized_dir)
+    monkeypatch.setattr("copaw.skill_service.get_active_skills_dir", lambda: active_dir)
+
+    service = CapabilitySkillService(
+        skill_evolution_service=SimpleNamespace(
+            resolve_candidate_path=lambda **_kwargs: {
+                "resolution_kind": "reuse_existing_candidate",
+                "fallback_required": False,
+                "selected_candidate_id": "cand-reuse",
+                "package_form": "mcp-bundle",
+            },
+        ),
+    )
+
+    result = service.materialize_fallback_skill_artifact(
+        candidate_kind="mcp-bundle",
+        candidate_source_kind="external_catalog",
+        candidate_source_ref="registry://browser-runtime",
+        candidate_source_version="2026.04.04",
+        skill_name="should_not_exist",
+        content="---\nname: should_not_exist\ndescription: no-op\n---\n# no-op\n",
+    )
+
+    assert result["created"] is False
+    assert result["resolution_kind"] == "reuse_existing_candidate"
+    assert not (customized_dir / "should_not_exist").exists()
+
+
 @pytest.mark.asyncio
 async def test_system_trial_remote_skill_assignment_attaches_candidate_to_selected_seat_scope_without_apply_role() -> None:
     class _FakeSkillService:

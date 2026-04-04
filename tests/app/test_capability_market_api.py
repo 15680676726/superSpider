@@ -651,6 +651,36 @@ def test_capability_market_overview_exposes_capability_candidates(tmp_path) -> N
     assert payload["routes"]["candidate_list"] == "/api/runtime-center/capabilities/candidates"
 
 
+def test_capability_market_overview_prefers_runtime_center_candidate_projection() -> None:
+    app = build_app()
+
+    class _FakeStateQueryService:
+        def list_capability_candidates(self, *, limit: int | None = None):
+            return [
+                {
+                    "candidate_id": "cand-browser-runtime",
+                    "candidate_kind": "mcp-bundle",
+                    "candidate_source_kind": "external_catalog",
+                    "supply_path": "healthy-reuse",
+                    "lifecycle_history": {
+                        "trial_count": 1,
+                        "latest_trial_verdict": "passed",
+                    },
+                },
+            ][: limit or 20]
+
+    app.state.state_query_service = _FakeStateQueryService()
+    client = TestClient(app)
+
+    response = client.get("/capability-market/overview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["capability_candidates"][0]["candidate_kind"] == "mcp-bundle"
+    assert payload["capability_candidates"][0]["supply_path"] == "healthy-reuse"
+    assert payload["capability_candidates"][0]["lifecycle_history"]["trial_count"] == 1
+
+
 def test_capability_market_overview_uses_one_public_snapshot_for_summary() -> None:
     app = FastAPI()
     app.include_router(capability_market_router)

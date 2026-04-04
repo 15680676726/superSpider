@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
+from copaw.capabilities.skill_evolution_service import SkillEvolutionService
 from copaw.capabilities.skill_service import CapabilitySkillService
 from copaw.skill_service import SkillService
 
@@ -117,3 +119,87 @@ seat_budget_limit: 4
     assert metadata["rollout_scope"] == "single-seat"
     assert metadata["role_budget_limit"] == 12
     assert metadata["seat_budget_limit"] == 4
+
+
+def test_skill_evolution_service_prefers_reuse_and_preserves_mcp_candidate_form() -> None:
+    class _CandidateService:
+        def list_candidates(self, *, limit: int | None = None):
+            _ = limit
+            return [
+                SimpleNamespace(
+                    candidate_id="cand-browser-reuse",
+                    donor_id="donor-browser",
+                    package_id="pkg-browser",
+                    canonical_package_id="pkg:browser-runtime",
+                    candidate_kind="mcp-bundle",
+                    candidate_source_kind="external_catalog",
+                    candidate_source_ref="registry://browser-runtime",
+                    candidate_source_version="2026.04.04",
+                    target_scope="seat",
+                    target_role_id="operator",
+                    target_seat_ref="seat-primary",
+                    status="active",
+                    lifecycle_stage="active",
+                ),
+            ]
+
+    class _PackageService:
+        def find_reusable_package(self, **kwargs):
+            _ = kwargs
+            return None
+
+    service = SkillEvolutionService(
+        candidate_service=_CandidateService(),
+        donor_package_service=_PackageService(),
+    )
+
+    resolution = service.resolve_candidate_path(
+        candidate_kind="mcp-bundle",
+        candidate_source_kind="external_catalog",
+        candidate_source_ref="registry://browser-runtime",
+        candidate_source_version="2026.04.04",
+        canonical_package_id="pkg:browser-runtime",
+        target_scope="seat",
+        target_role_id="operator",
+        target_seat_ref="seat-primary",
+        target_capability_ids=["mcp:browser_runtime"],
+    )
+
+    assert resolution["resolution_kind"] == "reuse_existing_candidate"
+    assert resolution["selected_candidate_id"] == "cand-browser-reuse"
+    assert resolution["package_form"] == "mcp-bundle"
+    assert resolution["fallback_required"] is False
+
+
+def test_skill_evolution_service_only_uses_local_fallback_when_no_donor_or_reuse_exists() -> None:
+    class _CandidateService:
+        def list_candidates(self, *, limit: int | None = None):
+            _ = limit
+            return []
+
+    class _PackageService:
+        def find_reusable_package(self, **kwargs):
+            _ = kwargs
+            return None
+
+    service = SkillEvolutionService(
+        candidate_service=_CandidateService(),
+        donor_package_service=_PackageService(),
+    )
+
+    resolution = service.resolve_candidate_path(
+        candidate_kind="skill",
+        candidate_source_kind="local_authored",
+        candidate_source_ref="local://industry/private-gap",
+        candidate_source_version="draft-v1",
+        canonical_package_id=None,
+        target_scope="seat",
+        target_role_id="researcher",
+        target_seat_ref="seat-1",
+        target_capability_ids=["skill:private_gap"],
+    )
+
+    assert resolution["resolution_kind"] == "author_local_fallback"
+    assert resolution["selected_candidate_id"] is None
+    assert resolution["selected_package_id"] is None
+    assert resolution["fallback_required"] is True

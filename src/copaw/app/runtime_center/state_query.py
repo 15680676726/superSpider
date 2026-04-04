@@ -8,6 +8,7 @@ from typing import Any
 
 from ...evidence import EvidenceLedger
 from ...industry.models import IndustrySeatCapabilityLayers
+from ...learning.skill_gap_detector import SkillGapDetector
 from ...kernel.decision_policy import (
     decision_chat_route,
     decision_chat_thread_id,
@@ -91,6 +92,7 @@ class RuntimeCenterStateQueryService:
         self._human_assist_task_service = human_assist_task_service
         self._environment_service = environment_service
         self._memory_activation_service = memory_activation_service
+        self._skill_gap_detector = SkillGapDetector()
         self._environment_feedback_projector = RuntimeCenterEnvironmentFeedbackProjector(
             task_repository=self._task_repository,
             task_runtime_repository=self._task_runtime_repository,
@@ -257,9 +259,8 @@ class RuntimeCenterStateQueryService:
         items = list_candidates(limit=limit)
         payload: list[dict[str, object]] = []
         for item in items:
-            model_dump = getattr(item, "model_dump", None)
-            serialized = model_dump(mode="json") if callable(model_dump) else None
-            if isinstance(serialized, dict):
+            serialized = self._serialize_capability_candidate(item)
+            if serialized:
                 payload.append(serialized)
         return payload
 
@@ -398,6 +399,109 @@ class RuntimeCenterStateQueryService:
             if isinstance(serialized, dict):
                 payload.append(serialized)
         return payload
+
+    def _serialize_capability_candidate(self, item: object) -> dict[str, object] | None:
+        model_dump = getattr(item, "model_dump", None)
+        serialized = model_dump(mode="json") if callable(model_dump) else None
+        if not isinstance(serialized, dict):
+            return None
+        candidate_id = str(serialized.get("candidate_id") or "").strip()
+        lifecycle_history = self._candidate_lifecycle_history(candidate_id)
+        return {
+            **serialized,
+            "supply_path": self._candidate_supply_path(serialized),
+            "provenance": {
+                "candidate_kind": serialized.get("candidate_kind"),
+                "candidate_source_kind": serialized.get("candidate_source_kind"),
+                "candidate_source_ref": serialized.get("candidate_source_ref"),
+                "candidate_source_version": serialized.get("candidate_source_version"),
+                "candidate_source_lineage": serialized.get("candidate_source_lineage"),
+                "ingestion_mode": serialized.get("ingestion_mode"),
+                "donor_id": serialized.get("donor_id"),
+                "package_id": serialized.get("package_id"),
+                "source_profile_id": serialized.get("source_profile_id"),
+                "canonical_package_id": serialized.get("canonical_package_id"),
+                "protection_flags": list(serialized.get("protection_flags") or []),
+            },
+            "lifecycle_history": lifecycle_history,
+            "drift_reentry": self._skill_gap_detector.build_reentry_summary(
+                trial_summary=lifecycle_history,
+                latest_decision_kind=str(lifecycle_history.get("latest_decision_kind") or ""),
+            ),
+        }
+
+    def _candidate_supply_path(self, payload: Mapping[str, object]) -> str:
+        metadata = self._mapping_payload(payload.get("metadata"))
+        resolution_kind = first_non_empty(
+            metadata.get("resolution_kind"),
+            payload.get("resolution_kind"),
+        )
+        ingestion_mode = first_non_empty(payload.get("ingestion_mode")) or ""
+        source_kind = first_non_empty(payload.get("candidate_source_kind")) or ""
+        mapping = {
+            "reuse_existing_candidate": "healthy-reuse",
+            "adopt_registered_package": "registered-package",
+            "adopt_external_donor": "external-donor",
+            "author_local_fallback": "local-fallback",
+        }
+        if resolution_kind in mapping:
+            return mapping[str(resolution_kind)]
+        if ingestion_mode == "baseline-import":
+            return "baseline-import"
+        if source_kind == "local_authored":
+            return "local-fallback"
+        return "external-donor"
+
+    def _candidate_lifecycle_history(self, candidate_id: str) -> dict[str, object]:
+        if not candidate_id:
+            return {
+                "trial_count": 0,
+                "decision_count": 0,
+                "latest_trial_verdict": None,
+                "latest_decision_kind": None,
+            }
+        trial_service = getattr(self, "_skill_trial_service", None)
+        decision_service = getattr(self, "_skill_lifecycle_decision_service", None)
+        list_trials = getattr(trial_service, "list_trials", None)
+        list_decisions = getattr(decision_service, "list_decisions", None)
+        verdict_summary = getattr(trial_service, "get_candidate_verdict_summary", None)
+        trials = list_trials(candidate_id=candidate_id, limit=50) if callable(list_trials) else []
+        decisions = (
+            list_decisions(candidate_id=candidate_id, limit=50) if callable(list_decisions) else []
+        )
+        summary = (
+            verdict_summary(candidate_id=candidate_id)
+            if callable(verdict_summary)
+            else {}
+        )
+        latest_trial_verdict = None
+        if trials:
+            latest_trial_verdict = getattr(trials[0], "verdict", None)
+        latest_decision_kind = None
+        if decisions:
+            latest_decision_kind = getattr(decisions[0], "decision_kind", None)
+        return {
+            "trial_count": len(trials),
+            "decision_count": len(decisions),
+            "latest_trial_verdict": latest_trial_verdict,
+            "latest_decision_kind": latest_decision_kind,
+            "aggregate_verdict": (
+                summary.get("aggregate_verdict")
+                if isinstance(summary, Mapping)
+                else None
+            ),
+            "operator_intervention_count": (
+                summary.get("operator_intervention_count")
+                if isinstance(summary, Mapping)
+                else 0
+            ),
+            "scope_verdicts": (
+                dict(summary.get("scope_verdicts"))
+                if isinstance(summary, Mapping)
+                and isinstance(summary.get("scope_verdicts"), Mapping)
+                else {}
+            ),
+        }
 
     def list_work_contexts(self, limit: int | None = 5) -> list[dict[str, object]]:
         return self._work_context_projector.list_work_contexts(limit=limit)

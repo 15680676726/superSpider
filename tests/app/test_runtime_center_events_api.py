@@ -10,7 +10,12 @@ from copaw.app.runtime_center.state_query import RuntimeCenterStateQueryService
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.app.startup_recovery import StartupRecoverySummary
 from copaw.memory.conversation_compaction_service import ConversationCompactionService
+from copaw.state import SQLiteStateStore
+from copaw.state.capability_donor_service import CapabilityDonorService
 from copaw.state.capability_portfolio_service import CapabilityPortfolioService
+from copaw.state.skill_candidate_service import CapabilityCandidateService
+from copaw.state.skill_lifecycle_decision_service import SkillLifecycleDecisionService
+from copaw.state.skill_trial_service import SkillTrialService
 
 
 def _build_app() -> FastAPI:
@@ -574,6 +579,90 @@ def test_runtime_center_state_query_discovery_summary_filters_fallback_only_sour
         "external_catalog": 1,
         "external_remote": 1,
     }
+
+
+def test_runtime_center_state_query_candidate_projection_exposes_provenance_history_and_reentry(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.db")
+    donor_service = CapabilityDonorService(state_store=state_store)
+    candidate_service = CapabilityCandidateService(
+        state_store=state_store,
+        donor_service=donor_service,
+    )
+    trial_service = SkillTrialService(state_store=state_store)
+    decision_service = SkillLifecycleDecisionService(state_store=state_store)
+
+    candidate = candidate_service.normalize_candidate_source(
+        candidate_kind="mcp-bundle",
+        target_scope="seat",
+        target_role_id="operator",
+        target_seat_ref="seat-primary",
+        candidate_source_kind="external_catalog",
+        candidate_source_ref="registry://browser-runtime",
+        candidate_source_version="2026.04.04",
+        candidate_source_lineage="donor:browser-runtime",
+        ingestion_mode="prediction-recommendation",
+        proposed_skill_name="browser_runtime",
+        summary="Governed browser runtime candidate.",
+        lifecycle_stage="trial",
+        metadata={
+            "resolution_kind": "reuse_existing_candidate",
+            "selected_candidate_id": "cand-previous-browser-runtime",
+        },
+    )
+    trial_service.create_or_update_trial(
+        candidate_id=candidate.candidate_id,
+        donor_id=candidate.donor_id,
+        package_id=candidate.package_id,
+        source_profile_id=candidate.source_profile_id,
+        canonical_package_id=candidate.canonical_package_id,
+        scope_type="seat",
+        scope_ref="seat-primary",
+        verdict="failed",
+        success_count=0,
+        failure_count=2,
+        operator_intervention_count=1,
+        summary="Seat-local browser runtime drifted.",
+    )
+    decision_service.create_decision(
+        candidate_id=candidate.candidate_id,
+        donor_id=candidate.donor_id,
+        package_id=candidate.package_id,
+        source_profile_id=candidate.source_profile_id,
+        canonical_package_id=candidate.canonical_package_id,
+        decision_kind="rollback",
+        from_stage="trial",
+        to_stage="blocked",
+        reason="Seat-local runtime drift requires rollback.",
+        replacement_target_ids=["mcp:browser_runtime"],
+    )
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=object(),
+        task_runtime_repository=object(),
+        runtime_frame_repository=None,
+        schedule_repository=object(),
+        goal_repository=None,
+        work_context_repository=None,
+        decision_request_repository=object(),
+        capability_candidate_service=candidate_service,
+        skill_trial_service=trial_service,
+        skill_lifecycle_decision_service=decision_service,
+    )
+
+    payload = state_query.list_capability_candidates(limit=5)
+
+    assert len(payload) == 1
+    assert payload[0]["supply_path"] == "healthy-reuse"
+    assert payload[0]["provenance"]["candidate_kind"] == "mcp-bundle"
+    assert payload[0]["provenance"]["candidate_source_kind"] == "external_catalog"
+    assert payload[0]["provenance"]["donor_id"] == candidate.donor_id
+    assert payload[0]["lifecycle_history"]["trial_count"] == 1
+    assert payload[0]["lifecycle_history"]["latest_trial_verdict"] == "failed"
+    assert payload[0]["lifecycle_history"]["latest_decision_kind"] == "rollback"
+    assert payload[0]["drift_reentry"]["status"] == "pressure"
+    assert "rollback" in payload[0]["drift_reentry"]["reasons"]
 
 
 def test_runtime_center_capability_lifecycle_decisions_endpoint_returns_state_query_projection() -> None:
