@@ -57,7 +57,10 @@ from ..state.main_brain_service import (
 from ..state.agent_experience_service import AgentExperienceMemoryService
 from ..state.knowledge_service import StateKnowledgeService
 from ..state.reporting_service import StateReportingService
+from ..state.skill_lifecycle_decision_service import SkillLifecycleDecisionService
 from ..state.strategy_memory_service import StateStrategyMemoryService
+from ..state.skill_candidate_service import CapabilityCandidateService
+from ..state.skill_trial_service import SkillTrialService
 from ..state.work_context_service import WorkContextService
 from ..state.repositories import (
     SqliteAgentCheckpointRepository,
@@ -189,6 +192,9 @@ def _build_query_services(
     repositories: RuntimeRepositories,
     evidence_ledger: EvidenceLedger,
     runtime_event_bus: RuntimeEventBus,
+    capability_candidate_service: CapabilityCandidateService | None,
+    skill_trial_service: object | None,
+    skill_lifecycle_decision_service: object | None,
     human_assist_task_service: HumanAssistTaskService | None,
     environment_service: EnvironmentService,
 ) -> tuple[
@@ -207,6 +213,9 @@ def _build_query_services(
         repositories=repositories,
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
+        capability_candidate_service=capability_candidate_service,
+        skill_trial_service=skill_trial_service,
+        skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         human_assist_task_service=human_assist_task_service,
         environment_service=environment_service,
     )
@@ -317,6 +326,15 @@ def build_runtime_bootstrap(
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
     )
+    capability_candidate_service = CapabilityCandidateService(
+        state_store=state_store,
+    )
+    skill_trial_service = SkillTrialService(
+        state_store=state_store,
+    )
+    skill_lifecycle_decision_service = SkillLifecycleDecisionService(
+        state_store=state_store,
+    )
 
     provider_manager = ProviderManager()
     runtime_provider = _resolve_runtime_provider_facade(provider_manager)
@@ -338,6 +356,9 @@ def build_runtime_bootstrap(
         repositories=repositories,
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
+        capability_candidate_service=capability_candidate_service,
+        skill_trial_service=skill_trial_service,
+        skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         human_assist_task_service=human_assist_task_service,
         environment_service=environment_service,
     )
@@ -389,6 +410,9 @@ def build_runtime_bootstrap(
         work_context_service=work_context_service,
         learning_service=learning_service,
         capability_service=capability_service,
+        capability_candidate_service=capability_candidate_service,
+        skill_trial_service=skill_trial_service,
+        skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         kernel_dispatcher=kernel_dispatcher,
         kernel_tool_bridge=kernel_tool_bridge,
         actor_mailbox_service=actor_mailbox_service,
@@ -412,6 +436,12 @@ def build_runtime_bootstrap(
     query_execution_service = domain_services.query_execution_service
     main_brain_chat_service = domain_services.main_brain_chat_service
     main_brain_orchestrator = domain_services.main_brain_orchestrator
+    try:
+        capability_candidate_service.import_active_baseline_artifacts(
+            mounts=capability_service.list_public_capabilities(enabled_only=True),
+        )
+    except Exception:
+        logger.debug("capability candidate baseline import failed", exc_info=True)
     governance_service.set_environment_service(environment_service)
     governance_service.set_human_assist_task_service(human_assist_task_service)
     governance_service.set_industry_service(industry_service)
@@ -458,6 +488,9 @@ def build_runtime_bootstrap(
         provider_admin_service=provider_admin_service,
         state_query_service=state_query_service,
         evidence_query_service=evidence_query_service,
+        capability_candidate_service=capability_candidate_service,
+        skill_trial_service=skill_trial_service,
+        skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         human_assist_task_service=human_assist_task_service,
         strategy_memory_service=strategy_memory_service,
         work_context_service=work_context_service,

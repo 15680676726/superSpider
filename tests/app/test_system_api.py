@@ -268,6 +268,89 @@ def test_system_self_check_exposes_runtime_summary_for_automation_and_recovery(
     assert runtime_summary["startup_recovery"]["notes"] == [
         "Recovered canonical scheduler ownership after restart."
     ]
+    assert runtime_summary["status"] == "degraded"
+
+
+def test_system_self_check_prefers_environment_runtime_recovery_report(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+
+    class FakeEnvironmentService:
+        def get_latest_recovery_report(self):
+            return {
+                "reason": "runtime-recovery",
+                "pending_decisions": 1,
+                "active_schedules": 4,
+                "latest_scope": "runtime",
+            }
+
+    app.state.environment_service = FakeEnvironmentService()
+    app.state.latest_recovery_report = {
+        "reason": "stale-startup-alias",
+        "pending_decisions": 9,
+    }
+    client = TestClient(app)
+
+    response = client.get("/system/self-check")
+
+    assert response.status_code == 200
+    payload = response.json()
+    by_name = {item["name"]: item for item in payload["checks"]}
+    assert by_name["startup_recovery"]["meta"]["recovery_summary"]["reason"] == (
+        "runtime-recovery"
+    )
+    assert by_name["startup_recovery"]["meta"]["recovery_summary"]["latest_scope"] == (
+        "runtime"
+    )
+
+
+def test_system_self_check_prefers_persisted_automation_loop_snapshots_when_live_tasks_are_absent(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    app.state.state_query_service = SimpleNamespace(
+        list_schedules=lambda: [],
+    )
+    app.state.startup_recovery_summary = StartupRecoverySummary(
+        reason="Recovered leases after restart.",
+        active_schedules=0,
+    )
+    app.state.automation_tasks = []
+    app.state.automation_loop_runtime_repository = SimpleNamespace(
+        list_loops=lambda limit=None: [
+            SimpleNamespace(
+                automation_task_id=(
+                    "copaw-main-brain:operating-cycle:system:run_operating_cycle"
+                ),
+                task_name="operating-cycle",
+                capability_ref="system:run_operating_cycle",
+                owner_agent_id="copaw-main-brain",
+                interval_seconds=180,
+                coordinator_contract="automation-coordinator/v1",
+                loop_phase="failed",
+                health_status="degraded",
+                last_gate_reason="active-industry",
+                last_result_phase="failed",
+                last_error_summary="planner timeout",
+                submit_count=2,
+                consecutive_failures=2,
+            )
+        ]
+    )
+    client = TestClient(app)
+
+    response = client.get("/system/self-check")
+
+    assert response.status_code == 200
+    payload = response.json()
+    runtime_summary = payload["runtime_summary"]
+    assert runtime_summary["status"] == "degraded"
+    assert runtime_summary["automation"]["status"] == "degraded"
+    assert runtime_summary["automation"]["loop_count"] == 1
+    assert runtime_summary["automation"]["loops"][0]["task_name"] == "operating-cycle"
+    assert runtime_summary["automation"]["loops"][0]["health_status"] == "degraded"
+    assert payload["overall_status"] == "warn"
 
 
 def test_system_backup_download_streams_workspace_archive(

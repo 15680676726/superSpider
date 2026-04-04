@@ -52,6 +52,9 @@ class _PredictionServiceCoreMixin:
         workflow_run_repository: SqliteWorkflowRunRepository | None = None,
         strategy_memory_service: object | None = None,
         capability_service: object | None = None,
+        capability_candidate_service: object | None = None,
+        skill_trial_service: object | None = None,
+        skill_lifecycle_decision_service: object | None = None,
         agent_profile_service: object | None = None,
         kernel_dispatcher: object | None = None,
         enable_remote_hub_search: bool = True,
@@ -72,6 +75,9 @@ class _PredictionServiceCoreMixin:
         self._workflow_run_repository = workflow_run_repository
         self._strategy_memory_service = strategy_memory_service
         self._capability_service = capability_service
+        self._capability_candidate_service = capability_candidate_service
+        self._skill_trial_service = skill_trial_service
+        self._skill_lifecycle_decision_service = skill_lifecycle_decision_service
         self._agent_profile_service = agent_profile_service
         self._kernel_dispatcher = kernel_dispatcher
         self._enable_remote_hub_search = enable_remote_hub_search
@@ -608,11 +614,86 @@ class _PredictionServiceCoreMixin:
                 },
             )
             self._recommendation_repository.upsert_recommendation(updated)
+            self._record_executed_lifecycle_decision(
+                record=updated,
+                execution=execution,
+                actor=actor,
+            )
         detail = self.get_case_detail(case_id)
         return PredictionRecommendationExecutionResponse(
             execution=execution,
             decision=self._decision_payload(updated.decision_request_id),
             detail=detail,
+        )
+
+    def _record_executed_lifecycle_decision(
+        self,
+        *,
+        record: PredictionRecommendationRecord,
+        execution: dict[str, Any],
+        actor: str,
+    ) -> None:
+        service = getattr(self, "_skill_lifecycle_decision_service", None)
+        create_decision = getattr(service, "create_decision", None)
+        list_decisions = getattr(service, "list_decisions", None)
+        if not callable(create_decision):
+            return
+        if str(record.action_kind or "").strip() != "system:apply_capability_lifecycle":
+            return
+        if self._status_from_phase(execution.get("phase"), fallback=record.status) != "executed":
+            return
+        action_payload = _safe_dict(record.action_payload)
+        metadata = _safe_dict(record.metadata)
+        candidate_id = _string(action_payload.get("candidate_id")) or _string(metadata.get("candidate_id"))
+        if candidate_id is None:
+            return
+        decision_kind = _string(action_payload.get("decision_kind"))
+        stage_mapping = {
+            "continue_trial": ("candidate", "trial"),
+            "keep_seat_local": ("trial", "trial"),
+            "replace_existing": ("candidate", "trial"),
+            "promote_to_role": ("trial", "active"),
+            "rollback": ("trial", "blocked"),
+            "retire": ("active", "retired"),
+        }
+        if decision_kind not in stage_mapping:
+            return
+        source_recommendation_id = record.recommendation_id
+        if callable(list_decisions):
+            existing = list_decisions(candidate_id=candidate_id, limit=100)
+            for item in existing:
+                item_metadata = _safe_dict(getattr(item, "metadata", None))
+                if (
+                    getattr(item, "decision_kind", None) == decision_kind
+                    and _string(item_metadata.get("source_recommendation_id")) == source_recommendation_id
+                    and _string(item_metadata.get("execution_status")) == "executed"
+                ):
+                    return
+        from_stage, to_stage = stage_mapping[decision_kind]
+        create_decision(
+            candidate_id=candidate_id,
+            decision_kind=decision_kind,
+            from_stage=from_stage,
+            to_stage=to_stage,
+            reason=_string(action_payload.get("reason")) or _string(metadata.get("optimization_stage")) or decision_kind,
+            evidence_refs=_string_list(record.execution_evidence_id),
+            replacement_target_ids=_string_list(
+                action_payload.get("replacement_target_ids"),
+                action_payload.get("rollback_target_ids"),
+                metadata.get("replacement_target_ids"),
+                metadata.get("rollback_target_ids"),
+            ),
+            protection_lifted=False,
+            applied_by=_string(actor) or "prediction-service",
+            metadata={
+                "source_recommendation_id": source_recommendation_id,
+                "execution_status": "executed",
+                "gap_kind": _string(metadata.get("gap_kind")),
+                "trial_scope": _string(metadata.get("trial_scope")),
+                "selected_seat_ref": _string(action_payload.get("selected_seat_ref"))
+                or _string(metadata.get("selected_seat_ref"))
+                or _string(metadata.get("source_trial_seat_ref")),
+            },
         )
 
     def get_active_team_role_gap_recommendation(

@@ -805,12 +805,27 @@ def _template_to_install_template_response(
 async def get_capability_market_overview(request: Request) -> dict[str, object]:
     service = _get_capability_service(request)
     capabilities, summary = service.list_public_capability_inventory()
+    candidate_service = getattr(request.app.state, "capability_candidate_service", None)
+    list_candidates = getattr(candidate_service, "list_candidates", None)
+    summarize_candidates = getattr(candidate_service, "summarize_candidates", None)
+    capability_candidates = (
+        [item.model_dump(mode="json") for item in list_candidates(limit=12)]
+        if callable(list_candidates)
+        else []
+    )
+    candidate_summary = (
+        dict(summarize_candidates())
+        if callable(summarize_candidates)
+        else {"total": 0, "by_kind": {}, "by_source_kind": {}, "by_status": {}}
+    )
     return {
         "summary": summary.model_dump(mode="json"),
         "installed": [mount.model_dump(mode="json") for mount in capabilities],
         "skills": service.list_skill_specs(),
         "available_skills": service.list_available_skill_specs(),
         "mcp_clients": service.list_mcp_client_infos(),
+        "candidate_summary": candidate_summary,
+        "capability_candidates": capability_candidates,
         "routes": {
             "capabilities": "/api/capability-market/capabilities",
             "capability_summary": "/api/capability-market/capabilities/summary",
@@ -823,6 +838,7 @@ async def get_capability_market_overview(request: Request) -> dict[str, object]:
             "curated_install": "/api/capability-market/curated-catalog/install",
             "hub_search": "/api/capability-market/hub/search",
             "hub_install": "/api/capability-market/hub/install",
+            "candidate_list": "/api/runtime-center/capabilities/candidates",
         },
     }
 

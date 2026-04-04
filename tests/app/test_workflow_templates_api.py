@@ -1058,6 +1058,18 @@ def test_workflow_template_service_launch_materializes_run(tmp_path) -> None:
     assert schedule_payload["meta"]["host_snapshot"]["coordination"][
         "recommended_scheduler_action"
     ] == "continue"
+    schedule_record = client.app.state.workflow_template_service._schedule_repository.get_schedule(
+        detail_payload["schedules"][0]["id"],
+    )
+    assert schedule_record is not None
+    assert schedule_record.spec_payload["request"]["control_thread_id"] == run_id
+    assert schedule_record.spec_payload["request"]["entry_source"] == "workflow-run"
+    assert schedule_record.spec_payload["request"]["main_brain_runtime"]["environment"][
+        "ref"
+    ] == detail["environment_id"]
+    assert schedule_record.spec_payload["request"]["main_brain_runtime"]["environment"][
+        "session_id"
+    ] == run_id
 
 
 def test_workflow_schedule_meta_uses_canonical_host_refs_when_launch_only_has_session_mount(

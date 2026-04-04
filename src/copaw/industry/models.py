@@ -293,6 +293,8 @@ class IndustrySeatCapabilityLayers(BaseModel):
         return _normalize_text_list(value)
 
     def merged_capability_ids(self) -> list[str]:
+        if self.effective_capability_ids:
+            return _merge_text_lists(self.effective_capability_ids)
         return _merge_text_lists(
             self.role_prototype_capability_ids,
             self.seat_instance_capability_ids,
@@ -315,6 +317,27 @@ class IndustrySeatCapabilityLayers(BaseModel):
         if isinstance(value, dict):
             return cls.model_validate(value)
         return cls()
+
+
+def resolve_runtime_effective_capability_ids(
+    metadata: object | None,
+) -> list[str]:
+    payload = metadata if isinstance(metadata, dict) else {}
+    layers = IndustrySeatCapabilityLayers.from_metadata(payload.get("capability_layers"))
+    effective_capability_ids = layers.merged_capability_ids()
+    current_trial = payload.get("current_capability_trial")
+    if not isinstance(current_trial, dict):
+        return effective_capability_ids
+    replacement_target_ids = set(
+        _normalize_text_list(current_trial.get("replacement_target_ids")),
+    )
+    if not replacement_target_ids:
+        return effective_capability_ids
+    return [
+        capability_id
+        for capability_id in effective_capability_ids
+        if capability_id not in replacement_target_ids
+    ]
 
 
 class IndustryDraftGoal(BaseModel):

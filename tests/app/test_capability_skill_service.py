@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from copaw.capabilities import CapabilityMount, CapabilityService, CapabilityRegistry
 from copaw.capabilities.remote_skill_contract import RemoteSkillCandidate
 from copaw.capabilities.skill_service import CapabilitySkillService
+from copaw.capabilities.system_skill_handlers import SystemSkillCapabilityFacade
 from copaw.evidence.models import EvidenceRecord
 from copaw.state import (
     AgentProfileOverrideRecord,
@@ -305,6 +306,116 @@ def test_capability_skill_service_install_hub_skill_tolerates_missing_local_skil
 
     assert getattr(result, "name") == "research"
     assert getattr(result, "source_url") == "https://example.com/research-pack.zip"
+
+
+@pytest.mark.asyncio
+async def test_system_trial_remote_skill_assignment_attaches_candidate_to_selected_seat_scope_without_apply_role() -> None:
+    class _FakeSkillService:
+        @staticmethod
+        def install_skill_from_hub(**_kwargs: object) -> object:
+            return SimpleNamespace(
+                name="nextgen_outreach",
+                enabled=True,
+                source_url="https://example.com/nextgen-outreach.zip",
+            )
+
+    class _FakeAgentProfileService:
+        @staticmethod
+        def get_agent_detail(_agent_id: str) -> dict[str, object]:
+            return {
+                "runtime": {
+                    "industry_role_id": "solution-lead",
+                    "metadata": {
+                        "selected_seat_ref": "env-browser-primary",
+                        "capability_layers": {
+                            "schema_version": "industry-seat-capability-layers-v1",
+                            "role_prototype_capability_ids": ["tool:read_file"],
+                            "seat_instance_capability_ids": ["skill:legacy_outreach"],
+                            "cycle_delta_capability_ids": [],
+                            "session_overlay_capability_ids": [],
+                        },
+                    },
+                },
+            }
+
+        @staticmethod
+        def get_capability_surface(_agent_id: str) -> dict[str, object]:
+            return {
+                "baseline_capabilities": ["tool:read_file"],
+                "effective_capabilities": [
+                    "tool:read_file",
+                    "skill:legacy_outreach",
+                ],
+            }
+
+    apply_calls: list[dict[str, object]] = []
+    attach_calls: list[dict[str, object]] = []
+
+    async def _attach_trial(payload: dict[str, object]) -> dict[str, object]:
+        attach_calls.append(dict(payload))
+        return {
+            "success": True,
+            "trial_id": "trial-nextgen-seat-1",
+            "selected_scope": "seat",
+            "scope_type": "seat",
+            "scope_ref": "env-browser-primary",
+            "attached_capability_ids": ["skill:nextgen_outreach"],
+        }
+
+    async def _apply_role(payload: dict[str, object]) -> dict[str, object]:
+        apply_calls.append(dict(payload))
+        return {"success": True}
+
+    facade = SystemSkillCapabilityFacade(
+        skill_service=_FakeSkillService(),
+        get_capability_fn=lambda capability_id: CapabilityMount(
+            id=capability_id,
+            name=capability_id,
+            summary=f"Mount for {capability_id}",
+            kind="skill-bundle",
+            source_kind="skill" if capability_id.startswith("skill:") else "tool",
+            risk_level="guarded",
+        ),
+        agent_profile_service=_FakeAgentProfileService(),
+        apply_role_handler=_apply_role,
+        trial_scope_handler=_attach_trial,
+    )
+
+    result = await facade.handle_trial_remote_skill_assignment(
+        {
+            "candidate": {
+                "candidate_key": "hub:nextgen-outreach",
+                "source_kind": "hub",
+                "source_label": "SkillHub",
+                "title": "NextGen Outreach",
+                "description": "Guarded outreach skill",
+                "bundle_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/nextgen-outreach.zip",
+                "source_url": "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/nextgen-outreach.zip",
+                "version": "1.0.0",
+                "install_name": "nextgen_outreach",
+                "capability_ids": ["skill:nextgen_outreach"],
+                "review_required": False,
+            },
+            "candidate_id": "candidate-nextgen-outreach",
+            "target_agent_id": "industry-solution-lead-demo",
+            "capability_ids": ["skill:nextgen_outreach"],
+            "replacement_capability_ids": ["skill:legacy_outreach"],
+            "capability_assignment_mode": "replace",
+            "selected_seat_ref": "env-browser-primary",
+            "trial_scope": "single-seat",
+            "target_role_id": "solution-lead",
+        },
+    )
+
+    assert result["success"] is True
+    assert result["trial_attachment"]["trial_id"] == "trial-nextgen-seat-1"
+    assert result["trial_attachment"]["selected_scope"] == "seat"
+    assert result["trial_attachment"]["scope_ref"] == "env-browser-primary"
+    assert attach_calls[0]["candidate_id"] == "candidate-nextgen-outreach"
+    assert attach_calls[0]["selected_scope"] == "seat"
+    assert attach_calls[0]["scope_ref"] == "env-browser-primary"
+    assert attach_calls[0]["target_role_id"] == "solution-lead"
+    assert apply_calls == []
 
 
 def test_capability_skill_service_bind_skill_package_metadata_canonicalizes_filesystem_binding(
@@ -757,8 +868,16 @@ def test_prediction_service_rollout_recommendation_uses_single_seat_trial_metada
     rollout_metadata = rollout["recommendation"]["metadata"]
 
     assert rollout["recommendation"]["target_agent_id"] == "industry-ops-demo"
+    assert rollout["recommendation"]["action_kind"] == "system:apply_capability_lifecycle"
+    assert rollout["recommendation"]["action_payload"]["decision_kind"] == (
+        "promote_to_role"
+    )
     assert rollout["recommendation"]["action_payload"]["capability_assignment_mode"] == (
         "replace"
+    )
+    assert rollout["recommendation"]["action_payload"]["selected_scope"] == "seat"
+    assert rollout["recommendation"]["action_payload"]["selected_seat_ref"] == (
+        "env-browser-secondary"
     )
     assert rollout_metadata["lifecycle_stage"] == "rollout"
     assert rollout_metadata["candidate_lifecycle_stage"] == "active"
@@ -808,6 +927,7 @@ def test_prediction_service_recommends_rollback_when_trial_candidate_underperfor
                     "gap_kind": "underperforming_capability",
                     "optimization_stage": "trial",
                     "industry_instance_id": "industry-demo",
+                    "candidate_id": "candidate-nextgen-outreach",
                     "target_agent_id": "industry-solution-lead-demo",
                     "replacement_capability_ids": ["skill:legacy_outreach"],
                     "replacement_capability_id": "skill:legacy_outreach",
@@ -824,6 +944,31 @@ def test_prediction_service_recommends_rollback_when_trial_candidate_underperfor
     )
     client = TestClient(app)
     skill_service = app.state.capability_service._skill_service
+    seeded_candidate = app.state.capability_candidate_service.normalize_candidate_source(
+        candidate_kind="skill",
+        target_scope="seat",
+        target_role_id="solution-lead",
+        target_seat_ref="env-browser-primary",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="hub:nextgen-outreach",
+        candidate_source_version="1.0.0",
+        candidate_source_lineage="hub:nextgen-outreach",
+        ingestion_mode="prediction-recommendation",
+        proposed_skill_name="nextgen_outreach",
+        summary="Seed trial candidate for rollback follow-up.",
+        industry_instance_id="industry-demo",
+        status="candidate",
+        lifecycle_stage="trial",
+        metadata={"seeded_for_test": True},
+    )
+    app.state.capability_candidate_service._upsert_record(  # pylint: disable=protected-access
+        seeded_candidate.model_copy(
+            update={
+                "candidate_id": "candidate-nextgen-outreach",
+                "lineage_root_id": "candidate-nextgen-outreach",
+            },
+        ),
+    )
     skill_service.create_skill(
         name="legacy_outreach",
         content=(
@@ -950,10 +1095,14 @@ def test_prediction_service_recommends_rollback_when_trial_candidate_underperfor
     rollback_metadata = rollback["recommendation"]["metadata"]
     rollback_payload = rollback["recommendation"]["action_payload"]
 
-    assert rollback["recommendation"]["action_kind"] == "system:apply_role"
+    assert rollback["recommendation"]["action_kind"] == "system:apply_capability_lifecycle"
+    assert rollback_payload["decision_kind"] == "rollback"
+    assert rollback_payload["candidate_id"] == rollback_metadata["candidate_id"]
     assert rollback_payload["capability_assignment_mode"] == "replace"
-    assert "skill:legacy_outreach" in rollback_payload["capabilities"]
-    assert "skill:nextgen_outreach" not in rollback_payload["capabilities"]
+    assert rollback_payload["selected_scope"] == "seat"
+    assert rollback_payload["selected_seat_ref"] == "env-browser-primary"
+    assert rollback_payload["rollback_target_ids"] == ["skill:legacy_outreach"]
+    assert rollback_payload["capability_ids"] == ["skill:nextgen_outreach"]
     assert rollback_metadata["lifecycle_stage"] == "blocked"
     assert rollback_metadata["candidate_lifecycle_stage"] == "deprecated"
     assert rollback_metadata["replacement_target_stage"] == "active"

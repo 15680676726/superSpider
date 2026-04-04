@@ -14,6 +14,7 @@ from ..models import (
     AssignmentRecord,
     AgentRuntimeRecord,
     AgentThreadBindingRecord,
+    AutomationLoopRuntimeRecord,
     BacklogItemRecord,
     DecisionRequestRecord,
     ExecutionRoutineRecord,
@@ -193,6 +194,35 @@ class BaseAgentThreadBindingRepository(ABC):
 
     @abstractmethod
     def delete_binding(self, thread_id: str) -> bool:
+        raise NotImplementedError
+
+
+class BaseAutomationLoopRuntimeRepository(ABC):
+    """Abstract repository for durable automation-loop runtime snapshots."""
+
+    @abstractmethod
+    def get_loop(self, automation_task_id: str) -> Optional[AutomationLoopRuntimeRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_loops(
+        self,
+        *,
+        owner_agent_id: str | None = None,
+        health_status: str | None = None,
+        limit: int | None = None,
+    ) -> list[AutomationLoopRuntimeRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_loop(
+        self,
+        loop: AutomationLoopRuntimeRecord,
+    ) -> AutomationLoopRuntimeRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_loop(self, automation_task_id: str) -> bool:
         raise NotImplementedError
 
 

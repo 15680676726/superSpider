@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 
 from .agent_runtime import create_agent_runtime_app
 from .runtime_host import RuntimeHost
+from .runtime_recovery_report import build_latest_recovery_report
 from ..config import (  # pylint: disable=no-name-in-module
     load_config,
 )
@@ -129,9 +130,35 @@ async def lifespan(
         environment_service=bootstrap.environment_service,
         industry_service=bootstrap.industry_service,
         learning_service=bootstrap.learning_service,
+        automation_loop_runtime_repository=(
+            bootstrap.repositories.automation_loop_runtime_repository
+        ),
         logger=logger,
     )
     app.state.automation_tasks = automation_tasks
+    app.state.latest_recovery_report = build_latest_recovery_report(
+        startup_recovery_summary=app.state.startup_recovery_summary,
+        automation_tasks=automation_tasks,
+        automation_loop_runtime_repository=(
+            bootstrap.repositories.automation_loop_runtime_repository
+        ),
+    )
+    set_latest_recovery_report_sink = getattr(
+        bootstrap.environment_service,
+        "set_latest_recovery_report_sink",
+        None,
+    )
+    if callable(set_latest_recovery_report_sink):
+        set_latest_recovery_report_sink(
+            lambda payload: setattr(app.state, "latest_recovery_report", payload),
+        )
+    set_latest_recovery_report = getattr(
+        bootstrap.environment_service,
+        "set_latest_recovery_report",
+        None,
+    )
+    if callable(set_latest_recovery_report):
+        set_latest_recovery_report(app.state.latest_recovery_report)
     restart_coordinator = RuntimeRestartCoordinator(
         app=app,
         agent_runtime_app=agent_runtime_app,

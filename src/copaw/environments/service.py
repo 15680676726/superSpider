@@ -2,6 +2,7 @@
 """Environment query facade."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from ..state import AgentLeaseRecord
@@ -45,6 +46,8 @@ class EnvironmentService:
         self._runtime_event_bus = None
         self._agent_lease_repository = None
         self._kernel_dispatcher = None
+        self._latest_recovery_report: dict[str, object] | None = None
+        self._latest_recovery_report_sink = None
         self._browser_companion_runtime: BrowserCompanionRuntime | None = None
         self._browser_attach_runtime: BrowserAttachRuntime | None = None
         self._document_bridge_runtime: DocumentBridgeRuntime | None = None
@@ -100,6 +103,27 @@ class EnvironmentService:
 
     def set_kernel_dispatcher(self, kernel_dispatcher) -> None:
         self._kernel_dispatcher = kernel_dispatcher
+
+    def set_latest_recovery_report_sink(self, sink) -> None:
+        self._latest_recovery_report_sink = sink
+
+    def set_latest_recovery_report(
+        self,
+        report: dict[str, object] | None,
+    ) -> dict[str, object] | None:
+        normalized = _mapping_dict(report)
+        self._latest_recovery_report = normalized or None
+        if normalized and callable(self._latest_recovery_report_sink):
+            try:
+                self._latest_recovery_report_sink(dict(normalized))
+            except Exception:
+                pass
+        return dict(normalized) if normalized else None
+
+    def get_latest_recovery_report(self) -> dict[str, object] | None:
+        if not isinstance(self._latest_recovery_report, dict):
+            return None
+        return dict(self._latest_recovery_report)
 
     def register_session_handle_restorer(
         self,
@@ -818,11 +842,62 @@ class EnvironmentService:
         *,
         limit: int = 20,
         allow_cross_process_recovery: bool = False,
+        actor: str | None = None,
+        source: str | None = None,
+        session_mount_id: str | None = None,
     ) -> dict[str, Any]:
-        return self._host_event_recovery_service.run_recovery_cycle(
+        result = self._host_event_recovery_service.run_recovery_cycle(
             limit=limit,
+            session_mount_id=session_mount_id,
             allow_cross_process_recovery=allow_cross_process_recovery,
         )
+        self.set_latest_recovery_report(
+            self._build_latest_host_recovery_report(
+                host_recovery=result,
+                actor=actor,
+                source=source,
+                session_mount_id=session_mount_id,
+            )
+        )
+        return result
+
+    def _build_latest_host_recovery_report(
+        self,
+        *,
+        host_recovery: dict[str, Any] | None,
+        actor: str | None,
+        source: str | None,
+        session_mount_id: str | None,
+    ) -> dict[str, object]:
+        payload = _mapping_dict(host_recovery)
+        executed = _int_value(payload.get("executed"))
+        report: dict[str, object] = {
+            "reason": "runtime-recovery",
+            "source": "runtime",
+            "latest_scope": "runtime",
+            "producer": "host-recovery",
+            "recovered_at": datetime.now(timezone.utc).isoformat(),
+            "executed": executed,
+            "skipped": _int_value(payload.get("skipped")),
+            "failed": _int_value(payload.get("failed")),
+            "planned": _int_value(payload.get("planned")),
+            "last_seen_event_id": payload.get("last_seen_event_id"),
+            "decisions": _mapping_dict(payload.get("decisions")),
+            "actions": list(payload.get("actions") or []),
+            "pending_decisions": 0,
+            "hydrated_waiting_confirm_tasks": 0,
+            "active_schedules": 0,
+            "notes": [
+                f"Host recovery processed {executed} actionable event(s).",
+            ],
+        }
+        if actor:
+            report["actor"] = str(actor).strip()
+        if source:
+            report["trigger_source"] = str(source).strip()
+        if session_mount_id:
+            report["session_mount_id"] = str(session_mount_id).strip()
+        return report
 
     def register_browser_companion(self, **kwargs) -> dict[str, Any]:
         runtime = self._require_browser_companion_runtime()
@@ -1266,3 +1341,14 @@ class EnvironmentService:
                 "WindowsAppAdapterRuntime requires EnvironmentRegistry.repository and SessionMountRepository.",
             )
         return self._windows_app_adapter_runtime
+
+
+def _mapping_dict(value: object | None) -> dict[str, object]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _int_value(value: object | None) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0

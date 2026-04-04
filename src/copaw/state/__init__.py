@@ -14,9 +14,11 @@ from .models import (
     AgentProfileOverrideRecord,
     AgentRuntimeRecord,
     AgentReportRecord,
+    AutomationLoopRuntimeRecord,
     AssignmentRecord,
     AgentThreadBindingRecord,
     BacklogItemRecord,
+    CapabilityCandidateRecord,
     CapabilityOverrideRecord,
     DecisionRequestRecord,
     ExecutionRoutineRecord,
@@ -41,6 +43,8 @@ from .models import (
     RuntimeFrameRecord,
     RoutineRunRecord,
     ScheduleRecord,
+    SkillLifecycleDecisionRecord,
+    SkillTrialRecord,
     StrategicUncertaintyRecord,
     StrategyMemoryRecord,
     StrategyTriggerRuleRecord,
@@ -70,6 +74,8 @@ from .main_brain_service import (
     OperatingCycleService,
     OperatingLaneService,
 )
+from .skill_lifecycle_decision_service import SkillLifecycleDecisionService
+from .skill_trial_service import SkillTrialService
 from .store import SQLiteStateStore, STATE_SCHEMA_VERSION
 
 __all__ = [
@@ -81,10 +87,12 @@ __all__ = [
     "AssignmentService",
     "AgentRuntimeRecord",
     "AgentReportRecord",
+    "AutomationLoopRuntimeRecord",
     "AssignmentRecord",
     "AgentThreadBindingRecord",
     "BacklogService",
     "BacklogItemRecord",
+    "CapabilityCandidateRecord",
     "CapabilityOverrideRecord",
     "DecisionRequestRecord",
     "ExecutionRoutineRecord",
@@ -120,6 +128,10 @@ __all__ = [
     "ScheduleRecord",
     "SQLiteStateStore",
     "STATE_SCHEMA_VERSION",
+    "SkillLifecycleDecisionService",
+    "SkillLifecycleDecisionRecord",
+    "SkillTrialService",
+    "SkillTrialRecord",
     "StrategicUncertaintyRecord",
     "StrategyMemoryRecord",
     "StrategyTriggerRuleRecord",

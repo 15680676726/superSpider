@@ -8,6 +8,12 @@ from .models_agents_runtime import (
     AgentMailboxRecord,
     AgentRuntimeRecord,
     AgentThreadBindingRecord,
+    AutomationLoopRuntimeRecord,
+)
+from .models_capability_evolution import (
+    CapabilityCandidateRecord,
+    SkillLifecycleDecisionRecord,
+    SkillTrialRecord,
 )
 from .models_core import (
     ActorDesiredState,
@@ -115,10 +121,12 @@ __all__ = [
     "AgentRuntimeStatus",
     "AgentThreadBindingKind",
     "AgentThreadBindingRecord",
+    "AutomationLoopRuntimeRecord",
     "AssignmentRecord",
     "AssignmentStatus",
     "BacklogItemRecord",
     "BacklogItemStatus",
+    "CapabilityCandidateRecord",
     "CapabilityOverrideRecord",
     "DecisionRequestRecord",
     "DecisionRequestStatus",
@@ -170,6 +178,8 @@ __all__ = [
     "RuntimeFrameRecord",
     "ScheduleRecord",
     "ScheduleStatus",
+    "SkillLifecycleDecisionRecord",
+    "SkillTrialRecord",
     "StrategicUncertaintyRecord",
     "StrategyMemoryRecord",
     "StrategyTriggerRuleRecord",

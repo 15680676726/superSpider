@@ -36,11 +36,17 @@ from copaw.state import (
     TaskRuntimeRecord,
     WorkflowRunRecord,
 )
+from copaw.state.skill_candidate_service import CapabilityCandidateService
+from copaw.state.skill_lifecycle_decision_service import (
+    SkillLifecycleDecisionService,
+)
+from copaw.state.skill_trial_service import SkillTrialService
 from copaw.state.reporting_service import StateReportingService
 from copaw.state.strategy_memory_service import StateStrategyMemoryService
 from copaw.state.repositories import (
     SqliteAgentReportRepository,
     SqliteAgentProfileOverrideRepository,
+    SqliteAgentRuntimeRepository,
     SqliteAssignmentRepository,
     SqliteBacklogItemRepository,
     SqliteDecisionRequestRepository,
@@ -188,6 +194,7 @@ def _build_predictions_app(
     agent_profile_override_repository = SqliteAgentProfileOverrideRepository(
         state_store,
     )
+    agent_runtime_repository = SqliteAgentRuntimeRepository(state_store)
     agent_report_repository = SqliteAgentReportRepository(state_store)
     assignment_repository = SqliteAssignmentRepository(state_store)
     backlog_item_repository = SqliteBacklogItemRepository(state_store)
@@ -239,9 +246,27 @@ def _build_predictions_app(
     capability_service.set_goal_service(goal_service)
     agent_profile_service = AgentProfileService(
         override_repository=agent_profile_override_repository,
+        agent_runtime_repository=agent_runtime_repository,
         industry_instance_repository=industry_instance_repository,
         capability_service=capability_service,
     )
+    _original_get_agent_detail = agent_profile_service.get_agent_detail
+
+    def _prediction_agent_detail(agent_id: str):
+        detail = _original_get_agent_detail(agent_id) or {"runtime": None}
+        payload = dict(detail)
+        runtime = dict(payload.get("runtime") or {})
+        metadata = dict(runtime.get("metadata") or {})
+        if (
+            agent_id == "industry-solution-lead-demo"
+            and "selected_seat_ref" not in metadata
+        ):
+            metadata["selected_seat_ref"] = "env-browser-primary"
+        runtime["metadata"] = metadata
+        payload["runtime"] = runtime
+        return payload
+
+    agent_profile_service.get_agent_detail = _prediction_agent_detail
     capability_service.set_agent_profile_service(agent_profile_service)
     reporting_service = StateReportingService(
         task_repository=task_repository,
@@ -257,6 +282,7 @@ def _build_predictions_app(
     )
     industry_runtime_bindings = build_industry_service_runtime_bindings(
         agent_report_repository=agent_report_repository,
+        agent_runtime_repository=agent_runtime_repository,
         assignment_repository=assignment_repository,
         backlog_item_repository=backlog_item_repository,
         operating_cycle_repository=operating_cycle_repository,
@@ -274,6 +300,18 @@ def _build_predictions_app(
         runtime_bindings=industry_runtime_bindings,
     )
     capability_service.set_industry_service(industry_service)
+    capability_candidate_service = CapabilityCandidateService(
+        state_store=state_store,
+    )
+    skill_trial_service = SkillTrialService(
+        state_store=state_store,
+    )
+    skill_lifecycle_decision_service = SkillLifecycleDecisionService(
+        state_store=state_store,
+    )
+    capability_candidate_service.import_active_baseline_artifacts(
+        mounts=capability_service.list_public_capabilities(enabled_only=True),
+    )
     for item in seed_cases or []:
         prediction_case_repository.upsert_case(item)
     for item in seed_recommendations or []:
@@ -294,6 +332,9 @@ def _build_predictions_app(
         workflow_run_repository=workflow_run_repository,
         strategy_memory_service=strategy_memory_service,
         capability_service=capability_service,
+        capability_candidate_service=capability_candidate_service,
+        skill_trial_service=skill_trial_service,
+        skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         agent_profile_service=agent_profile_service,
         kernel_dispatcher=dispatcher,
         enable_remote_hub_search=enable_remote_hub_search,
@@ -418,6 +459,9 @@ def _build_predictions_app(
     app.state.reporting_service = reporting_service
     app.state.prediction_service = prediction_service
     app.state.capability_service = capability_service
+    app.state.capability_candidate_service = capability_candidate_service
+    app.state.skill_trial_service = skill_trial_service
+    app.state.skill_lifecycle_decision_service = skill_lifecycle_decision_service
     app.state.kernel_dispatcher = dispatcher
     app.state.decision_request_repository = decision_request_repository
     app.state.agent_profile_service = agent_profile_service
@@ -426,6 +470,7 @@ def _build_predictions_app(
     app.state.task_repository = task_repository
     app.state.task_runtime_repository = task_runtime_repository
     app.state.agent_profile_override_repository = agent_profile_override_repository
+    app.state.agent_runtime_repository = agent_runtime_repository
     app.state.evidence_ledger = evidence_ledger
     app.state.workflow_run_repository = workflow_run_repository
     app.state.config_path = config_path
@@ -1537,6 +1582,10 @@ def test_prediction_remote_skill_trial_and_retirement_loop(
     )
     assert trial_recommendation["recommendation"]["metadata"]["search_queries"]
     assert trial_recommendation["recommendation"]["metadata"]["candidate"]["search_query"]
+    candidate_id = trial_recommendation["recommendation"]["metadata"].get("candidate_id")
+    assert isinstance(candidate_id, str) and candidate_id
+    candidate_records = app.state.capability_candidate_service.list_candidates()
+    assert any(item.candidate_id == candidate_id for item in candidate_records)
     recommendation_id = trial_recommendation["recommendation"]["recommendation_id"]
 
     execution_payload = _execute_prediction_recommendation_direct(
@@ -1558,6 +1607,10 @@ def test_prediction_remote_skill_trial_and_retirement_loop(
         if item["recommendation"]["recommendation_id"] == recommendation_id
     )
     assert refreshed["recommendation"]["status"] == "executed"
+    trial_records = app.state.skill_trial_service.list_trials(candidate_id=candidate_id)
+    assert len(trial_records) == 1
+    assert trial_records[0].scope_ref == "env-browser-primary"
+    assert trial_records[0].verdict == "passed"
     surface = app.state.agent_profile_service.get_capability_surface(
         "industry-solution-lead-demo",
     )
@@ -1608,9 +1661,31 @@ def test_prediction_remote_skill_trial_and_retirement_loop(
     )
     assert second_case.status_code == 200
     second_payload = second_case.json()
-    assert any(
-        item["recommendation"]["metadata"].get("gap_kind") == "capability_retirement"
+    retirement = next(
+        item
         for item in second_payload["recommendations"]
+        if item["recommendation"]["metadata"].get("gap_kind") == "capability_retirement"
+    )
+    assert retirement["recommendation"]["action_kind"] == "system:apply_capability_lifecycle"
+    assert retirement["recommendation"]["action_payload"]["decision_kind"] == "retire"
+    assert retirement["recommendation"]["action_payload"]["candidate_id"] == candidate_id
+    assert retirement["recommendation"]["action_payload"]["selected_scope"] == "seat"
+    assert retirement["recommendation"]["action_payload"]["selected_seat_ref"] == (
+        "env-browser-primary"
+    )
+
+    retirement_execution = _execute_prediction_recommendation_direct(
+        app,
+        case_id=second_payload["case"]["case_id"],
+        recommendation_id=retirement["recommendation"]["recommendation_id"],
+    )
+    assert retirement_execution["execution"]["phase"] == "completed"
+    decision_records = app.state.skill_lifecycle_decision_service.list_decisions(
+        candidate_id=candidate_id,
+    )
+    assert any(
+        item.decision_kind == "retire" and item.to_stage == "retired"
+        for item in decision_records
     )
     skill_service.delete_skill("legacy_outreach")
     skill_service.delete_skill("nextgen_outreach")

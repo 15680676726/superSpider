@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
+from ..runtime_recovery_report import resolve_current_recovery_report
+
 
 def _compact_payload(value: dict[str, Any]) -> dict[str, Any]:
     compact: dict[str, Any] = {}
@@ -115,6 +117,9 @@ class RuntimeCenterAppStateView:
 
     state_query_service: Any = None
     evidence_query_service: Any = None
+    capability_candidate_service: Any = None
+    skill_trial_service: Any = None
+    skill_lifecycle_decision_service: Any = None
     capability_service: Any = None
     learning_service: Any = None
     agent_profile_service: Any = None
@@ -126,6 +131,7 @@ class RuntimeCenterAppStateView:
     query_execution_service: Any = None
     cron_manager: Any = None
     automation_tasks: Any = None
+    automation_loop_runtime_repository: Any = None
     actor_supervisor: Any = None
     actor_worker: Any = None
     latest_recovery_report: Any = None
@@ -133,9 +139,21 @@ class RuntimeCenterAppStateView:
 
     @classmethod
     def from_object(cls, app_state: Any) -> "RuntimeCenterAppStateView":
+        latest_recovery_report, _ = resolve_current_recovery_report(app_state)
         return cls(
             state_query_service=getattr(app_state, "state_query_service", None),
             evidence_query_service=getattr(app_state, "evidence_query_service", None),
+            capability_candidate_service=getattr(
+                app_state,
+                "capability_candidate_service",
+                None,
+            ),
+            skill_trial_service=getattr(app_state, "skill_trial_service", None),
+            skill_lifecycle_decision_service=getattr(
+                app_state,
+                "skill_lifecycle_decision_service",
+                None,
+            ),
             capability_service=getattr(app_state, "capability_service", None),
             learning_service=getattr(app_state, "learning_service", None),
             agent_profile_service=getattr(app_state, "agent_profile_service", None),
@@ -147,9 +165,14 @@ class RuntimeCenterAppStateView:
             query_execution_service=getattr(app_state, "query_execution_service", None),
             cron_manager=getattr(app_state, "cron_manager", None),
             automation_tasks=getattr(app_state, "automation_tasks", None),
+            automation_loop_runtime_repository=getattr(
+                app_state,
+                "automation_loop_runtime_repository",
+                None,
+            ),
             actor_supervisor=getattr(app_state, "actor_supervisor", None),
             actor_worker=getattr(app_state, "actor_worker", None),
-            latest_recovery_report=getattr(app_state, "latest_recovery_report", None),
+            latest_recovery_report=latest_recovery_report,
             startup_recovery_summary=getattr(app_state, "startup_recovery_summary", None),
         )
 

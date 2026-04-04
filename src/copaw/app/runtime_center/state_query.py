@@ -53,6 +53,9 @@ class RuntimeCenterStateQueryService:
         work_context_repository: SqliteWorkContextRepository | None = None,
         goal_service: object | None = None,
         decision_request_repository: SqliteDecisionRequestRepository,
+        capability_candidate_service: object | None = None,
+        skill_trial_service: object | None = None,
+        skill_lifecycle_decision_service: object | None = None,
         evidence_ledger: EvidenceLedger | None = None,
         learning_service: object | None = None,
         agent_profile_service: object | None = None,
@@ -68,6 +71,9 @@ class RuntimeCenterStateQueryService:
         self._work_context_repository = work_context_repository
         self._goal_service = goal_service
         self._decision_request_repository = decision_request_repository
+        self._capability_candidate_service = capability_candidate_service
+        self._skill_trial_service = skill_trial_service
+        self._skill_lifecycle_decision_service = skill_lifecycle_decision_service
         self._evidence_ledger = evidence_ledger
         self._learning_service = learning_service
         self._agent_profile_service = agent_profile_service
@@ -227,6 +233,62 @@ class RuntimeCenterStateQueryService:
             self._memory_activation_service,
         )
         return self._task_detail_projector.get_task_review(task_id)
+
+    def list_capability_candidates(
+        self,
+        *,
+        limit: int | None = 20,
+    ) -> list[dict[str, object]]:
+        service = getattr(self, "_capability_candidate_service", None)
+        list_candidates = getattr(service, "list_candidates", None)
+        if not callable(list_candidates):
+            return []
+        items = list_candidates(limit=limit)
+        payload: list[dict[str, object]] = []
+        for item in items:
+            model_dump = getattr(item, "model_dump", None)
+            serialized = model_dump(mode="json") if callable(model_dump) else None
+            if isinstance(serialized, dict):
+                payload.append(serialized)
+        return payload
+
+    def list_capability_trials(
+        self,
+        *,
+        candidate_id: str | None = None,
+        limit: int | None = 20,
+    ) -> list[dict[str, object]]:
+        service = getattr(self, "_skill_trial_service", None)
+        lister = getattr(service, "list_trials", None)
+        if not callable(lister):
+            return []
+        items = lister(candidate_id=candidate_id, limit=limit)
+        payload: list[dict[str, object]] = []
+        for item in items:
+            model_dump = getattr(item, "model_dump", None)
+            serialized = model_dump(mode="json") if callable(model_dump) else None
+            if isinstance(serialized, dict):
+                payload.append(serialized)
+        return payload
+
+    def list_capability_lifecycle_decisions(
+        self,
+        *,
+        candidate_id: str | None = None,
+        limit: int | None = 20,
+    ) -> list[dict[str, object]]:
+        service = getattr(self, "_skill_lifecycle_decision_service", None)
+        lister = getattr(service, "list_decisions", None)
+        if not callable(lister):
+            return []
+        items = lister(candidate_id=candidate_id, limit=limit)
+        payload: list[dict[str, object]] = []
+        for item in items:
+            model_dump = getattr(item, "model_dump", None)
+            serialized = model_dump(mode="json") if callable(model_dump) else None
+            if isinstance(serialized, dict):
+                payload.append(serialized)
+        return payload
 
     def list_work_contexts(self, limit: int | None = 5) -> list[dict[str, object]]:
         return self._work_context_projector.list_work_contexts(limit=limit)

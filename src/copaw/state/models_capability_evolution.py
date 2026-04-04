@@ -1,0 +1,85 @@
+# -*- coding: utf-8 -*-
+"""Formal capability-evolution state records."""
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import Field
+
+from .model_support import UpdatedRecord, _new_record_id
+
+
+class CapabilityCandidateRecord(UpdatedRecord):
+    """Top-level governed capability-evolution candidate truth."""
+
+    candidate_id: str = Field(default_factory=_new_record_id, min_length=1)
+    candidate_kind: str = Field(default="skill", min_length=1)
+    industry_instance_id: str | None = None
+    target_role_id: str | None = None
+    target_seat_ref: str | None = None
+    target_scope: str = Field(default="seat", min_length=1)
+    status: str = Field(default="candidate", min_length=1)
+    lifecycle_stage: str = Field(default="candidate", min_length=1)
+    candidate_source_kind: str = Field(default="local_authored", min_length=1)
+    candidate_source_ref: str | None = None
+    candidate_source_version: str | None = None
+    candidate_source_lineage: str | None = None
+    ingestion_mode: str = Field(default="manual", min_length=1)
+    proposed_skill_name: str | None = None
+    summary: str = ""
+    replacement_target_ids: list[str] = Field(default_factory=list)
+    rollback_target_ids: list[str] = Field(default_factory=list)
+    required_capability_ids: list[str] = Field(default_factory=list)
+    required_mcp_ids: list[str] = Field(default_factory=list)
+    protection_flags: list[str] = Field(default_factory=list)
+    success_criteria: list[str] = Field(default_factory=list)
+    rollback_criteria: list[str] = Field(default_factory=list)
+    source_task_ids: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    version: str = Field(default="v1", min_length=1)
+    lineage_root_id: str | None = None
+    supersedes: list[str] = Field(default_factory=list)
+    superseded_by: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SkillTrialRecord(UpdatedRecord):
+    """Formal trial truth for a candidate on a specific runtime scope."""
+
+    trial_id: str = Field(default_factory=_new_record_id, min_length=1)
+    candidate_id: str = Field(..., min_length=1)
+    scope_type: str = Field(default="seat", min_length=1)
+    scope_ref: str = Field(..., min_length=1)
+    verdict: str = Field(default="pending", min_length=1)
+    summary: str = ""
+    task_ids: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    success_count: int = 0
+    failure_count: int = 0
+    handoff_count: int = 0
+    operator_intervention_count: int = 0
+    latency_summary: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SkillLifecycleDecisionRecord(UpdatedRecord):
+    """Formal lifecycle decision log for capability-evolution governance."""
+
+    decision_id: str = Field(default_factory=_new_record_id, min_length=1)
+    candidate_id: str = Field(..., min_length=1)
+    decision_kind: str = Field(default="continue_trial", min_length=1)
+    from_stage: str | None = None
+    to_stage: str | None = None
+    reason: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+    replacement_target_ids: list[str] = Field(default_factory=list)
+    protection_lifted: bool = False
+    applied_by: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+__all__ = [
+    "CapabilityCandidateRecord",
+    "SkillLifecycleDecisionRecord",
+    "SkillTrialRecord",
+]

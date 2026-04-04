@@ -40,6 +40,7 @@ _SKILL_CAPABILITIES = {
     "system:create_skill",
     "system:install_hub_skill",
     "system:trial_remote_skill_assignment",
+    "system:apply_capability_lifecycle",
 }
 
 _DISCOVERY_CAPABILITIES = {
@@ -111,6 +112,7 @@ class SystemCapabilityHandler:
             get_capability_fn=get_capability_fn,
             resolve_agent_profile_fn=resolve_agent_profile_fn,
             agent_profile_service=agent_profile_service,
+            industry_service=industry_service,
             apply_role_handler=self._team.handle_apply_role,
         )
         self._discovery = SystemCapabilityDiscoveryFacade(
@@ -161,6 +163,7 @@ class SystemCapabilityHandler:
 
     def set_industry_service(self, industry_service: object | None) -> None:
         self._team.set_industry_service(industry_service)
+        self._skills.set_industry_service(industry_service)
 
     def set_state_store(self, state_store: object | None) -> None:
         self._discovery.set_state_store(state_store)
@@ -314,6 +317,8 @@ class SystemCapabilityHandler:
     ) -> dict[str, object]:
         if capability_id == "system:trial_remote_skill_assignment":
             return await self._skills.handle_trial_remote_skill_assignment(resolved_payload)
+        if capability_id == "system:apply_capability_lifecycle":
+            return await self._skills.handle_apply_capability_lifecycle(resolved_payload)
         return self._execute_skill_capability(capability_id, resolved_payload)
 
     async def execute_turn_dispatch(

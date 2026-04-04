@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from ..industry.models import resolve_runtime_effective_capability_ids
 from .service_shared import *  # noqa: F401,F403
 
 
@@ -587,6 +588,7 @@ class _PredictionServiceContextMixin:
                 or _string(trial_plan.get("rollout_scope"))
                 or "single-agent"
             )
+            candidate_id = _string(metadata.get("candidate_id"))
             if not self._trial_improved(new_stats=new_stats, old_stats=old_stats):
                 if self._trial_underperformed(new_stats=new_stats, old_stats=old_stats):
                     findings.append(
@@ -599,6 +601,7 @@ class _PredictionServiceContextMixin:
                             "old_capability_id": old_capability_id,
                             "new_capability_id": new_capability_id,
                             "target_agent_id": target_agent_id,
+                            "candidate_id": candidate_id,
                             "source_recommendation_id": record.recommendation_id,
                             "selected_seat_ref": selected_seat_ref,
                             "trial_scope": trial_scope,
@@ -646,6 +649,7 @@ class _PredictionServiceContextMixin:
                             "old_capability_id": old_capability_id,
                             "new_capability_id": new_capability_id,
                             "target_agent_id": rollout_agent_id,
+                            "candidate_id": candidate_id,
                             "source_recommendation_id": record.recommendation_id,
                             "selected_seat_ref": selected_seat_ref,
                             "trial_scope": trial_scope,
@@ -669,6 +673,7 @@ class _PredictionServiceContextMixin:
                         "old_capability_id": old_capability_id,
                         "new_capability_id": new_capability_id,
                         "target_agent_id": target_agent_id,
+                        "candidate_id": candidate_id,
                         "source_recommendation_id": record.recommendation_id,
                         "selected_seat_ref": selected_seat_ref,
                         "trial_scope": trial_scope,
@@ -780,16 +785,9 @@ class _PredictionServiceContextMixin:
             detail_payload = _safe_dict(detail)
             runtime_payload = _safe_dict(detail_payload.get("runtime"))
             metadata_payload = _safe_dict(runtime_payload.get("metadata"))
-            capability_layers = _safe_dict(metadata_payload.get("capability_layers"))
-            layered_capabilities: list[str] = []
-            for capability_id in (
-                _string_list(capability_layers.get("role_prototype_capability_ids"))
-                + _string_list(capability_layers.get("seat_instance_capability_ids"))
-                + _string_list(capability_layers.get("cycle_delta_capability_ids"))
-                + _string_list(capability_layers.get("session_overlay_capability_ids"))
-            ):
-                if capability_id not in layered_capabilities:
-                    layered_capabilities.append(capability_id)
+            layered_capabilities = resolve_runtime_effective_capability_ids(
+                metadata_payload,
+            )
             if layered_capabilities:
                 return layered_capabilities
         getter = getattr(self._agent_profile_service, "get_capability_surface", None)

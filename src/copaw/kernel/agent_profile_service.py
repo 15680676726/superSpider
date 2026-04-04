@@ -9,6 +9,10 @@ from urllib.parse import quote
 from .agent_profile import AgentProfile, DEFAULT_AGENTS
 from .persistence import decode_kernel_task_metadata
 from ..evidence import EvidenceLedger
+from ..industry.models import (
+    IndustrySeatCapabilityLayers,
+    resolve_runtime_effective_capability_ids,
+)
 from ..industry.identity import EXECUTION_CORE_AGENT_ID, EXECUTION_CORE_ROLE_ID
 from ..utils.runtime_action_links import build_decision_actions
 from ..state.repositories import (
@@ -1084,6 +1088,9 @@ class AgentProfileService:
             if current_checkpoint is not None
             else {}
         )
+        runtime_layers = IndustrySeatCapabilityLayers.from_metadata(
+            runtime_metadata.get("capability_layers"),
+        )
 
         explicit_focus_kind = (
             _coerce_non_empty_str(runtime_metadata.get("current_focus_kind"))
@@ -1181,6 +1188,11 @@ class AgentProfileService:
             "current_focus": current_focus,
             "updated_at": max(updated_candidates),
         }
+        merged_runtime_capabilities = resolve_runtime_effective_capability_ids(
+            runtime_metadata,
+        )
+        if merged_runtime_capabilities:
+            update["capabilities"] = merged_runtime_capabilities
         if actor_runtime is not None:
             update.update(
                 {

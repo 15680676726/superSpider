@@ -89,6 +89,152 @@ def test_runtime_center_recovery_latest_endpoint_prefers_canonical_latest_report
     assert payload["latest_scope"] == "runtime"
     assert payload["detail"]["decisions"]["pending_decisions"] == 1
     assert payload["detail"]["automation"]["active_schedules"] == 4
+
+
+def test_runtime_center_recovery_latest_endpoint_prefers_environment_runtime_report() -> None:
+    app = _build_app()
+    app.state.startup_recovery_summary = StartupRecoverySummary(
+        reason="startup",
+        pending_decisions=2,
+        active_schedules=3,
+    )
+    app.state.latest_recovery_report = {
+        "reason": "stale-startup-alias",
+        "pending_decisions": 9,
+        "active_schedules": 9,
+    }
+
+    class FakeEnvironmentService:
+        def get_latest_recovery_report(self):
+            return {
+                "reason": "runtime-recovery",
+                "pending_decisions": 1,
+                "active_schedules": 4,
+                "executed": 2,
+                "latest_scope": "runtime",
+            }
+
+    app.state.environment_service = FakeEnvironmentService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/recovery/latest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reason"] == "runtime-recovery"
+    assert payload["source"] == "latest"
+    assert payload["pending_decisions"] == 1
+    assert payload["active_schedules"] == 4
+    assert payload["executed"] == 2
+    assert payload["latest_scope"] == "runtime"
+
+
+def test_runtime_center_capability_candidates_endpoint_returns_state_query_projection() -> None:
+    app = _build_app()
+
+    class FakeStateQueryService:
+        def list_capability_candidates(self, *, limit: int | None = None):
+            return [
+                {
+                    "candidate_id": "cand-1",
+                    "candidate_kind": "skill",
+                    "candidate_source_kind": "external_remote",
+                    "status": "candidate",
+                },
+            ][: limit or 20]
+
+    app.state.state_query_service = FakeStateQueryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/capabilities/candidates", params={"limit": 5})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == [
+        {
+            "candidate_id": "cand-1",
+            "candidate_kind": "skill",
+            "candidate_source_kind": "external_remote",
+            "status": "candidate",
+        },
+    ]
+
+
+def test_runtime_center_capability_trials_endpoint_returns_state_query_projection() -> None:
+    app = _build_app()
+
+    class FakeStateQueryService:
+        def list_capability_trials(self, *, candidate_id: str | None = None, limit: int | None = None):
+            assert candidate_id == "cand-1"
+            return [
+                {
+                    "trial_id": "trial-1",
+                    "candidate_id": "cand-1",
+                    "scope_type": "seat",
+                    "scope_ref": "seat-primary",
+                    "verdict": "passed",
+                },
+            ][: limit or 20]
+
+    app.state.state_query_service = FakeStateQueryService()
+
+    client = TestClient(app)
+    response = client.get(
+        "/runtime-center/capabilities/trials",
+        params={"candidate_id": "cand-1", "limit": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "trial_id": "trial-1",
+            "candidate_id": "cand-1",
+            "scope_type": "seat",
+            "scope_ref": "seat-primary",
+            "verdict": "passed",
+        },
+    ]
+
+
+def test_runtime_center_capability_lifecycle_decisions_endpoint_returns_state_query_projection() -> None:
+    app = _build_app()
+
+    class FakeStateQueryService:
+        def list_capability_lifecycle_decisions(
+            self,
+            *,
+            candidate_id: str | None = None,
+            limit: int | None = None,
+        ):
+            assert candidate_id == "cand-1"
+            return [
+                {
+                    "decision_id": "decision-1",
+                    "candidate_id": "cand-1",
+                    "decision_kind": "promote_to_role",
+                    "to_stage": "active",
+                },
+            ][: limit or 20]
+
+    app.state.state_query_service = FakeStateQueryService()
+
+    client = TestClient(app)
+    response = client.get(
+        "/runtime-center/capabilities/lifecycle-decisions",
+        params={"candidate_id": "cand-1", "limit": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "decision_id": "decision-1",
+            "candidate_id": "cand-1",
+            "decision_kind": "promote_to_role",
+            "to_stage": "active",
+        },
+    ]
+
+
 def test_conversation_compaction_service_builds_visibility_payload() -> None:
     payload = ConversationCompactionService.build_visibility_payload(
         {

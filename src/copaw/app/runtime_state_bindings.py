@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from .runtime_bootstrap_models import RuntimeBootstrap, RuntimeManagerStack
+from .runtime_recovery_report import build_latest_recovery_report
 
 
 def _materialize_automation_tasks(automation_tasks: list[Any] | None) -> Any:
@@ -26,6 +27,11 @@ def build_runtime_state_bindings(
     automation_tasks: list[Any] | None = None,
 ) -> dict[str, object]:
     repositories = bootstrap.repositories
+    latest_recovery_report = build_latest_recovery_report(
+        startup_recovery_summary=startup_recovery_summary,
+        automation_tasks=automation_tasks,
+        automation_loop_runtime_repository=repositories.automation_loop_runtime_repository,
+    )
     return {
         "runtime_host": runtime_host,
         "session_backend": bootstrap.session_backend,
@@ -89,10 +95,14 @@ def build_runtime_state_bindings(
         "runtime_health_service": bootstrap.runtime_health_service,
         "provider_admin_service": bootstrap.provider_admin_service,
         "startup_recovery_summary": startup_recovery_summary,
-        "latest_recovery_report": startup_recovery_summary,
+        "latest_recovery_report": latest_recovery_report,
         "session_mount_repository": repositories.session_mount_repository,
+        "automation_loop_runtime_repository": repositories.automation_loop_runtime_repository,
         "state_query_service": bootstrap.state_query_service,
         "evidence_query_service": bootstrap.evidence_query_service,
+        "capability_candidate_service": bootstrap.capability_candidate_service,
+        "skill_trial_service": bootstrap.skill_trial_service,
+        "skill_lifecycle_decision_service": bootstrap.skill_lifecycle_decision_service,
         "human_assist_task_service": bootstrap.human_assist_task_service,
         "strategy_memory_service": bootstrap.strategy_memory_service,
         "work_context_service": bootstrap.work_context_service,

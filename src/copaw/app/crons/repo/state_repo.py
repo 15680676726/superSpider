@@ -165,6 +165,16 @@ class StateBackedJobRepository(BaseJobRepository):
             if isinstance(getattr(job, "meta", None), dict)
             else {}
         )
+        spec_payload = job.model_dump(mode="json")
+        request_payload = (
+            dict(spec_payload.get("request"))
+            if isinstance(spec_payload.get("request"), dict)
+            else None
+        )
+        request_extra = getattr(getattr(job, "request", None), "model_extra", None)
+        if request_payload is not None and isinstance(request_extra, dict) and request_extra:
+            request_payload.update(request_extra)
+            spec_payload["request"] = request_payload
 
         return ScheduleRecord(
             id=job.id,
@@ -181,7 +191,7 @@ class StateBackedJobRepository(BaseJobRepository):
             next_run_at=preserved.next_run_at,
             last_error=preserved.last_error,
             source_ref="state:/cron-sole-repository",
-            spec_payload=job.model_dump(mode="json"),
+            spec_payload=spec_payload,
             schedule_kind=str(meta.get("schedule_kind") or preserved.schedule_kind or "cadence"),
             trigger_target=(
                 str(meta.get("trigger_target")).strip()

@@ -11,6 +11,67 @@ from .service_shared import *  # noqa: F401,F403
 
 
 class _PredictionServiceRefreshMixin:
+    def _sync_capability_trial_from_recommendation(
+        self,
+        record: PredictionRecommendationRecord,
+    ) -> None:
+        service = getattr(self, "_skill_trial_service", None)
+        upsert_trial = getattr(service, "create_or_update_trial", None)
+        if not callable(upsert_trial):
+            return
+        metadata = _safe_dict(record.metadata)
+        candidate_id = _string(metadata.get("candidate_id"))
+        if candidate_id is None:
+            return
+        gap_kind = _string(metadata.get("gap_kind"))
+        if gap_kind not in {"underperforming_capability", "missing_capability"}:
+            return
+        if record.status not in {"executed", "failed", "rejected"}:
+            return
+        target_agent_id = _string(record.target_agent_id) or _string(metadata.get("target_agent_id"))
+        selected_seat_ref = _string(metadata.get("selected_seat_ref"))
+        if selected_seat_ref is None and target_agent_id is not None:
+            detail_getter = getattr(self._agent_profile_service, "get_agent_detail", None)
+            if callable(detail_getter):
+                detail = _safe_dict(detail_getter(target_agent_id))
+                runtime = _safe_dict(detail.get("runtime"))
+                runtime_metadata = _safe_dict(runtime.get("metadata"))
+                selected_seat_ref = _string(runtime_metadata.get("selected_seat_ref"))
+        scope_ref = selected_seat_ref or target_agent_id
+        if scope_ref is None:
+            return
+        scope_type = "seat" if selected_seat_ref else "agent"
+        verdict = "passed" if record.status == "executed" else "failed"
+        success_count = 1 if verdict == "passed" else 0
+        failure_count = 1 if verdict == "failed" else 0
+        evidence_refs = _string_list(record.execution_evidence_id, metadata.get("evidence_refs"))
+        task_ids = _string_list(record.execution_task_id, metadata.get("source_task_ids"))
+        upsert_trial(
+            candidate_id=candidate_id,
+            scope_type=scope_type,
+            scope_ref=scope_ref,
+            verdict=verdict,
+            summary=_string(record.outcome_summary) or record.summary,
+            task_ids=task_ids,
+            evidence_refs=evidence_refs,
+            success_count=success_count,
+            failure_count=failure_count,
+            handoff_count=0,
+            operator_intervention_count=1 if record.status in {"failed", "rejected"} else 0,
+            latency_summary={},
+            metadata={
+                "recommendation_id": record.recommendation_id,
+                "trial_scope": _string(metadata.get("trial_scope")),
+                "selected_scope": _string(metadata.get("selected_scope")),
+                "skill_trial_id": _string(metadata.get("skill_trial_id")),
+                "selected_seat_ref": selected_seat_ref,
+                "target_agent_id": target_agent_id,
+                "target_role_id": _string(metadata.get("target_role_id")),
+                "lifecycle_stage": _string(metadata.get("lifecycle_stage")),
+                "replacement_target_ids": _string_list(metadata.get("replacement_target_ids")),
+            },
+        )
+
     def _purge_retired_goal_dispatch_recommendations(self) -> int:
         removed_count = 0
         for item in self._recommendation_repository.list_recommendations():
@@ -93,12 +154,54 @@ class _PredictionServiceRefreshMixin:
             installed_capability_ids = _string_list(output.get("installed_capability_ids"))
             if installed_capability_ids:
                 metadata["installed_capability_ids"] = installed_capability_ids
+            trial_attachment = _safe_dict(output.get("trial_attachment"))
+            if trial_attachment:
+                metadata["trial_attachment"] = trial_attachment
+                metadata["skill_trial_id"] = _string(
+                    trial_attachment.get("trial_id"),
+                ) or _string(metadata.get("skill_trial_id"))
+                metadata["selected_scope"] = _string(
+                    trial_attachment.get("selected_scope"),
+                ) or _string(metadata.get("selected_scope"))
+                metadata["selected_seat_ref"] = _string(
+                    trial_attachment.get("scope_ref"),
+                ) or _string(metadata.get("selected_seat_ref"))
             resolved_candidate = _safe_dict(output.get("resolved_candidate"))
             if resolved_candidate:
                 metadata["resolved_candidate"] = resolved_candidate
+            lifecycle_result = _safe_dict(output.get("lifecycle_result"))
+            if lifecycle_result:
+                metadata["lifecycle_result"] = lifecycle_result
             assignment_result = output.get("assignment_result")
             if isinstance(assignment_result, dict):
                 metadata["assignment_result"] = dict(assignment_result)
+            trial_attachment = output.get("trial_attachment")
+            if isinstance(trial_attachment, dict):
+                metadata["trial_attachment"] = dict(trial_attachment)
+                skill_trial_id = _string(trial_attachment.get("trial_id"))
+                if skill_trial_id:
+                    metadata["skill_trial_id"] = skill_trial_id
+                selected_scope = _string(trial_attachment.get("selected_scope"))
+                if selected_scope:
+                    metadata["selected_scope"] = selected_scope
+                selected_seat_ref = _string(
+                    trial_attachment.get("selected_seat_ref")
+                    or trial_attachment.get("scope_ref"),
+                )
+                if selected_seat_ref:
+                    metadata["selected_seat_ref"] = selected_seat_ref
+            lifecycle_result = output.get("lifecycle_result")
+            if isinstance(lifecycle_result, dict):
+                metadata["lifecycle_result"] = dict(lifecycle_result)
+            skill_trial_id = _string(output.get("skill_trial_id"))
+            if skill_trial_id:
+                metadata["skill_trial_id"] = skill_trial_id
+            selected_scope = _string(output.get("selected_scope"))
+            if selected_scope:
+                metadata["selected_scope"] = selected_scope
+            selected_seat_ref = _string(output.get("selected_seat_ref"))
+            if selected_seat_ref:
+                metadata["selected_seat_ref"] = selected_seat_ref
         return metadata
 
     def _refresh_recommendation(
@@ -130,9 +233,11 @@ class _PredictionServiceRefreshMixin:
                 if runtime.last_evidence_id and not record.execution_evidence_id:
                     update["execution_evidence_id"] = runtime.last_evidence_id
         if not update:
+            self._sync_capability_trial_from_recommendation(record)
             return record, False
         updated = record.model_copy(update={**update, "updated_at": _utc_now()})
         self._recommendation_repository.upsert_recommendation(updated)
+        self._sync_capability_trial_from_recommendation(updated)
         return updated, True
 
     def _decision_payload(self, decision_request_id: str | None) -> dict[str, Any] | None:
@@ -222,6 +327,7 @@ class _PredictionServiceRefreshMixin:
             "missing_capability",
             "underperforming_capability",
             "capability_rollout",
+            "capability_rollback",
             "capability_retirement",
         }
 

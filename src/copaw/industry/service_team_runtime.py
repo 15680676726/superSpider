@@ -7,6 +7,25 @@ from .service_recommendation_pack import *  # noqa: F401,F403
 from .models import _normalize_text_list
 
 
+def _string(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _unique_strings(*values: object) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for item in _normalize_text_list(value):
+            if item in seen:
+                continue
+            seen.add(item)
+            merged.append(item)
+    return merged
+
+
 class _IndustryTeamRuntimeMixin:
     def sync_agent_runtime_capability_override(
         self,
@@ -39,6 +58,7 @@ class _IndustryTeamRuntimeMixin:
             session_overlay_capability_ids=list(
                 layers.session_overlay_capability_ids,
             ),
+            effective_capability_ids=effective_capability_ids,
         ).to_metadata_payload()
         repository.upsert_runtime(
             runtime.model_copy(
@@ -47,6 +67,248 @@ class _IndustryTeamRuntimeMixin:
                 },
             ),
         )
+
+    def attach_candidate_to_scope(
+        self,
+        *,
+        target_agent_id: str,
+        capability_ids: list[str] | None = None,
+        replacement_capability_ids: list[str] | None = None,
+        capability_assignment_mode: str = "merge",
+        selected_scope: str = "seat",
+        scope_ref: str | None = None,
+        selected_seat_ref: str | None = None,
+        candidate_id: str | None = None,
+        target_role_id: str | None = None,
+        lifecycle_stage: str | None = None,
+        next_lifecycle_stage: str | None = None,
+        replacement_target_ids: list[str] | None = None,
+        rollback_target_ids: list[str] | None = None,
+        trial_scope: str | None = None,
+        reason: str | None = None,
+        preflight: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        repository = self._agent_runtime_repository
+        if repository is None or not isinstance(target_agent_id, str) or not target_agent_id.strip():
+            return {"success": False, "error": "Agent runtime repository is not available"}
+        runtime = repository.get_runtime(target_agent_id)
+        if runtime is None:
+            runtime = self._seed_agent_runtime_for_scope_attach(
+                agent_id=target_agent_id,
+                target_role_id=target_role_id,
+                selected_seat_ref=selected_seat_ref,
+            )
+            if runtime is None:
+                return {"success": False, "error": f"Target agent '{target_agent_id}' is not available"}
+        metadata = dict(getattr(runtime, "metadata", {}) or {})
+        if selected_seat_ref:
+            metadata["selected_seat_ref"] = selected_seat_ref
+        layers = IndustrySeatCapabilityLayers.from_metadata(
+            metadata.get("capability_layers"),
+        )
+        normalized_scope = str(selected_scope or "seat").strip().lower() or "seat"
+        normalized_capability_ids = _normalize_text_list(capability_ids)
+        normalized_replacement_ids = _unique_strings(
+            replacement_capability_ids,
+            replacement_target_ids,
+        )
+        assignment_mode = (
+            capability_assignment_mode
+            if capability_assignment_mode in {"merge", "replace"}
+            else "merge"
+        )
+        effective_capability_ids = self._mutate_scope_capabilities(
+            existing_capability_ids=layers.merged_capability_ids(),
+            capability_ids=normalized_capability_ids,
+            replacement_capability_ids=normalized_replacement_ids,
+            capability_assignment_mode=assignment_mode,
+        )
+        if normalized_scope == "session":
+            session_overlay_capability_ids = self._mutate_scope_capabilities(
+                existing_capability_ids=layers.session_overlay_capability_ids,
+                capability_ids=normalized_capability_ids,
+                replacement_capability_ids=normalized_replacement_ids,
+                capability_assignment_mode=assignment_mode,
+            )
+            updated_layers = IndustrySeatCapabilityLayers(
+                role_prototype_capability_ids=list(layers.role_prototype_capability_ids),
+                seat_instance_capability_ids=list(layers.seat_instance_capability_ids),
+                cycle_delta_capability_ids=list(layers.cycle_delta_capability_ids),
+                session_overlay_capability_ids=session_overlay_capability_ids,
+                effective_capability_ids=effective_capability_ids,
+            )
+            scope_type = "session"
+            resolved_scope_ref = _string(scope_ref) or _string(selected_seat_ref) or target_agent_id
+            metadata["current_session_overlay"] = {
+                "overlay_scope": "session",
+                "overlay_mode": "additive",
+                "session_id": resolved_scope_ref,
+                "capability_ids": session_overlay_capability_ids,
+                "status": "active",
+                "candidate_id": candidate_id,
+            }
+        else:
+            seat_instance_capability_ids = self._mutate_scope_capabilities(
+                existing_capability_ids=layers.seat_instance_capability_ids,
+                capability_ids=normalized_capability_ids,
+                replacement_capability_ids=normalized_replacement_ids,
+                capability_assignment_mode=assignment_mode,
+            )
+            updated_layers = IndustrySeatCapabilityLayers(
+                role_prototype_capability_ids=list(layers.role_prototype_capability_ids),
+                seat_instance_capability_ids=seat_instance_capability_ids,
+                cycle_delta_capability_ids=list(layers.cycle_delta_capability_ids),
+                session_overlay_capability_ids=list(layers.session_overlay_capability_ids),
+                effective_capability_ids=effective_capability_ids,
+            )
+            scope_type = "seat" if _string(selected_seat_ref) is not None else "agent"
+            resolved_scope_ref = _string(scope_ref) or _string(selected_seat_ref) or target_agent_id
+            metadata.pop("current_session_overlay", None)
+        trial_id = (
+            f"trial:{candidate_id}:{resolved_scope_ref}"
+            if candidate_id
+            else f"trial:{target_agent_id}:{resolved_scope_ref}"
+        )
+        metadata["capability_layers"] = updated_layers.to_metadata_payload()
+        metadata["current_capability_trial"] = {
+            "candidate_id": _string(candidate_id),
+            "skill_trial_id": trial_id,
+            "skill_candidate_id": _string(candidate_id),
+            "skill_lifecycle_stage": _string(lifecycle_stage) or "trial",
+            "selected_scope": normalized_scope,
+            "selected_seat_ref": _string(selected_seat_ref),
+            "scope_ref": resolved_scope_ref,
+            "scope_type": scope_type,
+            "target_agent_id": target_agent_id,
+            "target_role_id": _string(target_role_id),
+            "trial_scope": _string(trial_scope),
+            "replacement_target_ids": _unique_strings(
+                replacement_target_ids,
+                normalized_replacement_ids,
+            ),
+            "rollback_target_ids": _normalize_text_list(rollback_target_ids),
+            "capability_ids": normalized_capability_ids,
+            "reason": _string(reason),
+            "next_lifecycle_stage": _string(next_lifecycle_stage),
+            "preflight": dict(preflight or {}),
+        }
+        repository.upsert_runtime(
+            runtime.model_copy(
+                update={
+                    "metadata": metadata,
+                },
+            ),
+        )
+        return {
+            "success": True,
+            "summary": (
+                f"Attached candidate capabilities to {normalized_scope} scope "
+                f"'{resolved_scope_ref}' for '{target_agent_id}'."
+            ),
+            "trial_id": trial_id,
+            "selected_scope": normalized_scope,
+            "scope_type": scope_type,
+            "scope_ref": resolved_scope_ref,
+            "attached_capability_ids": normalized_capability_ids,
+            "replacement_target_ids": _unique_strings(
+                replacement_target_ids,
+                normalized_replacement_ids,
+            ),
+        }
+
+    def _seed_agent_runtime_for_scope_attach(
+        self,
+        *,
+        agent_id: str,
+        target_role_id: str | None,
+        selected_seat_ref: str | None,
+    ) -> AgentRuntimeRecord | None:
+        repository = self._agent_runtime_repository
+        if repository is None:
+            return None
+        profile_getter = getattr(self._agent_profile_service, "get_agent", None)
+        profile = profile_getter(agent_id) if callable(profile_getter) else None
+        detail_getter = getattr(self._agent_profile_service, "get_agent_detail", None)
+        detail = detail_getter(agent_id) if callable(detail_getter) else None
+        runtime_detail = (
+            dict((detail or {}).get("runtime"))
+            if isinstance((detail or {}).get("runtime"), dict)
+            else {}
+        )
+        runtime_metadata = (
+            dict(runtime_detail.get("metadata"))
+            if isinstance(runtime_detail.get("metadata"), dict)
+            else {}
+        )
+        if profile is None:
+            profile = (
+                self._resolve_agent_profile(agent_id)
+                if callable(getattr(self, "_resolve_agent_profile", None))
+                else None
+            )
+        if profile is None:
+            return None
+        normalized_role_id = _string(target_role_id) or _string(
+            getattr(profile, "industry_role_id", None),
+        )
+        detail_layers = IndustrySeatCapabilityLayers.from_metadata(
+            runtime_metadata.get("capability_layers"),
+        )
+        metadata = {
+            "selected_seat_ref": _string(selected_seat_ref)
+            or _string(runtime_metadata.get("selected_seat_ref")),
+            "capability_layers": (
+                detail_layers.to_metadata_payload()
+                if detail_layers.merged_capability_ids()
+                or detail_layers.role_prototype_capability_ids
+                or detail_layers.seat_instance_capability_ids
+                or detail_layers.session_overlay_capability_ids
+                else IndustrySeatCapabilityLayers(
+                    role_prototype_capability_ids=_normalize_text_list(
+                        getattr(profile, "capabilities", None),
+                    ),
+                ).to_metadata_payload()
+            ),
+        }
+        runtime = AgentRuntimeRecord(
+            agent_id=agent_id,
+            actor_key=f"runtime:{agent_id}",
+            actor_fingerprint=f"runtime:{agent_id}",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            industry_instance_id=_string(getattr(profile, "industry_instance_id", None)),
+            industry_role_id=normalized_role_id or _string(runtime_detail.get("industry_role_id")),
+            display_name=_string(getattr(profile, "name", None)),
+            role_name=_string(getattr(profile, "role_name", None)),
+            metadata=metadata,
+        )
+        repository.upsert_runtime(runtime)
+        return runtime
+
+    @staticmethod
+    def _mutate_scope_capabilities(
+        *,
+        existing_capability_ids: list[str] | None,
+        capability_ids: list[str] | None,
+        replacement_capability_ids: list[str] | None,
+        capability_assignment_mode: str,
+    ) -> list[str]:
+        resolved_existing = _normalize_text_list(existing_capability_ids)
+        resolved_capability_ids = _normalize_text_list(capability_ids)
+        resolved_replacement_ids = _normalize_text_list(replacement_capability_ids)
+        if capability_assignment_mode == "replace":
+            final_capability_ids = [
+                capability_id
+                for capability_id in resolved_existing
+                if capability_id not in resolved_replacement_ids
+            ]
+        else:
+            final_capability_ids = list(resolved_existing)
+        for capability_id in resolved_capability_ids:
+            if capability_id not in final_capability_ids:
+                final_capability_ids.append(capability_id)
+        return final_capability_ids
 
     def _build_actor_runtime_capability_layers(
         self,

@@ -11,6 +11,7 @@ from fastapi import APIRouter, File, Request, UploadFile
 
 from ...constant import WORKING_DIR
 from ..runtime_center.models import RuntimeCenterAppStateView
+from ..runtime_recovery_report import resolve_current_recovery_report
 from ..runtime_health_service import RuntimeHealthService
 from .workspace import _dir_stats, download_workspace, upload_workspace
 
@@ -209,14 +210,25 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
         ],
     )
 
-    recovery_summary, _ = RuntimeCenterAppStateView.from_object(
-        app_state,
-    ).resolve_recovery_summary()
+    recovery_summary, _ = resolve_current_recovery_report(app_state)
     add_check(
         "startup_recovery",
         "pass" if recovery_summary is not None else "warn",
         "Recovery summary is available." if recovery_summary is not None else "Recovery summary is missing.",
         recovery_summary=recovery_summary,
+    )
+    runtime_summary_status = str(runtime_summary.get("status") or "").strip().lower()
+    add_check(
+        "runtime_summary",
+        (
+            "pass"
+            if runtime_summary_status in {"ready", "active", "idle"}
+            else "warn"
+            if runtime_summary_status == "degraded"
+            else "warn"
+        ),
+        str(runtime_summary.get("summary") or "Runtime summary is unavailable."),
+        runtime_status=runtime_summary_status or "unavailable",
     )
 
     statuses = {item["status"] for item in checks}

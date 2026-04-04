@@ -43,6 +43,9 @@ from .sqlite_governance_agents import (
     SqliteGoalOverrideRepository,
     SqliteGovernanceControlRepository,
 )
+from .sqlite_runtime_automation import (
+    SqliteAutomationLoopRuntimeRepository,
+)
 from .sqlite_industry import (
     SqliteAgentReportRepository,
     SqliteAssignmentRepository,

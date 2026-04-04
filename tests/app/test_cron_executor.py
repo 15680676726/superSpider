@@ -201,3 +201,83 @@ def test_cron_executor_persists_canonical_environment_id_when_only_environment_r
     assert submitted.environment_ref == "env:canonical-host-ref"
     assert submitted.payload["meta"]["environment_id"] == "env:canonical-host-ref"
     assert submitted.payload["meta"]["session_mount_id"] == "session:canonical-host-ref"
+
+
+def test_cron_executor_dispatches_agent_with_shared_durable_request_context() -> None:
+    dispatcher = _FakeKernelDispatcher()
+    executor = CronExecutor(kernel_dispatcher=dispatcher)
+    job = CronJobSpec.model_validate(
+        {
+            "id": "cron-job-ctx-1",
+            "name": "Shared durable path cron",
+            "enabled": True,
+            "schedule": {
+                "type": "cron",
+                "cron": "0 9 * * 1",
+                "timezone": "UTC",
+            },
+            "task_type": "agent",
+            "request": {
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "resume shared workflow"}],
+                    }
+                ],
+                "control_thread_id": "thread-cron-ctx-1",
+                "work_context_id": "ctx-cron-ctx-1",
+                "main_brain_runtime": {
+                    "work_context_id": "ctx-cron-ctx-1",
+                    "recovery": {
+                        "mode": "resume-environment",
+                        "checkpoint_id": "checkpoint-cron-1",
+                    },
+                },
+            },
+            "dispatch": {
+                "type": "channel",
+                "channel": "console",
+                "target": {
+                    "user_id": "workflow",
+                    "session_id": "workflow-run-ctx-1",
+                },
+                "mode": "final",
+                "meta": {"summary": "resume durable path"},
+            },
+            "runtime": {
+                "max_concurrency": 1,
+                "timeout_seconds": 30,
+                "misfire_grace_seconds": 30,
+            },
+            "meta": {
+                "host_snapshot": {
+                    "scheduler_inputs": {
+                        "environment_ref": "env:cron-shared-path",
+                        "session_mount_id": "session:cron-shared-path",
+                    },
+                },
+            },
+        }
+    )
+
+    asyncio.run(executor.execute(job))
+
+    assert len(dispatcher.tasks) == 1
+    submitted = dispatcher.tasks[0]
+    assert submitted.environment_ref == "env:cron-shared-path"
+    assert submitted.work_context_id == "ctx-cron-ctx-1"
+    assert submitted.payload["request"]["entry_source"] == "cron-job"
+    assert submitted.payload["request"]["environment_ref"] == "env:cron-shared-path"
+    assert submitted.payload["request"]["main_brain_runtime"]["environment"]["ref"] == (
+        "env:cron-shared-path"
+    )
+    assert submitted.payload["request_context"]["session_id"] == "workflow-run-ctx-1"
+    assert submitted.payload["request_context"]["control_thread_id"] == "thread-cron-ctx-1"
+    assert submitted.payload["request_context"]["work_context_id"] == "ctx-cron-ctx-1"
+    assert submitted.payload["request_context"]["channel"] == "console"
+    assert submitted.payload["request_context"]["main_brain_runtime"]["environment"]["ref"] == (
+        "env:cron-shared-path"
+    )
+    assert submitted.payload["request_context"]["main_brain_runtime"]["recovery"]["mode"] == (
+        "resume-environment"
+    )

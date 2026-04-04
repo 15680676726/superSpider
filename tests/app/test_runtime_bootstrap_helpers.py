@@ -116,6 +116,7 @@ def _build_bootstrap() -> RuntimeBootstrap:
         prediction_signal_repository=object(),
         prediction_recommendation_repository=object(),
         prediction_review_repository=object(),
+        automation_loop_runtime_repository=object(),
         session_mount_repository=object(),
     )
     return RuntimeBootstrap(
@@ -133,6 +134,9 @@ def _build_bootstrap() -> RuntimeBootstrap:
         provider_admin_service=object(),
         state_query_service=object(),
         evidence_query_service=object(),
+        capability_candidate_service=object(),
+        skill_trial_service=object(),
+        skill_lifecycle_decision_service=object(),
         human_assist_task_service=object(),
         strategy_memory_service=object(),
         work_context_service=object(),
@@ -224,6 +228,63 @@ def test_build_runtime_query_services_returns_memory_activation_service_when_ava
     assert not hasattr(bootstrap[0], "_runtime_event_bus")
 
 
+def test_build_runtime_query_services_attaches_capability_candidate_service() -> None:
+    candidate_service = object()
+    repositories = SimpleNamespace(
+        task_repository=object(),
+        task_runtime_repository=object(),
+        runtime_frame_repository=object(),
+        schedule_repository=object(),
+        goal_repository=object(),
+        work_context_repository=object(),
+        decision_request_repository=object(),
+        memory_fact_index_repository=object(),
+        memory_entity_view_repository=object(),
+        memory_opinion_view_repository=object(),
+        memory_reflection_run_repository=object(),
+        knowledge_chunk_repository=object(),
+        strategy_memory_repository=object(),
+        agent_report_repository=object(),
+        routine_repository=object(),
+        routine_run_repository=object(),
+        industry_instance_repository=object(),
+    )
+
+    bootstrap = build_runtime_query_services(
+        repositories=repositories,
+        evidence_ledger=object(),
+        runtime_event_bus=object(),
+        human_assist_task_service=object(),
+        environment_service=object(),
+        capability_candidate_service=candidate_service,
+    )
+
+    assert bootstrap[0]._capability_candidate_service is candidate_service
+
+
+def test_attach_runtime_state_binds_capability_candidate_service() -> None:
+    app = FastAPI()
+    bootstrap = _build_bootstrap()
+    bootstrap.capability_candidate_service = object()
+    bootstrap.skill_trial_service = object()
+    bootstrap.skill_lifecycle_decision_service = object()
+
+    attach_runtime_state(
+        app,
+        runtime_host=object(),
+        bootstrap=bootstrap,
+        manager_stack=RuntimeManagerStack(),
+        startup_recovery_summary=object(),
+    )
+
+    assert app.state.capability_candidate_service is bootstrap.capability_candidate_service
+    assert app.state.skill_trial_service is bootstrap.skill_trial_service
+    assert (
+        app.state.skill_lifecycle_decision_service
+        is bootstrap.skill_lifecycle_decision_service
+    )
+
+
 def test_attach_runtime_state_binds_bootstrap_and_manager_stack() -> None:
     app = FastAPI()
     bootstrap = _build_bootstrap()
@@ -265,6 +326,10 @@ def test_attach_runtime_state_binds_bootstrap_and_manager_stack() -> None:
         is bootstrap.repositories.human_assist_task_repository
     )
     assert app.state.work_context_repository is bootstrap.repositories.work_context_repository
+    assert (
+        app.state.automation_loop_runtime_repository
+        is bootstrap.repositories.automation_loop_runtime_repository
+    )
     assert app.state.session_mount_repository is bootstrap.repositories.session_mount_repository
     assert (
         app.state.media_analysis_repository
@@ -351,6 +416,10 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
     )
     assert bindings["work_context_repository"] is bootstrap.repositories.work_context_repository
     assert (
+        bindings["automation_loop_runtime_repository"]
+        is bootstrap.repositories.automation_loop_runtime_repository
+    )
+    assert (
         bindings["fixed_sop_template_repository"]
         is bootstrap.repositories.fixed_sop_template_repository
     )
@@ -387,6 +456,9 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
     assert bindings["media_service"] is bootstrap.media_service
     assert bindings["main_brain_chat_service"] is bootstrap.main_brain_chat_service
     assert bindings["startup_recovery_summary"] == startup_recovery_summary
+    assert bindings["latest_recovery_report"] is not startup_recovery_summary
+    assert bindings["latest_recovery_report"]["reason"] == "startup"
+    assert bindings["latest_recovery_report"]["source"] == "startup"
     assert bindings["automation_tasks"] == automation_tasks
     assert bindings["automation_tasks"] is not automation_tasks
 
@@ -436,6 +508,7 @@ def test_build_runtime_repositories_keeps_bootstrap_schedule_repo_separate(
     assert repositories.schedule_repository is not None
     assert repositories.bootstrap_schedule_repository is not None
     assert repositories.bootstrap_schedule_repository is not repositories.schedule_repository
+    assert repositories.automation_loop_runtime_repository is not None
     assert repositories.session_mount_repository is not None
 
 

@@ -11,6 +11,7 @@ from ..state.repositories import (
     SqliteAgentReportRepository,
     SqliteAgentRuntimeRepository,
     SqliteAgentThreadBindingRepository,
+    SqliteAutomationLoopRuntimeRepository,
     SqliteAssignmentRepository,
     SqliteBacklogItemRepository,
     SqliteCapabilityOverrideRepository,
@@ -103,5 +104,8 @@ def build_runtime_repositories(state_store: SQLiteStateStore) -> RuntimeReposito
             state_store,
         ),
         prediction_review_repository=SqlitePredictionReviewRepository(state_store),
+        automation_loop_runtime_repository=SqliteAutomationLoopRuntimeRepository(
+            state_store,
+        ),
         session_mount_repository=SessionMountRepository(state_store),
     )

@@ -48,6 +48,7 @@ from copaw.kernel.agent_profile import AgentProfile
 from .industry_api_parts.shared import _build_industry_app
 from copaw.kernel import KernelDispatcher, KernelTaskStore
 from copaw.state import AgentRuntimeRecord, SQLiteStateStore, TaskRecord, TaskRuntimeRecord
+from copaw.state.skill_candidate_service import CapabilityCandidateService
 from copaw.state.repositories import (
     SqliteDecisionRequestRepository,
     SqliteRuntimeFrameRepository,
@@ -566,6 +567,37 @@ def test_capability_market_overview_aggregates_existing_sources() -> None:
         payload["routes"]["install_templates"]
         == "/api/capability-market/install-templates"
     )
+
+
+def test_capability_market_overview_exposes_capability_candidates(tmp_path) -> None:
+    app = build_app()
+    candidate_service = CapabilityCandidateService(
+        state_store=SQLiteStateStore(tmp_path / "state.sqlite3"),
+    )
+    candidate_service.normalize_candidate_source(
+        candidate_kind="skill",
+        target_scope="seat",
+        target_role_id="researcher",
+        target_seat_ref="seat-1",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://example.com/skills/research-pack.zip",
+        candidate_source_version="1.2.3",
+        ingestion_mode="auto-install",
+        proposed_skill_name="research_pack",
+        summary="Remote research pack candidate.",
+    )
+    app.state.capability_candidate_service = candidate_service
+    client = TestClient(app)
+
+    response = client.get("/capability-market/overview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["candidate_summary"]["total"] == 1
+    assert payload["candidate_summary"]["by_kind"] == {"skill": 1}
+    assert payload["candidate_summary"]["by_source_kind"] == {"external_remote": 1}
+    assert payload["capability_candidates"][0]["candidate_source_kind"] == "external_remote"
+    assert payload["routes"]["candidate_list"] == "/api/runtime-center/capabilities/candidates"
 
 
 def test_capability_market_overview_uses_one_public_snapshot_for_summary() -> None:

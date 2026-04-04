@@ -61,6 +61,7 @@ if TYPE_CHECKING:
         SqliteAgentRuntimeRepository,
         SqliteAssignmentRepository,
         SqliteAgentThreadBindingRepository,
+        SqliteAutomationLoopRuntimeRepository,
         SqliteBacklogItemRepository,
         SqliteCapabilityOverrideRepository,
         SqliteDecisionRequestRepository,
@@ -157,6 +158,7 @@ class RuntimeRepositories:
     prediction_signal_repository: SqlitePredictionSignalRepository
     prediction_recommendation_repository: SqlitePredictionRecommendationRepository
     prediction_review_repository: SqlitePredictionReviewRepository
+    automation_loop_runtime_repository: SqliteAutomationLoopRuntimeRepository
     session_mount_repository: SessionMountRepository
 
 
@@ -176,6 +178,9 @@ class RuntimeBootstrap:
     provider_admin_service: Any
     state_query_service: RuntimeCenterStateQueryService
     evidence_query_service: RuntimeCenterEvidenceQueryService
+    capability_candidate_service: Any | None
+    skill_trial_service: Any | None
+    skill_lifecycle_decision_service: Any | None
     human_assist_task_service: HumanAssistTaskService
     strategy_memory_service: StateStrategyMemoryService
     work_context_service: WorkContextService

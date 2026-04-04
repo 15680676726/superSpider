@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 24
+STATE_SCHEMA_VERSION = 26
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS goals (
@@ -818,6 +818,29 @@ CREATE INDEX IF NOT EXISTS idx_agent_thread_bindings_agent
     ON agent_thread_bindings(agent_id, active, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_thread_bindings_alias
     ON agent_thread_bindings(alias_of_thread_id);
+
+CREATE TABLE IF NOT EXISTS automation_loop_runtimes (
+    automation_task_id TEXT PRIMARY KEY,
+    task_name TEXT NOT NULL,
+    capability_ref TEXT NOT NULL,
+    owner_agent_id TEXT NOT NULL,
+    interval_seconds INTEGER NOT NULL DEFAULT 30,
+    coordinator_contract TEXT NOT NULL DEFAULT 'automation-coordinator/v1',
+    loop_phase TEXT NOT NULL DEFAULT 'idle',
+    health_status TEXT NOT NULL DEFAULT 'idle',
+    last_gate_reason TEXT,
+    last_result_phase TEXT,
+    last_error_summary TEXT,
+    submit_count INTEGER NOT NULL DEFAULT 0,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_loop_runtimes_owner
+    ON automation_loop_runtimes(owner_agent_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_automation_loop_runtimes_health
+    ON automation_loop_runtimes(health_status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_thread_bindings_work_context
     ON agent_thread_bindings(work_context_id, updated_at DESC);
 
@@ -1331,6 +1354,92 @@ CREATE INDEX IF NOT EXISTS idx_memory_reflection_runs_scope
     ON memory_reflection_runs(scope_type, scope_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_reflection_runs_status
     ON memory_reflection_runs(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS capability_candidates (
+    candidate_id TEXT PRIMARY KEY,
+    candidate_kind TEXT NOT NULL,
+    industry_instance_id TEXT,
+    target_role_id TEXT,
+    target_seat_ref TEXT,
+    target_scope TEXT NOT NULL DEFAULT 'seat',
+    status TEXT NOT NULL DEFAULT 'candidate',
+    lifecycle_stage TEXT NOT NULL DEFAULT 'candidate',
+    candidate_source_kind TEXT NOT NULL,
+    candidate_source_ref TEXT,
+    candidate_source_version TEXT,
+    candidate_source_lineage TEXT,
+    ingestion_mode TEXT NOT NULL DEFAULT 'manual',
+    proposed_skill_name TEXT,
+    summary TEXT NOT NULL DEFAULT '',
+    replacement_target_ids_json TEXT NOT NULL DEFAULT '[]',
+    rollback_target_ids_json TEXT NOT NULL DEFAULT '[]',
+    required_capability_ids_json TEXT NOT NULL DEFAULT '[]',
+    required_mcp_ids_json TEXT NOT NULL DEFAULT '[]',
+    protection_flags_json TEXT NOT NULL DEFAULT '[]',
+    success_criteria_json TEXT NOT NULL DEFAULT '[]',
+    rollback_criteria_json TEXT NOT NULL DEFAULT '[]',
+    source_task_ids_json TEXT NOT NULL DEFAULT '[]',
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    version TEXT NOT NULL DEFAULT 'v1',
+    lineage_root_id TEXT,
+    supersedes_json TEXT NOT NULL DEFAULT '[]',
+    superseded_by_json TEXT NOT NULL DEFAULT '[]',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_capability_candidates_updated
+    ON capability_candidates(updated_at DESC, candidate_id DESC);
+CREATE INDEX IF NOT EXISTS idx_capability_candidates_source
+    ON capability_candidates(candidate_source_kind, candidate_source_ref, candidate_source_version);
+CREATE INDEX IF NOT EXISTS idx_capability_candidates_scope
+    ON capability_candidates(target_scope, target_role_id, target_seat_ref, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS skill_trials (
+    trial_id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL,
+    scope_type TEXT NOT NULL DEFAULT 'seat',
+    scope_ref TEXT NOT NULL,
+    verdict TEXT NOT NULL DEFAULT 'pending',
+    summary TEXT NOT NULL DEFAULT '',
+    task_ids_json TEXT NOT NULL DEFAULT '[]',
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    success_count INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    handoff_count INTEGER NOT NULL DEFAULT 0,
+    operator_intervention_count INTEGER NOT NULL DEFAULT 0,
+    latency_summary_json TEXT NOT NULL DEFAULT '{}',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(candidate_id) REFERENCES capability_candidates(candidate_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_skill_trials_candidate
+    ON skill_trials(candidate_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_trials_scope
+    ON skill_trials(scope_type, scope_ref, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS skill_lifecycle_decisions (
+    decision_id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL,
+    decision_kind TEXT NOT NULL DEFAULT 'continue_trial',
+    from_stage TEXT,
+    to_stage TEXT,
+    reason TEXT NOT NULL DEFAULT '',
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    replacement_target_ids_json TEXT NOT NULL DEFAULT '[]',
+    protection_lifted INTEGER NOT NULL DEFAULT 0,
+    applied_by TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(candidate_id) REFERENCES capability_candidates(candidate_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_skill_lifecycle_decisions_candidate
+    ON skill_lifecycle_decisions(candidate_id, updated_at DESC);
 """
 
 _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (

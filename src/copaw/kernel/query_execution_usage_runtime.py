@@ -146,7 +146,7 @@ class _QueryExecutionUsageRuntimeMixin:
                         getattr(request, "industry_role_id", None),
                     ),
                     "model_context": model_context,
-                    **dict(capability_trial_attribution or {}),
+                    **self._resolve_query_usage_trial_attribution(request=request),
                 },
             ),
         )
@@ -182,6 +182,43 @@ class _QueryExecutionUsageRuntimeMixin:
             "slot_source": "fallback" if using_fallback else "active",
             "selection_reason": reason,
             "unavailable_slots": list(unavailable),
+        }
+
+    @staticmethod
+    def _resolve_query_usage_trial_attribution(
+        *,
+        request: Any,
+    ) -> dict[str, Any]:
+        payload = _mapping_value(
+            getattr(request, "capability_trial_attribution", None),
+        )
+        if not payload:
+            payload = _mapping_value(
+                getattr(request, "_copaw_capability_trial_attribution", None),
+            )
+        if not payload:
+            return {}
+        return {
+            "skill_candidate_id": _first_non_empty(
+                payload.get("skill_candidate_id"),
+                payload.get("candidate_id"),
+            ),
+            "skill_trial_id": _first_non_empty(
+                payload.get("skill_trial_id"),
+                payload.get("trial_id"),
+            ),
+            "skill_lifecycle_stage": _first_non_empty(
+                payload.get("skill_lifecycle_stage"),
+                payload.get("lifecycle_stage"),
+            ),
+            "selected_scope": _first_non_empty(
+                payload.get("selected_scope"),
+                payload.get("scope_type"),
+                payload.get("trial_scope"),
+            ),
+            "replacement_target_ids": _string_list(
+                payload.get("replacement_target_ids"),
+            ),
         }
 
 

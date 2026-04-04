@@ -5,7 +5,10 @@ import importlib
 
 from ..capabilities.tool_execution_contracts import get_tool_execution_contract
 from ..constant import MEMORY_COMPACT_KEEP_RECENT
-from ..industry.models import IndustrySeatCapabilityLayers
+from ..industry.models import (
+    IndustrySeatCapabilityLayers,
+    resolve_runtime_effective_capability_ids,
+)
 from ..memory.conversation_compaction_service import ConversationCompactionService
 from .main_brain_intake import (
     build_industry_chat_action_kwargs,
@@ -144,22 +147,65 @@ def _normalize_capability_trial_attribution(
     if not raw_payload:
         return {}
     normalized: dict[str, Any] = {}
-    for key in (
-        "candidate_id",
-        "skill_candidate_id",
-        "skill_trial_id",
-        "skill_lifecycle_stage",
-        "selected_scope",
-        "selected_seat_ref",
-    ):
-        resolved = _first_non_empty(raw_payload.get(key))
-        if resolved is not None:
-            normalized[key] = resolved
+    candidate_id = _first_non_empty(
+        raw_payload.get("candidate_id"),
+        raw_payload.get("skill_candidate_id"),
+    )
+    if candidate_id is not None:
+        normalized["candidate_id"] = candidate_id
+    skill_candidate_id = _first_non_empty(
+        raw_payload.get("skill_candidate_id"),
+        raw_payload.get("candidate_id"),
+    )
+    if skill_candidate_id is not None:
+        normalized["skill_candidate_id"] = skill_candidate_id
+    skill_trial_id = _first_non_empty(
+        raw_payload.get("skill_trial_id"),
+        raw_payload.get("trial_id"),
+    )
+    if skill_trial_id is not None:
+        normalized["skill_trial_id"] = skill_trial_id
+    skill_lifecycle_stage = _first_non_empty(
+        raw_payload.get("skill_lifecycle_stage"),
+        raw_payload.get("lifecycle_stage"),
+    )
+    if skill_lifecycle_stage is not None:
+        normalized["skill_lifecycle_stage"] = skill_lifecycle_stage
+    selected_scope = _first_non_empty(
+        raw_payload.get("selected_scope"),
+        raw_payload.get("scope_type"),
+        raw_payload.get("trial_scope"),
+    )
+    if selected_scope is not None:
+        normalized["selected_scope"] = selected_scope
+    selected_seat_ref = _first_non_empty(raw_payload.get("selected_seat_ref"))
+    if selected_seat_ref is not None:
+        normalized["selected_seat_ref"] = selected_seat_ref
     for key in ("replacement_target_ids", "rollback_target_ids", "capability_ids"):
         resolved_items = _string_list(raw_payload.get(key))
         if resolved_items:
             normalized[key] = resolved_items
     return normalized
+
+
+def _merge_query_tool_trial_attribution(
+    payload: dict[str, Any] | None,
+    attribution: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    resolved_payload = _query_tool_contract_metadata(payload)
+    resolved_attribution = {
+        key: value
+        for key, value in _normalize_capability_trial_attribution(attribution).items()
+        if value is not None and value != "" and value != []
+    }
+    if not resolved_attribution:
+        return resolved_payload
+    metadata = {
+        **dict(_mapping_value(resolved_payload.get("metadata"))),
+        **resolved_attribution,
+    }
+    resolved_payload["metadata"] = metadata
+    return resolved_payload
 
 
 def _query_environment_ref(execution_context: Mapping[str, Any] | None) -> str | None:
@@ -905,6 +951,9 @@ class _QueryExecutionRuntimeMixin(
                 session_lease=lease,
                 actor_lease=actor_lease,
             )
+            capability_trial_attribution = _normalize_capability_trial_attribution(
+                _mapping_value((execution_context or {}).get("capability_trial_attribution")),
+            )
             tool_execution_delegate = self._build_query_tool_execution_delegate(
                 owner_agent_id=owner_agent_id,
                 kernel_task_id=kernel_task_id,
@@ -1431,10 +1480,7 @@ class _QueryExecutionRuntimeMixin(
             return None
         return lambda payload: self._tool_bridge.record_shell_event(
             kernel_task_id,
-            _query_tool_contract_metadata(
-                payload,
-                capability_trial_attribution=capability_trial_attribution,
-            ),
+            _merge_query_tool_trial_attribution(payload, capability_trial_attribution),
         )
 
     def _make_file_evidence_sink(
@@ -1447,10 +1493,7 @@ class _QueryExecutionRuntimeMixin(
             return None
         return lambda payload: self._tool_bridge.record_file_event(
             kernel_task_id,
-            _query_tool_contract_metadata(
-                payload,
-                capability_trial_attribution=capability_trial_attribution,
-            ),
+            _merge_query_tool_trial_attribution(payload, capability_trial_attribution),
         )
 
     def _make_browser_evidence_sink(
@@ -1463,10 +1506,7 @@ class _QueryExecutionRuntimeMixin(
             return None
         return lambda payload: self._tool_bridge.record_browser_event(
             kernel_task_id,
-            _query_tool_contract_metadata(
-                payload,
-                capability_trial_attribution=capability_trial_attribution,
-            ),
+            _merge_query_tool_trial_attribution(payload, capability_trial_attribution),
         )
 
     def _build_query_tool_execution_delegate(
@@ -1491,18 +1531,16 @@ class _QueryExecutionRuntimeMixin(
             "auto",
         ) or "auto"
         capability_trial_attribution = _normalize_capability_trial_attribution(
-            (execution_context or {}).get("capability_trial_attribution"),
+            _mapping_value((execution_context or {}).get("capability_trial_attribution")),
         )
 
         async def _delegate(capability_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-            resolved_payload = dict(payload or {})
+            task_payload = dict(payload or {})
             if capability_trial_attribution:
-                metadata = dict(_mapping_value(resolved_payload.get("metadata")))
-                for key, value in capability_trial_attribution.items():
-                    if value in (None, "", []):
-                        continue
-                    metadata[key] = value
-                resolved_payload["metadata"] = metadata
+                task_payload["metadata"] = {
+                    **dict(_mapping_value(task_payload.get("metadata"))),
+                    **capability_trial_attribution,
+                }
             task = KernelTask(
                 id=kernel_task_id,
                 title=f"Query tool execution: {capability_id}",
@@ -1511,7 +1549,7 @@ class _QueryExecutionRuntimeMixin(
                 work_context_id=work_context_id,
                 environment_ref=environment_ref,
                 risk_level=risk_level,
-                payload=resolved_payload,
+                payload=task_payload,
             )
             return await execute_task(task)
 
@@ -1910,8 +1948,14 @@ class _QueryExecutionRuntimeMixin(
             owner_agent_id=owner_agent_id,
         )
         if runtime_capability_layers is not None:
+            runtime = (
+                self._agent_runtime_repository.get_runtime(owner_agent_id)
+                if self._agent_runtime_repository is not None
+                else None
+            )
+            runtime_metadata = _mapping_value(getattr(runtime, "metadata", None))
             effective_capability_ids = set(
-                runtime_capability_layers.merged_capability_ids(),
+                resolve_runtime_effective_capability_ids(runtime_metadata),
             )
             mounts = [
                 mount

@@ -363,49 +363,15 @@ class _WorkflowServiceRunMixin:
                     step=step,
                     host_snapshot=host_snapshot,
                 )
-                await self._persist_schedule_spec(
-                    {
-                        "id": schedule_id,
-                        "name": step.title,
-                        "enabled": True,
-                        "schedule": {
-                            "type": "cron",
-                            "cron": str(step_payload.get("cron") or "0 9 * * *"),
-                            "timezone": str(step_payload.get("timezone") or "UTC"),
-                        },
-                        "task_type": "agent",
-                        "request": {
-                            "input": str(step_payload.get("request_input") or step.summary),
-                            "meta": {
-                                "workflow_run_id": run.run_id,
-                                "workflow_template_id": template.template_id,
-                                "workflow_step_id": step.step_id,
-                            },
-                        },
-                        "dispatch": {
-                            "type": "channel",
-                            "channel": str(step_payload.get("dispatch_channel") or "console"),
-                            "target": {
-                                "user_id": str(step_payload.get("dispatch_user_id") or "workflow"),
-                                "session_id": str(step_payload.get("dispatch_session_id") or run.run_id),
-                            },
-                            "mode": str(step_payload.get("dispatch_mode") or "final"),
-                            "meta": {
-                                "summary": step.summary,
-                                "owner_agent_id": step.owner_agent_id,
-                                "workflow_run_id": run.run_id,
-                                "workflow_template_id": template.template_id,
-                                **dict(schedule_meta),
-                            },
-                        },
-                        "runtime": {
-                            "max_concurrency": 1,
-                            "timeout_seconds": 120,
-                            "misfire_grace_seconds": 60,
-                        },
-                        "meta": dict(schedule_meta),
-                    }
+                schedule_spec = self._build_schedule_spec(
+                    run=run,
+                    template=template,
+                    step=step,
+                    step_payload=step_payload,
+                    schedule_id=schedule_id,
+                    schedule_meta=schedule_meta,
                 )
+                await self._persist_schedule_spec(schedule_spec)
                 if self._schedule_repository is not None:
                     stored = self._schedule_repository.get_schedule(schedule_id)
                     if stored is None:
@@ -419,9 +385,7 @@ class _WorkflowServiceRunMixin:
                                 enabled=True,
                                 target_channel=str(step_payload.get("dispatch_channel") or "console"),
                                 source_ref=f"workflow-template:{template.template_id}",
-                                spec_payload={
-                                    "meta": dict(schedule_meta),
-                                },
+                                spec_payload=schedule_spec,
                             ),
                         )
 
@@ -616,9 +580,7 @@ class _WorkflowServiceRunMixin:
                                         step_payload.get("dispatch_channel") or "console"
                                     ),
                                     source_ref=f"workflow-template:{template.template_id}",
-                                    spec_payload={
-                                        "meta": dict(schedule_meta),
-                                    },
+                                    spec_payload=dict(schedule_spec),
                                 )
                             )
                 else:
@@ -665,6 +627,7 @@ class _WorkflowServiceRunMixin:
                                             ),
                                             "spec_payload": {
                                                 **dict(stored.spec_payload or {}),
+                                                **dict(schedule_spec),
                                                 "meta": dict(schedule_meta),
                                             },
                                             "updated_at": _utc_now(),
@@ -742,6 +705,10 @@ class _WorkflowServiceRunMixin:
             **dict(dispatch_meta_extra or {}),
             **dict(schedule_meta),
         }
+        environment_ref = _string(schedule_meta.get("environment_ref")) or _string(
+            schedule_meta.get("environment_id"),
+        )
+        control_thread_id = run.run_id
         return {
             "id": schedule_id,
             "name": step.title,
@@ -754,6 +721,16 @@ class _WorkflowServiceRunMixin:
             "task_type": "agent",
             "request": {
                 "input": str(step_payload.get("request_input") or step.summary),
+                "control_thread_id": control_thread_id,
+                "entry_source": "workflow-run",
+                "main_brain_runtime": {
+                    "environment": {
+                        "ref": environment_ref,
+                        "session_id": control_thread_id,
+                        "continuity_source": "workflow-run",
+                        "resume_ready": True,
+                    },
+                },
                 "meta": {
                     "workflow_run_id": run.run_id,
                     "workflow_template_id": template.template_id,

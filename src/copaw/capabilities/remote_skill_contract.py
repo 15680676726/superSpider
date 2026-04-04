@@ -258,15 +258,16 @@ def build_remote_skill_preflight(
     )
 
     target_agent = _get_agent(agent_profile_service, target_agent_id)
+    target_agent_available = target_agent is not None or bool(runtime_context)
     if target_agent_id:
         checks.append(
             RemoteSkillPreflightCheck(
                 code="target-agent",
                 label="目标智能体",
-                status="pass" if target_agent is not None else "fail",
+                status="pass" if target_agent_available else "fail",
                 detail=(
                     f"目标智能体“{target_agent_id}”可用。"
-                    if target_agent is not None
+                    if target_agent_available
                     else f"目标智能体“{target_agent_id}”不可用。"
                 ),
             ),

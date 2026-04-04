@@ -1558,7 +1558,6 @@ def test_runtime_center_main_brain_route_prefers_public_runtime_snapshots():
                     "submit_count": 4,
                 }
             ]
-
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()
     app.state.evidence_query_service = FakeEvidenceQueryService()
@@ -1600,6 +1599,70 @@ def test_runtime_center_main_brain_route_prefers_public_runtime_snapshots():
     assert payload["automation"]["loops"][0]["submit_count"] == 4
     assert payload["automation"]["supervisor"]["poll_interval_seconds"] == 2.5
     assert payload["automation"]["supervisor"]["active_agent_run_count"] == 2
+
+
+def test_runtime_center_main_brain_route_marks_automation_degraded_from_persisted_loop_state():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.cron_manager = FakeCronManager([make_job("sched-1")])
+    app.state.automation_tasks = []
+    app.state.automation_loop_runtime_repository = SimpleNamespace(
+        list_loops=lambda limit=None: [
+            SimpleNamespace(
+                automation_task_id=(
+                    "copaw-main-brain:operating-cycle:system:run_operating_cycle"
+                ),
+                task_name="operating-cycle",
+                capability_ref="system:run_operating_cycle",
+                owner_agent_id="copaw-main-brain",
+                interval_seconds=180,
+                coordinator_contract="automation-coordinator/v1",
+                loop_phase="failed",
+                health_status="degraded",
+                last_gate_reason="active-industry",
+                last_result_phase="failed",
+                last_error_summary="planner timeout",
+                submit_count=2,
+                consecutive_failures=2,
+            )
+        ]
+    )
+    app.state.actor_supervisor = SimpleNamespace(
+        snapshot=lambda: {
+            "available": True,
+            "status": "running",
+            "running": True,
+            "poll_interval_seconds": 2.5,
+            "active_agent_run_count": 0,
+            "blocked_runtime_count": 0,
+            "recent_failure_count": 2,
+            "last_failure_at": None,
+            "last_failure_type": "timeout",
+        }
+    )
+
+    client = TestClient(app)
+    with patch(
+        "copaw.app.runtime_center.overview_cards.get_heartbeat_config",
+        return_value=HeartbeatConfig(enabled=True, every="6h", target="main"),
+        create=True,
+    ):
+        response = client.get("/runtime-center/surface?sections=main_brain")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["main_brain"]["automation"]["status"] == "degraded"
+    assert payload["main_brain"]["automation"]["loop_count"] == 1
+    assert payload["main_brain"]["automation"]["loops"][0]["health_status"] == "degraded"
+    assert payload["surface"]["status"] == "degraded"
 
 
 def test_runtime_center_main_brain_route_handles_object_schedule_summaries():

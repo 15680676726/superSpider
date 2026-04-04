@@ -15,6 +15,7 @@ from ..capabilities import CapabilityService
 from ..config import load_config
 from ..config.utils import get_config_path
 from ..kernel import KernelDispatcher, KernelTask
+from ..state import AutomationLoopRuntimeRecord
 from .runtime_bootstrap import (
     RuntimeBootstrap,
     attach_runtime_state,
@@ -45,6 +46,8 @@ class _AutomationLoopState:
     last_error_summary: str | None = None
     submit_count: int = 0
     consecutive_failures: int = 0
+    automation_loop_runtime_repository: object | None = None
+    created_at: object | None = None
 
     def with_contract_payload(self, payload: dict[str, object]) -> dict[str, object]:
         enriched = dict(payload)
@@ -53,11 +56,69 @@ class _AutomationLoopState:
         enriched.setdefault("automation_loop_name", self.task_name)
         return enriched
 
+    @classmethod
+    def from_record(
+        cls,
+        record: AutomationLoopRuntimeRecord,
+        *,
+        automation_loop_runtime_repository: object | None = None,
+    ) -> "_AutomationLoopState":
+        return cls(
+            task_name=record.task_name,
+            capability_ref=record.capability_ref,
+            owner_agent_id=record.owner_agent_id,
+            interval_seconds=record.interval_seconds,
+            automation_task_id=record.automation_task_id,
+            coordinator_contract=record.coordinator_contract,
+            loop_phase=record.loop_phase,
+            health_status=record.health_status,
+            last_gate_reason=record.last_gate_reason or "not-yet-evaluated",
+            last_result_phase=record.last_result_phase,
+            last_error_summary=record.last_error_summary,
+            submit_count=record.submit_count,
+            consecutive_failures=record.consecutive_failures,
+            automation_loop_runtime_repository=automation_loop_runtime_repository,
+            created_at=record.created_at,
+        )
+
+    def to_record(self) -> AutomationLoopRuntimeRecord:
+        payload: dict[str, object] = {
+            "automation_task_id": self.automation_task_id,
+            "task_name": self.task_name,
+            "capability_ref": self.capability_ref,
+            "owner_agent_id": self.owner_agent_id,
+            "interval_seconds": self.interval_seconds,
+            "coordinator_contract": self.coordinator_contract,
+            "loop_phase": self.loop_phase,
+            "health_status": self.health_status,
+            "last_gate_reason": self.last_gate_reason,
+            "last_result_phase": self.last_result_phase,
+            "last_error_summary": self.last_error_summary,
+            "submit_count": self.submit_count,
+            "consecutive_failures": self.consecutive_failures,
+        }
+        if self.created_at is not None:
+            payload["created_at"] = self.created_at
+        return AutomationLoopRuntimeRecord(
+            **payload,
+        )
+
+    def persist(self) -> None:
+        repository = self.automation_loop_runtime_repository
+        if repository is None:
+            return
+        upsert_loop = getattr(repository, "upsert_loop", None)
+        if not callable(upsert_loop):
+            return
+        record = upsert_loop(self.to_record())
+        self.created_at = getattr(record, "created_at", None) or self.created_at
+
     def mark_blocked(self, reason: str) -> None:
         self.loop_phase = "blocked"
         self.health_status = "idle"
         self.last_gate_reason = reason
         self.last_error_summary = None
+        self.persist()
 
     def mark_submitting(self, reason: str) -> None:
         self.loop_phase = "submitting"
@@ -65,6 +126,7 @@ class _AutomationLoopState:
         self.last_gate_reason = reason
         self.last_error_summary = None
         self.submit_count += 1
+        self.persist()
 
     def record_result(self, result: object) -> None:
         phase = str(getattr(result, "phase", "") or "").strip() or "unknown"
@@ -74,17 +136,16 @@ class _AutomationLoopState:
             self.loop_phase = "completed"
             self.health_status = "healthy"
             self.consecutive_failures = 0
-            return
-        if phase == "skipped":
+        elif phase == "skipped":
             self.loop_phase = "skipped"
             self.health_status = "idle"
-            return
-        if phase in {"waiting-confirm", "risk-check"}:
+        elif phase in {"waiting-confirm", "risk-check"}:
             self.loop_phase = phase
             self.health_status = "guarded"
-            return
-        self.loop_phase = phase
-        self.health_status = "degraded"
+        else:
+            self.loop_phase = phase
+            self.health_status = "degraded"
+        self.persist()
 
     def record_failure(self, exc: Exception) -> None:
         self.loop_phase = "failed"
@@ -93,10 +154,12 @@ class _AutomationLoopState:
         summary = str(exc).strip()
         self.last_error_summary = summary or exc.__class__.__name__
         self.consecutive_failures += 1
+        self.persist()
 
     def mark_stopped(self) -> None:
         self.loop_phase = "stopped"
         self.health_status = "stopped"
+        self.persist()
 
     def snapshot(self) -> dict[str, object]:
         return {
@@ -337,6 +400,7 @@ def start_automation_tasks(
     environment_service: Any | None = None,
     industry_service: Any | None = None,
     learning_service: Any | None = None,
+    automation_loop_runtime_repository: object | None = None,
     logger: logging.Logger,
 ) -> AutomationTaskGroup:
     host_recovery_interval = automation_interval_seconds(
@@ -406,17 +470,31 @@ def start_automation_tasks(
             ),
         ),
     ):
-        loop_state = _AutomationLoopState(
+        automation_task_id = _automation_task_id(
             task_name=task_name,
             capability_ref=capability_ref,
             owner_agent_id=owner_agent_id,
-            interval_seconds=interval_seconds,
-            automation_task_id=_automation_task_id(
+        )
+        loop_state = None
+        if automation_loop_runtime_repository is not None:
+            get_loop = getattr(automation_loop_runtime_repository, "get_loop", None)
+            if callable(get_loop):
+                record = get_loop(automation_task_id)
+                if isinstance(record, AutomationLoopRuntimeRecord):
+                    loop_state = _AutomationLoopState.from_record(
+                        record,
+                        automation_loop_runtime_repository=automation_loop_runtime_repository,
+                    )
+        if loop_state is None:
+            loop_state = _AutomationLoopState(
                 task_name=task_name,
                 capability_ref=capability_ref,
                 owner_agent_id=owner_agent_id,
-            ),
-        )
+                interval_seconds=interval_seconds,
+                automation_task_id=automation_task_id,
+                automation_loop_runtime_repository=automation_loop_runtime_repository,
+            )
+        loop_state.persist()
         task = asyncio.create_task(
             _automation_loop(
                 task_name=task_name,

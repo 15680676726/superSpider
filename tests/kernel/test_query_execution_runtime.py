@@ -545,7 +545,18 @@ def test_query_execution_runtime_evidence_sinks_attach_tool_contract_metadata() 
         tool_bridge=bridge,
     )
 
-    shell_sink = service._make_shell_evidence_sink("ktask:query-tool")  # pylint: disable=protected-access
+    attribution = {
+        "skill_candidate_id": "candidate-nextgen-outreach",
+        "skill_trial_id": "trial-nextgen-seat-1",
+        "skill_lifecycle_stage": "trial",
+        "selected_scope": "seat",
+        "replacement_target_ids": ["skill:legacy_outreach"],
+    }
+
+    shell_sink = service._make_shell_evidence_sink(  # pylint: disable=protected-access
+        "ktask:query-tool",
+        capability_trial_attribution=attribution,
+    )
     assert shell_sink is not None
     shell_sink(
         {
@@ -561,7 +572,10 @@ def test_query_execution_runtime_evidence_sinks_attach_tool_contract_metadata() 
         },
     )
 
-    file_sink = service._make_file_evidence_sink("ktask:query-tool")  # pylint: disable=protected-access
+    file_sink = service._make_file_evidence_sink(  # pylint: disable=protected-access
+        "ktask:query-tool",
+        capability_trial_attribution=attribution,
+    )
     assert file_sink is not None
     file_sink(
         {
@@ -575,7 +589,10 @@ def test_query_execution_runtime_evidence_sinks_attach_tool_contract_metadata() 
         },
     )
 
-    browser_sink = service._make_browser_evidence_sink("ktask:query-tool")  # pylint: disable=protected-access
+    browser_sink = service._make_browser_evidence_sink(  # pylint: disable=protected-access
+        "ktask:query-tool",
+        capability_trial_attribution=attribution,
+    )
     assert browser_sink is not None
     browser_sink(
         {
@@ -594,6 +611,10 @@ def test_query_execution_runtime_evidence_sinks_attach_tool_contract_metadata() 
     assert shell_meta["read_only"] is True
     assert shell_meta["concurrency_class"] == "parallel-read"
     assert shell_meta["preflight_policy"] == "shell-safety"
+    assert shell_meta["skill_candidate_id"] == "candidate-nextgen-outreach"
+    assert shell_meta["skill_trial_id"] == "trial-nextgen-seat-1"
+    assert shell_meta["selected_scope"] == "seat"
+    assert shell_meta["replacement_target_ids"] == ["skill:legacy_outreach"]
 
     file_meta = bridge.file_calls[0]["payload"]["metadata"]
     assert file_meta["tool_contract"] == "tool:write_file"
@@ -601,6 +622,9 @@ def test_query_execution_runtime_evidence_sinks_attach_tool_contract_metadata() 
     assert file_meta["read_only"] is False
     assert file_meta["concurrency_class"] == "serial-write"
     assert file_meta["preflight_policy"] == "inline"
+    assert file_meta["skill_candidate_id"] == "candidate-nextgen-outreach"
+    assert file_meta["skill_trial_id"] == "trial-nextgen-seat-1"
+    assert file_meta["selected_scope"] == "seat"
 
     browser_meta = bridge.browser_calls[0]["payload"]["metadata"]
     assert browser_meta["tool_contract"] == "tool:browser_use"
@@ -608,6 +632,9 @@ def test_query_execution_runtime_evidence_sinks_attach_tool_contract_metadata() 
     assert browser_meta["read_only"] is False
     assert browser_meta["concurrency_class"] == "serial-write"
     assert browser_meta["preflight_policy"] == "inline"
+    assert browser_meta["skill_candidate_id"] == "candidate-nextgen-outreach"
+    assert browser_meta["skill_trial_id"] == "trial-nextgen-seat-1"
+    assert browser_meta["selected_scope"] == "seat"
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from copaw.app import runtime_lifecycle as runtime_lifecycle_module
 from copaw.app.crons.heartbeat import run_heartbeat_once
+from copaw.app.runtime_bootstrap_repositories import build_runtime_repositories
 from copaw.app.runtime_lifecycle import (
     RuntimeRestartCoordinator,
     _should_run_host_recovery,
@@ -19,6 +20,7 @@ from copaw.app.runtime_lifecycle import (
     stop_automation_tasks,
     submit_kernel_automation_task,
 )
+from copaw.state import AutomationLoopRuntimeRecord, SQLiteStateStore
 
 
 def test_automation_interval_seconds_uses_default_for_invalid_value(
@@ -95,6 +97,50 @@ async def test_start_automation_tasks_exposes_durable_loop_contract_snapshots() 
         "submit_count": 0,
         "consecutive_failures": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_start_automation_tasks_rehydrates_persisted_loop_state(
+    tmp_path,
+) -> None:
+    repositories = build_runtime_repositories(SQLiteStateStore(tmp_path / "state.db"))
+    repositories.automation_loop_runtime_repository.upsert_loop(
+        AutomationLoopRuntimeRecord(
+            automation_task_id=(
+                "copaw-main-brain:operating-cycle:system:run_operating_cycle"
+            ),
+            task_name="operating-cycle",
+            capability_ref="system:run_operating_cycle",
+            owner_agent_id="copaw-main-brain",
+            interval_seconds=180,
+            coordinator_contract="automation-coordinator/v1",
+            loop_phase="failed",
+            health_status="degraded",
+            last_gate_reason="active-industry",
+            last_result_phase="failed",
+            last_error_summary="planner timeout",
+            submit_count=3,
+            consecutive_failures=2,
+        ),
+    )
+
+    tasks = start_automation_tasks(
+        kernel_dispatcher=SimpleNamespace(),
+        capability_service=SimpleNamespace(get_capability=lambda *_args, **_kwargs: None),
+        automation_loop_runtime_repository=repositories.automation_loop_runtime_repository,
+        logger=logging.getLogger(__name__),
+    )
+
+    try:
+        snapshots = tasks.loop_snapshots()
+    finally:
+        await stop_automation_tasks(tasks)
+
+    assert snapshots["operating-cycle"]["loop_phase"] == "failed"
+    assert snapshots["operating-cycle"]["health_status"] == "degraded"
+    assert snapshots["operating-cycle"]["last_error_summary"] == "planner timeout"
+    assert snapshots["operating-cycle"]["submit_count"] == 3
+    assert snapshots["operating-cycle"]["consecutive_failures"] == 2
 
 
 @pytest.mark.asyncio

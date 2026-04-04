@@ -5,6 +5,199 @@ from .service_shared import *  # noqa: F401,F403
 
 
 class _PredictionServiceRecommendationMixin:
+    def _register_capability_candidate(
+        self,
+        *,
+        case: PredictionCaseRecord,
+        summary: str,
+        metadata: dict[str, Any],
+        action_payload: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        service = getattr(self, "_capability_candidate_service", None)
+        normalize_candidate_source = getattr(service, "normalize_candidate_source", None)
+        if not callable(normalize_candidate_source):
+            return metadata, action_payload
+        candidate_payload = _safe_dict(metadata.get("candidate")) or _safe_dict(
+            action_payload.get("candidate"),
+        )
+        if not candidate_payload:
+            return metadata, action_payload
+        source_kind = (_string(candidate_payload.get("source_kind")) or "hub").lower()
+        candidate_source_kind = (
+            "external_catalog" if source_kind == "curated" else "external_remote"
+        )
+        source_ref = (
+            _string(candidate_payload.get("bundle_url"))
+            or _string(candidate_payload.get("source_url"))
+            or _string(candidate_payload.get("candidate_key"))
+        )
+        if source_kind == "curated":
+            source_ref = ":".join(
+                part
+                for part in (
+                    _string(candidate_payload.get("source_id")),
+                    _string(candidate_payload.get("candidate_id")),
+                )
+                if part is not None
+            ) or source_ref
+        target_role_id = _string(metadata.get("target_role_id"))
+        target_seat_ref = _string(metadata.get("selected_seat_ref"))
+        target_scope = (
+            "seat"
+            if target_seat_ref
+            else "role"
+            if target_role_id
+            else "global"
+        )
+        record = normalize_candidate_source(
+            candidate_kind="skill",
+            industry_instance_id=case.industry_instance_id,
+            target_scope=target_scope,
+            target_role_id=target_role_id,
+            target_seat_ref=target_seat_ref,
+            candidate_source_kind=candidate_source_kind,
+            candidate_source_ref=source_ref,
+            candidate_source_version=_string(candidate_payload.get("version")),
+            candidate_source_lineage=_string(candidate_payload.get("candidate_key")),
+            ingestion_mode="prediction-recommendation",
+            proposed_skill_name=(
+                _string(candidate_payload.get("install_name"))
+                or _string(candidate_payload.get("slug"))
+                or _string(candidate_payload.get("title"))
+            ),
+            summary=summary,
+            status="candidate",
+            lifecycle_stage=_string(metadata.get("lifecycle_stage")) or "candidate",
+            metadata={
+                "prediction_case_id": case.case_id,
+                "prediction_source_kind": source_kind,
+                "candidate": candidate_payload,
+            },
+        )
+        metadata = {**metadata, "candidate_id": record.candidate_id}
+        action_payload = {**action_payload, "candidate_id": record.candidate_id}
+        return metadata, action_payload
+
+    def _register_lifecycle_decision_proposal(
+        self,
+        *,
+        metadata: dict[str, Any],
+    ) -> None:
+        service = getattr(self, "_skill_lifecycle_decision_service", None)
+        create_decision = getattr(service, "create_decision", None)
+        list_decisions = getattr(service, "list_decisions", None)
+        if not callable(create_decision):
+            return
+        candidate_id = _string(metadata.get("candidate_id"))
+        if candidate_id is None:
+            return
+        gap_kind = _string(metadata.get("gap_kind"))
+        mapping = {
+            "capability_rollout": ("promote_to_role", "trial", "active"),
+            "capability_rollback": ("rollback", "trial", "blocked"),
+            "capability_retirement": ("retire", "active", "retired"),
+        }
+        if gap_kind not in mapping:
+            return
+        decision_kind, from_stage, to_stage = mapping[gap_kind]
+        source_recommendation_id = _string(metadata.get("source_recommendation_id"))
+        if callable(list_decisions):
+            existing = list_decisions(candidate_id=candidate_id, limit=100)
+            for item in existing:
+                item_metadata = _safe_dict(getattr(item, "metadata", None))
+                if (
+                    getattr(item, "decision_kind", None) == decision_kind
+                    and _string(item_metadata.get("source_recommendation_id")) == source_recommendation_id
+                ):
+                    return
+        create_decision(
+            candidate_id=candidate_id,
+            decision_kind=decision_kind,
+            from_stage=from_stage,
+            to_stage=to_stage,
+            reason=_string(metadata.get("optimization_stage")) or gap_kind or decision_kind,
+            evidence_refs=_string_list(metadata.get("evidence_refs")),
+            replacement_target_ids=_string_list(
+                metadata.get("replacement_target_ids"),
+                metadata.get("rollback_target_ids"),
+            ),
+            protection_lifted=False,
+            applied_by="prediction-service",
+            metadata={
+                "source_recommendation_id": source_recommendation_id,
+                "gap_kind": gap_kind,
+                "trial_scope": _string(metadata.get("trial_scope")),
+                "selected_seat_ref": _string(metadata.get("selected_seat_ref"))
+                or _string(metadata.get("source_trial_seat_ref")),
+            },
+        )
+    def _resolve_agent_scope_payload(
+        self,
+        *,
+        target_agent_id: str | None,
+        selected_seat_ref: str | None = None,
+        trial_scope: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_agent_id = _string(target_agent_id)
+        resolved_seat_ref = _string(selected_seat_ref)
+        if resolved_seat_ref is None and normalized_agent_id is not None:
+            detail_getter = getattr(self._agent_profile_service, "get_agent_detail", None)
+            if callable(detail_getter):
+                detail = detail_getter(normalized_agent_id)
+                runtime = _safe_dict(_safe_dict(detail).get("runtime"))
+                metadata = _safe_dict(runtime.get("metadata"))
+                resolved_seat_ref = _string(metadata.get("selected_seat_ref"))
+        normalized_trial_scope = _string(trial_scope) or ""
+        selected_scope = "agent"
+        if normalized_trial_scope == "single-seat" or resolved_seat_ref is not None:
+            selected_scope = "seat"
+        elif normalized_trial_scope == "single-session":
+            selected_scope = "session"
+        payload: dict[str, Any] = {
+            "target_agent_id": normalized_agent_id,
+            "selected_scope": selected_scope,
+        }
+        if resolved_seat_ref is not None:
+            payload["selected_seat_ref"] = resolved_seat_ref
+        return payload
+
+    def _build_lifecycle_action_payload(
+        self,
+        *,
+        case_id: str,
+        decision_kind: str,
+        target_agent_id: str | None,
+        target_capability_ids: list[str] | None = None,
+        replacement_target_ids: list[str] | None = None,
+        rollback_target_ids: list[str] | None = None,
+        capability_assignment_mode: str = "replace",
+        selected_seat_ref: str | None = None,
+        trial_scope: str | None = None,
+        target_role_id: str | None = None,
+        candidate_id: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            **self._resolve_agent_scope_payload(
+                target_agent_id=target_agent_id,
+                selected_seat_ref=selected_seat_ref,
+                trial_scope=trial_scope,
+            ),
+            "decision_kind": decision_kind,
+            "candidate_id": _string(candidate_id),
+            "target_capability_ids": _string_list(target_capability_ids),
+            "capability_ids": _string_list(target_capability_ids),
+            "replacement_target_ids": _string_list(replacement_target_ids),
+            "rollback_target_ids": _string_list(rollback_target_ids),
+            "capability_assignment_mode": capability_assignment_mode,
+            "reason": _string(reason)
+            or f"prediction:{case_id}:capability-lifecycle:{decision_kind}",
+        }
+        normalized_role_id = _string(target_role_id)
+        if normalized_role_id is not None:
+            payload["target_role_id"] = normalized_role_id
+        return payload
+
     def _build_signals(
         self,
         case: PredictionCaseRecord,
@@ -485,6 +678,17 @@ class _PredictionServiceRecommendationMixin:
                     "strategy_priority_order": priority_order[:5],
                     "strategy_execution_constraints": execution_constraints[:4],
                 }
+            normalized_action_payload = dict(action_payload or {})
+            normalized_metadata = {**strategy_metadata, **dict(metadata or {})}
+            normalized_metadata, normalized_action_payload = self._register_capability_candidate(
+                case=case,
+                summary=summary,
+                metadata=normalized_metadata,
+                action_payload=normalized_action_payload,
+            )
+            self._register_lifecycle_decision_proposal(
+                metadata=normalized_metadata,
+            )
             recommendations.append(
                 PredictionRecommendationRecord(
                     case_id=case.case_id,
@@ -502,8 +706,8 @@ class _PredictionServiceRecommendationMixin:
                     target_goal_id=target_goal_id,
                     target_schedule_id=target_schedule_id,
                     target_capability_ids=list(target_capability_ids or []),
-                    action_payload=dict(action_payload or {}),
-                    metadata={**strategy_metadata, **dict(metadata or {})},
+                    action_payload=normalized_action_payload,
+                    metadata=normalized_metadata,
                 ),
             )
 
@@ -860,6 +1064,8 @@ class _PredictionServiceRecommendationMixin:
                     "gap_kind": gap_kind,
                     "optimization_stage": "trial",
                     "industry_instance_id": case.industry_instance_id,
+                    "candidate_id": _string(getattr(candidate, "candidate_id", None))
+                    or _string(getattr(candidate, "candidate_key", None)),
                     "search_queries": queries,
                     "candidate": candidate.model_dump(mode="json"),
                     "preflight": preflight.model_dump(mode="json"),
@@ -899,32 +1105,6 @@ class _PredictionServiceRecommendationMixin:
                     ),
                 }
                 if candidate.installed and requested_capability_ids:
-                    action_kind = "system:apply_role"
-                    action_payload: dict[str, Any]
-                    if replacement_capability_ids:
-                        final_capabilities = [
-                            item
-                            for item in self._effective_capabilities_for_agent(target_agent_id)
-                            if item not in replacement_capability_ids
-                        ]
-                        for capability_name in requested_capability_ids:
-                            if capability_name not in final_capabilities:
-                                final_capabilities.append(capability_name)
-                        action_payload = {
-                            "agent_id": target_agent_id,
-                            "capabilities": final_capabilities,
-                            "capability_assignment_mode": "replace",
-                            "reason": (
-                                f"prediction:{case.case_id}:replace-underperforming-capability"
-                            ),
-                        }
-                    else:
-                        action_payload = {
-                            "agent_id": target_agent_id,
-                            "capabilities": requested_capability_ids,
-                            "capability_assignment_mode": "merge",
-                            "reason": f"prediction:{case.case_id}:assign-installed-remote-candidate",
-                        }
                     append_recommendation(
                         recommendation_type="capability_recommendation",
                         title=(
@@ -942,7 +1122,7 @@ class _PredictionServiceRecommendationMixin:
                         priority=90 if replacement_capability_ids else 84,
                         confidence=min(0.96, confidence_baseline + (0.14 if replacement_capability_ids else 0.1)),
                         risk_level="confirm" if replacement_capability_ids else "guarded",
-                        action_kind=action_kind,
+                        action_kind="system:apply_capability_lifecycle",
                         executable=True,
                         auto_eligible=False,
                         status="proposed",
@@ -951,7 +1131,28 @@ class _PredictionServiceRecommendationMixin:
                             requested_capability_ids,
                             replacement_capability_ids,
                         ),
-                        action_payload=action_payload,
+                        action_payload=self._build_lifecycle_action_payload(
+                            case_id=case.case_id,
+                            decision_kind=(
+                                "replace_existing"
+                                if replacement_capability_ids
+                                else "continue_trial"
+                            ),
+                            target_agent_id=target_agent_id,
+                            target_capability_ids=requested_capability_ids,
+                            replacement_target_ids=metadata["replacement_target_ids"],
+                            rollback_target_ids=metadata["rollback_target_ids"],
+                            capability_assignment_mode=trial_mode,
+                            selected_seat_ref=_string(metadata.get("selected_seat_ref")),
+                            trial_scope=_string(metadata.get("trial_scope")),
+                            target_role_id=_string(metadata.get("target_role_id")),
+                            candidate_id=_string(metadata.get("candidate_id")),
+                            reason=(
+                                f"prediction:{case.case_id}:replace-underperforming-capability"
+                                if replacement_capability_ids
+                                else f"prediction:{case.case_id}:assign-installed-remote-candidate"
+                            ),
+                        ),
                         metadata=metadata,
                     )
                 else:
@@ -980,6 +1181,7 @@ class _PredictionServiceRecommendationMixin:
                         ),
                         action_payload={
                             "candidate": candidate.model_dump(mode="json"),
+                            "candidate_id": metadata["candidate_id"],
                             "target_agent_id": target_agent_id,
                             "capability_ids": requested_capability_ids,
                             "replacement_capability_ids": replacement_capability_ids,
@@ -1007,13 +1209,6 @@ class _PredictionServiceRecommendationMixin:
             if old_capability_id is None or new_capability_id is None:
                 continue
             if gap_kind == "capability_rollout" and target_agent_id:
-                final_capabilities = [
-                    item
-                    for item in self._effective_capabilities_for_agent(target_agent_id)
-                    if item != old_capability_id
-                ]
-                if new_capability_id not in final_capabilities:
-                    final_capabilities.append(new_capability_id)
                 append_recommendation(
                     recommendation_type="capability_recommendation",
                     title=f"将“{new_capability_id}”滚动替换到“{target_agent_id}”",
@@ -1024,21 +1219,35 @@ class _PredictionServiceRecommendationMixin:
                     priority=87,
                     confidence=min(0.95, confidence_baseline + 0.12),
                     risk_level="guarded",
-                    action_kind="system:apply_role",
+                    action_kind="system:apply_capability_lifecycle",
                     executable=True,
                     auto_eligible=False,
                     status="proposed",
                     target_agent_id=target_agent_id,
                     target_capability_ids=[old_capability_id, new_capability_id],
-                    action_payload={
-                        "agent_id": target_agent_id,
-                        "capabilities": final_capabilities,
-                        "capability_assignment_mode": "replace",
-                        "reason": f"prediction:{case.case_id}:rollout-remote-skill-replacement",
-                    },
+                    action_payload=self._build_lifecycle_action_payload(
+                        case_id=case.case_id,
+                        decision_kind="promote_to_role",
+                        target_agent_id=target_agent_id,
+                        target_capability_ids=[new_capability_id],
+                        replacement_target_ids=_string_list(
+                            finding.get("replacement_target_ids"),
+                            [old_capability_id],
+                        ),
+                        rollback_target_ids=_string_list(
+                            finding.get("replacement_target_ids"),
+                            [old_capability_id],
+                        ),
+                        capability_assignment_mode="replace",
+                        selected_seat_ref=None,
+                        trial_scope=_string(finding.get("trial_scope")) or "single-agent",
+                        candidate_id=_string(finding.get("candidate_id")),
+                        reason=f"prediction:{case.case_id}:rollout-remote-skill-replacement",
+                    ),
                     metadata={
                         "gap_kind": gap_kind,
                         "optimization_stage": str(finding.get("optimization_stage") or "rollout"),
+                        "candidate_id": _string(finding.get("candidate_id")),
                         "industry_instance_id": case.industry_instance_id,
                         "old_capability_id": old_capability_id,
                         "new_capability_id": new_capability_id,
@@ -1061,13 +1270,6 @@ class _PredictionServiceRecommendationMixin:
                 )
                 continue
             if gap_kind == "capability_rollback" and target_agent_id:
-                final_capabilities = [
-                    item
-                    for item in self._effective_capabilities_for_agent(target_agent_id)
-                    if item != new_capability_id
-                ]
-                if old_capability_id not in final_capabilities:
-                    final_capabilities.append(old_capability_id)
                 append_recommendation(
                     recommendation_type="capability_recommendation",
                     title=f"回滚试投放候选 {new_capability_id}",
@@ -1078,21 +1280,35 @@ class _PredictionServiceRecommendationMixin:
                     priority=91,
                     confidence=min(0.96, confidence_baseline + 0.14),
                     risk_level="guarded",
-                    action_kind="system:apply_role",
+                    action_kind="system:apply_capability_lifecycle",
                     executable=True,
                     auto_eligible=False,
                     status="proposed",
                     target_agent_id=target_agent_id,
                     target_capability_ids=[old_capability_id, new_capability_id],
-                    action_payload={
-                        "agent_id": target_agent_id,
-                        "capabilities": final_capabilities,
-                        "capability_assignment_mode": "replace",
-                        "reason": f"prediction:{case.case_id}:rollback-remote-skill-trial",
-                    },
+                    action_payload=self._build_lifecycle_action_payload(
+                        case_id=case.case_id,
+                        decision_kind="rollback",
+                        target_agent_id=target_agent_id,
+                        target_capability_ids=[new_capability_id],
+                        replacement_target_ids=_string_list(
+                            finding.get("rollback_target_ids"),
+                            [old_capability_id],
+                        ),
+                        rollback_target_ids=_string_list(
+                            finding.get("rollback_target_ids"),
+                            [old_capability_id],
+                        ),
+                        capability_assignment_mode="replace",
+                        selected_seat_ref=_string(finding.get("selected_seat_ref")),
+                        trial_scope=_string(finding.get("trial_scope")) or "single-agent",
+                        candidate_id=_string(finding.get("candidate_id")),
+                        reason=f"prediction:{case.case_id}:rollback-remote-skill-trial",
+                    ),
                     metadata={
                         "gap_kind": gap_kind,
                         "optimization_stage": str(finding.get("optimization_stage") or "rollback"),
+                        "candidate_id": _string(finding.get("candidate_id")),
                         "industry_instance_id": case.industry_instance_id,
                         "old_capability_id": old_capability_id,
                         "new_capability_id": new_capability_id,
@@ -1125,20 +1341,35 @@ class _PredictionServiceRecommendationMixin:
                     priority=78,
                     confidence=min(0.92, confidence_baseline + 0.08),
                     risk_level="guarded",
-                    action_kind="system:set_capability_enabled",
+                    action_kind="system:apply_capability_lifecycle",
                     executable=True,
                     auto_eligible=False,
                     status="proposed",
                     target_agent_id=target_agent_id,
                     target_capability_ids=[old_capability_id, new_capability_id],
-                    action_payload={
-                        "capability_id": old_capability_id,
-                        "enabled": False,
-                        "reason": f"prediction:{case.case_id}:retire-legacy-capability",
-                    },
+                    action_payload=self._build_lifecycle_action_payload(
+                        case_id=case.case_id,
+                        decision_kind="retire",
+                        target_agent_id=target_agent_id,
+                        target_capability_ids=[new_capability_id],
+                        replacement_target_ids=_string_list(
+                            finding.get("replacement_target_ids"),
+                            [old_capability_id],
+                        ),
+                        rollback_target_ids=_string_list(
+                            finding.get("replacement_target_ids"),
+                            [old_capability_id],
+                        ),
+                        capability_assignment_mode="replace",
+                        selected_seat_ref=_string(finding.get("selected_seat_ref")),
+                        trial_scope=_string(finding.get("trial_scope")) or "single-agent",
+                        candidate_id=_string(finding.get("candidate_id")),
+                        reason=f"prediction:{case.case_id}:retire-legacy-capability",
+                    ),
                     metadata={
                         "gap_kind": gap_kind,
                         "optimization_stage": str(finding.get("optimization_stage") or "retire"),
+                        "candidate_id": _string(finding.get("candidate_id")),
                         "industry_instance_id": case.industry_instance_id,
                         "old_capability_id": old_capability_id,
                         "new_capability_id": new_capability_id,

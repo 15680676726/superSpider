@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from types import SimpleNamespace
 from typing import Any, Dict, TYPE_CHECKING
 
 from ..runtime_center.execution_runtime_projection import resolve_canonical_host_identity
@@ -239,6 +240,9 @@ class CronExecutor:
         dispatch_meta: Dict[str, Any],
     ) -> None:
         from ...kernel import KernelTask
+        from ...kernel.query_execution_confirmation import (
+            query_confirmation_request_context,
+        )
 
         if self._kernel_dispatcher is None:
             raise RuntimeError("Kernel dispatcher is not configured for cron")
@@ -246,16 +250,37 @@ class CronExecutor:
             job=job,
             target_session_id=target_session_id,
         )
+        normalized_request = self._normalized_agent_request_payload(
+            job=job,
+            request_payload=request_payload,
+            target_user_id=target_user_id,
+            target_session_id=target_session_id,
+            environment_ref=environment_ref,
+        )
+        request_context = query_confirmation_request_context(
+            SimpleNamespace(**normalized_request),
+        )
+        main_brain_runtime = _mapping_value(
+            normalized_request.get("main_brain_runtime"),
+        )
+        if main_brain_runtime:
+            request_context["main_brain_runtime"] = dict(main_brain_runtime)
+        work_context_id = _string_value(
+            normalized_request.get("work_context_id"),
+        ) or _string_value(request_context.get("work_context_id"))
         task = KernelTask(
             title=f"Cron dispatch agent: {job.name}",
             capability_ref=infer_turn_capability_and_risk(
-                _request_text(request_payload),
+                _request_text(normalized_request),
             )[0],
             environment_ref=environment_ref,
             owner_agent_id="copaw-cron",
-            risk_level=infer_turn_capability_and_risk(_request_text(request_payload))[1],
+            work_context_id=work_context_id,
+            risk_level=infer_turn_capability_and_risk(_request_text(normalized_request))[1],
             payload={
-                "request": request_payload,
+                "request": normalized_request,
+                "request_context": request_context,
+                "main_brain_runtime": dict(main_brain_runtime) if main_brain_runtime else {},
                 "channel": job.dispatch.channel,
                 "user_id": target_user_id,
                 "session_id": target_session_id,
@@ -279,6 +304,50 @@ class CronExecutor:
         )
         if not result.success:
             raise RuntimeError(result.error or result.summary or "cron agent dispatch failed")
+
+    def _normalized_agent_request_payload(
+        self,
+        *,
+        job: CronJobSpec,
+        request_payload: Dict[str, Any],
+        target_user_id: str,
+        target_session_id: str,
+        environment_ref: str | None,
+    ) -> Dict[str, Any]:
+        normalized = dict(request_payload or {})
+        control_thread_id = _string_value(
+            normalized.get("control_thread_id"),
+        ) or _string_value(target_session_id)
+        main_brain_runtime = _merge_main_brain_runtime_contexts(
+            normalized.get("main_brain_runtime"),
+            {
+                "work_context_id": normalized.get("work_context_id"),
+                "environment": {
+                    "ref": environment_ref,
+                    "session_id": target_session_id,
+                    "continuity_source": "cron-job",
+                    "resume_ready": True,
+                },
+            },
+        )
+        work_context_id = _string_value(normalized.get("work_context_id")) or _string_value(
+            main_brain_runtime.get("work_context_id")
+            if isinstance(main_brain_runtime, dict)
+            else None,
+        )
+        normalized["user_id"] = target_user_id or "cron"
+        normalized["session_id"] = target_session_id or f"cron:{job.id}"
+        normalized["channel"] = job.dispatch.channel
+        normalized.setdefault("entry_source", "cron-job")
+        if environment_ref is not None:
+            normalized["environment_ref"] = environment_ref
+        if control_thread_id is not None:
+            normalized["control_thread_id"] = control_thread_id
+        if work_context_id is not None:
+            normalized["work_context_id"] = work_context_id
+        if main_brain_runtime is not None:
+            normalized["main_brain_runtime"] = main_brain_runtime
+        return normalized
 
     def _resolve_environment_ref(
         self,
@@ -355,3 +424,31 @@ def _string_value(value: object | None) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _mapping_value(value: object | None) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _merge_main_brain_runtime_contexts(
+    *values: object,
+) -> dict[str, Any] | None:
+    from ...kernel.main_brain_intake import normalize_main_brain_runtime_context
+
+    merged: dict[str, Any] = {}
+    for value in values:
+        normalized = normalize_main_brain_runtime_context(value)
+        if not normalized:
+            continue
+        work_context_id = _string_value(normalized.get("work_context_id"))
+        if work_context_id is not None:
+            merged["work_context_id"] = work_context_id
+        for section in ("intent", "environment", "recovery"):
+            payload = _mapping_value(normalized.get(section))
+            if not payload:
+                continue
+            merged[section] = {
+                **_mapping_value(merged.get(section)),
+                **payload,
+            }
+    return merged or None
