@@ -367,6 +367,20 @@ Recommended ordering:
 
 These three define whether donor-first autonomy stays clean enough to scale.
 
+They must not be treated as an isolated cleanup phase.
+
+Implementation rule:
+
+- `P0` should be built together with the first donor-first external expansion wave
+- not fully before it
+- and not deferred until after it
+
+In other words:
+
+- the safe minimal donor expansion spine is `external assimilation chain + A/B/C`
+- not `external assimilation chain` alone
+- and not `A/B/C` as a detached internal-only hardening project
+
 ### 7.2 Priority P1
 
 - Package D: Read Concurrent, Write Serialized

@@ -8,6 +8,35 @@
 
 **Tech Stack:** Python, FastAPI, SQLite state store, existing `src/copaw/state`, `src/copaw/predictions`, `src/copaw/capabilities`, `src/copaw/app/runtime_center`, pytest
 
+## Execution Coupling Rule
+
+This plan must not be implemented as:
+
+- "finish all discipline work first, then build donor expansion"
+- or "ship donor expansion first, then clean it up later"
+
+The correct rule is:
+
+- donor-first external expansion and the blocking `P0` discipline cuts move together
+
+Concretely, the following are coupled and should be treated as one implementation wave:
+
+- donor/package/source truth
+- discovery source chain
+- multi-source deduplication and donor normalization
+- query runtime entropy contract for donor/trial-heavy turns
+
+Reason:
+
+- without the external spine, the platform does not actually grow
+- without the `P0` discipline cuts, growth immediately creates duplicate candidates, provenance drift, and long-turn entropy
+
+Therefore:
+
+- `Package A` from `2026-04-04-next-round-discipline-closure-spec.md` is a hard companion to the first donor expansion wave
+- `Package B` and `Package C` are not optional "later hardening"; they are part of the minimal safe donor-first spine
+- later packages such as shared writer contract, child-run shell, MCP lifecycle hardening, and hotspot cooling may continue as follow-up waves, but the first donor expansion wave must already include `A + B + C`
+
 ---
 
 ## File Map
