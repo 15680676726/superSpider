@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 29
+STATE_SCHEMA_VERSION = 30
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS human_profiles (
@@ -41,6 +41,7 @@ CREATE INDEX IF NOT EXISTS idx_growth_targets_profile_updated
 CREATE TABLE IF NOT EXISTS companion_relationships (
     relationship_id TEXT PRIMARY KEY,
     profile_id TEXT NOT NULL,
+    buddy_name TEXT NOT NULL DEFAULT '',
     encouragement_style TEXT NOT NULL DEFAULT 'old-friend',
     effective_reminders_json TEXT NOT NULL DEFAULT '[]',
     ineffective_reminders_json TEXT NOT NULL DEFAULT '[]',
@@ -52,6 +53,25 @@ CREATE TABLE IF NOT EXISTS companion_relationships (
 
 CREATE INDEX IF NOT EXISTS idx_companion_relationships_profile_updated
     ON companion_relationships(profile_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS buddy_onboarding_sessions (
+    session_id TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'clarifying',
+    question_count INTEGER NOT NULL DEFAULT 1,
+    tightened INTEGER NOT NULL DEFAULT 0,
+    next_question TEXT NOT NULL DEFAULT '',
+    transcript_json TEXT NOT NULL DEFAULT '[]',
+    candidate_directions_json TEXT NOT NULL DEFAULT '[]',
+    recommended_direction TEXT NOT NULL DEFAULT '',
+    selected_direction TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(profile_id) REFERENCES human_profiles(profile_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_buddy_onboarding_sessions_profile_updated
+    ON buddy_onboarding_sessions(profile_id, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS goals (
     id TEXT PRIMARY KEY,

@@ -76,6 +76,7 @@ class CompanionRelationship(UpdatedRecord):
 
     relationship_id: str = Field(default_factory=_new_record_id, min_length=1)
     profile_id: str = Field(..., min_length=1)
+    buddy_name: str = ""
     encouragement_style: str = Field(default="old-friend", min_length=1)
     effective_reminders: list[str] = Field(default_factory=list)
     ineffective_reminders: list[str] = Field(default_factory=list)
