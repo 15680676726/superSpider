@@ -2,13 +2,14 @@
 
 ## 1. Purpose
 
-This document defines the complete-loop design for how CoPaw should autonomously discover, synthesize, trial, promote, replace, and retire long-lived capability packages in the formal long-horizon autonomy architecture.
+This document defines the complete-loop design for how CoPaw should autonomously discover, ingest, reuse, synthesize only when necessary, trial, promote, replace, and retire long-lived capability packages in the formal long-horizon autonomy architecture.
 
 This design is intentionally broader than "auto-generate a skill". The formal target is:
 
 - discover repeatable capability gaps
 - decide the correct capability form
-- synthesize a governed artifact
+- prefer an external donor or reusable package when one already fits
+- synthesize a governed artifact only when donor-first reuse still leaves a real gap
 - trial it on the right scope
 - evaluate it with runtime evidence
 - promote / replace / rollback / retire it
@@ -27,6 +28,13 @@ The loop must obey repository architecture rules:
 - no fourth capability semantics
 - no prompt-only hidden capability state
 - all important mutations must stay governed and evidence-backed
+
+The loop must also obey the donor-first platform rule:
+
+- CoPaw is the governance/runtime base, not a built-in skill factory
+- mature external projects, MCPs, adapters, and helper runtimes are the default growth path
+- local self-authored artifacts are fallback-only
+- local authoring must never become the silent default just because the system can write files
 
 The loop must stay on CoPaw's canonical chain:
 
@@ -71,13 +79,22 @@ CoPaw should optimize for:
 
 `automatically evolve the correct capability package for the formal autonomy system`
 
+The first preference order is:
+
+1. adopt an existing external donor
+2. reuse an already-known healthy artifact/version
+3. revise an existing governed local artifact when that is cheaper than replacement
+4. author a new local artifact only when the previous three paths still fail to close the gap
+
 In some cases the right result is:
 
-- a new skill
+- adoption of an existing donor package
+- reuse of an already-proven package version
 - a revision of an existing skill
 - an MCP bundle decision
 - a role-capability recomposition
 - a seat-local capability patch
+- a thin local glue artifact
 
 The design therefore centers on capability evolution, not skill generation alone.
 
@@ -85,17 +102,17 @@ The design therefore centers on capability evolution, not skill generation alone
 
 ## 5. Unified Candidate Sources
 
-CoPaw already has two real-world ways to obtain a skill-like artifact:
+CoPaw already has two real-world ways to obtain a capability artifact:
 
-1. external donor / hub / remote auto-install path
-2. local self-authored / main-brain-requested / writer-authored path
+1. external donor / open-source project / MCP / adapter / remote auto-install path
+2. local self-authored / main-brain-requested / writer-authored fallback path
 
 These must not become two promotion systems.
 
 The formal rule is:
 
-- external auto-install is only a candidate source
-- local self-authored synthesis is only a candidate source
+- external donor intake is the default candidate source
+- local self-authored synthesis is fallback-only candidate supply
 - both must normalize into the same `CapabilityCandidateRecord`
 - both must pass the same overlap detection, budget governance, scoped trial, lineage, promotion, replacement, and rollback flow
 
@@ -104,6 +121,7 @@ This means:
 - an externally fetched skill must not become role-active only because install succeeded
 - a locally generated skill must not become role-active only because a file was written
 - both paths must be visible in Runtime Center as the same lifecycle object model
+- the existence of local writing ability does not justify bypassing donor search or donor reuse
 
 The difference between the two paths is source provenance, not lifecycle semantics.
 
@@ -176,13 +194,13 @@ Does not own:
 - artifact authoring
 - runtime trial execution details
 
-### 5.2 Skill Writer
+### 5.2 Artifact Adapter / Writer
 
 Owns:
 
-- `SKILL.md` synthesis
-- companion `scripts/`
-- companion `references/`
+- donor artifact normalization and packaging
+- thin local glue artifact synthesis when donor-first paths still leave a gap
+- companion `SKILL.md` / `scripts/` / `references/` only when they are actually needed
 - verification contract authoring
 
 Does not own lifecycle promotion.
@@ -255,9 +273,19 @@ Main brain decides the candidate form:
 
 This is a major architectural difference from a skill-only system.
 
-### 6.4 Draft
+### 6.4 Resolve Donor Or Reuse Path
 
-If the chosen form needs a new or revised skill artifact, the main brain dispatches a `skill-writer` owner to synthesize:
+Before any new local artifact is authored, the system must explicitly try:
+
+- governed donor adoption
+- healthy-version reuse
+- existing local artifact revision
+
+Only if those paths still fail should the loop proceed to local artifact drafting.
+
+### 6.5 Draft Fallback Artifact
+
+If the chosen form still needs a new or revised local artifact after donor-first resolution, the main brain dispatches an `artifact-writer` owner to synthesize:
 
 - `SKILL.md`
 - `scripts/`
@@ -266,7 +294,7 @@ If the chosen form needs a new or revised skill artifact, the main brain dispatc
 - required mounts
 - verification plan
 
-### 6.5 Attach Trial
+### 6.6 Attach Trial
 
 The default trial sequence is:
 
@@ -276,7 +304,7 @@ The default trial sequence is:
 
 New capability artifacts must not default directly to role-wide activation.
 
-### 6.6 Run Trial
+### 6.7 Run Trial
 
 Trial execution must happen in real runtime conditions:
 
@@ -286,7 +314,7 @@ Trial execution must happen in real runtime conditions:
 - real writeback / evidence path
 - real seat contention and runtime governance
 
-### 6.7 Evaluate
+### 6.8 Evaluate
 
 Observer / learning aggregates:
 
@@ -299,7 +327,7 @@ Observer / learning aggregates:
 - environment friction
 - comparison with previous capability path
 
-### 6.8 Decide Lifecycle
+### 6.9 Decide Lifecycle
 
 Main brain decides:
 
@@ -310,7 +338,7 @@ Main brain decides:
 - `rollback`
 - `retire`
 
-### 6.9 Recompose Capability Layers
+### 6.10 Recompose Capability Layers
 
 Capability governor applies the decision onto the formal layers:
 
@@ -319,7 +347,7 @@ Capability governor applies the decision onto the formal layers:
 - cycle delta pack
 - session overlay
 
-### 6.10 Monitor Drift
+### 6.11 Monitor Drift
 
 After activation, the system keeps monitoring:
 
@@ -739,6 +767,8 @@ The following are architectural failures:
 
 - directly writing a new skill file and treating that as completion
 - allowing the main brain to become the default artifact author
+- treating local self-authored artifacts as the default growth path
+- skipping donor adoption/reuse evaluation because local synthesis is available
 - promoting directly to role prototype with no seat/session trial
 - silently mutating active role skills from ad-hoc user corrections
 - letting session overlay state become a hidden second lifecycle truth
@@ -756,11 +786,11 @@ The following are architectural failures:
 Implementation should proceed in four macro phases:
 
 1. candidate truth and discovery
-2. artifact synthesis and scoped trialing
-3. lifecycle decision and role promotion/rollback
+2. donor adoption / reuse / fallback artifact materialization
+3. scoped trialing and lifecycle decision
 4. continuous drift detection and active artifact improvement
 
-The system should first ship a full governed loop for new skill candidates, then extend the same lifecycle model to skill revisions and broader capability recomposition.
+The system should first ship a full governed loop for donor-first candidates, then extend the same lifecycle model to local revisions and broader capability recomposition. Local new-artifact authoring is not the first milestone; it is the bounded fallback path inside the same governed loop.
 
 ---
 
@@ -773,7 +803,8 @@ The recommended strategy for CoPaw is:
 That means:
 
 - main brain decides
-- writer produces artifacts
+- donor/reuse path is evaluated first
+- writer only fills the remaining bounded gap
 - executor trials them
 - governor applies lifecycle mutations
 - observer keeps the loop alive after activation

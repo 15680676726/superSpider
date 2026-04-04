@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement the full governed capability-evolution loop for long-term autonomy so CoPaw can discover capability gaps, synthesize candidate artifacts, trial them on the correct scope, evaluate them with evidence, and promote / replace / rollback / retire them without introducing a second truth source.
+**Goal:** Implement the full governed capability-evolution loop for long-term autonomy so CoPaw can discover capability gaps, adopt mature external capability donors first, synthesize local fallback artifacts only when necessary, trial them on the correct scope, evaluate them with evidence, and promote / replace / rollback / retire them without introducing a second truth source.
 
-**Architecture:** Reuse the canonical `CapabilityMount / role prototype / seat instance / cycle delta / session overlay / governed mutation / evidence` chain. Do not build a parallel skill lifecycle manager.
+**Architecture:** Reuse the canonical `CapabilityMount / role prototype / seat instance / cycle delta / session overlay / governed mutation / evidence` chain. Do not build a parallel skill lifecycle manager. CoPaw remains the governance/runtime base; mature external projects, MCPs, adapters, and helper runtimes are the default growth path, while local authored artifacts remain fallback-only.
 
 **Tech Stack:** Python, Pydantic, existing CoPaw `state / capabilities / industry / kernel / predictions / runtime_center`, pytest.
 
@@ -26,8 +26,8 @@
 - [ ] Keep `SkillCandidateRecord` as the skill-specific subtype instead of the only candidate truth.
 - [ ] Leave room for `McpBundleCandidateRecord` so MCP-native candidates do not get forced into a skill-only schema.
 - [ ] Add candidate-source normalization so both:
-  - external donor / remote auto-install
-  - local self-authored / generated skill artifacts
+  - external donor / remote auto-install / MCP / adapter ingest
+  - local self-authored / generated fallback artifacts
   enter the same `CapabilityCandidateRecord` truth before any activation work.
 - [ ] Persist source provenance on every candidate:
   - `candidate_source_kind`
@@ -43,6 +43,11 @@
 - [ ] Ensure predictions can emit governed candidate proposals without directly installing anything.
 - [ ] Add duplicate/overlap detection between external candidates and local candidates so equivalent artifacts do not create parallel trial tracks.
 - [ ] Import already-active installed/enabled skill/MCP artifacts as baseline lifecycle records instead of re-installing them as if they were brand new candidates.
+- [ ] Enforce donor-first selection discipline so candidate creation prefers:
+  - existing mature donor
+  - healthy artifact reuse
+  - governed local revision
+  - only then new local artifact authoring
 - [ ] Project candidate truth into Runtime Center read models.
 - [ ] Verify candidate creation never writes role capability state directly.
 
@@ -53,9 +58,9 @@ PYTHONPATH=src python -m pytest tests/predictions/test_skill_candidate_service.p
 
 ---
 
-## Phase 2: Artifact Synthesis
+## Phase 2: Donor Adoption, Reuse, And Fallback Artifact Materialization
 
-**Outcome:** a candidate can produce a governed artifact package, not just recommendation text.
+**Outcome:** a candidate can first resolve to donor adoption or healthy-version reuse, and only then produce a governed fallback artifact package when donor-first paths still leave a real gap.
 
 **Files:**
 - Modify: `src/copaw/capabilities/skill_service.py`
@@ -64,16 +69,19 @@ PYTHONPATH=src python -m pytest tests/predictions/test_skill_candidate_service.p
 - Test: `tests/app/test_capability_skill_service.py`
 - Test: `tests/test_skill_service.py`
 
-- [ ] Define artifact materialization contract for:
+- [ ] Define governed package materialization contract for:
+  - external donor package/adapters
+  - MCP/runtime bundle metadata
   - `SKILL.md`
   - optional `scripts/`
   - optional `references/`
   - lifecycle metadata
   - verification contract
-- [ ] Ensure externally sourced artifacts and locally authored artifacts both materialize behind the same draft/artifact contract instead of separate lifecycle codepaths.
+- [ ] Ensure externally sourced artifacts and locally authored fallback artifacts both materialize behind the same draft/artifact contract instead of separate lifecycle codepaths.
 - [ ] Keep subtype-specific materialization boundaries explicit:
   - skill candidates materialize skill artifacts
   - MCP candidates materialize MCP/runtime bundle metadata
+- [ ] Require donor adoption or healthy-version reuse to be evaluated before new local artifact authoring starts.
 - [ ] Persist `candidate_id`, lifecycle stage, and lineage metadata into the artifact path and capability projection.
 - [ ] Keep artifact materialization separate from lifecycle promotion.
 - [ ] Ensure missing local artifact targets fail safely and do not corrupt lifecycle truth.
@@ -165,6 +173,7 @@ PYTHONPATH=src python -m pytest tests/kernel/test_query_execution_runtime.py tes
   - latency summary
 - [ ] Feed verdict-ready trial summaries back into prediction / learning.
 - [ ] Distinguish trial success from mere time-in-use.
+- [ ] Verify donor adoption/reuse paths and local fallback artifacts feed the same trial verdict model.
 
 **Verification:**
 ```powershell
@@ -234,6 +243,7 @@ PYTHONPATH=src python -m pytest tests/app/test_governed_mutations.py tests/app/i
 - [ ] Add install/rebuild discipline so recomposition prefers reuse/mount before reinstall.
 - [ ] Add replacement pressure evaluation.
 - [ ] Recompute role/seat/cycle/session capability composition after lifecycle applies.
+- [ ] Prefer reuse/mount/replace over fresh reinstall whenever a healthy governed package already exists.
 - [ ] Ensure no layer becomes a hidden second truth source.
 
 **Verification:**
@@ -285,6 +295,7 @@ PYTHONPATH=src python -m pytest tests/app/test_capability_market_api.py tests/in
   - replacement candidate
   - retirement pressure
 - [ ] Reuse `cc`-style improvement ideas only for governed revisions of existing active artifacts.
+- [ ] Keep local self-authored revision as a bounded fallback path, not the default answer to every degradation signal.
 - [ ] Do not allow silent mutation of active role-wide skills without a lifecycle pass.
 
 **Verification:**
@@ -297,10 +308,11 @@ PYTHONPATH=src python -m pytest tests/predictions/test_skill_candidate_service.p
 ## Global Acceptance Criteria
 
 - [ ] A repeated failure/success pattern can create a formal candidate.
-- [ ] External auto-installed artifacts and local self-authored/generated artifacts normalize into the same candidate lifecycle.
+- [ ] External auto-installed artifacts and local self-authored/generated fallback artifacts normalize into the same candidate lifecycle.
 - [ ] The top-level lifecycle truth can represent both skill candidates and MCP-native candidates without forcing MCP into a skill-only schema.
 - [ ] Existing active installed/enabled artifacts can be imported into the lifecycle ledger without forced reinstall.
-- [ ] A candidate can synthesize a governed artifact package.
+- [ ] Donor adoption and healthy-version reuse are evaluated before new local artifact authoring.
+- [ ] A candidate can synthesize a governed fallback artifact package when donor-first paths do not close the gap.
 - [ ] A new artifact defaults to seat/session trial, not direct role promotion.
 - [ ] The same healthy artifact version is reused across tasks when scope and environment contract still match.
 - [ ] Multi-seat trial evidence stays isolated per seat/session while still aggregating to candidate-level verdicts.
