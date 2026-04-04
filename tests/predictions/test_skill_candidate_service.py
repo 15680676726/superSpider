@@ -231,15 +231,49 @@ def test_capability_candidate_service_materializes_donor_truth_and_portfolio_sum
     donors = donor_service.list_donors()
     source_profiles = donor_service.list_source_profiles()
     packages = donor_service.list_packages()
+    trust_records = donor_service.list_trust_records()
     portfolio = portfolio_service.summarize_portfolio()
 
     assert len(donors) == 2
     assert len(source_profiles) == 2
     assert len(packages) == 2
+    assert len(trust_records) == 2
     assert {item.trust_posture for item in source_profiles} == {
         "trusted",
         "watchlist",
     }
+    donor_by_id = {item.donor_id: item for item in donors}
+    package_by_id = {item.package_id: item for item in packages}
+    source_profile_by_id = {
+        item.source_profile_id: item
+        for item in source_profiles
+    }
+    trust_by_donor_id = {item.donor_id: item for item in trust_records}
+
+    assert donor_by_id[candidate.donor_id].source_kind == "external_remote"
+    assert donor_by_id[baseline.donor_id].source_kind == "external_catalog"
+    assert donor_by_id[candidate.donor_id].canonical_package_id is not None
+    assert donor_by_id[baseline.donor_id].canonical_package_id is not None
+    assert (
+        donor_by_id[candidate.donor_id].canonical_package_id
+        != donor_by_id[baseline.donor_id].canonical_package_id
+    )
+    assert donor_by_id[candidate.donor_id].candidate_source_lineage == "candidate:research-pack"
+    assert donor_by_id[baseline.donor_id].candidate_source_lineage == "donor:browser-registry"
+    assert source_profile_by_id[candidate.source_profile_id].source_lineage == "candidate:research-pack"
+    assert source_profile_by_id[baseline.source_profile_id].source_lineage == "donor:browser-registry"
+    assert (
+        "https://example.com/skills/research-pack.zip"
+        in donor_by_id[candidate.donor_id].source_aliases
+    )
+    assert "registry://browser" in donor_by_id[baseline.donor_id].source_aliases
+    assert package_by_id[candidate.package_id].canonical_package_id == donor_by_id[candidate.donor_id].canonical_package_id
+    assert package_by_id[baseline.package_id].canonical_package_id == donor_by_id[baseline.donor_id].canonical_package_id
+    assert trust_by_donor_id[candidate.donor_id].last_candidate_id == candidate.candidate_id
+    assert trust_by_donor_id[candidate.donor_id].last_package_id == candidate.package_id
+    assert trust_by_donor_id[baseline.donor_id].last_candidate_id == baseline.candidate_id
+    assert trust_by_donor_id[baseline.donor_id].last_package_id == baseline.package_id
+    assert trust_by_donor_id[baseline.donor_id].last_canonical_package_id == package_by_id[baseline.package_id].canonical_package_id
     assert portfolio["donor_count"] == 2
     assert portfolio["active_donor_count"] == 1
     assert portfolio["candidate_donor_count"] == 1
@@ -252,3 +286,49 @@ def test_capability_candidate_service_materializes_donor_truth_and_portfolio_sum
         item["action"] == "review_retirement_pressure"
         for item in portfolio["planning_actions"]
     )
+
+
+def test_capability_candidate_service_persists_candidate_attribution_fields(
+    tmp_path: Path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.db")
+    donor_service = CapabilityDonorService(state_store=state_store)
+    candidate_service = CapabilityCandidateService(
+        state_store=state_store,
+        donor_service=donor_service,
+    )
+
+    created = candidate_service.normalize_candidate_source(
+        candidate_kind="skill",
+        target_scope="seat",
+        target_role_id="researcher",
+        target_seat_ref="seat-primary",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://example.com/skills/research-pack.zip",
+        candidate_source_version="2.4.0",
+        candidate_source_lineage="donor:research-pack",
+        ingestion_mode="prediction-recommendation",
+        proposed_skill_name="research_pack",
+        summary="Research automation donor candidate.",
+        metadata={
+            "source_aliases": [
+                "https://mirror.example/research-pack.zip",
+            ],
+            "equivalence_class": "pkg:research-pack",
+            "capability_overlap_score": 0.88,
+            "replacement_relation": "replace_requested",
+        },
+    )
+
+    reloaded = candidate_service.list_candidates(limit=1)[0]
+
+    assert created.donor_id is not None
+    assert created.package_id is not None
+    assert created.source_profile_id is not None
+    assert reloaded.canonical_package_id is not None
+    assert reloaded.canonical_package_id == created.canonical_package_id
+    assert "https://mirror.example/research-pack.zip" in reloaded.source_aliases
+    assert "https://example.com/skills/research-pack.zip" in reloaded.source_aliases
+    assert reloaded.equivalence_class == "pkg:research-pack"
+    assert reloaded.capability_overlap_score == 0.88
+    assert reloaded.replacement_relation == "replace_requested"

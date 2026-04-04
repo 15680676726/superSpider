@@ -2533,6 +2533,24 @@ class FakePredictionService:
                     },
                 ],
             },
+            "discovery": {
+                "status": "ready",
+                "summary": "Donor discovery is operating with one trusted source and one watchlist source.",
+                "source_profile_count": 2,
+                "active_source_count": 2,
+                "trusted_source_count": 1,
+                "watchlist_source_count": 1,
+                "fallback_only_source_count": 1,
+                "by_source_kind": {
+                    "external_catalog": 1,
+                    "external_remote": 1,
+                },
+                "routes": {
+                    "portfolio": "/api/runtime-center/capabilities/portfolio",
+                    "source_profiles": "/api/runtime-center/capabilities/source-profiles",
+                    "discovery": "/api/runtime-center/capabilities/discovery",
+                },
+            },
             "actionable": [
                 {
                     "case": {

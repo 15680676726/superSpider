@@ -28,6 +28,18 @@ def _json_load_dict(value: object | None) -> dict[str, Any]:
     return dict(payload) if isinstance(payload, dict) else {}
 
 
+def _json_load_list(value: object | None) -> list[str]:
+    if not isinstance(value, str) or not value.strip():
+        return []
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [item for item in (_string(entry) for entry in payload) if item is not None]
+
+
 def _string(value: object | None) -> str | None:
     if value is None:
         return None
@@ -96,6 +108,71 @@ def _normalize_donor_status(candidate: CapabilityCandidateRecord) -> str:
     return "candidate"
 
 
+def _normalize_aliases(*values: object) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple, set)):
+            items = list(value)
+        else:
+            items = [value]
+        for item in items:
+            text = _string(item)
+            if text is None:
+                continue
+            lowered = text.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(text)
+    return normalized
+
+
+def _normalize_source_aliases(candidate: CapabilityCandidateRecord) -> list[str]:
+    return _normalize_aliases(
+        getattr(candidate, "source_aliases", []),
+        candidate.candidate_source_ref,
+    )
+
+
+def _normalize_canonical_package_id(candidate: CapabilityCandidateRecord) -> str:
+    explicit = _string(getattr(candidate, "canonical_package_id", None))
+    if explicit is not None:
+        return explicit
+    return "|".join(
+        (
+            candidate.candidate_kind.strip().lower(),
+            candidate.candidate_source_kind.strip().lower(),
+            _string(candidate.candidate_source_ref) or "unknown",
+            _string(candidate.candidate_source_version) or "unversioned",
+        ),
+    )
+
+
+def _normalize_equivalence_class(
+    candidate: CapabilityCandidateRecord,
+    *,
+    canonical_package_id: str,
+    donor_key: str,
+) -> str:
+    return (
+        _string(getattr(candidate, "equivalence_class", None))
+        or canonical_package_id
+        or donor_key
+    )
+
+
+def _normalize_replacement_relation(candidate: CapabilityCandidateRecord) -> str | None:
+    explicit = _string(getattr(candidate, "replacement_relation", None))
+    if explicit is not None:
+        return explicit
+    if list(candidate.replacement_target_ids or []):
+        return "replace_requested"
+    return None
+
+
 class CapabilityDonorService:
     def __init__(self, *, state_store: SQLiteStateStore) -> None:
         self._state_store = state_store
@@ -113,7 +190,9 @@ class CapabilityDonorService:
             source_profile=source_profile,
         )
         self._upsert_trust(
+            candidate=candidate,
             donor=donor,
+            package=package,
             source_profile=source_profile,
             donor_status=donor.status,
         )
@@ -133,6 +212,21 @@ class CapabilityDonorService:
         with self._state_store.connection() as conn:
             rows = conn.execute(query, params).fetchall()
         return [self._row_to_donor(row) for row in rows]
+
+    def get_donor(self, donor_id: str | None) -> CapabilityDonorRecord | None:
+        if _string(donor_id) is None:
+            return None
+        with self._state_store.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM capability_donors
+                WHERE donor_id = ?
+                LIMIT 1
+                """,
+                (donor_id,),
+            ).fetchone()
+        return self._row_to_donor(row) if row is not None else None
 
     def list_packages(
         self,
@@ -156,6 +250,21 @@ class CapabilityDonorService:
             rows = conn.execute(query, tuple(params)).fetchall()
         return [self._row_to_package(row) for row in rows]
 
+    def get_package(self, package_id: str | None) -> CapabilityPackageRecord | None:
+        if _string(package_id) is None:
+            return None
+        with self._state_store.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM capability_packages
+                WHERE package_id = ?
+                LIMIT 1
+                """,
+                (package_id,),
+            ).fetchone()
+        return self._row_to_package(row) if row is not None else None
+
     def list_source_profiles(
         self,
         *,
@@ -173,6 +282,24 @@ class CapabilityDonorService:
         with self._state_store.connection() as conn:
             rows = conn.execute(query, params).fetchall()
         return [self._row_to_source_profile(row) for row in rows]
+
+    def get_source_profile(
+        self,
+        source_profile_id: str | None,
+    ) -> CapabilitySourceProfileRecord | None:
+        if _string(source_profile_id) is None:
+            return None
+        with self._state_store.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM capability_source_profiles
+                WHERE source_profile_id = ?
+                LIMIT 1
+                """,
+                (source_profile_id,),
+            ).fetchone()
+        return self._row_to_source_profile(row) if row is not None else None
 
     def list_trust_records(
         self,
@@ -196,6 +323,7 @@ class CapabilityDonorService:
         self,
         candidate: CapabilityCandidateRecord,
     ) -> CapabilitySourceProfileRecord:
+        source_aliases = _normalize_source_aliases(candidate)
         source_key = _normalize_source_key(
             source_kind=candidate.candidate_source_kind,
             source_ref=candidate.candidate_source_ref,
@@ -226,6 +354,8 @@ class CapabilityDonorService:
             else CapabilitySourceProfileRecord(
                 source_kind=source_kind,
                 source_key=source_key,
+                source_lineage=candidate.candidate_source_lineage,
+                source_aliases=source_aliases,
                 display_name=display_name,
                 trust_posture=trust_posture,
                 active=True,
@@ -237,6 +367,8 @@ class CapabilityDonorService:
         )
         record = record.model_copy(
             update={
+                "source_lineage": candidate.candidate_source_lineage,
+                "source_aliases": _normalize_aliases(record.source_aliases, source_aliases),
                 "display_name": display_name,
                 "trust_posture": record.trust_posture or trust_posture,
                 "active": True,
@@ -258,6 +390,14 @@ class CapabilityDonorService:
     ) -> CapabilityDonorRecord:
         normalized_key = _normalize_donor_key(candidate)
         donor_status = _normalize_donor_status(candidate)
+        canonical_package_id = _normalize_canonical_package_id(candidate)
+        source_aliases = _normalize_source_aliases(candidate)
+        equivalence_class = _normalize_equivalence_class(
+            candidate,
+            canonical_package_id=canonical_package_id,
+            donor_key=normalized_key,
+        )
+        replacement_relation = _normalize_replacement_relation(candidate)
         display_name = (
             _string(candidate.proposed_skill_name)
             or _string(candidate.candidate_source_ref)
@@ -280,9 +420,13 @@ class CapabilityDonorService:
             else CapabilityDonorRecord(
                 donor_kind=candidate.candidate_kind,
                 normalized_key=normalized_key,
+                canonical_package_id=canonical_package_id,
                 source_kind=candidate.candidate_source_kind,
                 primary_source_ref=candidate.candidate_source_ref,
                 candidate_source_lineage=candidate.candidate_source_lineage,
+                source_aliases=source_aliases,
+                equivalence_class=equivalence_class,
+                replacement_relation=replacement_relation,
                 display_name=display_name,
                 status=donor_status,
                 trust_status=_default_trust_status(
@@ -307,9 +451,13 @@ class CapabilityDonorService:
         record = record.model_copy(
             update={
                 "donor_kind": candidate.candidate_kind,
+                "canonical_package_id": canonical_package_id,
                 "source_kind": candidate.candidate_source_kind,
                 "primary_source_ref": candidate.candidate_source_ref,
                 "candidate_source_lineage": candidate.candidate_source_lineage,
+                "source_aliases": _normalize_aliases(record.source_aliases, source_aliases),
+                "equivalence_class": equivalence_class,
+                "replacement_relation": replacement_relation,
                 "display_name": display_name,
                 "status": donor_status,
                 "trust_status": next_trust,
@@ -332,9 +480,16 @@ class CapabilityDonorService:
         donor: CapabilityDonorRecord,
         source_profile: CapabilitySourceProfileRecord,
     ) -> CapabilityPackageRecord:
+        canonical_package_id = _normalize_canonical_package_id(candidate)
         package_ref = _string(candidate.candidate_source_ref)
         package_version = _string(candidate.candidate_source_version)
         package_kind = candidate.candidate_kind
+        source_aliases = _normalize_source_aliases(candidate)
+        equivalence_class = _normalize_equivalence_class(
+            candidate,
+            canonical_package_id=canonical_package_id,
+            donor_key=donor.normalized_key,
+        )
         with self._state_store.connection() as conn:
             row = conn.execute(
                 """
@@ -354,8 +509,11 @@ class CapabilityDonorService:
             else CapabilityPackageRecord(
                 donor_id=donor.donor_id,
                 source_profile_id=source_profile.source_profile_id,
+                canonical_package_id=canonical_package_id,
                 package_ref=package_ref,
                 package_version=package_version,
+                source_aliases=source_aliases,
+                equivalence_class=equivalence_class,
                 package_kind=package_kind,
                 status="available" if donor.status != "retired" else "retired",
                 metadata={
@@ -367,8 +525,11 @@ class CapabilityDonorService:
         record = record.model_copy(
             update={
                 "source_profile_id": source_profile.source_profile_id,
+                "canonical_package_id": canonical_package_id,
                 "package_ref": package_ref,
                 "package_version": package_version,
+                "source_aliases": _normalize_aliases(record.source_aliases, source_aliases),
+                "equivalence_class": equivalence_class,
                 "package_kind": package_kind,
                 "status": "available" if donor.status != "retired" else "retired",
                 "metadata": {
@@ -384,7 +545,9 @@ class CapabilityDonorService:
     def _upsert_trust(
         self,
         *,
+        candidate: CapabilityCandidateRecord,
         donor: CapabilityDonorRecord,
+        package: CapabilityPackageRecord,
         source_profile: CapabilitySourceProfileRecord,
         donor_status: str,
     ) -> CapabilityDonorTrustRecord:
@@ -404,10 +567,14 @@ class CapabilityDonorService:
             else CapabilityDonorTrustRecord(
                 donor_id=donor.donor_id,
                 source_profile_id=source_profile.source_profile_id,
+                last_candidate_id=candidate.candidate_id,
+                last_package_id=package.package_id,
+                last_canonical_package_id=package.canonical_package_id,
                 trust_status=_default_trust_status(
                     source_posture=source_profile.trust_posture,
                     donor_status=donor_status,
                 ),
+                replacement_pressure_count=max(0, len(candidate.replacement_target_ids)),
                 metadata={
                     "source_kind": source_profile.source_kind,
                     "source_key": source_profile.source_key,
@@ -418,9 +585,16 @@ class CapabilityDonorService:
             record = record.model_copy(
                 update={
                     "source_profile_id": source_profile.source_profile_id,
+                    "last_candidate_id": candidate.candidate_id,
+                    "last_package_id": package.package_id,
+                    "last_canonical_package_id": package.canonical_package_id,
                     "trust_status": _default_trust_status(
                         source_posture=source_profile.trust_posture,
                         donor_status=donor_status,
+                    ),
+                    "replacement_pressure_count": max(
+                        int(record.replacement_pressure_count or 0),
+                        len(candidate.replacement_target_ids),
                     ),
                     "metadata": {
                         **dict(record.metadata or {}),
@@ -462,9 +636,13 @@ class CapabilityDonorService:
                     donor_id,
                     donor_kind,
                     normalized_key,
+                    canonical_package_id,
                     source_kind,
                     primary_source_ref,
                     candidate_source_lineage,
+                    source_aliases_json,
+                    equivalence_class,
+                    replacement_relation,
                     display_name,
                     status,
                     trust_status,
@@ -476,9 +654,13 @@ class CapabilityDonorService:
                     :donor_id,
                     :donor_kind,
                     :normalized_key,
+                    :canonical_package_id,
                     :source_kind,
                     :primary_source_ref,
                     :candidate_source_lineage,
+                    :source_aliases_json,
+                    :equivalence_class,
+                    :replacement_relation,
                     :display_name,
                     :status,
                     :trust_status,
@@ -490,9 +672,13 @@ class CapabilityDonorService:
                 ON CONFLICT(donor_id) DO UPDATE SET
                     donor_kind = excluded.donor_kind,
                     normalized_key = excluded.normalized_key,
+                    canonical_package_id = excluded.canonical_package_id,
                     source_kind = excluded.source_kind,
                     primary_source_ref = excluded.primary_source_ref,
                     candidate_source_lineage = excluded.candidate_source_lineage,
+                    source_aliases_json = excluded.source_aliases_json,
+                    equivalence_class = excluded.equivalence_class,
+                    replacement_relation = excluded.replacement_relation,
                     display_name = excluded.display_name,
                     status = excluded.status,
                     trust_status = excluded.trust_status,
@@ -504,9 +690,13 @@ class CapabilityDonorService:
                     "donor_id": record.donor_id,
                     "donor_kind": record.donor_kind,
                     "normalized_key": record.normalized_key,
+                    "canonical_package_id": record.canonical_package_id,
                     "source_kind": record.source_kind,
                     "primary_source_ref": record.primary_source_ref,
                     "candidate_source_lineage": record.candidate_source_lineage,
+                    "source_aliases_json": _json_dumps(record.source_aliases),
+                    "equivalence_class": record.equivalence_class,
+                    "replacement_relation": record.replacement_relation,
                     "display_name": record.display_name,
                     "status": record.status,
                     "trust_status": record.trust_status,
@@ -525,8 +715,11 @@ class CapabilityDonorService:
                     package_id,
                     donor_id,
                     source_profile_id,
+                    canonical_package_id,
                     package_ref,
                     package_version,
+                    source_aliases_json,
+                    equivalence_class,
                     package_kind,
                     status,
                     metadata_json,
@@ -536,8 +729,11 @@ class CapabilityDonorService:
                     :package_id,
                     :donor_id,
                     :source_profile_id,
+                    :canonical_package_id,
                     :package_ref,
                     :package_version,
+                    :source_aliases_json,
+                    :equivalence_class,
                     :package_kind,
                     :status,
                     :metadata_json,
@@ -547,8 +743,11 @@ class CapabilityDonorService:
                 ON CONFLICT(package_id) DO UPDATE SET
                     donor_id = excluded.donor_id,
                     source_profile_id = excluded.source_profile_id,
+                    canonical_package_id = excluded.canonical_package_id,
                     package_ref = excluded.package_ref,
                     package_version = excluded.package_version,
+                    source_aliases_json = excluded.source_aliases_json,
+                    equivalence_class = excluded.equivalence_class,
                     package_kind = excluded.package_kind,
                     status = excluded.status,
                     metadata_json = excluded.metadata_json,
@@ -558,8 +757,11 @@ class CapabilityDonorService:
                     "package_id": record.package_id,
                     "donor_id": record.donor_id,
                     "source_profile_id": record.source_profile_id,
+                    "canonical_package_id": record.canonical_package_id,
                     "package_ref": record.package_ref,
                     "package_version": record.package_version,
+                    "source_aliases_json": _json_dumps(record.source_aliases),
+                    "equivalence_class": record.equivalence_class,
                     "package_kind": record.package_kind,
                     "status": record.status,
                     "metadata_json": _json_dumps(record.metadata),
@@ -576,6 +778,8 @@ class CapabilityDonorService:
                     source_profile_id,
                     source_kind,
                     source_key,
+                    source_lineage,
+                    source_aliases_json,
                     display_name,
                     trust_posture,
                     active,
@@ -586,6 +790,8 @@ class CapabilityDonorService:
                     :source_profile_id,
                     :source_kind,
                     :source_key,
+                    :source_lineage,
+                    :source_aliases_json,
                     :display_name,
                     :trust_posture,
                     :active,
@@ -596,6 +802,8 @@ class CapabilityDonorService:
                 ON CONFLICT(source_profile_id) DO UPDATE SET
                     source_kind = excluded.source_kind,
                     source_key = excluded.source_key,
+                    source_lineage = excluded.source_lineage,
+                    source_aliases_json = excluded.source_aliases_json,
                     display_name = excluded.display_name,
                     trust_posture = excluded.trust_posture,
                     active = excluded.active,
@@ -606,6 +814,8 @@ class CapabilityDonorService:
                     "source_profile_id": record.source_profile_id,
                     "source_kind": record.source_kind,
                     "source_key": record.source_key,
+                    "source_lineage": record.source_lineage,
+                    "source_aliases_json": _json_dumps(record.source_aliases),
                     "display_name": record.display_name,
                     "trust_posture": record.trust_posture,
                     "active": 1 if record.active else 0,
@@ -622,10 +832,15 @@ class CapabilityDonorService:
                 INSERT INTO capability_donor_trust (
                     donor_id,
                     source_profile_id,
+                    last_candidate_id,
+                    last_package_id,
+                    last_canonical_package_id,
                     trust_status,
                     trial_success_count,
                     trial_failure_count,
+                    underperformance_count,
                     rollback_count,
+                    replacement_pressure_count,
                     retirement_count,
                     last_trial_verdict,
                     last_decision_kind,
@@ -635,10 +850,15 @@ class CapabilityDonorService:
                 ) VALUES (
                     :donor_id,
                     :source_profile_id,
+                    :last_candidate_id,
+                    :last_package_id,
+                    :last_canonical_package_id,
                     :trust_status,
                     :trial_success_count,
                     :trial_failure_count,
+                    :underperformance_count,
                     :rollback_count,
+                    :replacement_pressure_count,
                     :retirement_count,
                     :last_trial_verdict,
                     :last_decision_kind,
@@ -648,10 +868,15 @@ class CapabilityDonorService:
                 )
                 ON CONFLICT(donor_id) DO UPDATE SET
                     source_profile_id = excluded.source_profile_id,
+                    last_candidate_id = excluded.last_candidate_id,
+                    last_package_id = excluded.last_package_id,
+                    last_canonical_package_id = excluded.last_canonical_package_id,
                     trust_status = excluded.trust_status,
                     trial_success_count = excluded.trial_success_count,
                     trial_failure_count = excluded.trial_failure_count,
+                    underperformance_count = excluded.underperformance_count,
                     rollback_count = excluded.rollback_count,
+                    replacement_pressure_count = excluded.replacement_pressure_count,
                     retirement_count = excluded.retirement_count,
                     last_trial_verdict = excluded.last_trial_verdict,
                     last_decision_kind = excluded.last_decision_kind,
@@ -661,10 +886,15 @@ class CapabilityDonorService:
                 {
                     "donor_id": record.donor_id,
                     "source_profile_id": record.source_profile_id,
+                    "last_candidate_id": record.last_candidate_id,
+                    "last_package_id": record.last_package_id,
+                    "last_canonical_package_id": record.last_canonical_package_id,
                     "trust_status": record.trust_status,
                     "trial_success_count": record.trial_success_count,
                     "trial_failure_count": record.trial_failure_count,
+                    "underperformance_count": record.underperformance_count,
                     "rollback_count": record.rollback_count,
+                    "replacement_pressure_count": record.replacement_pressure_count,
                     "retirement_count": record.retirement_count,
                     "last_trial_verdict": record.last_trial_verdict,
                     "last_decision_kind": record.last_decision_kind,
@@ -679,9 +909,13 @@ class CapabilityDonorService:
             donor_id=row["donor_id"],
             donor_kind=row["donor_kind"],
             normalized_key=row["normalized_key"],
+            canonical_package_id=row["canonical_package_id"],
             source_kind=row["source_kind"],
             primary_source_ref=row["primary_source_ref"],
             candidate_source_lineage=row["candidate_source_lineage"],
+            source_aliases=_json_load_list(row["source_aliases_json"]),
+            equivalence_class=row["equivalence_class"],
+            replacement_relation=row["replacement_relation"],
             display_name=row["display_name"],
             status=row["status"],
             trust_status=row["trust_status"],
@@ -696,8 +930,11 @@ class CapabilityDonorService:
             package_id=row["package_id"],
             donor_id=row["donor_id"],
             source_profile_id=row["source_profile_id"],
+            canonical_package_id=row["canonical_package_id"],
             package_ref=row["package_ref"],
             package_version=row["package_version"],
+            source_aliases=_json_load_list(row["source_aliases_json"]),
+            equivalence_class=row["equivalence_class"],
             package_kind=row["package_kind"],
             status=row["status"],
             metadata=_json_load_dict(row["metadata_json"]),
@@ -710,6 +947,8 @@ class CapabilityDonorService:
             source_profile_id=row["source_profile_id"],
             source_kind=row["source_kind"],
             source_key=row["source_key"],
+            source_lineage=row["source_lineage"],
+            source_aliases=_json_load_list(row["source_aliases_json"]),
             display_name=row["display_name"],
             trust_posture=row["trust_posture"],
             active=bool(row["active"]),
@@ -722,10 +961,15 @@ class CapabilityDonorService:
         return CapabilityDonorTrustRecord(
             donor_id=row["donor_id"],
             source_profile_id=row["source_profile_id"],
+            last_candidate_id=row["last_candidate_id"],
+            last_package_id=row["last_package_id"],
+            last_canonical_package_id=row["last_canonical_package_id"],
             trust_status=row["trust_status"],
             trial_success_count=int(row["trial_success_count"] or 0),
             trial_failure_count=int(row["trial_failure_count"] or 0),
+            underperformance_count=int(row["underperformance_count"] or 0),
             rollback_count=int(row["rollback_count"] or 0),
+            replacement_pressure_count=int(row["replacement_pressure_count"] or 0),
             retirement_count=int(row["retirement_count"] or 0),
             last_trial_verdict=row["last_trial_verdict"],
             last_decision_kind=row["last_decision_kind"],

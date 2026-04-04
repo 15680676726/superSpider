@@ -121,6 +121,28 @@ class ConversationCompactionService(ReMeLight):
         }
         return normalized or None
 
+    @staticmethod
+    def _normalize_visibility_list(
+        value: Any,
+        *,
+        max_items: int = 6,
+    ) -> list[str] | None:
+        if isinstance(value, str):
+            items = [value]
+        elif isinstance(value, (list, tuple, set)):
+            items = list(value)
+        else:
+            return None
+        normalized: list[str] = []
+        for item in items:
+            text = str(item).strip()
+            if not text or text in normalized:
+                continue
+            normalized.append(text)
+            if len(normalized) >= max_items:
+                break
+        return normalized or None
+
     @classmethod
     def build_visibility_payload(
         cls,
@@ -146,7 +168,36 @@ class ConversationCompactionService(ReMeLight):
             allowed_keys=("summary", "artifact_refs"),
         )
         if tool_use_summary is not None:
+            artifact_refs = cls._normalize_visibility_list(tool_use_summary.get("artifact_refs"))
+            if artifact_refs is not None:
+                tool_use_summary["artifact_refs"] = artifact_refs
+            else:
+                tool_use_summary.pop("artifact_refs", None)
             payload["tool_use_summary"] = tool_use_summary
+        donor_trial_carry_forward = cls._normalize_visibility_dict(
+            value.get("donor_trial_carry_forward"),
+            allowed_keys=(
+                "status",
+                "summary",
+                "retained_metadata_keys",
+                "truncated_metadata_keys",
+                "artifact_refs",
+            ),
+        )
+        if donor_trial_carry_forward is not None:
+            for key in (
+                "retained_metadata_keys",
+                "truncated_metadata_keys",
+                "artifact_refs",
+            ):
+                normalized_items = cls._normalize_visibility_list(
+                    donor_trial_carry_forward.get(key),
+                )
+                if normalized_items is not None:
+                    donor_trial_carry_forward[key] = normalized_items
+                else:
+                    donor_trial_carry_forward.pop(key, None)
+            payload["donor_trial_carry_forward"] = donor_trial_carry_forward
         return payload
 
     async def start(self) -> None:

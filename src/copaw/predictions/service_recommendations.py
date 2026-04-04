@@ -74,8 +74,30 @@ class _PredictionServiceRecommendationMixin:
                 "candidate": candidate_payload,
             },
         )
-        metadata = {**metadata, "candidate_id": record.candidate_id}
-        action_payload = {**action_payload, "candidate_id": record.candidate_id}
+        metadata = {
+            **metadata,
+            "candidate_id": record.candidate_id,
+            "donor_id": _string(getattr(record, "donor_id", None)),
+            "package_id": _string(getattr(record, "package_id", None)),
+            "source_profile_id": _string(getattr(record, "source_profile_id", None)),
+            "candidate_source_kind": _string(
+                getattr(record, "candidate_source_kind", None),
+            ),
+            "candidate_source_ref": _string(
+                getattr(record, "candidate_source_ref", None),
+            ),
+            "candidate_source_lineage": _string(
+                getattr(record, "candidate_source_lineage", None),
+            ),
+            "governance_path_kind": "donor-assimilation",
+        }
+        action_payload = {
+            **action_payload,
+            "candidate_id": record.candidate_id,
+            "donor_id": _string(getattr(record, "donor_id", None)),
+            "package_id": _string(getattr(record, "package_id", None)),
+            "source_profile_id": _string(getattr(record, "source_profile_id", None)),
+        }
         return metadata, action_payload
 
     def _register_lifecycle_decision_proposal(
@@ -1012,8 +1034,8 @@ class _PredictionServiceRecommendationMixin:
         getter = getattr(self._capability_service, "get_capability", None)
         capability_getter = getter if callable(getter) else None
         remote_findings = [
-            *self._missing_remote_capability_findings(facts=facts),
-            *self._underperforming_remote_skill_findings(
+            *self._missing_donor_capability_findings(facts=facts),
+            *self._underperforming_donor_capability_findings(
                 facts=facts,
                 telemetry=telemetry,
             ),
@@ -1028,7 +1050,7 @@ class _PredictionServiceRecommendationMixin:
             target_agent_id = _string(finding.get("target_agent_id"))
             if gap_kind in {"missing_capability", "underperforming_capability"}:
                 capability_id = _string(finding.get("capability_id"))
-                queries = self._compile_remote_skill_queries(
+                queries = self._compile_external_capability_queries(
                     facts=facts,
                     target_agent_id=target_agent_id,
                     capability_id=capability_id,
@@ -1041,7 +1063,7 @@ class _PredictionServiceRecommendationMixin:
                 )
                 if not queries:
                     continue
-                candidates = self._remote_skill_candidates_for_queries(
+                candidates = self._discovery_candidates_for_queries(
                     queries=queries,
                     current_capability_id=capability_id if gap_kind == "underperforming_capability" else None,
                 )
@@ -1114,7 +1136,7 @@ class _PredictionServiceRecommendationMixin:
                         ),
                         summary=(
                             f"执行中枢已为“{target_agent_id}”找到本地可用候选“{candidate.title}”，"
-                            "可直接走治理分配，不需要再次远程安装。"
+                            "可直接走治理分配，不需要再次从外部 donor 源安装。"
                             if not replacement_capability_ids
                             else f"能力“{self._capability_hint(capability_id)}”在当前窗口内表现偏弱，"
                             f"先在单个 agent 上用已安装候选“{candidate.title}”进行治理替换。"
@@ -1150,7 +1172,7 @@ class _PredictionServiceRecommendationMixin:
                             reason=(
                                 f"prediction:{case.case_id}:replace-underperforming-capability"
                                 if replacement_capability_ids
-                                else f"prediction:{case.case_id}:assign-installed-remote-candidate"
+                                else f"prediction:{case.case_id}:assign-installed-donor-candidate"
                             ),
                         ),
                         metadata=metadata,
@@ -1159,12 +1181,12 @@ class _PredictionServiceRecommendationMixin:
                     append_recommendation(
                         recommendation_type="capability_recommendation",
                         title=(
-                            f"试投放远程候选“{candidate.title}”补齐“{self._capability_hint(capability_id)}”"
+                            f"试投放外部候选“{candidate.title}”补齐“{self._capability_hint(capability_id)}”"
                             if not replacement_capability_ids
-                            else f"试投放远程候选“{candidate.title}”替换“{self._capability_hint(capability_id)}”"
+                            else f"试投放外部候选“{candidate.title}”替换“{self._capability_hint(capability_id)}”"
                         ),
                         summary=(
-                            f"执行中枢已从 allowlisted 远程源找到候选“{candidate.title}”，"
+                            f"执行中枢已从受治理 donor 源找到候选“{candidate.title}”，"
                             "建议先完成预检与受治理试投放，再决定是否继续扩散。"
                         ),
                         priority=94 if replacement_capability_ids else 86,
@@ -1197,7 +1219,7 @@ class _PredictionServiceRecommendationMixin:
                             "selected_seat_ref": metadata["selected_seat_ref"],
                             "target_role_id": metadata["target_role_id"],
                             "reason": (
-                                f"prediction:{case.case_id}:trial-remote-skill"
+                                f"prediction:{case.case_id}:trial-external-donor-candidate"
                             ),
                         },
                         metadata=metadata,
@@ -1225,29 +1247,42 @@ class _PredictionServiceRecommendationMixin:
                     status="proposed",
                     target_agent_id=target_agent_id,
                     target_capability_ids=[old_capability_id, new_capability_id],
-                    action_payload=self._build_lifecycle_action_payload(
-                        case_id=case.case_id,
-                        decision_kind="promote_to_role",
-                        target_agent_id=target_agent_id,
-                        target_capability_ids=[new_capability_id],
-                        replacement_target_ids=_string_list(
-                            finding.get("replacement_target_ids"),
-                            [old_capability_id],
+                    action_payload={
+                        **self._build_lifecycle_action_payload(
+                            case_id=case.case_id,
+                            decision_kind="promote_to_role",
+                            target_agent_id=target_agent_id,
+                            target_capability_ids=[new_capability_id],
+                            replacement_target_ids=_string_list(
+                                finding.get("replacement_target_ids"),
+                                [old_capability_id],
+                            ),
+                            rollback_target_ids=_string_list(
+                                finding.get("replacement_target_ids"),
+                                [old_capability_id],
+                            ),
+                            capability_assignment_mode="replace",
+                            selected_seat_ref=None,
+                            trial_scope=_string(finding.get("trial_scope")) or "single-agent",
+                            candidate_id=_string(finding.get("candidate_id")),
+                            reason=f"prediction:{case.case_id}:rollout-donor-candidate-replacement",
                         ),
-                        rollback_target_ids=_string_list(
-                            finding.get("replacement_target_ids"),
-                            [old_capability_id],
-                        ),
-                        capability_assignment_mode="replace",
-                        selected_seat_ref=None,
-                        trial_scope=_string(finding.get("trial_scope")) or "single-agent",
-                        candidate_id=_string(finding.get("candidate_id")),
-                        reason=f"prediction:{case.case_id}:rollout-remote-skill-replacement",
-                    ),
+                        "donor_id": _string(finding.get("donor_id")),
+                        "package_id": _string(finding.get("package_id")),
+                        "source_profile_id": _string(finding.get("source_profile_id")),
+                    },
                     metadata={
                         "gap_kind": gap_kind,
                         "optimization_stage": str(finding.get("optimization_stage") or "rollout"),
                         "candidate_id": _string(finding.get("candidate_id")),
+                        "donor_id": _string(finding.get("donor_id")),
+                        "package_id": _string(finding.get("package_id")),
+                        "source_profile_id": _string(finding.get("source_profile_id")),
+                        "candidate_source_kind": _string(finding.get("candidate_source_kind")),
+                        "candidate_source_ref": _string(finding.get("candidate_source_ref")),
+                        "candidate_source_lineage": _string(
+                            finding.get("candidate_source_lineage"),
+                        ),
                         "industry_instance_id": case.industry_instance_id,
                         "old_capability_id": old_capability_id,
                         "new_capability_id": new_capability_id,
@@ -1286,29 +1321,42 @@ class _PredictionServiceRecommendationMixin:
                     status="proposed",
                     target_agent_id=target_agent_id,
                     target_capability_ids=[old_capability_id, new_capability_id],
-                    action_payload=self._build_lifecycle_action_payload(
-                        case_id=case.case_id,
-                        decision_kind="rollback",
-                        target_agent_id=target_agent_id,
-                        target_capability_ids=[new_capability_id],
-                        replacement_target_ids=_string_list(
-                            finding.get("rollback_target_ids"),
-                            [old_capability_id],
+                    action_payload={
+                        **self._build_lifecycle_action_payload(
+                            case_id=case.case_id,
+                            decision_kind="rollback",
+                            target_agent_id=target_agent_id,
+                            target_capability_ids=[new_capability_id],
+                            replacement_target_ids=_string_list(
+                                finding.get("rollback_target_ids"),
+                                [old_capability_id],
+                            ),
+                            rollback_target_ids=_string_list(
+                                finding.get("rollback_target_ids"),
+                                [old_capability_id],
+                            ),
+                            capability_assignment_mode="replace",
+                            selected_seat_ref=_string(finding.get("selected_seat_ref")),
+                            trial_scope=_string(finding.get("trial_scope")) or "single-agent",
+                            candidate_id=_string(finding.get("candidate_id")),
+                            reason=f"prediction:{case.case_id}:rollback-donor-candidate-trial",
                         ),
-                        rollback_target_ids=_string_list(
-                            finding.get("rollback_target_ids"),
-                            [old_capability_id],
-                        ),
-                        capability_assignment_mode="replace",
-                        selected_seat_ref=_string(finding.get("selected_seat_ref")),
-                        trial_scope=_string(finding.get("trial_scope")) or "single-agent",
-                        candidate_id=_string(finding.get("candidate_id")),
-                        reason=f"prediction:{case.case_id}:rollback-remote-skill-trial",
-                    ),
+                        "donor_id": _string(finding.get("donor_id")),
+                        "package_id": _string(finding.get("package_id")),
+                        "source_profile_id": _string(finding.get("source_profile_id")),
+                    },
                     metadata={
                         "gap_kind": gap_kind,
                         "optimization_stage": str(finding.get("optimization_stage") or "rollback"),
                         "candidate_id": _string(finding.get("candidate_id")),
+                        "donor_id": _string(finding.get("donor_id")),
+                        "package_id": _string(finding.get("package_id")),
+                        "source_profile_id": _string(finding.get("source_profile_id")),
+                        "candidate_source_kind": _string(finding.get("candidate_source_kind")),
+                        "candidate_source_ref": _string(finding.get("candidate_source_ref")),
+                        "candidate_source_lineage": _string(
+                            finding.get("candidate_source_lineage"),
+                        ),
                         "industry_instance_id": case.industry_instance_id,
                         "old_capability_id": old_capability_id,
                         "new_capability_id": new_capability_id,
@@ -1347,29 +1395,42 @@ class _PredictionServiceRecommendationMixin:
                     status="proposed",
                     target_agent_id=target_agent_id,
                     target_capability_ids=[old_capability_id, new_capability_id],
-                    action_payload=self._build_lifecycle_action_payload(
-                        case_id=case.case_id,
-                        decision_kind="retire",
-                        target_agent_id=target_agent_id,
-                        target_capability_ids=[new_capability_id],
-                        replacement_target_ids=_string_list(
-                            finding.get("replacement_target_ids"),
-                            [old_capability_id],
+                    action_payload={
+                        **self._build_lifecycle_action_payload(
+                            case_id=case.case_id,
+                            decision_kind="retire",
+                            target_agent_id=target_agent_id,
+                            target_capability_ids=[new_capability_id],
+                            replacement_target_ids=_string_list(
+                                finding.get("replacement_target_ids"),
+                                [old_capability_id],
+                            ),
+                            rollback_target_ids=_string_list(
+                                finding.get("replacement_target_ids"),
+                                [old_capability_id],
+                            ),
+                            capability_assignment_mode="replace",
+                            selected_seat_ref=_string(finding.get("selected_seat_ref")),
+                            trial_scope=_string(finding.get("trial_scope")) or "single-agent",
+                            candidate_id=_string(finding.get("candidate_id")),
+                            reason=f"prediction:{case.case_id}:retire-legacy-capability",
                         ),
-                        rollback_target_ids=_string_list(
-                            finding.get("replacement_target_ids"),
-                            [old_capability_id],
-                        ),
-                        capability_assignment_mode="replace",
-                        selected_seat_ref=_string(finding.get("selected_seat_ref")),
-                        trial_scope=_string(finding.get("trial_scope")) or "single-agent",
-                        candidate_id=_string(finding.get("candidate_id")),
-                        reason=f"prediction:{case.case_id}:retire-legacy-capability",
-                    ),
+                        "donor_id": _string(finding.get("donor_id")),
+                        "package_id": _string(finding.get("package_id")),
+                        "source_profile_id": _string(finding.get("source_profile_id")),
+                    },
                     metadata={
                         "gap_kind": gap_kind,
                         "optimization_stage": str(finding.get("optimization_stage") or "retire"),
                         "candidate_id": _string(finding.get("candidate_id")),
+                        "donor_id": _string(finding.get("donor_id")),
+                        "package_id": _string(finding.get("package_id")),
+                        "source_profile_id": _string(finding.get("source_profile_id")),
+                        "candidate_source_kind": _string(finding.get("candidate_source_kind")),
+                        "candidate_source_ref": _string(finding.get("candidate_source_ref")),
+                        "candidate_source_lineage": _string(
+                            finding.get("candidate_source_lineage"),
+                        ),
                         "industry_instance_id": case.industry_instance_id,
                         "old_capability_id": old_capability_id,
                         "new_capability_id": new_capability_id,

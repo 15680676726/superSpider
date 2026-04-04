@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Collection
 
 from ..capabilities.tool_execution_contracts import get_tool_execution_contract
 from ..constant import MEMORY_COMPACT_KEEP_RECENT
@@ -60,8 +61,40 @@ _RUNTIME_ENTROPY_DEGRADED_NEXT_STEP = (
     "Restore the compaction sidecar if long-horizon scratch recall is required."
 )
 _RUNTIME_ENTROPY_AVAILABLE_SUMMARY = "The private compaction memory sidecar is attached."
+_DONOR_TRIAL_CARRY_FORWARD_FAILURE_SOURCE = "donor-trial-carry-forward"
+_DONOR_TRIAL_CARRY_FORWARD_INACTIVE_SUMMARY = (
+    "No donor/trial metadata carry-forward is active."
+)
+_DONOR_TRIAL_CARRY_FORWARD_BOUNDED_SUMMARY = (
+    "Donor/trial metadata carry-forward is bounded by the runtime contract."
+)
+_DONOR_TRIAL_CARRY_FORWARD_DEGRADED_SUMMARY = (
+    "Donor/trial metadata overflow compacted into runtime evidence."
+)
+_DONOR_TRIAL_CARRY_FORWARD_DEGRADED_NEXT_STEP = (
+    "Inspect runtime evidence/artifacts or narrow donor/trial scope before continuing."
+)
+_QUERY_TRIAL_ATTRIBUTION_SCALAR_FIELDS = (
+    "candidate_id",
+    "skill_candidate_id",
+    "skill_trial_id",
+    "skill_lifecycle_stage",
+    "selected_scope",
+    "selected_seat_ref",
+)
+_QUERY_TRIAL_ATTRIBUTION_LIST_FIELDS = (
+    "replacement_target_ids",
+    "rollback_target_ids",
+    "capability_ids",
+)
+_QUERY_TRIAL_ATTRIBUTION_FIELD_SET = frozenset(
+    _QUERY_TRIAL_ATTRIBUTION_SCALAR_FIELDS + _QUERY_TRIAL_ATTRIBUTION_LIST_FIELDS,
+)
+_QUERY_TRIAL_ATTRIBUTION_MAX_LIST_ITEMS = 3
+_DONOR_TRIAL_VISIBILITY_MAX_ITEMS = 6
 _COMPACTION_VISIBILITY_KEYS = (
     "compaction_state",
+    "donor_trial_carry_forward",
     "tool_result_budget",
     "tool_use_summary",
 )
@@ -81,6 +114,124 @@ def _build_tool_result_budget_contract(
         "spill_surface": "runtime-center",
         "replay_surface": "runtime-conversation",
     }
+
+
+def _bounded_string_list(
+    value: Any,
+    *,
+    max_items: int,
+    allowed_values: Collection[str] | None = None,
+) -> list[str]:
+    resolved: list[str] = []
+    allowed = set(allowed_values or ())
+    for item in _string_list(value):
+        if allowed and item not in allowed:
+            continue
+        if item in resolved:
+            continue
+        resolved.append(item)
+        if len(resolved) >= max_items:
+            break
+    return resolved
+
+
+def _build_donor_trial_budget_contract() -> dict[str, Any]:
+    return {
+        "accepted_scalar_fields": list(_QUERY_TRIAL_ATTRIBUTION_SCALAR_FIELDS),
+        "accepted_list_fields": list(_QUERY_TRIAL_ATTRIBUTION_LIST_FIELDS),
+        "max_list_items": _QUERY_TRIAL_ATTRIBUTION_MAX_LIST_ITEMS,
+        "acceptance": "bounded-runtime-metadata",
+        "state_channel": "query_runtime_state",
+        "summary_surface": "runtime-center",
+        "spill_surface": "runtime-evidence",
+    }
+
+
+def build_donor_trial_carry_forward_projection(
+    payload: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    raw_payload = _mapping_value(payload)
+    retained_metadata_keys = _bounded_string_list(
+        raw_payload.get("retained_metadata_keys"),
+        max_items=_DONOR_TRIAL_VISIBILITY_MAX_ITEMS,
+        allowed_values=_QUERY_TRIAL_ATTRIBUTION_FIELD_SET,
+    )
+    truncated_metadata_keys = _bounded_string_list(
+        raw_payload.get("truncated_metadata_keys"),
+        max_items=_DONOR_TRIAL_VISIBILITY_MAX_ITEMS,
+        allowed_values=_QUERY_TRIAL_ATTRIBUTION_FIELD_SET,
+    )
+    artifact_refs = _bounded_string_list(
+        raw_payload.get("artifact_refs"),
+        max_items=_DONOR_TRIAL_VISIBILITY_MAX_ITEMS,
+    )
+    status = _first_non_empty(raw_payload.get("status"))
+    if status is None:
+        status = (
+            "bounded"
+            if retained_metadata_keys or truncated_metadata_keys or artifact_refs
+            else "inactive"
+        )
+    summary = _first_non_empty(
+        raw_payload.get("summary"),
+        (
+            _DONOR_TRIAL_CARRY_FORWARD_DEGRADED_SUMMARY
+            if status == "degraded"
+            else _DONOR_TRIAL_CARRY_FORWARD_BOUNDED_SUMMARY
+            if status == "bounded"
+            else _DONOR_TRIAL_CARRY_FORWARD_INACTIVE_SUMMARY
+        ),
+    )
+    return {
+        "status": status,
+        "summary": summary,
+        "retained_metadata_keys": retained_metadata_keys,
+        "truncated_metadata_keys": truncated_metadata_keys,
+        "artifact_refs": artifact_refs,
+    }
+
+
+def _build_donor_trial_carry_forward_degradation(
+    projection: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    resolved = build_donor_trial_carry_forward_projection(projection)
+    if resolved["status"] != "degraded":
+        return None
+    return {
+        **build_execution_diagnostics(
+            failure_source=_DONOR_TRIAL_CARRY_FORWARD_FAILURE_SOURCE,
+            remediation_summary=_first_non_empty(
+                resolved.get("summary"),
+                _DONOR_TRIAL_CARRY_FORWARD_DEGRADED_SUMMARY,
+            ),
+        ),
+        "blocked_next_step": _DONOR_TRIAL_CARRY_FORWARD_DEGRADED_NEXT_STEP,
+        "retained_metadata_keys": list(resolved["retained_metadata_keys"]),
+        "truncated_metadata_keys": list(resolved["truncated_metadata_keys"]),
+        "artifact_refs": list(resolved["artifact_refs"]),
+    }
+
+
+def _runtime_entropy_degraded_components(
+    degradation: Mapping[str, Any] | None,
+) -> list[str]:
+    resolved: list[str] = []
+    for key, value in dict(degradation or {}).items():
+        if _mapping_value(value):
+            resolved.append(str(key))
+    return resolved
+
+
+def _runtime_entropy_failure_source(
+    degradation: Mapping[str, Any] | None,
+) -> str:
+    for key in ("sidecar_memory", "donor_trial_carry_forward"):
+        failure_source = _first_non_empty(
+            _mapping_value(dict(degradation or {}).get(key)).get("failure_source"),
+        )
+        if failure_source is not None:
+            return failure_source
+    return ""
 
 _QUERY_TOOL_CAPABILITY_IDS_BY_NAME = {
     "browser_use": "tool:browser_use",
@@ -181,8 +332,11 @@ def _normalize_capability_trial_attribution(
     selected_seat_ref = _first_non_empty(raw_payload.get("selected_seat_ref"))
     if selected_seat_ref is not None:
         normalized["selected_seat_ref"] = selected_seat_ref
-    for key in ("replacement_target_ids", "rollback_target_ids", "capability_ids"):
-        resolved_items = _string_list(raw_payload.get(key))
+    for key in _QUERY_TRIAL_ATTRIBUTION_LIST_FIELDS:
+        resolved_items = _bounded_string_list(
+            raw_payload.get(key),
+            max_items=_QUERY_TRIAL_ATTRIBUTION_MAX_LIST_ITEMS,
+        )
         if resolved_items:
             normalized[key] = resolved_items
     return normalized
@@ -318,23 +472,32 @@ def build_runtime_entropy_contract_payload(
     budget: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     resolved_budget = dict(budget or _resolve_runtime_entropy_budget_payload())
-    sidecar_memory = build_runtime_entropy_sidecar_memory_projection(
+    resolved_degradation = _normalize_runtime_entropy_degradation(
         sidecar_memory_available=sidecar_memory_available,
         degradation=degradation,
     )
-    status = "degraded" if sidecar_memory["status"] == "degraded" else "available"
+    sidecar_memory = build_runtime_entropy_sidecar_memory_projection(
+        sidecar_memory_available=sidecar_memory_available,
+        degradation=resolved_degradation,
+    )
+    degraded_components = _runtime_entropy_degraded_components(resolved_degradation)
+    status = "degraded" if degraded_components else "available"
+    donor_trial_degradation = _mapping_value(
+        resolved_degradation.get("donor_trial_carry_forward"),
+    )
     return {
         "status": status,
         "sidecar_memory_status": sidecar_memory["status"],
+        "degraded_components": degraded_components,
         "carry_forward_contract": (
             "canonical-state-only"
-            if status == "degraded"
+            if sidecar_memory["status"] == "degraded"
             else "private-compaction-sidecar"
         ),
-        "failure_source": (
-            sidecar_memory["failure_source"]
-            if status == "degraded"
-            else ""
+        "failure_source": _runtime_entropy_failure_source(resolved_degradation),
+        "donor_trial_budget": _build_donor_trial_budget_contract(),
+        "donor_trial_carry_forward_status": (
+            "degraded" if donor_trial_degradation else "inactive"
         ),
         "tool_result_budget": dict(
             resolved_budget.get("tool_result_budget") or {},
@@ -350,11 +513,15 @@ def build_query_runtime_entropy_contract_payload(
     budget: dict[str, Any] | None = None,
     runtime_entropy: dict[str, Any] | None = None,
     compaction_visibility: dict[str, Any] | None = None,
+    donor_trial_carry_forward: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     resolved_budget = dict(budget or _resolve_runtime_entropy_budget_payload())
     resolved_degradation = _normalize_runtime_entropy_degradation(
         sidecar_memory_available=sidecar_memory_available,
         degradation=degradation,
+    )
+    resolved_donor_trial_carry_forward = build_donor_trial_carry_forward_projection(
+        donor_trial_carry_forward,
     )
     resolved_runtime_entropy = dict(
         runtime_entropy
@@ -363,6 +530,16 @@ def build_query_runtime_entropy_contract_payload(
             degradation=resolved_degradation,
             budget=resolved_budget,
         ),
+    )
+    resolved_runtime_entropy.setdefault(
+        "donor_trial_budget",
+        _build_donor_trial_budget_contract(),
+    )
+    resolved_runtime_entropy["donor_trial_carry_forward_status"] = (
+        resolved_donor_trial_carry_forward["status"]
+    )
+    resolved_runtime_entropy["donor_trial_carry_forward"] = (
+        resolved_donor_trial_carry_forward
     )
     return {
         # Compatibility wrapper: keep the historical query_runtime_entropy surface
@@ -375,6 +552,7 @@ def build_query_runtime_entropy_contract_payload(
             degradation=resolved_degradation,
         ),
         "degradation": resolved_degradation,
+        "donor_trial_carry_forward": resolved_donor_trial_carry_forward,
         **_normalize_runtime_compaction_visibility(compaction_visibility),
     }
 
@@ -385,6 +563,11 @@ def _normalize_runtime_compaction_visibility(
     source = dict(payload or {})
     normalized: dict[str, Any] = {}
     for key in _COMPACTION_VISIBILITY_KEYS:
+        if key == "donor_trial_carry_forward":
+            normalized[key] = build_donor_trial_carry_forward_projection(
+                _mapping_value(source.get(key)),
+            )
+            continue
         value = _mapping_value(source.get(key))
         if value:
             normalized[key] = value
@@ -594,18 +777,43 @@ class _QueryExecutionRuntimeMixin(
         runtime_entropy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         budget = self._resolve_query_runtime_entropy_budget()
-        resolved_runtime_entropy = runtime_entropy or self._build_runtime_entropy_contract(
-            degradation=degradation,
-            budget=budget,
+        compaction_visibility = _resolve_runtime_compaction_visibility_payload(
+            self._conversation_compaction_service,
         )
-        return build_query_runtime_entropy_contract_payload(
+        donor_trial_carry_forward = build_donor_trial_carry_forward_projection(
+            _mapping_value(compaction_visibility.get("donor_trial_carry_forward")),
+        )
+        resolved_degradation = _normalize_runtime_entropy_degradation(
             sidecar_memory_available=self._conversation_compaction_service is not None,
             degradation=degradation,
+        )
+        donor_trial_degradation = _build_donor_trial_carry_forward_degradation(
+            donor_trial_carry_forward,
+        )
+        if donor_trial_degradation is not None:
+            resolved_degradation["donor_trial_carry_forward"] = donor_trial_degradation
+        rebuilt_runtime_entropy = build_runtime_entropy_contract_payload(
+            sidecar_memory_available=self._conversation_compaction_service is not None,
+            degradation=resolved_degradation,
+            budget=budget,
+        )
+        rebuilt_runtime_entropy["donor_trial_carry_forward_status"] = (
+            donor_trial_carry_forward["status"]
+        )
+        rebuilt_runtime_entropy["donor_trial_carry_forward"] = donor_trial_carry_forward
+        if runtime_entropy is not None:
+            runtime_entropy.clear()
+            runtime_entropy.update(rebuilt_runtime_entropy)
+            resolved_runtime_entropy = runtime_entropy
+        else:
+            resolved_runtime_entropy = rebuilt_runtime_entropy
+        return build_query_runtime_entropy_contract_payload(
+            sidecar_memory_available=self._conversation_compaction_service is not None,
+            degradation=resolved_degradation,
             budget=budget,
             runtime_entropy=resolved_runtime_entropy,
-            compaction_visibility=_resolve_runtime_compaction_visibility_payload(
-                self._conversation_compaction_service,
-            ),
+            compaction_visibility=compaction_visibility,
+            donor_trial_carry_forward=donor_trial_carry_forward,
         )
 
     def _build_governance_control_record(

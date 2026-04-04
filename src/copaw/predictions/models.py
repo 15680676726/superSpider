@@ -129,6 +129,58 @@ class PredictionCapabilityOptimizationItem(BaseModel):
     routes: dict[str, str] = Field(default_factory=dict)
 
 
+class PredictionCapabilityPortfolioScopeSummary(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    scope_key: str = ""
+    target_scope: str | None = None
+    target_role_id: str | None = None
+    target_seat_ref: str | None = None
+    donor_count: int = 0
+    candidate_count: int = 0
+    active_candidate_count: int = 0
+    trial_candidate_count: int = 0
+    source_kind_count: dict[str, int] = Field(default_factory=dict)
+
+
+class PredictionCapabilityPortfolioSummary(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    donor_count: int = 0
+    active_donor_count: int = 0
+    candidate_donor_count: int = 0
+    trial_donor_count: int = 0
+    trusted_source_count: int = 0
+    watchlist_source_count: int = 0
+    degraded_donor_count: int = 0
+    replace_pressure_count: int = 0
+    retire_pressure_count: int = 0
+    over_budget_scope_count: int = 0
+    fallback_only_candidate_count: int = 0
+    over_budget_scopes: list[dict[str, Any]] = Field(default_factory=list)
+    scope_breakdown: list[PredictionCapabilityPortfolioScopeSummary] = Field(
+        default_factory=list,
+    )
+    planning_actions: list[dict[str, Any]] = Field(default_factory=list)
+    routes: dict[str, str] = Field(default_factory=dict)
+
+
+class PredictionCapabilityDiscoverySummary(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    status: str = "unavailable"
+    summary: str = ""
+    source_profile_count: int = 0
+    active_source_count: int = 0
+    trusted_source_count: int = 0
+    watchlist_source_count: int = 0
+    fallback_only_source_count: int = 0
+    by_source_kind: dict[str, int] = Field(default_factory=dict)
+    trust_posture_count: dict[str, int] = Field(default_factory=dict)
+    degraded_components: list[dict[str, Any]] = Field(default_factory=list)
+    routes: dict[str, str] = Field(default_factory=dict)
+
+
 class PredictionCapabilityOptimizationOverview(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -144,5 +196,10 @@ class PredictionCapabilityOptimizationOverview(BaseModel):
     history: list[PredictionCapabilityOptimizationItem] = Field(
         default_factory=list,
     )
-    portfolio: dict[str, Any] = Field(default_factory=dict)
+    portfolio: PredictionCapabilityPortfolioSummary = Field(
+        default_factory=PredictionCapabilityPortfolioSummary,
+    )
+    discovery: PredictionCapabilityDiscoverySummary = Field(
+        default_factory=PredictionCapabilityDiscoverySummary,
+    )
     routes: dict[str, str] = Field(default_factory=dict)

@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from copaw.app.runtime_events import RuntimeEventBus
+from copaw.app.runtime_center.state_query import RuntimeCenterStateQueryService
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.app.startup_recovery import StartupRecoverySummary
 from copaw.memory.conversation_compaction_service import ConversationCompactionService
@@ -257,6 +260,309 @@ def test_runtime_center_capability_source_profiles_endpoint_returns_state_query_
             "active": True,
         },
     ]
+
+
+def test_runtime_center_capability_portfolio_endpoint_returns_state_query_projection() -> None:
+    app = _build_app()
+
+    class FakeStateQueryService:
+        def get_capability_portfolio_summary(self):
+            return {
+                "donor_count": 2,
+                "active_donor_count": 1,
+                "candidate_donor_count": 1,
+                "trial_donor_count": 1,
+                "fallback_only_candidate_count": 2,
+                "over_budget_scope_count": 0,
+                "scope_breakdown": [
+                    {
+                        "scope_key": "seat:role-ops:seat-a",
+                        "donor_count": 2,
+                        "candidate_count": 2,
+                    },
+                ],
+            }
+
+    app.state.state_query_service = FakeStateQueryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/capabilities/portfolio")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "donor_count": 2,
+        "active_donor_count": 1,
+        "candidate_donor_count": 1,
+        "trial_donor_count": 1,
+        "fallback_only_candidate_count": 2,
+        "over_budget_scope_count": 0,
+        "scope_breakdown": [
+            {
+                "scope_key": "seat:role-ops:seat-a",
+                "donor_count": 2,
+                "candidate_count": 2,
+            },
+        ],
+    }
+
+
+def test_runtime_center_capability_discovery_endpoint_returns_state_query_projection() -> None:
+    app = _build_app()
+
+    class FakeStateQueryService:
+        def get_capability_discovery_summary(self):
+            return {
+                "status": "ready",
+                "source_profile_count": 2,
+                "active_source_count": 2,
+                "trusted_source_count": 1,
+                "watchlist_source_count": 1,
+                "fallback_only_source_count": 2,
+                "by_source_kind": {
+                    "external_catalog": 1,
+                    "external_remote": 1,
+                },
+            }
+
+    app.state.state_query_service = FakeStateQueryService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/capabilities/discovery")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ready",
+        "source_profile_count": 2,
+        "active_source_count": 2,
+        "trusted_source_count": 1,
+        "watchlist_source_count": 1,
+        "fallback_only_source_count": 2,
+        "by_source_kind": {
+            "external_catalog": 1,
+            "external_remote": 1,
+        },
+    }
+
+
+def test_runtime_center_state_query_portfolio_summary_filters_local_and_baseline_candidates() -> None:
+    class _CandidateService:
+        def list_candidates(self, *, limit: int | None = None):
+            return [
+                SimpleNamespace(
+                    candidate_id="cand-external-active",
+                    donor_id="donor-external-a",
+                    source_profile_id="source-external-a",
+                    target_scope="seat",
+                    target_role_id="role-ops",
+                    target_seat_ref="seat-a",
+                    status="active",
+                    lifecycle_stage="active",
+                    candidate_source_kind="external_remote",
+                    ingestion_mode="prediction-recommendation",
+                ),
+                SimpleNamespace(
+                    candidate_id="cand-external-trial",
+                    donor_id="donor-external-b",
+                    source_profile_id="source-external-b",
+                    target_scope="seat",
+                    target_role_id="role-ops",
+                    target_seat_ref="seat-a",
+                    status="candidate",
+                    lifecycle_stage="trial",
+                    candidate_source_kind="external_catalog",
+                    ingestion_mode="prediction-recommendation",
+                ),
+                SimpleNamespace(
+                    candidate_id="cand-local",
+                    donor_id="donor-local",
+                    source_profile_id="source-local",
+                    target_scope="seat",
+                    target_role_id="role-ops",
+                    target_seat_ref="seat-a",
+                    status="active",
+                    lifecycle_stage="active",
+                    candidate_source_kind="local_authored",
+                    ingestion_mode="manual",
+                ),
+                SimpleNamespace(
+                    candidate_id="cand-baseline",
+                    donor_id="donor-baseline",
+                    source_profile_id="source-baseline",
+                    target_scope="seat",
+                    target_role_id="role-ops",
+                    target_seat_ref="seat-a",
+                    status="active",
+                    lifecycle_stage="baseline",
+                    candidate_source_kind="external_catalog",
+                    ingestion_mode="baseline-import",
+                ),
+            ]
+
+    class _DonorService:
+        def list_donors(self, *, limit: int | None = None):
+            return [
+                SimpleNamespace(donor_id="donor-external-a", source_kind="external_remote"),
+                SimpleNamespace(donor_id="donor-external-b", source_kind="external_catalog"),
+                SimpleNamespace(donor_id="donor-local", source_kind="local_authored"),
+                SimpleNamespace(donor_id="donor-baseline", source_kind="external_catalog"),
+            ]
+
+        def list_source_profiles(self, *, limit: int | None = None):
+            return []
+
+        def list_trust_records(self, *, limit: int | None = None):
+            return []
+
+    class _PortfolioService:
+        def get_runtime_portfolio_summary(self) -> dict[str, object]:
+            return {
+                "donor_count": 4,
+                "active_donor_count": 3,
+                "candidate_donor_count": 1,
+                "trial_donor_count": 1,
+                "trusted_source_count": 3,
+                "watchlist_source_count": 1,
+                "degraded_donor_count": 0,
+                "replace_pressure_count": 0,
+                "retire_pressure_count": 0,
+                "over_budget_scope_count": 1,
+                "planning_actions": [
+                    {
+                        "action": "compact_over_budget_scope",
+                        "summary": "Inflated by baseline-import and local-authored candidates.",
+                    },
+                ],
+            }
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=object(),
+        task_runtime_repository=object(),
+        runtime_frame_repository=None,
+        schedule_repository=object(),
+        goal_repository=None,
+        work_context_repository=None,
+        decision_request_repository=object(),
+        capability_candidate_service=_CandidateService(),
+        capability_donor_service=_DonorService(),
+        capability_portfolio_service=_PortfolioService(),
+    )
+
+    payload = state_query.get_capability_portfolio_summary()
+
+    assert payload["donor_count"] == 2
+    assert payload["active_donor_count"] == 1
+    assert payload["candidate_donor_count"] == 1
+    assert payload["trial_donor_count"] == 1
+    assert payload["fallback_only_candidate_count"] == 2
+    assert payload["over_budget_scope_count"] == 0
+    assert payload["planning_actions"] == []
+    assert payload["scope_breakdown"] == [
+        {
+            "scope_key": "seat:role-ops:seat-a",
+            "target_scope": "seat",
+            "target_role_id": "role-ops",
+            "target_seat_ref": "seat-a",
+            "donor_count": 2,
+            "candidate_count": 2,
+            "active_candidate_count": 1,
+            "trial_candidate_count": 1,
+            "source_kind_count": {
+                "external_catalog": 1,
+                "external_remote": 1,
+            },
+        },
+    ]
+
+
+def test_runtime_center_state_query_discovery_summary_filters_fallback_only_sources() -> None:
+    class _CandidateService:
+        def list_candidates(self, *, limit: int | None = None):
+            return [
+                SimpleNamespace(
+                    donor_id="donor-external-a",
+                    source_profile_id="source-external-a",
+                    candidate_source_kind="external_remote",
+                    ingestion_mode="prediction-recommendation",
+                ),
+                SimpleNamespace(
+                    donor_id="donor-external-b",
+                    source_profile_id="source-external-b",
+                    candidate_source_kind="external_catalog",
+                    ingestion_mode="prediction-recommendation",
+                ),
+                SimpleNamespace(
+                    donor_id="donor-local",
+                    source_profile_id="source-local",
+                    candidate_source_kind="local_authored",
+                    ingestion_mode="manual",
+                ),
+                SimpleNamespace(
+                    donor_id="donor-baseline",
+                    source_profile_id="source-baseline",
+                    candidate_source_kind="external_catalog",
+                    ingestion_mode="baseline-import",
+                ),
+            ]
+
+    class _DonorService:
+        def list_donors(self, *, limit: int | None = None):
+            return []
+
+        def list_source_profiles(self, *, limit: int | None = None):
+            return [
+                SimpleNamespace(
+                    source_profile_id="source-external-a",
+                    source_kind="external_remote",
+                    trust_posture="trusted",
+                    active=True,
+                ),
+                SimpleNamespace(
+                    source_profile_id="source-external-b",
+                    source_kind="external_catalog",
+                    trust_posture="watchlist",
+                    active=True,
+                ),
+                SimpleNamespace(
+                    source_profile_id="source-local",
+                    source_kind="local_authored",
+                    trust_posture="local",
+                    active=True,
+                ),
+                SimpleNamespace(
+                    source_profile_id="source-baseline",
+                    source_kind="external_catalog",
+                    trust_posture="trusted",
+                    active=True,
+                ),
+            ]
+
+        def list_trust_records(self, *, limit: int | None = None):
+            return []
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=object(),
+        task_runtime_repository=object(),
+        runtime_frame_repository=None,
+        schedule_repository=object(),
+        goal_repository=None,
+        work_context_repository=None,
+        decision_request_repository=object(),
+        capability_candidate_service=_CandidateService(),
+        capability_donor_service=_DonorService(),
+    )
+
+    payload = state_query.get_capability_discovery_summary()
+
+    assert payload["status"] == "ready"
+    assert payload["source_profile_count"] == 2
+    assert payload["active_source_count"] == 2
+    assert payload["trusted_source_count"] == 1
+    assert payload["watchlist_source_count"] == 1
+    assert payload["fallback_only_source_count"] == 2
+    assert payload["by_source_kind"] == {
+        "external_catalog": 1,
+        "external_remote": 1,
+    }
 
 
 def test_runtime_center_capability_lifecycle_decisions_endpoint_returns_state_query_projection() -> None:

@@ -41,6 +41,20 @@ def _string(value: object | None) -> str | None:
     return text or None
 
 
+def _float_value(value: object | None) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = _string(value)
+    if text is None:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
 class SkillTrialService:
     def __init__(self, *, state_store: SQLiteStateStore) -> None:
         self._state_store = state_store
@@ -50,6 +64,15 @@ class SkillTrialService:
         self,
         *,
         candidate_id: str,
+        donor_id: str | None = None,
+        package_id: str | None = None,
+        source_profile_id: str | None = None,
+        canonical_package_id: str | None = None,
+        candidate_source_lineage: str | None = None,
+        source_aliases: list[str] | None = None,
+        equivalence_class: str | None = None,
+        capability_overlap_score: float | None = None,
+        replacement_relation: str | None = None,
         scope_type: str,
         scope_ref: str,
         verdict: str = "pending",
@@ -67,6 +90,22 @@ class SkillTrialService:
         record = (
             existing.model_copy(
                 update={
+                    "donor_id": _string(donor_id) or existing.donor_id,
+                    "package_id": _string(package_id) or existing.package_id,
+                    "source_profile_id": _string(source_profile_id) or existing.source_profile_id,
+                    "canonical_package_id": _string(canonical_package_id)
+                    or existing.canonical_package_id,
+                    "candidate_source_lineage": _string(candidate_source_lineage)
+                    or existing.candidate_source_lineage,
+                    "source_aliases": list(source_aliases or existing.source_aliases),
+                    "equivalence_class": _string(equivalence_class) or existing.equivalence_class,
+                    "capability_overlap_score": (
+                        _float_value(capability_overlap_score)
+                        if _float_value(capability_overlap_score) is not None
+                        else existing.capability_overlap_score
+                    ),
+                    "replacement_relation": _string(replacement_relation)
+                    or existing.replacement_relation,
                     "verdict": _string(verdict) or "pending",
                     "summary": str(summary or ""),
                     "task_ids": list(task_ids or []),
@@ -82,6 +121,15 @@ class SkillTrialService:
             if existing is not None
             else SkillTrialRecord(
                 candidate_id=candidate_id,
+                donor_id=_string(donor_id),
+                package_id=_string(package_id),
+                source_profile_id=_string(source_profile_id),
+                canonical_package_id=_string(canonical_package_id),
+                candidate_source_lineage=_string(candidate_source_lineage),
+                source_aliases=list(source_aliases or []),
+                equivalence_class=_string(equivalence_class),
+                capability_overlap_score=_float_value(capability_overlap_score),
+                replacement_relation=_string(replacement_relation),
                 scope_type=_string(scope_type) or "seat",
                 scope_ref=_string(scope_ref) or "unknown",
                 verdict=_string(verdict) or "pending",
@@ -174,6 +222,15 @@ class SkillTrialService:
                 INSERT INTO skill_trials (
                     trial_id,
                     candidate_id,
+                    donor_id,
+                    package_id,
+                    source_profile_id,
+                    canonical_package_id,
+                    candidate_source_lineage,
+                    source_aliases_json,
+                    equivalence_class,
+                    capability_overlap_score,
+                    replacement_relation,
                     scope_type,
                     scope_ref,
                     verdict,
@@ -191,6 +248,15 @@ class SkillTrialService:
                 ) VALUES (
                     :trial_id,
                     :candidate_id,
+                    :donor_id,
+                    :package_id,
+                    :source_profile_id,
+                    :canonical_package_id,
+                    :candidate_source_lineage,
+                    :source_aliases_json,
+                    :equivalence_class,
+                    :capability_overlap_score,
+                    :replacement_relation,
                     :scope_type,
                     :scope_ref,
                     :verdict,
@@ -207,6 +273,15 @@ class SkillTrialService:
                     :updated_at
                 )
                 ON CONFLICT(trial_id) DO UPDATE SET
+                    donor_id = excluded.donor_id,
+                    package_id = excluded.package_id,
+                    source_profile_id = excluded.source_profile_id,
+                    canonical_package_id = excluded.canonical_package_id,
+                    candidate_source_lineage = excluded.candidate_source_lineage,
+                    source_aliases_json = excluded.source_aliases_json,
+                    equivalence_class = excluded.equivalence_class,
+                    capability_overlap_score = excluded.capability_overlap_score,
+                    replacement_relation = excluded.replacement_relation,
                     verdict = excluded.verdict,
                     summary = excluded.summary,
                     task_ids_json = excluded.task_ids_json,
@@ -222,6 +297,15 @@ class SkillTrialService:
                 {
                     "trial_id": record.trial_id,
                     "candidate_id": record.candidate_id,
+                    "donor_id": record.donor_id,
+                    "package_id": record.package_id,
+                    "source_profile_id": record.source_profile_id,
+                    "canonical_package_id": record.canonical_package_id,
+                    "candidate_source_lineage": record.candidate_source_lineage,
+                    "source_aliases_json": _json_dumps(record.source_aliases),
+                    "equivalence_class": record.equivalence_class,
+                    "capability_overlap_score": record.capability_overlap_score,
+                    "replacement_relation": record.replacement_relation,
                     "scope_type": record.scope_type,
                     "scope_ref": record.scope_ref,
                     "verdict": record.verdict,
@@ -243,6 +327,15 @@ class SkillTrialService:
         return SkillTrialRecord(
             trial_id=row["trial_id"],
             candidate_id=row["candidate_id"],
+            donor_id=row["donor_id"],
+            package_id=row["package_id"],
+            source_profile_id=row["source_profile_id"],
+            canonical_package_id=row["canonical_package_id"],
+            candidate_source_lineage=row["candidate_source_lineage"],
+            source_aliases=_json_load_list(row["source_aliases_json"]),
+            equivalence_class=row["equivalence_class"],
+            capability_overlap_score=_float_value(row["capability_overlap_score"]),
+            replacement_relation=row["replacement_relation"],
             scope_type=row["scope_type"],
             scope_ref=row["scope_ref"],
             verdict=row["verdict"],

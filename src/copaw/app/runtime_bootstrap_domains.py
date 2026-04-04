@@ -346,6 +346,7 @@ def build_runtime_domain_services(
         strategy_memory_service=strategy_memory_service,
         capability_service=capability_service,
         capability_candidate_service=capability_candidate_service,
+        capability_donor_service=capability_donor_service,
         capability_portfolio_service=capability_portfolio_service,
         skill_trial_service=skill_trial_service,
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,

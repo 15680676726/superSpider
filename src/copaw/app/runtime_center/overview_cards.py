@@ -1623,6 +1623,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             or []
         )
         prediction_service = app_state.prediction_service
+        state_query_service = getattr(app_state, "state_query_service", None)
         optimization_overview = {}
         get_runtime_capability_optimization_overview = getattr(
             prediction_service,
@@ -1634,19 +1635,49 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 get_runtime_capability_optimization_overview(),
             ) or {}
         delta = self._mapping(optimization_overview.get("summary")) or {}
+        discovery = self._mapping(optimization_overview.get("discovery")) or {}
+        portfolio_summary = self._mapping(optimization_overview.get("portfolio")) or {}
+        if state_query_service is not None:
+            get_capability_portfolio_summary = getattr(
+                state_query_service,
+                "get_capability_portfolio_summary",
+                None,
+            )
+            if callable(get_capability_portfolio_summary):
+                portfolio_summary = {
+                    **portfolio_summary,
+                    **(self._mapping(
+                        get_capability_portfolio_summary(),
+                    ) or {}),
+                }
+        if not portfolio_summary:
+            portfolio_summary = {}
         portfolio_service = getattr(app_state, "capability_portfolio_service", None)
-        portfolio_summary = {}
         get_runtime_portfolio_summary = getattr(
             portfolio_service,
             "get_runtime_portfolio_summary",
             None,
         )
         if callable(get_runtime_portfolio_summary):
-            portfolio_summary = self._mapping(get_runtime_portfolio_summary()) or {}
+            portfolio_summary = {
+                **portfolio_summary,
+                **(self._mapping(get_runtime_portfolio_summary()) or {}),
+            }
         else:
             summarize_portfolio = getattr(portfolio_service, "summarize_portfolio", None)
             if callable(summarize_portfolio):
-                portfolio_summary = self._mapping(summarize_portfolio()) or {}
+                portfolio_summary = {
+                    **portfolio_summary,
+                    **(self._mapping(summarize_portfolio()) or {}),
+                }
+        if not discovery and state_query_service is not None:
+            get_capability_discovery_summary = getattr(
+                state_query_service,
+                "get_capability_discovery_summary",
+                None,
+            )
+            if callable(get_capability_discovery_summary):
+                discovery = self._mapping(get_capability_discovery_summary()) or {}
         package_bound_skill_count = sum(
             1
             for item in skills
@@ -1805,6 +1836,36 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                     if isinstance(portfolio_summary.get("planning_actions"), list)
                     else []
                 ),
+            },
+            "discovery": {
+                "status": self._string(discovery.get("status")) or "unknown",
+                "summary": self._string(discovery.get("summary")),
+                "source_profile_count": self._int(
+                    discovery.get("source_profile_count"),
+                    0,
+                ),
+                "active_source_count": self._int(
+                    discovery.get("active_source_count"),
+                    0,
+                ),
+                "trusted_source_count": self._int(
+                    discovery.get("trusted_source_count"),
+                    0,
+                ),
+                "watchlist_source_count": self._int(
+                    discovery.get("watchlist_source_count"),
+                    0,
+                ),
+                "fallback_only_source_count": self._int(
+                    discovery.get("fallback_only_source_count"),
+                    0,
+                ),
+                "by_source_kind": self._normalize_int_map(
+                    discovery.get("by_source_kind"),
+                ),
+                "routes": dict(discovery.get("routes") or {})
+                if isinstance(discovery.get("routes"), Mapping)
+                else {},
             },
             "degraded": bool(degraded_components),
             "degraded_components": degraded_components,

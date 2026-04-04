@@ -41,6 +41,20 @@ def _string(value: object | None) -> str | None:
     return text or None
 
 
+def _float_value(value: object | None) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = _string(value)
+    if text is None:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
 class SkillLifecycleDecisionService:
     def __init__(self, *, state_store: SQLiteStateStore) -> None:
         self._state_store = state_store
@@ -50,11 +64,23 @@ class SkillLifecycleDecisionService:
         self,
         *,
         candidate_id: str,
+        donor_id: str | None = None,
+        package_id: str | None = None,
+        source_profile_id: str | None = None,
+        canonical_package_id: str | None = None,
+        candidate_source_lineage: str | None = None,
+        source_aliases: list[str] | None = None,
+        equivalence_class: str | None = None,
+        capability_overlap_score: float | None = None,
+        replacement_relation: str | None = None,
         decision_kind: str,
         from_stage: str | None = None,
         to_stage: str | None = None,
         reason: str = "",
         evidence_refs: list[str] | None = None,
+        retirement_reason: str | None = None,
+        retirement_scope: str | None = None,
+        retirement_evidence_refs: list[str] | None = None,
         replacement_target_ids: list[str] | None = None,
         protection_lifted: bool = False,
         applied_by: str | None = None,
@@ -62,11 +88,23 @@ class SkillLifecycleDecisionService:
     ) -> SkillLifecycleDecisionRecord:
         record = SkillLifecycleDecisionRecord(
             candidate_id=candidate_id,
+            donor_id=_string(donor_id),
+            package_id=_string(package_id),
+            source_profile_id=_string(source_profile_id),
+            canonical_package_id=_string(canonical_package_id),
+            candidate_source_lineage=_string(candidate_source_lineage),
+            source_aliases=list(source_aliases or []),
+            equivalence_class=_string(equivalence_class),
+            capability_overlap_score=_float_value(capability_overlap_score),
+            replacement_relation=_string(replacement_relation),
             decision_kind=_string(decision_kind) or "continue_trial",
             from_stage=_string(from_stage),
             to_stage=_string(to_stage),
             reason=str(reason or ""),
+            retirement_reason=_string(retirement_reason),
+            retirement_scope=_string(retirement_scope),
             evidence_refs=list(evidence_refs or []),
+            retirement_evidence_refs=list(retirement_evidence_refs or []),
             replacement_target_ids=list(replacement_target_ids or []),
             protection_lifted=bool(protection_lifted),
             applied_by=_string(applied_by),
@@ -107,11 +145,23 @@ class SkillLifecycleDecisionService:
                 INSERT INTO skill_lifecycle_decisions (
                     decision_id,
                     candidate_id,
+                    donor_id,
+                    package_id,
+                    source_profile_id,
+                    canonical_package_id,
+                    candidate_source_lineage,
+                    source_aliases_json,
+                    equivalence_class,
+                    capability_overlap_score,
+                    replacement_relation,
                     decision_kind,
                     from_stage,
                     to_stage,
                     reason,
+                    retirement_reason,
+                    retirement_scope,
                     evidence_refs_json,
+                    retirement_evidence_refs_json,
                     replacement_target_ids_json,
                     protection_lifted,
                     applied_by,
@@ -121,11 +171,23 @@ class SkillLifecycleDecisionService:
                 ) VALUES (
                     :decision_id,
                     :candidate_id,
+                    :donor_id,
+                    :package_id,
+                    :source_profile_id,
+                    :canonical_package_id,
+                    :candidate_source_lineage,
+                    :source_aliases_json,
+                    :equivalence_class,
+                    :capability_overlap_score,
+                    :replacement_relation,
                     :decision_kind,
                     :from_stage,
                     :to_stage,
                     :reason,
+                    :retirement_reason,
+                    :retirement_scope,
                     :evidence_refs_json,
+                    :retirement_evidence_refs_json,
                     :replacement_target_ids_json,
                     :protection_lifted,
                     :applied_by,
@@ -134,11 +196,23 @@ class SkillLifecycleDecisionService:
                     :updated_at
                 )
                 ON CONFLICT(decision_id) DO UPDATE SET
+                    donor_id = excluded.donor_id,
+                    package_id = excluded.package_id,
+                    source_profile_id = excluded.source_profile_id,
+                    canonical_package_id = excluded.canonical_package_id,
+                    candidate_source_lineage = excluded.candidate_source_lineage,
+                    source_aliases_json = excluded.source_aliases_json,
+                    equivalence_class = excluded.equivalence_class,
+                    capability_overlap_score = excluded.capability_overlap_score,
+                    replacement_relation = excluded.replacement_relation,
                     decision_kind = excluded.decision_kind,
                     from_stage = excluded.from_stage,
                     to_stage = excluded.to_stage,
                     reason = excluded.reason,
+                    retirement_reason = excluded.retirement_reason,
+                    retirement_scope = excluded.retirement_scope,
                     evidence_refs_json = excluded.evidence_refs_json,
+                    retirement_evidence_refs_json = excluded.retirement_evidence_refs_json,
                     replacement_target_ids_json = excluded.replacement_target_ids_json,
                     protection_lifted = excluded.protection_lifted,
                     applied_by = excluded.applied_by,
@@ -148,11 +222,25 @@ class SkillLifecycleDecisionService:
                 {
                     "decision_id": record.decision_id,
                     "candidate_id": record.candidate_id,
+                    "donor_id": record.donor_id,
+                    "package_id": record.package_id,
+                    "source_profile_id": record.source_profile_id,
+                    "canonical_package_id": record.canonical_package_id,
+                    "candidate_source_lineage": record.candidate_source_lineage,
+                    "source_aliases_json": _json_dumps(record.source_aliases),
+                    "equivalence_class": record.equivalence_class,
+                    "capability_overlap_score": record.capability_overlap_score,
+                    "replacement_relation": record.replacement_relation,
                     "decision_kind": record.decision_kind,
                     "from_stage": record.from_stage,
                     "to_stage": record.to_stage,
                     "reason": record.reason,
+                    "retirement_reason": record.retirement_reason,
+                    "retirement_scope": record.retirement_scope,
                     "evidence_refs_json": _json_dumps(record.evidence_refs),
+                    "retirement_evidence_refs_json": _json_dumps(
+                        record.retirement_evidence_refs,
+                    ),
                     "replacement_target_ids_json": _json_dumps(record.replacement_target_ids),
                     "protection_lifted": 1 if record.protection_lifted else 0,
                     "applied_by": record.applied_by,
@@ -166,11 +254,23 @@ class SkillLifecycleDecisionService:
         return SkillLifecycleDecisionRecord(
             decision_id=row["decision_id"],
             candidate_id=row["candidate_id"],
+            donor_id=row["donor_id"],
+            package_id=row["package_id"],
+            source_profile_id=row["source_profile_id"],
+            canonical_package_id=row["canonical_package_id"],
+            candidate_source_lineage=row["candidate_source_lineage"],
+            source_aliases=_json_load_list(row["source_aliases_json"]),
+            equivalence_class=row["equivalence_class"],
+            capability_overlap_score=_float_value(row["capability_overlap_score"]),
+            replacement_relation=row["replacement_relation"],
             decision_kind=row["decision_kind"],
             from_stage=row["from_stage"],
             to_stage=row["to_stage"],
             reason=row["reason"] or "",
+            retirement_reason=row["retirement_reason"],
+            retirement_scope=row["retirement_scope"],
             evidence_refs=_json_load_list(row["evidence_refs_json"]),
+            retirement_evidence_refs=_json_load_list(row["retirement_evidence_refs_json"]),
             replacement_target_ids=_json_load_list(row["replacement_target_ids_json"]),
             protection_lifted=bool(row["protection_lifted"]),
             applied_by=row["applied_by"],

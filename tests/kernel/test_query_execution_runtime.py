@@ -391,6 +391,110 @@ def test_query_execution_runtime_projects_compaction_visibility_when_available()
     }
 
 
+def test_query_execution_runtime_exposes_bounded_donor_trial_carry_forward_contract() -> None:
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        conversation_compaction_service=object(),
+    )
+
+    entropy = service.get_query_runtime_entropy_contract()
+
+    assert entropy["runtime_entropy"]["donor_trial_budget"] == {
+        "accepted_scalar_fields": [
+            "candidate_id",
+            "skill_candidate_id",
+            "skill_trial_id",
+            "skill_lifecycle_stage",
+            "selected_scope",
+            "selected_seat_ref",
+        ],
+        "accepted_list_fields": [
+            "replacement_target_ids",
+            "rollback_target_ids",
+            "capability_ids",
+        ],
+        "max_list_items": 3,
+        "acceptance": "bounded-runtime-metadata",
+        "state_channel": "query_runtime_state",
+        "summary_surface": "runtime-center",
+        "spill_surface": "runtime-evidence",
+    }
+    assert entropy["runtime_entropy"]["donor_trial_carry_forward_status"] == "inactive"
+    assert entropy["runtime_entropy"]["degraded_components"] == []
+    assert entropy["donor_trial_carry_forward"] == {
+        "status": "inactive",
+        "summary": "No donor/trial metadata carry-forward is active.",
+        "retained_metadata_keys": [],
+        "truncated_metadata_keys": [],
+        "artifact_refs": [],
+    }
+
+
+def test_query_execution_runtime_projects_donor_trial_carry_forward_degradation() -> None:
+    class _CompactionService:
+        @staticmethod
+        def build_visibility_payload(source: dict[str, object] | None = None) -> dict[str, object]:
+            return ConversationCompactionService.build_visibility_payload(source)
+
+        def runtime_visibility_payload(self) -> dict[str, object]:
+            return {
+                "donor_trial_carry_forward": {
+                    "status": "degraded",
+                    "summary": "Donor/trial metadata overflow compacted into runtime evidence.",
+                    "retained_metadata_keys": [
+                        "skill_candidate_id",
+                        "skill_trial_id",
+                        "selected_scope",
+                    ],
+                    "truncated_metadata_keys": [
+                        "replacement_target_ids",
+                        "capability_ids",
+                        "ignored_field",
+                    ],
+                    "artifact_refs": [
+                        "artifact://entropy-donor-1",
+                        "artifact://entropy-donor-2",
+                    ],
+                    "ignored": "drop-me",
+                },
+            }
+
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        conversation_compaction_service=_CompactionService(),
+    )
+
+    entropy = service.get_query_runtime_entropy_contract()
+
+    assert entropy["status"] == "degraded"
+    assert entropy["runtime_entropy"]["status"] == "degraded"
+    assert entropy["runtime_entropy"]["donor_trial_carry_forward_status"] == "degraded"
+    assert entropy["runtime_entropy"]["failure_source"] == "donor-trial-carry-forward"
+    assert entropy["runtime_entropy"]["degraded_components"] == [
+        "donor_trial_carry_forward",
+    ]
+    assert entropy["donor_trial_carry_forward"] == {
+        "status": "degraded",
+        "summary": "Donor/trial metadata overflow compacted into runtime evidence.",
+        "retained_metadata_keys": [
+            "skill_candidate_id",
+            "skill_trial_id",
+            "selected_scope",
+        ],
+        "truncated_metadata_keys": [
+            "replacement_target_ids",
+            "capability_ids",
+        ],
+        "artifact_refs": [
+            "artifact://entropy-donor-1",
+            "artifact://entropy-donor-2",
+        ],
+    }
+    degradation = entropy["degradation"]["donor_trial_carry_forward"]
+    assert degradation["failure_source"] == "donor-trial-carry-forward"
+    assert "runtime evidence" in degradation["remediation_summary"]
+
+
 @pytest.mark.asyncio
 async def test_query_execution_runtime_requires_durable_kickoff_proof_before_marking_committed() -> None:
     class _IndustryService:
@@ -635,6 +739,83 @@ def test_query_execution_runtime_evidence_sinks_attach_tool_contract_metadata() 
     assert browser_meta["skill_candidate_id"] == "candidate-nextgen-outreach"
     assert browser_meta["skill_trial_id"] == "trial-nextgen-seat-1"
     assert browser_meta["selected_scope"] == "seat"
+
+
+def test_query_execution_runtime_bounds_trial_attribution_list_carry_forward() -> None:
+    class _ToolBridge:
+        def __init__(self) -> None:
+            self.shell_calls: list[dict[str, object]] = []
+
+        def record_shell_event(self, task_id: str, payload: dict[str, object]) -> None:
+            self.shell_calls.append({"task_id": task_id, "payload": payload})
+
+    bridge = _ToolBridge()
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        tool_bridge=bridge,
+    )
+
+    shell_sink = service._make_shell_evidence_sink(  # pylint: disable=protected-access
+        "ktask:query-tool",
+        capability_trial_attribution={
+            "skill_candidate_id": "candidate-nextgen-outreach",
+            "skill_trial_id": "trial-nextgen-seat-1",
+            "skill_lifecycle_stage": "trial",
+            "selected_scope": "seat",
+            "replacement_target_ids": [
+                "skill:legacy-outreach-1",
+                "skill:legacy-outreach-2",
+                "skill:legacy-outreach-3",
+                "skill:legacy-outreach-4",
+            ],
+            "rollback_target_ids": [
+                "skill:rollback-1",
+                "skill:rollback-2",
+                "skill:rollback-3",
+                "skill:rollback-4",
+            ],
+            "capability_ids": [
+                "tool:execute_shell_command",
+                "tool:write_file",
+                "tool:browser_use",
+                "tool:ignored-overflow",
+            ],
+            "ignored_key": "drop-me",
+        },
+    )
+    assert shell_sink is not None
+
+    shell_sink(
+        {
+            "tool_name": "execute_shell_command",
+            "command": "git status",
+            "cwd": "D:/word/copaw",
+            "timeout_seconds": 60,
+            "status": "success",
+            "returncode": 0,
+            "stdout": "ok",
+            "stderr": "",
+            "metadata": {},
+        },
+    )
+
+    metadata = bridge.shell_calls[0]["payload"]["metadata"]
+    assert metadata["replacement_target_ids"] == [
+        "skill:legacy-outreach-1",
+        "skill:legacy-outreach-2",
+        "skill:legacy-outreach-3",
+    ]
+    assert metadata["rollback_target_ids"] == [
+        "skill:rollback-1",
+        "skill:rollback-2",
+        "skill:rollback-3",
+    ]
+    assert metadata["capability_ids"] == [
+        "tool:execute_shell_command",
+        "tool:write_file",
+        "tool:browser_use",
+    ]
+    assert "ignored_key" not in metadata
 
 
 @pytest.mark.asyncio

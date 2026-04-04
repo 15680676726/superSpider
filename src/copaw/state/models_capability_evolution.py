@@ -16,6 +16,7 @@ class CapabilityCandidateRecord(UpdatedRecord):
     donor_id: str | None = None
     package_id: str | None = None
     source_profile_id: str | None = None
+    canonical_package_id: str | None = None
     candidate_kind: str = Field(default="skill", min_length=1)
     industry_instance_id: str | None = None
     target_role_id: str | None = None
@@ -27,6 +28,10 @@ class CapabilityCandidateRecord(UpdatedRecord):
     candidate_source_ref: str | None = None
     candidate_source_version: str | None = None
     candidate_source_lineage: str | None = None
+    source_aliases: list[str] = Field(default_factory=list)
+    equivalence_class: str | None = None
+    capability_overlap_score: float | None = None
+    replacement_relation: str | None = None
     ingestion_mode: str = Field(default="manual", min_length=1)
     proposed_skill_name: str | None = None
     summary: str = ""
@@ -51,6 +56,15 @@ class SkillTrialRecord(UpdatedRecord):
 
     trial_id: str = Field(default_factory=_new_record_id, min_length=1)
     candidate_id: str = Field(..., min_length=1)
+    donor_id: str | None = None
+    package_id: str | None = None
+    source_profile_id: str | None = None
+    canonical_package_id: str | None = None
+    candidate_source_lineage: str | None = None
+    source_aliases: list[str] = Field(default_factory=list)
+    equivalence_class: str | None = None
+    capability_overlap_score: float | None = None
+    replacement_relation: str | None = None
     scope_type: str = Field(default="seat", min_length=1)
     scope_ref: str = Field(..., min_length=1)
     verdict: str = Field(default="pending", min_length=1)
@@ -70,11 +84,23 @@ class SkillLifecycleDecisionRecord(UpdatedRecord):
 
     decision_id: str = Field(default_factory=_new_record_id, min_length=1)
     candidate_id: str = Field(..., min_length=1)
+    donor_id: str | None = None
+    package_id: str | None = None
+    source_profile_id: str | None = None
+    canonical_package_id: str | None = None
+    candidate_source_lineage: str | None = None
+    source_aliases: list[str] = Field(default_factory=list)
+    equivalence_class: str | None = None
+    capability_overlap_score: float | None = None
+    replacement_relation: str | None = None
     decision_kind: str = Field(default="continue_trial", min_length=1)
     from_stage: str | None = None
     to_stage: str | None = None
     reason: str = ""
+    retirement_reason: str | None = None
+    retirement_scope: str | None = None
     evidence_refs: list[str] = Field(default_factory=list)
+    retirement_evidence_refs: list[str] = Field(default_factory=list)
     replacement_target_ids: list[str] = Field(default_factory=list)
     protection_lifted: bool = False
     applied_by: str | None = None
@@ -87,9 +113,13 @@ class CapabilityDonorRecord(UpdatedRecord):
     donor_id: str = Field(default_factory=_new_record_id, min_length=1)
     donor_kind: str = Field(default="skill", min_length=1)
     normalized_key: str = Field(..., min_length=1)
+    canonical_package_id: str | None = None
     source_kind: str = Field(default="local_authored", min_length=1)
     primary_source_ref: str | None = None
     candidate_source_lineage: str | None = None
+    source_aliases: list[str] = Field(default_factory=list)
+    equivalence_class: str | None = None
+    replacement_relation: str | None = None
     display_name: str | None = None
     status: str = Field(default="candidate", min_length=1)
     trust_status: str = Field(default="observing", min_length=1)
@@ -103,8 +133,11 @@ class CapabilityPackageRecord(UpdatedRecord):
     package_id: str = Field(default_factory=_new_record_id, min_length=1)
     donor_id: str = Field(..., min_length=1)
     source_profile_id: str | None = None
+    canonical_package_id: str | None = None
     package_ref: str | None = None
     package_version: str | None = None
+    source_aliases: list[str] = Field(default_factory=list)
+    equivalence_class: str | None = None
     package_kind: str = Field(default="package", min_length=1)
     status: str = Field(default="available", min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -116,6 +149,8 @@ class CapabilitySourceProfileRecord(UpdatedRecord):
     source_profile_id: str = Field(default_factory=_new_record_id, min_length=1)
     source_kind: str = Field(default="local_authored", min_length=1)
     source_key: str = Field(..., min_length=1)
+    source_lineage: str | None = None
+    source_aliases: list[str] = Field(default_factory=list)
     display_name: str | None = None
     trust_posture: str = Field(default="watchlist", min_length=1)
     active: bool = True
@@ -127,10 +162,15 @@ class CapabilityDonorTrustRecord(UpdatedRecord):
 
     donor_id: str = Field(..., min_length=1)
     source_profile_id: str | None = None
+    last_candidate_id: str | None = None
+    last_package_id: str | None = None
+    last_canonical_package_id: str | None = None
     trust_status: str = Field(default="observing", min_length=1)
     trial_success_count: int = 0
     trial_failure_count: int = 0
+    underperformance_count: int = 0
     rollback_count: int = 0
+    replacement_pressure_count: int = 0
     retirement_count: int = 0
     last_trial_verdict: str | None = None
     last_decision_kind: str | None = None

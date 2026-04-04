@@ -404,6 +404,25 @@ class _PredictionServiceContextMixin:
             ),
         )
 
+    def _compile_external_capability_queries(
+        self,
+        *,
+        facts: _FactPack,
+        target_agent_id: str | None,
+        capability_id: str | None,
+        workflow_titles: list[str] | None = None,
+        task_titles: list[str] | None = None,
+        task_summaries: list[str] | None = None,
+    ) -> list[str]:
+        return self._compile_remote_skill_queries(
+            facts=facts,
+            target_agent_id=target_agent_id,
+            capability_id=capability_id,
+            workflow_titles=workflow_titles,
+            task_titles=task_titles,
+            task_summaries=task_summaries,
+        )
+
     def _remote_skill_candidates_for_queries(
         self,
         *,
@@ -432,6 +451,17 @@ class _PredictionServiceContextMixin:
                 include_curated=self._enable_remote_curated_search,
                 include_hub=self._enable_remote_hub_search,
             ),
+        )
+
+    def _discovery_candidates_for_queries(
+        self,
+        *,
+        queries: list[str],
+        current_capability_id: str | None = None,
+    ) -> list[RemoteSkillCandidate]:
+        return self._remote_skill_candidates_for_queries(
+            queries=queries,
+            current_capability_id=current_capability_id,
         )
 
     def _missing_remote_capability_findings(
@@ -479,6 +509,13 @@ class _PredictionServiceContextMixin:
                 )
         return findings
 
+    def _missing_donor_capability_findings(
+        self,
+        *,
+        facts: _FactPack,
+    ) -> list[dict[str, Any]]:
+        return self._missing_remote_capability_findings(facts=facts)
+
     def _underperforming_remote_skill_findings(
         self,
         *,
@@ -523,6 +560,17 @@ class _PredictionServiceContextMixin:
             ),
         )
         return findings[:3]
+
+    def _underperforming_donor_capability_findings(
+        self,
+        *,
+        facts: _FactPack,
+        telemetry: dict[tuple[str, str], dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return self._underperforming_remote_skill_findings(
+            facts=facts,
+            telemetry=telemetry,
+        )
 
     def _trial_followup_findings(
         self,
@@ -589,6 +637,16 @@ class _PredictionServiceContextMixin:
                 or "single-agent"
             )
             candidate_id = _string(metadata.get("candidate_id"))
+            donor_metadata = {
+                "donor_id": _string(metadata.get("donor_id")),
+                "package_id": _string(metadata.get("package_id")),
+                "source_profile_id": _string(metadata.get("source_profile_id")),
+                "candidate_source_kind": _string(metadata.get("candidate_source_kind")),
+                "candidate_source_ref": _string(metadata.get("candidate_source_ref")),
+                "candidate_source_lineage": _string(
+                    metadata.get("candidate_source_lineage"),
+                ),
+            }
             if not self._trial_improved(new_stats=new_stats, old_stats=old_stats):
                 if self._trial_underperformed(new_stats=new_stats, old_stats=old_stats):
                     findings.append(
@@ -610,6 +668,7 @@ class _PredictionServiceContextMixin:
                                 "new_stats": new_stats,
                                 "old_stats": old_stats,
                             },
+                            **donor_metadata,
                         },
                     )
                 continue
@@ -659,6 +718,7 @@ class _PredictionServiceContextMixin:
                                 "new_stats": new_stats,
                                 "old_stats": old_stats,
                             },
+                            **donor_metadata,
                         },
                     )
                 continue
@@ -682,6 +742,7 @@ class _PredictionServiceContextMixin:
                             "new_stats": new_stats,
                             "old_stats": old_stats,
                         },
+                        **donor_metadata,
                     },
                 )
         return findings

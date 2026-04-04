@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 27
+STATE_SCHEMA_VERSION = 28
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS goals (
@@ -1360,6 +1360,7 @@ CREATE TABLE IF NOT EXISTS capability_candidates (
     donor_id TEXT,
     package_id TEXT,
     source_profile_id TEXT,
+    canonical_package_id TEXT,
     candidate_kind TEXT NOT NULL,
     industry_instance_id TEXT,
     target_role_id TEXT,
@@ -1371,6 +1372,10 @@ CREATE TABLE IF NOT EXISTS capability_candidates (
     candidate_source_ref TEXT,
     candidate_source_version TEXT,
     candidate_source_lineage TEXT,
+    source_aliases_json TEXT NOT NULL DEFAULT '[]',
+    equivalence_class TEXT,
+    capability_overlap_score REAL,
+    replacement_relation TEXT,
     ingestion_mode TEXT NOT NULL DEFAULT 'manual',
     proposed_skill_name TEXT,
     summary TEXT NOT NULL DEFAULT '',
@@ -1400,14 +1405,20 @@ CREATE INDEX IF NOT EXISTS idx_capability_candidates_scope
     ON capability_candidates(target_scope, target_role_id, target_seat_ref, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_capability_candidates_donor
     ON capability_candidates(donor_id, package_id, source_profile_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_capability_candidates_identity
+    ON capability_candidates(canonical_package_id, equivalence_class, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS capability_donors (
     donor_id TEXT PRIMARY KEY,
     donor_kind TEXT NOT NULL,
     normalized_key TEXT NOT NULL UNIQUE,
+    canonical_package_id TEXT,
     source_kind TEXT NOT NULL,
     primary_source_ref TEXT,
     candidate_source_lineage TEXT,
+    source_aliases_json TEXT NOT NULL DEFAULT '[]',
+    equivalence_class TEXT,
+    replacement_relation TEXT,
     display_name TEXT,
     status TEXT NOT NULL DEFAULT 'candidate',
     trust_status TEXT NOT NULL DEFAULT 'observing',
@@ -1421,13 +1432,18 @@ CREATE INDEX IF NOT EXISTS idx_capability_donors_status
     ON capability_donors(status, trust_status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_capability_donors_source
     ON capability_donors(source_kind, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_capability_donors_identity
+    ON capability_donors(canonical_package_id, equivalence_class, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS capability_packages (
     package_id TEXT PRIMARY KEY,
     donor_id TEXT NOT NULL,
     source_profile_id TEXT,
+    canonical_package_id TEXT,
     package_ref TEXT,
     package_version TEXT,
+    source_aliases_json TEXT NOT NULL DEFAULT '[]',
+    equivalence_class TEXT,
     package_kind TEXT NOT NULL DEFAULT 'package',
     status TEXT NOT NULL DEFAULT 'available',
     metadata_json TEXT NOT NULL DEFAULT '{}',
@@ -1440,11 +1456,15 @@ CREATE INDEX IF NOT EXISTS idx_capability_packages_donor
     ON capability_packages(donor_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_capability_packages_ref
     ON capability_packages(package_ref, package_version, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_capability_packages_identity
+    ON capability_packages(canonical_package_id, equivalence_class, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS capability_source_profiles (
     source_profile_id TEXT PRIMARY KEY,
     source_kind TEXT NOT NULL,
     source_key TEXT NOT NULL,
+    source_lineage TEXT,
+    source_aliases_json TEXT NOT NULL DEFAULT '[]',
     display_name TEXT,
     trust_posture TEXT NOT NULL DEFAULT 'watchlist',
     active INTEGER NOT NULL DEFAULT 1,
@@ -1457,14 +1477,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_capability_source_profiles_key
     ON capability_source_profiles(source_kind, source_key);
 CREATE INDEX IF NOT EXISTS idx_capability_source_profiles_trust
     ON capability_source_profiles(trust_posture, active, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_capability_source_profiles_lineage
+    ON capability_source_profiles(source_lineage, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS capability_donor_trust (
     donor_id TEXT PRIMARY KEY,
     source_profile_id TEXT,
+    last_candidate_id TEXT,
+    last_package_id TEXT,
+    last_canonical_package_id TEXT,
     trust_status TEXT NOT NULL DEFAULT 'observing',
     trial_success_count INTEGER NOT NULL DEFAULT 0,
     trial_failure_count INTEGER NOT NULL DEFAULT 0,
+    underperformance_count INTEGER NOT NULL DEFAULT 0,
     rollback_count INTEGER NOT NULL DEFAULT 0,
+    replacement_pressure_count INTEGER NOT NULL DEFAULT 0,
     retirement_count INTEGER NOT NULL DEFAULT 0,
     last_trial_verdict TEXT,
     last_decision_kind TEXT,
@@ -1476,10 +1503,21 @@ CREATE TABLE IF NOT EXISTS capability_donor_trust (
 
 CREATE INDEX IF NOT EXISTS idx_capability_donor_trust_status
     ON capability_donor_trust(trust_status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_capability_donor_trust_package
+    ON capability_donor_trust(last_canonical_package_id, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS skill_trials (
     trial_id TEXT PRIMARY KEY,
     candidate_id TEXT NOT NULL,
+    donor_id TEXT,
+    package_id TEXT,
+    source_profile_id TEXT,
+    canonical_package_id TEXT,
+    candidate_source_lineage TEXT,
+    source_aliases_json TEXT NOT NULL DEFAULT '[]',
+    equivalence_class TEXT,
+    capability_overlap_score REAL,
+    replacement_relation TEXT,
     scope_type TEXT NOT NULL DEFAULT 'seat',
     scope_ref TEXT NOT NULL,
     verdict TEXT NOT NULL DEFAULT 'pending',
@@ -1501,15 +1539,29 @@ CREATE INDEX IF NOT EXISTS idx_skill_trials_candidate
     ON skill_trials(candidate_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_skill_trials_scope
     ON skill_trials(scope_type, scope_ref, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_trials_attribution
+    ON skill_trials(donor_id, package_id, source_profile_id, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS skill_lifecycle_decisions (
     decision_id TEXT PRIMARY KEY,
     candidate_id TEXT NOT NULL,
+    donor_id TEXT,
+    package_id TEXT,
+    source_profile_id TEXT,
+    canonical_package_id TEXT,
+    candidate_source_lineage TEXT,
+    source_aliases_json TEXT NOT NULL DEFAULT '[]',
+    equivalence_class TEXT,
+    capability_overlap_score REAL,
+    replacement_relation TEXT,
     decision_kind TEXT NOT NULL DEFAULT 'continue_trial',
     from_stage TEXT,
     to_stage TEXT,
     reason TEXT NOT NULL DEFAULT '',
+    retirement_reason TEXT,
+    retirement_scope TEXT,
     evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    retirement_evidence_refs_json TEXT NOT NULL DEFAULT '[]',
     replacement_target_ids_json TEXT NOT NULL DEFAULT '[]',
     protection_lifted INTEGER NOT NULL DEFAULT 0,
     applied_by TEXT,
@@ -1521,6 +1573,8 @@ CREATE TABLE IF NOT EXISTS skill_lifecycle_decisions (
 
 CREATE INDEX IF NOT EXISTS idx_skill_lifecycle_decisions_candidate
     ON skill_lifecycle_decisions(candidate_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_lifecycle_decisions_attribution
+    ON skill_lifecycle_decisions(donor_id, package_id, source_profile_id, decision_kind, updated_at DESC);
 """
 
 _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
@@ -1700,6 +1754,76 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
             ("donor_id", "TEXT"),
             ("package_id", "TEXT"),
             ("source_profile_id", "TEXT"),
+            ("canonical_package_id", "TEXT"),
+            ("source_aliases_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("equivalence_class", "TEXT"),
+            ("capability_overlap_score", "REAL"),
+            ("replacement_relation", "TEXT"),
+        ),
+    ),
+    (
+        "capability_donors",
+        (
+            ("canonical_package_id", "TEXT"),
+            ("source_aliases_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("equivalence_class", "TEXT"),
+            ("replacement_relation", "TEXT"),
+        ),
+    ),
+    (
+        "capability_packages",
+        (
+            ("canonical_package_id", "TEXT"),
+            ("source_aliases_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("equivalence_class", "TEXT"),
+        ),
+    ),
+    (
+        "capability_source_profiles",
+        (
+            ("source_lineage", "TEXT"),
+            ("source_aliases_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ),
+    ),
+    (
+        "capability_donor_trust",
+        (
+            ("last_candidate_id", "TEXT"),
+            ("last_package_id", "TEXT"),
+            ("last_canonical_package_id", "TEXT"),
+            ("underperformance_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("replacement_pressure_count", "INTEGER NOT NULL DEFAULT 0"),
+        ),
+    ),
+    (
+        "skill_trials",
+        (
+            ("donor_id", "TEXT"),
+            ("package_id", "TEXT"),
+            ("source_profile_id", "TEXT"),
+            ("canonical_package_id", "TEXT"),
+            ("candidate_source_lineage", "TEXT"),
+            ("source_aliases_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("equivalence_class", "TEXT"),
+            ("capability_overlap_score", "REAL"),
+            ("replacement_relation", "TEXT"),
+        ),
+    ),
+    (
+        "skill_lifecycle_decisions",
+        (
+            ("donor_id", "TEXT"),
+            ("package_id", "TEXT"),
+            ("source_profile_id", "TEXT"),
+            ("canonical_package_id", "TEXT"),
+            ("candidate_source_lineage", "TEXT"),
+            ("source_aliases_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("equivalence_class", "TEXT"),
+            ("capability_overlap_score", "REAL"),
+            ("replacement_relation", "TEXT"),
+            ("retirement_reason", "TEXT"),
+            ("retirement_scope", "TEXT"),
+            ("retirement_evidence_refs_json", "TEXT NOT NULL DEFAULT '[]'"),
         ),
     ),
     (

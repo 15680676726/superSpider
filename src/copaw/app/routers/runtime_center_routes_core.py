@@ -828,6 +828,36 @@ async def list_runtime_center_capability_source_profiles(
     )
 
 
+@router.get("/capabilities/portfolio", response_model=dict[str, object])
+async def get_runtime_center_capability_portfolio(
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    return await _runtime_center_detail_query(
+        request=request,
+        response=response,
+        query_methods=("get_capability_portfolio_summary",),
+        not_available_detail="Capability portfolio view is not available.",
+        not_found_detail="Capability portfolio summary was not found.",
+        payload_key="portfolio",
+    )
+
+
+@router.get("/capabilities/discovery", response_model=dict[str, object])
+async def get_runtime_center_capability_discovery(
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    return await _runtime_center_detail_query(
+        request=request,
+        response=response,
+        query_methods=("get_capability_discovery_summary",),
+        not_available_detail="Capability discovery view is not available.",
+        not_found_detail="Capability discovery summary was not found.",
+        payload_key="discovery",
+    )
+
+
 @router.get("/capabilities/lifecycle-decisions", response_model=list[dict[str, object]])
 async def list_runtime_center_capability_lifecycle_decisions(
     request: Request,
