@@ -8,6 +8,26 @@
 
 **Tech Stack:** Python, FastAPI, SQLite state store, existing CoPaw `state / discovery / capabilities / industry / predictions / kernel / runtime_center`, pytest.
 
+## Reality Correction (`2026-04-05`)
+
+This priority plan is still valid, but it must now be read with a stricter runtime boundary:
+
+- Task 1-4 landing in code/read-model/tests does not by itself prove live donor-first closure
+- donor-first evolution is only "closed" when external discovery, external installability, and downstream use are all live-verified
+
+The live gaps that still block a truthful completion claim are:
+
+- autonomous scout still lacks a real default discovery executor
+- opportunity radar still lacks real default feeds
+- generic GitHub/open-source donor search is not yet on the runtime path
+- SkillHub/curated search still needs dead-bundle suppression before results can be trusted by default
+
+So this plan should be executed as:
+
+- keep the donor-first lifecycle/resolver/read-model work already landed
+- finish the live external supply-chain gaps
+- only then report full donor-first capability evolution closure
+
 ---
 
 ## Priority Rule

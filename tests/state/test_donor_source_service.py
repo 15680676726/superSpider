@@ -33,20 +33,22 @@ def test_donor_source_service_provides_default_regional_profiles(
         "primary",
         "mirror",
         "fallback",
+        "fallback",
     ]
     assert [item.chain_role for item in china_profile.sources] == [
         "primary",
         "mirror",
+        "fallback",
         "fallback",
     ]
     assert [item.chain_role for item in hybrid_profile.sources] == [
         "primary",
         "mirror",
         "fallback",
+        "fallback",
     ]
     assert [item.chain_role for item in offline_profile.sources] == [
         "primary",
-        "mirror",
         "fallback",
     ]
     assert global_profile.sources[0].source_id != china_profile.sources[0].source_id

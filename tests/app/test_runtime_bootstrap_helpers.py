@@ -24,11 +24,13 @@ from copaw.app import runtime_service_graph as runtime_service_graph_module
 from copaw.app.runtime_bootstrap_query import build_runtime_query_services
 from copaw.app.runtime_service_graph import (
     _build_kernel_runtime,
+    _execute_runtime_discovery_action,
     _resolve_state_store,
     _warm_runtime_memory_services,
     _resolve_default_memory_recall_backend,
 )
 from copaw.memory.models import MemoryBackendKind
+from copaw.discovery.models import DiscoveryActionRequest, DiscoverySourceSpec
 from copaw.state import SQLiteStateStore
 from copaw.state.models_memory import MemoryRelationViewRecord
 
@@ -266,6 +268,49 @@ def test_build_runtime_query_services_attaches_capability_candidate_service() ->
     )
 
     assert bootstrap[0]._capability_candidate_service is candidate_service
+
+
+def test_runtime_discovery_executor_dispatches_provider_hits(monkeypatch) -> None:
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "_search_github_repository_donors",
+        lambda query, limit=20: [
+            runtime_service_graph_module.DiscoveryHit(
+                source_id="global-github",
+                source_kind="github-repo",
+                source_alias="global-github",
+                candidate_kind="project",
+                display_name="acme/browser-pilot",
+                summary=f"query={query} limit={limit}",
+                candidate_source_ref="https://github.com/acme/browser-pilot",
+                candidate_source_version="main",
+                candidate_source_lineage="donor:github:acme/browser-pilot",
+                canonical_package_id="pkg:github:acme/browser-pilot",
+                capability_keys=("browser", "automation"),
+            ),
+        ],
+        raising=False,
+    )
+    source = DiscoverySourceSpec(
+        source_id="global-github",
+        chain_role="primary",
+        source_kind="catalog",
+        display_name="GitHub",
+        endpoint="https://api.github.com/search/repositories",
+        metadata={"provider": "github-repo"},
+    )
+
+    hits = _execute_runtime_discovery_action(
+        source,
+        DiscoveryActionRequest(
+            action_id="discover-1",
+            query="browser automation github",
+            limit=5,
+        ),
+    )
+
+    assert len(hits) == 1
+    assert hits[0].canonical_package_id == "pkg:github:acme/browser-pilot"
 
 
 def test_attach_runtime_state_binds_capability_candidate_service() -> None:

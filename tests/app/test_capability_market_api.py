@@ -1168,19 +1168,25 @@ def test_capability_market_curated_catalog_exposes_allowlisted_sources() -> None
 
 def test_search_curated_skill_catalog_uses_skillhub_dynamic_source() -> None:
     clear_curated_skill_catalog_cache()
-    with patch(
-        "copaw.capabilities.remote_skill_catalog.search_skillhub_skills",
-        return_value=[
-            SimpleNamespace(
-                slug="research-pack",
-                name="Research Pack",
-                description="Collect research signals and summarize findings.",
-                version="1.0.0",
-                source_url="https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/research-pack.zip",
-                source_label="SkillHub 商店",
-                score=9.7,
-            ),
-        ],
+    with (
+        patch(
+            "copaw.capabilities.remote_skill_catalog.search_skillhub_skills",
+            return_value=[
+                SimpleNamespace(
+                    slug="research-pack",
+                    name="Research Pack",
+                    description="Collect research signals and summarize findings.",
+                    version="1.0.0",
+                    source_url="https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/research-pack.zip",
+                    source_label="SkillHub 商店",
+                    score=9.7,
+                ),
+            ],
+        ),
+        patch(
+            "copaw.capabilities.remote_skill_catalog.skillhub_bundle_is_installable",
+            return_value=True,
+        ),
     ):
         payload = search_curated_skill_catalog("salesforce", limit=8)
 
@@ -1194,6 +1200,7 @@ def test_search_curated_skill_catalog_uses_skillhub_dynamic_source() -> None:
 
 def test_search_curated_skill_catalog_aggregates_skillhub_featured_sources() -> None:
     clear_curated_skill_catalog_cache()
+
     def _fake_search(query: str, limit: int = 20):
         _ = limit
         mapping = {
@@ -1222,15 +1229,27 @@ def test_search_curated_skill_catalog_aggregates_skillhub_featured_sources() -> 
         }
         return mapping.get(query, [])
 
-    with patch(
-        "copaw.capabilities.remote_skill_catalog.search_skillhub_skills",
-        side_effect=_fake_search,
+    with (
+        patch(
+            "copaw.capabilities.remote_skill_catalog.search_skillhub_skills",
+            side_effect=_fake_search,
+        ),
+        patch(
+            "copaw.capabilities.remote_skill_catalog.skillhub_bundle_is_installable",
+            return_value=True,
+        ),
     ):
         payload = search_curated_skill_catalog("excel", limit=8)
 
-    with patch(
-        "copaw.capabilities.remote_skill_catalog.search_skillhub_skills",
-        side_effect=_fake_search,
+    with (
+        patch(
+            "copaw.capabilities.remote_skill_catalog.search_skillhub_skills",
+            side_effect=_fake_search,
+        ),
+        patch(
+            "copaw.capabilities.remote_skill_catalog.skillhub_bundle_is_installable",
+            return_value=True,
+        ),
     ):
         featured_payload = search_curated_skill_catalog("", limit=8)
 

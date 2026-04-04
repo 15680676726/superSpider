@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from typing import Any
 
@@ -38,120 +39,183 @@ def _string(value: object | None) -> str | None:
 
 
 _DISCOVERY_PROFILE_TYPE = "discovery-source"
-_DEFAULT_DISCOVERY_SOURCE_PROFILES: dict[str, tuple[DiscoverySourceSpec, ...]] = {
-    "global": (
-        DiscoverySourceSpec(
-            source_id="global-github",
-            chain_role="primary",
-            source_kind="catalog",
-            display_name="GitHub",
-            endpoint="https://github.com",
-            trust_posture="trusted",
-            priority=0,
+
+
+def _env_url(name: str, default: str) -> str:
+    return os.environ.get(name, "").strip() or default
+
+
+def _default_discovery_source_profiles() -> dict[str, tuple[DiscoverySourceSpec, ...]]:
+    github_endpoint = _env_url(
+        "COPAW_DISCOVERY_GITHUB_SEARCH_URL",
+        "https://api.github.com/search/repositories",
+    )
+    skillhub_endpoint = _env_url(
+        "COPAW_DISCOVERY_SKILLHUB_SEARCH_URL",
+        "https://lightmake.site/api/v1/search",
+    )
+    mcp_registry_endpoint = _env_url(
+        "COPAW_DISCOVERY_MCP_REGISTRY_URL",
+        "https://registry.modelcontextprotocol.io",
+    )
+    china_github_endpoint = _env_url(
+        "COPAW_DISCOVERY_CHINA_GITHUB_SEARCH_URL",
+        github_endpoint,
+    )
+    china_skillhub_endpoint = _env_url(
+        "COPAW_DISCOVERY_CHINA_SKILLHUB_SEARCH_URL",
+        skillhub_endpoint,
+    )
+    china_mcp_endpoint = _env_url(
+        "COPAW_DISCOVERY_CHINA_MCP_REGISTRY_URL",
+        mcp_registry_endpoint,
+    )
+    return {
+        "global": (
+            DiscoverySourceSpec(
+                source_id="global-skillhub",
+                chain_role="primary",
+                source_kind="catalog",
+                display_name="SkillHub",
+                endpoint=skillhub_endpoint,
+                trust_posture="trusted",
+                priority=0,
+                metadata={"provider": "skillhub-catalog"},
+            ),
+            DiscoverySourceSpec(
+                source_id="global-github",
+                chain_role="mirror",
+                source_kind="catalog",
+                display_name="GitHub",
+                endpoint=github_endpoint,
+                trust_posture="trusted",
+                priority=1,
+                metadata={"provider": "github-repo"},
+            ),
+            DiscoverySourceSpec(
+                source_id="global-mcp-registry",
+                chain_role="fallback",
+                source_kind="catalog",
+                display_name="Official MCP Registry",
+                endpoint=mcp_registry_endpoint,
+                trust_posture="trusted",
+                priority=2,
+                metadata={"provider": "mcp-registry"},
+            ),
+            DiscoverySourceSpec(
+                source_id="global-snapshot",
+                chain_role="fallback",
+                source_kind="snapshot",
+                display_name="Last Known Good Snapshot",
+                trust_posture="local",
+                priority=3,
+                metadata={"provider": "snapshot"},
+            ),
         ),
-        DiscoverySourceSpec(
-            source_id="global-mirror",
-            chain_role="mirror",
-            source_kind="catalog",
-            display_name="Registry Mirror",
-            endpoint="https://mirror.example.invalid",
-            trust_posture="watchlist",
-            priority=1,
+        "china-mainland": (
+            DiscoverySourceSpec(
+                source_id="china-skillhub",
+                chain_role="primary",
+                source_kind="catalog",
+                display_name="SkillHub",
+                endpoint=china_skillhub_endpoint,
+                trust_posture="trusted",
+                priority=0,
+                metadata={"provider": "skillhub-catalog"},
+            ),
+            DiscoverySourceSpec(
+                source_id="china-github",
+                chain_role="mirror",
+                source_kind="catalog",
+                display_name="GitHub",
+                endpoint=china_github_endpoint,
+                trust_posture="watchlist",
+                priority=1,
+                metadata={"provider": "github-repo"},
+            ),
+            DiscoverySourceSpec(
+                source_id="china-mcp-registry",
+                chain_role="fallback",
+                source_kind="catalog",
+                display_name="Official MCP Registry",
+                endpoint=china_mcp_endpoint,
+                trust_posture="trusted",
+                priority=2,
+                metadata={"provider": "mcp-registry"},
+            ),
+            DiscoverySourceSpec(
+                source_id="china-snapshot",
+                chain_role="fallback",
+                source_kind="snapshot",
+                display_name="Regional Snapshot",
+                trust_posture="local",
+                priority=3,
+                metadata={"provider": "snapshot"},
+            ),
         ),
-        DiscoverySourceSpec(
-            source_id="global-snapshot",
-            chain_role="fallback",
-            source_kind="snapshot",
-            display_name="Last Known Good Snapshot",
-            trust_posture="local",
-            priority=2,
+        "hybrid": (
+            DiscoverySourceSpec(
+                source_id="hybrid-github",
+                chain_role="primary",
+                source_kind="catalog",
+                display_name="GitHub",
+                endpoint=github_endpoint,
+                trust_posture="trusted",
+                priority=0,
+                metadata={"provider": "github-repo"},
+            ),
+            DiscoverySourceSpec(
+                source_id="hybrid-skillhub",
+                chain_role="mirror",
+                source_kind="catalog",
+                display_name="SkillHub",
+                endpoint=skillhub_endpoint,
+                trust_posture="trusted",
+                priority=1,
+                metadata={"provider": "skillhub-catalog"},
+            ),
+            DiscoverySourceSpec(
+                source_id="hybrid-mcp-registry",
+                chain_role="fallback",
+                source_kind="catalog",
+                display_name="Official MCP Registry",
+                endpoint=mcp_registry_endpoint,
+                trust_posture="watchlist",
+                priority=2,
+                metadata={"provider": "mcp-registry"},
+            ),
+            DiscoverySourceSpec(
+                source_id="hybrid-snapshot",
+                chain_role="fallback",
+                source_kind="snapshot",
+                display_name="Hybrid Snapshot",
+                trust_posture="local",
+                priority=3,
+                metadata={"provider": "snapshot"},
+            ),
         ),
-    ),
-    "china-mainland": (
-        DiscoverySourceSpec(
-            source_id="china-mirror",
-            chain_role="primary",
-            source_kind="catalog",
-            display_name="Domestic Mirror",
-            endpoint="https://mirror.cn.example.invalid",
-            trust_posture="trusted",
-            priority=0,
+        "offline-private": (
+            DiscoverySourceSpec(
+                source_id="offline-cache",
+                chain_role="primary",
+                source_kind="catalog",
+                display_name="Offline Cache",
+                endpoint="file://cache",
+                trust_posture="local",
+                priority=0,
+                metadata={"provider": "offline-cache"},
+            ),
+            DiscoverySourceSpec(
+                source_id="offline-snapshot",
+                chain_role="fallback",
+                source_kind="snapshot",
+                display_name="Offline Snapshot",
+                trust_posture="local",
+                priority=1,
+                metadata={"provider": "snapshot"},
+            ),
         ),
-        DiscoverySourceSpec(
-            source_id="china-private",
-            chain_role="mirror",
-            source_kind="catalog",
-            display_name="Internal Registry",
-            endpoint="https://registry.infra.invalid",
-            trust_posture="trusted",
-            priority=1,
-        ),
-        DiscoverySourceSpec(
-            source_id="china-snapshot",
-            chain_role="fallback",
-            source_kind="snapshot",
-            display_name="Regional Snapshot",
-            trust_posture="local",
-            priority=2,
-        ),
-    ),
-    "hybrid": (
-        DiscoverySourceSpec(
-            source_id="hybrid-private",
-            chain_role="primary",
-            source_kind="catalog",
-            display_name="Private Registry",
-            endpoint="https://registry.hybrid.invalid",
-            trust_posture="trusted",
-            priority=0,
-        ),
-        DiscoverySourceSpec(
-            source_id="hybrid-github",
-            chain_role="mirror",
-            source_kind="catalog",
-            display_name="GitHub",
-            endpoint="https://github.com",
-            trust_posture="watchlist",
-            priority=1,
-        ),
-        DiscoverySourceSpec(
-            source_id="hybrid-snapshot",
-            chain_role="fallback",
-            source_kind="snapshot",
-            display_name="Hybrid Snapshot",
-            trust_posture="local",
-            priority=2,
-        ),
-    ),
-    "offline-private": (
-        DiscoverySourceSpec(
-            source_id="offline-registry",
-            chain_role="primary",
-            source_kind="catalog",
-            display_name="Offline Registry",
-            endpoint="file://registry",
-            trust_posture="trusted",
-            priority=0,
-        ),
-        DiscoverySourceSpec(
-            source_id="offline-cache",
-            chain_role="mirror",
-            source_kind="catalog",
-            display_name="Offline Cache",
-            endpoint="file://cache",
-            trust_posture="local",
-            priority=1,
-        ),
-        DiscoverySourceSpec(
-            source_id="offline-snapshot",
-            chain_role="fallback",
-            source_kind="snapshot",
-            display_name="Offline Snapshot",
-            trust_posture="local",
-            priority=2,
-        ),
-    ),
-}
+    }
 
 
 def _source_key(profile_name: str, source_id: str) -> str:
@@ -165,7 +229,7 @@ class DonorSourceService:
         self._ensure_default_profiles()
 
     def list_profile_names(self) -> list[str]:
-        return sorted(_DEFAULT_DISCOVERY_SOURCE_PROFILES.keys())
+        return sorted(_default_discovery_source_profiles().keys())
 
     def resolve_source_profile(self, profile_name: str) -> DiscoverySourceProfile:
         self._ensure_default_profiles()
@@ -184,6 +248,32 @@ class DonorSourceService:
             profile_name=normalized_name,
             display_name=normalized_name,
             sources=sources,
+        )
+
+    def resolve_source_profile_for_request(
+        self,
+        profile_name: str,
+        request: object | None,
+    ) -> DiscoverySourceProfile:
+        profile = self.resolve_source_profile(profile_name)
+        preferred_providers = self._preferred_provider_order(request)
+        if not preferred_providers:
+            return profile
+        ranking = {provider: index for index, provider in enumerate(preferred_providers)}
+        ordered = tuple(
+            sorted(
+                profile.sources,
+                key=lambda item: (
+                    ranking.get(_string(item.metadata.get("provider")) or "", len(ranking) + item.priority),
+                    item.priority,
+                ),
+            ),
+        )
+        return DiscoverySourceProfile(
+            profile_name=profile.profile_name,
+            display_name=profile.display_name,
+            sources=ordered,
+            metadata=dict(profile.metadata),
         )
 
     def record_source_success(
@@ -225,6 +315,22 @@ class DonorSourceService:
         metadata["last_failure_at"] = _utc_now().isoformat()
         self._write_source_profile(record.model_copy(update={"metadata": metadata}))
 
+    def record_source_empty(
+        self,
+        *,
+        profile_name: str,
+        source_id: str,
+    ) -> None:
+        record = self._get_profile_record(profile_name=profile_name, source_id=source_id)
+        if record is None:
+            return
+        metadata = dict(record.metadata or {})
+        metadata["last_status"] = "empty"
+        metadata["last_error"] = None
+        metadata["empty_count"] = int(metadata.get("empty_count") or 0) + 1
+        metadata["last_empty_at"] = _utc_now().isoformat()
+        self._write_source_profile(record.model_copy(update={"metadata": metadata}))
+
     def get_source_health(
         self,
         *,
@@ -238,8 +344,10 @@ class DonorSourceService:
             "last_error": _string(metadata.get("last_error")),
             "success_count": int(metadata.get("success_count") or 0),
             "failure_count": int(metadata.get("failure_count") or 0),
+            "empty_count": int(metadata.get("empty_count") or 0),
             "last_success_at": _string(metadata.get("last_success_at")),
             "last_failure_at": _string(metadata.get("last_failure_at")),
+            "last_empty_at": _string(metadata.get("last_empty_at")),
             "last_known_good_at": _string(metadata.get("last_known_good_at")),
         }
 
@@ -272,7 +380,7 @@ class DonorSourceService:
         )
 
     def _ensure_default_profiles(self) -> None:
-        for profile_name, sources in _DEFAULT_DISCOVERY_SOURCE_PROFILES.items():
+        for profile_name, sources in _default_discovery_source_profiles().items():
             for source in sources:
                 record = self._get_profile_record(
                     profile_name=profile_name,
@@ -315,6 +423,32 @@ class DonorSourceService:
                         },
                     ),
                 )
+
+    def _preferred_provider_order(
+        self,
+        request: object | None,
+    ) -> tuple[str, ...]:
+        query = _string(getattr(request, "query", None)) or ""
+        query_lower = query.lower()
+        metadata = getattr(request, "metadata", None)
+        preferred_provider = (
+            _string(metadata.get("preferred_provider"))
+            if isinstance(metadata, dict)
+            else None
+        )
+        if preferred_provider:
+            normalized = preferred_provider.lower()
+            return (normalized, "skillhub-catalog", "github-repo", "mcp-registry")
+        if any(keyword in query_lower for keyword in ("mcp", "registry", "modelcontextprotocol")):
+            return ("mcp-registry", "github-repo", "skillhub-catalog", "snapshot")
+        if any(
+            keyword in query_lower
+            for keyword in ("github", "repo", "repository", "open source", "opensource", "project", "release")
+        ):
+            return ("github-repo", "skillhub-catalog", "mcp-registry", "snapshot")
+        if any(keyword in query_lower for keyword in ("curated", "skill", "automation", "browser")):
+            return ("skillhub-catalog", "github-repo", "mcp-registry", "snapshot")
+        return ("skillhub-catalog", "github-repo", "mcp-registry", "snapshot")
 
     def _list_profile_rows(self, profile_name: str):
         with self._state_store.connection() as conn:

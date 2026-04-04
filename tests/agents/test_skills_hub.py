@@ -28,6 +28,11 @@ def test_search_hub_skills_prefers_skillhub_results(monkeypatch) -> None:
             AssertionError("legacy search should not run when SkillHub has results")
         ),
     )
+    monkeypatch.setattr(
+        skills_hub_module,
+        "_skillhub_bundle_is_installable",
+        lambda _url: True,
+    )
 
     results = skills_hub_module.search_hub_skills("sku", limit=5)
 
@@ -55,6 +60,43 @@ def test_search_hub_skills_returns_empty_when_skillhub_empty(
     results = skills_hub_module.search_hub_skills("legacy", limit=5)
 
     assert results == []
+
+
+def test_search_hub_skills_suppresses_non_installable_skillhub_results(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        skills_hub_module,
+        "search_skillhub_skills",
+        lambda query, limit=20: [
+            SimpleNamespace(
+                slug="broken-browser",
+                name="Broken Browser",
+                description="bad bundle",
+                version="0.0.1",
+                source_url="https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/broken-browser.zip",
+                source_label="SkillHub 鍟嗗簵",
+            ),
+            SimpleNamespace(
+                slug="agent-browser",
+                name="Agent Browser",
+                description="good bundle",
+                version="0.2.0",
+                source_url="https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/agent-browser.zip",
+                source_label="SkillHub 鍟嗗簵",
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        skills_hub_module,
+        "_skillhub_bundle_is_installable",
+        lambda url: not str(url).endswith("broken-browser.zip"),
+        raising=False,
+    )
+
+    results = skills_hub_module.search_hub_skills("browser", limit=5)
+
+    assert [item.slug for item in results] == ["agent-browser"]
 
 
 def test_install_skill_from_hub_supports_skillhub_zip(monkeypatch) -> None:

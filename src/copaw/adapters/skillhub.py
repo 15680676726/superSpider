@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import time
 import zipfile
 from dataclasses import dataclass
 from typing import Any
@@ -19,6 +20,8 @@ _DEFAULT_DOWNLOAD_URL_TEMPLATE = (
     "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/{slug}.zip"
 )
 _DEFAULT_TIMEOUT_SECONDS = 15.0
+_BUNDLE_VALIDATION_CACHE_TTL_SECONDS = 600.0
+_BUNDLE_VALIDATION_CACHE: dict[str, tuple[float, bool]] = {}
 
 
 @dataclass
@@ -199,6 +202,24 @@ def bundle_url_to_skillhub_slug(url: str) -> str:
 def load_skillhub_bundle_from_url(bundle_url: str) -> tuple[dict[str, Any], str]:
     payload = _bundle_payload_from_zip_bytes(_http_bytes_get(bundle_url))
     return payload, bundle_url
+
+
+def skillhub_bundle_is_installable(bundle_url: str) -> bool:
+    normalized_url = str(bundle_url or "").strip()
+    if not normalized_url:
+        return False
+    cached = _BUNDLE_VALIDATION_CACHE.get(normalized_url)
+    now = time.time()
+    if cached is not None and (now - cached[0]) <= _BUNDLE_VALIDATION_CACHE_TTL_SECONDS:
+        return bool(cached[1])
+    try:
+        load_skillhub_bundle_from_url(normalized_url)
+    except Exception as exc:  # pragma: no cover - network/runtime variability
+        logger.warning("SkillHub bundle validation failed for %s: %s", normalized_url, exc)
+        _BUNDLE_VALIDATION_CACHE[normalized_url] = (now, False)
+        return False
+    _BUNDLE_VALIDATION_CACHE[normalized_url] = (now, True)
+    return True
 
 
 def _normalize_zip_files(file_map: dict[str, str]) -> dict[str, str]:

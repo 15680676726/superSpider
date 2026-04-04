@@ -37,9 +37,14 @@ def execute_discovery_action(
     source_service: object,
     executor: Callable[[DiscoverySourceSpec, DiscoveryActionRequest], Iterable[DiscoveryHit]],
 ) -> DiscoverySourceChainResult:
-    profile = getattr(source_service, "resolve_source_profile")(request.source_profile)
+    resolver = getattr(source_service, "resolve_source_profile_for_request", None)
+    if callable(resolver):
+        profile = resolver(request.source_profile, request)
+    else:
+        profile = getattr(source_service, "resolve_source_profile")(request.source_profile)
     attempts: list[DiscoverySourceAttempt] = []
     last_error: str | None = None
+    saw_empty = False
 
     for source in profile.sources:
         try:
@@ -59,6 +64,23 @@ def execute_discovery_action(
                     chain_role=source.chain_role,
                     status="failed",
                     error=last_error,
+                ),
+            )
+            continue
+
+        if not raw_hits:
+            saw_empty = True
+            record_empty = getattr(source_service, "record_source_empty", None)
+            if callable(record_empty):
+                record_empty(
+                    profile_name=profile.profile_name,
+                    source_id=source.source_id,
+                )
+            attempts.append(
+                DiscoverySourceAttempt(
+                    source_id=source.source_id,
+                    chain_role=source.chain_role,
+                    status="empty",
                 ),
             )
             continue
@@ -96,7 +118,7 @@ def execute_discovery_action(
     return DiscoverySourceChainResult(
         action_id=request.action_id,
         source_profile=profile.profile_name,
-        status="degraded",
+        status="degraded" if snapshot is not None or last_error is not None else "empty" if saw_empty else "degraded",
         active_source_id=getattr(snapshot, "source_id", None),
         discovery_hits=tuple(getattr(snapshot, "discovery_hits", ()) or ()),
         attempts=tuple(attempts),

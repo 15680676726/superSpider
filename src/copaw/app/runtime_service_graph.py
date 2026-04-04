@@ -36,6 +36,14 @@ from ..memory import (
 from ..discovery.scout_service import DonorScoutService
 from ..discovery.opportunity_radar import OpportunityRadarService
 from ..discovery.models import DiscoveryActionRequest, DiscoveryHit
+from ..discovery.provider_search import (
+    github_opportunity_radar_items as _github_opportunity_radar_items,
+    mcp_registry_opportunity_radar_items as _mcp_registry_opportunity_radar_items,
+    search_curated_discovery_hits as _search_curated_discovery_hits,
+    search_github_repository_donors as _search_github_repository_donors,
+    search_mcp_registry_discovery_hits as _search_mcp_registry_discovery_hits,
+    search_skillhub_discovery_hits as _search_skillhub_discovery_hits,
+)
 from ..predictions import PredictionService
 from ..providers.provider_admin_service import (
     ProviderAdminService,
@@ -185,10 +193,47 @@ def _resolve_runtime_provider_facade(
 
 
 def _execute_runtime_discovery_action(
-    _source: object,
-    _request: DiscoveryActionRequest,
+    source: object,
+    request: DiscoveryActionRequest,
 ) -> list[DiscoveryHit]:
+    source_metadata = getattr(source, "metadata", None)
+    provider = ""
+    if isinstance(source_metadata, dict):
+        provider = str(source_metadata.get("provider") or "").strip().lower()
+    limit = max(1, int(getattr(request, "limit", 20) or 20))
+    query = str(getattr(request, "query", "") or "").strip()
+    if provider == "github-repo":
+        return _search_github_repository_donors(query, limit=limit)
+    if provider == "skillhub-catalog":
+        return _search_skillhub_discovery_hits(query, limit=limit)
+    if provider == "skillhub-curated":
+        return _search_curated_discovery_hits(query, limit=limit)
+    if provider == "mcp-registry":
+        return _search_mcp_registry_discovery_hits(query, limit=limit)
     return []
+
+
+def _build_runtime_opportunity_radar_feeds() -> dict[str, object]:
+    github_queries = (
+        "browser automation github",
+        "workflow automation github",
+        "research assistant github",
+    )
+    mcp_queries = (
+        "filesystem mcp",
+        "browser mcp",
+        "search mcp",
+    )
+    return {
+        "github-trending": lambda: _github_opportunity_radar_items(
+            github_queries,
+            per_query_limit=2,
+        ),
+        "mcp-registry": lambda: _mcp_registry_opportunity_radar_items(
+            mcp_queries,
+            per_query_limit=2,
+        ),
+    }
 
 
 def _build_runtime_observability(
@@ -385,7 +430,7 @@ def build_runtime_bootstrap(
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
     )
     opportunity_radar_service = OpportunityRadarService(
-        feeds={},
+        feeds=_build_runtime_opportunity_radar_feeds(),
     )
     donor_scout_service = DonorScoutService(
         source_service=donor_source_service,

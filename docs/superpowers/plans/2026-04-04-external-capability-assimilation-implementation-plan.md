@@ -8,6 +8,31 @@
 
 **Tech Stack:** Python, FastAPI, SQLite state store, existing `src/copaw/state`, `src/copaw/predictions`, `src/copaw/capabilities`, `src/copaw/app/runtime_center`, pytest
 
+## Reality Correction (`2026-04-05`)
+
+This plan's code-structure wave has largely landed, but that does **not** mean live external donor closure was already complete.
+
+Current verified reality:
+
+- donor/package/source/trial/lifecycle truth is in the mainline codebase
+- Runtime Center donor/package/trust/scout read surfaces exist
+- capability-market can already search/install a subset of external supply paths
+- official MCP registry search -> install -> live connection has been proven
+
+Current still-real gaps:
+
+- runtime bootstrap discovery executor is still not wired to real external providers
+- opportunity radar has code and tests, but default runtime feeds are still empty
+- generic open-source / GitHub donor search is not yet a real product path
+- SkillHub / curated results still include dead bundles unless installability is checked
+- source-chain currently treats empty-hit execution as success, which overstates source health
+
+Therefore this plan must be read as:
+
+- the formal donor-first spine exists
+- the remaining work is to close the live discovery/installability gaps above
+- "code baseline landed" must not be reported as "real donor expansion fully closed"
+
 ## Execution Coupling Rule
 
 This plan must not be implemented as:

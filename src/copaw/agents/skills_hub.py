@@ -25,6 +25,8 @@ from ..adapters.skillhub import (
 from ..skill_service import SkillService
 
 logger = logging.getLogger(__name__)
+_SKILLHUB_INSTALLABILITY_CACHE_TTL_SECONDS = 600.0
+_SKILLHUB_INSTALLABILITY_CACHE: dict[str, tuple[float, bool]] = {}
 
 
 @dataclass
@@ -86,6 +88,24 @@ def _hub_http_backoff_cap() -> float:
         return max(0.5, float(raw))
     except Exception:
         return 6.0
+
+
+def _skillhub_bundle_is_installable(bundle_url: str) -> bool:
+    normalized_url = str(bundle_url or "").strip()
+    if not normalized_url:
+        return False
+    cached = _SKILLHUB_INSTALLABILITY_CACHE.get(normalized_url)
+    now = time.time()
+    if cached is not None and (now - cached[0]) <= _SKILLHUB_INSTALLABILITY_CACHE_TTL_SECONDS:
+        return bool(cached[1])
+    try:
+        load_skillhub_bundle_from_url(normalized_url)
+    except Exception as exc:  # pragma: no cover - network/runtime variability
+        logger.warning("SkillHub bundle validation failed for %s: %s", normalized_url, exc)
+        _SKILLHUB_INSTALLABILITY_CACHE[normalized_url] = (now, False)
+        return False
+    _SKILLHUB_INSTALLABILITY_CACHE[normalized_url] = (now, True)
+    return True
 
 
 def _compute_backoff_seconds(attempt: int) -> float:
@@ -1164,21 +1184,29 @@ def search_hub_skills(query: str, limit: int = 20) -> list[HubSkillResult]:
     if not normalized_query:
         return []
     try:
-        skillhub_results = search_skillhub_skills(normalized_query, limit=limit)
+        fetch_limit = max(int(limit), min(max(int(limit) * 3, int(limit)), 60))
+        skillhub_results = search_skillhub_skills(normalized_query, limit=fetch_limit)
     except Exception as exc:
         logger.warning("SkillHub search failed: %s", exc)
         return []
-    return [
-        HubSkillResult(
-            slug=item.slug,
-            name=item.name,
-            description=item.description,
-            version=item.version,
-            source_url=item.source_url,
-            source_label=item.source_label or skillhub_source_label(),
+    filtered_results: list[HubSkillResult] = []
+    for item in skillhub_results:
+        source_url = str(item.source_url or "").strip()
+        if not source_url or not _skillhub_bundle_is_installable(source_url):
+            continue
+        filtered_results.append(
+            HubSkillResult(
+                slug=item.slug,
+                name=item.name,
+                description=item.description,
+                version=item.version,
+                source_url=source_url,
+                source_label=item.source_label or skillhub_source_label(),
+            ),
         )
-        for item in skillhub_results
-    ]
+        if len(filtered_results) >= max(1, int(limit)):
+            break
+    return filtered_results
 
 
 # pylint: disable-next=too-many-branches

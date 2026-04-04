@@ -11,7 +11,11 @@ from urllib.parse import quote, unquote
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from ..adapters.skillhub import SkillHubSearchResult, search_skillhub_skills
+from ..adapters.skillhub import (
+    SkillHubSearchResult,
+    search_skillhub_skills,
+    skillhub_bundle_is_installable,
+)
 from .remote_skill_presentation import (
     present_remote_skill_name,
     present_remote_skill_source_label,
@@ -329,8 +333,21 @@ def _load_source_entries(
         )
         return [], warnings
 
-    entries = _entries_from_skillhub_results(source, results)
+    installable_results: list[SkillHubSearchResult] = []
+    suppressed_count = 0
+    for item in results:
+        bundle_url = str(item.source_url or "").strip()
+        if not bundle_url or not skillhub_bundle_is_installable(bundle_url):
+            suppressed_count += 1
+            continue
+        installable_results.append(item)
+
+    entries = _entries_from_skillhub_results(source, installable_results)
     warnings: list[str] = []
+    if suppressed_count > 0:
+        warnings.append(
+            f"{source.label} 已抑制 {suppressed_count} 个不可安装的 SkillHub bundle 结果。",
+        )
     _CATALOG_CACHE[cache_key] = (
         now + _CACHE_TTL,
         list(entries),

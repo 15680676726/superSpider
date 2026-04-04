@@ -110,11 +110,58 @@ def test_source_chain_degrades_to_snapshot_without_runtime_failure(
     assert result.used_snapshot is True
     assert result.active_source_id == profile.sources[1].source_id
     assert result.error_summary is not None
-    assert [attempt.status for attempt in result.attempts] == [
-        "failed",
-        "failed",
-        "failed",
-    ]
+    assert [attempt.status for attempt in result.attempts] == ["failed"] * len(profile.sources)
     assert [item.canonical_package_id for item in result.discovery_hits] == [
         "pkg:research-relay",
     ]
+
+
+def test_source_chain_treats_empty_hits_as_empty_and_retries_next_source(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path)
+    request = DiscoveryActionRequest(
+        action_id="discover-empty-then-hit",
+        query="browser automation donor",
+        source_profile="global",
+        discovery_mode="gap",
+    )
+    profile = service.resolve_source_profile("global")
+    calls: list[str] = []
+
+    def executor(source, _discovery_request):
+        calls.append(source.source_id)
+        if source.source_id == profile.sources[0].source_id:
+            return []
+        return [
+            DiscoveryHit(
+                source_id=source.source_id,
+                source_kind=source.source_kind,
+                source_alias=source.source_id,
+                candidate_kind="skill",
+                display_name="Browser Pilot",
+                summary="Mirror search result.",
+                candidate_source_ref="https://github.com/acme/browser-pilot",
+                candidate_source_version="2.0.0",
+                candidate_source_lineage="donor:browser-pilot",
+                canonical_package_id="pkg:browser-pilot",
+                capability_keys=("browser", "automation"),
+            ),
+        ]
+
+    result = execute_discovery_action(
+        request=request,
+        source_service=service,
+        executor=executor,
+    )
+
+    health = service.get_source_health(
+        profile_name="global",
+        source_id=profile.sources[0].source_id,
+    )
+
+    assert calls == [profile.sources[0].source_id, profile.sources[1].source_id]
+    assert [attempt.status for attempt in result.attempts] == ["empty", "succeeded"]
+    assert result.active_source_id == profile.sources[1].source_id
+    assert health["last_status"] == "empty"
+    assert health["success_count"] == 0
