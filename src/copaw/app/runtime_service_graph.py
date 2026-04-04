@@ -16,6 +16,7 @@ from ..kernel import (
     ActorWorker,
     AgentProfileService,
     BuddyOnboardingService,
+    BuddyProjectionService,
     GovernanceService,
     KernelDispatcher,
     MainBrainChatService,
@@ -366,6 +367,13 @@ def build_runtime_bootstrap(
         relationship_repository=SqliteCompanionRelationshipRepository(state_store),
         onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(state_store),
     )
+    buddy_projection_service = BuddyProjectionService(
+        profile_repository=SqliteHumanProfileRepository(state_store),
+        growth_target_repository=SqliteGrowthTargetRepository(state_store),
+        relationship_repository=SqliteCompanionRelationshipRepository(state_store),
+        onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(state_store),
+        human_assist_task_service=human_assist_task_service,
+    )
     donor_source_service = DonorSourceService(
         state_store=state_store,
     )
@@ -566,6 +574,7 @@ def build_runtime_bootstrap(
         runtime_provider=runtime_provider,
         provider_admin_service=provider_admin_service,
         buddy_onboarding_service=buddy_onboarding_service,
+        buddy_projection_service=buddy_projection_service,
         state_query_service=state_query_service,
         evidence_query_service=evidence_query_service,
         donor_source_service=donor_source_service,

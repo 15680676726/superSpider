@@ -95,6 +95,7 @@ def build_runtime_state_bindings(
         "runtime_health_service": bootstrap.runtime_health_service,
         "provider_admin_service": bootstrap.provider_admin_service,
         "buddy_onboarding_service": bootstrap.buddy_onboarding_service,
+        "buddy_projection_service": bootstrap.buddy_projection_service,
         "startup_recovery_summary": startup_recovery_summary,
         "latest_recovery_report": latest_recovery_report,
         "session_mount_repository": repositories.session_mount_repository,

@@ -6,6 +6,7 @@ from .actor_worker import ActorWorker
 from .agent_profile import AgentDailyReport, AgentProfile, AgentStatus, DEFAULT_AGENTS
 from .agent_profile_service import AgentProfileService
 from .buddy_onboarding_service import BuddyOnboardingService
+from .buddy_projection_service import BuddyProjectionService
 from .delegation_service import TaskDelegationService
 from .dispatcher import KernelDispatcher
 from .governance import GovernanceBatchResult, GovernanceService, GovernanceStatus
@@ -27,6 +28,7 @@ __all__ = [
     "AgentProfileService",
     "AgentStatus",
     "BuddyOnboardingService",
+    "BuddyProjectionService",
     "DEFAULT_AGENTS",
     "GovernanceBatchResult",
     "GovernanceService",

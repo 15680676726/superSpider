@@ -97,6 +97,17 @@ class SqliteHumanProfileRepository:
             ).fetchone()
         return _human_profile_from_row(row)
 
+    def get_latest_profile(self) -> HumanProfile | None:
+        with self._store.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM human_profiles
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+            ).fetchone()
+        return _human_profile_from_row(row)
+
     def upsert_profile(self, profile: HumanProfile) -> HumanProfile:
         payload = profile.model_dump(mode="json")
         payload["interests_json"] = _encode_json(profile.interests)
@@ -243,6 +254,22 @@ class SqliteBuddyOnboardingSessionRepository:
             row = conn.execute(
                 "SELECT * FROM buddy_onboarding_sessions WHERE session_id = ?",
                 (session_id,),
+            ).fetchone()
+        return _session_from_row(row)
+
+    def get_latest_session_for_profile(
+        self,
+        profile_id: str,
+    ) -> BuddyOnboardingSessionRecord | None:
+        with self._store.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM buddy_onboarding_sessions
+                WHERE profile_id = ?
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (profile_id,),
             ).fetchone()
         return _session_from_row(row)
 

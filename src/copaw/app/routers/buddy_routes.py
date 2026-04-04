@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ...kernel.buddy_onboarding_service import BuddyOnboardingService
+from ...kernel.buddy_projection_service import BuddyProjectionService
 
 router = APIRouter(prefix="/buddy", tags=["buddy"])
 
@@ -40,6 +41,13 @@ def _get_buddy_onboarding_service(request: Request) -> BuddyOnboardingService:
     if isinstance(service, BuddyOnboardingService):
         return service
     raise HTTPException(503, detail="Buddy onboarding service is not available")
+
+
+def _get_buddy_projection_service(request: Request) -> BuddyProjectionService:
+    service = getattr(request.app.state, "buddy_projection_service", None)
+    if isinstance(service, BuddyProjectionService):
+        return service
+    raise HTTPException(503, detail="Buddy projection service is not available")
 
 
 @router.post("/onboarding/identity")
@@ -109,6 +117,19 @@ async def name_buddy(
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     return relationship.model_dump(mode="json")
+
+
+@router.get("/surface")
+async def get_buddy_surface(
+    request: Request,
+    profile_id: str | None = None,
+) -> dict[str, object]:
+    service = _get_buddy_projection_service(request)
+    try:
+        surface = service.build_chat_surface(profile_id=profile_id)
+    except ValueError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    return surface.model_dump(mode="json")
 
 
 __all__ = ["router"]
