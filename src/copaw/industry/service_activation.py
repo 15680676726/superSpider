@@ -4,6 +4,9 @@ from __future__ import annotations
 from .service_context import *  # noqa: F401,F403
 from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
+from ..capabilities.lifecycle_assignment import (
+    build_capability_lifecycle_assignment_payload,
+)
 from ..kernel.governed_mutation_dispatch import dispatch_governed_mutation_runtime
 
 
@@ -1113,8 +1116,10 @@ class _IndustryActivationMixin:
         update_mcp_client = (
             None if governed_mode else self._resolve_system_executor("system:update_mcp_client")
         )
-        apply_role = (
-            None if governed_mode else self._resolve_system_executor("system:apply_role")
+        apply_capability_lifecycle = (
+            None
+            if governed_mode
+            else self._resolve_system_executor("system:apply_capability_lifecycle")
         )
         set_capability_enabled = (
             None if governed_mode else self._resolve_system_executor("system:set_capability_enabled")
@@ -1136,9 +1141,9 @@ class _IndustryActivationMixin:
         if requires_hub_install and install_hub_skill is None:
             if not governed_mode:
                 raise ValueError("Skill hub install executor is not available.")
-        if apply_role is None:
+        if apply_capability_lifecycle is None:
             if not governed_mode:
-                raise ValueError("Capability assignment executor is not available.")
+                raise ValueError("Capability lifecycle executor is not available.")
 
         recommendation_by_id = {
             item.recommendation_id: item
@@ -1197,7 +1202,7 @@ class _IndustryActivationMixin:
             executor = {
                 "system:create_mcp_client": create_mcp_client,
                 "system:update_mcp_client": update_mcp_client,
-                "system:apply_role": apply_role,
+                "system:apply_capability_lifecycle": apply_capability_lifecycle,
                 "system:set_capability_enabled": set_capability_enabled,
                 "system:install_hub_skill": install_hub_skill,
             }.get(capability_ref)
@@ -1986,16 +1991,18 @@ class _IndustryActivationMixin:
 
             assignment_results: list[IndustryBootstrapInstallAssignmentResult] = []
             for agent_id in target_agent_ids:
+                lifecycle_payload = build_capability_lifecycle_assignment_payload(
+                    agent_profile_service=self._agent_profile_service,
+                    target_agent_id=agent_id,
+                    capability_ids=capability_ids,
+                    capability_assignment_mode=item.capability_assignment_mode,
+                    reason=f"Industry bootstrap install plan: {item.template_id}",
+                    actor=governed_actor,
+                )
                 assignment_response = await execute_system_mutation(
-                    "system:apply_role",
+                    "system:apply_capability_lifecycle",
                     title=f"Assign installed capabilities to {agent_id}",
-                    payload={
-                        "agent_id": agent_id,
-                        "capabilities": capability_ids,
-                        "capability_assignment_mode": item.capability_assignment_mode,
-                        "reason": f"Industry bootstrap install plan: {item.template_id}",
-                        "actor": governed_actor,
-                    },
+                    payload=lifecycle_payload,
                 )
                 assignment_success = bool(assignment_response.get("success"))
                 assignment_detail = str(

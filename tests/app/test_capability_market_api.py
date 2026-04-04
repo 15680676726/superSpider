@@ -12,6 +12,7 @@ from copaw.app.runtime_center.overview_cards import _RuntimeCenterOverviewCardsS
 from copaw.app.runtime_center.state_query import RuntimeCenterStateQueryService
 from copaw.app.routers.capability_market import (
     CapabilityMarketCapabilityAssignmentResult,
+    _assign_capabilities_to_agents,
     router as capability_market_router,
 )
 from copaw.capabilities import CapabilityMount, CapabilityService, CapabilitySummary
@@ -536,6 +537,56 @@ def build_runtime_app(tmp_path) -> FastAPI:
     app.state.runtime_event_bus = runtime_event_bus
     app.state.mcp_registry_catalog = FakeMcpRegistryCatalog()
     return app
+
+
+def test_capability_market_assignment_uses_lifecycle_contract_for_replace_mode() -> None:
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(agent_profile_service=_GovernedAgentProfileService()),
+        ),
+    )
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def _fake_dispatch(
+        _request,
+        *,
+        capability_ref: str,
+        title: str,
+        payload: dict[str, object],
+        fallback_risk: str,
+    ) -> dict[str, object]:
+        _ = (title, fallback_risk)
+        captured.append((capability_ref, dict(payload)))
+        return {"success": True, "summary": "Lifecycle assignment applied."}
+
+    with patch(
+        "copaw.app.routers.capability_market._dispatch_market_mutation",
+        side_effect=_fake_dispatch,
+    ):
+        results = asyncio.run(
+            _assign_capabilities_to_agents(
+                request,
+                template_id="desktop-windows",
+                actor="copaw-operator",
+                target_agent_ids=["agent-seat"],
+                capability_ids=["mcp:desktop_windows"],
+                capability_assignment_mode="replace",
+            ),
+        )
+
+    assert len(results) == 1
+    assert results[0].agent_id == "agent-seat"
+    assert captured[0][0] == "system:apply_capability_lifecycle"
+    payload = captured[0][1]
+    assert payload["decision_kind"] == "replace_existing"
+    assert payload["target_agent_id"] == "agent-seat"
+    assert payload["target_capability_ids"] == ["mcp:desktop_windows"]
+    assert payload["selected_scope"] == "agent"
+    assert payload["target_role_id"] == "support-seat"
+    assert payload["selected_seat_ref"] is None
+    assert "mcp:browser-temp" not in payload["replacement_target_ids"]
+    assert "skill:crm-seat-playbook" in payload["replacement_target_ids"]
+    assert "mcp:campaign-dashboard" in payload["replacement_target_ids"]
 
 
 def _fake_tool_response(payload: str):

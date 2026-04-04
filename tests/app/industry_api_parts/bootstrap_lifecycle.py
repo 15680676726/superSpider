@@ -798,7 +798,7 @@ def test_industry_auto_gap_closure_uses_governed_kernel_tasks_for_mcp_install(
         task_type="system:create_mcp_client",
     )
     assignment_tasks = app.state.task_repository.list_tasks(
-        task_type="system:apply_role",
+        task_type="system:apply_capability_lifecycle",
     )
     assert install_tasks
     assert assignment_tasks

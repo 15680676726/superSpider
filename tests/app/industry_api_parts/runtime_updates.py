@@ -989,7 +989,7 @@ def test_industry_chat_writeback_auto_closes_temporary_seat_desktop_gap_via_gove
         task_type="system:create_mcp_client",
     )
     assignment_tasks = app.state.task_repository.list_tasks(
-        task_type="system:apply_role",
+        task_type="system:apply_capability_lifecycle",
     )
     assert install_tasks
     assert assignment_tasks

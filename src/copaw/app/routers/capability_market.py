@@ -36,6 +36,9 @@ from ...capabilities.install_templates import (
     normalize_install_template_config,
     run_install_template_example,
 )
+from ...capabilities.lifecycle_assignment import (
+    build_capability_lifecycle_assignment_payload,
+)
 from ...capabilities.remote_skill_catalog import (
     CuratedSkillCatalogEntry,
     CuratedSkillCatalogSearchResponse,
@@ -495,22 +498,25 @@ async def _assign_capabilities_to_agents(
     capability_assignment_mode: Literal["replace", "merge"],
 ) -> list[CapabilityMarketCapabilityAssignmentResult]:
     _ensure_target_agents_exist(request, target_agent_ids=target_agent_ids)
+    agent_profile_service = _get_agent_profile_service(request)
     assignment_results: list[CapabilityMarketCapabilityAssignmentResult] = []
     for agent_id in target_agent_ids:
+        lifecycle_payload = build_capability_lifecycle_assignment_payload(
+            agent_profile_service=agent_profile_service,
+            target_agent_id=agent_id,
+            capability_ids=capability_ids,
+            capability_assignment_mode=capability_assignment_mode,
+            reason=(
+                f"Capability market install template '{template_id}' "
+                f"assigned capabilities to '{agent_id}'."
+            ),
+            actor=actor,
+        )
         result = await _dispatch_market_mutation(
             request,
-            capability_ref="system:apply_role",
+            capability_ref="system:apply_capability_lifecycle",
             title=f"Assign template {template_id} capabilities to {agent_id}",
-            payload={
-                "agent_id": agent_id,
-                "capabilities": capability_ids,
-                "capability_assignment_mode": capability_assignment_mode,
-                "reason": (
-                    f"Capability market install template '{template_id}' "
-                    f"assigned capabilities to '{agent_id}'."
-                ),
-                "actor": actor,
-            },
+            payload=lifecycle_payload,
             fallback_risk="guarded",
         )
         if not result.get("success"):

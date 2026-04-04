@@ -143,26 +143,27 @@ def _governance_path_for_recommendation(
     review_required: bool,
     action_kind: str | None = None,
 ) -> list[str]:
+    lifecycle_action = "system:apply_capability_lifecycle"
     if install_kind == "hub-skill":
         path: list[str] = []
         if review_required:
             path.append("review")
         if not installed:
             path.append("system:install_hub_skill")
-        path.append("system:apply_role")
+        path.append(lifecycle_action)
         return path
     if install_kind == "mcp-registry":
         selected_action = (
             action_kind
-            or ("system:create_mcp_client" if not installed else "system:apply_role")
+            or ("system:create_mcp_client" if not installed else lifecycle_action)
         )
         path = ["official-mcp-registry", selected_action]
-        if selected_action != "system:apply_role":
-            path.append("system:apply_role")
+        if selected_action != lifecycle_action:
+            path.append(lifecycle_action)
         return path
     if install_kind == "builtin-runtime":
-        return ["runtime-ready", "system:apply_role"]
-    return ["install-template", "system:apply_role"]
+        return ["runtime-ready", lifecycle_action]
+    return ["install-template", lifecycle_action]
 
 
 @dataclass(slots=True)
