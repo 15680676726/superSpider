@@ -90,6 +90,113 @@
   z-index: 1;
 }
 
+.buddyLoading {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  z-index: 21;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--baize-text-secondary);
+  font-size: 12px;
+  backdrop-filter: blur(10px);
+}
+
+.buddyCompanion {
+  position: absolute;
+  right: 18px;
+  bottom: 92px;
+  z-index: 22;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 280px;
+  padding: 12px 14px;
+  border: 1px solid rgba(201, 168, 76, 0.18);
+  border-radius: 18px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(7, 16, 40, 0.88));
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+  text-align: left;
+}
+
+.buddySprite {
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  border-radius: 16px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(180deg, rgba(255, 236, 179, 0.9), rgba(201, 168, 76, 0.8));
+  box-shadow: inset 0 0 0 3px rgba(15, 23, 42, 0.22);
+}
+
+.buddySprite[data-stage="bonded"] {
+  background: linear-gradient(180deg, rgba(147, 197, 253, 0.94), rgba(59, 130, 246, 0.84));
+}
+
+.buddySprite[data-stage="capable"] {
+  background: linear-gradient(180deg, rgba(167, 243, 208, 0.95), rgba(16, 185, 129, 0.84));
+}
+
+.buddySprite[data-stage="seasoned"] {
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.96), rgba(217, 119, 6, 0.86));
+}
+
+.buddySprite[data-stage="signature"] {
+  background: linear-gradient(180deg, rgba(244, 114, 182, 0.95), rgba(168, 85, 247, 0.86));
+}
+
+.buddySpriteFace {
+  width: 38px;
+  height: 28px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.buddySpriteFace span {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: #111827;
+}
+
+.buddyCompanionMeta {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.buddyCompanionName {
+  color: var(--baize-text-main);
+  font-size: 14px;
+}
+
+.buddyCompanionStatus {
+  color: var(--baize-text-secondary);
+  font-size: 12px;
+}
+
+.buddyCompanionTags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.buddyCompanionAction {
+  flex-shrink: 0;
+  color: var(--baize-accent-color, #c9a84c);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* ================================================================
    顶部状态条
    ================================================================ */

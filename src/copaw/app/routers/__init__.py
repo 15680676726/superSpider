@@ -2,6 +2,7 @@
 from fastapi import APIRouter
 
 from .agent import router as agent_router
+from .buddy_routes import router as buddy_router
 from .capability_market import router as capability_market_router
 from .capabilities import router as capabilities_router
 from .config import router as config_router
@@ -29,6 +30,7 @@ from .console import router as console_router
 router = APIRouter()
 
 router.include_router(agent_router)
+router.include_router(buddy_router)
 router.include_router(capability_market_router)
 router.include_router(capabilities_router)
 router.include_router(config_router)

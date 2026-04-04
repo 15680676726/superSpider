@@ -5,6 +5,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  RuntimeMainBrainBuddySummary,
   RuntimeCenterSurfaceInfo,
   RuntimeMainBrainMeta,
   RuntimeMainBrainPlanning,
@@ -412,13 +413,31 @@ const unifiedPayload = {
   meta: unifiedMeta,
 } satisfies RuntimeMainBrainResponse;
 
-function renderPanel(mainBrainData: RuntimeMainBrainResponse) {
+const buddySummary: RuntimeMainBrainBuddySummary = {
+  buddy_name: "Nova",
+  lifecycle_state: "named",
+  presence_state: "available",
+  mood_state: "warm",
+  evolution_stage: "bonded",
+  growth_level: 4,
+  intimacy: 24,
+  affinity: 19,
+  current_goal_summary: "Build an independent creator-business growth path",
+  current_task_summary: "Write the first meaningful piece today",
+  why_now_summary: "This is the smallest move that keeps momentum real.",
+};
+
+function renderPanel(
+  mainBrainData: RuntimeMainBrainResponse,
+  options?: { buddySummary?: RuntimeMainBrainBuddySummary | null },
+) {
   return render(
     <MainBrainCockpitPanel
       data={overviewPayload}
       loading={false}
       refreshing={false}
       error={null}
+      buddySummary={options?.buddySummary ?? null}
       mainBrainData={mainBrainData}
       mainBrainLoading={false}
       mainBrainError={null}
@@ -452,6 +471,7 @@ describe("MainBrainCockpitPanel", () => {
         loading={false}
         refreshing={false}
         error="overview error should stay hidden"
+        buddySummary={null}
         mainBrainData={
           {
             ...dedicatedPayload,
@@ -498,6 +518,7 @@ describe("MainBrainCockpitPanel", () => {
         loading={false}
         refreshing={false}
         error={null}
+        buddySummary={null}
         mainBrainData={null}
         mainBrainLoading={false}
         mainBrainError={null}
@@ -743,5 +764,19 @@ describe("MainBrainCockpitPanel", () => {
     expect(screen.queryByText("Untimed evidence")).toBeNull();
     expect(screen.queryByText("Old decision")).toBeNull();
     expect(screen.queryByText("Untimed patch")).toBeNull();
+  });
+
+  it("renders compact buddy summary when runtime center receives buddy projection", () => {
+    renderPanel(unifiedPayload, { buddySummary });
+
+    expect(screen.getByText("Buddy summary")).toBeInTheDocument();
+    expect(screen.getByText("Nova")).toBeInTheDocument();
+    expect(
+      screen.getByText("Build an independent creator-business growth path"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Write the first meaningful piece today")).toBeInTheDocument();
+    expect(
+      screen.getByText("This is the smallest move that keeps momentum real."),
+    ).toBeInTheDocument();
   });
 });

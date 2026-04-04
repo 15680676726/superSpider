@@ -184,6 +184,7 @@ export default function RuntimeCenterPage() {
     loading,
     refreshing,
     error,
+    buddySummary,
     mainBrainData,
     mainBrainError,
     mainBrainLoading,
@@ -396,6 +397,7 @@ export default function RuntimeCenterPage() {
             loading={loading}
             refreshing={refreshing}
             error={error}
+            buddySummary={buddySummary}
             mainBrainData={mainBrainData}
             mainBrainError={mainBrainError}
             mainBrainLoading={mainBrainLoading}

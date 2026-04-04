@@ -164,6 +164,12 @@ export default function IndustryPage() {
       </Card>
 
       {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError(null)} /> : null}
+      <Alert
+        type="info"
+        showIcon
+        message="这已经不是系统的首次建档入口"
+        description="先通过 Buddy onboarding 建立人的画像与主方向，再回到这里做行业/团队/执行载体的下游配置会更准确。"
+      />
 
       {/* Brief Modal */}
       <Modal

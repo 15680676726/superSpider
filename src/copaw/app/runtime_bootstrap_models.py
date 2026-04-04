@@ -16,6 +16,8 @@ if TYPE_CHECKING:
         ActorSupervisor,
         ActorWorker,
         AgentProfileService,
+        BuddyOnboardingService,
+        BuddyProjectionService,
         GovernanceService,
         KernelDispatcher,
         MainBrainChatService,
@@ -176,6 +178,8 @@ class RuntimeBootstrap:
     runtime_health_service: RuntimeHealthService
     runtime_provider: ProviderRuntimeSurface
     provider_admin_service: Any
+    buddy_onboarding_service: BuddyOnboardingService | None = None
+    buddy_projection_service: BuddyProjectionService | None = None
     state_query_service: RuntimeCenterStateQueryService
     evidence_query_service: RuntimeCenterEvidenceQueryService
     donor_source_service: Any | None

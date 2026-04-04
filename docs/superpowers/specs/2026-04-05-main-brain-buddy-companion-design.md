@@ -44,6 +44,7 @@ It does not replace:
 
 That means:
 
+- this is an upgrade on top of the existing main-brain/runtime/human-assist foundation, not a greenfield replacement
 - the main brain remains the only strategic authority
 - Buddy is the only front-facing voice the human primarily interacts with
 - specialist seats remain backstage execution members
@@ -107,6 +108,7 @@ The human should feel accompanied, not managed by a dashboard.
 
 The following must remain true:
 
+- the main brain itself does not get replaced
 - Buddy has no independent long-term mission
 - Buddy has no independent planning chain
 - Buddy has no independent truth store
@@ -135,9 +137,20 @@ Buddy must not directly rewrite:
 The formal relation should be:
 
 - specialist seats do the work
+- human-assist/current-task objects remain formal runtime truth
 - results flow back through the main brain
 - Buddy speaks to the human about those results
 - the source seat may be labeled, but should not take over the front-stage voice
+
+This means the human-facing task experience should move toward:
+
+- chat-led task delivery
+- chat-led acceptance / evidence submission
+- chat-led recovery and pull-back
+
+and away from:
+
+- a standalone front-stage task module as the primary human interaction surface
 
 The intended human feeling is:
 
@@ -435,6 +448,12 @@ The runtime/main-brain page should instead serve as:
 - Buddy's longer-horizon cockpit
 - the summary surface for final goal and current task
 - the place for reviewing growth status and longer continuity
+
+Human collaboration tasks should follow the same rule:
+
+- they may remain formal task objects backstage
+- but they should primarily reach the human through Buddy in chat
+- standalone task pages or strips should become supporting read/detail surfaces, not the primary relationship surface
 
 ### 6.3 Support Intervention Style
 
@@ -1035,6 +1054,10 @@ The cutover should become:
 - main direction confirmation third
 - industry/team/execution scaffolding afterward
 
+This is a cutover of first-entry ownership and front-stage expression, not a rewrite of the entire runtime.
+
+Existing runtime truth that already works should be reused wherever possible.
+
 ### 13.3 Migration Table
 
 Recommended cutover mapping:
@@ -1058,6 +1081,8 @@ Migration should allow a short compatibility window, but with strict boundaries:
 - old industry-first flow may remain temporarily for legacy operator/business routes
 - new human-first Buddy onboarding must become the default first entry
 - no long-term dual-first-entry truth should remain
+- existing human-assist/task truth may remain backstage and canonical during the transition
+- what must change is the front-stage human interaction contract, which should become Buddy/chat-first
 
 ### 13.5 Required Migration Tests
 

@@ -2,6 +2,7 @@ import { lazy } from "react";
 import { Navigate } from "react-router-dom";
 
 const Chat = lazy(() => import("../pages/Chat"));
+const BuddyOnboardingPage = lazy(() => import("../pages/BuddyOnboarding"));
 const AgentConfigPage = lazy(() => import("../pages/Agent/Config"));
 const RuntimeCenterPage = lazy(() => import("../pages/RuntimeCenter"));
 const AgentWorkbenchPage = lazy(() => import("../pages/AgentWorkbench"));
@@ -24,7 +25,8 @@ export interface RouteConfig {
 }
 
 export const routes: RouteConfig[] = [
-  { path: "/", element: <Navigate to="/runtime-center" replace /> },
+  { path: "/", element: <Navigate to="/buddy-onboarding" replace /> },
+  { path: "/buddy-onboarding", element: <BuddyOnboardingPage />, menuKey: "chat" },
   { path: "/chat", element: <Chat />, menuKey: "chat" },
   {
     path: "/runtime-center",
@@ -83,6 +85,7 @@ const PATHNAME_TO_KEY: Array<[string, string]> = [
   ["/performance", "performance"],
   ["/calendar", "calendar"],
   ["/chat", "chat"],
+  ["/buddy-onboarding", "chat"],
   ["/runtime-center", "runtime-center"],
 ];
 

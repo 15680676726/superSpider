@@ -10,11 +10,13 @@ import { request } from "../../api";
 import { subscribe } from "../../runtime/eventBus";
 import type {
   RuntimeCenterSurfaceResponse,
+  RuntimeMainBrainBuddySummary,
   RuntimeMainBrainResponse,
 } from "../../api/modules/runtimeCenter";
 import {
   normalizeRuntimePath,
   requestRuntimeRecord,
+  requestRuntimeBuddySummary,
   type RuntimeSurfaceSection,
   requestRuntimeSurface,
 } from "../../runtime/runtimeSurfaceClient";
@@ -219,6 +221,8 @@ function isMainBrainAgent(agent: RuntimeCenterAgentSummary | null | undefined): 
 export function useRuntimeCenter() {
   const [surfaceData, setSurfaceData] =
     useState<RuntimeCenterSurfaceResponse | null>(null);
+  const [buddySummary, setBuddySummary] =
+    useState<RuntimeMainBrainBuddySummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -264,10 +268,19 @@ export function useRuntimeCenter() {
         setRefreshing(true);
       }
       try {
-        const payload = await requestRuntimeSurface<RuntimeCenterSurfaceResponse>(options);
         const requestedSections = new Set<RuntimeSurfaceSection>(
           options?.sections ?? ["cards", "main_brain"],
         );
+        const shouldLoadBuddySummary =
+          options?.sections == null || requestedSections.has("main_brain");
+        const [payload, buddyPayload] = await Promise.all([
+          requestRuntimeSurface<RuntimeCenterSurfaceResponse>(options),
+          shouldLoadBuddySummary
+            ? requestRuntimeBuddySummary<RuntimeMainBrainBuddySummary>().catch(
+                () => null,
+              )
+            : Promise.resolve(null),
+        ]);
         setSurfaceData((previous) => ({
           generated_at: payload.generated_at,
           surface: payload.surface,
@@ -278,6 +291,9 @@ export function useRuntimeCenter() {
             ? payload.main_brain
             : previous?.main_brain ?? null,
         }));
+        if (shouldLoadBuddySummary) {
+          setBuddySummary(buddyPayload);
+        }
         setError(null);
       } catch (err) {
         const detail = localizeRuntimeText(
@@ -449,6 +465,7 @@ export function useRuntimeCenter() {
     loading,
     refreshing,
     error,
+    buddySummary,
     mainBrainData,
     mainBrainError,
     mainBrainLoading,

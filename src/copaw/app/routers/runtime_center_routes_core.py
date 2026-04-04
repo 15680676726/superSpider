@@ -710,6 +710,13 @@ async def _maybe_intercept_human_assist_chat_turn(
     )
 
 
+def _get_buddy_projection_service(request: Request):
+    service = getattr(request.app.state, "buddy_projection_service", None)
+    if service is None or not callable(getattr(service, "build_cockpit_summary", None)):
+        raise HTTPException(503, detail="Buddy projection service is unavailable")
+    return service
+
+
 async def _runtime_center_list_query(
     *,
     request: Request,
@@ -1093,6 +1100,20 @@ async def get_latest_recovery_report(
     if summary is None:
         raise HTTPException(404, detail="Startup recovery summary is not available")
     return project_latest_recovery_summary(summary, source=source)
+
+
+@router.get("/main-brain/buddy-summary", response_model=dict[str, object])
+async def get_runtime_center_buddy_summary(
+    request: Request,
+    response: Response,
+    profile_id: str | None = None,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    service = _get_buddy_projection_service(request)
+    try:
+        return dict(service.build_cockpit_summary(profile_id=profile_id))
+    except ValueError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
 
 
 async def _stream_runtime_chat_events(
