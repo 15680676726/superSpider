@@ -113,6 +113,12 @@ class DiscoveryHit:
     equivalence_hint: str | None = None
     capability_keys: tuple[str, ...] = ()
     replacement_relation: str | None = None
+    protocol_surface_kind: str | None = None
+    transport_kind: str | None = None
+    call_surface_ref: str | None = None
+    formal_adapter_eligible: bool = False
+    adapter_blockers: tuple[str, ...] = ()
+    protocol_hints: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
@@ -130,6 +136,12 @@ class DiscoveryHit:
             "equivalence_hint": self.equivalence_hint,
             "capability_keys": list(self.capability_keys),
             "replacement_relation": self.replacement_relation,
+            "protocol_surface_kind": self.protocol_surface_kind,
+            "transport_kind": self.transport_kind,
+            "call_surface_ref": self.call_surface_ref,
+            "formal_adapter_eligible": self.formal_adapter_eligible,
+            "adapter_blockers": list(self.adapter_blockers),
+            "protocol_hints": dict(self.protocol_hints),
             "metadata": dict(self.metadata),
         }
 
@@ -149,6 +161,12 @@ class DiscoveryHit:
             equivalence_hint=_string(payload.get("equivalence_hint")),
             capability_keys=_unique_strings(payload.get("capability_keys") or []),
             replacement_relation=_string(payload.get("replacement_relation")),
+            protocol_surface_kind=_string(payload.get("protocol_surface_kind")),
+            transport_kind=_string(payload.get("transport_kind")),
+            call_surface_ref=_string(payload.get("call_surface_ref")),
+            formal_adapter_eligible=bool(payload.get("formal_adapter_eligible")),
+            adapter_blockers=_unique_strings(payload.get("adapter_blockers") or []),
+            protocol_hints=_normalize_metadata(payload.get("protocol_hints")),
             metadata=_normalize_metadata(payload.get("metadata")),
         )
 
@@ -201,6 +219,12 @@ class NormalizedDiscoveryHit:
     capability_keys: tuple[str, ...] = ()
     capability_overlap_score: float = 0.0
     replacement_relation: str | None = None
+    protocol_surface_kind: str | None = None
+    transport_kind: str | None = None
+    call_surface_ref: str | None = None
+    formal_adapter_eligible: bool = False
+    adapter_blockers: tuple[str, ...] = ()
+    protocol_hints: dict[str, Any] = field(default_factory=dict)
     confidence_score: float = 0.5
     source_hit_count: int = 1
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -216,6 +240,12 @@ class NormalizedDiscoveryHit:
                 "capability_keys": list(self.capability_keys),
                 "capability_overlap_score": self.capability_overlap_score,
                 "replacement_relation": self.replacement_relation,
+                "protocol_surface_kind": self.protocol_surface_kind,
+                "transport_kind": self.transport_kind,
+                "call_surface_ref": self.call_surface_ref,
+                "formal_adapter_eligible": self.formal_adapter_eligible,
+                "adapter_blockers": list(self.adapter_blockers),
+                "protocol_hints": dict(self.protocol_hints),
                 "confidence_score": self.confidence_score,
                 "source_hit_count": self.source_hit_count,
             },

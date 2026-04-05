@@ -509,3 +509,38 @@ def test_capability_candidate_service_persists_candidate_attribution_fields(
     assert reloaded.equivalence_class == "pkg:research-pack"
     assert reloaded.capability_overlap_score == 0.88
     assert reloaded.replacement_relation == "replace_requested"
+
+
+def test_import_normalized_discovery_hits_preserves_protocol_surface_metadata(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path)
+
+    hit = NormalizedDiscoveryHit(
+        candidate_kind="adapter",
+        candidate_source_kind="external_remote",
+        display_name="OpenSpace MCP",
+        summary="MCP-backed donor candidate.",
+        candidate_source_ref="https://example.com/openspace",
+        candidate_source_version="main",
+        candidate_source_lineage="donor:github:hku/openspace",
+        canonical_package_id="pkg:github:hku/openspace",
+        equivalence_class="pkg:github:hku/openspace",
+        protocol_surface_kind="native_mcp",
+        transport_kind="mcp",
+        call_surface_ref="mcp:openspace",
+        formal_adapter_eligible=True,
+    )
+
+    imported = service.import_normalized_discovery_hits(
+        normalized_hits=[hit],
+        target_scope="seat",
+        target_role_id="operator",
+        target_seat_ref="seat-1",
+    )
+
+    assert len(imported) == 1
+    assert imported[0].metadata["protocol_surface_kind"] == "native_mcp"
+    assert imported[0].metadata["transport_kind"] == "mcp"
+    assert imported[0].metadata["call_surface_ref"] == "mcp:openspace"
+    assert imported[0].metadata["formal_adapter_eligible"] is True

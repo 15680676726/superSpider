@@ -166,6 +166,42 @@ def _build_normalized_hit(cluster: list[DiscoveryHit]) -> NormalizedDiscoveryHit
         ),
         None,
     )
+    protocol_surface_kind = next(
+        (
+            _string(hit.protocol_surface_kind)
+            for hit in cluster
+            if _string(hit.protocol_surface_kind) is not None
+        ),
+        None,
+    )
+    transport_kind = next(
+        (
+            _string(hit.transport_kind)
+            for hit in cluster
+            if _string(hit.transport_kind) is not None
+        ),
+        None,
+    )
+    call_surface_ref = next(
+        (
+            _string(hit.call_surface_ref)
+            for hit in cluster
+            if _string(hit.call_surface_ref) is not None
+        ),
+        None,
+    )
+    formal_adapter_eligible = any(hit.formal_adapter_eligible for hit in cluster)
+    adapter_blockers = _unique_strings(
+        [value for hit in cluster for value in hit.adapter_blockers],
+    )
+    protocol_hints = next(
+        (
+            dict(hit.protocol_hints)
+            for hit in cluster
+            if isinstance(hit.protocol_hints, dict) and hit.protocol_hints
+        ),
+        {},
+    )
     if replacement_relation is None and len(cluster) > 1 and overlap_score == 1.0:
         replacement_relation = "potential-equivalent"
     confidence_score = min(
@@ -202,6 +238,12 @@ def _build_normalized_hit(cluster: list[DiscoveryHit]) -> NormalizedDiscoveryHit
         capability_keys=capability_keys,
         capability_overlap_score=overlap_score,
         replacement_relation=replacement_relation,
+        protocol_surface_kind=protocol_surface_kind,
+        transport_kind=transport_kind,
+        call_surface_ref=call_surface_ref,
+        formal_adapter_eligible=formal_adapter_eligible,
+        adapter_blockers=adapter_blockers,
+        protocol_hints=protocol_hints,
         confidence_score=confidence_score,
         source_hit_count=len(cluster),
         metadata=metadata,
