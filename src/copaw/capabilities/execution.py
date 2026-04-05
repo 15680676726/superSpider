@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -42,6 +43,8 @@ from .execution_support import (
     _tool_response_success,
     _tool_response_summary,
 )
+from .external_runtime_actions import parse_external_runtime_action_payload
+from .external_runtime_execution import ExternalRuntimeExecution
 from .skill_service import CapabilitySkillService
 from .tool_execution_contracts import ToolExecutionContract, get_tool_execution_contract
 
@@ -110,6 +113,7 @@ class CapabilityExecutionFacade:
         is_mount_accessible_fn: Callable[..., bool],
         append_execution_evidence_fn: Callable[..., str | None],
         skill_service: CapabilitySkillService,
+        external_runtime_execution: ExternalRuntimeExecution | None = None,
         tool_bridge: "KernelToolBridge | None" = None,
         environment_service: object | None = None,
         mcp_manager: object | None = None,
@@ -123,6 +127,7 @@ class CapabilityExecutionFacade:
         self._is_mount_accessible = is_mount_accessible_fn
         self._append_execution_evidence = append_execution_evidence_fn
         self._skill_service = skill_service
+        self._external_runtime_execution = external_runtime_execution
         self._tool_bridge = tool_bridge
         self._environment_service = environment_service
         self._mcp_manager = mcp_manager
@@ -228,6 +233,10 @@ class CapabilityExecutionFacade:
     async def execute_task(self, task: "KernelTask") -> dict[str, object]:
         capability_id = task.capability_ref or ""
         payload = dict(task.payload or {})
+        if capability_id.startswith(("project:", "adapter:", "runtime:")):
+            payload.setdefault("owner_agent_id", task.owner_agent_id)
+            payload.setdefault("environment_ref", task.environment_ref)
+            payload.setdefault("work_context_id", task.work_context_id)
         tool_contract = get_tool_execution_contract(capability_id)
         if capability_id.startswith("system:"):
             payload.setdefault("task_id", task.id)
@@ -1129,6 +1138,7 @@ class CapabilityExecutionFacade:
             action or resolved_payload.get("action") or "run",
         ).strip().lower()
         metadata = dict(mount.metadata or {})
+        runtime_contract = dict(metadata.get("runtime_contract") or {})
         if resolved_action == "describe":
             return _json_tool_response(
                 {
@@ -1137,6 +1147,100 @@ class CapabilityExecutionFacade:
                     "capability": mount.model_dump(mode="json"),
                 },
             )
+        if runtime_contract.get("runtime_kind") in {"cli", "service"}:
+            typed_payload, validation_error = parse_external_runtime_action_payload(
+                mount=mount,
+                action=resolved_action,
+                payload=resolved_payload,
+            )
+            if validation_error is not None:
+                return _json_tool_response(
+                    {
+                        "success": False,
+                        "error": validation_error,
+                        "summary": validation_error,
+                    },
+                )
+            if self._external_runtime_execution is None:
+                if runtime_contract.get("runtime_kind") == "cli" and resolved_action == "run":
+                    command = str(metadata.get("execute_command") or "").strip()
+                    if not command:
+                        return _json_tool_response(
+                            {
+                                "success": False,
+                                "error": (
+                                    f"External capability '{capability_id}' does not declare an executable command"
+                                ),
+                            },
+                        )
+                    cli_args = [
+                        shlex.quote(str(item))
+                        for item in getattr(typed_payload, "args", [])
+                        if str(item).strip()
+                    ]
+                    if cli_args:
+                        command = f"{command} {' '.join(cli_args)}"
+                    timeout_value = int(
+                        getattr(typed_payload, "timeout_sec", None) or timeout or 180,
+                    )
+                    response = await execute_shell_command(
+                        command=command,
+                        timeout=timeout_value,
+                        cwd=str(metadata.get("cwd") or "").strip() or None,
+                    )
+                    summary = _tool_response_summary(response)
+                    success = _tool_response_success(response)
+                    return _json_tool_response(
+                        {
+                            "success": success,
+                            "summary": summary,
+                            "command": command,
+                            "cwd": str(metadata.get("cwd") or "").strip() or None,
+                            "error": None if success else summary,
+                            "output": _tool_response_payload(response),
+                        },
+                    )
+                message = "External runtime execution service is not available."
+                return _json_tool_response(
+                    {
+                        "success": False,
+                        "error": message,
+                        "summary": message,
+                    },
+                )
+            if runtime_contract.get("runtime_kind") == "cli":
+                response = await self._external_runtime_execution.run_cli(
+                    mount,
+                    typed_payload,
+                )
+            elif resolved_action == "start":
+                response = await self._external_runtime_execution.start_service(
+                    mount,
+                    typed_payload,
+                )
+            elif resolved_action == "healthcheck":
+                response = await self._external_runtime_execution.healthcheck_service(
+                    mount,
+                    typed_payload,
+                )
+            elif resolved_action == "stop":
+                response = await self._external_runtime_execution.stop_service(
+                    mount,
+                    typed_payload,
+                )
+            elif resolved_action == "restart":
+                response = await self._external_runtime_execution.restart_service(
+                    mount,
+                    typed_payload,
+                )
+            else:
+                response = {
+                    "success": False,
+                    "summary": (
+                        f"External capability '{capability_id}' does not support typed action '{resolved_action}'."
+                    ),
+                }
+            return _json_tool_response(response)
         command = ""
         if resolved_action in {"healthcheck", "doctor"}:
             command = str(metadata.get("healthcheck_command") or "").strip()

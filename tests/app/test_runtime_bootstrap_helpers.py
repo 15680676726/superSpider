@@ -270,6 +270,52 @@ def test_build_runtime_query_services_attaches_capability_candidate_service() ->
     assert bootstrap[0]._capability_candidate_service is candidate_service
 
 
+def test_build_runtime_repositories_exposes_external_runtime_repository(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+
+    repositories = build_runtime_repositories(store)
+
+    assert hasattr(repositories, "external_runtime_repository")
+    assert repositories.external_runtime_repository is not None
+
+
+def test_reconcile_external_runtime_truth_marks_missing_process_orphaned(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from copaw.app.runtime_service_graph import _reconcile_external_runtime_truth
+    from copaw.state import ExternalCapabilityRuntimeService
+    from copaw.state.repositories import SqliteExternalCapabilityRuntimeRepository
+
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteExternalCapabilityRuntimeRepository(store)
+    service = ExternalCapabilityRuntimeService(repository=repository)
+    runtime = service.create_or_reuse_service_runtime(
+        capability_id="runtime:flask",
+        scope_kind="session",
+        session_mount_id="session-1",
+        owner_agent_id="copaw-agent-runner",
+        command="python -m flask run",
+    )
+    service.update_runtime(
+        runtime.runtime_id,
+        status="ready",
+        process_id=987654,
+    )
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "_external_runtime_process_exists",
+        lambda pid: False,
+    )
+
+    summary = _reconcile_external_runtime_truth(service)
+    updated = service.get_runtime(runtime.runtime_id)
+
+    assert summary == {"checked": 1, "orphaned": 1}
+    assert updated is not None
+    assert updated.status == "orphaned"
+
+
 def test_runtime_discovery_executor_dispatches_provider_hits(monkeypatch) -> None:
     monkeypatch.setattr(
         runtime_service_graph_module,

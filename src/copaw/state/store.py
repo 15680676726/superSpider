@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 31
+STATE_SCHEMA_VERSION = 32
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS human_profiles (
@@ -127,6 +127,47 @@ CREATE INDEX IF NOT EXISTS idx_work_contexts_industry
     ON work_contexts(industry_instance_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_work_contexts_thread
     ON work_contexts(primary_thread_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS external_capability_runtime_instances (
+    runtime_id TEXT PRIMARY KEY,
+    capability_id TEXT NOT NULL,
+    runtime_kind TEXT NOT NULL,
+    scope_kind TEXT NOT NULL,
+    work_context_id TEXT,
+    owner_agent_id TEXT,
+    environment_ref TEXT,
+    session_mount_id TEXT,
+    status TEXT NOT NULL,
+    command TEXT NOT NULL DEFAULT '',
+    cwd TEXT,
+    process_id INTEGER,
+    port INTEGER,
+    health_url TEXT,
+    lease_owner_ref TEXT,
+    continuity_policy TEXT NOT NULL DEFAULT 'scoped',
+    retention_policy TEXT NOT NULL DEFAULT 'until-stop',
+    last_started_at TEXT,
+    last_ready_at TEXT,
+    last_stopped_at TEXT,
+    last_exit_code INTEGER,
+    last_error TEXT,
+    latest_start_evidence_id TEXT,
+    latest_healthcheck_evidence_id TEXT,
+    latest_stop_evidence_id TEXT,
+    latest_recovery_evidence_id TEXT,
+    artifact_refs_json TEXT NOT NULL DEFAULT '[]',
+    replay_pointer TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_runtime_capability_status
+    ON external_capability_runtime_instances(capability_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_external_runtime_scope
+    ON external_capability_runtime_instances(scope_kind, session_mount_id, work_context_id, environment_ref, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_external_runtime_owner
+    ON external_capability_runtime_instances(owner_agent_id, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,

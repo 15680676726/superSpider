@@ -28,6 +28,12 @@ def test_external_packages_are_loaded_as_first_class_capabilities() -> None:
                 execution_mode="shell",
                 execute_command='python -m black --version',
                 healthcheck_command='python -m black --version',
+                runtime_kind="cli",
+                supported_actions=["describe", "run"],
+                scope_policy="session",
+                ready_probe_kind="none",
+                stop_strategy="terminate",
+                startup_entry_ref="module:black",
             ),
             "adapter:pywinauto": ExternalCapabilityPackageConfig(
                 capability_id="adapter:pywinauto",
@@ -43,6 +49,12 @@ def test_external_packages_are_loaded_as_first_class_capabilities() -> None:
                 execute_command=(
                     'python -c "import pywinauto; print(getattr(pywinauto, \'__name__\', \'pywinauto\'))"'
                 ),
+                runtime_kind="cli",
+                supported_actions=["describe", "run"],
+                scope_policy="seat",
+                ready_probe_kind="none",
+                stop_strategy="terminate",
+                startup_entry_ref="module:pywinauto",
             ),
             "runtime:flask": ExternalCapabilityPackageConfig(
                 capability_id="runtime:flask",
@@ -57,6 +69,22 @@ def test_external_packages_are_loaded_as_first_class_capabilities() -> None:
                 execution_mode="shell",
                 execute_command='python -m flask --version',
                 healthcheck_command='python -m flask --version',
+                runtime_kind="service",
+                supported_actions=[
+                    "describe",
+                    "start",
+                    "healthcheck",
+                    "stop",
+                    "restart",
+                ],
+                scope_policy="session",
+                ready_probe_kind="command",
+                ready_probe_config={
+                    "predicted_default_port": 5000,
+                    "predicted_health_path": "/",
+                },
+                stop_strategy="terminate",
+                startup_entry_ref="module:flask",
             ),
         },
     )
@@ -79,6 +107,17 @@ def test_external_packages_are_loaded_as_first_class_capabilities() -> None:
     assert mounts["adapter:pywinauto"].source_kind == "adapter"
     assert mounts["runtime:flask"].kind == "runtime-component"
     assert mounts["runtime:flask"].source_kind == "runtime"
+    assert mounts["runtime:flask"].metadata["runtime_contract"]["runtime_kind"] == "service"
+    assert mounts["runtime:flask"].metadata["runtime_contract"]["supported_actions"] == [
+        "describe",
+        "start",
+        "healthcheck",
+        "stop",
+        "restart",
+    ]
+    assert mounts["runtime:flask"].metadata["runtime_contract"]["predicted_default_port"] == 5000
+    assert mounts["runtime:flask"].metadata["runtime_contract"]["predicted_health_path"] == "/"
+    assert mounts["runtime:flask"].evidence_contract == ["shell-command", "runtime-event"]
 
 
 def test_external_package_capability_executes_through_unified_execution_surface() -> None:
@@ -97,6 +136,12 @@ def test_external_package_capability_executes_through_unified_execution_surface(
                 execution_mode="shell",
                 execute_command="python -m black --version",
                 healthcheck_command="python -m black --version",
+                runtime_kind="cli",
+                supported_actions=["describe", "run"],
+                scope_policy="session",
+                ready_probe_kind="none",
+                stop_strategy="terminate",
+                startup_entry_ref="module:black",
             ),
         },
     )

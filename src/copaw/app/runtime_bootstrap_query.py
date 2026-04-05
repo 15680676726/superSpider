@@ -71,6 +71,7 @@ def build_runtime_query_services(
     skill_lifecycle_decision_service: object | None = None,
     human_assist_task_service: object | None = None,
     environment_service: EnvironmentService | None = None,
+    external_runtime_service: object | None = None,
 ) -> RuntimeQueryServices:
     default_recall_backend = resolve_default_memory_recall_backend()
     state_query_service = RuntimeCenterStateQueryService(
@@ -93,6 +94,7 @@ def build_runtime_query_services(
         evidence_ledger=evidence_ledger,
         human_assist_task_service=human_assist_task_service,
         environment_service=environment_service,
+        external_runtime_service=external_runtime_service,
         memory_activation_service=None,
     )
     evidence_query_service = RuntimeCenterEvidenceQueryService(

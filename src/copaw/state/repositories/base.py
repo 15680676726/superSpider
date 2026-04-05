@@ -42,6 +42,7 @@ from ..models import (
     WorkflowRunRecord,
     WorkflowTemplateRecord,
 )
+from ..models_external_runtime import ExternalCapabilityRuntimeInstanceRecord
 from ..models_knowledge import KnowledgeChunkRecord
 from ..models_memory import (
     MemoryEntityViewRecord,
@@ -290,6 +291,42 @@ class BaseWorkContextRepository(ABC):
 
     @abstractmethod
     def delete_context(self, context_id: str) -> bool:
+        raise NotImplementedError
+
+
+class BaseExternalCapabilityRuntimeRepository(ABC):
+    @abstractmethod
+    def get_runtime(
+        self,
+        runtime_id: str,
+    ) -> Optional[ExternalCapabilityRuntimeInstanceRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_runtimes(
+        self,
+        *,
+        capability_id: str | None = None,
+        runtime_kind: str | None = None,
+        scope_kind: str | None = None,
+        status: str | None = None,
+        owner_agent_id: str | None = None,
+        session_mount_id: str | None = None,
+        work_context_id: str | None = None,
+        environment_ref: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExternalCapabilityRuntimeInstanceRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def upsert_runtime(
+        self,
+        runtime: ExternalCapabilityRuntimeInstanceRecord,
+    ) -> ExternalCapabilityRuntimeInstanceRecord:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_runtime(self, runtime_id: str) -> bool:
         raise NotImplementedError
 
 

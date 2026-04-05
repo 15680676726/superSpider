@@ -18,6 +18,7 @@ import copaw.capabilities.execution as capability_execution_module
 from copaw.capabilities import CapabilityMount, CapabilityService
 from copaw.capabilities.system_team_handlers import SystemTeamCapabilityFacade
 from copaw.capabilities.remote_skill_contract import RemoteSkillCandidate
+from copaw.config.config import Config, ExternalCapabilityPackageConfig
 from copaw.evidence import EvidenceLedger
 from copaw.goals import GoalService
 from copaw.kernel import (
@@ -36,13 +37,19 @@ from copaw.routines import (
     RoutineService,
 )
 from copaw.sop_kernel import FixedSopService
-from copaw.state import AgentRuntimeRecord, GoalOverrideRecord, SQLiteStateStore
+from copaw.state import (
+    AgentRuntimeRecord,
+    ExternalCapabilityRuntimeService,
+    GoalOverrideRecord,
+    SQLiteStateStore,
+)
 from copaw.state import ExecutionRoutineRecord, RoutineRunRecord
 from copaw.state.repositories import (
     SqliteAgentReportRepository,
     SqliteAgentProfileOverrideRepository,
     SqliteAgentRuntimeRepository,
     SqliteDecisionRequestRepository,
+    SqliteExternalCapabilityRuntimeRepository,
     SqliteFixedSopBindingRepository,
     SqliteFixedSopTemplateRepository,
     SqliteGoalOverrideRepository,
@@ -277,6 +284,34 @@ def _execute_capability_direct(
     if admitted.phase != "executing":
         return admitted.model_dump(mode="json")
     return asyncio.run(dispatcher.execute_task(task.id)).model_dump(mode="json")
+
+
+def _build_external_runtime_capability_service(
+    tmp_path,
+    *,
+    config: Config,
+) -> CapabilityService:
+    state_store = SQLiteStateStore(tmp_path / "state.db")
+    runtime_repository = SqliteExternalCapabilityRuntimeRepository(state_store)
+    external_runtime_service = ExternalCapabilityRuntimeService(
+        repository=runtime_repository,
+    )
+    with patch(
+        "copaw.capabilities.sources.external_packages.load_config",
+        return_value=config,
+    ):
+        from copaw.capabilities.sources.external_packages import (
+            list_external_package_capabilities,
+        )
+
+        mounts = list_external_package_capabilities()
+    return CapabilityService(
+        registry=StaticCapabilityRegistry(*mounts),
+        state_store=state_store,
+        external_runtime_service=external_runtime_service,
+        load_config_fn=lambda: config,
+        save_config_fn=lambda updated: None,
+    )
 
 
 def test_capability_execute_runs_through_kernel_and_emits_evidence() -> None:
@@ -2777,3 +2812,354 @@ def test_update_industry_team_add_role_response_drops_goal_count() -> None:
     assert result["team_size"] == 1
     assert result["schedule_count"] == 1
     assert "goal_count" not in result
+
+
+def test_supported_service_donor_rejects_raw_shell_payload(tmp_path) -> None:
+    config = Config(
+        external_capability_packages={
+            "runtime:flask": ExternalCapabilityPackageConfig(
+                capability_id="runtime:flask",
+                name="flask",
+                summary="Flask runtime component",
+                kind="runtime-component",
+                source_kind="runtime",
+                source_url="https://github.com/pallets/flask",
+                package_ref="git+https://github.com/pallets/flask.git",
+                package_kind="git-repo",
+                enabled=True,
+                execute_command="python -m flask run",
+                healthcheck_command="python -m flask --version",
+                runtime_kind="service",
+                supported_actions=[
+                    "describe",
+                    "start",
+                    "healthcheck",
+                    "stop",
+                    "restart",
+                ],
+                scope_policy="session",
+                ready_probe_kind="command",
+                ready_probe_config={"command": "python -m flask --version"},
+                stop_strategy="terminate",
+                startup_entry_ref="module:flask",
+                environment_requirements=["process", "network"],
+                evidence_contract=["shell-command", "runtime-event"],
+            ),
+        },
+    )
+    capability_service = _build_external_runtime_capability_service(
+        tmp_path,
+        config=config,
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                id="task-runtime-flask-start",
+                title="Start flask",
+                capability_ref="runtime:flask",
+                owner_agent_id="copaw-agent-runner",
+                payload={
+                    "action": "start",
+                    "session_mount_id": "session-1",
+                    "command": "python -m flask run --weird-shell-override",
+                },
+            ),
+        ),
+    )
+
+    assert result["success"] is False
+    assert "typed runtime action" in str(result["error"])
+
+
+def test_service_healthcheck_requires_runtime_id(tmp_path) -> None:
+    config = Config(
+        external_capability_packages={
+            "runtime:flask": ExternalCapabilityPackageConfig(
+                capability_id="runtime:flask",
+                name="flask",
+                summary="Flask runtime component",
+                kind="runtime-component",
+                source_kind="runtime",
+                source_url="https://github.com/pallets/flask",
+                package_ref="git+https://github.com/pallets/flask.git",
+                package_kind="git-repo",
+                enabled=True,
+                execute_command="python -m flask run",
+                healthcheck_command="python -m flask --version",
+                runtime_kind="service",
+                supported_actions=[
+                    "describe",
+                    "start",
+                    "healthcheck",
+                    "stop",
+                    "restart",
+                ],
+                scope_policy="session",
+                ready_probe_kind="command",
+                ready_probe_config={"command": "python -m flask --version"},
+                stop_strategy="terminate",
+                startup_entry_ref="module:flask",
+                environment_requirements=["process", "network"],
+                evidence_contract=["shell-command", "runtime-event"],
+            ),
+        },
+    )
+    capability_service = _build_external_runtime_capability_service(
+        tmp_path,
+        config=config,
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                id="task-runtime-flask-health",
+                title="Healthcheck flask",
+                capability_ref="runtime:flask",
+                owner_agent_id="copaw-agent-runner",
+                payload={"action": "healthcheck"},
+            ),
+        ),
+    )
+
+    assert result["success"] is False
+    assert "runtime_id" in str(result["error"])
+
+
+def test_service_healthcheck_marks_missing_process_orphaned(tmp_path, monkeypatch) -> None:
+    config = Config(
+        external_capability_packages={
+            "runtime:openspace": ExternalCapabilityPackageConfig(
+                capability_id="runtime:openspace",
+                name="openspace",
+                summary="OpenSpace runtime component",
+                kind="runtime-component",
+                source_kind="runtime",
+                source_url="https://github.com/HKUDS/OpenSpace",
+                package_ref="git+https://github.com/HKUDS/OpenSpace.git",
+                package_kind="git-repo",
+                enabled=True,
+                execute_command="openspace",
+                healthcheck_command="openspace --help",
+                runtime_kind="service",
+                supported_actions=[
+                    "describe",
+                    "start",
+                    "healthcheck",
+                    "stop",
+                    "restart",
+                ],
+                scope_policy="session",
+                ready_probe_kind="http",
+                ready_probe_config={"url": "http://127.0.0.1:8080/health"},
+                stop_strategy="terminate",
+                startup_entry_ref="script:openspace",
+                environment_requirements=["process", "network"],
+                evidence_contract=["shell-command", "runtime-event"],
+            ),
+        },
+    )
+    capability_service = _build_external_runtime_capability_service(
+        tmp_path,
+        config=config,
+    )
+    runtime_service = capability_service._external_runtime_service
+    runtime = runtime_service.create_or_reuse_service_runtime(
+        capability_id="runtime:openspace",
+        scope_kind="session",
+        session_mount_id="session-1",
+        owner_agent_id="copaw-agent-runner",
+        command="openspace",
+    )
+    runtime_service.update_runtime(runtime.runtime_id, process_id=4242)
+    monkeypatch.setattr(
+        "copaw.capabilities.external_runtime_execution._process_exists",
+        lambda pid: False,
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                id="task-runtime-openspace-health",
+                title="Healthcheck openspace",
+                capability_ref="runtime:openspace",
+                owner_agent_id="copaw-agent-runner",
+                payload={
+                    "action": "healthcheck",
+                    "runtime_id": runtime.runtime_id,
+                },
+            ),
+        ),
+    )
+
+    updated = runtime_service.get_runtime(runtime.runtime_id)
+    assert result["success"] is False
+    assert result["output"]["status"] == "orphaned"
+    assert updated is not None
+    assert updated.status == "orphaned"
+
+
+def test_service_start_preserves_orphaned_when_process_exits_before_ready(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config = Config(
+        external_capability_packages={
+            "runtime:openspace": ExternalCapabilityPackageConfig(
+                capability_id="runtime:openspace",
+                name="openspace",
+                summary="OpenSpace runtime component",
+                kind="runtime-component",
+                source_kind="runtime",
+                source_url="https://github.com/HKUDS/OpenSpace",
+                package_ref="git+https://github.com/HKUDS/OpenSpace.git",
+                package_kind="git-repo",
+                enabled=True,
+                execute_command="openspace",
+                healthcheck_command="openspace --help",
+                runtime_kind="service",
+                supported_actions=[
+                    "describe",
+                    "start",
+                    "healthcheck",
+                    "stop",
+                    "restart",
+                ],
+                scope_policy="session",
+                ready_probe_kind="http",
+                ready_probe_config={"url": "http://127.0.0.1:8080/health"},
+                stop_strategy="terminate",
+                startup_entry_ref="script:openspace",
+                environment_requirements=["process", "network"],
+                evidence_contract=["shell-command", "runtime-event"],
+            ),
+        },
+    )
+    capability_service = _build_external_runtime_capability_service(
+        tmp_path,
+        config=config,
+    )
+    runtime_service = capability_service._external_runtime_service
+    monkeypatch.setattr(
+        "copaw.capabilities.external_runtime_execution._spawn_process",
+        lambda command: (4242, None),
+    )
+    monkeypatch.setattr(
+        "copaw.capabilities.external_runtime_execution._process_exists",
+        lambda pid: False,
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                id="task-runtime-openspace-start",
+                title="Start openspace",
+                capability_ref="runtime:openspace",
+                owner_agent_id="copaw-agent-runner",
+                payload={
+                    "action": "start",
+                    "session_mount_id": "session-1",
+                },
+            ),
+        ),
+    )
+
+    runtime_id = result["output"]["runtime_id"]
+    updated = runtime_service.get_runtime(runtime_id)
+    assert result["success"] is False
+    assert result["output"]["status"] == "orphaned"
+    assert updated is not None
+    assert updated.status == "orphaned"
+
+
+def test_service_start_waits_until_runtime_is_ready(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    config = Config(
+        external_capability_packages={
+            "runtime:openspace": ExternalCapabilityPackageConfig(
+                capability_id="runtime:openspace",
+                name="openspace",
+                summary="OpenSpace runtime component",
+                kind="runtime-component",
+                source_kind="runtime",
+                source_url="https://github.com/HKUDS/OpenSpace",
+                package_ref="git+https://github.com/HKUDS/OpenSpace.git",
+                package_kind="git-repo",
+                enabled=True,
+                execute_command="openspace-dashboard --port 7788",
+                healthcheck_command="openspace-dashboard --help",
+                runtime_kind="service",
+                supported_actions=[
+                    "describe",
+                    "start",
+                    "healthcheck",
+                    "stop",
+                    "restart",
+                ],
+                scope_policy="session",
+                ready_probe_kind="http",
+                ready_probe_config={
+                    "url": "http://127.0.0.1:7788/health",
+                    "predicted_default_port": 7788,
+                    "predicted_health_path": "/health",
+                    "startup_timeout_sec": 0.05,
+                    "probe_interval_sec": 0.0,
+                },
+                stop_strategy="terminate",
+                startup_entry_ref="script:openspace-dashboard",
+                environment_requirements=["process", "network"],
+                evidence_contract=["shell-command", "runtime-event"],
+            ),
+        },
+    )
+    capability_service = _build_external_runtime_capability_service(
+        tmp_path,
+        config=config,
+    )
+    runtime_service = capability_service._external_runtime_service
+    attempts = {"count": 0}
+
+    monkeypatch.setattr(
+        "copaw.capabilities.external_runtime_execution._spawn_process",
+        lambda command: (4242, None),
+    )
+    monkeypatch.setattr(
+        "copaw.capabilities.external_runtime_execution._process_exists",
+        lambda pid: True,
+    )
+
+    def _fake_http_check(url: str, timeout: float) -> tuple[bool, str]:
+        _ = (url, timeout)
+        attempts["count"] += 1
+        if attempts["count"] < 2:
+            return False, "Connection refused"
+        return True, "HTTP readiness probe succeeded (200)"
+
+    monkeypatch.setattr(
+        "copaw.capabilities.external_runtime_execution._http_check",
+        _fake_http_check,
+    )
+
+    result = asyncio.run(
+        capability_service.execute_task(
+            KernelTask(
+                id="task-runtime-openspace-start-ready",
+                title="Start openspace dashboard",
+                capability_ref="runtime:openspace",
+                owner_agent_id="copaw-agent-runner",
+                payload={
+                    "action": "start",
+                    "session_mount_id": "session-1",
+                },
+            ),
+        ),
+    )
+
+    runtime_id = result["output"]["runtime_id"]
+    updated = runtime_service.get_runtime(runtime_id)
+    assert result["success"] is True
+    assert attempts["count"] >= 2
+    assert updated is not None
+    assert updated.status == "ready"

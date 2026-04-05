@@ -162,6 +162,7 @@ class RuntimeRepositories:
     prediction_review_repository: SqlitePredictionReviewRepository
     automation_loop_runtime_repository: SqliteAutomationLoopRuntimeRepository
     session_mount_repository: SessionMountRepository
+    external_runtime_repository: Any | None = None
 
 
 @dataclass(slots=True)
@@ -226,6 +227,7 @@ class RuntimeBootstrap:
     actor_mailbox_service: ActorMailboxService
     actor_worker: ActorWorker
     actor_supervisor: ActorSupervisor
+    external_runtime_service: Any | None = None
     buddy_onboarding_service: BuddyOnboardingService | None = None
     buddy_projection_service: BuddyProjectionService | None = None
     main_brain_orchestrator: MainBrainOrchestrator | None = None

@@ -1542,7 +1542,14 @@ def test_capability_market_project_install_unwraps_kernel_output_payload(
             "source_url": "https://github.com/psf/black",
             "installed_capability_ids": ["project:black"],
             "capability_kind": "project-package",
-            "execution_mode": "shell",
+            "runtime_contract": {
+                "runtime_kind": "cli",
+                "supported_actions": ["describe", "run"],
+                "scope_policy": "session",
+                "ready_probe_kind": "none",
+                "predicted_default_port": None,
+                "predicted_health_path": None,
+            },
         },
     )
     async def _fake_dispatch(*args, **kwargs):
@@ -1578,6 +1585,9 @@ def test_capability_market_project_install_unwraps_kernel_output_payload(
     assert payload["source_url"] == "https://github.com/psf/black"
     assert payload["installed_capability_ids"] == ["project:black"]
     assert payload["trial_attachment"]["scope_ref"] == "seat-1"
+    assert payload["runtime_contract"]["runtime_kind"] == "cli"
+    assert payload["runtime_contract"]["supported_actions"] == ["describe", "run"]
+    assert "port" not in payload["runtime_contract"]
 
 
 def test_capability_market_project_install_from_source_url_materializes_candidate_truth(

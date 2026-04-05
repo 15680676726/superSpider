@@ -37,6 +37,17 @@ class InstalledPythonProjectContract:
     console_script: str | None
     execute_command: str
     healthcheck_command: str
+    runtime_kind: str
+    supported_actions: list[str]
+    scope_policy: str
+    ready_probe_kind: str
+    ready_probe_config: dict[str, Any]
+    stop_strategy: str
+    startup_entry_ref: str
+    environment_requirements: list[str]
+    evidence_contract: list[str]
+    predicted_default_port: int | None
+    predicted_health_path: str | None
     metadata: dict[str, Any]
 
 
@@ -123,6 +134,37 @@ def _resolve_console_script_path(script_name: str, *, scripts_dir: str) -> str |
     return None
 
 
+def _service_entrypoint_score(
+    entry_point: dict[str, Any],
+    *,
+    normalized_distribution: str,
+) -> int:
+    name = _normalize_name(entry_point.get("name"))
+    target_module = _normalize_name(
+        _entry_module_from_target(str(entry_point.get("value") or "")),
+    )
+    if not name:
+        return -10_000
+    score = 0
+    if normalized_distribution and name == normalized_distribution:
+        score += 10
+    if "dashboard" in name or "dashboard" in target_module:
+        score += 500
+    if "server" in name or "server" in target_module:
+        score += 400
+    if "api" in name or "api" in target_module:
+        score += 250
+    if "daemon" in name or "daemon" in target_module:
+        score += 150
+    if "web" in name or "web" in target_module:
+        score += 100
+    if "mcp" in name or "mcp" in target_module:
+        score -= 600
+    if any(token in name for token in ("upload", "download", "skill")):
+        score -= 300
+    return score
+
+
 def _shell_command_for_capability(
     *,
     capability_kind: str,
@@ -133,14 +175,14 @@ def _shell_command_for_capability(
     if script_path:
         script = f'"{script_path}"'
         if capability_kind == "runtime-component":
-            return f"{script} --help", f"{script} --help"
+            return script, f"{script} --help"
         if capability_kind == "project-package":
             return f"{script} --version", f"{script} --version"
         return script, script
     python_exe = f'"{python_path}"'
     if capability_kind == "runtime-component":
         return (
-            f"{python_exe} -m {entry_module} --help",
+            f"{python_exe} -m {entry_module}",
             f"{python_exe} -m {entry_module} --help",
         )
     if capability_kind == "project-package":
@@ -152,6 +194,67 @@ def _shell_command_for_capability(
         f'{python_exe} -c "import {entry_module}; print(getattr({entry_module}, \'__name__\', \'{entry_module}\'))"',
         f'{python_exe} -c "import {entry_module}; print(getattr({entry_module}, \'__name__\', \'{entry_module}\'))"',
     )
+
+
+def _default_scope_policy(capability_kind: str) -> str:
+    if capability_kind == "adapter":
+        return "seat"
+    return "session"
+
+
+def _default_runtime_kind(capability_kind: str) -> str:
+    return "service" if capability_kind == "runtime-component" else "cli"
+
+
+def _default_supported_actions(runtime_kind: str) -> list[str]:
+    if runtime_kind == "service":
+        return ["describe", "start", "healthcheck", "stop", "restart"]
+    return ["describe", "run"]
+
+
+def _default_environment_requirements(capability_kind: str) -> list[str]:
+    if capability_kind == "adapter":
+        return ["workspace", "process", "desktop-session"]
+    if capability_kind == "runtime-component":
+        return ["process", "network"]
+    return ["workspace", "process"]
+
+
+def _default_evidence_contract(capability_kind: str) -> list[str]:
+    if capability_kind == "adapter":
+        return ["shell-command", "runtime-event", "environment-session"]
+    if capability_kind == "runtime-component":
+        return ["shell-command", "runtime-event"]
+    return ["shell-command", "call-record"]
+
+
+def _predict_service_probe(
+    *,
+    distribution_name: str,
+    entry_module: str,
+    console_script: str | None = None,
+) -> tuple[int | None, str | None]:
+    normalized = " ".join(
+        filter(
+            None,
+            (
+                _normalize_name(distribution_name),
+                _normalize_name(entry_module),
+                _normalize_name(console_script),
+            ),
+        ),
+    )
+    if "openspace_dashboard" in normalized:
+        return 7788, "/health"
+    if "openspace_server" in normalized or "local_server" in normalized:
+        return 5000, "/health"
+    if "openspace" in normalized:
+        return 7788, "/health"
+    if "flask" in normalized:
+        return 5000, "/"
+    if "fastapi" in normalized or "uvicorn" in normalized:
+        return 8000, "/health"
+    return None, None
 
 
 def inspect_installed_python_distribution(
@@ -227,6 +330,25 @@ def resolve_installed_python_project_contract(
             if _normalize_name(entry_point.get("name", "")) == normalized_entry:
                 chosen_entry_point = entry_point
                 break
+    if chosen_entry_point is None and capability_kind == "runtime-component":
+        service_candidates = sorted(
+            console_entry_points,
+            key=lambda entry_point: _service_entrypoint_score(
+                entry_point,
+                normalized_distribution=normalized_distribution,
+            ),
+            reverse=True,
+        )
+        if service_candidates:
+            best_candidate = service_candidates[0]
+            if (
+                _service_entrypoint_score(
+                    best_candidate,
+                    normalized_distribution=normalized_distribution,
+                )
+                > 0
+            ):
+                chosen_entry_point = best_candidate
     if chosen_entry_point is None:
         for entry_point in console_entry_points:
             if _normalize_name(entry_point.get("name", "")) == normalized_distribution:
@@ -259,10 +381,38 @@ def resolve_installed_python_project_contract(
         entry_module=resolved_entry_module,
         python_path=python_path,
     )
+    runtime_kind = _default_runtime_kind(capability_kind)
+    supported_actions = _default_supported_actions(runtime_kind)
+    predicted_default_port, predicted_health_path = _predict_service_probe(
+        distribution_name=resolved_distribution_name,
+        entry_module=resolved_entry_module,
+        console_script=preferred_console_script,
+    )
+    ready_probe_kind = "none"
+    if runtime_kind == "service":
+        ready_probe_kind = (
+            "http"
+            if isinstance(predicted_default_port, int) and predicted_health_path
+            else "command"
+        )
+    ready_probe_config = {
+        "command": healthcheck_command if ready_probe_kind == "command" else "",
+        "predicted_default_port": predicted_default_port,
+        "predicted_health_path": predicted_health_path,
+    }
+    if ready_probe_kind == "http" and isinstance(predicted_default_port, int):
+        ready_probe_config["url"] = (
+            f"http://127.0.0.1:{predicted_default_port}{predicted_health_path}"
+        )
+    startup_entry_ref = (
+        f"script:{preferred_console_script}"
+        if preferred_console_script
+        else f"module:{resolved_entry_module}"
+    )
     install_name = (
-        preferred_console_script
-        or normalized_distribution
+        normalized_distribution
         or _normalize_name(resolved_entry_module)
+        or preferred_console_script
         or "external_capability"
     )
     return InstalledPythonProjectContract(
@@ -273,6 +423,17 @@ def resolve_installed_python_project_contract(
         console_script=preferred_console_script,
         execute_command=execute_command,
         healthcheck_command=healthcheck_command,
+        runtime_kind=runtime_kind,
+        supported_actions=supported_actions,
+        scope_policy=_default_scope_policy(capability_kind),
+        ready_probe_kind=ready_probe_kind,
+        ready_probe_config=ready_probe_config,
+        stop_strategy="terminate",
+        startup_entry_ref=startup_entry_ref,
+        environment_requirements=_default_environment_requirements(capability_kind),
+        evidence_contract=_default_evidence_contract(capability_kind),
+        predicted_default_port=predicted_default_port,
+        predicted_health_path=predicted_health_path,
         metadata={
             "entry_source": "console-script" if preferred_console_script else "module",
             "console_script": preferred_console_script,

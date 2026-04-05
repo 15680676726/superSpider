@@ -16,9 +16,10 @@ _CANCELLATION_MARKERS = (
     "查询在完成前已被取消",
 )
 _TIMEOUT_MARKERS = (
-    "timeout",
     "timed out",
+    "timeout expired",
     "exceeded the timeout",
+    "command timed out",
 )
 _BLOCKED_MARKERS = (
     "blocked by shell safety policy",

@@ -58,6 +58,12 @@ from .models_core import (
     TaskRuntimeStatus,
     TaskStatus,
 )
+from .models_external_runtime import (
+    ExternalCapabilityRuntimeInstanceRecord,
+    ExternalCapabilityRuntimeKind,
+    ExternalCapabilityRuntimeScopeKind,
+    ExternalCapabilityRuntimeStatus,
+)
 from .models_goals_tasks import (
     AgentReportRecord,
     AssignmentRecord,
@@ -149,6 +155,10 @@ __all__ = [
     "DecisionRequestRecord",
     "DecisionRequestStatus",
     "ExecutionRoutineRecord",
+    "ExternalCapabilityRuntimeInstanceRecord",
+    "ExternalCapabilityRuntimeKind",
+    "ExternalCapabilityRuntimeScopeKind",
+    "ExternalCapabilityRuntimeStatus",
     "FixedSopBindingRecord",
     "FixedSopTemplateRecord",
     "GoalOverrideRecord",

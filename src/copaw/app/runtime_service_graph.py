@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from ..capabilities import CapabilityService
@@ -86,6 +87,7 @@ from ..state.skill_lifecycle_decision_service import SkillLifecycleDecisionServi
 from ..state.strategy_memory_service import StateStrategyMemoryService
 from ..state.skill_candidate_service import CapabilityCandidateService
 from ..state.skill_trial_service import SkillTrialService
+from ..state.external_runtime_service import ExternalCapabilityRuntimeService
 from ..state.work_context_service import WorkContextService
 from ..state.repositories import (
     SqliteAgentCheckpointRepository,
@@ -262,6 +264,48 @@ def _build_runtime_opportunity_radar_feeds() -> dict[str, object]:
     }
 
 
+def _external_runtime_process_exists(pid: int | None) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _reconcile_external_runtime_truth(
+    external_runtime_service: object | None,
+) -> dict[str, int]:
+    lister = getattr(external_runtime_service, "list_runtimes", None)
+    marker = getattr(external_runtime_service, "mark_runtime_stopped", None)
+    if not callable(lister) or not callable(marker):
+        return {"checked": 0, "orphaned": 0}
+    checked = 0
+    orphaned = 0
+    for runtime in lister(runtime_kind="service", limit=500):
+        if getattr(runtime, "status", None) not in {
+            "starting",
+            "restarting",
+            "ready",
+            "degraded",
+        }:
+            continue
+        process_id = getattr(runtime, "process_id", None)
+        if process_id is None:
+            continue
+        checked += 1
+        if _external_runtime_process_exists(process_id):
+            continue
+        marker(
+            runtime.runtime_id,
+            status="orphaned",
+            last_error="Runtime process was missing during bootstrap reconcile.",
+        )
+        orphaned += 1
+    return {"checked": checked, "orphaned": orphaned}
+
+
 def _build_runtime_observability(
     *,
     state_store: SQLiteStateStore,
@@ -289,6 +333,7 @@ def _build_query_services(
     skill_lifecycle_decision_service: object | None,
     human_assist_task_service: HumanAssistTaskService | None,
     environment_service: EnvironmentService,
+    external_runtime_service: object | None = None,
 ) -> tuple[
     RuntimeCenterStateQueryService,
     RuntimeCenterEvidenceQueryService,
@@ -316,6 +361,7 @@ def _build_query_services(
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         human_assist_task_service=human_assist_task_service,
         environment_service=environment_service,
+        external_runtime_service=external_runtime_service,
     )
 
 
@@ -468,6 +514,10 @@ def build_runtime_bootstrap(
         opportunity_radar_service=opportunity_radar_service,
         discovery_executor=_execute_runtime_discovery_action,
     )
+    external_runtime_service = ExternalCapabilityRuntimeService(
+        repository=repositories.external_runtime_repository,
+    )
+    _reconcile_external_runtime_truth(external_runtime_service)
 
     provider_manager = ProviderManager()
     runtime_provider = _resolve_runtime_provider_facade(provider_manager)
@@ -500,6 +550,7 @@ def build_runtime_bootstrap(
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         human_assist_task_service=human_assist_task_service,
         environment_service=environment_service,
+        external_runtime_service=external_runtime_service,
     )
     work_context_service = WorkContextService(
         repository=repositories.work_context_repository,
@@ -525,6 +576,7 @@ def build_runtime_bootstrap(
         experience_memory_service=agent_experience_service,
         state_store=state_store,
         work_context_service=work_context_service,
+        external_runtime_service=external_runtime_service,
     )
 
     domain_services = build_runtime_domain_services(
@@ -710,4 +762,5 @@ def build_runtime_bootstrap(
         actor_mailbox_service=actor_mailbox_service,
         actor_worker=actor_worker,
         actor_supervisor=actor_supervisor,
+        external_runtime_service=external_runtime_service,
     )

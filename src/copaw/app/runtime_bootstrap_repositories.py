@@ -16,6 +16,7 @@ from ..state.repositories import (
     SqliteBacklogItemRepository,
     SqliteCapabilityOverrideRepository,
     SqliteDecisionRequestRepository,
+    SqliteExternalCapabilityRuntimeRepository,
     SqliteExecutionRoutineRepository,
     SqliteFixedSopBindingRepository,
     SqliteFixedSopTemplateRepository,
@@ -108,4 +109,7 @@ def build_runtime_repositories(state_store: SQLiteStateStore) -> RuntimeReposito
             state_store,
         ),
         session_mount_repository=SessionMountRepository(state_store),
+        external_runtime_repository=SqliteExternalCapabilityRuntimeRepository(
+            state_store,
+        ),
     )

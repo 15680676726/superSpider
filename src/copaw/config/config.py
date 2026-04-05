@@ -374,6 +374,13 @@ class ExternalCapabilityPackageConfig(BaseModel):
     install_command: str = ""
     execute_command: str = ""
     healthcheck_command: str = ""
+    runtime_kind: Literal["cli", "service"] | None = None
+    supported_actions: List[str] = Field(default_factory=list)
+    scope_policy: Literal["session", "work_context", "seat"] = "session"
+    ready_probe_kind: str = "none"
+    ready_probe_config: Dict[str, object] = Field(default_factory=dict)
+    stop_strategy: str = "terminate"
+    startup_entry_ref: str = ""
     environment_root: str = ""
     python_path: str = ""
     scripts_dir: str = ""
