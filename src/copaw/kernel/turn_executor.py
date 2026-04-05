@@ -816,6 +816,125 @@ class KernelTurnExecutor:
                 return owner_agent_id.strip()
         return None
 
+    def _admit_interactive_kernel_task(
+        self,
+        *,
+        request: AgentRequest,
+        kernel_task_id: str | None,
+        skip_kernel_admission: bool,
+        session_id: str,
+        user_id: str,
+        channel: str,
+        query: str | None,
+        name: str,
+        owner_agent_id: str | None,
+        capability_ref: str = "system:dispatch_query",
+        risk_level: str = "auto",
+        log_label: str,
+    ) -> tuple[str | None, bool, tuple[Msg, bool] | None]:
+        if (
+            self._kernel_dispatcher is None
+            or skip_kernel_admission
+            or kernel_task_id is not None
+        ):
+            return kernel_task_id, False, None
+        try:
+            admitted = self._submit_interactive_task(
+                request_id=getattr(request, "id", None),
+                session_id=session_id,
+                user_id=user_id,
+                channel=channel,
+                query_preview=(query or name),
+                capability_ref=capability_ref,
+                risk_level=risk_level,
+                owner_agent_id=owner_agent_id,
+                payload={
+                    "request": _request_payload(request),
+                    "channel": channel,
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "dispatch_events": False,
+                },
+            )
+            kernel_task_id = admitted.task_id
+            _set_request_runtime_value(
+                request,
+                "_copaw_kernel_task_id",
+                kernel_task_id,
+            )
+            managed_by_kernel_dispatcher = admitted.phase == "executing"
+            if admitted.phase == "waiting-confirm":
+                return kernel_task_id, managed_by_kernel_dispatcher, (
+                    _approval_required_message(
+                        query=query,
+                        decision_request_id=admitted.decision_request_id,
+                    ),
+                    True,
+                )
+            if admitted.phase != "executing":
+                return kernel_task_id, managed_by_kernel_dispatcher, (
+                    _admission_blocked_message(
+                        phase=admitted.phase,
+                        error=admitted.error,
+                        summary=admitted.summary,
+                    ),
+                    True,
+                )
+            return kernel_task_id, managed_by_kernel_dispatcher, None
+        except Exception:
+            logger.exception("Kernel dispatcher failed to admit %s", log_label)
+            return kernel_task_id, False, None
+
+    def _complete_managed_interactive_task(
+        self,
+        *,
+        kernel_task_id: str | None,
+        managed_by_kernel_dispatcher: bool,
+        summary: str,
+        log_label: str,
+    ) -> None:
+        if not managed_by_kernel_dispatcher or kernel_task_id is None:
+            return
+        try:
+            self._kernel_dispatcher.complete_task(
+                kernel_task_id,
+                summary=summary,
+                metadata={"source": "kernel-turn-executor"},
+            )
+        except Exception:
+            logger.exception("Kernel dispatcher failed to complete %s", log_label)
+
+    def _record_managed_interactive_terminal(
+        self,
+        *,
+        kernel_task_id: str | None,
+        managed_by_kernel_dispatcher: bool,
+        error: str,
+        cancellation_resolution: str = "查询在完成前已被取消。",
+    ) -> None:
+        if not managed_by_kernel_dispatcher or kernel_task_id is None:
+            return
+        try:
+            if is_cancellation_runtime_error(error):
+                cancel_task = getattr(self._kernel_dispatcher, "cancel_task", None)
+                if callable(cancel_task):
+                    cancel_task(
+                        kernel_task_id,
+                        resolution=cancellation_resolution,
+                    )
+                else:
+                    self._kernel_dispatcher.fail_task(
+                        kernel_task_id,
+                        error=cancellation_resolution,
+                    )
+                return
+            self._kernel_dispatcher.fail_task(
+                kernel_task_id,
+                error=error,
+            )
+        except Exception:
+            logger.exception("Kernel dispatcher failed to record terminal outcome")
+
     async def handle_query(
         self,
         *,
@@ -850,58 +969,26 @@ class KernelTurnExecutor:
             name = _initial_turn_title(msgs)
             if query and is_command(query):
                 logger.info("Command path: %s", query.strip()[:50])
-                if (
-                    self._kernel_dispatcher is not None
-                    and not skip_kernel_admission
-                    and kernel_task_id is None
-                ):
-                    try:
-                        capability_ref, risk_level = infer_turn_capability_and_risk(query)
-                        admitted = self._submit_interactive_task(
-                            request_id=getattr(request, "id", None),
-                            session_id=session_id,
-                            user_id=user_id,
-                            channel=channel,
-                            query_preview=(query or name),
-                            capability_ref=capability_ref,
-                            risk_level=risk_level,
-                            owner_agent_id=owner_agent_id,
-                            payload={
-                                "request": _request_payload(request),
-                                "channel": channel,
-                                "user_id": user_id,
-                                "session_id": session_id,
-                                "dispatch_events": False,
-                            },
-                        )
-                        kernel_task_id = admitted.task_id
-                        _set_request_runtime_value(
-                            request,
-                            "_copaw_kernel_task_id",
-                            kernel_task_id,
-                        )
-                        managed_by_kernel_dispatcher = admitted.phase == "executing"
-                        if admitted.phase == "waiting-confirm":
-                            yield (
-                                _approval_required_message(
-                                    query=query,
-                                    decision_request_id=admitted.decision_request_id,
-                                ),
-                                True,
-                            )
-                            return
-                        if admitted.phase != "executing":
-                            yield (
-                                _admission_blocked_message(
-                                    phase=admitted.phase,
-                                    error=admitted.error,
-                                    summary=admitted.summary,
-                                ),
-                                True,
-                            )
-                            return
-                    except Exception:
-                        logger.exception("Kernel dispatcher failed to admit command task")
+                capability_ref, risk_level = infer_turn_capability_and_risk(query)
+                kernel_task_id, managed_by_kernel_dispatcher, terminal_message = (
+                    self._admit_interactive_kernel_task(
+                        request=request,
+                        kernel_task_id=kernel_task_id,
+                        skip_kernel_admission=skip_kernel_admission,
+                        session_id=session_id,
+                        user_id=user_id,
+                        channel=channel,
+                        query=query,
+                        name=name,
+                        owner_agent_id=owner_agent_id,
+                        capability_ref=capability_ref,
+                        risk_level=risk_level,
+                        log_label="command task",
+                    )
+                )
+                if terminal_message is not None:
+                    yield terminal_message
+                    return
 
                 async for msg, last in run_command_path(
                     request=request,
@@ -913,66 +1000,31 @@ class KernelTurnExecutor:
                     last_output_summary = summarize_stream_message(msg)
                     yield msg, last
 
-                if managed_by_kernel_dispatcher and kernel_task_id is not None:
-                    try:
-                        self._kernel_dispatcher.complete_task(
-                            kernel_task_id,
-                            summary=last_output_summary or "Command completed",
-                            metadata={"source": "kernel-turn-executor"},
-                        )
-                    except Exception:
-                        logger.exception("Kernel dispatcher failed to complete command task")
+                self._complete_managed_interactive_task(
+                    kernel_task_id=kernel_task_id,
+                    managed_by_kernel_dispatcher=managed_by_kernel_dispatcher,
+                    summary=last_output_summary or "Command completed",
+                    log_label="command task",
+                )
                 return
 
-            if (
-                self._kernel_dispatcher is not None
-                and not skip_kernel_admission
-                and kernel_task_id is None
-            ):
-                try:
-                    admitted = self._submit_interactive_task(
-                        request_id=getattr(request, "id", None),
-                        session_id=session_id,
-                        user_id=user_id,
-                        channel=channel,
-                        query_preview=(query or name),
-                        owner_agent_id=owner_agent_id,
-                        payload={
-                            "request": _request_payload(request),
-                            "channel": channel,
-                            "user_id": user_id,
-                            "session_id": session_id,
-                            "dispatch_events": False,
-                        },
-                    )
-                    kernel_task_id = admitted.task_id
-                    _set_request_runtime_value(
-                        request,
-                        "_copaw_kernel_task_id",
-                        kernel_task_id,
-                    )
-                    managed_by_kernel_dispatcher = admitted.phase == "executing"
-                    if admitted.phase == "waiting-confirm":
-                        yield (
-                            _approval_required_message(
-                                query=query,
-                                decision_request_id=admitted.decision_request_id,
-                            ),
-                            True,
-                        )
-                        return
-                    if admitted.phase != "executing":
-                        yield (
-                            _admission_blocked_message(
-                                phase=admitted.phase,
-                                error=admitted.error,
-                                summary=admitted.summary,
-                            ),
-                            True,
-                        )
-                        return
-                except Exception:
-                    logger.exception("Kernel dispatcher failed to admit query")
+            kernel_task_id, managed_by_kernel_dispatcher, terminal_message = (
+                self._admit_interactive_kernel_task(
+                    request=request,
+                    kernel_task_id=kernel_task_id,
+                    skip_kernel_admission=skip_kernel_admission,
+                    session_id=session_id,
+                    user_id=user_id,
+                    channel=channel,
+                    query=query,
+                    name=name,
+                    owner_agent_id=owner_agent_id,
+                    log_label="query",
+                )
+            )
+            if terminal_message is not None:
+                yield terminal_message
+                return
 
             async for msg, last in self._main_brain_orchestrator.execute_stream(
                 msgs=msgs,
@@ -983,44 +1035,28 @@ class KernelTurnExecutor:
                 last_output_summary = summarize_stream_message(msg)
                 yield msg, last
 
-            if managed_by_kernel_dispatcher and kernel_task_id is not None:
-                try:
-                    self._kernel_dispatcher.complete_task(
-                        kernel_task_id,
-                        summary=last_output_summary or "Query completed",
-                        metadata={"source": "kernel-turn-executor"},
-                    )
-                except Exception:
-                    logger.exception("Kernel dispatcher failed to complete query")
+            self._complete_managed_interactive_task(
+                kernel_task_id=kernel_task_id,
+                managed_by_kernel_dispatcher=managed_by_kernel_dispatcher,
+                summary=last_output_summary or "Query completed",
+                log_label="query",
+            )
 
         except asyncio.CancelledError as exc:
             logger.info("query_handler: %s cancelled!", session_id)
-            if managed_by_kernel_dispatcher and kernel_task_id is not None:
-                try:
-                    cancel_task = getattr(self._kernel_dispatcher, "cancel_task", None)
-                    if callable(cancel_task):
-                        cancel_task(
-                            kernel_task_id,
-                            resolution="查询在完成前已被取消。",
-                        )
-                    else:
-                        self._kernel_dispatcher.fail_task(
-                            kernel_task_id,
-                            error="查询在完成前已被取消。",
-                        )
-                except Exception:
-                    logger.exception("Kernel dispatcher failed to record cancellation")
+            self._record_managed_interactive_terminal(
+                kernel_task_id=kernel_task_id,
+                managed_by_kernel_dispatcher=managed_by_kernel_dispatcher,
+                error="查询在完成前已被取消。",
+            )
             raise RuntimeError("任务已取消。") from exc
         except Exception as exc:
             exc = normalize_runtime_exception(exc)  # type: ignore[assignment]
-            if managed_by_kernel_dispatcher and kernel_task_id is not None:
-                try:
-                    self._kernel_dispatcher.fail_task(
-                        kernel_task_id,
-                        error=str(exc),
-                    )
-                except Exception:
-                    logger.exception("Kernel dispatcher failed to record failure")
+            self._record_managed_interactive_terminal(
+                kernel_task_id=kernel_task_id,
+                managed_by_kernel_dispatcher=managed_by_kernel_dispatcher,
+                error=str(exc),
+            )
             debug_dump_path = write_query_error_dump(
                 request=request,
                 exc=exc,

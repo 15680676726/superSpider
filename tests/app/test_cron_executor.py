@@ -267,6 +267,9 @@ def test_cron_executor_dispatches_agent_with_shared_durable_request_context() ->
     assert submitted.environment_ref == "env:cron-shared-path"
     assert submitted.work_context_id == "ctx-cron-ctx-1"
     assert submitted.payload["request"]["entry_source"] == "cron-job"
+    assert submitted.payload["request"]["coordinator_contract"] == "durable-runtime-coordinator/v1"
+    assert submitted.payload["request"]["coordinator_entrypoint"] == "cron-job"
+    assert submitted.payload["request"]["coordinator_id"] == "cron-job-ctx-1"
     assert submitted.payload["request"]["environment_ref"] == "env:cron-shared-path"
     assert submitted.payload["request"]["main_brain_runtime"]["environment"]["ref"] == (
         "env:cron-shared-path"
@@ -275,6 +278,11 @@ def test_cron_executor_dispatches_agent_with_shared_durable_request_context() ->
     assert submitted.payload["request_context"]["control_thread_id"] == "thread-cron-ctx-1"
     assert submitted.payload["request_context"]["work_context_id"] == "ctx-cron-ctx-1"
     assert submitted.payload["request_context"]["channel"] == "console"
+    assert submitted.payload["request_context"]["coordinator_contract"] == (
+        "durable-runtime-coordinator/v1"
+    )
+    assert submitted.payload["request_context"]["coordinator_entrypoint"] == "cron-job"
+    assert submitted.payload["request_context"]["coordinator_id"] == "cron-job-ctx-1"
     assert submitted.payload["request_context"]["main_brain_runtime"]["environment"]["ref"] == (
         "env:cron-shared-path"
     )

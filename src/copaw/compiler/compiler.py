@@ -87,6 +87,9 @@ class SemanticCompiler:
                     payload=payload,
                     goal_id=str(goal_id) if goal_id else None,
                     parent_task_id=str(parent_task_id) if parent_task_id else None,
+                    work_context_id=_string_context_value(
+                        unit.context.get("work_context_id"),
+                    ),
                     owner_agent_id=(
                         str(owner_agent_id)
                         if owner_agent_id
@@ -1007,6 +1010,7 @@ def _request_context_payload(
         "lane_id",
         "cycle_id",
         "assignment_id",
+        "work_context_id",
         "report_back_mode",
         "session_kind",
         "task_mode",

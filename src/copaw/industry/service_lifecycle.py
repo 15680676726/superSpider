@@ -2409,6 +2409,14 @@ class _IndustryLifecycleMixin:
             instance_id=record.instance_id,
             session_id=session_id,
         )
+        control_thread_binding = (
+            self._agent_thread_binding_repository.get_binding(control_thread_id)
+            if self._agent_thread_binding_repository is not None
+            else None
+        )
+        control_thread_work_context_id = _string(
+            getattr(control_thread_binding, "work_context_id", None),
+        )
         chat_writeback_channel = _string(channel) or "console"
         chat_writeback_environment_ref = (
             f"session:{chat_writeback_channel}:industry:{record.instance_id}"
@@ -2683,6 +2691,11 @@ class _IndustryLifecycleMixin:
                     existing_metadata.get("proposal_status"),
                 )
             elif self._backlog_service is not None:
+                extra_goal_metadata = (
+                    dict(plan.goal_metadata or {})
+                    if isinstance(plan.goal_metadata, dict)
+                    else {}
+                )
                 backlog_item = self._backlog_service.record_chat_writeback(
                     industry_instance_id=record.instance_id,
                     lane_id=target_lane.id if target_lane is not None else None,
@@ -2691,6 +2704,7 @@ class _IndustryLifecycleMixin:
                     priority=3,
                     source_ref=f"chat-writeback:{plan.fingerprint}",
                     metadata={
+                        **extra_goal_metadata,
                         "plan_steps": list(plan.goal.plan_steps),
                         "owner_agent_id": target_owner_agent_id,
                         "industry_role_id": target_industry_role_id,
@@ -2720,6 +2734,7 @@ class _IndustryLifecycleMixin:
                         "chat_writeback_channel": chat_writeback_channel,
                         "control_thread_id": control_thread_id,
                         "session_id": control_thread_id,
+                        "work_context_id": control_thread_work_context_id,
                         "environment_ref": chat_writeback_environment_ref,
                         "seat_resolution_kind": seat_resolution_kind,
                         "seat_resolution_reason": seat_resolution_reason or None,
@@ -4253,6 +4268,7 @@ class _IndustryLifecycleMixin:
             "environment_ref": environment_ref,
             "session_id": control_thread_id,
             "control_thread_id": control_thread_id,
+            "work_context_id": _string(metadata.get("work_context_id")),
         }
         compiler_context.update(
             self._assignment_plan_context_from_formal_planning(assignment),

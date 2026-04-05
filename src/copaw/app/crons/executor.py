@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, TYPE_CHECKING
 
 from ..runtime_center.execution_runtime_projection import resolve_canonical_host_identity
+from ..runtime_launch_contract import build_runtime_launch_contract
 from ..runtime_commands import infer_turn_capability_and_risk
 from ...kernel.runtime_coordination import build_durable_runtime_coordination
 from .models import CronJobSpec
@@ -315,6 +316,16 @@ class CronExecutor:
         environment_ref: str | None,
     ) -> Dict[str, Any]:
         normalized = dict(request_payload or {})
+        normalized.update(
+            {
+                key: value
+                for key, value in build_runtime_launch_contract(
+                    entry_source="cron-job",
+                    coordinator_id=job.id,
+                ).items()
+                if key not in normalized
+            },
+        )
         control_thread_id = _string_value(
             normalized.get("control_thread_id"),
         ) or _string_value(target_session_id)
@@ -338,7 +349,6 @@ class CronExecutor:
         normalized["user_id"] = target_user_id or "cron"
         normalized["session_id"] = target_session_id or f"cron:{job.id}"
         normalized["channel"] = job.dispatch.channel
-        normalized.setdefault("entry_source", "cron-job")
         if environment_ref is not None:
             normalized["environment_ref"] = environment_ref
         if control_thread_id is not None:

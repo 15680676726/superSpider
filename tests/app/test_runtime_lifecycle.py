@@ -219,11 +219,17 @@ async def test_start_automation_tasks_tracks_blocked_and_submitting_loop_health(
                 "actor": "system:automation",
                 "source": "automation:operating_cycle",
                 "force": False,
+                "entry_source": "automation-loop",
                 "automation_task_id": (
                     "copaw-main-brain:operating-cycle:system:run_operating_cycle"
                 ),
                 "coordinator_contract": "automation-coordinator/v1",
                 "automation_loop_name": "operating-cycle",
+                "durable_coordinator_contract": "durable-runtime-coordinator/v1",
+                "durable_coordinator_entrypoint": "automation-loop",
+                "durable_coordinator_id": (
+                    "copaw-main-brain:operating-cycle:system:run_operating_cycle"
+                ),
             },
         },
     ]
@@ -315,11 +321,17 @@ async def test_start_automation_tasks_dispatches_operating_cycle_when_gate_allow
         "actor": "system:automation",
         "source": "automation:operating_cycle",
         "force": False,
+        "entry_source": "automation-loop",
         "automation_task_id": (
             "copaw-main-brain:operating-cycle:system:run_operating_cycle"
         ),
         "coordinator_contract": "automation-coordinator/v1",
         "automation_loop_name": "operating-cycle",
+        "durable_coordinator_contract": "durable-runtime-coordinator/v1",
+        "durable_coordinator_entrypoint": "automation-loop",
+        "durable_coordinator_id": (
+            "copaw-main-brain:operating-cycle:system:run_operating_cycle"
+        ),
     }
 
 
@@ -460,11 +472,17 @@ async def test_start_automation_tasks_dispatches_host_recovery_payload(
         "source": "automation:host_recovery",
         "limit": 25,
         "allow_cross_process_recovery": True,
+        "entry_source": "automation-loop",
         "automation_task_id": (
             "copaw-main-brain:host-recovery:system:run_host_recovery"
         ),
         "coordinator_contract": "automation-coordinator/v1",
         "automation_loop_name": "host-recovery",
+        "durable_coordinator_contract": "durable-runtime-coordinator/v1",
+        "durable_coordinator_entrypoint": "automation-loop",
+        "durable_coordinator_id": (
+            "copaw-main-brain:host-recovery:system:run_host_recovery"
+        ),
     }
 
 

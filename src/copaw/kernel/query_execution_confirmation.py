@@ -98,6 +98,9 @@ def query_confirmation_request_context(request: Any) -> dict[str, object]:
         "work_context_id",
         "agent_id",
         "entry_source",
+        "coordinator_contract",
+        "coordinator_entrypoint",
+        "coordinator_id",
         "owner_scope",
         "industry_instance_id",
         "industry_role_id",
@@ -180,6 +183,9 @@ def build_query_resume_request(
         "session_kind",
         "task_mode",
         "target_agent_id",
+        "coordinator_contract",
+        "coordinator_entrypoint",
+        "coordinator_id",
     ):
         value = payload.get(field)
         if value not in (None, ""):

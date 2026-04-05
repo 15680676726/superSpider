@@ -44,6 +44,7 @@ class ChatWritebackPlan:
     fingerprint: str
     strategy: StrategyWritebackPlan
     goal: GoalWritebackPlan | None = None
+    goal_metadata: dict[str, object] = field(default_factory=dict)
     schedule: ScheduleWritebackPlan | None = None
     classifications: list[str] = field(default_factory=list)
 
@@ -62,6 +63,7 @@ def _build_chat_writeback_plan(
     goal_title: str | None = None,
     goal_summary: str | None = None,
     goal_plan_steps: list[str] | None = None,
+    goal_metadata: dict[str, object] | None = None,
     schedule_title: str | None = None,
     schedule_summary: str | None = None,
     schedule_cron: str | None = None,
@@ -129,6 +131,7 @@ def _build_chat_writeback_plan(
         fingerprint=fingerprint,
         strategy=strategy,
         goal=goal,
+        goal_metadata=_normalize_object_mapping(goal_metadata),
         schedule=schedule,
         classifications=classifications,
     )
@@ -145,6 +148,7 @@ def build_chat_writeback_plan(
     goal_title: str | None = None,
     goal_summary: str | None = None,
     goal_plan_steps: list[str] | None = None,
+    goal_metadata: dict[str, object] | None = None,
     schedule_title: str | None = None,
     schedule_summary: str | None = None,
     schedule_cron: str | None = None,
@@ -160,6 +164,7 @@ def build_chat_writeback_plan(
         goal_title=goal_title,
         goal_summary=goal_summary,
         goal_plan_steps=goal_plan_steps,
+        goal_metadata=goal_metadata,
         schedule_title=schedule_title,
         schedule_summary=schedule_summary,
         schedule_cron=schedule_cron,
@@ -178,6 +183,7 @@ def build_chat_writeback_plan_from_payload(
     goal_title: str | None = None,
     goal_summary: str | None = None,
     goal_plan_steps: list[str] | None = None,
+    goal_metadata: dict[str, object] | None = None,
     schedule_title: str | None = None,
     schedule_summary: str | None = None,
     schedule_cron: str | None = None,
@@ -193,6 +199,7 @@ def build_chat_writeback_plan_from_payload(
         goal_title=goal_title,
         goal_summary=goal_summary,
         goal_plan_steps=goal_plan_steps,
+        goal_metadata=goal_metadata,
         schedule_title=schedule_title,
         schedule_summary=schedule_summary,
         schedule_cron=schedule_cron,
@@ -205,6 +212,12 @@ def _normalize_text(value: str | None) -> str | None:
         return None
     text = _SPACE_RE.sub(" ", str(value).strip())
     return text or None
+
+
+def _normalize_object_mapping(value: dict[str, object] | None) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in value.items()}
 
 
 def _normalize_approved_classifications(

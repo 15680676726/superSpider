@@ -16,6 +16,7 @@ from ..config import load_config
 from ..config.utils import get_config_path
 from ..kernel import KernelDispatcher, KernelTask
 from ..state import AutomationLoopRuntimeRecord
+from .runtime_launch_contract import build_runtime_launch_contract
 from .runtime_bootstrap import (
     RuntimeBootstrap,
     attach_runtime_state,
@@ -54,6 +55,17 @@ class _AutomationLoopState:
         enriched.setdefault("automation_task_id", self.automation_task_id)
         enriched.setdefault("coordinator_contract", self.coordinator_contract)
         enriched.setdefault("automation_loop_name", self.task_name)
+        enriched.update(
+            {
+                key: value
+                for key, value in build_runtime_launch_contract(
+                    entry_source="automation-loop",
+                    coordinator_id=self.automation_task_id,
+                    durable_field_prefix="durable_",
+                ).items()
+                if key not in enriched
+            },
+        )
         return enriched
 
     @classmethod

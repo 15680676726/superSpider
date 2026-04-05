@@ -115,6 +115,17 @@ class FakeKernelDispatcher:
         self.cancelled.append((task_id, resolution))
 
 
+class WaitingConfirmKernelDispatcher(FakeKernelDispatcher):
+    def submit(self, task):
+        self.submitted.append(task)
+        return KernelResult(
+            task_id=task.id,
+            success=False,
+            phase="waiting-confirm",
+            decision_request_id="decision-waiting-confirm",
+        )
+
+
 class FailingQueryExecutionService(FakeQueryExecutionService):
     async def execute_stream(self, **kwargs):
         self.calls.append(kwargs)
@@ -126,6 +137,13 @@ class CancelledQueryExecutionService(FakeQueryExecutionService):
     async def execute_stream(self, **kwargs):
         self.calls.append(kwargs)
         raise asyncio.CancelledError()
+        yield
+
+
+class RuntimeCancelledQueryExecutionService(FakeQueryExecutionService):
+    async def execute_stream(self, **kwargs):
+        self.calls.append(kwargs)
+        raise RuntimeError("任务已取消。")
         yield
 
 
@@ -218,6 +236,37 @@ async def test_kernel_turn_executor_delegates_query_execution_to_service():
     assert kernel_dispatcher.completed == [
         (submitted.id, "kernel done", {"source": "kernel-turn-executor"})
     ]
+
+
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_command_waiting_confirm_does_not_execute_or_complete():
+    query_execution_service = FakeQueryExecutionService()
+    kernel_dispatcher = WaitingConfirmKernelDispatcher()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        kernel_dispatcher=kernel_dispatcher,
+        query_execution_service=query_execution_service,
+    )
+
+    request = AgentRequest(
+        id="req-command-waiting-confirm",
+        session_id="sess-command-waiting-confirm",
+        user_id="user-command-waiting-confirm",
+        channel="console",
+        input=[],
+    )
+    msgs = [Msg(name="user", role="user", content="/status")]
+
+    streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+    assert len(streamed) == 1
+    assert streamed[0][1] is True
+    assert "批准" in streamed[0][0].get_text_content()
+    assert query_execution_service.calls == []
+    assert len(kernel_dispatcher.submitted) == 1
+    assert kernel_dispatcher.completed == []
+    assert kernel_dispatcher.failed == []
+    assert kernel_dispatcher.cancelled == []
 
 
 @pytest.mark.asyncio
@@ -2104,6 +2153,72 @@ async def test_kernel_turn_executor_stream_request_marks_cancellation_as_cancele
         user_id="user-cancelled",
         channel="console",
         input=[],
+    )
+
+    events = [event async for event in executor.stream_request(request)]
+
+    final_response = events[-1]
+    assert final_response.status == RunStatus.Canceled
+    assert kernel_dispatcher.failed == []
+    assert len(kernel_dispatcher.cancelled) == 1
+    assert kernel_dispatcher.cancelled[0][1] == "查询在完成前已被取消。"
+
+
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_stream_request_treats_runtime_cancellation_as_cancelled_not_failed():
+    kernel_dispatcher = FakeKernelDispatcher()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=RuntimeCancelledQueryExecutionService(),
+        kernel_dispatcher=kernel_dispatcher,
+    )
+    request = AgentRequest(
+        id="req-runtime-cancelled",
+        session_id="sess-runtime-cancelled",
+        user_id="user-runtime-cancelled",
+        channel="console",
+        input=[],
+    )
+
+    events = [event async for event in executor.stream_request(request)]
+
+    final_response = events[-1]
+    assert final_response.status == RunStatus.Canceled
+    assert kernel_dispatcher.failed == []
+    assert len(kernel_dispatcher.cancelled) == 1
+    assert kernel_dispatcher.cancelled[0][1] == "查询在完成前已被取消。"
+
+
+@pytest.mark.asyncio
+async def test_kernel_turn_executor_stream_request_treats_command_runtime_cancellation_as_cancelled_not_failed(
+    monkeypatch,
+):
+    kernel_dispatcher = FakeKernelDispatcher()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        query_execution_service=FakeQueryExecutionService(),
+        kernel_dispatcher=kernel_dispatcher,
+    )
+    request = AgentRequest(
+        id="req-command-runtime-cancelled",
+        session_id="sess-command-runtime-cancelled",
+        user_id="user-command-runtime-cancelled",
+        channel="console",
+        input=[
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "/status"}],
+            },
+        ],
+    )
+
+    async def _cancelled_command_path(**_kwargs):
+        raise RuntimeError("任务已取消。")
+        yield
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.run_command_path",
+        _cancelled_command_path,
     )
 
     events = [event async for event in executor.stream_request(request)]

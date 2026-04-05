@@ -13,6 +13,7 @@ from copaw.kernel import KernelTurnExecutor
 from copaw.kernel.main_brain_chat_service import MainBrainChatService
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.main_brain_orchestrator import MainBrainOrchestrator
+from copaw.sop_kernel import FixedSopBindingCreateRequest
 from copaw.state import AgentReportRecord
 
 from .industry_api_parts.shared import _build_industry_app
@@ -699,3 +700,200 @@ def test_runtime_canonical_flow_auto_frontdoor_replan_materializes_followup_assi
     )
     assert runtime_assignment["metadata"]["control_thread_id"] == control_thread_id
     assert runtime_assignment["metadata"]["work_context_id"] == work_context_id
+
+
+def test_runtime_canonical_flow_chat_frontdoor_can_close_through_real_fixed_sop_terminal_report(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+
+    instruction = "Please run the repeatable SOP on the same control thread and return the result."
+    control_ack = "Recorded. I will move this into the governed execution chain."
+
+    chat_service = MainBrainChatService(
+        session_backend=app.state.session_backend,
+        industry_service=app.state.industry_service,
+        agent_profile_service=app.state.agent_profile_service,
+        model_factory=lambda: _StaticResponseModel(control_ack),
+    )
+    query_execution_service = _CanonicalFlowQueryExecutionService(
+        chat_service=chat_service,
+        industry_service=app.state.industry_service,
+    )
+    fixed_sop_binding_ref: dict[str, str] = {}
+
+    async def _resolve_intake_contract(**_kwargs):
+        return MainBrainIntakeContract(
+            message_text=instruction,
+            decision=SimpleNamespace(intent_kind="execute-task", kickoff_allowed=False),
+            intent_kind="execute-task",
+            writeback_requested=True,
+            writeback_plan=build_chat_writeback_plan(
+                instruction,
+                approved_classifications=["backlog"],
+                goal_title="Run canonical flow fixed SOP",
+                goal_summary="Trigger the governed fixed SOP and report back on the same control thread.",
+                goal_plan_steps=[
+                    "Run the governed fixed SOP binding.",
+                    "Keep the same control thread and work context.",
+                    "Write back the terminal report and evidence.",
+                ],
+                goal_metadata={
+                    "fixed_sop_binding_id": fixed_sop_binding_ref["binding_id"],
+                    "fixed_sop_binding_name": fixed_sop_binding_ref["binding_name"],
+                    "fixed_sop_source_type": "assignment",
+                    "fixed_sop_source_ref": "runtime-canonical-flow-chat",
+                    "fixed_sop_input_payload": {"window": "today"},
+                },
+            ),
+            should_kickoff=False,
+        )
+
+    app.state.turn_executor = KernelTurnExecutor(
+        session_backend=app.state.session_backend,
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=chat_service,
+        main_brain_orchestrator=MainBrainOrchestrator(
+            query_execution_service=query_execution_service,
+            session_backend=app.state.session_backend,
+            intake_contract_resolver=_resolve_intake_contract,
+        ),
+    )
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Customer Operations",
+            "company_name": "Northwind Robotics",
+            "product": "guided customer follow-up",
+        },
+    )
+    assert preview.status_code == 200
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview.json()["profile"],
+            "draft": preview.json()["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    control_thread_id = f"industry-chat:{instance_id}:execution-core"
+    binding = app.state.agent_thread_binding_repository.get_binding(control_thread_id)
+    assert binding is not None
+    work_context_id = binding.work_context_id
+    assert work_context_id is not None
+
+    fixed_sop_binding = app.state.fixed_sop_service.create_binding(
+        FixedSopBindingCreateRequest(
+            template_id="fixed-sop-http-routine-bridge",
+            binding_name="Canonical Flow Fixed SOP",
+            status="active",
+            owner_scope=record.owner_scope,
+            owner_agent_id="copaw-agent-runner",
+            industry_instance_id=instance_id,
+            metadata={"binding_source": "runtime-canonical-flow-e2e"},
+        ),
+    )
+    fixed_sop_binding_ref.update(
+        {
+            "binding_id": fixed_sop_binding.binding.binding_id,
+            "binding_name": fixed_sop_binding.binding.binding_name,
+        }
+    )
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-canonical-flow-fixed-sop",
+            "session_id": control_thread_id,
+            "thread_id": control_thread_id,
+            "user_id": "copaw-agent-runner",
+            "channel": "console",
+            "agent_id": "copaw-agent-runner",
+            "industry_instance_id": instance_id,
+            "industry_role_id": "execution-core",
+            "session_kind": "industry-control-thread",
+            "control_thread_id": control_thread_id,
+            "interaction_mode": "auto",
+            "requested_actions": ["writeback_backlog"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [{"type": "text", "text": instruction}],
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert query_execution_service.writeback_result is not None
+
+    writeback = query_execution_service.writeback_result
+    backlog_id = str(writeback["created_backlog_ids"][0])
+    decision_id = writeback.get("decision_request_id")
+    if decision_id is not None:
+        approved = client.post(
+            f"/runtime-center/decisions/{decision_id}/approve",
+            json={"resolution": "Approved for the fixed SOP closure test.", "execute": True},
+        )
+        assert approved.status_code == 200
+
+    first_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:canonical-flow-fixed-sop-cycle",
+            force=True,
+            backlog_item_ids=[backlog_id],
+            auto_dispatch_materialized_goals=True,
+        ),
+    )
+    processed_instance = first_cycle["processed_instances"][0]
+    assert processed_instance["created_assignment_ids"]
+    assert processed_instance["created_task_ids"]
+
+    task = app.state.task_repository.get_task(processed_instance["created_task_ids"][0])
+    assert task is not None
+    assert task.task_type == "system:run_fixed_sop"
+    assert task.work_context_id == work_context_id
+
+    second_cycle = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:canonical-flow-fixed-sop-reconcile",
+            force=True,
+        ),
+    )
+    processed_report_ids = second_cycle["processed_instances"][0]["processed_report_ids"]
+    assert processed_report_ids
+
+    runtime_detail = client.get(f"/runtime-center/industry/{instance_id}")
+    assert runtime_detail.status_code == 200
+    runtime_payload = runtime_detail.json()
+    report = next(
+        item
+        for item in runtime_payload["agent_reports"]
+        if item["report_id"] in processed_report_ids
+    )
+    assert report["result"] == "completed"
+    assert report["evidence_ids"]
+    assert report["metadata"]["fixed_sop_binding_id"] == fixed_sop_binding.binding.binding_id
+
+    snapshot = app.state.session_backend.load_session_snapshot(
+        session_id=control_thread_id,
+        user_id="copaw-agent-runner",
+        allow_not_exist=True,
+    )
+    assert snapshot is not None
+    memory_messages = _flatten_memory_messages(snapshot["agent"]["memory"])
+    report_message = next(
+        message
+        for message in memory_messages
+        if message.get("id") == f"agent-report:{report['report_id']}"
+    )
+    assert report_message["metadata"]["control_thread_id"] == control_thread_id
+    assert report_message["metadata"]["work_context_id"] == work_context_id
