@@ -77,12 +77,17 @@ def classify_external_protocol_surface(
     payload = dict(metadata or {})
     mcp_server_ref = _string(payload.get("mcp_server_ref"))
     mcp_tools = payload.get("mcp_tools")
-    if mcp_server_ref is not None and isinstance(mcp_tools, list) and mcp_tools:
+    if mcp_server_ref is not None:
+        eligible = isinstance(mcp_tools, list) and bool(mcp_tools)
+        blockers: list[str] = []
+        if not eligible:
+            blockers.append("no-typed-action-surface")
         return ExternalProtocolSurface(
             protocol_surface_kind="native_mcp",
             transport_kind="mcp",
             call_surface_ref=mcp_server_ref,
-            formal_adapter_eligible=True,
+            formal_adapter_eligible=eligible,
+            blockers=blockers,
             hints={"actions": list(mcp_tools)},
         )
 

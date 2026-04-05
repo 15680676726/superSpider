@@ -381,6 +381,9 @@ class ExternalCapabilityPackageConfig(BaseModel):
     ready_probe_config: Dict[str, object] = Field(default_factory=dict)
     stop_strategy: str = "terminate"
     startup_entry_ref: str = ""
+    intake_protocol_kind: str = "unknown"
+    call_surface_ref: str = ""
+    adapter_contract: Dict[str, object] = Field(default_factory=dict)
     environment_root: str = ""
     python_path: str = ""
     scripts_dir: str = ""

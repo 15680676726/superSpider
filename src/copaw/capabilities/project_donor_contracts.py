@@ -228,6 +228,31 @@ def _default_evidence_contract(capability_kind: str) -> list[str]:
     return ["shell-command", "call-record"]
 
 
+def _callable_surface_hints(
+    *,
+    capability_kind: str,
+    console_entry_points: list[dict[str, Any]],
+    resolved_entry_module: str,
+) -> dict[str, Any]:
+    hints: dict[str, Any] = {}
+    mcp_entry = next(
+        (
+            entry_point
+            for entry_point in console_entry_points
+            if "mcp" in _normalize_name(entry_point.get("name"))
+            or "mcp" in _normalize_name(entry_point.get("value"))
+        ),
+        None,
+    )
+    if mcp_entry is not None:
+        mcp_name = str(mcp_entry.get("name") or "").strip()
+        if mcp_name:
+            hints["mcp_server_ref"] = f"script:{mcp_name}"
+    if capability_kind == "adapter" and resolved_entry_module:
+        hints.setdefault("sdk_entry_ref", f"module:{resolved_entry_module}")
+    return hints
+
+
 def _predict_service_probe(
     *,
     distribution_name: str,
@@ -438,5 +463,10 @@ def resolve_installed_python_project_contract(
             "entry_source": "console-script" if preferred_console_script else "module",
             "console_script": preferred_console_script,
             "script_path": script_path,
+            **_callable_surface_hints(
+                capability_kind=capability_kind,
+                console_entry_points=console_entry_points,
+                resolved_entry_module=resolved_entry_module,
+            ),
         },
     )

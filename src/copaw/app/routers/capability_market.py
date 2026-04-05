@@ -49,6 +49,13 @@ from ...capabilities.install_templates import (
 from ...capabilities.lifecycle_assignment import (
     build_capability_lifecycle_assignment_payload,
 )
+from ...capabilities.external_adapter_compiler import (
+    compile_external_adapter_contract,
+)
+from ...capabilities.external_adapter_contracts import (
+    classify_external_protocol_surface,
+    protocol_surface_metadata,
+)
 from ...capabilities.project_donor_contracts import (
     build_github_python_project_transport_chain,
     parse_pip_install_report_requested_distribution,
@@ -181,6 +188,7 @@ class CapabilityMarketProjectInstallResponse(BaseModel):
     capability_kind: str = "project-package"
     installed_capability_ids: list[str] = Field(default_factory=list)
     runtime_contract: dict[str, Any] = Field(default_factory=dict)
+    adapter_contract: dict[str, Any] = Field(default_factory=dict)
     target_agent_id: str | None = None
     trial_attachment: dict[str, Any] | None = None
 
@@ -1135,6 +1143,19 @@ async def _install_external_project_capability(
             or resolved_contract.healthcheck_command
             or resolved_execute_command
         )
+        surface_metadata = {
+            **dict(resolved_contract.metadata or {}),
+            "entry_module": resolved_contract.entry_module,
+            "console_script": resolved_contract.console_script,
+            "startup_entry_ref": resolved_contract.startup_entry_ref,
+            "execute_command": resolved_execute_command,
+            "healthcheck_command": resolved_healthcheck_command,
+        }
+        protocol_surface = classify_external_protocol_surface(metadata=surface_metadata)
+        compiled_adapter_contract = compile_external_adapter_contract(
+            capability_id=capability_id,
+            surface=protocol_surface,
+        )
         staged_environment = {}
         for key, package in existing_source_matches:
             packages.pop(key, None)
@@ -1173,6 +1194,15 @@ async def _install_external_project_capability(
             },
             stop_strategy=str(resolved_contract.stop_strategy or "terminate"),
             startup_entry_ref=str(resolved_contract.startup_entry_ref or ""),
+            intake_protocol_kind=str(
+                protocol_surface.protocol_surface_kind or "unknown",
+            ),
+            call_surface_ref=str(protocol_surface.call_surface_ref or ""),
+            adapter_contract=(
+                compiled_adapter_contract.model_dump(mode="json")
+                if compiled_adapter_contract is not None
+                else {}
+            ),
             environment_root=final_environment["environment_root"],
             python_path=final_environment["python_path"],
             scripts_dir=final_environment["scripts_dir"],
@@ -1188,6 +1218,7 @@ async def _install_external_project_capability(
                 "open_source_project": True,
                 "install_transport_kind": selected_transport.kind,
                 **dict(resolved_contract.metadata or {}),
+                **protocol_surface_metadata(protocol_surface),
             },
         )
         config.external_capability_packages = packages
@@ -1205,6 +1236,11 @@ async def _install_external_project_capability(
                 contract=resolved_contract,
                 execute_command=resolved_execute_command,
                 healthcheck_command=resolved_healthcheck_command,
+            ),
+            "adapter_contract": (
+                compiled_adapter_contract.model_dump(mode="json")
+                if compiled_adapter_contract is not None
+                else {}
             ),
         }
     finally:
@@ -2682,6 +2718,11 @@ async def install_market_project_donor(
         runtime_contract=(
             dict(result.get("runtime_contract"))
             if isinstance(result.get("runtime_contract"), dict)
+            else {}
+        ),
+        adapter_contract=(
+            dict(result.get("adapter_contract"))
+            if isinstance(result.get("adapter_contract"), dict)
             else {}
         ),
         target_agent_id=target_agent_id,
