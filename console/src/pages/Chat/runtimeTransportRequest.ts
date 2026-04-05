@@ -214,6 +214,8 @@ export function buildRuntimeChatRequest({
     channel: sessionContext.channel,
     stream: true,
     ...biz_params,
+    buddy_profile_id:
+      threadMeta.buddy_profile_id || biz_params?.buddy_profile_id,
     interaction_mode: "auto",
     industry_instance_id:
       threadMeta.industry_instance_id || biz_params?.industry_instance_id,

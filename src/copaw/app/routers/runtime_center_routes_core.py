@@ -81,6 +81,41 @@ def _set_runtime_chat_interaction_mode(
     return request_payload
 
 
+def _record_buddy_chat_interaction(
+    *,
+    request_payload: AgentRequest,
+    request: Request,
+    interaction_mode: str,
+) -> None:
+    service = getattr(request.app.state, "buddy_onboarding_service", None)
+    recorder = getattr(service, "record_chat_interaction", None)
+    if not callable(recorder):
+        return
+    profile_id = str(getattr(request_payload, "buddy_profile_id", "") or "").strip()
+    if not profile_id:
+        return
+    input_payload = getattr(request_payload, "input", None)
+    if not isinstance(input_payload, list) or not input_payload:
+        return
+    last_message = input_payload[-1]
+    if not isinstance(last_message, dict):
+        return
+    text_parts: list[str] = []
+    for block in last_message.get("content") or []:
+        if isinstance(block, dict) and block.get("type") == "text":
+            text = str(block.get("text") or "").strip()
+            if text:
+                text_parts.append(text)
+    message_text = "\n".join(text_parts).strip()
+    if not message_text:
+        return
+    recorder(
+        profile_id=profile_id,
+        user_message=message_text,
+        interaction_mode=interaction_mode,
+    )
+
+
 def _resolve_runtime_chat_interaction_mode(
     request_payload: AgentRequest,
     *,
@@ -1151,6 +1186,11 @@ async def _run_runtime_chat_turn(
     request_payload = _set_runtime_chat_interaction_mode(
         request_payload,
         interaction_mode,
+    )
+    _record_buddy_chat_interaction(
+        request_payload=request_payload,
+        request=request,
+        interaction_mode=interaction_mode,
     )
     intercepted = await _maybe_intercept_human_assist_chat_turn(
         request_payload=request_payload,

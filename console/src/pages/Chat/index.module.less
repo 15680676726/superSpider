@@ -123,8 +123,8 @@
 }
 
 .buddySprite {
-  width: 72px;
-  height: 72px;
+  width: 92px;
+  min-height: 88px;
   flex-shrink: 0;
   border-radius: 16px;
   position: relative;
@@ -133,6 +133,7 @@
   background:
     linear-gradient(180deg, rgba(255, 236, 179, 0.9), rgba(201, 168, 76, 0.8));
   box-shadow: inset 0 0 0 3px rgba(15, 23, 42, 0.22);
+  overflow: hidden;
 }
 
 .buddySprite[data-stage="bonded"] {
@@ -151,19 +152,40 @@
   background: linear-gradient(180deg, rgba(244, 114, 182, 0.95), rgba(168, 85, 247, 0.86));
 }
 
-.buddySpriteFace {
-  width: 38px;
-  height: 28px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.buddySprite[data-presence="focused"] {
+  transform: scale(1.03);
+  box-shadow:
+    inset 0 0 0 3px rgba(15, 23, 42, 0.22),
+    0 0 0 3px rgba(59, 130, 246, 0.16);
 }
 
-.buddySpriteFace span {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  background: #111827;
+.buddySprite[data-presence="supporting"] {
+  animation: buddyFloat 2.4s ease-in-out infinite;
+}
+
+.buddySprite[data-presence="celebrating"] {
+  animation: buddyBounce 1.3s ease-in-out infinite;
+}
+
+.buddySprite[data-presence="pulling-back"] {
+  animation: buddyShake 0.85s ease-in-out infinite;
+}
+
+.buddySprite[data-presence="resting"] {
+  filter: saturate(0.75) brightness(0.92);
+}
+
+.buddySpriteAscii {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1;
+  color: #111827;
+  white-space: pre;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .buddyCompanionMeta {
@@ -195,6 +217,103 @@
   color: var(--baize-accent-color, #c9a84c);
   font-size: 12px;
   font-weight: 600;
+}
+
+.buddyPanelAvatar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.buddyPanelAvatarSprite {
+  width: 132px;
+  min-height: 120px;
+  padding: 12px 10px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(180deg, rgba(255, 236, 179, 0.9), rgba(201, 168, 76, 0.78));
+  box-shadow: inset 0 0 0 3px rgba(15, 23, 42, 0.22);
+}
+
+.buddyPanelAvatarSprite[data-stage="bonded"] {
+  background: linear-gradient(180deg, rgba(147, 197, 253, 0.94), rgba(59, 130, 246, 0.84));
+}
+
+.buddyPanelAvatarSprite[data-stage="capable"] {
+  background: linear-gradient(180deg, rgba(167, 243, 208, 0.95), rgba(16, 185, 129, 0.84));
+}
+
+.buddyPanelAvatarSprite[data-stage="seasoned"] {
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.96), rgba(217, 119, 6, 0.86));
+}
+
+.buddyPanelAvatarSprite[data-stage="signature"] {
+  background: linear-gradient(180deg, rgba(244, 114, 182, 0.95), rgba(168, 85, 247, 0.86));
+}
+
+.buddyPanelAvatarSprite[data-presence="focused"] {
+  transform: scale(1.02);
+  box-shadow:
+    inset 0 0 0 3px rgba(15, 23, 42, 0.22),
+    0 0 0 4px rgba(59, 130, 246, 0.14);
+}
+
+.buddyPanelAvatarSprite[data-presence="supporting"] {
+  animation: buddyFloat 2.4s ease-in-out infinite;
+}
+
+.buddyPanelAvatarSprite[data-presence="celebrating"] {
+  animation: buddyBounce 1.3s ease-in-out infinite;
+}
+
+.buddyPanelAvatarSprite[data-presence="pulling-back"] {
+  animation: buddyShake 0.85s ease-in-out infinite;
+}
+
+.buddyPanelAvatarSprite[data-presence="resting"] {
+  filter: saturate(0.75) brightness(0.92);
+}
+
+.buddyPanelAvatarMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+@keyframes buddyFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes buddyBounce {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-6px) scale(1.04);
+  }
+}
+
+@keyframes buddyShake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-2px);
+  }
+  75% {
+    transform: translateX(2px);
+  }
 }
 
 /* ================================================================

@@ -33,17 +33,17 @@ export function resolveBuddyEvolutionStage(
 export function presentBuddyRarityLabel(rarity?: string | null): string {
   switch ((rarity || "").trim()) {
     case "common":
-      return "Common";
+      return "普通";
     case "uncommon":
-      return "Uncommon";
+      return "进阶";
     case "rare":
-      return "Rare";
+      return "稀有";
     case "epic":
-      return "Epic";
+      return "史诗";
     case "signature":
-      return "Signature";
+      return "招牌";
     default:
-      return "Growing";
+      return "成长中";
   }
 }
 

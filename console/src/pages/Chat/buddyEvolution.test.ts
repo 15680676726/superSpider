@@ -16,7 +16,7 @@ describe("buddyEvolution", () => {
   });
 
   it("builds a stable presentation view from stage and rarity", () => {
-    expect(presentBuddyRarityLabel("epic")).toBe("Epic");
+    expect(presentBuddyRarityLabel("epic")).toBe("史诗");
     expect(
       resolveBuddyEvolutionView({
         evolutionStage: "seasoned",
@@ -26,7 +26,7 @@ describe("buddyEvolution", () => {
       expect.objectContaining({
         stage: "seasoned",
         accentTone: "violet",
-        rarityLabel: "Epic",
+        rarityLabel: "史诗",
       }),
     );
   });

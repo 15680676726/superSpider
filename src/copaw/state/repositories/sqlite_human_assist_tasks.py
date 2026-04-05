@@ -45,6 +45,7 @@ class SqliteHumanAssistTaskRepository(BaseHumanAssistTaskRepository):
     def list_tasks(
         self,
         *,
+        profile_id: str | None = None,
         chat_thread_id: str | None = None,
         industry_instance_id: str | None = None,
         assignment_id: str | None = None,
@@ -54,6 +55,9 @@ class SqliteHumanAssistTaskRepository(BaseHumanAssistTaskRepository):
     ) -> list[HumanAssistTaskRecord]:
         clauses: list[str] = []
         params: list[Any] = []
+        if profile_id is not None:
+            clauses.append("profile_id = ?")
+            params.append(profile_id)
         if chat_thread_id is not None:
             clauses.append("chat_thread_id = ?")
             params.append(chat_thread_id)
@@ -95,6 +99,7 @@ class SqliteHumanAssistTaskRepository(BaseHumanAssistTaskRepository):
                 """
                 INSERT INTO human_assist_tasks (
                     id,
+                    profile_id,
                     industry_instance_id,
                     assignment_id,
                     task_id,
@@ -127,6 +132,7 @@ class SqliteHumanAssistTaskRepository(BaseHumanAssistTaskRepository):
                     updated_at
                 ) VALUES (
                     :id,
+                    :profile_id,
                     :industry_instance_id,
                     :assignment_id,
                     :task_id,
@@ -159,6 +165,7 @@ class SqliteHumanAssistTaskRepository(BaseHumanAssistTaskRepository):
                     :updated_at
                 )
                 ON CONFLICT(id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
                     industry_instance_id = excluded.industry_instance_id,
                     assignment_id = excluded.assignment_id,
                     task_id = excluded.task_id,

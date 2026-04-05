@@ -108,6 +108,13 @@ class SqliteHumanProfileRepository:
             ).fetchone()
         return _human_profile_from_row(row)
 
+    def count_profiles(self) -> int:
+        with self._store.connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS count FROM human_profiles",
+            ).fetchone()
+        return int(row["count"] if row is not None else 0)
+
     def upsert_profile(self, profile: HumanProfile) -> HumanProfile:
         payload = profile.model_dump(mode="json")
         payload["interests_json"] = _encode_json(profile.interests)
@@ -223,11 +230,15 @@ class SqliteCompanionRelationshipRepository:
                 INSERT INTO companion_relationships (
                     relationship_id, profile_id, buddy_name, encouragement_style,
                     effective_reminders_json, ineffective_reminders_json,
-                    avoidance_patterns_json, created_at, updated_at
+                    avoidance_patterns_json, communication_count,
+                    pleasant_interaction_score, companion_experience,
+                    strong_pull_count, last_interaction_at, created_at, updated_at
                 ) VALUES (
                     :relationship_id, :profile_id, :buddy_name, :encouragement_style,
                     :effective_reminders_json, :ineffective_reminders_json,
-                    :avoidance_patterns_json, :created_at, :updated_at
+                    :avoidance_patterns_json, :communication_count,
+                    :pleasant_interaction_score, :companion_experience,
+                    :strong_pull_count, :last_interaction_at, :created_at, :updated_at
                 )
                 ON CONFLICT(relationship_id) DO UPDATE SET
                     profile_id = excluded.profile_id,
@@ -236,6 +247,11 @@ class SqliteCompanionRelationshipRepository:
                     effective_reminders_json = excluded.effective_reminders_json,
                     ineffective_reminders_json = excluded.ineffective_reminders_json,
                     avoidance_patterns_json = excluded.avoidance_patterns_json,
+                    communication_count = excluded.communication_count,
+                    pleasant_interaction_score = excluded.pleasant_interaction_score,
+                    companion_experience = excluded.companion_experience,
+                    strong_pull_count = excluded.strong_pull_count,
+                    last_interaction_at = excluded.last_interaction_at,
                     created_at = excluded.created_at,
                     updated_at = excluded.updated_at
                 """,

@@ -78,6 +78,7 @@ const mockSurface = (
 
 const requestRuntimeSurfaceMock = vi.fn();
 const requestRuntimeBuddySummaryMock = vi.fn();
+const readBuddyProfileIdMock = vi.fn();
 let runtimeEventHandler:
   | ((event: { event_name: string; payload: Record<string, unknown> }) => void)
   | null = null;
@@ -104,6 +105,10 @@ vi.mock("../../runtime/runtimeSurfaceClient", () => ({
   requestRuntimeRecord: vi.fn(),
 }));
 
+vi.mock("../../runtime/buddyProfileBinding", () => ({
+  readBuddyProfileId: () => readBuddyProfileIdMock(),
+}));
+
 vi.mock("../../runtime/eventBus", () => ({
   subscribe: vi.fn((_topic: string, handler: typeof runtimeEventHandler) => {
     runtimeEventHandler = handler;
@@ -117,6 +122,7 @@ describe("useRuntimeCenter", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     runtimeEventHandler = null;
+    readBuddyProfileIdMock.mockReturnValue("profile-bound");
     requestRuntimeSurfaceMock.mockResolvedValue(mockSurface());
     requestRuntimeBuddySummaryMock.mockResolvedValue(mockBuddySummary);
   });
@@ -132,6 +138,7 @@ describe("useRuntimeCenter", () => {
     const { result } = renderHook(() => useRuntimeCenter());
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+    expect(requestRuntimeBuddySummaryMock).toHaveBeenCalledWith("profile-bound");
 
     resolveSurface(
       mockSurface({
@@ -281,6 +288,21 @@ describe("useRuntimeCenter", () => {
     ]);
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
     expect(requestRuntimeBuddySummaryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("requests buddy summary with null profile when no binding exists", async () => {
+    readBuddyProfileIdMock.mockReturnValue(null);
+
+    const { result } = renderHook(() => useRuntimeCenter());
+
+    await waitFor(
+      () =>
+        !result.current.loading &&
+        !result.current.mainBrainLoading &&
+        !result.current.businessAgentsLoading,
+    );
+
+    expect(requestRuntimeBuddySummaryMock).toHaveBeenCalledWith(null);
   });
 
   it("refreshes only the main-brain section on assignment events", async () => {

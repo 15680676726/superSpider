@@ -9,6 +9,10 @@ import {
   Waypoints,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import {
+  presentBuddyMoodLabel,
+  presentBuddyStageLabel,
+} from "../Chat/buddyPresentation";
 
 import { surfaceTagColor } from "./viewHelpers";
 import styles from "./index.module.less";
@@ -919,25 +923,25 @@ export default function MainBrainCockpitPanel({
       </Card>
 
       {buddySummary ? (
-        <Card size="small" title="Buddy summary" style={{ marginBottom: 16 }}>
+        <Card size="small" title="伙伴摘要" style={{ marginBottom: 16 }}>
           <div className={styles.briefGrid}>
             <div className={styles.briefCard}>
               <div className={styles.briefTitle}>{buddySummary.buddy_name}</div>
               <div className={styles.briefList}>
                 <div className={styles.briefItem}>
                   {localizeRuntimeText(
-                    `${buddySummary.evolution_stage} / mood ${buddySummary.mood_state}`,
+                    `${presentBuddyStageLabel(buddySummary.evolution_stage)} / 心情 ${presentBuddyMoodLabel(buddySummary.mood_state)}`,
                   )}
                 </div>
                 <div className={styles.briefItem}>
                   {localizeRuntimeText(
-                    `level ${buddySummary.growth_level} / intimacy ${buddySummary.intimacy} / affinity ${buddySummary.affinity}`,
+                    `等级 ${buddySummary.growth_level} / 亲密度 ${buddySummary.intimacy} / 契合度 ${buddySummary.affinity}`,
                   )}
                 </div>
               </div>
             </div>
             <div className={styles.briefCard}>
-              <div className={styles.briefTitle}>Final goal</div>
+              <div className={styles.briefTitle}>最终目标</div>
               <div className={styles.briefList}>
                 <div className={styles.briefItem}>
                   {localizeRuntimeText(buddySummary.current_goal_summary)}
@@ -945,7 +949,7 @@ export default function MainBrainCockpitPanel({
               </div>
             </div>
             <div className={styles.briefCard}>
-              <div className={styles.briefTitle}>Current task</div>
+              <div className={styles.briefTitle}>当前任务</div>
               <div className={styles.briefList}>
                 <div className={styles.briefItem}>
                   {localizeRuntimeText(buddySummary.current_task_summary)}
@@ -953,7 +957,7 @@ export default function MainBrainCockpitPanel({
               </div>
             </div>
             <div className={styles.briefCard}>
-              <div className={styles.briefTitle}>Why now</div>
+              <div className={styles.briefTitle}>为什么现在做</div>
               <div className={styles.briefList}>
                 <div className={styles.briefItem}>
                   {localizeRuntimeText(buddySummary.why_now_summary)}

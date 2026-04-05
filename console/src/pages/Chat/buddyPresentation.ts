@@ -17,6 +17,27 @@ export function presentBuddyStageLabel(stage?: string | null): string {
   }
 }
 
+export function presentBuddyPresenceLabel(presence?: string | null): string {
+  switch ((presence || "").trim()) {
+    case "attentive":
+      return "留意着你";
+    case "focused":
+      return "专注陪你";
+    case "supporting":
+      return "正在陪跑";
+    case "pulling-back":
+      return "拉你回航";
+    case "celebrating":
+      return "陪你庆祝";
+    case "resting":
+      return "安静守着";
+    case "idle":
+    case "available":
+    default:
+      return "陪在身边";
+  }
+}
+
 export function presentBuddyMoodLabel(mood?: string | null): string {
   switch ((mood || "").trim()) {
     case "warm":
@@ -26,9 +47,9 @@ export function presentBuddyMoodLabel(mood?: string | null): string {
     case "playful":
       return "轻松";
     case "proud":
-      return "为你骄傲";
+      return "替你骄傲";
     case "determined":
-      return "很笃定";
+      return "很坚定";
     case "calm":
     default:
       return "平静";
@@ -38,7 +59,7 @@ export function presentBuddyMoodLabel(mood?: string | null): string {
 export function buildBuddyStatusLine(surface: BuddySurfaceResponse): string {
   const name = surface.presentation.buddy_name || "你的伙伴";
   const stage = presentBuddyStageLabel(surface.growth.evolution_stage);
+  const presence = presentBuddyPresenceLabel(surface.presentation.presence_state);
   const mood = presentBuddyMoodLabel(surface.presentation.mood_state);
-  return `${name} · ${stage} · ${mood}`;
+  return `${name} · ${stage} · ${presence} · ${mood}`;
 }
-

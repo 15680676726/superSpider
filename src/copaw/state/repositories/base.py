@@ -344,6 +344,7 @@ class BaseHumanAssistTaskRepository(ABC):
     def list_tasks(
         self,
         *,
+        profile_id: str | None = None,
         chat_thread_id: str | None = None,
         industry_instance_id: str | None = None,
         assignment_id: str | None = None,

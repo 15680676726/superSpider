@@ -81,6 +81,11 @@ class CompanionRelationship(UpdatedRecord):
     effective_reminders: list[str] = Field(default_factory=list)
     ineffective_reminders: list[str] = Field(default_factory=list)
     avoidance_patterns: list[str] = Field(default_factory=list)
+    communication_count: int = Field(default=0, ge=0)
+    pleasant_interaction_score: int = Field(default=0, ge=0)
+    companion_experience: int = Field(default=0, ge=0)
+    strong_pull_count: int = Field(default=0, ge=0)
+    last_interaction_at: str | None = None
 
     @field_validator(
         "effective_reminders",

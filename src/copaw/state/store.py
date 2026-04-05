@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 30
+STATE_SCHEMA_VERSION = 31
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS human_profiles (
@@ -46,6 +46,11 @@ CREATE TABLE IF NOT EXISTS companion_relationships (
     effective_reminders_json TEXT NOT NULL DEFAULT '[]',
     ineffective_reminders_json TEXT NOT NULL DEFAULT '[]',
     avoidance_patterns_json TEXT NOT NULL DEFAULT '[]',
+    communication_count INTEGER NOT NULL DEFAULT 0,
+    pleasant_interaction_score INTEGER NOT NULL DEFAULT 0,
+    companion_experience INTEGER NOT NULL DEFAULT 0,
+    strong_pull_count INTEGER NOT NULL DEFAULT 0,
+    last_interaction_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY(profile_id) REFERENCES human_profiles(profile_id) ON DELETE CASCADE
@@ -158,6 +163,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS human_assist_tasks (
     id TEXT PRIMARY KEY,
+    profile_id TEXT,
     industry_instance_id TEXT,
     assignment_id TEXT,
     task_id TEXT,
@@ -192,6 +198,8 @@ CREATE TABLE IF NOT EXISTS human_assist_tasks (
 
 CREATE INDEX IF NOT EXISTS idx_human_assist_tasks_thread_updated
     ON human_assist_tasks(chat_thread_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_human_assist_tasks_profile_updated
+    ON human_assist_tasks(profile_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_human_assist_tasks_status
     ON human_assist_tasks(status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_human_assist_tasks_assignment
@@ -1641,6 +1649,22 @@ CREATE INDEX IF NOT EXISTS idx_skill_lifecycle_decisions_attribution
 """
 
 _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "companion_relationships",
+        (
+            ("communication_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("pleasant_interaction_score", "INTEGER NOT NULL DEFAULT 0"),
+            ("companion_experience", "INTEGER NOT NULL DEFAULT 0"),
+            ("strong_pull_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("last_interaction_at", "TEXT"),
+        ),
+    ),
+    (
+        "human_assist_tasks",
+        (
+            ("profile_id", "TEXT"),
+        ),
+    ),
     (
         "memory_fact_index",
         (
