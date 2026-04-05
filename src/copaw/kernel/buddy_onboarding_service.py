@@ -84,6 +84,16 @@ def _contains_any(source: str, tokens: tuple[str, ...]) -> bool:
 
 
 _STRONG_PULL_INTERACTION_MODES = ("strong-pull", "strong_pull")
+_GROWTH_CHECKPOINT_INTERACTION_MODES = (
+    "checkpoint",
+    "runtime-outcome",
+    "runtime_outcome",
+    "human-assist-checkpoint",
+    "human_assist_checkpoint",
+    "human-assist-resume",
+    "human_assist_resume",
+    "closure",
+)
 _STRONG_PULL_MESSAGE_TOKENS = (
     "卡住",
     "卡住了",
@@ -123,6 +133,15 @@ def _is_strong_pull_interaction(
     if normalized_mode in _STRONG_PULL_INTERACTION_MODES:
         return True
     return _contains_any(normalized_message, _STRONG_PULL_MESSAGE_TOKENS)
+
+
+def _is_growth_checkpoint_interaction(interaction_mode: str | None) -> bool:
+    normalized_mode = _normalize_text(interaction_mode)
+    if not normalized_mode:
+        return False
+    if normalized_mode in _GROWTH_CHECKPOINT_INTERACTION_MODES:
+        return True
+    return normalized_mode.startswith("checkpoint:")
 
 
 def _build_buddy_question(
@@ -319,6 +338,7 @@ def _derive_why_it_matters(*, profile: HumanProfile) -> str:
 class BuddyOnboardingService:
     MAX_QUESTIONS = 9
     TIGHTEN_AFTER = 5
+    EXECUTION_CORE_ROLE_ID = "execution-core"
 
     def __init__(
         self,
@@ -554,6 +574,16 @@ class BuddyOnboardingService:
             interaction_mode=interaction_mode,
             normalized_message=_normalize_text(normalized_message),
         )
+        growth_checkpoint = _is_growth_checkpoint_interaction(interaction_mode)
+        if not growth_checkpoint and not strong_pull:
+            return relationship
+        updates: dict[str, object] = {
+            "strong_pull_count": relationship.strong_pull_count + (1 if strong_pull else 0),
+            "last_interaction_at": _utc_now().isoformat(),
+        }
+        if not growth_checkpoint:
+            updated = relationship.model_copy(update=updates)
+            return self._relationship_repository.upsert_relationship(updated)
         experience_delta = 8 if strong_pull else 5
         effective_reminders = list(relationship.effective_reminders)
         ineffective_reminders = list(relationship.ineffective_reminders)
@@ -564,8 +594,8 @@ class BuddyOnboardingService:
             avoidance_patterns = _unique([*avoidance_patterns, "拖延回避"])
         if any(token in normalized_message for token in ("别催", "太压", "有压力", "烦")):
             ineffective_reminders = _unique([*ineffective_reminders, "高压催促"])
-        updated = relationship.model_copy(
-            update={
+        updates.update(
+            {
                 "effective_reminders": effective_reminders[:3],
                 "ineffective_reminders": ineffective_reminders[:3],
                 "avoidance_patterns": avoidance_patterns[:3],
@@ -575,10 +605,9 @@ class BuddyOnboardingService:
                     relationship.pleasant_interaction_score + pleasant_delta,
                 ),
                 "companion_experience": relationship.companion_experience + experience_delta,
-                "strong_pull_count": relationship.strong_pull_count + (1 if strong_pull else 0),
-                "last_interaction_at": _utc_now().isoformat(),
             },
         )
+        updated = relationship.model_copy(update=updates)
         return self._relationship_repository.upsert_relationship(updated)
 
     def name_buddy(
@@ -617,6 +646,7 @@ class BuddyOnboardingService:
         profile: HumanProfile,
         growth_target: GrowthTarget,
     ) -> tuple[GrowthTarget, dict[str, object] | None]:
+        instance_id = f"buddy:{profile.profile_id}"
         if (
             self._industry_instance_repository is None
             or self._operating_lane_service is None
@@ -624,8 +654,13 @@ class BuddyOnboardingService:
             or self._operating_cycle_service is None
             or self._assignment_service is None
         ):
-            return growth_target, None
-        instance_id = f"buddy:{profile.profile_id}"
+            return growth_target, self._build_execution_carrier_handoff(
+                profile=profile,
+                instance_id=instance_id,
+                label=profile.display_name,
+                current_cycle_id=growth_target.current_cycle_label or "Cycle 1",
+                team_generated=False,
+            )
         existing_instance = self._industry_instance_repository.get_instance(instance_id)
         instance = IndustryInstanceRecord(
             instance_id=instance_id,
@@ -724,12 +759,47 @@ class BuddyOnboardingService:
         updated_target = self._growth_target_repository.upsert_target(
             growth_target.model_copy(update={"current_cycle_label": cycle.title}),
         )
-        return updated_target, {
+        return updated_target, self._build_execution_carrier_handoff(
+            profile=profile,
+            instance_id=instance_id,
+            label=persisted_instance.label,
+            current_cycle_id=cycle.id,
+            team_generated=True,
+        )
+
+    def _build_execution_carrier_handoff(
+        self,
+        *,
+        profile: HumanProfile,
+        instance_id: str,
+        label: str,
+        current_cycle_id: str,
+        team_generated: bool,
+    ) -> dict[str, object]:
+        control_thread_id = f"industry-chat:{instance_id}:{self.EXECUTION_CORE_ROLE_ID}"
+        return {
             "instance_id": instance_id,
-            "label": persisted_instance.label,
+            "label": label,
             "owner_scope": profile.profile_id,
-            "current_cycle_id": cycle.id,
-            "team_generated": True,
+            "current_cycle_id": current_cycle_id,
+            "team_generated": team_generated,
+            "thread_id": control_thread_id,
+            "control_thread_id": control_thread_id,
+            "chat_binding": {
+                "thread_id": control_thread_id,
+                "control_thread_id": control_thread_id,
+                "user_id": f"buddy:{profile.profile_id}",
+                "channel": "console",
+                "context_key": f"control-thread:{control_thread_id}",
+                "binding_kind": "buddy-execution-carrier",
+                "metadata": {
+                    "industry_instance_id": instance_id,
+                    "industry_role_id": self.EXECUTION_CORE_ROLE_ID,
+                    "industry_role_name": "execution-core",
+                    "owner_scope": profile.profile_id,
+                    "team_generated": team_generated,
+                },
+            },
         }
 
     def _build_lane_roles(

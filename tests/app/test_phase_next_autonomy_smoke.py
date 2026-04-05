@@ -129,7 +129,7 @@ def test_phase_next_runtime_center_overview_surfaces_routine_degradation_contrac
     assert "Restore the compaction sidecar" in routines["meta"]["blocked_next_step"]
 
 
-def test_phase_next_industry_long_run_smoke_keeps_followup_focus_and_replan_truth(
+def test_phase_next_industry_long_run_smoke_keeps_followup_focus_and_replan_truth_contract(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
@@ -276,7 +276,7 @@ def test_phase_next_industry_long_run_smoke_keeps_followup_focus_and_replan_trut
         assert replan_node["metrics"]["replan_reason_count"] >= 1
 
 
-def test_phase_next_industry_long_run_smoke_keeps_handoff_human_assist_and_replan_on_one_control_thread(
+def test_phase_next_industry_long_run_smoke_keeps_handoff_human_assist_and_replan_on_one_control_thread_contract(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
@@ -1540,7 +1540,7 @@ def test_phase_next_researcher_schedule_followup_keeps_execution_core_continuity
     assert environment_ref in replan_node["metrics"]["followup_environment_refs"]
 
 
-def test_phase_next_long_run_live_smoke_closes_unified_runtime_chain_and_multi_surface_continuity(
+def test_phase_next_long_run_harness_smoke_covers_runtime_chain_and_multi_surface_continuity_contract(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path / "industry-long-run")

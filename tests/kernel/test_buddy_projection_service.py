@@ -207,6 +207,51 @@ def test_buddy_projection_prefers_human_assist_task_over_carrier_assignment(tmp_
     )
 
 
+def test_buddy_projection_honestly_degrades_when_runtime_focus_is_missing(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "buddy-projection-degrade.sqlite3")
+    profile_repository = SqliteHumanProfileRepository(store)
+    growth_target_repository = SqliteGrowthTargetRepository(store)
+    relationship_repository = SqliteCompanionRelationshipRepository(store)
+    session_repository = SqliteBuddyOnboardingSessionRepository(store)
+    onboarding = BuddyOnboardingService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        onboarding_session_repository=session_repository,
+    )
+    identity = onboarding.submit_identity(
+        display_name="Mina",
+        profession="Operator",
+        current_stage="restart",
+        interests=["writing"],
+        strengths=["clarity"],
+        constraints=["time"],
+        goal_intention="Build a durable direction.",
+    )
+    clarification = onboarding.answer_clarification_turn(
+        session_id=identity.session_id,
+        answer="I want leverage and long-term growth.",
+        existing_question_count=9,
+    )
+    onboarding.confirm_primary_direction(
+        session_id=identity.session_id,
+        selected_direction=clarification.recommended_direction,
+    )
+    projection = BuddyProjectionService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        onboarding_session_repository=session_repository,
+        current_focus_resolver=lambda _profile_id: {},
+    )
+
+    payload = projection.build_chat_surface(profile_id=identity.profile.profile_id)
+
+    assert payload.presentation.current_task_summary == ""
+    assert payload.presentation.why_now_summary == ""
+    assert payload.presentation.single_next_action_summary == ""
+
+
 def test_buddy_projection_turns_relationship_memory_into_companion_strategy(tmp_path) -> None:
     onboarding, projection = _build_services(tmp_path)
     identity = onboarding.submit_identity(

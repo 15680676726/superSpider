@@ -1,4 +1,5 @@
 import type { NavigateFunction } from "react-router-dom";
+import type { BuddyExecutionCarrier } from "../api/modules/buddy";
 import type {
   IndustryInstanceSummary,
   IndustryRoleBlueprint,
@@ -13,6 +14,14 @@ export interface RuntimeChatBinding {
   userId: string;
   channel?: string;
   meta?: Record<string, unknown>;
+}
+
+interface BuddyCarrierChatBindingParams {
+  sessionId: string;
+  profileId: string;
+  profileDisplayName?: string | null;
+  executionCarrier: BuddyExecutionCarrier;
+  entrySource?: string;
 }
 
 interface RuntimeThreadBinding {
@@ -75,6 +84,82 @@ function resolveIndustryControlThreadId(
     return undefined;
   }
   return `industry-chat:${industryInstanceId}:${EXECUTION_CORE_ROLE_ID}`;
+}
+
+function resolveBuddyCarrierThreadId(
+  executionCarrier: BuddyExecutionCarrier,
+): { threadId: string | null; controlThreadId: string | null; contextKey: string | null } {
+  const chatBinding =
+    executionCarrier.chat_binding && typeof executionCarrier.chat_binding === "object"
+      ? executionCarrier.chat_binding
+      : null;
+  const controlThreadId =
+    normalizeThreadId(chatBinding?.control_thread_id) ||
+    normalizeThreadId(executionCarrier.control_thread_id) ||
+    null;
+  const threadId =
+    normalizeThreadId(chatBinding?.thread_id) ||
+    normalizeThreadId(executionCarrier.thread_id) ||
+    controlThreadId ||
+    resolveIndustryControlThreadId(executionCarrier.instance_id) ||
+    null;
+  const contextKey =
+    (typeof chatBinding?.context_key === "string" && chatBinding.context_key.trim()) ||
+    (threadId ? `control-thread:${threadId}` : null);
+  return { threadId, controlThreadId: controlThreadId || threadId, contextKey };
+}
+
+export function buildBuddyExecutionCarrierChatBinding(
+  params: BuddyCarrierChatBindingParams,
+): RuntimeChatBinding {
+  const profileId = params.profileId.trim();
+  if (!profileId) {
+    throw new Error("Buddy profile id is required to open runtime chat.");
+  }
+  const { threadId, controlThreadId, contextKey } = resolveBuddyCarrierThreadId(
+    params.executionCarrier,
+  );
+  if (!threadId) {
+    throw new Error("Buddy execution carrier does not provide a runtime chat thread.");
+  }
+  const chatBinding =
+    params.executionCarrier.chat_binding &&
+    typeof params.executionCarrier.chat_binding === "object"
+      ? params.executionCarrier.chat_binding
+      : null;
+  const userId =
+    (typeof chatBinding?.user_id === "string" && chatBinding.user_id.trim()) ||
+    `buddy:${profileId}`;
+  const channel =
+    (typeof chatBinding?.channel === "string" && chatBinding.channel.trim()) ||
+    "console";
+  return {
+    name:
+      normalizeSpiderMeshBrand(
+        params.executionCarrier.label || params.profileDisplayName || "Buddy",
+      ) || "Buddy",
+    threadId,
+    userId,
+    channel,
+    meta: {
+      session_kind: "industry-control-thread",
+      entry_source: params.entrySource || "buddy-onboarding",
+      buddy_profile_id: profileId,
+      buddy_session_id: params.sessionId,
+      industry_instance_id: params.executionCarrier.instance_id || undefined,
+      owner_scope: params.executionCarrier.owner_scope || profileId,
+      control_thread_id: controlThreadId || undefined,
+      context_key: contextKey || undefined,
+      current_cycle_id: params.executionCarrier.current_cycle_id || undefined,
+      thread_binding_kind:
+        (typeof chatBinding?.binding_kind === "string" && chatBinding.binding_kind.trim()) ||
+        "buddy-execution-carrier",
+      team_generated: params.executionCarrier.team_generated,
+      ...(chatBinding?.metadata && typeof chatBinding.metadata === "object"
+        ? chatBinding.metadata
+        : {}),
+    },
+  };
 }
 
 export function buildBoundAgentChatBinding(params: {

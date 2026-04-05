@@ -28,14 +28,16 @@ describe("useRuntimeBinding", () => {
     expect(resolved.activeAgentId).toBe("agent-meta");
   });
 
-  it("builds the canonical workbench route from runtime binding context", () => {
+  it("builds the canonical runtime-center route from runtime binding context", () => {
     expect(buildWorkbenchPath({ activeIndustryId: "industry-1", activeAgentId: "agent-1" })).toBe(
-      "/agents?industry=industry-1&agent=agent-1",
+      "/runtime-center?industry=industry-1&agent=agent-1",
     );
     expect(buildWorkbenchPath({ activeIndustryId: "industry-1", activeAgentId: null })).toBe(
-      "/agents?industry=industry-1",
+      "/runtime-center?industry=industry-1",
     );
-    expect(buildWorkbenchPath({ activeIndustryId: null, activeAgentId: null })).toBe("/agents");
+    expect(buildWorkbenchPath({ activeIndustryId: null, activeAgentId: null })).toBe(
+      "/runtime-center",
+    );
   });
 
   it("keeps the workbench callback stable across unrelated thread-meta updates", () => {

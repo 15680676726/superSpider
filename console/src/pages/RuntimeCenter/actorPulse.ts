@@ -488,11 +488,9 @@ export function buildActorPulseItems(
       const metadata = runtime.metadata || {};
       const currentGoal =
         textOrNull(metadata.current_focus) ||
-        textOrNull(metadata.goal_title) ||
         textOrNull(focusReview?.objective) ||
         assignment.title ||
-        textOrNull(metadata.current_focus_id) ||
-        textOrNull(metadata.goal_id);
+        textOrNull(metadata.current_focus_id);
       const item: ActorPulseItem = {
         agentId: runtime.agent_id,
         title:

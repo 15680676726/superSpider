@@ -16,6 +16,11 @@ const { navigateMock, apiMock } = vi.hoisted(() => ({
   },
 }));
 
+const runtimeChatMock = vi.hoisted(() => ({
+  buildBuddyExecutionCarrierChatBinding: vi.fn(),
+  openRuntimeChat: vi.fn(),
+}));
+
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>(
     "react-router-dom",
@@ -33,6 +38,8 @@ vi.mock("../../api", () => ({
     error !== null &&
     "status" in (error as Record<string, unknown>),
 }));
+
+vi.mock("../../utils/runtimeChat", () => runtimeChatMock);
 
 import BuddyOnboardingPage from "./index";
 
@@ -87,6 +94,17 @@ describe("BuddyOnboardingPage", () => {
         team_generated: true,
       },
     });
+    runtimeChatMock.buildBuddyExecutionCarrierChatBinding.mockReturnValue({
+      name: "Alex growth carrier",
+      threadId: "industry-chat:buddy:profile-1:execution-core",
+      userId: "buddy:profile-1",
+      channel: "console",
+      meta: {
+        session_kind: "industry-control-thread",
+        buddy_profile_id: "profile-1",
+      },
+    });
+    runtimeChatMock.openRuntimeChat.mockResolvedValue(undefined);
   });
 
   it("shows a visible completion state after direction confirmation before routing into chat naming flow", async () => {
@@ -138,7 +156,23 @@ describe("BuddyOnboardingPage", () => {
 
     fireEvent.click(screen.getByTestId("buddy-direction-enter-chat"));
 
-    expect(navigateMock).toHaveBeenCalledWith(
+    await waitFor(() => {
+      expect(runtimeChatMock.buildBuddyExecutionCarrierChatBinding).toHaveBeenCalledWith({
+        sessionId: "session-1",
+        profileId: "profile-1",
+        profileDisplayName: "Alex",
+        executionCarrier: expect.objectContaining({
+          instance_id: "buddy:profile-1",
+        }),
+      });
+    });
+    expect(runtimeChatMock.openRuntimeChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "industry-chat:buddy:profile-1:execution-core",
+      }),
+      navigateMock,
+    );
+    expect(navigateMock).not.toHaveBeenCalledWith(
       "/chat?buddy_session=session-1&buddy_profile=profile-1",
       { replace: true },
     );

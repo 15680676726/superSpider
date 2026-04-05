@@ -32,6 +32,12 @@ def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+LIVE_ROUTINE_SMOKE_SKIP_REASON = (
+    "Set COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 to run V6 live routine smoke coverage "
+    "(opt-in; not part of default regression coverage)."
+)
+
+
 def _build_live_routine_harness(tmp_path) -> SimpleNamespace:
     state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
     routine_repository = SqliteExecutionRoutineRepository(state_store)
@@ -106,6 +112,21 @@ def _build_stubbed_routine_harness(tmp_path) -> SimpleNamespace:
 
 def _browser_tool_response(payload: dict[str, object]) -> SimpleNamespace:
     return SimpleNamespace(content=[{"text": json.dumps(payload)}])
+
+
+def test_live_routine_smoke_skip_reasons_declare_opt_in_boundary() -> None:
+    missing: list[str] = []
+    for name, value in globals().items():
+        if not name.startswith("test_live_") or not callable(value):
+            continue
+        marks = list(getattr(value, "pytestmark", []))
+        skipif_marks = [mark for mark in marks if mark.name == "skipif"]
+        if not skipif_marks:
+            continue
+        reason = str(skipif_marks[0].kwargs.get("reason", "")).lower()
+        if "opt-in" not in reason or "not part of default regression coverage" not in reason:
+            missing.append(name)
+    assert not missing, f"Live routine smoke skip reasons must declare opt-in/default-regression boundary: {missing}"
 
 
 @pytest.mark.asyncio
@@ -757,7 +778,7 @@ def _run_live_browser_case(
 
 @pytest.mark.skipif(
     not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
-    reason="Set COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 to run V6 live routine smoke coverage.",
+    reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
 )
 def test_live_browser_routine_replay_round_trip(tmp_path) -> None:
     screenshot_path = tmp_path / "browser-routine-smoke.png"
@@ -784,7 +805,7 @@ def test_live_browser_routine_replay_round_trip(tmp_path) -> None:
 
 @pytest.mark.skipif(
     not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
-    reason="Set COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 to run V6 live routine smoke coverage.",
+    reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
 )
 def test_live_browser_routine_replay_clicks_example_anchor(tmp_path) -> None:
     screenshot_path = tmp_path / "browser-routine-click.png"
@@ -811,7 +832,7 @@ def test_live_browser_routine_replay_clicks_example_anchor(tmp_path) -> None:
 
 @pytest.mark.skipif(
     not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
-    reason="Set COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 to run V6 live routine smoke coverage.",
+    reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
 )
 def test_live_browser_routine_replay_navigates_to_iana_reserved(tmp_path) -> None:
     screenshot_path = tmp_path / "browser-routine-iana.png"
@@ -842,7 +863,7 @@ def test_live_browser_routine_replay_navigates_to_iana_reserved(tmp_path) -> Non
 
 @pytest.mark.skipif(
     not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
-    reason="Set COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 to run V6 live routine smoke coverage.",
+    reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
 )
 def test_live_browser_routine_replay_reuses_same_session(tmp_path) -> None:
     screenshot_path = tmp_path / "browser-routine-reuse.png"
@@ -876,7 +897,7 @@ def test_live_browser_routine_replay_reuses_same_session(tmp_path) -> None:
 
 @pytest.mark.skipif(
     not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
-    reason="Set COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 to run V6 live routine smoke coverage.",
+    reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
 )
 def test_live_browser_routine_reconnect_cleanup_smoke(tmp_path) -> None:
     screenshot_path = tmp_path / "browser-routine-reconnect-cleanup.png"
@@ -919,7 +940,7 @@ def test_live_browser_routine_reconnect_cleanup_smoke(tmp_path) -> None:
 
 @pytest.mark.skipif(
     not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
-    reason="Set COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 to run V6 live routine smoke coverage.",
+    reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
 )
 def test_live_desktop_routine_cross_surface_contention_smoke(tmp_path) -> None:
     script = textwrap.dedent(
@@ -1021,7 +1042,7 @@ def test_live_desktop_routine_cross_surface_contention_smoke(tmp_path) -> None:
 
 @pytest.mark.skipif(
     not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
-    reason="Set COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 to run V6 live routine smoke coverage.",
+    reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
 )
 def test_live_browser_routine_verification_chain_with_upload_and_evidence_anchors(
     tmp_path,
@@ -1116,7 +1137,7 @@ def test_live_browser_routine_verification_chain_with_upload_and_evidence_anchor
 
 @pytest.mark.skipif(
     not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
-    reason="Set COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 to run V6 live routine smoke coverage.",
+    reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
 )
 def test_live_browser_routine_authenticated_continuation_cross_tab_save_reopen_smoke(
     tmp_path,
@@ -1308,7 +1329,7 @@ def test_live_browser_routine_authenticated_continuation_cross_tab_save_reopen_s
 
 @pytest.mark.skipif(
     not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
-    reason="Set COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 to run V6 live routine smoke coverage.",
+    reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
 )
 @pytest.mark.asyncio
 async def test_live_desktop_routine_replay_round_trip(tmp_path) -> None:

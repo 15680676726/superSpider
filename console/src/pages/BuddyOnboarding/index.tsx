@@ -23,6 +23,10 @@ import {
   writeBuddyProfileId,
 } from "../../runtime/buddyProfileBinding";
 import { resolveBuddyEntryDecision } from "../../runtime/buddyFlow";
+import {
+  buildBuddyExecutionCarrierChatBinding,
+  openRuntimeChat,
+} from "../../utils/runtimeChat";
 
 const { Paragraph, Title } = Typography;
 const { TextArea } = Input;
@@ -194,8 +198,24 @@ export default function BuddyOnboardingPage() {
     }
   };
 
-  const handleEnterChat = () => {
+  const handleEnterChat = async () => {
     if (!identity || !confirmPayload?.session?.session_id) return;
+    const executionCarrier = confirmPayload.execution_carrier;
+    if (executionCarrier) {
+      try {
+        const binding = buildBuddyExecutionCarrierChatBinding({
+          sessionId: confirmPayload.session.session_id,
+          profileId: identity.profile.profile_id,
+          profileDisplayName: identity.profile.display_name,
+          executionCarrier,
+        });
+        await openRuntimeChat(binding, navigate);
+        return;
+      } catch (rawError) {
+        setError(rawError instanceof Error ? rawError.message : "杩涘叆鑱婂ぉ澶辫触");
+        return;
+      }
+    }
     navigate(
       `/chat?buddy_session=${encodeURIComponent(confirmPayload.session.session_id)}&buddy_profile=${encodeURIComponent(identity.profile.profile_id)}`,
       { replace: true },
@@ -384,7 +404,7 @@ export default function BuddyOnboardingPage() {
             ) : null}
             <Button
               type="primary"
-              onClick={handleEnterChat}
+              onClick={() => void handleEnterChat()}
               data-testid="buddy-direction-enter-chat"
             >
               进入聊天，给伙伴起名

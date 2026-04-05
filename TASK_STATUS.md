@@ -81,6 +81,23 @@
 
 ---
 
+## 1.4 `2026-04-05` Group F 闭环证明口径纠偏（必读）
+
+- `collect-only` 只证明“被收集到哪些测试”，**不证明行为通过**、不证明“默认回归闭环”。
+- 当前已确认的收集边界示例（历史命令口径）：
+  - `python -m pytest tests/app/test_phase_next_autonomy_smoke.py tests/app/test_operator_runtime_e2e.py tests/app/test_runtime_canonical_flow_e2e.py tests/app/runtime_center_api_parts/detail_environment.py tests/app/test_runtime_projection_contracts.py tests/app/test_runtime_query_services.py --collect-only -q`
+  - 输出：`61 tests collected`。
+  - 其中任何 `-k` 过滤切片（例如 `26 passed`）都只能算 focused slice，不可写成“整链默认闭环”。
+- `tests/providers/test_live_provider_smoke.py` 与 `tests/routines/test_live_routine_smoke.py` 属于 **opt-in live smoke**：
+  - 默认环境下可被 skip。
+  - `skipped` 只代表前置条件未开启，不代表默认 CI 已证明 live 可靠性。
+- 本文档后续所有“已闭环/已验证”叙述必须同时注明：
+  - 是否为默认回归（默认命令直接执行）
+  - 是否为 gated live smoke（需显式环境变量）
+  - 是否仅为 collect-only / focused slice
+
+---
+
 ## 1.1 `2026-03-25` 硬切维护窗口说明
 
 - 当前仓库已进入一次性 `hard-cut autonomy rebuild` 维护窗口，允许短期停机与阶段性功能不完整。

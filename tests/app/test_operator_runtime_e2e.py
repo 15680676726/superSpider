@@ -241,7 +241,7 @@ def _compile_goal(
     ]
 
 
-def test_operator_runtime_e2e_covers_feedback_governance_and_runtime_center(
+def test_operator_runtime_e2e_feedback_governance_and_runtime_center_contract(
     tmp_path,
 ) -> None:
     app = _build_operator_app(tmp_path)
@@ -371,7 +371,7 @@ def test_operator_runtime_e2e_covers_feedback_governance_and_runtime_center(
     assert cards["growth"]["key"] == "growth"
 
 
-def test_operator_runtime_e2e_covers_rejection_visibility_in_runtime_center(
+def test_operator_runtime_e2e_rejection_visibility_in_runtime_center_contract(
     tmp_path,
 ) -> None:
     app = _build_operator_app(tmp_path)
@@ -438,7 +438,7 @@ def test_operator_runtime_e2e_covers_rejection_visibility_in_runtime_center(
     )
 
 
-def test_operator_runtime_e2e_covers_governed_patch_apply_writeback(
+def test_operator_runtime_e2e_governed_patch_apply_writeback_contract(
     tmp_path,
 ) -> None:
     app = _build_operator_app(tmp_path)
@@ -515,7 +515,7 @@ def test_operator_runtime_e2e_covers_governed_patch_apply_writeback(
     )
 
 
-def test_operator_runtime_e2e_covers_governed_patch_rejection_evidence(
+def test_operator_runtime_e2e_governed_patch_rejection_evidence_contract(
     tmp_path,
 ) -> None:
     app = _build_operator_app(tmp_path)
@@ -583,7 +583,7 @@ def test_operator_runtime_e2e_covers_governed_patch_rejection_evidence(
     )
 
 
-def test_operator_manual_environment_e2e_covers_force_release_and_recovery_report(
+def test_operator_manual_environment_e2e_force_release_and_recovery_report_contract(
     tmp_path,
 ) -> None:
     app = _build_operator_environment_app(tmp_path)

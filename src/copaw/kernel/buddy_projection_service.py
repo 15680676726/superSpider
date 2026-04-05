@@ -281,9 +281,12 @@ class BuddyProjectionService:
                     or getattr(task, "title", None)
                     or ""
                 ).strip()
+        return ""
         return "先把眼前这一步做完，我们再一起看下一步。"
 
     def _fallback_why_now_summary(self, target: GrowthTarget | None) -> str:
+        del target
+        return ""
         if target is not None and target.why_it_matters.strip():
             return target.why_it_matters.strip()
         return "因为只有先推进当前这一步，你最终想去的地方才不会继续停在原地。"
@@ -298,6 +301,8 @@ class BuddyProjectionService:
         if task_summary:
             return f"现在先完成这一步：{task_summary}"
         fallback = self._fallback_current_task_summary(profile_id)
+        if not fallback:
+            return ""
         if fallback:
             return f"现在先完成这一步：{fallback}"
         return "现在先做一个最小动作，我们再一起看下一步。"

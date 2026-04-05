@@ -53,7 +53,7 @@ export function buildWorkbenchPath({
     params.set("agent", activeAgentId);
   }
   const query = params.toString();
-  return query ? `/agents?${query}` : "/agents";
+  return query ? `/runtime-center?${query}` : "/runtime-center";
 }
 
 export function useRuntimeBinding({

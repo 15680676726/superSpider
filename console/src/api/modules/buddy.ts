@@ -37,6 +37,27 @@ export interface BuddyClarificationResponse {
   recommended_direction: string;
 }
 
+export interface BuddyExecutionCarrierChatBinding {
+  thread_id?: string | null;
+  control_thread_id?: string | null;
+  user_id?: string | null;
+  channel?: string | null;
+  context_key?: string | null;
+  binding_kind?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface BuddyExecutionCarrier {
+  instance_id: string;
+  label: string;
+  owner_scope: string;
+  current_cycle_id: string;
+  team_generated: boolean;
+  thread_id?: string | null;
+  control_thread_id?: string | null;
+  chat_binding?: BuddyExecutionCarrierChatBinding | null;
+}
+
 export interface BuddyConfirmDirectionResponse {
   session: {
     session_id: string;
@@ -61,13 +82,7 @@ export interface BuddyConfirmDirectionResponse {
     buddy_name: string;
     encouragement_style: string;
   };
-  execution_carrier?: {
-    instance_id: string;
-    label: string;
-    owner_scope: string;
-    current_cycle_id: string;
-    team_generated: boolean;
-  } | null;
+  execution_carrier?: BuddyExecutionCarrier | null;
 }
 
 export interface BuddySurfaceResponse {

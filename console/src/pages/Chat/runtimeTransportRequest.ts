@@ -1,4 +1,5 @@
 import type { MediaSourceSpec } from "../../api/modules/media";
+import { resolveCanonicalBuddyProfileId } from "../../runtime/buddyProfileBinding";
 import { normalizeThreadId } from "./chatPageHelpers";
 import { normalizeRuntimeMediaSources } from "./runtimeTransportMedia";
 
@@ -205,6 +206,9 @@ export function buildRuntimeChatRequest({
       : []),
     ...selectedMediaAnalysisIds,
   ]);
+  const canonicalBuddyProfileId = resolveCanonicalBuddyProfileId(
+    threadMeta.buddy_profile_id,
+  );
 
   return {
     input: input.slice(-1),
@@ -214,8 +218,7 @@ export function buildRuntimeChatRequest({
     channel: sessionContext.channel,
     stream: true,
     ...biz_params,
-    buddy_profile_id:
-      threadMeta.buddy_profile_id || biz_params?.buddy_profile_id,
+    buddy_profile_id: canonicalBuddyProfileId || undefined,
     interaction_mode: "auto",
     industry_instance_id:
       threadMeta.industry_instance_id || biz_params?.industry_instance_id,

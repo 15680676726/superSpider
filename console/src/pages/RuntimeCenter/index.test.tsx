@@ -320,9 +320,7 @@ describe("RuntimeCenterPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /运营执行位/i }));
 
-    expect(mockNavigate).toHaveBeenCalledWith(
-      "/agents?tab=daily&agent=agent-ops-1",
-    );
+    expect(mockNavigate).toHaveBeenCalledWith("/runtime-center?agent=agent-ops-1");
   });
 
   it("does not render the legacy generic main-brain overview card", () => {

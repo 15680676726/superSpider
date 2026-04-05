@@ -20,6 +20,7 @@ import {
   Typography,
 } from "antd";
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type {
   IndustryDraftPlan,
@@ -154,6 +155,13 @@ export default function IndustryPage() {
     protectedCarrierInstanceId
     && (detail?.instance_id || selectedSummary?.instance_id) === protectedCarrierInstanceId,
   );
+  const [legacyDraftEditorVisible, setLegacyDraftEditorVisible] = useState(false);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setLegacyDraftEditorVisible(false);
+    }
+  }, [isEditing]);
 
   return (
     <div className="page-container" style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 24 }}>
@@ -452,6 +460,12 @@ export default function IndustryPage() {
           extra={
             isEditing ? (
               <Space wrap>
+                <Button
+                  data-testid="industry-open-legacy-draft-editor"
+                  onClick={() => setLegacyDraftEditorVisible((current) => !current)}
+                >
+                  {legacyDraftEditorVisible ? "收起草案编辑器" : "打开草案编辑器"}
+                </Button>
                 <Button onClick={() => setBriefModalOpen(true)}>{INDUSTRY_TEXT.regenerateDraft}</Button>
                 <Button type="primary" disabled={!preview?.can_activate} loading={bootstrapLoading} onClick={() => void handleBootstrap()}>
                   {isEditingExistingTeam ? INDUSTRY_TEXT.updateTeam : INDUSTRY_TEXT.activateTeam}
@@ -478,8 +492,25 @@ export default function IndustryPage() {
           {/* Right card body */}
           {isEditing ? (
             /* 编辑 / 预览模式 */
-            <Form form={draftForm} layout="vertical">
-              <Space direction="vertical" size={24} style={{ width: "100%" }}>
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              {detail ? (
+                <div data-testid="industry-runtime-cockpit-shell">
+                  <IndustryRuntimeCockpitPanel
+                    detail={detail}
+                    locale={locale}
+                    onClearRuntimeFocus={() => void handleClearRuntimeFocus()}
+                    onOpenAgentReportChat={(report) => void handleOpenAgentReportChat(report)}
+                    onSelectAssignmentFocus={(assignmentId) => void handleSelectAssignmentFocus(assignmentId)}
+                    onSelectBacklogFocus={(backlogItemId) => void handleSelectBacklogFocus(backlogItemId)}
+                  />
+                </div>
+              ) : null}
+              <div
+                data-testid="industry-legacy-draft-editor"
+                style={{ display: legacyDraftEditorVisible ? "block" : "none" }}
+              >
+                <Form form={draftForm} layout="vertical">
+                  <Space direction="vertical" size={24} style={{ width: "100%" }}>
                 {!preview?.can_activate ? <Alert type="warning" showIcon message={INDUSTRY_TEXT.previewBlockedWarning} /> : null}
                 {/* Team info - flat, no nested card */}
                 <div>
@@ -916,8 +947,10 @@ export default function IndustryPage() {
                 </div>
 
                 {draftGenerationSummary ? <Alert type="info" showIcon message={draftGenerationSummary} /> : null}
-              </Space>
-            </Form>
+                  </Space>
+                </Form>
+              </div>
+            </Space>
           ) : loadingDetail ? (
             <div style={{ padding: 48, textAlign: "center" }}><Spin /></div>
           ) : !detail ? (

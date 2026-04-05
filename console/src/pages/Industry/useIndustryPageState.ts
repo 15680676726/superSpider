@@ -5,7 +5,7 @@ import type { NavigateFunction } from "react-router-dom";
 
 import api from "../../api";
 import {
-  readBuddyProfileId,
+  resolveCanonicalBuddyProfileId,
   writeBuddyProfileId,
 } from "../../runtime/buddyProfileBinding";
 import type {
@@ -152,9 +152,7 @@ export function useIndustryPageState({
   const [briefMediaItems, setBriefMediaItems] = useState<IndustryBriefMediaItem[]>([]);
   const [briefMediaLink, setBriefMediaLink] = useState("");
   const [briefMediaBusy, setBriefMediaBusy] = useState(false);
-  const [currentBuddyProfileId, setCurrentBuddyProfileId] = useState<string | null>(
-    () => readBuddyProfileId(),
-  );
+  const [currentBuddyProfileId, setCurrentBuddyProfileId] = useState<string | null>(null);
   const protectedCarrierInstanceId = resolveProtectedCarrierInstanceId(
     currentBuddyProfileId,
   );
@@ -194,11 +192,9 @@ export function useIndustryPageState({
           api.listIndustryInstances({ status: "active" }),
           api.listIndustryInstances({ status: "retired" }),
         ]);
-        const resolvedBuddyProfileId =
-          typeof buddySurface?.profile?.profile_id === "string" &&
-          buddySurface.profile.profile_id.trim()
-            ? buddySurface.profile.profile_id.trim()
-            : readBuddyProfileId();
+        const resolvedBuddyProfileId = resolveCanonicalBuddyProfileId(
+          buddySurface?.profile?.profile_id,
+        );
         if (resolvedBuddyProfileId) {
           writeBuddyProfileId(resolvedBuddyProfileId);
         }

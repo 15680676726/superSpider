@@ -10,6 +10,10 @@ from copaw.providers.provider_manager import ModelSlotConfig, ProviderManager
 
 
 _SMOKE_TOKEN = "COPAW_PROVIDER_SMOKE_OK"
+LIVE_PROVIDER_SMOKE_SKIP_REASON = (
+    "Set COPAW_RUN_LIVE_PROVIDER_SMOKE=1 to run live provider smoke coverage "
+    "(opt-in; not part of default regression coverage)."
+)
 
 
 def _env_flag(name: str) -> bool:
@@ -116,9 +120,17 @@ def test_live_provider_smoke_response_to_text_accepts_block_content() -> None:
     assert _response_to_text(response) == "alpha\nbeta"
 
 
+def test_live_provider_smoke_skip_reason_declares_opt_in_boundary() -> None:
+    marks = list(getattr(test_live_provider_connection_and_model_round_trip, "pytestmark", []))
+    skipif_mark = next(mark for mark in marks if mark.name == "skipif")
+    reason = str(skipif_mark.kwargs.get("reason", "")).lower()
+    assert "opt-in" in reason
+    assert "not part of default regression coverage" in reason
+
+
 @pytest.mark.skipif(
     not _env_flag("COPAW_RUN_LIVE_PROVIDER_SMOKE"),
-    reason="Set COPAW_RUN_LIVE_PROVIDER_SMOKE=1 to run live provider smoke coverage.",
+    reason=LIVE_PROVIDER_SMOKE_SKIP_REASON,
 )
 async def test_live_provider_connection_and_model_round_trip() -> None:
     provider_ids = _provider_ids()

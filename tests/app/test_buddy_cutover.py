@@ -99,6 +99,52 @@ def test_runtime_center_legacy_buddy_summary_route_is_removed(tmp_path) -> None:
     assert response.status_code == 404
 
 
+def test_buddy_confirm_direction_returns_execution_carrier_for_chat_binding(tmp_path) -> None:
+    client = _build_client(tmp_path)
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Mina",
+            "profession": "Operator",
+            "current_stage": "exploring",
+            "interests": ["content"],
+            "strengths": ["consistency"],
+            "constraints": ["money"],
+            "goal_intention": "Find a real long-term direction.",
+        },
+    ).json()
+    clarification = client.post(
+        "/buddy/onboarding/clarify",
+        json={
+            "session_id": identity["session_id"],
+            "answer": "I want a direction with leverage, identity growth, and real independence.",
+            "existing_question_count": 9,
+        },
+    ).json()
+    confirmation = client.post(
+        "/buddy/onboarding/confirm-direction",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": clarification["recommended_direction"],
+        },
+    ).json()
+
+    execution_carrier = confirmation.get("execution_carrier")
+    assert execution_carrier is not None
+    assert execution_carrier["instance_id"] == f"buddy:{identity['profile']['profile_id']}"
+    assert execution_carrier["owner_scope"] == identity["profile"]["profile_id"]
+    assert execution_carrier["control_thread_id"] == (
+        f"industry-chat:buddy:{identity['profile']['profile_id']}:execution-core"
+    )
+    assert execution_carrier["thread_id"] == (
+        f"industry-chat:buddy:{identity['profile']['profile_id']}:execution-core"
+    )
+    assert execution_carrier["chat_binding"]["thread_id"] == execution_carrier["thread_id"]
+    assert execution_carrier["chat_binding"]["control_thread_id"] == execution_carrier["control_thread_id"]
+    assert execution_carrier["chat_binding"]["channel"] == "console"
+    assert execution_carrier["chat_binding"]["binding_kind"] == "buddy-execution-carrier"
+
+
 def test_runtime_center_chat_run_preserves_strong_pull_signal_for_buddy_growth(tmp_path) -> None:
     store = SQLiteStateStore(tmp_path / "buddy-chat-run.sqlite3")
     profile_repository = SqliteHumanProfileRepository(store)

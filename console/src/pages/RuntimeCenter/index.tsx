@@ -310,9 +310,8 @@ export default function RuntimeCenterPage() {
   const openAgentWorkbench = useCallback(
     (agentId: string) => {
       const nextParams = new URLSearchParams();
-      nextParams.set("tab", "daily");
       nextParams.set("agent", agentId);
-      navigate(`/agents?${nextParams.toString()}`);
+      navigate(`/runtime-center?${nextParams.toString()}`);
     },
     [navigate],
   );

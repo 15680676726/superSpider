@@ -111,7 +111,7 @@ def _flatten_memory_messages(memory_state: object) -> list[dict[str, object]]:
     return flattened
 
 
-def test_runtime_canonical_flow_covers_identity_chat_execution_and_runtime_reads(
+def test_runtime_canonical_flow_harness_covers_identity_chat_execution_and_runtime_reads_contract(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
@@ -363,7 +363,7 @@ def test_runtime_canonical_flow_covers_identity_chat_execution_and_runtime_reads
     assert evidence.id in evidence_ids
 
 
-def test_runtime_canonical_flow_auto_writeback_requested_actions_still_closes_real_frontdoor(
+def test_runtime_canonical_flow_harness_auto_writeback_requested_actions_routes_frontdoor_contract(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
@@ -487,7 +487,7 @@ def test_runtime_canonical_flow_auto_writeback_requested_actions_still_closes_re
     assert backlog_item["metadata"]["source"] == "chat-writeback"
 
 
-def test_runtime_canonical_flow_auto_frontdoor_replan_materializes_followup_assignment_on_same_thread(
+def test_runtime_canonical_flow_harness_auto_frontdoor_replan_materializes_followup_assignment_on_same_thread_contract(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
@@ -702,7 +702,7 @@ def test_runtime_canonical_flow_auto_frontdoor_replan_materializes_followup_assi
     assert runtime_assignment["metadata"]["work_context_id"] == work_context_id
 
 
-def test_runtime_canonical_flow_chat_frontdoor_can_close_through_real_fixed_sop_terminal_report(
+def test_runtime_canonical_flow_harness_chat_frontdoor_closes_through_fixed_sop_terminal_report_contract(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)

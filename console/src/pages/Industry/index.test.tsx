@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import IndustryPage from "./index";
 import { INDUSTRY_TEXT } from "./pageHelpers";
+import { buildActorPulseItems } from "../RuntimeCenter/actorPulse";
 
 const mockNavigate = vi.fn();
 const useIndustryPageStateMock = vi.fn();
@@ -825,5 +826,68 @@ describe("IndustryPage", () => {
     expect(screen.getByText("desktop")).toBeTruthy();
     expect(screen.getByText("汇报快照")).toBeTruthy();
     expect(screen.getByText("Evidence snapshot entry")).toBeTruthy();
+  });
+
+  it("keeps runtime cockpit visible while editing and gates legacy draft editor behind explicit action", () => {
+    useIndustryPageStateMock.mockReturnValue(
+      createPageState({
+        isEditing: true,
+        isEditingExistingTeam: true,
+        preview: {
+          can_activate: true,
+          draft: {
+            team: {
+              label: "Buddy Carrier",
+              summary: "Execution carrier",
+            },
+          },
+          media_warnings: [],
+          media_analyses: [],
+          recommendation_pack: null,
+          readiness_checks: [],
+        },
+      }),
+    );
+
+    render(<IndustryPage />);
+
+    expect(screen.getByText("运行驾驶舱")).toBeTruthy();
+    expect(
+      screen.getByTestId("industry-open-legacy-draft-editor"),
+    ).toBeTruthy();
+    expect(screen.getByTestId("industry-legacy-draft-editor")).toHaveStyle({
+      display: "none",
+    });
+
+    fireEvent.click(screen.getByTestId("industry-open-legacy-draft-editor"));
+    expect(screen.getByTestId("industry-legacy-draft-editor")).toHaveStyle({
+      display: "block",
+    });
+  });
+
+  it("does not use legacy goal_* metadata as actor current focus", () => {
+    const { items } = buildActorPulseItems(
+      [
+        {
+          runtime: {
+            agent_id: "agent-1",
+            actor_key: "actor-1",
+            desired_state: "active",
+            runtime_status: "idle",
+            metadata: {
+              goal_title: "Legacy Goal Title",
+              goal_id: "goal-legacy-1",
+            },
+          },
+          mailbox: [],
+          checkpoints: [],
+        },
+      ],
+      new Map(),
+      Date.now(),
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0].currentGoal).toBeNull();
   });
 });

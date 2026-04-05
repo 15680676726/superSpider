@@ -8,6 +8,9 @@ from scripts.run_p0_runtime_terminal_gate import build_gate_commands
 
 def test_build_gate_commands_covers_python_ui_and_build_gate() -> None:
     commands = build_gate_commands(Path("D:/word/copaw"))
+    for command in commands:
+        assert "--collect-only" not in command.command
+        assert "-k" not in command.command
 
     names = [command.name for command in commands]
     assert names == [

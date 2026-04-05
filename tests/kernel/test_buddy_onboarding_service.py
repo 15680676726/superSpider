@@ -294,3 +294,28 @@ def test_record_chat_interaction_increments_strong_pull_for_stuck_or_avoidance_m
 
     assert relationship is not None
     assert relationship.strong_pull_count == 1
+    assert relationship.communication_count == 0
+    assert relationship.companion_experience == 0
+
+
+def test_record_chat_interaction_advances_growth_only_on_runtime_checkpoint(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing"],
+        strengths=["clarity"],
+        constraints=["time"],
+        goal_intention="Build a real long-term direction.",
+    )
+
+    relationship = service.record_chat_interaction(
+        profile_id=identity.profile.profile_id,
+        user_message="I completed the submission and got an accepted checkpoint.",
+        interaction_mode="checkpoint",
+    )
+
+    assert relationship is not None
+    assert relationship.communication_count == 1
+    assert relationship.companion_experience > 0

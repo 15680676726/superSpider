@@ -161,7 +161,7 @@ describe("runtimeTransport", () => {
     expect(request.stream).toBe(true);
   });
 
-  it("preserves buddy profile identity from biz params when thread meta does not provide one", () => {
+  it("does not take buddy profile identity from biz params when canonical thread meta does not provide one", () => {
     const request = buildRuntimeChatRequest({
       data: {
         input: [
@@ -190,7 +190,7 @@ describe("runtimeTransport", () => {
       selectedMediaAnalysisIds: [],
     });
 
-    expect(request.buddy_profile_id).toBe("profile-from-biz");
+    expect(request.buddy_profile_id).toBeUndefined();
   });
 
   it("prefers bound thread agent identity over window user for canonical chat session keys", () => {
