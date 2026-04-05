@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import unicodedata
 
 from pydantic import BaseModel, Field
 
@@ -15,6 +16,7 @@ from ..state.main_brain_service import (
     OperatingLaneService,
 )
 from ..state.models import IndustryInstanceRecord
+from ..state.repositories import SqliteIndustryInstanceRepository
 from ..state.repositories_buddy import (
     BuddyOnboardingSessionRecord,
     SqliteBuddyOnboardingSessionRepository,
@@ -22,7 +24,6 @@ from ..state.repositories_buddy import (
     SqliteGrowthTargetRepository,
     SqliteHumanProfileRepository,
 )
-from ..state.repositories import SqliteIndustryInstanceRepository
 
 
 class BuddyIdentitySubmitResult(BaseModel):
@@ -50,6 +51,13 @@ class BuddyDirectionConfirmationResult:
     relationship: CompanionRelationship
 
 
+_DEFAULT_DIRECTION = "建立稳定、自主、长期向上的人生主方向"
+_CREATOR_DIRECTION = "建立独立创作与内容事业的长期成长路径"
+_DESIGN_DIRECTION = "建立高杠杆的设计与系统领导力成长路径"
+_OPERATIONS_DIRECTION = "建立从执行型走向策略型的长期职业跃迁路径"
+_HEALTH_DIRECTION = "建立自律、健康与自我掌控的人生重建路径"
+
+
 def _unique(items: list[str]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
@@ -63,6 +71,15 @@ def _unique(items: list[str]) -> list[str]:
         seen.add(lowered)
         result.append(text)
     return result
+
+
+def _normalize_text(value: str | None) -> str:
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    return text.lower().strip()
+
+
+def _contains_any(source: str, tokens: tuple[str, ...]) -> bool:
+    return any(token in source for token in tokens)
 
 
 def _build_buddy_question(
@@ -92,95 +109,157 @@ def _derive_candidate_directions(
     profile: HumanProfile,
     transcript: list[str],
 ) -> list[str]:
+    segments = [
+        profile.profession,
+        profile.current_stage,
+        profile.goal_intention,
+        *profile.interests,
+        *profile.strengths,
+        *transcript,
+    ]
     source = " ".join(
-        [
-            profile.profession,
-            profile.current_stage,
-            profile.goal_intention,
-            *profile.interests,
-            *profile.strengths,
-            *transcript,
-        ],
-    ).lower()
-    directions: list[str] = []
-    if any(
-        token in source
-        for token in (
-            "content",
-            "creator",
-            "writing",
-            "write",
-            "audience",
-            "内容",
-            "创作",
-            "写作",
-            "作品",
-            "表达",
-            "自媒体",
-            "影响力",
+        _normalize_text(item)
+        for item in segments
+        if str(item or "").strip()
+    )
+    if not source:
+        return [_DEFAULT_DIRECTION]
+
+    direction_rules: list[tuple[str, tuple[str, ...], int]] = [
+        (
+            _CREATOR_DIRECTION,
+            (
+                "content",
+                "creator",
+                "writing",
+                "writer",
+                "write",
+                "story",
+                "storytelling",
+                "audience",
+                "video",
+                "creator economy",
+                "personal brand",
+                "brand",
+                "ip",
+                "内容",
+                "创作",
+                "写作",
+                "作品",
+                "表达",
+                "自媒体",
+                "影响力",
+                "视频",
+                "短视频",
+                "镜头",
+                "讲故事",
+                "个人ip",
+                "个人品牌",
+                "内容作品",
+                "创作者",
+                "内容运营",
+                "内容创作",
+                "内容表达",
+                "独立收入",
+                "内容变现",
+                "作品收入",
+                "长期影响力",
+            ),
+            3,
+        ),
+        (
+            _DESIGN_DIRECTION,
+            (
+                "design",
+                "designer",
+                "product",
+                "systems",
+                "ux",
+                "ui",
+                "service design",
+                "设计",
+                "产品",
+                "系统",
+                "体验",
+                "策略",
+                "品牌设计",
+            ),
+            3,
+        ),
+        (
+            _OPERATIONS_DIRECTION,
+            (
+                "operator",
+                "operations",
+                "process",
+                "execution",
+                "program manager",
+                "运营",
+                "执行",
+                "流程",
+                "管理",
+                "落地",
+                "组织",
+                "项目",
+                "项目管理",
+            ),
+            2,
+        ),
+        (
+            _HEALTH_DIRECTION,
+            (
+                "health",
+                "discipline",
+                "energy",
+                "exercise",
+                "fitness",
+                "健康",
+                "自律",
+                "精力",
+                "运动",
+                "作息",
+                "身体",
+                "减肥",
+            ),
+            2,
+        ),
+    ]
+
+    scores: dict[str, int] = {}
+    for direction, tokens, weight in direction_rules:
+        score = 0
+        for token in tokens:
+            if token in source:
+                score += weight
+        if score > 0:
+            scores[direction] = score
+
+    if _contains_any(source, ("独立收入", "自主收入", "收入", "变现", "赚钱")):
+        scores[_CREATOR_DIRECTION] = scores.get(_CREATOR_DIRECTION, 0) + 3
+    if _contains_any(source, ("作品", "输出", "长期影响力", "内容运营", "内容创作")):
+        scores[_CREATOR_DIRECTION] = scores.get(_CREATOR_DIRECTION, 0) + 2
+    if _contains_any(source, ("职业转型", "跃迁", "职业升级")):
+        scores[_OPERATIONS_DIRECTION] = scores.get(_OPERATIONS_DIRECTION, 0) + 2
+
+    ordered = [
+        direction
+        for direction, _score in sorted(
+            scores.items(),
+            key=lambda item: (-item[1], item[0]),
         )
-    ):
-        directions.append("建立独立创作与内容事业的长期成长路径")
-    if any(
-        token in source
-        for token in (
-            "design",
-            "designer",
-            "product",
-            "systems",
-            "设计",
-            "产品",
-            "系统",
-            "体验",
-            "策略",
-            "品牌",
-        )
-    ):
-        directions.append("建立高杠杆的设计与系统领导力成长路径")
-    if any(
-        token in source
-        for token in (
-            "operator",
-            "operations",
-            "process",
-            "execution",
-            "运营",
-            "执行",
-            "流程",
-            "管理",
-            "落地",
-            "组织",
-        )
-    ):
-        directions.append("建立从执行型走向策略型的长期职业跃迁路径")
-    if any(
-        token in source
-        for token in (
-            "health",
-            "discipline",
-            "energy",
-            "exercise",
-            "健康",
-            "自律",
-            "精力",
-            "运动",
-            "作息",
-            "身体",
-        )
-    ):
-        directions.append("建立自律、健康与自我掌控的人生重建路径")
-    directions.append("建立稳定、自主、长期向上的人生成长主方向")
-    return _unique(directions)[:3]
+    ]
+    ordered.append(_DEFAULT_DIRECTION)
+    return _unique(ordered)[:3]
 
 
 def _derive_final_goal(*, profile: HumanProfile, direction: str) -> str:
-    if "独立创作与内容事业" in direction:
+    if _CREATOR_DIRECTION in direction:
         return f"帮助{profile.display_name}建立可持续的创作事业与独立成长轨道"
-    if "设计与系统领导力" in direction:
+    if _DESIGN_DIRECTION in direction:
         return f"帮助{profile.display_name}成长为高杠杆的设计与系统领导者"
-    if "执行型走向策略型" in direction:
+    if _OPERATIONS_DIRECTION in direction:
         return f"帮助{profile.display_name}从高执行消耗转向更稳定的策略型掌控"
-    if "自律、健康与自我掌控" in direction:
+    if _HEALTH_DIRECTION in direction:
         return f"帮助{profile.display_name}重建健康、自律且可持续的人生状态"
     return f"帮助{profile.display_name}建立真正属于自己的长期成长方向与自主掌控感"
 
@@ -188,7 +267,10 @@ def _derive_final_goal(*, profile: HumanProfile, direction: str) -> str:
 def _derive_why_it_matters(*, profile: HumanProfile) -> str:
     if profile.goal_intention.strip():
         return profile.goal_intention.strip()
-    return f"因为{profile.display_name}需要一条真正有意义、而且能长期走下去的成长方向。"
+    return (
+        f"因为{profile.display_name}需要一个足够稳定的主方向，"
+        "让每一次当下努力都能慢慢积累成真正想要的人生。"
+    )
 
 
 class BuddyOnboardingService:
@@ -351,11 +433,11 @@ class BuddyOnboardingService:
                     "encouragement_style": "old-friend",
                     "effective_reminders": _unique(
                         list((existing_relationship.effective_reminders if existing_relationship else []) or [])
-                        + ["先把任务缩成一个最小动作", "先把今天这一小步做完"],
+                        + ["先把任务缩成一个最小动作", "先把今天这一小步做完"]
                     )[:3],
                     "ineffective_reminders": _unique(
                         list((existing_relationship.ineffective_reminders if existing_relationship else []) or [])
-                        + ["高压催促", "空泛说教"],
+                        + ["高压催促", "空泛说教"]
                     )[:3],
                     "avoidance_patterns": self._seed_avoidance_patterns(
                         profile=profile,
@@ -442,7 +524,7 @@ class BuddyOnboardingService:
         if relationship is None:
             raise ValueError("primary direction must be confirmed before naming Buddy")
         updated = self._relationship_repository.upsert_relationship(
-            relationship.model_copy(update={"buddy_name": buddy_name.strip() or "Buddy"}),
+            relationship.model_copy(update={"buddy_name": buddy_name.strip() or "伙伴"}),
         )
         self._onboarding_session_repository.upsert_session(
             session.model_copy(update={"status": "named"}),
@@ -460,73 +542,6 @@ class BuddyOnboardingService:
         if profile is None:
             raise ValueError(f"Human profile '{profile_id}' not found")
         return profile
-
-    def _build_question(
-        self,
-        *,
-        profile: HumanProfile,
-        question_count: int,
-        tightened: bool = False,
-    ) -> str:
-        if tightened:
-            return (
-                f"{profile.display_name}，如果现在只能先改变一件事，"
-                "你最想摆脱的是什么，为什么必须是现在？"
-            )
-        prompts = [
-            "先告诉我，你最想真正改变的人生部分是什么？",
-            "如果接下来一年只允许有一个明显进步，你最希望是哪一块？",
-            "什么样的长期方向，会让你觉得自己是在为真正想要的人生前进？",
-            "你最不想继续重复的旧状态是什么？",
-            "如果我现在只能陪你先抓住一个方向，你最不想放弃的东西是什么？",
-        ]
-        index = min(max(question_count - 1, 0), len(prompts) - 1)
-        return prompts[index]
-
-    def _candidate_directions(
-        self,
-        *,
-        profile: HumanProfile,
-        transcript: list[str],
-    ) -> list[str]:
-        source = " ".join(
-            [
-                profile.profession,
-                profile.current_stage,
-                profile.goal_intention,
-                *profile.interests,
-                *profile.strengths,
-                *transcript,
-            ],
-        ).lower()
-        directions: list[str] = []
-        if any(token in source for token in ("content", "creator", "writing", "write", "audience")):
-            directions.append("建立独立创作与内容事业的长期成长路径")
-        if any(token in source for token in ("design", "designer", "product", "systems")):
-            directions.append("建立高杠杆的设计与系统领导力成长路径")
-        if any(token in source for token in ("operator", "operations", "process", "execution")):
-            directions.append("建立从执行型走向策略型的长期职业跃迁路径")
-        if any(token in source for token in ("health", "discipline", "energy", "exercise")):
-            directions.append("建立自律、健康与自我掌控的人生重建路径")
-        directions.append("建立稳定、自主、长期向上的人生成长主方向")
-        unique = _unique(directions)
-        return unique[:3]
-
-    def _final_goal(self, *, profile: HumanProfile, direction: str) -> str:
-        if "独立创作与内容事业" in direction:
-            return f"帮助{profile.display_name}建立可持续的创作事业与独立成长轨道"
-        if "设计与系统领导力" in direction:
-            return f"帮助{profile.display_name}成长为高杠杆的设计与系统领导者"
-        if "执行型走向策略型" in direction:
-            return f"帮助{profile.display_name}从高执行消耗转向更稳定的策略型掌控"
-        if "自律、健康与自我掌控" in direction:
-            return f"帮助{profile.display_name}重建健康、自律且可持续的人生状态"
-        return f"帮助{profile.display_name}建立真正属于自己的长期成长方向与自主掌控感"
-
-    def _why_it_matters(self, *, profile: HumanProfile) -> str:
-        if profile.goal_intention.strip():
-            return profile.goal_intention.strip()
-        return f"因为{profile.display_name}需要一条真正有意义、而且能长期走下去的成长方向。"
 
     def _ensure_growth_scaffold(
         self,
@@ -610,7 +625,7 @@ class BuddyOnboardingService:
             summary=f"Buddy onboarding cycle for {profile.display_name}",
             metadata={"profile_id": profile.profile_id, "primary_direction": growth_target.primary_direction},
         )
-        assignments = self._assignment_service.ensure_assignments(
+        self._assignment_service.ensure_assignments(
             industry_instance_id=instance_id,
             cycle_id=cycle.id,
             specs=[
@@ -705,15 +720,13 @@ class BuddyOnboardingService:
         transcript: list[str],
         existing: list[str] | None = None,
     ) -> list[str]:
-        source = " ".join(
-            [profile.goal_intention, *profile.constraints, *transcript],
-        )
+        source = _normalize_text(" ".join([profile.goal_intention, *profile.constraints, *transcript]))
         patterns = list(existing or [])
-        if any(token in source for token in ("拖延", "分心", "刷", "逃避", "不想做")):
+        if _contains_any(source, ("拖延", "分心", "刷", "逃避", "不想做")):
             patterns.append("拖延回避")
-        if any(token in source for token in ("迷茫", "没方向", "不知道")):
+        if _contains_any(source, ("迷茫", "没方向", "不知道")):
             patterns.append("方向摇摆")
-        if any(token in source for token in ("时间", "精力", "累", "疲惫")):
+        if _contains_any(source, ("时间", "精力", "累", "疲惫")):
             patterns.append("精力透支")
         return _unique(patterns)
 

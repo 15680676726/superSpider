@@ -16,7 +16,6 @@ import type {
 import {
   normalizeRuntimePath,
   requestRuntimeRecord,
-  requestRuntimeBuddySummary,
   type RuntimeSurfaceSection,
   requestRuntimeSurface,
 } from "../../runtime/runtimeSurfaceClient";
@@ -272,18 +271,10 @@ export function useRuntimeCenter() {
         const requestedSections = new Set<RuntimeSurfaceSection>(
           options?.sections ?? ["cards", "main_brain"],
         );
-        const shouldLoadBuddySummary =
-          options?.sections == null || requestedSections.has("main_brain");
-        const [payload, buddyPayload] = await Promise.all([
-          requestRuntimeSurface<RuntimeCenterSurfaceResponse>(options),
-          shouldLoadBuddySummary
-            ? requestRuntimeBuddySummary<RuntimeMainBrainBuddySummary>(
-                readBuddyProfileId(),
-              ).catch(
-                () => null,
-              )
-            : Promise.resolve(null),
-        ]);
+        const payload = await requestRuntimeSurface<RuntimeCenterSurfaceResponse>({
+          ...options,
+          buddyProfileId: readBuddyProfileId(),
+        });
         setSurfaceData((previous) => ({
           generated_at: payload.generated_at,
           surface: payload.surface,
@@ -294,8 +285,8 @@ export function useRuntimeCenter() {
             ? payload.main_brain
             : previous?.main_brain ?? null,
         }));
-        if (shouldLoadBuddySummary) {
-          setBuddySummary(buddyPayload);
+        if (requestedSections.has("main_brain")) {
+          setBuddySummary(payload.main_brain?.buddy_summary ?? null);
         }
         setError(null);
       } catch (err) {

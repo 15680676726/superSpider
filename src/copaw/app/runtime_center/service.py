@@ -37,8 +37,16 @@ class RuntimeCenterQueryService:
     async def get_main_brain_view(
         self,
         runtime_state: RuntimeCenterAppStateView,
+        *,
+        buddy_profile_id: str | None = None,
     ) -> RuntimeMainBrainResponse:
-        return await self._overview_builder.build_main_brain_payload(runtime_state)
+        try:
+            return await self._overview_builder.build_main_brain_payload(
+                runtime_state,
+                buddy_profile_id=buddy_profile_id,
+            )
+        except TypeError:
+            return await self._overview_builder.build_main_brain_payload(runtime_state)
 
     async def get_surface_view(
         self,
@@ -46,6 +54,7 @@ class RuntimeCenterQueryService:
         *,
         include_cards: bool = True,
         include_main_brain: bool = True,
+        buddy_profile_id: str | None = None,
     ) -> RuntimeCenterSurfaceResponse:
         build_surface_payload = getattr(self._overview_builder, "build_surface_payload", None)
         if callable(build_surface_payload):
@@ -54,6 +63,7 @@ class RuntimeCenterQueryService:
                     runtime_state,
                     include_cards=include_cards,
                     include_main_brain=include_main_brain,
+                    buddy_profile_id=buddy_profile_id,
                 )
             except TypeError:
                 return await build_surface_payload(runtime_state)
@@ -64,7 +74,10 @@ class RuntimeCenterQueryService:
             cards = await self._overview_builder.build_cards(runtime_state)
             surface = build_runtime_surface(cards)
         if include_main_brain:
-            main_brain = await self.get_main_brain_view(runtime_state)
+            main_brain = await self.get_main_brain_view(
+                runtime_state,
+                buddy_profile_id=buddy_profile_id,
+            )
             if not include_cards:
                 surface = main_brain.surface
         return RuntimeCenterSurfaceResponse(
@@ -79,11 +92,13 @@ class RuntimeCenterQueryService:
         *,
         include_cards: bool = True,
         include_main_brain: bool = True,
+        buddy_profile_id: str | None = None,
     ) -> RuntimeCenterSurfaceResponse:
         return await self.get_surface_view(
             self._coerce_runtime_state(app_state),
             include_cards=include_cards,
             include_main_brain=include_main_brain,
+            buddy_profile_id=buddy_profile_id,
         )
 
 

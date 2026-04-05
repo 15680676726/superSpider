@@ -45,6 +45,7 @@ async def get_runtime_surface(
     request: Request,
     response: Response,
     sections: str | None = None,
+    buddy_profile_id: str | None = None,
 ) -> RuntimeCenterSurfaceResponse:
     """Return the canonical Runtime Center page surface."""
     apply_runtime_center_surface_headers(response, surface="runtime-center")
@@ -56,9 +57,14 @@ async def get_runtime_surface(
             runtime_state,
             include_cards=include_cards,
             include_main_brain=include_main_brain,
+            buddy_profile_id=buddy_profile_id,
         )
     except TypeError:
-        return await service.get_surface(runtime_state)
+        return await service.get_surface(
+            runtime_state,
+            include_cards=include_cards,
+            include_main_brain=include_main_brain,
+        )
 
 
 @router.get("/events")

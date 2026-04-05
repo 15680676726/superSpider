@@ -23,6 +23,7 @@ import {
   readBuddyProfileId,
   writeBuddyProfileId,
 } from "../../runtime/buddyProfileBinding";
+import { resolveBuddyEntryDecision } from "../../runtime/buddyFlow";
 
 const { Paragraph, Title } = Typography;
 const { TextArea } = Input;
@@ -64,13 +65,57 @@ export default function BuddyOnboardingPage() {
       try {
         const boundProfileId = readBuddyProfileId();
         const surface = await api.getBuddySurface(boundProfileId);
-        if (!cancelled && surface?.profile?.profile_id) {
+        if (cancelled) return;
+        const decision = resolveBuddyEntryDecision(surface);
+        if (surface?.profile?.profile_id) {
           writeBuddyProfileId(surface.profile.profile_id);
+        }
+        if (decision.mode === "chat-ready" && surface?.profile?.profile_id) {
           navigate(
             `/chat?buddy_profile=${encodeURIComponent(surface.profile.profile_id)}`,
             { replace: true },
           );
           return;
+        }
+        if (
+          decision.mode === "chat-needs-naming" &&
+          surface?.profile?.profile_id &&
+          decision.sessionId
+        ) {
+          navigate(
+            `/chat?buddy_session=${encodeURIComponent(decision.sessionId)}&buddy_profile=${encodeURIComponent(surface.profile.profile_id)}`,
+            { replace: true },
+          );
+          return;
+        }
+        if (
+          decision.mode === "resume-onboarding" &&
+          surface?.profile?.profile_id &&
+          surface.onboarding
+        ) {
+          setIdentity({
+            session_id: surface.onboarding.session_id ?? "",
+            profile: surface.profile,
+            question_count: surface.onboarding.question_count,
+            next_question: surface.onboarding.next_question,
+            finished: surface.onboarding.completed,
+          });
+          setClarification({
+            session_id: surface.onboarding.session_id ?? "",
+            question_count: surface.onboarding.question_count,
+            tightened: surface.onboarding.tightened,
+            finished:
+              surface.onboarding.requires_direction_confirmation ||
+              surface.onboarding.completed,
+            next_question: surface.onboarding.next_question,
+            candidate_directions: surface.onboarding.candidate_directions,
+            recommended_direction: surface.onboarding.recommended_direction,
+          });
+          setSelectedDirection(
+            surface.onboarding.selected_direction ||
+              surface.onboarding.recommended_direction ||
+              "",
+          );
         }
       } catch (rawError) {
         if (cancelled) return;
@@ -145,7 +190,7 @@ export default function BuddyOnboardingPage() {
       });
       setConfirmPayload(result);
       navigate(
-        `/chat?buddy_session=${encodeURIComponent(identity.session_id)}&buddy_needs_name=1&buddy_profile=${encodeURIComponent(identity.profile.profile_id)}`,
+        `/chat?buddy_session=${encodeURIComponent(identity.session_id)}&buddy_profile=${encodeURIComponent(identity.profile.profile_id)}`,
         { replace: true },
       );
     } catch (rawError) {
@@ -219,7 +264,7 @@ export default function BuddyOnboardingPage() {
               <TextArea rows={2} placeholder="可用逗号、顿号或换行分隔" />
             </Form.Item>
             <Form.Item label="特长" name="strengths">
-              <TextArea rows={2} placeholder="你做得比多数人更稳的东西" />
+              <TextArea rows={2} placeholder="你做得比大多数人更稳的东西" />
             </Form.Item>
             <Form.Item label="限制 / 困境" name="constraints">
               <TextArea rows={2} placeholder="时间、金钱、精力、环境约束等" />
@@ -227,7 +272,7 @@ export default function BuddyOnboardingPage() {
             <Form.Item label="目标意向" name="goal_intention" rules={[{ required: true }]}>
               <TextArea
                 rows={3}
-                placeholder="先说你隐约想改变什么，模糊也没有关系"
+                placeholder="先说你隐约想改变什么，模糊也没有关系。"
                 data-testid="buddy-identity-goal-intention"
               />
             </Form.Item>
@@ -258,7 +303,7 @@ export default function BuddyOnboardingPage() {
               rows={4}
               value={questionAnswer}
               onChange={(event) => setQuestionAnswer(event.target.value)}
-              placeholder="用最真实的话回答我，不用写得很工整"
+              placeholder="用最真实的话回答我，不用写得很工整。"
               data-testid="buddy-clarification-answer"
             />
             <Space>
