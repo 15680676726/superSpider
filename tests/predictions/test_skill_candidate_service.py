@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from copaw.capabilities.models import CapabilityMount
+from copaw.discovery.models import NormalizedDiscoveryHit
 from copaw.state import SQLiteStateStore
 from copaw.state.capability_donor_service import CapabilityDonorService
 from copaw.state.capability_portfolio_service import CapabilityPortfolioService
@@ -286,6 +287,36 @@ def test_capability_candidate_service_materializes_donor_truth_and_portfolio_sum
         item["action"] == "review_retirement_pressure"
         for item in portfolio["planning_actions"]
     )
+
+
+def test_capability_candidate_service_preserves_github_project_source_ref(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path)
+
+    imported = service.import_normalized_discovery_hits(
+        normalized_hits=[
+            NormalizedDiscoveryHit(
+                candidate_kind="project",
+                candidate_source_kind="external_remote",
+                display_name="acme/browser-pilot",
+                summary="GitHub browser automation donor.",
+                candidate_source_ref="https://github.com/acme/browser-pilot",
+                candidate_source_version="main",
+                candidate_source_lineage="donor:github:acme/browser-pilot",
+                canonical_package_id="pkg:github:acme/browser-pilot",
+                equivalence_class="pkg:github:acme/browser-pilot",
+            ),
+        ],
+        target_scope="seat",
+        target_role_id="execution-core",
+        target_seat_ref="seat-1",
+    )
+
+    assert len(imported) == 1
+    assert imported[0].candidate_kind == "project"
+    assert imported[0].candidate_source_ref == "https://github.com/acme/browser-pilot"
+    assert imported[0].canonical_package_id == "pkg:github:acme/browser-pilot"
 
 
 def test_capability_portfolio_service_reports_runtime_discovery_and_package_metadata(

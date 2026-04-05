@@ -6,7 +6,11 @@ from urllib.parse import quote, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..agents.skills_hub import HubSkillResult, search_hub_skills
+from ..agents.skills_hub import (
+    HubSkillResult,
+    remote_skill_bundle_is_installable as _remote_skill_bundle_is_installable,
+    search_hub_skills,
+)
 from ..industry.models import IndustrySeatCapabilityLayers
 from .remote_skill_catalog import (
     CuratedSkillCatalogEntry,
@@ -32,7 +36,7 @@ class RemoteSkillCandidate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     candidate_key: str
-    source_kind: Literal["curated", "hub"]
+    source_kind: Literal["curated", "hub", "github"]
     source_label: str
     title: str
     description: str = ""
@@ -161,10 +165,12 @@ def resolve_remote_skill_candidate(
             query=str((payload or {}).get("search_query") or ""),
             get_capability_fn=get_capability_fn,
         )
-    if source_kind != "hub":
+    if source_kind not in {"hub", "github"}:
         return None
     bundle_url = str((payload or {}).get("bundle_url") or "").strip()
     if not bundle_url or not _is_allowlisted_remote_url(bundle_url):
+        return None
+    if source_kind == "github" and not remote_skill_bundle_is_installable(bundle_url):
         return None
     source_url = str((payload or {}).get("source_url") or bundle_url).strip()
     slug = str((payload or {}).get("slug") or "").strip() or None
@@ -177,10 +183,13 @@ def resolve_remote_skill_candidate(
         capability_ids,
         get_capability_fn=get_capability_fn,
     )
+    source_label = str((payload or {}).get("source_label") or "").strip()
+    if not source_label:
+        source_label = "GitHub" if source_kind == "github" else "SkillHub 商店"
     return RemoteSkillCandidate(
-        candidate_key=f"hub:{slug or bundle_url}",
-        source_kind="hub",
-        source_label=str((payload or {}).get("source_label") or "SkillHub 商店"),
+        candidate_key=f"{source_kind}:{slug or bundle_url}",
+        source_kind=source_kind,  # type: ignore[arg-type]
+        source_label=source_label,
         title=str((payload or {}).get("title") or slug or bundle_url),
         description=str((payload or {}).get("description") or ""),
         bundle_url=bundle_url,
@@ -189,7 +198,10 @@ def resolve_remote_skill_candidate(
         version=str((payload or {}).get("version") or ""),
         install_name=install_name,
         capability_ids=capability_ids,
-        capability_tags=_unique_strings(list((payload or {}).get("capability_tags") or []), ["skill", "hub", "remote"]),
+        capability_tags=_unique_strings(
+            list((payload or {}).get("capability_tags") or []),
+            ["skill", source_kind, "remote"],
+        ),
         review_required=bool((payload or {}).get("review_required", False)),
         review_summary=str((payload or {}).get("review_summary") or ""),
         review_notes=_string_list((payload or {}).get("review_notes")),
@@ -198,6 +210,13 @@ def resolve_remote_skill_candidate(
         search_query=str((payload or {}).get("search_query") or ""),
         routes=_string_dict((payload or {}).get("routes")),
     )
+
+
+def remote_skill_bundle_is_installable(
+    bundle_url: str,
+    version: str = "",
+) -> bool:
+    return bool(_remote_skill_bundle_is_installable(bundle_url, version=version))
 
 
 def resolve_candidate_capability_ids(

@@ -242,3 +242,90 @@ def test_install_skill_from_hub_rejects_invalid_skill_frontmatter(
                 "skills/find-skills.zip"
             ),
         )
+
+
+def test_remote_skill_bundle_is_installable_accepts_github_repo_with_skill(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        skills_hub_module,
+        "_fetch_bundle_from_github_url",
+        lambda bundle_url, requested_version: (
+            {
+                "name": "browser_pilot",
+                "files": {
+                    "SKILL.md": "---\nname: browser_pilot\ndescription: test\n---\nbody\n",
+                },
+            },
+            bundle_url,
+        ),
+    )
+
+    assert (
+        skills_hub_module.remote_skill_bundle_is_installable(
+            "https://github.com/acme/browser-pilot",
+        )
+        is True
+    )
+
+
+def test_fetch_bundle_from_github_url_falls_back_to_raw_skill_md(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        skills_hub_module,
+        "_fetch_bundle_from_repo_and_skill_hint",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("GitHub API rate limit exceeded"),
+        ),
+    )
+    monkeypatch.setattr(
+        skills_hub_module,
+        "_fetch_bundle_from_github_raw_fallback",
+        lambda **_kwargs: (
+            {
+                "name": "teammate-skill",
+                "files": {
+                    "SKILL.md": "---\nname: teammate-skill\ndescription: raw fallback\n---\nbody\n",
+                },
+            },
+            "https://github.com/LeoYeAI/teammate-skill",
+        ),
+    )
+    monkeypatch.setattr(
+        skills_hub_module,
+        "_github_get_default_branch",
+        lambda owner, repo: "main",
+    )
+
+    bundle, source_url = skills_hub_module._fetch_bundle_from_github_url(
+        "https://github.com/LeoYeAI/teammate-skill",
+        requested_version="",
+    )
+
+    assert bundle["name"] == "teammate-skill"
+    assert "SKILL.md" in bundle["files"]
+    assert source_url == "https://github.com/LeoYeAI/teammate-skill"
+
+
+def test_fetch_bundle_from_github_raw_fallback_uses_frontmatter_name(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        skills_hub_module,
+        "_http_text_get",
+        lambda _url, params=None: (
+            "---\nname: create-teammate\ndescription: raw fallback\n---\nbody\n"
+        ),
+    )
+
+    bundle, source_url = skills_hub_module._fetch_bundle_from_github_raw_fallback(
+        owner="LeoYeAI",
+        repo="teammate-skill",
+        path_hint="",
+        requested_version="main",
+        default_branch="main",
+    )
+
+    assert bundle["name"] == "create-teammate"
+    assert source_url == "https://github.com/LeoYeAI/teammate-skill"

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import re
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -47,8 +49,15 @@ from ...capabilities.remote_skill_catalog import (
     list_curated_skill_sources,
     search_curated_skill_catalog,
 )
+from ...capabilities.remote_skill_contract import (
+    remote_skill_bundle_is_installable,
+)
 from ...config import load_config
+from ...discovery.models import DiscoveryHit, NormalizedDiscoveryHit
+from ...discovery.provider_search import search_github_repository_donors
 from ...state import SQLiteStateStore
+from ...state.skill_candidate_service import CapabilityCandidateService
+from ...state.skill_trial_service import SkillTrialService
 from .capabilities import CapabilityMutationRequest
 from .capability_contracts import (
     CreateSkillRequest,
@@ -123,6 +132,49 @@ class CapabilityMarketHubInstallResponse(BaseModel):
     assignment_results: list["CapabilityMarketCapabilityAssignmentResult"] = Field(
         default_factory=list,
     )
+
+
+class CapabilityMarketProjectInstallRequest(BaseModel):
+    candidate_id: str | None = None
+    source_url: str | None = None
+    version: str = ""
+    enable: bool = True
+    overwrite: bool = False
+    actor: str = Field(default="copaw-operator")
+    target_agent_id: str | None = None
+    selected_seat_ref: str | None = None
+    target_role_id: str | None = None
+    capability_ids: list[str] = Field(default_factory=list)
+    replacement_capability_ids: list[str] = Field(default_factory=list)
+    replacement_target_ids: list[str] = Field(default_factory=list)
+    capability_assignment_mode: Literal["replace", "merge"] = "merge"
+    trial_scope: Literal["single-agent", "single-seat", "wider-rollout"] = "single-seat"
+
+
+class CapabilityMarketProjectInstallResponse(BaseModel):
+    installed: bool
+    candidate_id: str | None = None
+    name: str
+    enabled: bool
+    source_url: str
+    installed_capability_ids: list[str] = Field(default_factory=list)
+    target_agent_id: str | None = None
+    trial_attachment: dict[str, Any] | None = None
+
+
+class CapabilityMarketProjectCandidate(BaseModel):
+    display_name: str
+    summary: str = ""
+    source_kind: str = "github-repo"
+    candidate_kind: str = "project"
+    source_url: str
+    version: str = ""
+    source_lineage: str | None = None
+    canonical_package_id: str | None = None
+    capability_keys: list[str] = Field(default_factory=list)
+    install_supported: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    routes: dict[str, str] = Field(default_factory=dict)
 
 
 class CapabilityMarketMCPCreateRequest(BaseModel):
@@ -288,6 +340,35 @@ def _get_capability_service(request: Request) -> CapabilityService:
     return _shared_get_capability_service(request)
 
 
+def _get_capability_candidate_service(
+    request: Request,
+) -> CapabilityCandidateService | None:
+    service = getattr(request.app.state, "capability_candidate_service", None)
+    if isinstance(service, CapabilityCandidateService):
+        return service
+    state_store = getattr(request.app.state, "state_store", None)
+    if not isinstance(state_store, SQLiteStateStore):
+        return None
+    service = CapabilityCandidateService(
+        state_store=state_store,
+        donor_service=getattr(request.app.state, "capability_donor_service", None),
+    )
+    request.app.state.capability_candidate_service = service
+    return service
+
+
+def _get_skill_trial_service(request: Request) -> SkillTrialService | None:
+    service = getattr(request.app.state, "skill_trial_service", None)
+    if isinstance(service, SkillTrialService):
+        return service
+    state_store = getattr(request.app.state, "state_store", None)
+    if not isinstance(state_store, SQLiteStateStore):
+        return None
+    service = SkillTrialService(state_store=state_store)
+    request.app.state.skill_trial_service = service
+    return service
+
+
 def _get_agent_profile_service(request: Request):
     return getattr(request.app.state, "agent_profile_service", None)
 
@@ -441,6 +522,15 @@ def _market_error_status(detail: str) -> int:
     return 400
 
 
+def _unwrap_market_mutation_result(result: dict[str, Any]) -> dict[str, Any]:
+    output = result.get("output")
+    if not isinstance(output, dict):
+        return dict(result)
+    flattened = dict(result)
+    flattened.update(output)
+    return flattened
+
+
 def _extract_installed_skill_name(summary: str | None) -> str:
     if not isinstance(summary, str):
         return ""
@@ -449,6 +539,257 @@ def _extract_installed_skill_name(summary: str | None) -> str:
     if summary.startswith(prefix) and summary.endswith(suffix):
         return summary[len(prefix) : -len(suffix)]
     return ""
+
+
+def _normalize_project_install_name(
+    *,
+    source_url: str,
+    proposed_name: str | None,
+) -> str:
+    candidate = str(proposed_name or "").strip()
+    if not candidate:
+        path = urlparse(source_url).path.strip("/")
+        candidate = path.split("/")[-1] if path else ""
+    candidate = re.sub(r"[^a-zA-Z0-9_-]+", "_", candidate).strip("_")
+    return candidate or "github_project_donor"
+
+
+def _project_target_scope(
+    *,
+    trial_scope: str,
+    selected_seat_ref: str | None,
+    target_role_id: str | None,
+) -> str:
+    if str(selected_seat_ref or "").strip():
+        return "seat"
+    if str(trial_scope or "").strip().lower() == "wider-rollout":
+        return "role" if str(target_role_id or "").strip() else "agent"
+    if str(target_role_id or "").strip():
+        return "role"
+    return "agent"
+
+
+def _resolve_project_candidate(
+    request: Request,
+    *,
+    candidate_id: str | None,
+    source_url: str | None,
+    version: str | None,
+):
+    candidate_service = _get_capability_candidate_service(request)
+    candidate = None
+    if isinstance(candidate_id, str) and candidate_id.strip():
+        if candidate_service is None:
+            raise HTTPException(503, detail="Capability candidate service is not available")
+        candidate = candidate_service.get_candidate(candidate_id.strip())
+        if candidate is None:
+            raise HTTPException(404, detail=f"Capability candidate '{candidate_id}' not found")
+        if str(candidate.candidate_kind or "").strip().lower() != "project":
+            raise HTTPException(400, detail="Capability candidate is not a project donor")
+    resolved_source_url = str(source_url or "").strip() or str(
+        getattr(candidate, "candidate_source_ref", "") or ""
+    ).strip()
+    resolved_version = str(version or "").strip() or str(
+        getattr(candidate, "candidate_source_version", "") or ""
+    ).strip()
+    if not resolved_source_url:
+        raise HTTPException(400, detail="Project donor source_url is required")
+    if not remote_skill_bundle_is_installable(
+        resolved_source_url,
+        version=resolved_version,
+    ):
+        raise HTTPException(
+            400,
+            detail=(
+                "Project donor is not installable through the current GitHub skill contract. "
+                "The repository must expose a valid SKILL.md bundle."
+            ),
+        )
+    return candidate, resolved_source_url, resolved_version
+
+
+def _materialize_project_candidate(
+    request: Request,
+    *,
+    candidate: object | None,
+    source_url: str,
+    target_role_id: str | None,
+    target_seat_ref: str | None,
+    trial_scope: str,
+):
+    if candidate is not None:
+        return candidate
+    candidate_service = _get_capability_candidate_service(request)
+    if candidate_service is None:
+        return None
+    discovery_hits = search_github_repository_donors(source_url, limit=1)
+    hit = next(
+        (
+            item
+            for item in discovery_hits
+            if str(item.candidate_source_ref or "").strip() == source_url
+        ),
+        None,
+    )
+    if hit is None:
+        lineage = source_url.rstrip("/").lower()
+        hit = DiscoveryHit(
+            source_id="github-repo",
+            source_kind="github-repo",
+            source_alias="github",
+            candidate_kind="project",
+            display_name=source_url,
+            summary="GitHub donor repository",
+            candidate_source_ref=source_url,
+            candidate_source_lineage=f"donor:github:{lineage}",
+            canonical_package_id=f"pkg:github:{lineage}",
+            metadata={
+                "provider": "github-repo",
+                "install_supported": True,
+                "repository_url": source_url,
+                "direct_query": True,
+            },
+        )
+    normalized_hit = NormalizedDiscoveryHit(
+        candidate_kind=hit.candidate_kind,
+        candidate_source_kind="external_remote",
+        display_name=hit.display_name,
+        summary=hit.summary,
+        candidate_source_ref=hit.candidate_source_ref,
+        candidate_source_version=hit.candidate_source_version,
+        candidate_source_lineage=hit.candidate_source_lineage,
+        canonical_package_id=hit.canonical_package_id,
+        equivalence_class=(
+            str(hit.canonical_package_id or "").strip()
+            or str(hit.candidate_source_ref or "").strip()
+            or source_url
+        ),
+        source_aliases=tuple(
+            item
+            for item in [str(hit.candidate_source_ref or "").strip()]
+            if item
+        ),
+        source_ids=tuple(
+            item
+            for item in [str(hit.source_id or "").strip()]
+            if item
+        ),
+        capability_keys=tuple(
+            str(item).strip()
+            for item in hit.capability_keys
+            if str(item).strip()
+        ),
+        metadata=dict(hit.metadata),
+    )
+    imported = candidate_service.import_normalized_discovery_hits(
+        normalized_hits=[normalized_hit],
+        target_scope=_project_target_scope(
+            trial_scope=trial_scope,
+            selected_seat_ref=target_seat_ref,
+            target_role_id=target_role_id,
+        ),
+        target_role_id=str(target_role_id or "").strip() or None,
+        target_seat_ref=str(target_seat_ref or "").strip() or None,
+    )
+    return imported[0] if imported else None
+
+
+def _build_project_remote_candidate_payload(
+    *,
+    candidate: object | None,
+    source_url: str,
+    version: str,
+    capability_ids: list[str],
+) -> dict[str, object]:
+    install_name = _normalize_project_install_name(
+        source_url=source_url,
+        proposed_name=getattr(candidate, "proposed_skill_name", None),
+    )
+    resolved_capability_ids = _normalize_capability_ids(capability_ids)
+    if not resolved_capability_ids:
+        resolved_capability_ids = [f"skill:{install_name}"]
+    return {
+        "candidate_key": str(getattr(candidate, "candidate_id", "") or source_url),
+        "source_kind": "github",
+        "source_label": "GitHub",
+        "title": str(getattr(candidate, "proposed_skill_name", "") or source_url),
+        "description": str(getattr(candidate, "summary", "") or ""),
+        "bundle_url": source_url,
+        "source_url": source_url,
+        "version": version,
+        "install_name": install_name,
+        "capability_ids": resolved_capability_ids,
+        "capability_tags": ["project", "github", "remote"],
+        "review_required": False,
+    }
+
+
+def _sync_project_trial_truth(
+    request: Request,
+    *,
+    candidate_id: str | None,
+    target_agent_id: str | None,
+    result: dict[str, object],
+) -> None:
+    normalized_candidate_id = str(candidate_id or "").strip()
+    if not normalized_candidate_id:
+        return
+    trial_attachment = result.get("trial_attachment")
+    if not isinstance(trial_attachment, dict) or not trial_attachment.get("success"):
+        return
+    candidate_service = _get_capability_candidate_service(request)
+    trial_service = _get_skill_trial_service(request)
+    if candidate_service is None or trial_service is None:
+        return
+    candidate = candidate_service.get_candidate(normalized_candidate_id)
+    if candidate is None:
+        return
+    selected_scope = str(
+        trial_attachment.get("selected_scope") or getattr(candidate, "target_scope", "seat")
+    ).strip() or "seat"
+    scope_type = str(
+        trial_attachment.get("scope_type") or selected_scope
+    ).strip() or "seat"
+    scope_ref = str(
+        trial_attachment.get("scope_ref") or getattr(candidate, "target_seat_ref", "") or normalized_candidate_id
+    ).strip()
+    installed_capability_ids = [
+        str(item).strip()
+        for item in list(result.get("installed_capability_ids") or [])
+        if str(item).strip()
+    ]
+    candidate_service.update_candidate_status(
+        normalized_candidate_id,
+        status="trial",
+        lifecycle_stage="trial",
+        metadata_updates={
+            "resolution_kind": "adopt_external_donor",
+            "selected_scope": selected_scope,
+            "installed_capability_ids": installed_capability_ids,
+            "target_agent_id": str(target_agent_id or "").strip() or None,
+        },
+    )
+    trial_service.create_or_update_trial(
+        candidate_id=normalized_candidate_id,
+        donor_id=candidate.donor_id,
+        package_id=candidate.package_id,
+        source_profile_id=candidate.source_profile_id,
+        canonical_package_id=candidate.canonical_package_id,
+        candidate_source_lineage=candidate.candidate_source_lineage,
+        source_aliases=list(candidate.source_aliases),
+        equivalence_class=candidate.equivalence_class,
+        capability_overlap_score=candidate.capability_overlap_score,
+        replacement_relation=candidate.replacement_relation,
+        scope_type=scope_type,
+        scope_ref=scope_ref,
+        verdict="pending",
+        summary="Project donor attached to scoped trial and awaiting runtime evidence.",
+        metadata={
+            "target_agent_id": str(target_agent_id or "").strip() or None,
+            "selected_scope": selected_scope,
+            "installed_capability_ids": installed_capability_ids,
+        },
+    )
 
 
 def _response_workflow_resume(
@@ -848,6 +1189,8 @@ async def get_capability_market_overview(request: Request) -> dict[str, object]:
             "curated_install": "/api/capability-market/curated-catalog/install",
             "hub_search": "/api/capability-market/hub/search",
             "hub_install": "/api/capability-market/hub/install",
+            "project_search": "/api/capability-market/projects/search",
+            "project_install": "/api/capability-market/projects/install",
             "candidate_list": "/api/runtime-center/capabilities/candidates",
         },
     }
@@ -1436,6 +1779,7 @@ async def install_market_hub_skill(
         },
         fallback_risk="guarded",
     )
+    result = _unwrap_market_mutation_result(result)
     if not result.get("success"):
         detail = str(
             result.get("error")
@@ -1512,6 +1856,7 @@ async def install_market_curated_skill(
         },
         fallback_risk="guarded",
     )
+    result = _unwrap_market_mutation_result(result)
     if not result.get("success"):
         detail = str(
             result.get("error")
@@ -1548,6 +1893,102 @@ async def install_market_curated_skill(
         review_notes=list(candidate.review_notes or []),
         assigned_capability_ids=assigned_capability_ids,
         assignment_results=assignment_results,
+    )
+
+
+@router.post(
+    "/projects/install",
+    response_model=CapabilityMarketProjectInstallResponse,
+)
+async def install_market_project_donor(
+    request: Request,
+    payload: CapabilityMarketProjectInstallRequest,
+) -> CapabilityMarketProjectInstallResponse:
+    candidate, source_url, version = _resolve_project_candidate(
+        request,
+        candidate_id=payload.candidate_id,
+        source_url=payload.source_url,
+        version=payload.version,
+    )
+    target_agent_id = str(payload.target_agent_id or "").strip() or None
+    if target_agent_id is not None:
+        _ensure_target_agents_exist(request, target_agent_ids=[target_agent_id])
+    candidate = _materialize_project_candidate(
+        request,
+        candidate=candidate,
+        source_url=source_url,
+        target_role_id=str(payload.target_role_id or "").strip() or None,
+        target_seat_ref=str(payload.selected_seat_ref or "").strip() or None,
+        trial_scope=payload.trial_scope,
+    )
+    resolved_candidate_id = str(
+        getattr(candidate, "candidate_id", "") or payload.candidate_id or "",
+    ).strip() or None
+    project_candidate_payload = _build_project_remote_candidate_payload(
+        candidate=candidate,
+        source_url=source_url,
+        version=version,
+        capability_ids=payload.capability_ids,
+    )
+    result = await _dispatch_market_mutation(
+        request,
+        capability_ref="system:trial_remote_skill_assignment",
+        title=(
+            f"Install project donor {source_url}"
+            + (f" for {target_agent_id}" if target_agent_id else "")
+        ),
+        payload={
+            "candidate": project_candidate_payload,
+            "candidate_id": resolved_candidate_id,
+            "target_agent_id": target_agent_id,
+            "selected_seat_ref": str(payload.selected_seat_ref or "").strip() or None,
+            "target_role_id": str(payload.target_role_id or "").strip() or None,
+            "capability_ids": _normalize_capability_ids(payload.capability_ids),
+            "replacement_capability_ids": _normalize_capability_ids(
+                payload.replacement_capability_ids,
+            ),
+            "replacement_target_ids": _normalize_capability_ids(
+                payload.replacement_target_ids,
+            ),
+            "capability_assignment_mode": payload.capability_assignment_mode,
+            "trial_scope": payload.trial_scope,
+            "enable": payload.enable,
+            "overwrite": payload.overwrite,
+            "actor": payload.actor,
+        },
+        fallback_risk="guarded",
+    )
+    result = _unwrap_market_mutation_result(result)
+    if not result.get("success"):
+        detail = str(
+            result.get("error")
+            or result.get("summary")
+            or "Project donor install failed"
+        )
+        raise HTTPException(_market_error_status(detail), detail=detail)
+    _sync_project_trial_truth(
+        request,
+        candidate_id=resolved_candidate_id,
+        target_agent_id=target_agent_id,
+        result=result,
+    )
+    return CapabilityMarketProjectInstallResponse(
+        installed=bool(result.get("installed", True)),
+        candidate_id=resolved_candidate_id,
+        name=str(result.get("name") or ""),
+        enabled=bool(result.get("enabled", payload.enable)),
+        source_url=str(result.get("source_url") or source_url),
+        installed_capability_ids=[
+            str(item).strip()
+            for item in list(result.get("installed_capability_ids") or [])
+            if str(item).strip()
+        ],
+        target_agent_id=target_agent_id,
+        trial_attachment=(
+            dict(result.get("trial_attachment"))
+            if isinstance(result.get("trial_attachment"), dict)
+            else None
+        ),
     )
 
 
@@ -1802,3 +2243,39 @@ async def search_market_curated_catalog(
     limit: int = Query(default=20, ge=1, le=500),
 ) -> CuratedSkillCatalogSearchResponse:
     return await asyncio.to_thread(search_curated_skill_catalog, q, limit=limit)
+
+
+@router.get(
+    "/projects/search",
+    response_model=list[CapabilityMarketProjectCandidate],
+)
+async def search_market_project_donors(
+    q: str = Query(default=""),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[CapabilityMarketProjectCandidate]:
+    hits = await asyncio.to_thread(
+        search_github_repository_donors,
+        q,
+        limit=limit,
+    )
+    return [
+        CapabilityMarketProjectCandidate(
+            display_name=str(hit.display_name or hit.candidate_source_ref or "GitHub donor"),
+            summary=hit.summary,
+            source_kind=hit.source_kind,
+            candidate_kind=hit.candidate_kind,
+            source_url=str(hit.candidate_source_ref or ""),
+            version=str(hit.candidate_source_version or ""),
+            source_lineage=hit.candidate_source_lineage,
+            canonical_package_id=hit.canonical_package_id,
+            capability_keys=[str(item).strip() for item in hit.capability_keys if str(item).strip()],
+            install_supported=bool(hit.metadata.get("install_supported")),
+            metadata=dict(hit.metadata),
+            routes={
+                "install": "/api/capability-market/projects/install",
+                "source": str(hit.candidate_source_ref or ""),
+            },
+        )
+        for hit in hits
+        if str(hit.candidate_source_ref or "").strip()
+    ]
