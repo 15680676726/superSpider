@@ -20,7 +20,6 @@ import type {
   BuddyIdentityResponse,
 } from "../../api/modules/buddy";
 import {
-  readBuddyProfileId,
   writeBuddyProfileId,
 } from "../../runtime/buddyProfileBinding";
 import { resolveBuddyEntryDecision } from "../../runtime/buddyFlow";
@@ -63,8 +62,7 @@ export default function BuddyOnboardingPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const boundProfileId = readBuddyProfileId();
-        const surface = await api.getBuddySurface(boundProfileId);
+        const surface = await api.getBuddySurface();
         if (cancelled) return;
         const decision = resolveBuddyEntryDecision(surface);
         if (surface?.profile?.profile_id) {

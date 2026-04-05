@@ -174,7 +174,7 @@ export default function IndustryPage() {
         type="info"
         showIcon
         message="这里不再是第一次创建身份的入口"
-        description="伙伴建档确认主方向后，系统会自动生成当前执行载体和团队骨架。这里现在只负责查看和调整已经生成好的执行载体。"
+        description="伙伴建档确认主方向后，系统会自动生成当前执行载体和执行位骨架。这里现在只负责查看和调整已经生成好的执行载体。"
         action={(
           <Button
             type="link"
@@ -411,8 +411,8 @@ export default function IndustryPage() {
                     </div>
                     {isProtectedCarrier ? null : (
                       <Popconfirm
-                        title="确认删除这个团队吗？"
-                        description="删除后将移除该团队及其运行记录。"
+                        title="确认删除这个载体吗？"
+                        description="删除后将移除该载体及其运行记录。"
                         okText="确认删除"
                         cancelText="取消"
                         onConfirm={(e) => { e?.stopPropagation(); void handleDeleteInstance(item.instance_id); }}
@@ -486,8 +486,8 @@ export default function IndustryPage() {
                   <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>基本信息</Text>
                   <div style={{ marginTop: 8 }}>
                     <Descriptions size="small" column={1} bordered items={[
-                      { key: "label", label: INDUSTRY_TEXT.teamLabel, children: draftTeamLabel || preview?.draft.team.label },
-                      { key: "summary", label: INDUSTRY_TEXT.summaryLabel, children: draftTeamSummary || preview?.draft.team.summary },
+                      { key: "label", label: "当前载体", children: draftTeamLabel || preview?.draft.team.label },
+                      { key: "summary", label: "当前载体摘要", children: draftTeamSummary || preview?.draft.team.summary },
                       { key: "activate", label: INDUSTRY_TEXT.activationLabel, children: preview?.can_activate ? INDUSTRY_TEXT.readyToActivate : INDUSTRY_TEXT.blocked },
                       { key: "counts", label: INDUSTRY_TEXT.detailStats, children: [
                         formatCountLabel(INDUSTRY_TEXT.metricRoles, draftCounts.roles),
@@ -754,9 +754,9 @@ export default function IndustryPage() {
                 <div>
                   <Text strong style={{ color: "var(--baize-text-muted)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>身份设置</Text>
                   <Row gutter={[16, 0]} style={{ marginTop: 8 }}>
-                    <Col xs={24} md={12}><Form.Item label={INDUSTRY_TEXT.teamLabel} name={["team", "label"]}><Input /></Form.Item></Col>
+                    <Col xs={24} md={12}><Form.Item label={INDUSTRY_TEXT.carrierLabel} name={["team", "label"]}><Input /></Form.Item></Col>
                     <Col xs={24} md={12}><Form.Item label={INDUSTRY_TEXT.draftSummary} name="generation_summary"><Input /></Form.Item></Col>
-                    <Col xs={24}><Form.Item label={INDUSTRY_TEXT.summaryLabel} name={["team", "summary"]}><TextArea rows={2} placeholder={INDUSTRY_TEXT.teamSummaryPlaceholder} /></Form.Item></Col>
+                    <Col xs={24}><Form.Item label={INDUSTRY_TEXT.carrierSummaryLabel} name={["team", "summary"]}><TextArea rows={2} placeholder={INDUSTRY_TEXT.carrierSummaryPlaceholder} /></Form.Item></Col>
                   </Row>
                 </div>
                 {/* Roles - flat list */}

@@ -137,9 +137,7 @@ describe("useRuntimeCenter", () => {
     const { result } = renderHook(() => useRuntimeCenter());
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledWith({
-      buddyProfileId: "profile-bound",
-    });
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledWith();
 
     resolveSurface(
       mockSurface({
@@ -290,7 +288,7 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
   });
 
-  it("requests buddy summary with null profile when no binding exists", async () => {
+  it("requests runtime surface without a browser-side buddy binding override", async () => {
     readBuddyProfileIdMock.mockReturnValue(null);
 
     const { result } = renderHook(() => useRuntimeCenter());
@@ -302,9 +300,8 @@ describe("useRuntimeCenter", () => {
         !result.current.businessAgentsLoading,
     );
 
-    expect(requestRuntimeSurfaceMock).toHaveBeenCalledWith({
-      buddyProfileId: null,
-    });
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledWith();
+    expect(readBuddyProfileIdMock).not.toHaveBeenCalled();
   });
 
   it("refreshes only the main-brain section on assignment events", async () => {
@@ -331,7 +328,6 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
     expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
       sections: ["main_brain"],
-      buddyProfileId: "profile-bound",
     });
     vi.useRealTimers();
   });
@@ -383,7 +379,6 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
     expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
       sections: ["cards"],
-      buddyProfileId: "profile-bound",
     });
     vi.useRealTimers();
   });
@@ -416,7 +411,6 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
     expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
       sections: ["cards", "main_brain"],
-      buddyProfileId: "profile-bound",
     });
     vi.useRealTimers();
   });

@@ -299,10 +299,10 @@ export default function ChatPage() {
     () => new URLSearchParams(location.search).get("buddy_profile"),
     [location.search],
   );
-  const buddyProfileId = useMemo(
+  const [resolvedBuddyProfileId, setResolvedBuddyProfileId] = useState<string | null>(
     () => buddyProfileIdFromQuery?.trim() || readBuddyProfileId(),
-    [buddyProfileIdFromQuery],
   );
+  const buddyProfileId = resolvedBuddyProfileId;
 
   const [showModelPrompt, setShowModelPrompt] = useState(false);
   const [suggestedTeams, setSuggestedTeams] = useState<IndustryInstanceSummary[]>([]);
@@ -409,21 +409,30 @@ export default function ChatPage() {
     setBuddyLoading(true);
     setBuddyError(null);
     try {
-      const surface = await api.getBuddySurface(buddyProfileId);
+      const explicitProfileId = buddyProfileIdFromQuery?.trim() || undefined;
+      const surface = await api.getBuddySurface(explicitProfileId);
       setBuddySurface(surface);
-      if (surface?.profile?.profile_id) {
-        writeBuddyProfileId(surface.profile.profile_id);
+      const nextProfileId =
+        surface?.profile?.profile_id?.trim() ||
+        explicitProfileId ||
+        readBuddyProfileId();
+      setResolvedBuddyProfileId(nextProfileId || null);
+      if (nextProfileId) {
+        writeBuddyProfileId(nextProfileId);
       }
       setBuddyNameDraft("");
     } catch (error) {
       setBuddySurface(null);
+      setResolvedBuddyProfileId(
+        buddyProfileIdFromQuery?.trim() || readBuddyProfileId(),
+      );
       if (error instanceof Error) {
         setBuddyError(error.message);
       }
     } finally {
       setBuddyLoading(false);
     }
-  }, [buddyProfileId]);
+  }, [buddyProfileIdFromQuery]);
 
   useEffect(() => {
     void loadBuddySurface();
@@ -435,8 +444,11 @@ export default function ChatPage() {
   );
 
   useEffect(() => {
-    if (buddyProfileIdFromQuery?.trim()) {
-      writeBuddyProfileId(buddyProfileIdFromQuery);
+    const explicitProfileId = buddyProfileIdFromQuery?.trim();
+    const nextProfileId = explicitProfileId || readBuddyProfileId();
+    setResolvedBuddyProfileId(nextProfileId || null);
+    if (explicitProfileId) {
+      writeBuddyProfileId(explicitProfileId);
     }
   }, [buddyProfileIdFromQuery]);
 

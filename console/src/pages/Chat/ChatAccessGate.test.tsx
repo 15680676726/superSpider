@@ -42,7 +42,7 @@ describe("ChatAccessGate", () => {
     cleanup();
   });
 
-  it("renders the binding notice and action shortcuts", async () => {
+  it("renders the binding notice and only exposes identity-first shortcuts", async () => {
     const onOpenIdentityCenter = vi.fn();
     const onOpenWorkbench = vi.fn();
     const onReload = vi.fn();
@@ -68,16 +68,15 @@ describe("ChatAccessGate", () => {
       />,
     );
 
-    expect(screen.getByText("正在绑定主脑控制线程")).toBeTruthy();
     expect(screen.getByRole("button", { name: "打开身份中心" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "智能体工作台" })).toBeTruthy();
-    expect(screen.getByText("需要配置对话模型")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "智能体工作台" }),
+    ).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "打开身份中心" }));
-    fireEvent.click(screen.getByRole("button", { name: "智能体工作台" }));
 
     expect(onOpenIdentityCenter).toHaveBeenCalledTimes(1);
-    expect(onOpenWorkbench).toHaveBeenCalledTimes(1);
+    expect(onOpenWorkbench).not.toHaveBeenCalled();
     expect(onReload).not.toHaveBeenCalled();
   });
 
@@ -103,6 +102,6 @@ describe("ChatAccessGate", () => {
     );
 
     expect(container.querySelector(".ant-spin")).not.toBeNull();
-    expect(screen.queryByText("需要配置对话模型")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

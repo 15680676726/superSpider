@@ -199,7 +199,7 @@ describe("BuddyOnboardingPage", () => {
     render(<BuddyOnboardingPage />);
 
     await waitFor(() => {
-      expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-existing");
+      expect(apiMock.getBuddySurface).toHaveBeenCalledWith();
     });
     expect(navigateMock).toHaveBeenCalledWith(
       "/chat?buddy_profile=profile-existing",
@@ -268,7 +268,7 @@ describe("BuddyOnboardingPage", () => {
     render(<BuddyOnboardingPage />);
 
     await waitFor(() => {
-      expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-incomplete");
+      expect(apiMock.getBuddySurface).toHaveBeenCalledWith();
     });
     expect(navigateMock).not.toHaveBeenCalled();
     expect(screen.getByText("Buddy 初次建档")).toBeInTheDocument();
@@ -352,7 +352,7 @@ describe("BuddyOnboardingPage", () => {
     render(<BuddyOnboardingPage />);
 
     await waitFor(() => {
-      expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-needs-name");
+      expect(apiMock.getBuddySurface).toHaveBeenCalledWith();
     });
     expect(navigateMock).toHaveBeenCalledWith(
       "/chat?buddy_session=session-needs-name&buddy_profile=profile-needs-name",

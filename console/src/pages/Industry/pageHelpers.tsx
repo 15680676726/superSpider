@@ -55,11 +55,12 @@ const INDUSTRY_TEXT = {
   readyToActivate: "可启动",
   blocked: "受阻",
   detailStats: "统计",
-  teamLabel: "团队名称",
-  summaryLabel: "团队摘要",
-  teamSummaryPlaceholder: "用一句话概括这个团队要解决的问题和边界。",
+  carrierLabel: "载体名称",
+  carrierSummaryLabel: "载体摘要",
+  summaryLabel: "摘要",
+  carrierSummaryPlaceholder: "用一句话概括这个载体当前要承接的执行目标和边界。",
   draftSummary: "生成摘要",
-  teamRoles: "团队角色",
+  teamRoles: "执行位角色",
   addRole: "添加角色",
   systemRolesLockedHint: "系统核心角色由主链维护，不建议在这里直接删除或改成其他身份。",
   roleDisplayName: "显示名称",
@@ -112,7 +113,7 @@ const INDUSTRY_TEXT = {
   installed: "已安装",
   recommended: "推荐",
   installTargets: "安装目标",
-  selectTeamHint: "先从左侧选择一个团队，右侧才会显示详情或编辑草案。",
+  selectTeamHint: "先从左侧选择一个执行载体，右侧才会显示详情或编辑草案。",
   noSchedules: "当前没有正式节奏计划。",
   dailyReport: "日报",
   reportEvidence: "证据",
@@ -257,7 +258,7 @@ const RECOMMENDATION_SECTION_LABELS: Record<
 > = {
   "system-baseline": "系统基线能力",
   "execution-core": "主脑调度能力",
-  shared: "团队共享能力",
+  shared: "载体共享能力",
   role: "角色专属能力",
 };
 
@@ -369,7 +370,7 @@ function buildFallbackRecommendationSections(
     section_id: "execution-core",
     section_kind: "execution-core",
     title: executionCoreRole?.role_name || "主脑调度能力",
-    summary: "提供团队目标拆解、节点调度以及状态监控的核心管理能力。",
+    summary: "提供执行载体目标拆解、节点调度以及状态监控的核心管理能力。",
     role_id: executionCoreRole?.role_id,
     role_name: executionCoreRole?.role_name,
     target_agent_id: executionCoreRole?.agent_id,
@@ -378,8 +379,8 @@ function buildFallbackRecommendationSections(
   pushSection({
     section_id: "shared",
     section_kind: "shared",
-    title: "团队共享能力",
-    summary: "推荐团队成员间相互调用或统一配备的通用效率工具。",
+    title: "载体共享能力",
+    summary: "推荐当前载体各执行位统一配备或相互调用的通用效率工具。",
     items: items.filter((item) => item.recommendation_group === "shared"),
   });
   roles

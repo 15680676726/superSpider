@@ -36,7 +36,6 @@ export function ChatAccessGate({
   onCloseModelPrompt,
   onOpenModelSettings,
   onOpenIdentityCenter,
-  onOpenWorkbench,
   onReload,
   onOpenSuggestedIndustryChat,
 }: ChatAccessGateProps) {
@@ -68,9 +67,6 @@ export function ChatAccessGate({
                   </span>
                   <Button size="small" type="link" onClick={onOpenIdentityCenter}>
                     打开身份中心
-                  </Button>
-                  <Button size="small" type="link" onClick={onOpenWorkbench}>
-                    智能体工作台
                   </Button>
                 </Space>
               }
@@ -112,7 +108,7 @@ export function ChatAccessGate({
                     : industryTeamsError
                       ? `身份列表或主脑投影不可用。${industryTeamsError}`
                       : executionCoreSuggestions.length > 0
-                        ? "请从身份中心或智能体工作台进入聊天，这样线程才会绑定到真实的执行主体。"
+                        ? "请先从身份中心进入聊天，这样线程才会绑定到真实的执行主体。"
                         : "暂无可用的伙伴身份主体。请先完成伙伴建档，再进入聊天。"
                 }
                 extra={
@@ -120,7 +116,6 @@ export function ChatAccessGate({
                     <Button type="primary" onClick={onOpenIdentityCenter}>
                       打开身份中心
                     </Button>
-                    <Button onClick={onOpenWorkbench}>智能体工作台</Button>
                     {industryTeamsError ? <Button onClick={onReload}>刷新页面</Button> : null}
                     {executionCoreSuggestions.map((instance) => (
                       <Button

@@ -4,7 +4,10 @@ import type { FormInstance } from "antd";
 import type { NavigateFunction } from "react-router-dom";
 
 import api from "../../api";
-import { readBuddyProfileId } from "../../runtime/buddyProfileBinding";
+import {
+  readBuddyProfileId,
+  writeBuddyProfileId,
+} from "../../runtime/buddyProfileBinding";
 import type {
   IndustryBootstrapResponse,
   IndustryCapabilityRecommendation,
@@ -149,8 +152,11 @@ export function useIndustryPageState({
   const [briefMediaItems, setBriefMediaItems] = useState<IndustryBriefMediaItem[]>([]);
   const [briefMediaLink, setBriefMediaLink] = useState("");
   const [briefMediaBusy, setBriefMediaBusy] = useState(false);
+  const [currentBuddyProfileId, setCurrentBuddyProfileId] = useState<string | null>(
+    () => readBuddyProfileId(),
+  );
   const protectedCarrierInstanceId = resolveProtectedCarrierInstanceId(
-    readBuddyProfileId(),
+    currentBuddyProfileId,
   );
 
   const watchedExperienceMode =
@@ -180,10 +186,23 @@ export function useIndustryPageState({
       setLoadingInstances(true);
       try {
         setError(null);
-        const [activePayload, retiredPayload] = await Promise.all([
+        const buddySurfacePromise = Promise.resolve(api.getBuddySurface()).catch(
+          () => null,
+        );
+        const [buddySurface, activePayload, retiredPayload] = await Promise.all([
+          buddySurfacePromise,
           api.listIndustryInstances({ status: "active" }),
           api.listIndustryInstances({ status: "retired" }),
         ]);
+        const resolvedBuddyProfileId =
+          typeof buddySurface?.profile?.profile_id === "string" &&
+          buddySurface.profile.profile_id.trim()
+            ? buddySurface.profile.profile_id.trim()
+            : readBuddyProfileId();
+        if (resolvedBuddyProfileId) {
+          writeBuddyProfileId(resolvedBuddyProfileId);
+        }
+        setCurrentBuddyProfileId(resolvedBuddyProfileId || null);
         const nextInstances = Array.isArray(activePayload) ? activePayload : [];
         const nextRetiredInstances = Array.isArray(retiredPayload)
           ? retiredPayload
@@ -194,7 +213,7 @@ export function useIndustryPageState({
         const nextSelected = resolvePreferredIndustryInstanceId({
           instances: nextInstances,
           preferredInstanceId: candidateId,
-          buddyProfileId: readBuddyProfileId(),
+          buddyProfileId: resolvedBuddyProfileId,
         });
         setSelectedInstanceId(nextSelected);
       } catch (fetchError) {

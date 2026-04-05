@@ -354,25 +354,46 @@ class BuddyOnboardingService:
         constraints: list[str] | None = None,
         goal_intention: str,
     ) -> BuddyIdentitySubmitResult:
-        profile = self._profile_repository.upsert_profile(
-            HumanProfile(
-                display_name=display_name,
-                profession=profession,
-                current_stage=current_stage,
-                interests=interests or [],
-                strengths=strengths or [],
-                constraints=constraints or [],
-                goal_intention=goal_intention,
-            ),
+        existing_profile = self._profile_repository.get_latest_profile()
+        profile = HumanProfile(
+            display_name=display_name,
+            profession=profession,
+            current_stage=current_stage,
+            interests=interests or [],
+            strengths=strengths or [],
+            constraints=constraints or [],
+            goal_intention=goal_intention,
         )
-        session = self._onboarding_session_repository.upsert_session(
-            BuddyOnboardingSessionRecord(
-                profile_id=profile.profile_id,
-                question_count=1,
-                next_question=_build_buddy_question(profile=profile, question_count=1),
-                transcript=[profile.goal_intention],
-            ),
+        if existing_profile is not None:
+            profile = profile.model_copy(
+                update={
+                    "profile_id": existing_profile.profile_id,
+                    "created_at": existing_profile.created_at,
+                    "updated_at": _utc_now(),
+                },
+            )
+        profile = self._profile_repository.upsert_profile(profile)
+
+        existing_session = self._onboarding_session_repository.get_latest_session_for_profile(
+            profile.profile_id,
         )
+        session = BuddyOnboardingSessionRecord(
+            profile_id=profile.profile_id,
+            question_count=1,
+            tightened=False,
+            status="clarifying",
+            next_question=_build_buddy_question(profile=profile, question_count=1),
+            transcript=[profile.goal_intention],
+        )
+        if existing_session is not None:
+            session = session.model_copy(
+                update={
+                    "session_id": existing_session.session_id,
+                    "created_at": existing_session.created_at,
+                    "updated_at": _utc_now(),
+                },
+            )
+        session = self._onboarding_session_repository.upsert_session(session)
         return BuddyIdentitySubmitResult(
             session_id=session.session_id,
             profile=profile,

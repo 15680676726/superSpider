@@ -74,7 +74,7 @@ def test_buddy_projection_derives_growth_from_formal_truth(tmp_path) -> None:
     )
 
 
-def test_buddy_projection_requires_profile_scope_when_multiple_profiles_exist(tmp_path) -> None:
+def test_buddy_projection_resolves_current_profile_without_explicit_binding(tmp_path) -> None:
     onboarding, projection = _build_services(tmp_path)
     first = onboarding.submit_identity(
         display_name="Alpha",
@@ -95,14 +95,12 @@ def test_buddy_projection_requires_profile_scope_when_multiple_profiles_exist(tm
         goal_intention="Build a durable direction with leverage.",
     )
 
-    assert first.profile.profile_id != second.profile.profile_id
+    payload = projection.build_chat_surface()
 
-    try:
-        projection.build_chat_surface()
-    except ValueError as exc:
-        assert "profile_id" in str(exc)
-    else:
-        raise AssertionError("expected Buddy surface to require explicit profile_id")
+    assert second.profile.profile_id == first.profile.profile_id
+    assert payload.profile.profile_id == first.profile.profile_id
+    assert payload.profile.display_name == "Beta"
+    assert payload.profile.profession == "Operator"
 
 
 def test_buddy_projection_filters_human_assist_fallback_by_profile(tmp_path) -> None:

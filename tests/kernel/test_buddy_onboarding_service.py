@@ -195,6 +195,34 @@ def test_buddy_naming_updates_relationship(tmp_path) -> None:
     assert relationship.buddy_name == "Mochi"
 
 
+def test_submit_identity_reuses_single_current_profile(tmp_path) -> None:
+    service = _build_service(tmp_path)
+
+    first = service.submit_identity(
+        display_name="Mina",
+        profession="Operator",
+        current_stage="exploring",
+        interests=["content"],
+        strengths=["consistency"],
+        constraints=["money"],
+        goal_intention="I want a bigger life direction.",
+    )
+    second = service.submit_identity(
+        display_name="Mina Updated",
+        profession="Builder",
+        current_stage="restarting",
+        interests=["systems"],
+        strengths=["clarity"],
+        constraints=["time"],
+        goal_intention="I want one real long-term direction.",
+    )
+
+    assert second.profile.profile_id == first.profile.profile_id
+    assert second.profile.display_name == "Mina Updated"
+    assert second.profile.profession == "Builder"
+    assert service._profile_repository.count_profiles() == 1  # pylint: disable=protected-access
+
+
 def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) -> None:
     service, store = _build_service_with_planning(tmp_path)
     identity = service.submit_identity(

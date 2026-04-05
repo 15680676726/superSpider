@@ -28,14 +28,10 @@ export function buildRuntimeConversationsPath(threadId: string): string {
 
 export async function requestRuntimeSurface<T>(options?: {
   sections?: RuntimeSurfaceSection[];
-  buddyProfileId?: string | null;
 }): Promise<T> {
   const params = new URLSearchParams();
   if (options?.sections?.length) {
     params.set("sections", options.sections.join(","));
-  }
-  if (options?.buddyProfileId) {
-    params.set("buddy_profile_id", options.buddyProfileId);
   }
   const query = params.toString() ? `?${params.toString()}` : "";
   return request<T>(`/runtime-center/surface${query}`);

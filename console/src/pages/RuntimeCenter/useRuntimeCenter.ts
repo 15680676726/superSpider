@@ -19,7 +19,6 @@ import {
   type RuntimeSurfaceSection,
   requestRuntimeSurface,
 } from "../../runtime/runtimeSurfaceClient";
-import { readBuddyProfileId } from "../../runtime/buddyProfileBinding";
 import {
   formatRuntimeActionLabel,
   localizeRuntimeText,
@@ -271,10 +270,14 @@ export function useRuntimeCenter() {
         const requestedSections = new Set<RuntimeSurfaceSection>(
           options?.sections ?? ["cards", "main_brain"],
         );
-        const payload = await requestRuntimeSurface<RuntimeCenterSurfaceResponse>({
-          ...options,
-          buddyProfileId: readBuddyProfileId(),
-        });
+        const requestOptions = options?.sections?.length
+          ? { sections: options.sections }
+          : undefined;
+        const payload = requestOptions
+          ? await requestRuntimeSurface<RuntimeCenterSurfaceResponse>(
+              requestOptions,
+            )
+          : await requestRuntimeSurface<RuntimeCenterSurfaceResponse>();
         setSurfaceData((previous) => ({
           generated_at: payload.generated_at,
           surface: payload.surface,

@@ -15,6 +15,7 @@ vi.mock("../../api", async () => {
       ...actual.default,
       listIndustryInstances: vi.fn(),
       getRuntimeIndustryDetail: vi.fn(),
+      getBuddySurface: vi.fn(),
     },
   };
 });
@@ -39,6 +40,7 @@ import {
 
 const mockedListIndustryInstances = vi.mocked(api.listIndustryInstances);
 const mockedGetRuntimeIndustryDetail = vi.mocked(api.getRuntimeIndustryDetail);
+const mockedGetBuddySurface = vi.mocked(api.getBuddySurface);
 const mockedBuildIndustryRoleChatBinding = vi.mocked(buildIndustryRoleChatBinding);
 const mockedOpenRuntimeChat = vi.mocked(openRuntimeChat);
 
@@ -47,6 +49,7 @@ describe("useIndustryPageState", () => {
     window.localStorage.clear();
     mockedListIndustryInstances.mockReset();
     mockedGetRuntimeIndustryDetail.mockReset();
+    mockedGetBuddySurface.mockReset();
     mockedBuildIndustryRoleChatBinding.mockReset();
     mockedOpenRuntimeChat.mockReset();
   });
@@ -107,7 +110,11 @@ describe("useIndustryPageState", () => {
   });
 
   it("prefers the buddy-generated execution carrier over unrelated active instances", async () => {
-    window.localStorage.setItem("copaw.buddy_profile_id", "profile-1");
+    mockedGetBuddySurface.mockResolvedValue({
+      profile: {
+        profile_id: "profile-1",
+      },
+    } as never);
     mockedListIndustryInstances.mockResolvedValue([
       {
         instance_id: "industry-other",
@@ -150,6 +157,51 @@ describe("useIndustryPageState", () => {
       "buddy:profile-1",
       undefined,
     );
+  });
+
+  it("protects the current buddy carrier from server truth even when local storage is empty", async () => {
+    mockedGetBuddySurface.mockResolvedValue({
+      profile: {
+        profile_id: "profile-7",
+      },
+    } as never);
+    mockedListIndustryInstances.mockResolvedValue([
+      {
+        instance_id: "industry-other",
+        label: "Other Team",
+        owner_scope: "industry-other",
+        team: { agents: [] },
+      },
+      {
+        instance_id: "buddy:profile-7",
+        label: "Buddy Carrier",
+        owner_scope: "profile-7",
+        team: { agents: [] },
+      },
+    ] as never);
+    mockedGetRuntimeIndustryDetail.mockImplementation(async (instanceId) => ({
+      instance_id: instanceId,
+      label: instanceId === "buddy:profile-7" ? "Buddy Carrier" : "Other Team",
+      owner_scope: instanceId === "buddy:profile-7" ? "profile-7" : "industry-other",
+      profile: { industry: "Retail" },
+      team: { agents: [] },
+      media_analyses: [],
+    } as never));
+
+    const { result } = renderHook(() => {
+      const [briefForm] = Form.useForm();
+      const [draftForm] = Form.useForm();
+      return useIndustryPageState({
+        briefForm,
+        draftForm,
+        navigate: vi.fn() as never,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.protectedCarrierInstanceId).toBe("buddy:profile-7");
+      expect(result.current.selectedInstanceId).toBe("buddy:profile-7");
+    });
   });
 
   it("resolves the current buddy carrier as the protected instance id", () => {
