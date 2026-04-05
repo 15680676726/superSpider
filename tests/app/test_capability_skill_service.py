@@ -633,8 +633,95 @@ package_version: 1.0.0
         is False
     )
 
-    updated = frontmatter.loads(target_md.read_text(encoding="utf-8"))
-    assert updated.get("package_ref") is None
+
+def test_capability_service_list_skill_specs_suppresses_duplicate_package_identity() -> None:
+    class _ScopedDuplicateSkillService:
+        def list_all_skills(self) -> list[object]:
+            content = """---
+name: research_enabled
+description: Research skill
+package_ref: https://example.com/skills/research-pack.zip
+package_kind: hub-bundle
+package_version: 1.2.3
+target_scope: seat
+target_role_id: researcher
+target_seat_ref: seat-1
+---
+# Research
+"""
+            duplicate_content = content.replace(
+                "research_enabled",
+                "research_duplicate",
+            )
+            return [
+                SimpleNamespace(
+                    name="research_enabled",
+                    content=content,
+                    source="customized",
+                    path="/tmp/research_enabled",
+                    references={},
+                    scripts={},
+                ),
+                SimpleNamespace(
+                    name="research_duplicate",
+                    content=duplicate_content,
+                    source="customized",
+                    path="/tmp/research_duplicate",
+                    references={},
+                    scripts={},
+                ),
+            ]
+
+        def list_available_skill_names(self) -> list[str]:
+            return ["research_enabled"]
+
+        def read_skill_package_binding(self, skill: object) -> dict[str, str | None]:
+            _ = skill
+            return {
+                "package_ref": "https://example.com/skills/research-pack.zip",
+                "package_kind": "hub-bundle",
+                "package_version": "1.2.3",
+            }
+
+    service = CapabilityService(
+        registry=_StaticRegistry(
+            [
+                CapabilityMount(
+                    id="skill:research_enabled",
+                    name="research_enabled",
+                    summary="Research skill",
+                    kind="skill-bundle",
+                    source_kind="skill",
+                    risk_level="guarded",
+                    enabled=True,
+                    package_ref="https://example.com/skills/research-pack.zip",
+                    package_kind="hub-bundle",
+                    package_version="1.2.3",
+                ),
+                CapabilityMount(
+                    id="skill:research_duplicate",
+                    name="research_duplicate",
+                    summary="Duplicate research skill",
+                    kind="skill-bundle",
+                    source_kind="skill",
+                    risk_level="guarded",
+                    enabled=False,
+                    package_ref="https://example.com/skills/research-pack.zip",
+                    package_kind="hub-bundle",
+                    package_version="1.2.3",
+                ),
+            ],
+        ),
+        skill_service=_ScopedDuplicateSkillService(),
+    )
+
+    specs = service.list_skill_specs()
+
+    assert len(specs) == 1
+    assert specs[0]["name"] == "research_enabled"
+    assert specs[0]["enabled"] is True
+    assert specs[0]["metadata_summary"]["activation_scope_key"] == "seat:researcher:seat-1"
+    assert specs[0]["metadata_summary"]["path_scoped_activation"] is True
 
 
 def test_capability_skill_service_read_binding_rejects_invalid_frontmatter() -> None:

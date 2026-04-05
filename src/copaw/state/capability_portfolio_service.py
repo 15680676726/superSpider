@@ -139,30 +139,119 @@ class CapabilityPortfolioService:
                 ),
             )
             first = items[0]
-            breakdown.append(
-                {
-                    "scope_key": scope_key,
-                    "target_scope": _string(getattr(first, "target_scope", None)) or "global",
-                    "target_role_id": _string(getattr(first, "target_role_id", None)),
-                    "target_seat_ref": _string(getattr(first, "target_seat_ref", None)),
-                    "donor_count": len(donor_ids),
-                    "candidate_count": len(items),
-                    "active_candidate_count": sum(
-                        1 for item in items if self._candidate_is_active(item)
-                    ),
-                    "trial_candidate_count": sum(
-                        1 for item in items if self._candidate_is_trial(item)
-                    ),
-                    "source_kind_count": source_kind_count,
-                },
-            )
+            summary = {
+                "scope_key": scope_key,
+                "target_scope": _string(getattr(first, "target_scope", None)) or "global",
+                "target_role_id": _string(getattr(first, "target_role_id", None)),
+                "target_seat_ref": _string(getattr(first, "target_seat_ref", None)),
+                "donor_count": len(donor_ids),
+                "candidate_count": len(items),
+                "active_candidate_count": sum(
+                    1 for item in items if self._candidate_is_active(item)
+                ),
+                "trial_candidate_count": sum(
+                    1 for item in items if self._candidate_is_trial(item)
+                ),
+                "source_kind_count": source_kind_count,
+            }
+            breakdown.append(summary)
             if len(donor_ids) > self._density_budget:
-                over_budget.append({"scope_key": scope_key, "count": len(donor_ids)})
+                over_budget.append(
+                    {
+                        **summary,
+                        "budget_limit": self._density_budget,
+                        "count": len(donor_ids),
+                    },
+                )
 
         breakdown.sort(
             key=lambda item: (-_int(item.get("donor_count")), str(item.get("scope_key") or "")),
         )
         return breakdown, over_budget
+
+    @staticmethod
+    def _planning_actions_from_governance_actions(
+        actions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "action": _string(item.get("action")) or "unknown",
+                "summary": _string(item.get("summary")) or "",
+            }
+            for item in actions
+            if _string(item.get("action"))
+        ]
+
+    @staticmethod
+    def _action_route(action: str) -> str:
+        if action == "run_scoped_trial":
+            return "/api/runtime-center/capabilities/trials"
+        if action in {"review_replacement_pressure", "review_retirement_pressure"}:
+            return "/api/runtime-center/capabilities/lifecycle-decisions"
+        return "/api/runtime-center/capabilities/portfolio"
+
+    def _build_governance_actions(
+        self,
+        *,
+        governed_candidates: list[object],
+        candidate_donor_ids: set[str],
+        trial_donor_ids: set[str],
+        replace_pressure_ids: set[str],
+        retire_pressure_ids: set[str],
+        over_budget_scopes: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        actions: list[dict[str, Any]] = []
+        missing_trial_donor_ids = sorted(candidate_donor_ids - trial_donor_ids)
+        if missing_trial_donor_ids:
+            actions.append(
+                {
+                    "action": "run_scoped_trial",
+                    "priority": "medium",
+                    "summary": "At least one governed donor still lacks a scoped trial.",
+                    "route": self._action_route("run_scoped_trial"),
+                    "donor_ids": missing_trial_donor_ids,
+                    "donor_count": len(missing_trial_donor_ids),
+                },
+            )
+        if replace_pressure_ids:
+            actions.append(
+                {
+                    "action": "review_replacement_pressure",
+                    "priority": "high",
+                    "summary": "Some governed donors carry replacement or rollback pressure.",
+                    "route": self._action_route("review_replacement_pressure"),
+                    "donor_ids": sorted(replace_pressure_ids),
+                    "donor_count": len(replace_pressure_ids),
+                },
+            )
+        if retire_pressure_ids:
+            actions.append(
+                {
+                    "action": "review_retirement_pressure",
+                    "priority": "high",
+                    "summary": "A governed donor is pending retirement governance.",
+                    "route": self._action_route("review_retirement_pressure"),
+                    "donor_ids": sorted(retire_pressure_ids),
+                    "donor_count": len(retire_pressure_ids),
+                },
+            )
+        for scope in over_budget_scopes:
+            actions.append(
+                {
+                    "action": "compact_over_budget_scope",
+                    "priority": "high",
+                    "summary": "One or more governed scopes exceeded donor density budget.",
+                    "route": self._action_route("compact_over_budget_scope"),
+                    "scope_key": _string(scope.get("scope_key")) or "unknown-scope",
+                    "target_scope": _string(scope.get("target_scope")) or "global",
+                    "target_role_id": _string(scope.get("target_role_id")),
+                    "target_seat_ref": _string(scope.get("target_seat_ref")),
+                    "budget_limit": _int(scope.get("budget_limit")) or self._density_budget,
+                    "donor_count": _int(scope.get("donor_count")),
+                    "candidate_count": _int(scope.get("candidate_count")),
+                },
+            )
+        return actions
 
     def summarize_portfolio(self) -> dict[str, Any]:
         donors = self._list_donors()
@@ -225,49 +314,18 @@ class CapabilityPortfolioService:
         }
         degraded_donor_ids.update(donor_replace)
 
-        scope_counter: Counter[str] = Counter()
-        for item in candidates:
-            if self._candidate_is_retired(item):
-                continue
-            target_scope = _string(getattr(item, "target_scope", None)) or "global"
-            target_role_id = _string(getattr(item, "target_role_id", None)) or "*"
-            target_seat_ref = _string(getattr(item, "target_seat_ref", None)) or "*"
-            scope_counter[f"{target_scope}:{target_role_id}:{target_seat_ref}"] += 1
-        over_budget_scopes = [
-            {"scope_key": key, "count": count}
-            for key, count in scope_counter.items()
-            if count > self._density_budget
-        ]
-
-        planning_actions: list[dict[str, Any]] = []
-        if len(candidate_donor_ids) > len(trial_donor_ids):
-            planning_actions.append(
-                {
-                    "action": "run_scoped_trial",
-                    "summary": "At least one candidate donor still lacks a scoped trial.",
-                },
-            )
-        if donor_replace:
-            planning_actions.append(
-                {
-                    "action": "review_replacement_pressure",
-                    "summary": "Some donors have replacement or rollback pressure.",
-                },
-            )
-        if donor_retire:
-            planning_actions.append(
-                {
-                    "action": "review_retirement_pressure",
-                    "summary": "A donor is pending retirement governance.",
-                },
-            )
-        if over_budget_scopes:
-            planning_actions.append(
-                {
-                    "action": "compact_over_budget_scope",
-                    "summary": "One or more scopes exceeded donor density budget.",
-                },
-            )
+        _scope_breakdown, over_budget_scopes = self._build_scope_breakdown(candidates)
+        governance_actions = self._build_governance_actions(
+            governed_candidates=candidates,
+            candidate_donor_ids=candidate_donor_ids,
+            trial_donor_ids=trial_donor_ids,
+            replace_pressure_ids=donor_replace,
+            retire_pressure_ids=donor_retire,
+            over_budget_scopes=over_budget_scopes,
+        )
+        planning_actions = self._planning_actions_from_governance_actions(
+            governance_actions,
+        )
 
         return {
             "donor_count": len(donors),
@@ -289,6 +347,7 @@ class CapabilityPortfolioService:
             "retire_pressure_count": len(donor_retire),
             "over_budget_scope_count": len(over_budget_scopes),
             "over_budget_scopes": over_budget_scopes,
+            "governance_actions": governance_actions,
             "planning_actions": planning_actions,
         }
 
@@ -403,35 +462,17 @@ class CapabilityPortfolioService:
                 degraded_donor_ids.add(donor_id)
 
         scope_breakdown, over_budget_scopes = self._build_scope_breakdown(governed_candidates)
-        planning_actions: list[dict[str, Any]] = []
-        if len(candidate_donor_ids) > len(trial_donor_ids):
-            planning_actions.append(
-                {
-                    "action": "run_scoped_trial",
-                    "summary": "At least one governed donor still lacks a scoped trial.",
-                },
-            )
-        if replace_pressure_ids:
-            planning_actions.append(
-                {
-                    "action": "review_replacement_pressure",
-                    "summary": "Some governed donors carry replacement or rollback pressure.",
-                },
-            )
-        if retire_pressure_ids:
-            planning_actions.append(
-                {
-                    "action": "review_retirement_pressure",
-                    "summary": "A governed donor is pending retirement governance.",
-                },
-            )
-        if over_budget_scopes:
-            planning_actions.append(
-                {
-                    "action": "compact_over_budget_scope",
-                    "summary": "One or more governed scopes exceeded donor density budget.",
-                },
-            )
+        governance_actions = self._build_governance_actions(
+            governed_candidates=governed_candidates,
+            candidate_donor_ids=candidate_donor_ids,
+            trial_donor_ids=trial_donor_ids,
+            replace_pressure_ids=replace_pressure_ids,
+            retire_pressure_ids=retire_pressure_ids,
+            over_budget_scopes=over_budget_scopes,
+        )
+        planning_actions = self._planning_actions_from_governance_actions(
+            governance_actions,
+        )
 
         return {
             "donor_count": len(governed_donor_ids),
@@ -455,6 +496,7 @@ class CapabilityPortfolioService:
             "over_budget_scopes": over_budget_scopes,
             "fallback_only_candidate_count": len(fallback_candidates),
             "scope_breakdown": scope_breakdown,
+            "governance_actions": governance_actions,
             "planning_actions": planning_actions,
             "package_kind_count": dict(
                 sorted(

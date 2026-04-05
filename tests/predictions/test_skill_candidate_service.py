@@ -392,6 +392,79 @@ def test_capability_portfolio_service_reports_runtime_discovery_and_package_meta
     assert discovery["by_source_kind"] == {"external_remote": 1}
 
 
+def test_capability_portfolio_service_emits_structured_governance_actions(
+    tmp_path: Path,
+) -> None:
+    (
+        candidate_service,
+        _donor_service,
+        trial_service,
+        decision_service,
+        portfolio_service,
+    ) = _build_portfolio_services(tmp_path)
+
+    created: list[object] = []
+    for idx in range(1, 5):
+        created.append(
+            candidate_service.normalize_candidate_source(
+                candidate_kind="skill",
+                target_scope="seat",
+                target_role_id="researcher",
+                target_seat_ref="seat-1",
+                candidate_source_kind="external_remote",
+                candidate_source_ref=f"https://example.com/skills/research-pack-{idx}.zip",
+                candidate_source_version=f"1.2.{idx}",
+                ingestion_mode="prediction-recommendation",
+                proposed_skill_name=f"research_pack_{idx}",
+                summary=f"Governed research donor {idx}.",
+                status="active" if idx == 1 else "candidate",
+                lifecycle_stage="active" if idx == 1 else "trial",
+            ),
+        )
+    trial_service.create_or_update_trial(
+        candidate_id=created[0].candidate_id,
+        scope_type="seat",
+        scope_ref="seat-1",
+        verdict="passed",
+        success_count=2,
+        summary="Seat trial passed.",
+    )
+    decision_service.create_decision(
+        candidate_id=created[0].candidate_id,
+        decision_kind="replace_existing",
+        from_stage="trial",
+        to_stage="active",
+        reason="Replacement-first review required.",
+    )
+    decision_service.create_decision(
+        candidate_id=created[1].candidate_id,
+        decision_kind="retire",
+        from_stage="active",
+        to_stage="retired",
+        reason="Retirement governance required.",
+    )
+
+    portfolio = portfolio_service.get_runtime_portfolio_summary()
+    governance_actions = {
+        item["action"]: item for item in portfolio["governance_actions"]
+    }
+
+    assert governance_actions["compact_over_budget_scope"]["scope_key"] == "seat:researcher:seat-1"
+    assert governance_actions["compact_over_budget_scope"]["budget_limit"] == 3
+    assert governance_actions["compact_over_budget_scope"]["donor_count"] == 4
+    assert governance_actions["compact_over_budget_scope"]["target_scope"] == "seat"
+    assert governance_actions["compact_over_budget_scope"]["target_role_id"] == "researcher"
+    assert governance_actions["compact_over_budget_scope"]["target_seat_ref"] == "seat-1"
+    assert governance_actions["review_replacement_pressure"]["priority"] == "high"
+    assert created[0].donor_id in governance_actions["review_replacement_pressure"]["donor_ids"]
+    assert governance_actions["review_retirement_pressure"]["priority"] == "high"
+    assert created[1].donor_id in governance_actions["review_retirement_pressure"]["donor_ids"]
+    assert any(
+        item["action"] == "compact_over_budget_scope"
+        for item in portfolio["planning_actions"]
+    )
+
+
 def test_capability_candidate_service_persists_candidate_attribution_fields(
     tmp_path: Path,
 ) -> None:

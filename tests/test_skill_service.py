@@ -203,3 +203,46 @@ def test_skill_evolution_service_only_uses_local_fallback_when_no_donor_or_reuse
     assert resolution["selected_candidate_id"] is None
     assert resolution["selected_package_id"] is None
     assert resolution["fallback_required"] is True
+
+
+def test_capability_skill_service_reads_metadata_summary_with_scoped_activation(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _patch_skill_dirs(monkeypatch, tmp_path)
+
+    created = SkillService.create_skill(
+        name="seat_research",
+        content="""---
+name: seat_research
+description: Seat-scoped research skill
+package_ref: https://example.com/skills/seat-research.zip
+package_kind: hub-bundle
+package_version: 2.0.0
+target_scope: seat
+target_role_id: researcher
+target_seat_ref: seat-primary
+---
+# Seat Research
+""",
+    )
+
+    assert created is True
+
+    service = CapabilitySkillService()
+    skill = service.find_skill("seat_research")
+
+    summary = service.read_skill_metadata_summary(skill)
+
+    assert summary["package_ref"] == "https://example.com/skills/seat-research.zip"
+    assert summary["package_kind"] == "hub-bundle"
+    assert summary["package_version"] == "2.0.0"
+    assert summary["canonical_skill_root"] == str(
+        (tmp_path / "customized" / "seat_research").resolve()
+    )
+    assert summary["target_scope"] == "seat"
+    assert summary["target_role_id"] == "researcher"
+    assert summary["target_seat_ref"] == "seat-primary"
+    assert summary["activation_scope_key"] == "seat:researcher:seat-primary"
+    assert summary["path_scoped_activation"] is True
+    assert summary["package_bound"] is True
