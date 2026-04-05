@@ -61,6 +61,13 @@ export interface BuddyConfirmDirectionResponse {
     buddy_name: string;
     encouragement_style: string;
   };
+  execution_carrier?: {
+    instance_id: string;
+    label: string;
+    owner_scope: string;
+    current_cycle_id: string;
+    team_generated: boolean;
+  } | null;
 }
 
 export interface BuddySurfaceResponse {

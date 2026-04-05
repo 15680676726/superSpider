@@ -157,6 +157,58 @@ def test_buddy_projection_filters_human_assist_fallback_by_profile(tmp_path) -> 
     assert payload.presentation.current_task_summary == "Ship the scoped task"
 
 
+def test_buddy_projection_prefers_human_assist_task_over_carrier_assignment(tmp_path) -> None:
+    onboarding, _projection = _build_services(tmp_path)
+    identity = onboarding.submit_identity(
+        display_name="Lena",
+        profession="Operator",
+        current_stage="building",
+        interests=["operations"],
+        strengths=["follow-through"],
+        constraints=["time"],
+        goal_intention="Build a durable operating system for my work.",
+    )
+
+    class _HumanAssistStub:
+        def list_tasks(self, limit: int = 20, profile_id: str | None = None):
+            del limit
+            assert profile_id == identity.profile.profile_id
+            return [
+                HumanAssistTaskRecord(
+                    profile_id=identity.profile.profile_id,
+                    chat_thread_id="chat-human-1",
+                    title="Go on-site",
+                    summary="The buddy should surface the human checkpoint first.",
+                    task_type="host-handoff-return",
+                    status="issued",
+                    required_action="Visit the office and submit the paperwork.",
+                ),
+            ]
+
+    projection = BuddyProjectionService(
+        profile_repository=_projection._profile_repository,
+        growth_target_repository=_projection._growth_target_repository,
+        relationship_repository=_projection._relationship_repository,
+        onboarding_session_repository=_projection._onboarding_session_repository,
+        human_assist_task_service=_HumanAssistStub(),
+        current_focus_resolver=lambda _profile_id: {
+            "current_task_summary": "Publish the first public artifact",
+            "why_now_summary": "Because the carrier still needs forward motion after this checkpoint.",
+            "single_next_action_summary": "Open the artifact draft and ship it.",
+        },
+    )
+
+    payload = projection.build_chat_surface(profile_id=identity.profile.profile_id)
+
+    assert payload.presentation.current_task_summary == "Visit the office and submit the paperwork."
+    assert payload.presentation.single_next_action_summary.endswith(
+        "Visit the office and submit the paperwork.",
+    )
+    assert payload.presentation.why_now_summary == (
+        "Because the carrier still needs forward motion after this checkpoint."
+    )
+
+
 def test_buddy_projection_turns_relationship_memory_into_companion_strategy(tmp_path) -> None:
     onboarding, projection = _build_services(tmp_path)
     identity = onboarding.submit_identity(

@@ -211,6 +211,7 @@ function createPageState(overrides: Record<string, unknown> = {}) {
     recommendationWarnings: [],
     retiredInstances: [],
     roleOptions: [],
+    protectedCarrierInstanceId: null,
     selectedExecutionCoreRole: null,
     selectedInstanceId: "industry-1",
     selectedSummary: null,
@@ -239,6 +240,164 @@ function createPageState(overrides: Record<string, unknown> = {}) {
 }
 
 describe("IndustryPage", () => {
+  it("hides delete for the protected current buddy carrier but keeps delete for other carriers", () => {
+    window.localStorage.setItem("copaw.buddy_profile_id", "profile-1");
+    useIndustryPageStateMock.mockReturnValue(
+      createPageState({
+        allTeams: [
+          {
+            instance_id: "buddy:profile-1",
+            bootstrap_kind: "industry-v1",
+            label: "Buddy Carrier",
+            summary: "Current live carrier",
+            owner_scope: "profile-1",
+            profile: {
+              schema_version: "industry-profile-v1",
+              industry: "demo",
+              target_customers: [],
+              channels: [],
+              goals: [],
+              constraints: [],
+              experience_mode: "operator-guided",
+              operator_requirements: [],
+            },
+            team: {
+              schema_version: "industry-team-blueprint-v1",
+              team_id: "team-buddy",
+              label: "Buddy Carrier",
+              summary: "Buddy carrier team",
+              agents: [],
+            },
+            status: "active",
+            updated_at: "2026-03-26T08:00:00Z",
+            stats: {},
+            routes: {},
+          },
+          {
+            instance_id: "industry-2",
+            bootstrap_kind: "industry-v1",
+            label: "Side Carrier",
+            summary: "Other carrier",
+            owner_scope: "industry-side",
+            profile: {
+              schema_version: "industry-profile-v1",
+              industry: "demo",
+              target_customers: [],
+              channels: [],
+              goals: [],
+              constraints: [],
+              experience_mode: "operator-guided",
+              operator_requirements: [],
+            },
+            team: {
+              schema_version: "industry-team-blueprint-v1",
+              team_id: "team-side",
+              label: "Side Carrier",
+              summary: "Side carrier team",
+              agents: [],
+            },
+            status: "active",
+            updated_at: "2026-03-26T08:00:00Z",
+            stats: {},
+            routes: {},
+          },
+        ],
+        protectedCarrierInstanceId: "buddy:profile-1",
+        selectedInstanceId: "buddy:profile-1",
+        detail: {
+          instance_id: "buddy:profile-1",
+          label: "Buddy Carrier",
+          owner_scope: "profile-1",
+          team: {
+            schema_version: "industry-team-blueprint-v1",
+            team_id: "team-buddy",
+            label: "Buddy Carrier",
+            summary: "Execution carrier",
+            agents: [],
+          },
+        },
+      }),
+    );
+
+    render(<IndustryPage />);
+
+    expect(
+      screen.queryByTestId("industry-delete-instance-buddy:profile-1"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("industry-protected-instance-buddy:profile-1"),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("industry-delete-instance-industry-2"),
+    ).toBeTruthy();
+  });
+
+  it("treats the industry page as current carrier adjustment instead of a second creation flow", () => {
+    window.localStorage.setItem("copaw.buddy_profile_id", "profile-1");
+    useIndustryPageStateMock.mockReturnValue(
+      createPageState({
+        selectedInstanceId: "buddy:profile-1",
+        detail: {
+          instance_id: "buddy:profile-1",
+          label: "Buddy Carrier",
+          owner_scope: "buddy:profile-1",
+          team: {
+            schema_version: "industry-team-blueprint-v1",
+            team_id: "team-buddy",
+            label: "Buddy Carrier",
+            summary: "Execution carrier",
+            agents: [],
+          },
+        },
+        }),
+      );
+
+    render(<IndustryPage />);
+
+    expect(screen.queryByTestId("industry-create-carrier")).toBeNull();
+    expect(screen.getByTestId("industry-adjust-current-carrier")).toBeTruthy();
+    expect(screen.getByText("当前执行载体")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("industry-open-buddy-onboarding"));
+    expect(mockNavigate).toHaveBeenCalledWith("/buddy-onboarding");
+  });
+
+  it("uses carrier-adjustment copy instead of team-bootstrap copy when editing the current carrier", () => {
+    window.localStorage.setItem("copaw.buddy_profile_id", "profile-1");
+    useIndustryPageStateMock.mockReturnValue(
+      createPageState({
+        protectedCarrierInstanceId: "buddy:profile-1",
+        selectedInstanceId: "buddy:profile-1",
+        isEditing: true,
+        isEditingExistingTeam: true,
+        preview: {
+          can_activate: true,
+          draft: {
+            team: {
+              label: "Buddy Carrier",
+              summary: "Execution carrier",
+            },
+          },
+          media_warnings: [],
+          media_analyses: [],
+          recommendation_pack: null,
+          readiness_checks: [],
+        },
+        detail: {
+          instance_id: "buddy:profile-1",
+          label: "Buddy Carrier",
+          owner_scope: "buddy:profile-1",
+        },
+      }),
+    );
+
+    render(<IndustryPage />);
+
+    expect(screen.getByRole("button", { name: "应用执行载体调整" })).toBeTruthy();
+    expect(screen.queryByText("创建并启动团队")).toBeNull();
+    expect(screen.queryByText("更新团队")).toBeNull();
+  });
+
   it("does not render deprecated goal counts in runtime detail stats", () => {
     useIndustryPageStateMock.mockReturnValue(createPageState());
 

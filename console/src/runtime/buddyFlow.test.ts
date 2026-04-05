@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { BuddySurfaceResponse } from "../api/modules/buddy";
 import {
+  BUDDY_IDENTITY_CENTER_ROUTE,
   resolveBuddyEntryDecision,
   resolveBuddyNamingState,
 } from "./buddyFlow";
@@ -69,6 +70,10 @@ function makeSurface(
 }
 
 describe("buddyFlow", () => {
+  it("pins the identity center to buddy onboarding", () => {
+    expect(BUDDY_IDENTITY_CENTER_ROUTE).toBe("/buddy-onboarding");
+  });
+
   it("keeps incomplete buddy profiles inside onboarding", () => {
     const decision = resolveBuddyEntryDecision(makeSurface());
 

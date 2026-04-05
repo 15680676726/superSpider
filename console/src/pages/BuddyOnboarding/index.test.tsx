@@ -64,15 +64,32 @@ describe("BuddyOnboardingPage", () => {
       recommended_direction: "建立独立创作与内容事业的长期成长路径",
     });
     apiMock.confirmBuddyDirection.mockResolvedValue({
-      session: { session_id: "session-1" },
+      session: {
+        session_id: "session-1",
+        profile_id: "profile-1",
+        status: "confirmed",
+        question_count: 9,
+        candidate_directions: [
+          "寤虹珛鐙珛鍒涗綔涓庡唴瀹逛簨涓氱殑闀挎湡鎴愰暱璺緞",
+        ],
+        recommended_direction: "寤虹珛鐙珛鍒涗綔涓庡唴瀹逛簨涓氱殑闀挎湡鎴愰暱璺緞",
+        selected_direction: "寤虹珛鐙珛鍒涗綔涓庡唴瀹逛簨涓氱殑闀挎湡鎴愰暱璺緞",
+      },
       growth_target: {
         primary_direction: "建立独立创作与内容事业的长期成长路径",
       },
       relationship: { encouragement_style: "old-friend" },
+      execution_carrier: {
+        instance_id: "buddy:profile-1",
+        label: "Alex 的成长载体",
+        owner_scope: "profile-1",
+        current_cycle_id: "cycle-1",
+        team_generated: true,
+      },
     });
   });
 
-  it("runs identity -> clarification -> direction confirmation and routes into chat naming flow", async () => {
+  it("shows a visible completion state after direction confirmation before routing into chat naming flow", async () => {
     render(<BuddyOnboardingPage />);
 
     await waitFor(() => {
@@ -116,6 +133,11 @@ describe("BuddyOnboardingPage", () => {
     await waitFor(() => {
       expect(apiMock.confirmBuddyDirection).toHaveBeenCalled();
     });
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("buddy-direction-confirmed")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("buddy-direction-enter-chat"));
+
     expect(navigateMock).toHaveBeenCalledWith(
       "/chat?buddy_session=session-1&buddy_profile=profile-1",
       { replace: true },

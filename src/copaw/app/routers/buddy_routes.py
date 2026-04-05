@@ -103,6 +103,7 @@ async def confirm_buddy_direction(
         "session": result.session.model_dump(mode="json"),
         "growth_target": result.growth_target.model_dump(mode="json"),
         "relationship": result.relationship.model_dump(mode="json"),
+        "execution_carrier": result.execution_carrier,
     }
 
 

@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from copaw.kernel.buddy_onboarding_service import BuddyOnboardingService
+from copaw.kernel.buddy_onboarding_service import (
+    BuddyOnboardingService,
+    _CREATOR_DIRECTION,
+)
 from copaw.state import SQLiteStateStore
 from copaw.state.main_brain_service import (
     AssignmentService,
@@ -110,8 +113,8 @@ def test_buddy_onboarding_derives_direction_candidates_from_chinese_profile(tmp_
     )
 
     assert result.finished is True
-    assert any("独立创作与内容事业" in item for item in result.candidate_directions)
-    assert "独立创作与内容事业" in result.recommended_direction
+    assert _CREATOR_DIRECTION in result.candidate_directions
+    assert result.recommended_direction == _CREATOR_DIRECTION
 
 
 def test_buddy_onboarding_derives_video_creator_direction_from_chinese_profile(tmp_path) -> None:
@@ -133,8 +136,8 @@ def test_buddy_onboarding_derives_video_creator_direction_from_chinese_profile(t
     )
 
     assert result.finished is True
-    assert any("独立创作与内容事业" in item for item in result.candidate_directions)
-    assert "独立创作与内容事业" in result.recommended_direction
+    assert _CREATOR_DIRECTION in result.candidate_directions
+    assert result.recommended_direction == _CREATOR_DIRECTION
 
 
 def test_buddy_onboarding_requires_exactly_one_primary_direction(tmp_path) -> None:
@@ -148,7 +151,7 @@ def test_buddy_onboarding_requires_exactly_one_primary_direction(tmp_path) -> No
         constraints=["money"],
         goal_intention="I want a bigger life direction.",
     )
-    service.answer_clarification_turn(
+    clarification = service.answer_clarification_turn(
         session_id=identity.session_id,
         answer="I want a direction with growth and independent leverage.",
         existing_question_count=9,
@@ -156,10 +159,10 @@ def test_buddy_onboarding_requires_exactly_one_primary_direction(tmp_path) -> No
 
     result = service.confirm_primary_direction(
         session_id=identity.session_id,
-        selected_direction="建立独立创作与内容事业的长期成长路径",
+        selected_direction=clarification.recommended_direction,
     )
 
-    assert result.growth_target.primary_direction == "建立独立创作与内容事业的长期成长路径"
+    assert result.growth_target.primary_direction == clarification.recommended_direction
     assert result.relationship.encouragement_style == "old-friend"
 
 
@@ -174,14 +177,14 @@ def test_buddy_naming_updates_relationship(tmp_path) -> None:
         constraints=["money"],
         goal_intention="I want a bigger life direction.",
     )
-    service.answer_clarification_turn(
+    clarification = service.answer_clarification_turn(
         session_id=identity.session_id,
         answer="I want a direction with growth and independent leverage.",
         existing_question_count=9,
     )
     service.confirm_primary_direction(
         session_id=identity.session_id,
-        selected_direction="建立独立创作与内容事业的长期成长路径",
+        selected_direction=clarification.recommended_direction,
     )
 
     relationship = service.name_buddy(
@@ -203,7 +206,7 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
         constraints=["time"],
         goal_intention="I want a real creator direction that can change my life.",
     )
-    service.answer_clarification_turn(
+    clarification = service.answer_clarification_turn(
         session_id=identity.session_id,
         answer="I want a long-term creator path with proof of work and income autonomy.",
         existing_question_count=9,
@@ -211,8 +214,12 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
 
     result = service.confirm_primary_direction(
         session_id=identity.session_id,
-        selected_direction="建立独立创作与内容事业的长期成长路径",
+        selected_direction=clarification.recommended_direction,
     )
+
+    assert result.execution_carrier is not None
+    assert result.execution_carrier["instance_id"] == f"buddy:{result.growth_target.profile_id}"
+    assert result.execution_carrier["team_generated"] is True
 
     industry_repository = SqliteIndustryInstanceRepository(store)
     lane_repository = SqliteOperatingLaneRepository(store)
@@ -222,7 +229,6 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
 
     instance = industry_repository.get_instance(f"buddy:{result.growth_target.profile_id}")
     assert instance is not None
-    assert isinstance(instance, type(instance))
     assert instance.current_cycle_id
 
     lanes = lane_repository.list_lanes(industry_instance_id=instance.instance_id)
@@ -236,3 +242,27 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
 
     assignments = assignment_repository.list_assignments(industry_instance_id=instance.instance_id)
     assert any(assignment.industry_instance_id == instance.instance_id for assignment in assignments)
+
+
+def test_record_chat_interaction_increments_strong_pull_for_stuck_or_avoidance_messages(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+    identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing"],
+        strengths=["clarity"],
+        constraints=["time"],
+        goal_intention="Build a real long-term direction.",
+    )
+
+    relationship = service.record_chat_interaction(
+        profile_id=identity.profile.profile_id,
+        user_message="I'm stuck, I keep avoiding this, and I don't want to do it right now.",
+        interaction_mode="chat",
+    )
+
+    assert relationship is not None
+    assert relationship.strong_pull_count == 1

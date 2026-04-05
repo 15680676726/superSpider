@@ -49,6 +49,7 @@ class BuddyDirectionConfirmationResult:
     session: BuddyOnboardingSessionRecord
     growth_target: GrowthTarget
     relationship: CompanionRelationship
+    execution_carrier: dict[str, object] | None = None
 
 
 _DEFAULT_DIRECTION = "建立稳定、自主、长期向上的人生主方向"
@@ -80,6 +81,48 @@ def _normalize_text(value: str | None) -> str:
 
 def _contains_any(source: str, tokens: tuple[str, ...]) -> bool:
     return any(token in source for token in tokens)
+
+
+_STRONG_PULL_INTERACTION_MODES = ("strong-pull", "strong_pull")
+_STRONG_PULL_MESSAGE_TOKENS = (
+    "卡住",
+    "卡住了",
+    "拖延",
+    "拖着",
+    "逃避",
+    "不想做",
+    "不想动",
+    "不想继续",
+    "做不下去",
+    "坚持不下去",
+    "刷手机",
+    "刷短视频",
+    "stuck",
+    "avoiding",
+    "avoid this",
+    "avoid it",
+    "procrastinat",
+    "don't want to do",
+    "dont want to do",
+    "don't want to",
+    "dont want to",
+    "can't start",
+    "cannot start",
+    "can't do it",
+    "can’t do it",
+    "stalled",
+)
+
+
+def _is_strong_pull_interaction(
+    *,
+    interaction_mode: str | None,
+    normalized_message: str,
+) -> bool:
+    normalized_mode = _normalize_text(interaction_mode)
+    if normalized_mode in _STRONG_PULL_INTERACTION_MODES:
+        return True
+    return _contains_any(normalized_message, _STRONG_PULL_MESSAGE_TOKENS)
 
 
 def _build_buddy_question(
@@ -447,7 +490,7 @@ class BuddyOnboardingService:
                 },
             ),
         )
-        growth_target = self._ensure_growth_scaffold(
+        growth_target, execution_carrier = self._ensure_growth_scaffold(
             profile=profile,
             growth_target=growth_target,
         )
@@ -464,6 +507,7 @@ class BuddyOnboardingService:
             session=updated_session,
             growth_target=growth_target,
             relationship=relationship,
+            execution_carrier=execution_carrier,
         )
 
     def record_chat_interaction(
@@ -485,7 +529,10 @@ class BuddyOnboardingService:
         pleasant_delta = 6
         if len(normalized_message) >= 48:
             pleasant_delta += 4
-        strong_pull = str(interaction_mode or "").strip().lower() == "strong-pull"
+        strong_pull = _is_strong_pull_interaction(
+            interaction_mode=interaction_mode,
+            normalized_message=_normalize_text(normalized_message),
+        )
         experience_delta = 8 if strong_pull else 5
         effective_reminders = list(relationship.effective_reminders)
         ineffective_reminders = list(relationship.ineffective_reminders)
@@ -548,7 +595,7 @@ class BuddyOnboardingService:
         *,
         profile: HumanProfile,
         growth_target: GrowthTarget,
-    ) -> GrowthTarget:
+    ) -> tuple[GrowthTarget, dict[str, object] | None]:
         if (
             self._industry_instance_repository is None
             or self._operating_lane_service is None
@@ -556,7 +603,7 @@ class BuddyOnboardingService:
             or self._operating_cycle_service is None
             or self._assignment_service is None
         ):
-            return growth_target
+            return growth_target, None
         instance_id = f"buddy:{profile.profile_id}"
         existing_instance = self._industry_instance_repository.get_instance(instance_id)
         instance = IndustryInstanceRecord(
@@ -653,9 +700,16 @@ class BuddyOnboardingService:
                 },
             ),
         )
-        return self._growth_target_repository.upsert_target(
+        updated_target = self._growth_target_repository.upsert_target(
             growth_target.model_copy(update={"current_cycle_label": cycle.title}),
         )
+        return updated_target, {
+            "instance_id": instance_id,
+            "label": persisted_instance.label,
+            "owner_scope": profile.profile_id,
+            "current_cycle_id": cycle.id,
+            "team_generated": True,
+        }
 
     def _build_lane_roles(
         self,

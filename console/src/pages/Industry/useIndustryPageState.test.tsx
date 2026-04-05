@@ -32,7 +32,10 @@ import {
   buildIndustryRoleChatBinding,
   openRuntimeChat,
 } from "../../utils/runtimeChat";
-import { useIndustryPageState } from "./useIndustryPageState";
+import {
+  resolveProtectedCarrierInstanceId,
+  useIndustryPageState,
+} from "./useIndustryPageState";
 
 const mockedListIndustryInstances = vi.mocked(api.listIndustryInstances);
 const mockedGetRuntimeIndustryDetail = vi.mocked(api.getRuntimeIndustryDetail);
@@ -41,6 +44,7 @@ const mockedOpenRuntimeChat = vi.mocked(openRuntimeChat);
 
 describe("useIndustryPageState", () => {
   afterEach(() => {
+    window.localStorage.clear();
     mockedListIndustryInstances.mockReset();
     mockedGetRuntimeIndustryDetail.mockReset();
     mockedBuildIndustryRoleChatBinding.mockReset();
@@ -100,6 +104,89 @@ describe("useIndustryPageState", () => {
       "industry-active",
       undefined,
     );
+  });
+
+  it("prefers the buddy-generated execution carrier over unrelated active instances", async () => {
+    window.localStorage.setItem("copaw.buddy_profile_id", "profile-1");
+    mockedListIndustryInstances.mockResolvedValue([
+      {
+        instance_id: "industry-other",
+        label: "Other Team",
+        owner_scope: "industry-other",
+        team: { agents: [] },
+      },
+      {
+        instance_id: "buddy:profile-1",
+        label: "Buddy Carrier",
+        owner_scope: "profile-1",
+        team: { agents: [] },
+      },
+    ] as never);
+    mockedGetRuntimeIndustryDetail.mockImplementation(async (instanceId) => ({
+      instance_id: instanceId,
+      label: instanceId === "buddy:profile-1" ? "Buddy Carrier" : "Other Team",
+      owner_scope: instanceId === "buddy:profile-1" ? "profile-1" : "industry-other",
+      profile: { industry: "Retail" },
+      team: { agents: [] },
+      media_analyses: [],
+    } as never));
+
+    const { result } = renderHook(() => {
+      const [briefForm] = Form.useForm();
+      const [draftForm] = Form.useForm();
+      return useIndustryPageState({
+        briefForm,
+        draftForm,
+        navigate: vi.fn() as never,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.selectedInstanceId).toBe("buddy:profile-1");
+      expect(result.current.detail?.instance_id).toBe("buddy:profile-1");
+    });
+
+    expect(mockedGetRuntimeIndustryDetail).toHaveBeenCalledWith(
+      "buddy:profile-1",
+      undefined,
+    );
+  });
+
+  it("resolves the current buddy carrier as the protected instance id", () => {
+    expect(resolveProtectedCarrierInstanceId("profile-1")).toBe("buddy:profile-1");
+    expect(resolveProtectedCarrierInstanceId("  profile-2  ")).toBe("buddy:profile-2");
+    expect(resolveProtectedCarrierInstanceId("")).toBeNull();
+    expect(resolveProtectedCarrierInstanceId(null)).toBeNull();
+  });
+
+  it("does not fall back to an unrelated team when the bound buddy carrier is missing", async () => {
+    window.localStorage.setItem("copaw.buddy_profile_id", "profile-missing");
+    mockedListIndustryInstances.mockResolvedValue([
+      {
+        instance_id: "industry-other",
+        label: "Other Team",
+        owner_scope: "industry-other",
+        team: { agents: [] },
+      },
+    ] as never);
+
+    const { result } = renderHook(() => {
+      const [briefForm] = Form.useForm();
+      const [draftForm] = Form.useForm();
+      return useIndustryPageState({
+        briefForm,
+        draftForm,
+        navigate: vi.fn() as never,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.instances).toHaveLength(1);
+    });
+
+    expect(result.current.selectedInstanceId).toBeNull();
+    expect(result.current.detail).toBeNull();
+    expect(mockedGetRuntimeIndustryDetail).not.toHaveBeenCalled();
   });
 
   it("reloads detail with a focused runtime subview when selecting an assignment or backlog item", async () => {

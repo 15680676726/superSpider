@@ -43,7 +43,7 @@ describe("ChatAccessGate", () => {
   });
 
   it("renders the binding notice and action shortcuts", async () => {
-    const onOpenIndustryCenter = vi.fn();
+    const onOpenIdentityCenter = vi.fn();
     const onOpenWorkbench = vi.fn();
     const onReload = vi.fn();
     const onOpenSuggestedIndustryChat = vi.fn().mockResolvedValue(true);
@@ -61,7 +61,7 @@ describe("ChatAccessGate", () => {
         showModelPrompt={true}
         onCloseModelPrompt={vi.fn()}
         onOpenModelSettings={vi.fn()}
-        onOpenIndustryCenter={onOpenIndustryCenter}
+        onOpenIdentityCenter={onOpenIdentityCenter}
         onOpenWorkbench={onOpenWorkbench}
         onReload={onReload}
         onOpenSuggestedIndustryChat={onOpenSuggestedIndustryChat}
@@ -76,7 +76,7 @@ describe("ChatAccessGate", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开身份中心" }));
     fireEvent.click(screen.getByRole("button", { name: "智能体工作台" }));
 
-    expect(onOpenIndustryCenter).toHaveBeenCalledTimes(1);
+    expect(onOpenIdentityCenter).toHaveBeenCalledTimes(1);
     expect(onOpenWorkbench).toHaveBeenCalledTimes(1);
     expect(onReload).not.toHaveBeenCalled();
   });
@@ -95,7 +95,7 @@ describe("ChatAccessGate", () => {
         showModelPrompt={false}
         onCloseModelPrompt={vi.fn()}
         onOpenModelSettings={vi.fn()}
-        onOpenIndustryCenter={vi.fn()}
+        onOpenIdentityCenter={vi.fn()}
         onOpenWorkbench={vi.fn()}
         onReload={vi.fn()}
         onOpenSuggestedIndustryChat={vi.fn()}

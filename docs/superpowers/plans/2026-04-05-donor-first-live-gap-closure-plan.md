@@ -25,14 +25,20 @@ Fresh verification recorded in `TASK_STATUS.md`:
   - MCP registry search/install/connect
   - gap scout + opportunity scout importing real candidates
 
-## Verified Remaining Gaps
+## Historical Gap List (Superseded `2026-04-05`)
+
+The 4 items below are the original live gaps that justified this plan.
+They are kept as historical closure context only.
+They are not current blocker claims after the live validation recorded above and in `TASK_STATUS.md`.
 
 1. runtime bootstrap still wires an empty discovery executor, so autonomous scout defaults to `0 imported candidates`
 2. source-chain records `success` on `0 hit`, which inflates source health and misleads Runtime Center
 3. generic GitHub / open-source donor discovery is not yet a real runtime search path
 4. SkillHub / curated search returns dead bundles, so result sets are not install-trustworthy by default
 
-## Closure Rule
+## Closure Rule Used By This Plan
+
+The criteria below were the completion gate for this plan and were satisfied on `2026-04-05`.
 
 This plan is complete only when all 4 are true:
 

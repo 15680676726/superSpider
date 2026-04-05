@@ -13,6 +13,7 @@ from ..state.repositories_buddy import (
     SqliteGrowthTargetRepository,
     SqliteHumanProfileRepository,
 )
+from .buddy_runtime_focus import resolve_active_human_assist_focus
 
 
 class BuddySurfacePayload(BaseModel):
@@ -76,10 +77,20 @@ class BuddyProjectionService:
             if callable(self._current_focus_resolver)
             else None
         ) or {}
-        current_task_summary = str(current_focus.get("current_task_summary") or "").strip()
+        human_focus = resolve_active_human_assist_focus(
+            profile.profile_id,
+            self._human_assist_task_service,
+        ) or {}
+        current_task_summary = str(
+            human_focus.get("current_task_summary")
+            or current_focus.get("current_task_summary")
+            or "",
+        ).strip()
         why_now_summary = str(current_focus.get("why_now_summary") or "").strip()
         single_next_action_summary = str(
-            current_focus.get("single_next_action_summary") or "",
+            human_focus.get("single_next_action_summary")
+            or current_focus.get("single_next_action_summary")
+            or "",
         ).strip()
         if not current_task_summary:
             current_task_summary = self._fallback_current_task_summary(profile.profile_id)
@@ -244,6 +255,12 @@ class BuddyProjectionService:
         )
 
     def _fallback_current_task_summary(self, profile_id: str) -> str:
+        human_focus = resolve_active_human_assist_focus(
+            profile_id,
+            self._human_assist_task_service,
+        )
+        if human_focus is not None:
+            return str(human_focus.get("current_task_summary") or "").strip()
         service = self._human_assist_task_service
         getter = getattr(service, "list_tasks", None)
         if callable(getter):

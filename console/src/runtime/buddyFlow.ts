@@ -1,5 +1,7 @@
 import type { BuddySurfaceResponse } from "../api/modules/buddy";
 
+export const BUDDY_IDENTITY_CENTER_ROUTE = "/buddy-onboarding";
+
 export type BuddyEntryDecision =
   | { mode: "start-onboarding"; sessionId: null }
   | { mode: "resume-onboarding"; sessionId: string | null }

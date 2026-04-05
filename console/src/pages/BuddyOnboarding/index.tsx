@@ -189,15 +189,19 @@ export default function BuddyOnboardingPage() {
         selected_direction: selectedDirection,
       });
       setConfirmPayload(result);
-      navigate(
-        `/chat?buddy_session=${encodeURIComponent(identity.session_id)}&buddy_profile=${encodeURIComponent(identity.profile.profile_id)}`,
-        { replace: true },
-      );
     } catch (rawError) {
       setError(rawError instanceof Error ? rawError.message : "主方向确认失败");
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleEnterChat = () => {
+    if (!identity || !confirmPayload?.session?.session_id) return;
+    navigate(
+      `/chat?buddy_session=${encodeURIComponent(confirmPayload.session.session_id)}&buddy_profile=${encodeURIComponent(identity.profile.profile_id)}`,
+      { replace: true },
+    );
   };
 
   const stepIndex = confirmPayload ? 2 : clarification?.finished ? 2 : identity ? 1 : 0;
@@ -320,7 +324,7 @@ export default function BuddyOnboardingPage() {
         </Card>
       ) : null}
 
-      {identity && clarification?.finished ? (
+      {identity && clarification?.finished && !confirmPayload ? (
         <Card title="我先给你 2-3 个候选大方向，但你只确认 1 个主方向">
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <Paragraph style={{ marginBottom: 0 }}>
@@ -354,6 +358,38 @@ export default function BuddyOnboardingPage() {
               data-testid="buddy-direction-confirm"
             >
               确认这个主方向，进入聊天主场
+            </Button>
+          </Space>
+        </Card>
+      ) : null}
+
+      {identity && confirmPayload ? (
+        <Card
+          title="已完成方向确认，准备进入伙伴主场"
+          data-testid="buddy-direction-confirmed"
+        >
+          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            <Alert
+              type="success"
+              showIcon
+              message="你的长期方向已经生成好了"
+              description="下一步进入聊天主场，给伙伴起名，然后只看最终目标和当前这一步。"
+            />
+            <Paragraph style={{ marginBottom: 0 }}>
+              <strong>已确认方向：</strong>{" "}
+              {confirmPayload.growth_target?.primary_direction || selectedDirection}
+            </Paragraph>
+            {confirmPayload.execution_carrier?.label ? (
+              <Paragraph style={{ marginBottom: 0 }}>
+                <strong>已生成载体：</strong> {confirmPayload.execution_carrier.label}
+              </Paragraph>
+            ) : null}
+            <Button
+              type="primary"
+              onClick={handleEnterChat}
+              data-testid="buddy-direction-enter-chat"
+            >
+              进入聊天，给伙伴起名
             </Button>
           </Space>
         </Card>

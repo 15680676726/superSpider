@@ -3,7 +3,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from copaw.kernel.buddy_runtime_focus import build_buddy_current_focus_resolver
+from copaw.kernel.buddy_runtime_focus import (
+    build_buddy_current_focus_resolver,
+    resolve_active_human_assist_focus,
+)
+from copaw.state.models import HumanAssistTaskRecord
 
 
 def test_buddy_current_focus_resolver_prefers_profile_scaffold_before_execution_core_focus() -> None:
@@ -59,3 +63,37 @@ def test_buddy_current_focus_resolver_does_not_leak_execution_core_focus_when_pr
     assert payload == {
         "why_now_summary": "Because the current cycle must start with a visible win.",
     }
+
+
+def test_resolve_active_human_assist_focus_prefers_open_human_task() -> None:
+    payload = resolve_active_human_assist_focus(
+        "profile-1",
+        SimpleNamespace(
+            list_tasks=lambda **kwargs: [
+                HumanAssistTaskRecord(
+                    profile_id="profile-1",
+                    chat_thread_id="chat-1",
+                    title="Already queued",
+                    summary="This should be ignored once the runtime is already resuming.",
+                    task_type="host-handoff-return",
+                    status="resume_queued",
+                    required_action="Wait for runtime resume",
+                ),
+                HumanAssistTaskRecord(
+                    profile_id="profile-1",
+                    chat_thread_id="chat-2",
+                    title="Go on-site",
+                    summary="Human checkpoint",
+                    task_type="host-handoff-return",
+                    status="issued",
+                    required_action="Visit the office and submit the paperwork.",
+                ),
+            ],
+        ),
+    )
+
+    assert payload is not None
+    assert payload["current_task_summary"] == "Visit the office and submit the paperwork."
+    assert payload["single_next_action_summary"].endswith(
+        "Visit the office and submit the paperwork.",
+    )

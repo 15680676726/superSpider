@@ -4,6 +4,7 @@ import type { FormInstance } from "antd";
 import type { NavigateFunction } from "react-router-dom";
 
 import api from "../../api";
+import { readBuddyProfileId } from "../../runtime/buddyProfileBinding";
 import type {
   IndustryBootstrapResponse,
   IndustryCapabilityRecommendation,
@@ -34,6 +35,39 @@ import {
   type IndustryBriefMediaItem,
   type InstallPlanDraftItem,
 } from "./pageHelpers";
+
+export function resolvePreferredIndustryInstanceId({
+  instances,
+  preferredInstanceId,
+  buddyProfileId,
+}: {
+  instances: IndustryInstanceSummary[];
+  preferredInstanceId?: string | null;
+  buddyProfileId?: string | null;
+}): string | null {
+  const buddyCarrierId = buddyProfileId?.trim()
+    ? `buddy:${buddyProfileId.trim()}`
+    : null;
+  if (buddyCarrierId) {
+    return instances.some((item) => item.instance_id === buddyCarrierId)
+      ? buddyCarrierId
+      : null;
+  }
+  if (
+    preferredInstanceId
+    && instances.some((item) => item.instance_id === preferredInstanceId)
+  ) {
+    return preferredInstanceId;
+  }
+  return instances[0]?.instance_id || null;
+}
+
+export function resolveProtectedCarrierInstanceId(
+  buddyProfileId?: string | null,
+): string | null {
+  const normalized = buddyProfileId?.trim();
+  return normalized ? `buddy:${normalized}` : null;
+}
 
 type RecommendationDisplayGroup = {
   group_id: "execution-core" | "delivery";
@@ -115,6 +149,9 @@ export function useIndustryPageState({
   const [briefMediaItems, setBriefMediaItems] = useState<IndustryBriefMediaItem[]>([]);
   const [briefMediaLink, setBriefMediaLink] = useState("");
   const [briefMediaBusy, setBriefMediaBusy] = useState(false);
+  const protectedCarrierInstanceId = resolveProtectedCarrierInstanceId(
+    readBuddyProfileId(),
+  );
 
   const watchedExperienceMode =
     Form.useWatch("experience_mode", briefForm) || "system-led";
@@ -154,13 +191,11 @@ export function useIndustryPageState({
         setInstances(nextInstances);
         setRetiredInstances(nextRetiredInstances);
         const candidateId = preferredInstanceId ?? selectedInstanceIdRef.current;
-        const nextSelected =
-          (candidateId &&
-          nextInstances.some((item) => item.instance_id === candidateId)
-            ? candidateId
-            : null) ||
-          nextInstances[0]?.instance_id ||
-          null;
+        const nextSelected = resolvePreferredIndustryInstanceId({
+          instances: nextInstances,
+          preferredInstanceId: candidateId,
+          buddyProfileId: readBuddyProfileId(),
+        });
         setSelectedInstanceId(nextSelected);
       } catch (fetchError) {
         setError(
@@ -811,6 +846,7 @@ export function useIndustryPageState({
     recommendationWarnings,
     retiredInstances,
     roleOptions,
+    protectedCarrierInstanceId,
     selectedExecutionCoreRole,
     selectedInstanceId,
     selectedSummary,

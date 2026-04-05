@@ -2,6 +2,58 @@
 """Buddy current-focus resolver helpers."""
 from __future__ import annotations
 
+_INACTIVE_HUMAN_ASSIST_STATUSES = frozenset(
+    {
+        "accepted",
+        "resume_queued",
+        "closed",
+        "expired",
+        "cancelled",
+        "rejected",
+    },
+)
+
+
+def _single_next_action(summary: str) -> str:
+    text = str(summary or "").strip()
+    if not text:
+        return ""
+    return f"现在先完成这一步：{text}"
+
+
+def resolve_active_human_assist_focus(
+    profile_id: str,
+    human_assist_task_service: object | None,
+) -> dict[str, str] | None:
+    getter = getattr(human_assist_task_service, "list_tasks", None)
+    if not callable(getter):
+        return None
+    try:
+        tasks = getter(limit=20, profile_id=profile_id)
+    except TypeError:
+        tasks = getter(limit=20)
+    for task in tasks:
+        task_profile_id = str(getattr(task, "profile_id", "") or "").strip()
+        if task_profile_id != profile_id:
+            continue
+        status = str(getattr(task, "status", "") or "").strip().lower()
+        if status in _INACTIVE_HUMAN_ASSIST_STATUSES:
+            continue
+        summary = str(
+            getattr(task, "required_action", None)
+            or getattr(task, "summary", None)
+            or getattr(task, "title", None)
+            or ""
+        ).strip()
+        if not summary:
+            continue
+        return {
+            "current_task_summary": summary,
+            "single_next_action_summary": _single_next_action(summary),
+        }
+    return None
+
+
 def build_buddy_current_focus_resolver(
     *,
     agent_profile_service: object,
@@ -10,11 +62,7 @@ def build_buddy_current_focus_resolver(
     assignment_service: object,
     backlog_service: object,
 ) -> object:
-    def _single_next_action(summary: str) -> str:
-        text = str(summary or "").strip()
-        if not text:
-            return ""
-        return f"现在先完成这一步：{text}"
+    del agent_profile_service
 
     def _resolve(profile_id: str) -> dict[str, str] | None:
         get_active_target = getattr(growth_target_repository, "get_active_target", None)
@@ -63,4 +111,7 @@ def build_buddy_current_focus_resolver(
     return _resolve
 
 
-__all__ = ["build_buddy_current_focus_resolver"]
+__all__ = [
+    "build_buddy_current_focus_resolver",
+    "resolve_active_human_assist_focus",
+]

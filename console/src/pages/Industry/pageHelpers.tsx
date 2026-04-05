@@ -27,8 +27,8 @@ import { runtimeRiskLabel, runtimeStatusColor } from "../../runtime/tagSemantics
 const { TextArea } = Input;
 
 const INDUSTRY_TEXT = {
-  pageTitle: "行业初始化",
-  prepareBrief: "填写行业简报",
+  pageTitle: "执行载体中心",
+  prepareBrief: "填写载体调整简报",
   formIndustry: "行业",
   formIndustryRequired: "请输入行业",
   formIndustryPlaceholder: "例如：工业自动化 / 电商运营 / 本地生活",
@@ -45,12 +45,12 @@ const INDUSTRY_TEXT = {
   formNotes: "补充说明",
   formNotesPlaceholder: "补充上下文、历史信息或特殊要求",
   previewPlan: "生成预览",
-  previewBeforeActivate: "先预览团队草案、目标、节奏与能力安装建议，再决定是否启动。",
+  previewBeforeActivate: "先预览执行载体调整草案、目标、节奏与能力安装建议，再决定是否应用。",
   previewBlockedWarning: "还有必填信息或关键检查未通过，当前不能正式启动。",
-  previewTitle: "预览结果",
-  regenerateDraft: "重新生成草案",
-  activateTeam: "创建并启动团队",
-  updateTeam: "更新团队",
+  previewTitle: "执行载体调整预览",
+  regenerateDraft: "重新生成调整草案",
+  activateTeam: "应用执行载体调整",
+  updateTeam: "应用执行载体调整",
   activationLabel: "激活状态",
   readyToActivate: "可启动",
   blocked: "受阻",
@@ -90,8 +90,8 @@ const INDUSTRY_TEXT = {
   scheduleTimezone: "时区",
   dispatchMode: "派发模式",
   readinessChecks: "准备度检查",
-  noInstances: "还没有已创建的行业团队。",
-  industryDetail: "团队详情",
+  noInstances: "还没有可调整的执行载体。",
+  industryDetail: "执行载体详情",
   loadIntoDraft: "载入到编辑区",
   detailInstance: "实例信息",
   detailOwnerScope: "归属范围",
@@ -120,7 +120,7 @@ const INDUSTRY_TEXT = {
   reportProposals: "提案",
   reportPatches: "补丁",
   noHighlights: "当前窗口内还没有高亮结果。",
-  updateSuccess: "团队已更新，主链状态已重新对齐。",
+  updateSuccess: "执行载体已更新，主链状态已重新对齐。",
   chatOpenFailed: "打开主脑聊天失败。",
   readinessBlocked: "环境与依赖受阻，无法启动执行。",
   readinessWarning: "有重要节点尚未就绪，建议检查。",
@@ -128,8 +128,8 @@ const INDUSTRY_TEXT = {
 } as const;
 
 const INDUSTRY_EXPERIENCE_TEXT = {
-  pageDescription: "系统会先补齐行业与客户上下文，再把团队带入正式执行。",
-  prepareBriefHint: "尽量把行业、客户、目标、限制写清楚，主脑会先生成学习导向的草案与执行团队。",
+  pageDescription: "这里负责查看、校准和调整当前执行载体，不再承担首次建档。",
+  prepareBriefHint: "尽量把当前行业、客户、目标和限制写清楚，主脑会据此重新生成执行载体调整草案。",
   formExperienceMode: "协作模式",
   formExperienceModeSystemLed: "系统主导",
   formExperienceModeOperatorGuided: "人工引导",
@@ -138,7 +138,7 @@ const INDUSTRY_EXPERIENCE_TEXT = {
   formOperatorRequirements: "人工要求",
   formOperatorRequirementsPlaceholder: "填写必须遵守的人类规则、审批要求或禁区。",
   openExecutionCoreChat: "打开主脑聊天",
-  activateSuccess: "团队已启动，主脑会先完成学习与协调，再自动进入执行。",
+  activateSuccess: "执行载体调整已生效，主脑会继续按新的编排推进执行。",
 } as const;
 
 const INDUSTRY_ROLE_CLASS_LABELS: Record<string, string> = {

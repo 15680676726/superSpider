@@ -14,7 +14,7 @@ from copaw.state.repositories_buddy import (
     SqliteHumanProfileRepository,
 )
 
-from .runtime_center_api_parts.shared import build_runtime_center_app
+from .runtime_center_api_parts.shared import FakeTurnExecutor, build_runtime_center_app
 
 
 def _build_client(tmp_path) -> TestClient:
@@ -97,3 +97,70 @@ def test_runtime_center_legacy_buddy_summary_route_is_removed(tmp_path) -> None:
     response = client.get("/runtime-center/main-brain/buddy-summary")
 
     assert response.status_code == 404
+
+
+def test_runtime_center_chat_run_preserves_strong_pull_signal_for_buddy_growth(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "buddy-chat-run.sqlite3")
+    profile_repository = SqliteHumanProfileRepository(store)
+    growth_target_repository = SqliteGrowthTargetRepository(store)
+    relationship_repository = SqliteCompanionRelationshipRepository(store)
+    session_repository = SqliteBuddyOnboardingSessionRepository(store)
+    onboarding_service = BuddyOnboardingService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        onboarding_session_repository=session_repository,
+    )
+    projection_service = BuddyProjectionService(
+        profile_repository=profile_repository,
+        growth_target_repository=growth_target_repository,
+        relationship_repository=relationship_repository,
+        onboarding_session_repository=session_repository,
+    )
+    app = build_runtime_center_app()
+    turn_executor = FakeTurnExecutor()
+    app.state.turn_executor = turn_executor
+    app.state.buddy_onboarding_service = onboarding_service
+    app.state.buddy_projection_service = projection_service
+    client = TestClient(app)
+
+    identity = onboarding_service.submit_identity(
+        display_name="Mina",
+        profession="Operator",
+        current_stage="restart",
+        interests=["writing"],
+        strengths=["follow-through"],
+        constraints=["time"],
+        goal_intention="Build a durable direction.",
+    )
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-buddy-strong-pull",
+            "session_id": "industry-chat:buddy:profile-1:execution-core",
+            "user_id": "buddy-user",
+            "channel": "console",
+            "thread_id": "industry-chat:buddy:profile-1:execution-core",
+            "buddy_profile_id": identity.profile.profile_id,
+            "interaction_mode": "strong-pull",
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "I'm stuck and I keep avoiding this. I don't want to do it.",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert getattr(turn_executor.stream_calls[0]["request_payload"], "interaction_mode", None) == "auto"
+    relationship = relationship_repository.get_relationship(identity.profile.profile_id)
+    assert relationship is not None
+    assert relationship.strong_pull_count == 1

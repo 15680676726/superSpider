@@ -70,7 +70,10 @@ import {
   readBuddyProfileId,
   writeBuddyProfileId,
 } from "../../runtime/buddyProfileBinding";
-import { resolveBuddyNamingState } from "../../runtime/buddyFlow";
+import {
+  BUDDY_IDENTITY_CENTER_ROUTE,
+  resolveBuddyNamingState,
+} from "../../runtime/buddyFlow";
 
 interface CustomWindow extends Window {
   currentChannel?: string;
@@ -652,7 +655,7 @@ export default function ChatPage() {
           setShowModelPrompt(false);
           navigate("/settings/models");
         }}
-        onOpenIndustryCenter={() => navigate("/industry")}
+        onOpenIdentityCenter={() => navigate(BUDDY_IDENTITY_CENTER_ROUTE)}
         onOpenWorkbench={openWorkbench}
         onReload={() => window.location.reload()}
         onOpenSuggestedIndustryChat={openSuggestedIndustryChat}

@@ -35,6 +35,7 @@ import {
 } from "../../utils/remoteSkillPresentation";
 import { normalizeSpiderMeshBrand } from "../../utils/brand";
 import { employmentModeColor } from "../../runtime/executionPresentation";
+import { BUDDY_IDENTITY_CENTER_ROUTE } from "../../runtime/buddyFlow";
 import {
   buildAnalysisModeOptions,
   formatAnalysisMode,
@@ -128,6 +129,7 @@ export default function IndustryPage() {
     loadingInstances,
     preview,
     previewLoading,
+    protectedCarrierInstanceId,
     recommendationById,
     recommendationDisplayGroups,
     recommendationWarnings,
@@ -148,6 +150,10 @@ export default function IndustryPage() {
     draftForm,
     navigate,
   });
+  const selectedIsCurrentBuddyCarrier = Boolean(
+    protectedCarrierInstanceId
+    && (detail?.instance_id || selectedSummary?.instance_id) === protectedCarrierInstanceId,
+  );
 
   return (
     <div className="page-container" style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 24 }}>
@@ -167,13 +173,22 @@ export default function IndustryPage() {
       <Alert
         type="info"
         showIcon
-        message="这已经不是系统的首次建档入口"
-        description="先通过 Buddy onboarding 建立人的画像与主方向，再回到这里做行业/团队/执行载体的下游配置会更准确。"
+        message="这里不再是第一次创建身份的入口"
+        description="伙伴建档确认主方向后，系统会自动生成当前执行载体和团队骨架。这里现在只负责查看和调整已经生成好的执行载体。"
+        action={(
+          <Button
+            type="link"
+            data-testid="industry-open-buddy-onboarding"
+            onClick={() => navigate(BUDDY_IDENTITY_CENTER_ROUTE)}
+          >
+            打开伙伴建档
+          </Button>
+        )}
       />
 
       {/* Brief Modal */}
       <Modal
-        title={INDUSTRY_TEXT.prepareBrief}
+        title="调整当前执行载体"
         open={briefModalOpen}
         onCancel={() => setBriefModalOpen(false)}
         footer={null}
@@ -345,19 +360,23 @@ export default function IndustryPage() {
         {/* Left: Team List */}
         <Card
           className="baize-card"
-          title={<span style={{ color: "var(--baize-text-main)" }}>身份</span>}
-          extra={<Button type="primary" size="small" onClick={() => setBriefModalOpen(true)}>创建身份</Button>}
+          title={<span style={{ color: "var(--baize-text-main)" }}>当前执行载体</span>}
           bodyStyle={{ padding: 0 }}
         >
           {loadingInstances ? (
             <div style={{ padding: 24, textAlign: "center" }}><Spin /></div>
           ) : allTeams.length === 0 ? (
-            <Empty description={INDUSTRY_TEXT.noInstances} style={{ padding: 24 }} />
+            <Empty description="当前还没有为这位伙伴生成执行载体。" style={{ padding: 24 }}>
+              <Button onClick={() => navigate(BUDDY_IDENTITY_CENTER_ROUTE)}>
+                返回伙伴建档
+              </Button>
+            </Empty>
           ) : (
             <div style={{ maxHeight: "calc(100vh - 240px)", overflow: "auto" }}>
               {allTeams.map((item) => {
                 const isSelected = item.instance_id === selectedInstanceId && !isEditing;
                 const isRetired = retiredInstances.some((r) => r.instance_id === item.instance_id);
+                const isProtectedCarrier = item.instance_id === protectedCarrierInstanceId;
                 return (
                   <div
                     key={item.instance_id}
@@ -377,19 +396,38 @@ export default function IndustryPage() {
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <Text strong style={{ color: "var(--baize-text-main)" }}>{item.label}</Text>
                         <Tag color={runtimeStatusColor(item.status)} style={{ margin: 0 }}>{presentIndustryRuntimeStatus(item.status)}</Tag>
+                        {isProtectedCarrier ? (
+                          <Tag
+                            color="gold"
+                            style={{ margin: 0 }}
+                            data-testid={`industry-protected-instance-${item.instance_id}`}
+                          >
+                            当前伙伴载体
+                          </Tag>
+                        ) : null}
                         {isRetired ? <Tag color="default" style={{ margin: 0 }}>已退役</Tag> : null}
                       </div>
                       <Text type="secondary" style={{ fontSize: 12 }}>{formatTimestamp(item.updated_at, locale)}</Text>
                     </div>
-                    <Popconfirm
-                      title="确认删除这个团队吗？"
-                      description="删除后将移除该团队及其运行记录。"
-                      okText="确认删除"
-                      cancelText="取消"
-                      onConfirm={(e) => { e?.stopPropagation(); void handleDeleteInstance(item.instance_id); }}
-                    >
-                      <Button type="text" danger size="small" icon={<DeleteOutlined />} loading={deletingInstanceId === item.instance_id} onClick={(e) => e.stopPropagation()} />
-                    </Popconfirm>
+                    {isProtectedCarrier ? null : (
+                      <Popconfirm
+                        title="确认删除这个团队吗？"
+                        description="删除后将移除该团队及其运行记录。"
+                        okText="确认删除"
+                        cancelText="取消"
+                        onConfirm={(e) => { e?.stopPropagation(); void handleDeleteInstance(item.instance_id); }}
+                      >
+                        <Button
+                          type="text"
+                          danger
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          loading={deletingInstanceId === item.instance_id}
+                          onClick={(e) => e.stopPropagation()}
+                          data-testid={`industry-delete-instance-${item.instance_id}`}
+                        />
+                      </Popconfirm>
+                    )}
                   </div>
                 );
               })}
@@ -403,7 +441,11 @@ export default function IndustryPage() {
           title={
             <span style={{ color: "var(--baize-text-main)" }}>
               {isEditing
-                ? (isEditingExistingTeam ? INDUSTRY_TEXT.updateTeam : INDUSTRY_TEXT.previewTitle)
+                ? (
+                  isEditingExistingTeam
+                    ? (selectedIsCurrentBuddyCarrier ? INDUSTRY_TEXT.previewTitle : INDUSTRY_TEXT.updateTeam)
+                    : INDUSTRY_TEXT.previewTitle
+                )
                 : (detail?.team?.label || selectedSummary?.label || INDUSTRY_TEXT.industryDetail)}
             </span>
           }
@@ -421,7 +463,14 @@ export default function IndustryPage() {
                 <Button size="small" type="primary" onClick={() => void handleOpenExecutionCoreChat()} disabled={!selectedExecutionCoreRole}>
                   {INDUSTRY_EXPERIENCE_TEXT.openExecutionCoreChat}
                 </Button>
-                <Button size="small" icon={<EditOutlined />} onClick={loadInstanceIntoDraft}>编辑</Button>
+                <Button
+                  size="small"
+                  icon={<EditOutlined />}
+                  data-testid="industry-adjust-current-carrier"
+                  onClick={loadInstanceIntoDraft}
+                >
+                  {selectedIsCurrentBuddyCarrier ? "调整当前执行载体" : "编辑执行载体"}
+                </Button>
               </Space>
             ) : null
           }

@@ -17,7 +17,7 @@ type ChatAccessGateProps = {
   showModelPrompt: boolean;
   onCloseModelPrompt: () => void;
   onOpenModelSettings: () => void;
-  onOpenIndustryCenter: () => void;
+  onOpenIdentityCenter: () => void;
   onOpenWorkbench: () => void;
   onReload: () => void;
   onOpenSuggestedIndustryChat: (instance: IndustryInstanceSummary) => Promise<boolean>;
@@ -35,7 +35,7 @@ export function ChatAccessGate({
   showModelPrompt,
   onCloseModelPrompt,
   onOpenModelSettings,
-  onOpenIndustryCenter,
+  onOpenIdentityCenter,
   onOpenWorkbench,
   onReload,
   onOpenSuggestedIndustryChat,
@@ -66,7 +66,7 @@ export function ChatAccessGate({
                         ? "正在将对话绑定至可用的主脑控制线程。"
                         : "正在解析当前线程的运行主体和绑定上下文。")}
                   </span>
-                  <Button size="small" type="link" onClick={onOpenIndustryCenter}>
+                  <Button size="small" type="link" onClick={onOpenIdentityCenter}>
                     打开身份中心
                   </Button>
                   <Button size="small" type="link" onClick={onOpenWorkbench}>
@@ -96,11 +96,11 @@ export function ChatAccessGate({
                       : "正在解析聊天线程"
                     : requestedThreadId
                       ? "正在绑定主脑控制线程"
-                      : industryTeamsError
-                        ? "身份列表加载失败"
-                        : hasSuggestedTeams
-                          ? "请先绑定主脑线程"
-                          : "请先创建身份"
+                    : industryTeamsError
+                      ? "身份列表加载失败"
+                      : hasSuggestedTeams
+                        ? "请先绑定主脑线程"
+                        : "请先完成伙伴建档"
                 }
                 subTitle={
                   effectiveThreadPending
@@ -109,15 +109,15 @@ export function ChatAccessGate({
                       : "正在解析当前聊天线程的运行主体和绑定上下文。"
                     : requestedThreadId
                       ? threadBootstrapError || "正在将对话绑定至可用的主脑控制线程。"
-                      : industryTeamsError
-                        ? `身份列表或主脑投影不可用。${industryTeamsError}`
-                        : executionCoreSuggestions.length > 0
-                          ? "请从身份中心或智能体工作台进入聊天，这样线程才会绑定到真实的执行主体。"
-                          : "暂无可用的身份主体。请先创建身份，再进入聊天。"
+                    : industryTeamsError
+                      ? `身份列表或主脑投影不可用。${industryTeamsError}`
+                      : executionCoreSuggestions.length > 0
+                        ? "请从身份中心或智能体工作台进入聊天，这样线程才会绑定到真实的执行主体。"
+                        : "暂无可用的伙伴身份主体。请先完成伙伴建档，再进入聊天。"
                 }
                 extra={
                   <Space wrap>
-                    <Button type="primary" onClick={onOpenIndustryCenter}>
+                    <Button type="primary" onClick={onOpenIdentityCenter}>
                       打开身份中心
                     </Button>
                     <Button onClick={onOpenWorkbench}>智能体工作台</Button>
