@@ -68,6 +68,42 @@
   - 至少 1 个真实 Python service donor（`HKUDS/OpenSpace`）已完成 `search -> install -> ready -> stop`
   - 当前边界仍是“符合 Python/GitHub/isolated-venv/runtime-contract 合同的项目”，不等于任何语言、任何构建系统的任意仓库都已自动适配
 
+## 1.2.1 `2026-04-06` donor adapter common-base assimilation 补充
+
+- 已新增并落地的公共吸纳主链：
+  - `protocol surface classify`
+  - `compiled adapter contract`
+  - `typed adapter execution`
+  - `trial / lifecycle / evidence attribution`
+  - `Runtime Center candidate adapter read-model`
+- 当前正式对象口径已收口为：
+  - 外部 intake/transport 事实：
+    - `native_mcp`
+    - `api`
+    - `sdk`
+    - `cli_runtime`
+  - CoPaw 内部正式能力对象：
+    - `project-package`
+    - `runtime-component`
+    - `adapter`
+- 当前 fresh regression：
+  - `PYTHONPATH=src python -m pytest tests/capabilities/test_external_adapter_contracts.py tests/capabilities/test_external_adapter_compiler.py tests/capabilities/test_external_adapter_execution.py tests/capabilities/test_external_packages.py tests/app/test_capability_market_api.py tests/app/test_capabilities_execution.py tests/app/test_runtime_center_events_api.py tests/app/test_runtime_center_donor_api.py tests/predictions/test_skill_candidate_service.py tests/predictions/test_skill_trial_service.py tests/predictions/test_donor_recommendations.py tests/kernel/test_query_execution_runtime.py -q`
+  - 结果：`148 passed`
+- 当前已验证事实：
+  - runtime-only donor 现在会被正式阻断，不能再冒充 business adapter
+  - compiled adapter action 可通过统一 `external-adapter` 执行面走 `mcp/http/sdk`
+  - candidate/trial/lifecycle/evidence/read-model 现在会保留：
+    - `protocol_surface_kind`
+    - `transport_kind`
+    - `compiled_adapter_id`
+    - `compiled_action_ids`
+    - `selected_adapter_action_id`（在 evidence/runtime attribution 面）
+- 当前诚实边界：
+  - 这一轮完成的是“公共 formal assimilation seam”
+  - 不是“任意开源项目安装后都自动抽出 typed callable actions”
+  - 现在真正 live-verified 的自动 install/start/health/stop 仍主要在 `project-package / runtime-component` 层
+  - 对 `adapter` 而言，公共执行/治理主链已完成；但“从任意真实 donor 自动抽取 `mcp_tools / api_actions / sdk_actions`”仍未作为通用 live-verified discovery 合同落地
+
 ---
 
 ## 1.3 `2026-04-05` 内部统一知识图谱设计补充

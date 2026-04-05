@@ -3,8 +3,28 @@
 ## Status
 
 - Date: `2026-04-06`
-- Scope: design only
+- Scope: implemented common-base adapter assimilation seam with focused regression proof
 - Goal: define the common external-donor intake contract for `MCP -> API/SDK -> runtime`, without adding project-specific special cases
+
+### Verified Reality
+
+- The common donor adapter base is now implemented across:
+  - protocol-surface classification
+  - compiled adapter contracts
+  - typed adapter execution (`mcp/http/sdk`)
+  - candidate/trial/lifecycle attribution
+  - Runtime Center candidate projection
+- Fresh focused regression on `2026-04-06`:
+  - `PYTHONPATH=src python -m pytest tests/capabilities/test_external_adapter_contracts.py tests/capabilities/test_external_adapter_compiler.py tests/capabilities/test_external_adapter_execution.py tests/capabilities/test_external_packages.py tests/app/test_capability_market_api.py tests/app/test_capabilities_execution.py tests/app/test_runtime_center_events_api.py tests/app/test_runtime_center_donor_api.py tests/predictions/test_skill_candidate_service.py tests/predictions/test_skill_trial_service.py tests/predictions/test_donor_recommendations.py tests/kernel/test_query_execution_runtime.py -q`
+  - Result: `148 passed`
+- The verified implementation boundary is:
+  - CoPaw can now formally host one common `MCP/API/SDK -> adapter` execution and governance seam
+  - Runtime-only donors are explicitly blocked from masquerading as business adapters
+  - Candidate/trial/lifecycle/evidence/read-model now preserve adapter attribution
+- The still-honest boundary is:
+  - automatic typed callable-surface extraction from arbitrary installed open-source donors is not yet generic live-proven
+  - current compile path is fully live once donor metadata/materialization already provides typed `mcp_tools / api_actions / sdk_actions`
+  - this spec therefore closes the common formal assimilation seam, not "all external projects auto-yield callable action schemas with zero extra discovery"
 
 ## 1. Goal
 
