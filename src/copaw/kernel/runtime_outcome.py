@@ -91,6 +91,8 @@ def classify_runtime_outcome(
         return "cancelled"
     if normalized_phase == "timeout":
         return "timeout"
+    if success and not timed_out:
+        return "completed"
     if is_blocked_runtime_error(error):
         return "blocked"
     if timed_out or is_timeout_runtime_error(error):

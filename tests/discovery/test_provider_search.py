@@ -37,7 +37,12 @@ def test_search_github_repository_donors_builds_normalized_hits(monkeypatch) -> 
     assert hit.candidate_source_lineage == "donor:github:acme/browser-pilot"
     assert "browser" in hit.capability_keys
     assert "automation" in hit.capability_keys
-    assert hit.metadata["materialization_strategy"] == "pip-git"
+    assert hit.metadata["materialization_strategy"] == "github-python-project"
+    assert hit.metadata["install_transport_chain"] == [
+        "git",
+        "codeload-tar-gz",
+        "github-archive-zip",
+    ]
 
 
 def test_search_github_repository_donors_keeps_open_source_project_candidates(

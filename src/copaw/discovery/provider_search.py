@@ -133,7 +133,12 @@ def search_github_repository_donors(
                     "install_supported": True,
                     "repository_url": source_url,
                     "direct_query": True,
-                    "materialization_strategy": "pip-git",
+                    "materialization_strategy": "github-python-project",
+                    "install_transport_chain": [
+                        "git",
+                        "codeload-tar-gz",
+                        "github-archive-zip",
+                    ],
                 },
             ),
         ]
@@ -176,7 +181,12 @@ def search_github_repository_donors(
                     "stars": stars,
                     "topics": list(topics),
                     "updated_at": pushed_at,
-                    "materialization_strategy": "pip-git",
+                    "materialization_strategy": "github-python-project",
+                    "install_transport_chain": [
+                        "git",
+                        "codeload-tar-gz",
+                        "github-archive-zip",
+                    ],
                 },
             ),
         )

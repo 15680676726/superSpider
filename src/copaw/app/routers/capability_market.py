@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import inspect
+from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from typing import Any, Literal
 from urllib.parse import urlparse
 from urllib.request import Request as URLRequest, urlopen
@@ -45,6 +49,11 @@ from ...capabilities.install_templates import (
 from ...capabilities.lifecycle_assignment import (
     build_capability_lifecycle_assignment_payload,
 )
+from ...capabilities.project_donor_contracts import (
+    build_github_python_project_transport_chain,
+    parse_pip_install_report_requested_distribution,
+    resolve_installed_python_project_contract,
+)
 from ...capabilities.remote_skill_catalog import (
     CuratedSkillCatalogEntry,
     CuratedSkillCatalogSearchResponse,
@@ -58,6 +67,7 @@ from ...capabilities.remote_skill_contract import (
 )
 from ...config import load_config, save_config
 from ...config.config import ExternalCapabilityPackageConfig
+from ...constant import WORKING_DIR
 from ...discovery.models import DiscoveryHit, NormalizedDiscoveryHit
 from ...discovery.provider_search import search_github_repository_donors
 from ...state import SQLiteStateStore
@@ -703,6 +713,91 @@ def _default_evidence_contract(
     return ["shell-command", "call-record"]
 
 
+def _external_project_environments_dir() -> Path:
+    return WORKING_DIR / "external_capability_packages"
+
+
+def _external_project_environment_name(
+    *,
+    capability_kind: Literal["project-package", "adapter", "runtime-component"],
+    install_name: str,
+) -> str:
+    normalized_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", install_name).strip("_")
+    return f"{_external_capability_prefix(capability_kind)}__{normalized_name or 'external_capability'}"
+
+
+def _external_project_venv_paths(venv_root: Path) -> tuple[str, str]:
+    scripts_dir = venv_root / ("Scripts" if sys.platform.startswith("win") else "bin")
+    python_name = "python.exe" if sys.platform.startswith("win") else "python"
+    return str((scripts_dir / python_name).resolve()), str(scripts_dir.resolve())
+
+
+def _cleanup_external_project_environment(environment_root: str) -> None:
+    candidate = Path(str(environment_root or "").strip())
+    if not str(candidate):
+        return
+    with contextlib.suppress(OSError):
+        if candidate.exists():
+            shutil.rmtree(candidate)
+
+
+def _prepare_external_project_environment(
+    *,
+    source_url: str,
+    capability_kind: Literal["project-package", "adapter", "runtime-component"],
+    entry_module: str | None,
+) -> dict[str, str]:
+    _ = entry_module
+    environments_dir = _external_project_environments_dir()
+    environments_dir.mkdir(parents=True, exist_ok=True)
+    owner, repo = _github_owner_repo(source_url)
+    environment_root = (
+        environments_dir
+        / _external_project_environment_name(
+            capability_kind=capability_kind,
+            install_name=f"{owner}__{repo}",
+        )
+    )
+    _cleanup_external_project_environment(str(environment_root))
+    environment_root.mkdir(parents=True, exist_ok=True)
+    venv_root = environment_root / ".venv"
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-m", "venv", str(venv_root)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        _cleanup_external_project_environment(str(environment_root))
+        raise HTTPException(
+            400,
+            detail=f"External project environment bootstrap timed out: {exc}",
+        ) from exc
+    if completed.returncode != 0:
+        summary = ((completed.stderr or "").strip() or (completed.stdout or "").strip())
+        _cleanup_external_project_environment(str(environment_root))
+        raise HTTPException(
+            400,
+            detail=f"External project environment bootstrap failed: {summary or completed.returncode}",
+        )
+    python_path, scripts_dir = _external_project_venv_paths(venv_root)
+    if not Path(python_path).exists():
+        _cleanup_external_project_environment(str(environment_root))
+        raise HTTPException(
+            400,
+            detail="External project environment bootstrap failed: venv python is missing",
+        )
+    return {
+        "environment_root": str(environment_root.resolve()),
+        "python_path": python_path,
+        "scripts_dir": scripts_dir,
+    }
+
+
 async def _run_external_project_process(
     command_parts: list[str],
     *,
@@ -712,6 +807,91 @@ async def _run_external_project_process(
         try:
             completed = subprocess.run(
                 command_parts,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return False, "Command timed out"
+        output = (completed.stdout or "").strip()
+        error_output = (completed.stderr or "").strip()
+        summary = (
+            output
+            or error_output
+            or f"Process exited with code {completed.returncode}"
+        )
+        return completed.returncode == 0, summary
+
+    return await asyncio.to_thread(_run)
+
+
+async def _run_external_project_install_attempt(
+    *,
+    command_parts: list[str],
+    timeout: int,
+    report_path: str,
+) -> dict[str, object]:
+    def _run() -> dict[str, object]:
+        try:
+            completed = subprocess.run(
+                command_parts,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "summary": "Command timed out",
+                "stdout": "",
+                "stderr": "",
+                "returncode": -1,
+                "report_path": report_path,
+            }
+        output = (completed.stdout or "").strip()
+        error_output = (completed.stderr or "").strip()
+        summary = (
+            output
+            or error_output
+            or f"Process exited with code {completed.returncode}"
+        )
+        return {
+            "success": completed.returncode == 0,
+            "summary": summary,
+            "stdout": output,
+            "stderr": error_output,
+            "returncode": completed.returncode,
+            "report_path": report_path,
+        }
+
+    return await asyncio.to_thread(_run)
+
+
+def _load_pip_install_report(report_path: str) -> dict[str, Any]:
+    try:
+        with open(report_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+async def _run_external_project_shell_command(
+    command: str,
+    *,
+    timeout: int,
+) -> tuple[bool, str]:
+    def _run() -> tuple[bool, str]:
+        try:
+            completed = subprocess.run(
+                command,
+                shell=True,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -745,117 +925,204 @@ async def _install_external_project_capability(
     overwrite: bool,
 ) -> dict[str, object]:
     normalized_source_url = _normalize_github_project_source_url(source_url)
-    install_name = _normalize_project_install_name(
-        source_url=normalized_source_url,
-        proposed_name=None,
-    )
-    normalized_entry_module = _normalize_entry_module(
-        entry_module,
-        fallback_name=install_name,
-    )
-    capability_id = _build_external_capability_id(
-        capability_kind,
-        install_name=install_name,
-    )
-    package_ref = _build_github_archive_package_ref(
-        normalized_source_url,
-        version=version,
-    )
     config = load_config()
     packages = dict(getattr(config, "external_capability_packages", {}) or {})
-    if capability_id in packages and not overwrite:
+    existing_source_matches = [
+        (key, package)
+        for key, package in packages.items()
+        if str(getattr(package, "source_url", "") or "").strip() == normalized_source_url
+        and str(getattr(package, "kind", "") or "").strip() == capability_kind
+    ]
+    if existing_source_matches and not overwrite:
         raise HTTPException(
             409,
             detail=(
-                f"External capability '{capability_id}' already exists. "
+                f"External capability '{existing_source_matches[0][0]}' already exists. "
                 "Use overwrite=true to replace it."
             ),
         )
-    install_command_parts = [
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "--user",
-        "--disable-pip-version-check",
-    ]
-    if overwrite:
-        install_command_parts.extend(["--upgrade", "--force-reinstall"])
-    install_command_parts.append(package_ref)
-    success, summary = await _run_external_project_process(
-        install_command_parts,
-        timeout=600,
+    resolved_version = str(version or "").strip() or _resolve_github_default_ref(
+        normalized_source_url,
     )
-    if not success:
-        raise HTTPException(
-            400,
-            detail=f"External project install failed: {summary}",
-        )
-    resolved_execute_command = str(execute_command or "").strip() or _default_external_execute_command(
-        capability_kind,
-        entry_module=normalized_entry_module,
+    install_summary = ""
+    report_payload: dict[str, Any] = {}
+    selected_transport = None
+    transport_errors: list[str] = []
+    staged_environment = _prepare_external_project_environment(
+        source_url=normalized_source_url,
+        capability_kind=capability_kind,
+        entry_module=str(entry_module or "").strip() or None,
     )
-    resolved_healthcheck_command = (
-        str(healthcheck_command or "").strip() or resolved_execute_command
-    )
-    if resolved_healthcheck_command:
-        verify_success, verify_summary = await _run_external_project_process(
-            (
-                [sys.executable, "-m", normalized_entry_module, "--version"]
-                if capability_kind == "project-package"
-                else (
-                    [sys.executable, "-m", normalized_entry_module, "--help"]
-                    if capability_kind == "runtime-component"
-                    else [
-                        sys.executable,
-                        "-c",
-                        f"import {normalized_entry_module}; print('ok')",
-                    ]
-                )
-            ),
-            timeout=180,
-        )
-        if not verify_success:
+    final_environment: dict[str, str] | None = None
+    try:
+        for transport in build_github_python_project_transport_chain(
+            source_url=normalized_source_url,
+            ref=resolved_version,
+        ):
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=".json",
+            ) as report_file:
+                report_path = report_file.name
+            install_command_parts = [
+                staged_environment["python_path"],
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "--report",
+                report_path,
+            ]
+            if overwrite:
+                install_command_parts.extend(["--upgrade", "--force-reinstall"])
+            install_command_parts.append(transport.package_ref)
+            attempt = await _run_external_project_install_attempt(
+                command_parts=install_command_parts,
+                timeout=900,
+                report_path=report_path,
+            )
+            install_summary = str(attempt.get("summary") or "").strip()
+            if bool(attempt.get("success")):
+                selected_transport = transport
+                report_payload = _load_pip_install_report(report_path)
+                break
+            transport_errors.append(f"{transport.kind}: {install_summary}")
+        if selected_transport is None:
             raise HTTPException(
                 400,
-                detail=f"External project verification failed: {verify_summary}",
+                detail=(
+                    "External project install failed: "
+                    + "; ".join(
+                        transport_errors
+                        or [install_summary or "unknown transport failure"]
+                    )
+                ),
             )
-    packages[capability_id] = ExternalCapabilityPackageConfig(
-        capability_id=capability_id,
-        name=install_name,
-        summary=f"External open-source donor from {normalized_source_url}",
-        enabled=enable,
-        kind=capability_kind,
-        source_kind=_external_source_kind(capability_kind),
-        source_url=normalized_source_url,
-        package_ref=package_ref,
-        package_kind="github-archive",
-        package_version=version,
-        execution_mode="shell",
-        install_command=subprocess.list2cmdline(install_command_parts),
-        execute_command=resolved_execute_command,
-        healthcheck_command=resolved_healthcheck_command,
-        environment_requirements=_default_environment_requirements(capability_kind),
-        evidence_contract=_default_evidence_contract(capability_kind),
-        provider_ref="github",
-        metadata={
-            "entry_module": normalized_entry_module,
-            "provider": "github-repo",
-            "open_source_project": True,
-        },
-    )
-    config.external_capability_packages = packages
-    save_config(config)
-    return {
-        "installed": True,
-        "name": install_name,
-        "enabled": enable,
-        "source_url": normalized_source_url,
-        "installed_capability_ids": [capability_id],
-        "capability_kind": capability_kind,
-        "execution_mode": "shell",
-        "summary": summary,
-    }
+        requested_distribution = parse_pip_install_report_requested_distribution(
+            report_payload,
+        )
+        if requested_distribution is None:
+            raise HTTPException(
+                400,
+                detail=(
+                    "External project install failed: pip report did not expose the requested distribution"
+                ),
+            )
+        staged_contract = resolve_installed_python_project_contract(
+            python_path=staged_environment["python_path"],
+            scripts_dir=staged_environment["scripts_dir"],
+            distribution_name=requested_distribution.distribution_name,
+            capability_kind=capability_kind,
+            entry_module=str(entry_module or "").strip() or None,
+        )
+        install_name = _normalize_project_install_name(
+            source_url=normalized_source_url,
+            proposed_name=staged_contract.install_name,
+        )
+        capability_id = _build_external_capability_id(
+            capability_kind,
+            install_name=install_name,
+        )
+        conflicting_package = packages.get(capability_id)
+        if conflicting_package is not None and (
+            str(getattr(conflicting_package, "source_url", "") or "").strip()
+            != normalized_source_url
+        ):
+            raise HTTPException(
+                409,
+                detail=(
+                    f"External capability '{capability_id}' already exists for a different source. "
+                    "Choose a different install target."
+                ),
+            )
+        final_environment = dict(staged_environment)
+        resolved_contract = resolve_installed_python_project_contract(
+            python_path=final_environment["python_path"],
+            scripts_dir=final_environment["scripts_dir"],
+            distribution_name=requested_distribution.distribution_name,
+            capability_kind=capability_kind,
+            entry_module=str(entry_module or "").strip() or None,
+        )
+        resolved_execute_command = (
+            str(execute_command or "").strip() or resolved_contract.execute_command
+        )
+        resolved_healthcheck_command = (
+            str(healthcheck_command or "").strip()
+            or resolved_contract.healthcheck_command
+            or resolved_execute_command
+        )
+        if resolved_healthcheck_command:
+            verify_success, verify_summary = await _run_external_project_shell_command(
+                resolved_healthcheck_command,
+                timeout=180,
+            )
+            if not verify_success:
+                raise HTTPException(
+                    400,
+                    detail=f"External project verification failed: {verify_summary}",
+                )
+        staged_environment = {}
+        for key, package in existing_source_matches:
+            packages.pop(key, None)
+            package_environment_root = str(
+                getattr(package, "environment_root", "") or "",
+            )
+            if package_environment_root != final_environment["environment_root"]:
+                _cleanup_external_project_environment(package_environment_root)
+        packages[capability_id] = ExternalCapabilityPackageConfig(
+            capability_id=capability_id,
+            name=install_name,
+            summary=f"External open-source donor from {normalized_source_url}",
+            enabled=enable,
+            kind=capability_kind,
+            source_kind=_external_source_kind(capability_kind),
+            source_url=normalized_source_url,
+            package_ref=selected_transport.package_ref,
+            package_kind=selected_transport.kind,
+            package_version=(
+                requested_distribution.distribution_version or resolved_version
+            ),
+            execution_mode="shell",
+            install_command=(
+                f'"{final_environment["python_path"]}" -m pip install '
+                f"{selected_transport.package_ref}"
+            ),
+            execute_command=resolved_execute_command,
+            healthcheck_command=resolved_healthcheck_command,
+            environment_root=final_environment["environment_root"],
+            python_path=final_environment["python_path"],
+            scripts_dir=final_environment["scripts_dir"],
+            environment_requirements=_default_environment_requirements(capability_kind),
+            evidence_contract=_default_evidence_contract(capability_kind),
+            provider_ref="github",
+            metadata={
+                "entry_module": resolved_contract.entry_module,
+                "console_script": resolved_contract.console_script,
+                "distribution_name": resolved_contract.distribution_name,
+                "distribution_version": resolved_contract.package_version,
+                "provider": "github-repo",
+                "open_source_project": True,
+                "install_transport_kind": selected_transport.kind,
+                **dict(resolved_contract.metadata or {}),
+            },
+        )
+        config.external_capability_packages = packages
+        save_config(config)
+        return {
+            "installed": True,
+            "name": install_name,
+            "enabled": enable,
+            "source_url": normalized_source_url,
+            "installed_capability_ids": [capability_id],
+            "capability_kind": capability_kind,
+            "execution_mode": "shell",
+            "summary": install_summary,
+        }
+    finally:
+        if staged_environment:
+            _cleanup_external_project_environment(
+                str(staged_environment.get("environment_root") or ""),
+            )
 
 
 def _project_target_scope(

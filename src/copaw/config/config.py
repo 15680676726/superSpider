@@ -374,6 +374,9 @@ class ExternalCapabilityPackageConfig(BaseModel):
     install_command: str = ""
     execute_command: str = ""
     healthcheck_command: str = ""
+    environment_root: str = ""
+    python_path: str = ""
+    scripts_dir: str = ""
     environment_requirements: List[str] = Field(default_factory=list)
     evidence_contract: List[str] = Field(default_factory=lambda: ["shell-command"])
     provider_ref: str = "github"

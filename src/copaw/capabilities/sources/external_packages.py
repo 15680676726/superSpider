@@ -24,6 +24,11 @@ def list_external_package_capabilities() -> list[CapabilityMount]:
                 "install_command": str(getattr(package, "install_command", "") or ""),
                 "execute_command": execute_command,
                 "healthcheck_command": healthcheck_command,
+                "environment_root": str(
+                    getattr(package, "environment_root", "") or ""
+                ),
+                "python_path": str(getattr(package, "python_path", "") or ""),
+                "scripts_dir": str(getattr(package, "scripts_dir", "") or ""),
                 "execution_mode": str(
                     getattr(package, "execution_mode", "shell") or "shell"
                 ),
