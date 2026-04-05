@@ -1474,3 +1474,44 @@ def test_sqlite_override_repositories_crud_round_trip(tmp_path) -> None:
     assert [item.id for item in knowledge_repo.list_chunks()] == [knowledge_chunk.id]
     assert knowledge_repo.delete_chunk(knowledge_chunk.id) is True
     assert knowledge_repo.get_chunk(knowledge_chunk.id) is None
+
+
+def test_agent_profile_override_repository_ignores_legacy_goal_columns(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    repository = SqliteAgentProfileOverrideRepository(store)
+
+    with store.connection() as conn:
+        conn.execute(
+            "ALTER TABLE agent_profile_overrides ADD COLUMN current_goal_id TEXT",
+        )
+        conn.execute(
+            "ALTER TABLE agent_profile_overrides ADD COLUMN current_goal TEXT",
+        )
+
+    override = AgentProfileOverrideRecord(
+        agent_id="legacy-agent",
+        role_name="operations",
+        role_summary="Legacy override row with retired goal columns.",
+        current_focus_kind="goal",
+        current_focus_id="goal-live",
+        current_focus="Keep current focus projection only.",
+    )
+    repository.upsert_override(override)
+
+    with store.connection() as conn:
+        conn.execute(
+            """
+            UPDATE agent_profile_overrides
+            SET current_goal_id = ?, current_goal = ?
+            WHERE agent_id = ?
+            """,
+            ("goal-legacy", "Legacy goal summary", "legacy-agent"),
+        )
+
+    stored = repository.get_override("legacy-agent")
+    assert stored is not None
+    assert stored.agent_id == "legacy-agent"
+    assert stored.current_focus_id == "goal-live"
+    assert hasattr(stored, "current_goal_id") is False
+    assert hasattr(stored, "current_goal") is False
+    assert [item.agent_id for item in repository.list_overrides()] == ["legacy-agent"]

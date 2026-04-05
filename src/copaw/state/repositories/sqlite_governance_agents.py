@@ -435,7 +435,11 @@ def _agent_profile_override_from_row(
         payload.pop("evidence_expectations_json", None),
     )
     payload["capabilities"] = _decode_json_list(payload.pop("capabilities_json", None))
-    return AgentProfileOverrideRecord.model_validate(payload)
+    allowed_keys = AgentProfileOverrideRecord.model_fields.keys()
+    filtered_payload = {
+        key: value for key, value in payload.items() if key in allowed_keys
+    }
+    return AgentProfileOverrideRecord.model_validate(filtered_payload)
 
 
 class SqliteAgentRuntimeRepository(BaseAgentRuntimeRepository):
