@@ -608,3 +608,17 @@ CoPaw 的内部统一知识图谱应定义为：
 
 > 一套统一的、证据驱动的、可生长的内部认知总图。它以世界、目标、行动、结果为主语，沉淀世界认知、执行认知和人类边界；主脑运行时只激活当前任务子图，执行结束后再把结果和经验写回总图。
 
+
+## 12. 2026-04-06 实现收口
+
+- 正式图谱真相仍留在现有 truth-first memory 体系内，没有新建第二套图谱真相源。
+- canonical graph writeback 现在正式落到三层：
+  - `knowledge_chunks`：持久化源真相
+  - `memory_fact_index`：活跃节点投影
+  - `memory_relation_views`：活跃关系投影
+- 旧知识不再只是追加：
+  - invalidated node 会被降出 active read path
+  - invalidated relation 会被过滤出 activation / planning 读链
+- 共享持久化回写已经接到两条主链：
+  - report synthesis closeout
+  - query execution runtime closeout

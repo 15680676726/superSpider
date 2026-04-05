@@ -3,11 +3,21 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from copaw.memory import DerivedMemoryIndexService, MemoryReflectionService
 from copaw.kernel import KernelQueryExecutionService
 from copaw.kernel.runtime_outcome import build_execution_knowledge_writeback
 from copaw.state import AgentRuntimeRecord, SQLiteStateStore
 from copaw.state.execution_feedback import collect_recent_execution_feedback
-from copaw.state.repositories import SqliteAgentRuntimeRepository
+from copaw.state.knowledge_service import StateKnowledgeService
+from copaw.state.repositories import (
+    SqliteAgentRuntimeRepository,
+    SqliteKnowledgeChunkRepository,
+    SqliteMemoryEntityViewRepository,
+    SqliteMemoryFactIndexRepository,
+    SqliteMemoryOpinionViewRepository,
+    SqliteMemoryReflectionRunRepository,
+    SqliteMemoryRelationViewRepository,
+)
 
 
 def test_build_execution_knowledge_writeback_emits_failure_and_recovery_patterns() -> None:
@@ -36,6 +46,35 @@ def test_build_execution_knowledge_writeback_emits_failure_and_recovery_patterns
         summary["node_types"],
     )
     assert {"indicates", "recovers_with"} <= set(summary["relation_types"])
+
+
+def _build_knowledge_services(tmp_path):
+    store = SQLiteStateStore(tmp_path / "query-knowledge.sqlite3")
+    knowledge_repo = SqliteKnowledgeChunkRepository(store)
+    fact_repo = SqliteMemoryFactIndexRepository(store)
+    entity_repo = SqliteMemoryEntityViewRepository(store)
+    opinion_repo = SqliteMemoryOpinionViewRepository(store)
+    relation_repo = SqliteMemoryRelationViewRepository(store)
+    reflection_repo = SqliteMemoryReflectionRunRepository(store)
+    derived = DerivedMemoryIndexService(
+        fact_index_repository=fact_repo,
+        entity_view_repository=entity_repo,
+        opinion_view_repository=opinion_repo,
+        relation_view_repository=relation_repo,
+        reflection_run_repository=reflection_repo,
+    )
+    reflection = MemoryReflectionService(
+        derived_index_service=derived,
+        entity_view_repository=entity_repo,
+        opinion_view_repository=opinion_repo,
+        reflection_run_repository=reflection_repo,
+    )
+    knowledge = StateKnowledgeService(
+        repository=knowledge_repo,
+        derived_index_service=derived,
+        reflection_service=reflection,
+    )
+    return knowledge, derived
 
 
 def test_query_execution_runtime_persists_knowledge_writeback_to_agent_runtime(tmp_path) -> None:
@@ -87,6 +126,65 @@ def test_query_execution_runtime_persists_knowledge_writeback_to_agent_runtime(t
     assert knowledge["capability_ref"] == "system:dispatch_query"
     assert knowledge["environment_ref"] == "workspace:repo"
     assert {"runtime_outcome", "failure_pattern"} <= set(knowledge["node_types"])
+
+
+def test_query_execution_runtime_persists_knowledge_writeback_into_memory(tmp_path) -> None:
+    knowledge_service, derived = _build_knowledge_services(tmp_path)
+    store = SQLiteStateStore(tmp_path / "query-runtime.sqlite3")
+    runtime_repository = SqliteAgentRuntimeRepository(store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="ops-agent",
+            actor_key="industry:ops:execution-core",
+            actor_fingerprint="fp-ops",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="executing",
+            current_task_id="task-1",
+            metadata={},
+        ),
+    )
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        agent_runtime_repository=runtime_repository,
+        knowledge_service=knowledge_service,
+    )
+
+    service._mark_actor_query_finished(  # pylint: disable=protected-access
+        agent_id="ops-agent",
+        task_id="task-1",
+        session_id="industry-chat:ops",
+        user_id="default",
+        conversation_thread_id="industry-chat:ops",
+        channel="console",
+        summary="Shell command blocked by safety policy.",
+        error="blocked by shell safety policy",
+        execution_context={
+            "work_context_id": "ctx-ops-1",
+            "main_brain_runtime": {
+                "risk_level": "guarded",
+                "environment": {"ref": "workspace:repo"},
+            },
+        },
+        stream_step_count=3,
+    )
+
+    fact_entries = derived.list_fact_entries(
+        scope_type="work_context",
+        scope_id="ctx-ops-1",
+        limit=None,
+    )
+    assert any(
+        entry.id.startswith("runtime-outcome:")
+        and (entry.metadata or {}).get("knowledge_graph_node_type") == "runtime_outcome"
+        for entry in fact_entries
+    )
+    relation_views = derived.list_relation_views(
+        scope_type="work_context",
+        scope_id="ctx-ops-1",
+        limit=None,
+    )
+    assert any(view.relation_kind == "indicates" for view in relation_views)
 
 
 def test_collect_recent_execution_feedback_exposes_execution_knowledge_anchors() -> None:

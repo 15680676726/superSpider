@@ -118,19 +118,19 @@ def build_runtime_domain_services(
     memory_recall_service: MemoryRecallService,
     memory_retain_service: MemoryRetainService,
     memory_activation_service: MemoryActivationService | None = None,
-    agent_experience_service: AgentExperienceMemoryService | None,
-    work_context_service: WorkContextService,
-    learning_service: LearningService,
-    capability_service: CapabilityService,
-    capability_candidate_service: object | None,
-    capability_donor_service: object | None,
-    capability_portfolio_service: object | None,
-    skill_trial_service: object | None,
-    skill_lifecycle_decision_service: object | None,
-    kernel_dispatcher: KernelDispatcher,
-    kernel_tool_bridge: KernelToolBridge,
-    actor_mailbox_service: ActorMailboxService,
-    actor_supervisor: ActorSupervisor,
+    agent_experience_service: AgentExperienceMemoryService | None = None,
+    work_context_service: WorkContextService | None = None,
+    learning_service: LearningService | None = None,
+    capability_service: CapabilityService | None = None,
+    capability_candidate_service: object | None = None,
+    capability_donor_service: object | None = None,
+    capability_portfolio_service: object | None = None,
+    skill_trial_service: object | None = None,
+    skill_lifecycle_decision_service: object | None = None,
+    kernel_dispatcher: KernelDispatcher | None = None,
+    kernel_tool_bridge: KernelToolBridge | None = None,
+    actor_mailbox_service: ActorMailboxService | None = None,
+    actor_supervisor: ActorSupervisor | None = None,
 ) -> RuntimeDomainServices:
     strategy_planning_compiler = StrategyPlanningCompiler()
     cycle_planner = CyclePlanningCompiler()
@@ -256,6 +256,7 @@ def build_runtime_domain_services(
         state_store=state_store,
         memory_retain_service=memory_retain_service,
         memory_activation_service=memory_activation_service,
+        knowledge_service=knowledge_service,
     )
     industry_service = IndustryService(
         goal_service=goal_service,
@@ -274,6 +275,7 @@ def build_runtime_domain_services(
         runtime_bindings=industry_runtime_bindings,
         memory_retain_service=memory_retain_service,
         memory_activation_service=memory_activation_service,
+        knowledge_service=knowledge_service,
         work_context_service=work_context_service,
         actor_mailbox_service=actor_mailbox_service,
     )

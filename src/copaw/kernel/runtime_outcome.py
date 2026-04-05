@@ -180,10 +180,12 @@ def build_execution_knowledge_writeback(
     blocked_next_step: str | None = None,
     evidence_refs: list[str] | None = None,
     recovery_summary: str | None = None,
+    knowledge_writeback_service: object | None = None,
+    persist: bool = False,
 ) -> dict[str, object]:
     from ..memory.knowledge_writeback_service import KnowledgeWritebackService
 
-    service = KnowledgeWritebackService()
+    service = knowledge_writeback_service or KnowledgeWritebackService()
     change = service.build_execution_outcome_writeback(
         scope_type=scope_type,
         scope_id=scope_id,
@@ -194,6 +196,9 @@ def build_execution_knowledge_writeback(
         evidence_refs=evidence_refs,
         recovery_summary=recovery_summary,
     )
+    apply_change = getattr(service, "apply_change", None)
+    if persist and callable(apply_change):
+        apply_change(change)
     node_ids = [item.node_id for item in change.upsert_nodes]
     node_types = [item.node_type for item in change.upsert_nodes]
     relation_ids = [item.relation_id for item in change.upsert_relations]

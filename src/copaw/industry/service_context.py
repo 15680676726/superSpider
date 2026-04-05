@@ -177,6 +177,7 @@ class IndustryServiceRuntimeBindings:
     assignment_planner: AssignmentPlanningCompiler | None = None
     report_replan_engine: ReportReplanEngine | None = None
     memory_activation_service: object | None = None
+    knowledge_service: object | None = None
 
 
 def build_industry_service_runtime_bindings(
@@ -213,6 +214,7 @@ def build_industry_service_runtime_bindings(
     report_replan_engine: ReportReplanEngine | None = None,
     memory_retain_service: object | None = None,
     memory_activation_service: object | None = None,
+    knowledge_service: object | None = None,
 ) -> IndustryServiceRuntimeBindings:
     # `state_store` remains in the signature for compatibility with older
     # bootstrapping sites, but runtime bindings must now be assembled from
@@ -298,6 +300,7 @@ def build_industry_service_runtime_bindings(
         assignment_planner=assignment_planner,
         report_replan_engine=report_replan_engine,
         memory_activation_service=memory_activation_service,
+        knowledge_service=knowledge_service,
     )
 
 _REMOTE_RECOMMENDATION_ROLE_LIMIT = 12

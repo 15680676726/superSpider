@@ -23,15 +23,7 @@ from .model_support import (
 MemoryScopeType = Literal["global", "industry", "agent", "task", "work_context"]
 MemoryReflectionStatus = Literal["queued", "running", "completed", "failed"]
 MemoryFactType = Literal["fact", "preference", "episode", "temporary", "inference"]
-MemoryRelationKind = Literal[
-    "updates",
-    "supersedes",
-    "derives",
-    "references",
-    "supports",
-    "contradicts",
-    "mentions",
-]
+MemoryRelationKind = str
 MemoryOpinionStance = Literal[
     "supporting",
     "neutral",

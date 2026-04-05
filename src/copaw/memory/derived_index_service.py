@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from datetime import datetime
 from typing import Any, Iterable
 
 from .models import MemoryRebuildSummary, MemoryScopeSelector, utc_now
@@ -397,7 +398,11 @@ class DerivedMemoryIndexService:
         self._sidecar_backends = list(sidecar_backends or [])
 
     def list_fact_entries(self, **kwargs: Any) -> list[MemoryFactIndexRecord]:
-        return self._fact_index_repository.list_entries(**kwargs)
+        include_inactive = bool(kwargs.pop("include_inactive", False))
+        entries = self._fact_index_repository.list_entries(**kwargs)
+        if include_inactive:
+            return entries
+        return [entry for entry in entries if self._is_active_fact_entry(entry)]
 
     def list_entity_views(self, **kwargs: Any) -> list[MemoryEntityViewRecord]:
         if self._entity_view_repository is None:
@@ -413,6 +418,7 @@ class DerivedMemoryIndexService:
         if self._relation_view_repository is None:
             return []
         list_kwargs = dict(kwargs)
+        include_inactive = bool(list_kwargs.pop("include_inactive", False))
         scope_type = normalize_optional_text(list_kwargs.get("scope_type"))
         scope_id = normalize_optional_text(list_kwargs.get("scope_id"))
         if scope_type is not None:
@@ -429,7 +435,10 @@ class DerivedMemoryIndexService:
             normalized = normalize_optional_text(list_kwargs.get(field))
             if normalized is not None:
                 list_kwargs[field] = normalized
-        return self._relation_view_repository.list_views(**list_kwargs)
+        relations = self._relation_view_repository.list_views(**list_kwargs)
+        if include_inactive:
+            return relations
+        return [relation for relation in relations if self._is_active_relation_view(relation)]
 
     def list_reflection_runs(self, **kwargs: Any) -> list[MemoryReflectionRunRecord]:
         if self._reflection_run_repository is None:
@@ -1680,6 +1689,36 @@ class DerivedMemoryIndexService:
             normalize_memory_scope_type(record_scope_type) == normalize_memory_scope_type(scope_type)
             and normalize_scope_id(record_scope_id) == normalize_scope_id(scope_id)
         )
+
+    def _is_active_fact_entry(self, entry: MemoryFactIndexRecord) -> bool:
+        if not bool(getattr(entry, "is_latest", True)):
+            return False
+        metadata = dict(getattr(entry, "metadata", {}) or {})
+        status = str(
+            metadata.get("knowledge_graph_status")
+            or metadata.get("status")
+            or "active",
+        ).strip().lower()
+        if status in {"superseded", "expired"}:
+            return False
+        expires_at = getattr(entry, "expires_at", None)
+        if expires_at is not None and expires_at <= utc_now():
+            return False
+        return True
+
+    def _is_active_relation_view(self, relation: MemoryRelationViewRecord) -> bool:
+        metadata = dict(getattr(relation, "metadata", {}) or {})
+        status = str(metadata.get("status") or "active").strip().lower()
+        if status in {"superseded", "expired"}:
+            return False
+        valid_to = normalize_optional_text(metadata.get("valid_to"))
+        if valid_to:
+            try:
+                if datetime.fromisoformat(valid_to) <= utc_now():
+                    return False
+            except ValueError:
+                return False
+        return True
 
     def _stable_entry_id(self, source_type: str, source_ref: object) -> str:
         return f"memory-index:{source_type}:{slugify(source_ref, fallback='entry')}"

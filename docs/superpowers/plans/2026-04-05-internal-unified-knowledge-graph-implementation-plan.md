@@ -325,7 +325,6 @@ git commit -m "feat: expose runtime knowledge graph summaries"
 ### Task 7: 文档同步与总回归
 
 **Files:**
-- Modify: `TASK_STATUS.md`
 - Modify: `docs/superpowers/specs/2026-04-05-internal-unified-knowledge-graph-design.md`
 - Optional Modify: `docs/superpowers/specs/2026-04-01-knowledge-activation-layer-design.md`
 
@@ -362,13 +361,13 @@ python -m pytest tests/memory/test_knowledge_graph_models.py tests/memory/test_s
 Run:
 
 ```bash
-python -m pytest tests/state/test_strategy_memory_contract.py tests/state/test_truth_first_memory_contract.py tests/memory/test_activation_service.py tests/industry/test_report_synthesis.py tests/compiler/test_strategy_compiler.py tests/kernel/test_query_execution_runtime.py tests/kernel/test_runtime_outcome.py -q
+python -m pytest tests/state/test_strategy_memory_contract.py tests/state/test_truth_first_memory_state.py tests/state/test_truth_first_memory_recall.py tests/memory/test_activation_service.py tests/industry/test_report_synthesis.py tests/compiler/test_strategy_compiler.py tests/kernel/test_query_execution_runtime.py tests/kernel/test_runtime_outcome.py -q
 ```
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add TASK_STATUS.md docs/superpowers/specs/2026-04-05-internal-unified-knowledge-graph-design.md docs/superpowers/specs/2026-04-01-knowledge-activation-layer-design.md
+git add docs/superpowers/specs/2026-04-05-internal-unified-knowledge-graph-design.md docs/superpowers/specs/2026-04-01-knowledge-activation-layer-design.md
 git commit -m "docs: close unified knowledge graph implementation"
 ```
 
@@ -403,3 +402,17 @@ This plan is complete only when:
 - Runtime Center can show current task subgraph summaries
 - old knowledge can be downgraded / replaced / contradicted rather than only accumulated
 
+## 2026-04-06 收口说明
+
+- Task 1-6 已经接入主链。
+- Knowledge writeback 不再只是 summary：
+  - canonical truth 会持久化进现有 truth-first `knowledge_chunks`
+  - graph node projection 会持久化进 `memory_fact_index`
+  - graph relation projection 会持久化进 `memory_relation_views`
+- invalidation 已正式生效：
+  - invalidated node 会被降出 active memory path
+  - invalidated relation 会从 active activation / planning 读链隐藏
+- 共享 writeback persistence 已接到：
+  - report synthesis
+  - query execution runtime closeout
+- 旧的 `query_execution_runtime` 收集期循环导入已经通过 `copaw.kernel` lazy export 拆掉。

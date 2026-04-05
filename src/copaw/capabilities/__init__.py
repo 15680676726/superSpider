@@ -1,21 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from .models import CapabilityMount, CapabilitySummary, SourceKind
-from .registry import CapabilityRegistry
-
-if TYPE_CHECKING:
-    from .service import CapabilityService
-
-
-def __getattr__(name: str):
-    if name == "CapabilityService":
-        from .service import CapabilityService
-
-        return CapabilityService
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+from importlib import import_module
 
 __all__ = [
     "CapabilityMount",
@@ -25,3 +11,19 @@ __all__ = [
     "SourceKind",
 ]
 
+_EXPORTS = {
+    "CapabilityMount": (".models", "CapabilityMount"),
+    "CapabilityRegistry": (".registry", "CapabilityRegistry"),
+    "CapabilityService": (".service", "CapabilityService"),
+    "CapabilitySummary": (".models", "CapabilitySummary"),
+    "SourceKind": (".models", "SourceKind"),
+}
+
+
+def __getattr__(name: str):
+    target = _EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, symbol = target
+    module = import_module(module_name, __name__)
+    return getattr(module, symbol)

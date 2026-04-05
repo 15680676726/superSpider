@@ -123,6 +123,7 @@ def synthesize_agent_reports(
     instance_id: str,
     cycle_id: str | None,
     activation_result: object | None = None,
+    knowledge_writeback_service: object | None = None,
 ) -> dict[str, Any]:
     return synthesize_reports(
         list_agent_report_records(
@@ -131,6 +132,7 @@ def synthesize_agent_reports(
             limit=None,
         ),
         activation_result=activation_result,
+        knowledge_writeback_service=knowledge_writeback_service,
     )
 
 

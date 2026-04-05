@@ -4,10 +4,21 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from copaw.memory import DerivedMemoryIndexService, MemoryReflectionService
+from copaw.memory.knowledge_writeback_service import KnowledgeWritebackService
 from copaw.compiler.planning import ReportReplanEngine
 from copaw.industry.report_synthesis import synthesize_reports
 from copaw.memory.activation_models import ActivationResult, KnowledgeNeuron
-from copaw.state import AgentReportRecord
+from copaw.state import AgentReportRecord, SQLiteStateStore
+from copaw.state.knowledge_service import StateKnowledgeService
+from copaw.state.repositories import (
+    SqliteKnowledgeChunkRepository,
+    SqliteMemoryEntityViewRepository,
+    SqliteMemoryFactIndexRepository,
+    SqliteMemoryOpinionViewRepository,
+    SqliteMemoryReflectionRunRepository,
+    SqliteMemoryRelationViewRepository,
+)
 
 
 def _report(
@@ -671,6 +682,41 @@ def test_synthesize_reports_emits_knowledge_writeback_summary() -> None:
         metadata={"verified_findings": True},
     )
 
+
+def _build_knowledge_writeback_service(tmp_path):
+    store = SQLiteStateStore(tmp_path / "report-synthesis-knowledge.sqlite3")
+    knowledge_repo = SqliteKnowledgeChunkRepository(store)
+    fact_repo = SqliteMemoryFactIndexRepository(store)
+    entity_repo = SqliteMemoryEntityViewRepository(store)
+    opinion_repo = SqliteMemoryOpinionViewRepository(store)
+    relation_repo = SqliteMemoryRelationViewRepository(store)
+    reflection_repo = SqliteMemoryReflectionRunRepository(store)
+    derived = DerivedMemoryIndexService(
+        fact_index_repository=fact_repo,
+        entity_view_repository=entity_repo,
+        opinion_view_repository=opinion_repo,
+        relation_view_repository=relation_repo,
+        reflection_run_repository=reflection_repo,
+    )
+    reflection = MemoryReflectionService(
+        derived_index_service=derived,
+        entity_view_repository=entity_repo,
+        opinion_view_repository=opinion_repo,
+        reflection_run_repository=reflection_repo,
+    )
+    knowledge = StateKnowledgeService(
+        repository=knowledge_repo,
+        derived_index_service=derived,
+        reflection_service=reflection,
+    )
+    service = KnowledgeWritebackService(
+        knowledge_service=knowledge,
+        derived_index_service=derived,
+        relation_view_repository=relation_repo,
+        reflection_service=reflection,
+    )
+    return service, knowledge, derived
+
     synthesis = synthesize_reports([report])
 
     writeback = synthesis["knowledge_writeback"]
@@ -680,3 +726,44 @@ def test_synthesize_reports_emits_knowledge_writeback_summary() -> None:
     assert "opinion" in writeback["node_types"]
     assert "derived_from" in writeback["relation_types"]
     assert "evidence-1" in writeback["evidence_refs"]
+
+
+def test_synthesize_reports_persists_knowledge_writeback_into_memory(tmp_path) -> None:
+    service, knowledge, derived = _build_knowledge_writeback_service(tmp_path)
+    report = _report(
+        headline="Warehouse approval review",
+        owner_agent_id="agent-a",
+        result="completed",
+        findings=["Warehouse approval is verified."],
+        recommendation="Keep the release paused until finance handoff clears.",
+        evidence_ids=["evidence-1"],
+        metadata={"verified_findings": True},
+    )
+
+    synthesis = synthesize_reports(
+        [report],
+        knowledge_writeback_service=service,
+    )
+
+    assert synthesis["knowledge_writeback"]["node_ids"]
+    memory_entries = derived.list_fact_entries(
+        scope_type="industry",
+        scope_id="industry-1",
+        limit=None,
+    )
+    assert any(entry.source_type == "knowledge_graph_node" for entry in memory_entries)
+    relation_views = derived.list_relation_views(
+        scope_type="industry",
+        scope_id="industry-1",
+        limit=None,
+    )
+    assert any(view.relation_kind == "derived_from" for view in relation_views)
+    chunks = knowledge.list_memory(
+        scope_type="industry",
+        scope_id="industry-1",
+        limit=None,
+    )
+    assert any(
+        str(item.source_ref or "").startswith("knowledge-graph-node:report:")
+        for item in chunks
+    )

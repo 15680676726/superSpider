@@ -519,6 +519,9 @@ def synthesize_reports(
             reports=latest_reports,
             activation_result=activation_result,
         )
+        apply_change = getattr(service, "apply_change", None)
+        if callable(apply_change):
+            apply_change(writeback_change)
         writeback_summary = summarize_change(writeback_change)
         if isinstance(writeback_summary, dict) and (
             writeback_summary.get("node_ids")
