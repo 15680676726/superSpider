@@ -1442,6 +1442,8 @@ def test_query_execution_service_injects_recent_execution_feedback_into_prompt(
                     id="evidence-fail-1",
                     task_id="task-2",
                     capability_ref="browser_use",
+                    environment_ref="browser:storefront",
+                    risk_level="guarded",
                     action_summary="Retry storefront login",
                     result_summary="Login failed due to stale OTP.",
                     created_at="2026-03-17T09:29:00+00:00",
@@ -1450,6 +1452,8 @@ def test_query_execution_service_injects_recent_execution_feedback_into_prompt(
                     id="evidence-fail-2",
                     task_id="task-2",
                     capability_ref="browser_use",
+                    environment_ref="browser:storefront",
+                    risk_level="guarded",
                     action_summary="Retry storefront login",
                     result_summary="Login failed again due to stale OTP.",
                     created_at="2026-03-17T09:28:00+00:00",
@@ -1458,6 +1462,8 @@ def test_query_execution_service_injects_recent_execution_feedback_into_prompt(
                     id="evidence-ok-1",
                     task_id="task-1",
                     capability_ref="read_file",
+                    environment_ref="workspace:ops",
+                    risk_level="auto",
                     action_summary="Review previous execution brief",
                     result_summary="Recovered the next owner and blocker summary.",
                     created_at="2026-03-17T09:10:00+00:00",
@@ -1512,6 +1518,10 @@ def test_query_execution_service_injects_recent_execution_feedback_into_prompt(
     assert "# Execution Feedback" in prompt_appendix
     assert "Current execution stage to continue from:" in prompt_appendix
     assert "Inspect feedback loop [verify-brief]" in prompt_appendix
+    assert "Execution knowledge graph anchors:" in prompt_appendix
+    assert "Capability refs: browser_use, read_file" in prompt_appendix
+    assert "Environment refs: browser:storefront, workspace:ops" in prompt_appendix
+    assert "Risk levels seen: guarded, auto" in prompt_appendix
     assert "Recent failures to avoid repeating:" in prompt_appendix
     assert "Retry storefront login" in prompt_appendix
     assert "Recently effective moves to reuse:" in prompt_appendix

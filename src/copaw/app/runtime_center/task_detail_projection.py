@@ -17,6 +17,7 @@ from ...utils.runtime_routes import task_route
 from .environment_feedback_projection import RuntimeCenterEnvironmentFeedbackProjector
 from .goal_decision_projection import RuntimeCenterGoalDecisionProjector
 from .models import RuntimeActivationSummary
+from .execution_runtime_projection import summarize_execution_knowledge_writeback
 from .projection_utils import first_non_empty, string_list_from_values
 from .task_review_projection import (
     build_task_review_payload,
@@ -173,6 +174,11 @@ class RuntimeCenterTaskDetailProjector:
             runtime=runtime,
             kernel_metadata=kernel_metadata,
         )
+        knowledge_writeback = summarize_execution_knowledge_writeback(
+            related_agents_by_id.get(str(owner_agent_id or "").strip(), {}).get("latest_knowledge_writeback")
+            if isinstance(related_agents_by_id.get(str(owner_agent_id or "").strip()), dict)
+            else None,
+        )
         return {
             "trace_id": trace_id_from_kernel_meta(task_id, kernel_metadata),
             "task": task.model_dump(mode="json"),
@@ -216,6 +222,7 @@ class RuntimeCenterTaskDetailProjector:
             "growth": growth,
             "review": review_payload,
             "activation": activation,
+            "knowledge_writeback": knowledge_writeback,
             "stats": {
                 "frame_count": len(frames),
                 "decision_count": len(decisions),
@@ -309,15 +316,25 @@ class RuntimeCenterTaskDetailProjector:
             activated_count=len(payload.get("activated_neurons") or []),
             contradiction_count=len(payload.get("contradictions") or []),
             top_entities=string_list_from_values(payload.get("top_entities")),
+            top_opinions=string_list_from_values(payload.get("top_opinions")),
+            top_relations=string_list_from_values(payload.get("top_relations")),
+            top_relation_kinds=string_list_from_values(payload.get("top_relation_kinds")),
             top_constraints=string_list_from_values(payload.get("top_constraints")),
             top_next_actions=string_list_from_values(payload.get("top_next_actions")),
             support_refs=string_list_from_values(payload.get("support_refs")),
+            top_evidence_refs=string_list_from_values(
+                payload.get("top_evidence_refs"),
+                payload.get("evidence_refs"),
+                payload.get("support_refs"),
+            ),
             evidence_refs=string_list_from_values(payload.get("evidence_refs")),
             strategy_refs=string_list_from_values(payload.get("strategy_refs")),
         )
         if (
             summary.activated_count <= 0
             and not summary.top_entities
+            and not summary.top_opinions
+            and not summary.top_relations
             and not summary.top_constraints
             and not summary.support_refs
         ):

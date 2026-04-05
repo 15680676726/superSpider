@@ -32,6 +32,7 @@ from ...state.repositories import (
     SqliteWorkContextRepository,
 )
 from .environment_feedback_projection import RuntimeCenterEnvironmentFeedbackProjector
+from .execution_runtime_projection import summarize_execution_knowledge_writeback
 from .goal_decision_projection import RuntimeCenterGoalDecisionProjector
 from .task_detail_projection import RuntimeCenterTaskDetailProjector
 from .task_list_projection import RuntimeCenterTaskListProjector
@@ -780,6 +781,11 @@ class RuntimeCenterStateQueryService:
         )
         if governance is not None:
             agent_payload["capability_governance"] = governance
+        knowledge_writeback = summarize_execution_knowledge_writeback(
+            self._mapping_payload(runtime_payload.get("metadata")).get("knowledge_writeback"),
+        )
+        if knowledge_writeback is not None:
+            agent_payload["latest_knowledge_writeback"] = knowledge_writeback
         return agent_payload
 
     def _project_agent_capability_governance(

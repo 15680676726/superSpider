@@ -659,17 +659,13 @@ class _IndustryLifecycleMixin:
             )
         return self._strategy_compiler.compile(strategy_record)
 
-    def _resolve_planning_activation_result(
+    def _build_planning_activation_query(
         self,
         *,
         record: IndustryInstanceRecord,
         open_backlog: Sequence[BacklogItemRecord],
         pending_reports: Sequence[AgentReportRecord],
-    ) -> object | None:
-        activation_service = getattr(self, "_memory_activation_service", None)
-        activate_for_query = getattr(activation_service, "activate_for_query", None)
-        if not callable(activate_for_query):
-            return None
+    ) -> str:
         query_parts = _unique_strings(
             [
                 record.label,
@@ -695,6 +691,24 @@ class _IndustryLifecycleMixin:
         query = " | ".join(query_parts[:6]).strip()
         if not query:
             query = record.label or record.summary or record.instance_id
+        return query
+
+    def _resolve_planning_activation_result(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        open_backlog: Sequence[BacklogItemRecord],
+        pending_reports: Sequence[AgentReportRecord],
+    ) -> object | None:
+        activation_service = getattr(self, "_memory_activation_service", None)
+        activate_for_query = getattr(activation_service, "activate_for_query", None)
+        if not callable(activate_for_query):
+            return None
+        query = self._build_planning_activation_query(
+            record=record,
+            open_backlog=open_backlog,
+            pending_reports=pending_reports,
+        )
         try:
             return activate_for_query(
                 query=query,
@@ -705,6 +719,40 @@ class _IndustryLifecycleMixin:
             )
         except Exception:
             return None
+
+    def _resolve_planning_task_subgraph(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        open_backlog: Sequence[BacklogItemRecord],
+        pending_reports: Sequence[AgentReportRecord],
+        activation_result: object | None = None,
+    ) -> object | None:
+        subgraph_service = getattr(self, "_subgraph_activation_service", None)
+        activate_for_query = getattr(subgraph_service, "activate_for_query", None)
+        if callable(activate_for_query):
+            query = self._build_planning_activation_query(
+                record=record,
+                open_backlog=open_backlog,
+                pending_reports=pending_reports,
+            )
+            try:
+                return activate_for_query(
+                    query=query,
+                    industry_instance_id=record.instance_id,
+                    owner_agent_id=EXECUTION_CORE_AGENT_ID,
+                    current_phase="operating-cycle-planning",
+                    limit=12,
+                )
+            except Exception:
+                return None
+        to_task_subgraph = getattr(activation_result, "to_task_subgraph", None)
+        if callable(to_task_subgraph):
+            try:
+                return to_task_subgraph()
+            except Exception:
+                return None
+        return None
 
     def _apply_activation_to_strategy_constraints(
         self,
@@ -796,6 +844,7 @@ class _IndustryLifecycleMixin:
         strategy_constraints_sidecar: Mapping[str, Any] | None = None,
         cycle_decision_sidecar: Mapping[str, Any] | None = None,
         report_replan_sidecar: Mapping[str, Any] | None = None,
+        task_subgraph: object | None = None,
     ) -> tuple[OperatingCycleRecord, list[str]]:
         if (
             self._assignment_service is None
@@ -821,6 +870,7 @@ class _IndustryLifecycleMixin:
                 backlog_item=item,
                 lane=lane,
                 strategy_constraints=strategy_constraints,
+                task_subgraph=task_subgraph,
             )
             assignment_plan_payload = self._planner_sidecar_payload(assignment_plan)
             assignment_specs.append(
@@ -3205,6 +3255,7 @@ class _IndustryLifecycleMixin:
         formal_planning_context: Mapping[str, Any] | None = None,
         report_synthesis: Mapping[str, Any] | None = None,
         activation_result: object | None = None,
+        task_subgraph: object | None = None,
     ) -> tuple[str | None, list[BacklogItemRecord]]:
         prediction_service = getattr(self, "_prediction_service", None)
         create_cycle_case = getattr(prediction_service, "create_cycle_case", None)
@@ -3235,6 +3286,7 @@ class _IndustryLifecycleMixin:
                 pending_reports=pending_reports,
                 force=force,
                 strategy_constraints=strategy_constraints,
+                task_subgraph=task_subgraph,
             )
             strategy_constraints_payload = self._strategy_constraints_sidecar_payload(
                 record=record,
@@ -3669,6 +3721,12 @@ class _IndustryLifecycleMixin:
             open_backlog=prediction_open_backlog,
             pending_reports=pending_reports,
         )
+        planning_task_subgraph = self._resolve_planning_task_subgraph(
+            record=record,
+            open_backlog=prediction_open_backlog,
+            pending_reports=pending_reports,
+            activation_result=planning_activation_result,
+        )
         prediction_strategy_constraints = self._apply_activation_to_strategy_constraints(
             constraints=self._compile_strategy_constraints(record=record),
             activation_result=planning_activation_result,
@@ -3684,6 +3742,7 @@ class _IndustryLifecycleMixin:
             processed_reports=processed_reports,
             strategy_constraints=prediction_strategy_constraints,
             activation_result=planning_activation_result,
+            task_subgraph=planning_task_subgraph,
         )
         open_backlog = self._backlog_service.list_open_items(
             industry_instance_id=record.instance_id,
@@ -3784,6 +3843,7 @@ class _IndustryLifecycleMixin:
                 force=force,
                 force_scoped_backlog=bool(scoped_backlog_ids),
                 strategy_constraints=strategy_constraints,
+                task_subgraph=planning_task_subgraph,
             )
             reason = cycle_decision.reason
             if cycle_decision.should_start and cycle_decision.selected_backlog_item_ids:
@@ -3833,6 +3893,7 @@ class _IndustryLifecycleMixin:
                         strategy_constraints_sidecar=strategy_constraints_payload,
                         cycle_decision_sidecar=cycle_decision_payload,
                         report_replan_sidecar=report_replan_payload,
+                        task_subgraph=planning_task_subgraph,
                     )
                     record = self._industry_instance_repository.upsert_instance(
                         record.model_copy(

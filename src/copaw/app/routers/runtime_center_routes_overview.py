@@ -60,11 +60,14 @@ async def get_runtime_surface(
             buddy_profile_id=buddy_profile_id,
         )
     except TypeError:
-        return await service.get_surface(
-            runtime_state,
-            include_cards=include_cards,
-            include_main_brain=include_main_brain,
-        )
+        try:
+            return await service.get_surface(
+                runtime_state,
+                include_cards=include_cards,
+                include_main_brain=include_main_brain,
+            )
+        except TypeError:
+            return await service.get_surface(runtime_state)
 
 
 @router.get("/events")

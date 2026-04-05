@@ -72,9 +72,20 @@ def execution_feedback_prompt_lines(feedback: dict[str, Any]) -> list[str]:
     recent_failures = _string_list(feedback.get("recent_failures"))
     effective_actions = _string_list(feedback.get("effective_actions"))
     avoid_repeats = _string_list(feedback.get("avoid_repeats"))
+    capability_refs = _string_list(feedback.get("capability_refs"))
+    environment_refs = _string_list(feedback.get("environment_refs"))
+    risk_levels = _string_list(feedback.get("risk_levels"))
     if current_stage:
         lines.append("Current execution stage to continue from:")
         lines.append(f"- {current_stage}")
+    if capability_refs or environment_refs or risk_levels:
+        lines.append("Execution knowledge graph anchors:")
+        if capability_refs:
+            lines.append(f"- Capability refs: {', '.join(capability_refs[:4])}")
+        if environment_refs:
+            lines.append(f"- Environment refs: {', '.join(environment_refs[:4])}")
+        if risk_levels:
+            lines.append(f"- Risk levels seen: {', '.join(risk_levels[:4])}")
     if recent_failures:
         lines.append("Recent failures to avoid repeating:")
         lines.extend(f"- {item}" for item in recent_failures[:4])

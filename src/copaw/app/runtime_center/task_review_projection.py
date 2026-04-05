@@ -20,6 +20,7 @@ from .execution_runtime_projection import (
     host_twin_trusted_anchor,
     host_twin_writable_surface_label,
     resolve_canonical_host_identity,
+    summarize_execution_knowledge_writeback,
 )
 from .projection_utils import (
     dict_from_value,
@@ -554,6 +555,11 @@ def build_task_review_payload(
     )
     trigger = extract_task_trigger(kernel_metadata)
     feedback = execution_feedback or {}
+    runtime_metadata = (
+        dict_from_value(getattr(runtime, "metadata", None))
+        if runtime is not None
+        else None
+    )
     current_stage = first_non_empty(feedback.get("current_stage"), phase)
     recent_failures = string_list_from_values(feedback.get("recent_failures"))
     effective_actions = string_list_from_values(feedback.get("effective_actions"))
@@ -573,6 +579,17 @@ def build_task_review_payload(
     host_companion_session = execution_runtime_sections.get("host_companion_session")
     host_twin = execution_runtime_sections.get("host_twin")
     host_twin_summary_payload = execution_runtime_sections.get("host_twin_summary")
+    knowledge_writeback = (
+        summarize_execution_knowledge_writeback(feedback.get("knowledge_writeback"))
+        or summarize_execution_knowledge_writeback(
+            runtime_metadata.get("knowledge_writeback") if runtime_metadata is not None else None,
+        )
+        or summarize_execution_knowledge_writeback(
+            owner_agent.get("latest_knowledge_writeback")
+            if isinstance(owner_agent, dict)
+            else None,
+        )
+    )
     host_twin_blocker_family = host_twin_active_blocker_family(host_twin)
     host_twin_resume = host_twin_resume_kind(host_twin)
     host_twin_recovery_mode = host_twin_legal_recovery_mode(host_twin)
@@ -1151,6 +1168,7 @@ def build_task_review_payload(
             "desktop_app_contract": desktop_app_contract,
             "host_twin": host_twin,
             "host_twin_summary": host_twin_summary_payload,
+            "knowledge_writeback": knowledge_writeback,
         },
         "continuity": continuity,
         "evidence_status": evidence_status,

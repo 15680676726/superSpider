@@ -45,6 +45,25 @@ _DEFAULT_BLOCKED_NEXT_STEPS: dict[str, str] = {
 }
 
 
+def _merge_string_lists(*values: object) -> list[str]:
+    seen: set[str] = set()
+    merged: list[str] = []
+    for value in values:
+        if isinstance(value, str):
+            items = [value]
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            items = list(value)
+        else:
+            items = []
+        for item in items:
+            text = str(item or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            merged.append(text)
+    return merged
+
+
 def normalize_runtime_summary(value: str | None) -> str | None:
     if not isinstance(value, str):
         return None
@@ -144,6 +163,64 @@ def build_execution_diagnostics(
         "failure_source": resolved_failure_source,
         "blocked_next_step": resolved_next_step,
         "remediation_summary": resolved_remediation_summary,
+    }
+
+
+def build_execution_knowledge_writeback(
+    *,
+    scope_type: str,
+    scope_id: str,
+    outcome_ref: str,
+    outcome: str,
+    summary: str,
+    capability_ref: str | None = None,
+    environment_ref: str | None = None,
+    risk_level: str | None = None,
+    failure_source: str | None = None,
+    blocked_next_step: str | None = None,
+    evidence_refs: list[str] | None = None,
+    recovery_summary: str | None = None,
+) -> dict[str, object]:
+    from ..memory.knowledge_writeback_service import KnowledgeWritebackService
+
+    service = KnowledgeWritebackService()
+    change = service.build_execution_outcome_writeback(
+        scope_type=scope_type,
+        scope_id=scope_id,
+        outcome_ref=outcome_ref,
+        outcome=outcome,
+        summary=summary,
+        capability_ref=capability_ref,
+        evidence_refs=evidence_refs,
+        recovery_summary=recovery_summary,
+    )
+    node_ids = [item.node_id for item in change.upsert_nodes]
+    node_types = [item.node_type for item in change.upsert_nodes]
+    relation_ids = [item.relation_id for item in change.upsert_relations]
+    relation_types = [item.relation_type for item in change.upsert_relations]
+    resolved_evidence_refs = _merge_string_lists(
+        evidence_refs,
+        *[item.evidence_refs for item in change.upsert_nodes],
+        *[item.evidence_refs for item in change.upsert_relations],
+    )
+    return {
+        "source": "execution-outcome",
+        "scope_type": scope_type,
+        "scope_id": scope_id,
+        "outcome_ref": outcome_ref,
+        "outcome": outcome,
+        "summary": summary,
+        "capability_ref": capability_ref,
+        "environment_ref": environment_ref,
+        "risk_level": risk_level,
+        "failure_source": normalize_runtime_summary(failure_source),
+        "blocked_next_step": normalize_runtime_summary(blocked_next_step),
+        "recovery_summary": normalize_runtime_summary(recovery_summary),
+        "node_ids": node_ids,
+        "node_types": node_types,
+        "relation_ids": relation_ids,
+        "relation_types": relation_types,
+        "evidence_refs": resolved_evidence_refs,
     }
 
 

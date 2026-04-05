@@ -2,6 +2,7 @@
 """Canonical execution-runtime projection helpers for Runtime Center read surfaces."""
 from __future__ import annotations
 
+from .models import RuntimeKnowledgeWritebackSummary
 from .projection_utils import (
     dict_from_value,
     dict_list_from_value,
@@ -104,6 +105,37 @@ def attach_execution_runtime_projection(
     normalized = dict(feedback or {})
     normalized["execution_runtime"] = extract_execution_runtime_sections(normalized)
     return normalized
+
+
+def summarize_execution_knowledge_writeback(
+    payload: dict[str, object] | None,
+) -> dict[str, object] | None:
+    resolved = dict_from_value(payload)
+    if resolved is None:
+        return None
+    summary = RuntimeKnowledgeWritebackSummary(
+        source=first_non_empty(resolved.get("source")) or "execution-outcome",
+        outcome=first_non_empty(resolved.get("outcome")) or "unknown",
+        summary=first_non_empty(resolved.get("summary")) or "",
+        capability_ref=first_non_empty(resolved.get("capability_ref")),
+        environment_ref=first_non_empty(resolved.get("environment_ref")),
+        risk_level=first_non_empty(resolved.get("risk_level")),
+        failure_source=first_non_empty(resolved.get("failure_source")),
+        blocked_next_step=first_non_empty(resolved.get("blocked_next_step")),
+        recovery_summary=first_non_empty(resolved.get("recovery_summary")),
+        node_types=string_list_from_values(resolved.get("node_types")),
+        relation_types=string_list_from_values(resolved.get("relation_types")),
+        evidence_refs=string_list_from_values(resolved.get("evidence_refs")),
+    )
+    if (
+        not summary.summary
+        and not summary.node_types
+        and not summary.relation_types
+        and not summary.failure_source
+        and not summary.recovery_summary
+    ):
+        return None
+    return summary.model_dump(mode="json")
 
 
 def host_twin_seat_owner_ref(host_twin: dict[str, object] | None) -> str | None:
@@ -550,4 +582,5 @@ __all__ = [
     "host_twin_trusted_anchor",
     "host_twin_writable_surface_label",
     "resolve_canonical_host_identity",
+    "summarize_execution_knowledge_writeback",
 ]

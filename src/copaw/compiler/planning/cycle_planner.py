@@ -14,6 +14,7 @@ from .models import (
     PlanningStrategyConstraints,
     StrategyTriggerRule,
     build_planning_shell_payload,
+    project_task_subgraph_to_planning_focus,
 )
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_-]{1,}")
@@ -127,8 +128,12 @@ class CyclePlanningCompiler:
         force: bool,
         force_scoped_backlog: bool = False,
         strategy_constraints: PlanningStrategyConstraints | None = None,
+        task_subgraph: object | None = None,
     ) -> CyclePlanningDecision:
-        constraints = PlanningStrategyConstraints.from_value(strategy_constraints)
+        constraints = self._merge_task_subgraph_into_constraints(
+            constraints=PlanningStrategyConstraints.from_value(strategy_constraints),
+            task_subgraph=task_subgraph,
+        )
         selection_limit = self._selection_limit(constraints)
         lane_budgets = self._lane_budget_map(constraints)
         lane_budget_outcomes: dict[str, dict[str, object]] = {}
@@ -330,6 +335,52 @@ class CyclePlanningCompiler:
         if lane_budget_outcomes:
             metadata["lane_budget_outcomes"] = lane_budget_outcomes
         return metadata
+
+    def _merge_task_subgraph_into_constraints(
+        self,
+        *,
+        constraints: PlanningStrategyConstraints,
+        task_subgraph: object | None,
+    ) -> PlanningStrategyConstraints:
+        projection = project_task_subgraph_to_planning_focus(task_subgraph)
+        if not projection:
+            return constraints
+        relation_evidence = list(constraints.graph_relation_evidence or [])
+        seen_relation_ids = {
+            _string(entry.get("relation_id"))
+            for entry in relation_evidence
+            if isinstance(entry, dict)
+        }
+        for entry in list(projection.get("relation_evidence") or []):
+            if not isinstance(entry, dict):
+                continue
+            relation_id = _string(entry.get("relation_id"))
+            if relation_id is not None and relation_id in seen_relation_ids:
+                continue
+            if relation_id is not None:
+                seen_relation_ids.add(relation_id)
+            relation_evidence.append(dict(entry))
+        return constraints.model_copy(
+            update={
+                "current_focuses": _unique_strings(
+                    constraints.current_focuses,
+                    projection.get("constraint_refs"),
+                ),
+                "graph_focus_entities": _unique_strings(
+                    constraints.graph_focus_entities,
+                    projection.get("top_entities"),
+                ),
+                "graph_focus_opinions": _unique_strings(
+                    constraints.graph_focus_opinions,
+                    projection.get("top_opinions"),
+                ),
+                "graph_focus_relations": _unique_strings(
+                    constraints.graph_focus_relations,
+                    projection.get("top_relations"),
+                ),
+                "graph_relation_evidence": relation_evidence,
+            },
+        )
 
     def _resolve_cycle_kind(
         self,

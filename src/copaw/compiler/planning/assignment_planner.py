@@ -12,6 +12,7 @@ from .models import (
     AssignmentPlanEnvelope,
     PlanningStrategyConstraints,
     build_planning_shell_payload,
+    project_task_subgraph_to_planning_focus,
 )
 
 
@@ -200,8 +201,10 @@ class AssignmentPlanningCompiler:
         backlog_item: BacklogItemRecord,
         lane: OperatingLaneRecord | None,
         strategy_constraints: PlanningStrategyConstraints | None = None,
+        task_subgraph: object | None = None,
     ) -> AssignmentPlanEnvelope:
-        constraints = strategy_constraints or PlanningStrategyConstraints()
+        constraints = PlanningStrategyConstraints.from_value(strategy_constraints)
+        knowledge_subgraph = project_task_subgraph_to_planning_focus(task_subgraph)
         metadata = dict(backlog_item.metadata or {})
         dependencies = _contract_entries(
             metadata.get("dependencies"),
@@ -259,6 +262,18 @@ class AssignmentPlanningCompiler:
             }
             for entry in capacity_requirements
         )
+        checkpoints.extend(
+            {"kind": "capability-ready", "label": label}
+            for label in list(knowledge_subgraph.get("capability_labels") or [])
+        )
+        checkpoints.extend(
+            {"kind": "environment-ready", "label": label}
+            for label in list(knowledge_subgraph.get("environment_labels") or [])
+        )
+        checkpoints.extend(
+            {"kind": "failure-watch", "label": label}
+            for label in list(knowledge_subgraph.get("failure_patterns") or [])
+        )
         if not any("verify" in step.lower() for step in plan_steps):
             checkpoints.append(
                 {"kind": "verify", "label": "Verify the result and supporting evidence."},
@@ -275,6 +290,11 @@ class AssignmentPlanningCompiler:
             acceptance_criteria = _string_list(
                 acceptance_criteria,
                 f"Outcome stays aligned with: {backlog_item.summary}",
+            )
+        if knowledge_subgraph.get("constraint_refs"):
+            acceptance_criteria = _string_list(
+                acceptance_criteria,
+                list(knowledge_subgraph.get("constraint_refs") or []),
             )
         if "prefer-evidence-before-external-move" in list(constraints.planning_policy or []):
             acceptance_criteria = _string_list(
@@ -311,6 +331,7 @@ class AssignmentPlanningCompiler:
                 "retry_policy": retry_policy,
                 "local_replan_policy": local_replan_policy,
                 "planning_policy": list(constraints.planning_policy or []),
+                "knowledge_subgraph": dict(knowledge_subgraph),
             },
             planning_shell=build_planning_shell_payload(
                 mode="assignment-planning-shell",
@@ -330,6 +351,17 @@ class AssignmentPlanningCompiler:
             metadata={
                 "source_ref": backlog_item.source_ref,
                 "source_kind": backlog_item.source_kind,
+                "affected_relation_ids": list(knowledge_subgraph.get("relation_ids") or []),
+                "affected_relation_kinds": list(
+                    knowledge_subgraph.get("top_relation_kinds") or [],
+                ),
+                "relation_source_refs": list(
+                    knowledge_subgraph.get("relation_source_refs") or [],
+                ),
+                "knowledge_focus_node_ids": list(
+                    knowledge_subgraph.get("focus_node_ids") or [],
+                ),
+                "knowledge_seed_refs": list(knowledge_subgraph.get("seed_refs") or []),
             },
         )
 
@@ -350,4 +382,5 @@ class AssignmentPlanningCompiler:
             backlog_item=backlog_item,
             lane=lane,
             strategy_constraints=PlanningStrategyConstraints.from_value(strategy_constraints),
+            task_subgraph=context.get("task_subgraph"),
         )

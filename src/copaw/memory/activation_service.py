@@ -467,12 +467,22 @@ class MemoryActivationService:
         owner_agent_id: str | None,
         industry_instance_id: str | None,
     ) -> dict[str, Any] | None:
-        _ = industry_instance_id
+        resolved_scope_type = self._resolve_scope_type(activation_input)
+        resolved_scope_id = self._resolve_scope_id(activation_input)
+        if resolved_scope_type not in {"global", "industry"}:
+            if industry_instance_id:
+                resolved_scope_type = "industry"
+                resolved_scope_id = industry_instance_id
+            elif activation_input.global_scope_id:
+                resolved_scope_type = "global"
+                resolved_scope_id = activation_input.global_scope_id
+            else:
+                return None
         strategy_owner = owner_agent_id or activation_input.owner_agent_id or activation_input.agent_id
         return resolve_strategy_payload(
             service=self._strategy_memory_service,
-            scope_type=self._resolve_scope_type(activation_input),
-            scope_id=self._resolve_scope_id(activation_input),
+            scope_type=resolved_scope_type,
+            scope_id=resolved_scope_id,
             owner_agent_id=strategy_owner,
             fallback_owner_agent_ids=(None,) if strategy_owner else (),
         )

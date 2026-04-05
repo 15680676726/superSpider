@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from .runtime_center_shared_core import *  # noqa: F401,F403
 from .runtime_center_dependencies import _get_memory_activation_service, _list_memory_relation_views
+from ..runtime_center.models import RuntimeActivationSummary
+from ..runtime_center.projection_utils import string_list_from_values
 
 
 def _first_non_empty(*values: object) -> str | None:
@@ -153,7 +155,37 @@ def _maybe_build_activation_payload(
         global_scope_id=global_scope_id,
         limit=limit,
     )
-    return result.model_dump(mode="json")
+    return _serialize_activation_summary(result)
+
+
+def _serialize_activation_summary(result: object) -> dict[str, object] | None:
+    model_dump = getattr(result, "model_dump", None)
+    if not callable(model_dump):
+        return None
+    payload = model_dump(mode="json")
+    if not isinstance(payload, dict):
+        return None
+    summary = RuntimeActivationSummary(
+        scope_type=_first_non_empty(payload.get("scope_type")) or "global",
+        scope_id=_first_non_empty(payload.get("scope_id")) or "runtime",
+        activated_count=len(payload.get("activated_neurons") or []),
+        contradiction_count=len(payload.get("contradictions") or []),
+        top_entities=string_list_from_values(payload.get("top_entities")),
+        top_opinions=string_list_from_values(payload.get("top_opinions")),
+        top_relations=string_list_from_values(payload.get("top_relations")),
+        top_relation_kinds=string_list_from_values(payload.get("top_relation_kinds")),
+        top_constraints=string_list_from_values(payload.get("top_constraints")),
+        top_next_actions=string_list_from_values(payload.get("top_next_actions")),
+        support_refs=string_list_from_values(payload.get("support_refs")),
+        top_evidence_refs=string_list_from_values(
+            payload.get("top_evidence_refs"),
+            payload.get("evidence_refs"),
+            payload.get("support_refs"),
+        ),
+        evidence_refs=string_list_from_values(payload.get("evidence_refs")),
+        strategy_refs=string_list_from_values(payload.get("strategy_refs")),
+    )
+    return summary.model_dump(mode="json")
 
 
 def _serialize_memory_entry(entry: object) -> dict[str, object]:
@@ -614,7 +646,7 @@ async def activate_memory(
         global_scope_id=global_scope_id,
         limit=limit,
     )
-    return result.model_dump(mode="json")
+    return _serialize_activation_summary(result) or {}
 
 
 @router.get("/memory/index", response_model=list[dict[str, object]])

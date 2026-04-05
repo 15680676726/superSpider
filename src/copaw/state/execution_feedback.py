@@ -67,6 +67,9 @@ def collect_recent_execution_feedback(
     recent_failures: list[str] = []
     effective_actions: list[str] = []
     evidence_refs: list[str] = []
+    capability_refs: list[str] = []
+    environment_refs: list[str] = []
+    risk_levels: list[str] = []
     repeated_failures: dict[str, dict[str, object]] = {}
 
     for record in recent_records:
@@ -76,6 +79,15 @@ def collect_recent_execution_feedback(
         record_id = str(getattr(record, "id", "") or "").strip()
         if record_id:
             evidence_refs = _merge_string_lists(evidence_refs, [record_id])
+        capability_ref = str(getattr(record, "capability_ref", "") or "").strip()
+        if capability_ref:
+            capability_refs = _merge_string_lists(capability_refs, [capability_ref])
+        environment_ref = str(getattr(record, "environment_ref", "") or "").strip()
+        if environment_ref:
+            environment_refs = _merge_string_lists(environment_refs, [environment_ref])
+        risk_level = str(getattr(record, "risk_level", "") or "").strip()
+        if risk_level:
+            risk_levels = _merge_string_lists(risk_levels, [risk_level])
         if _is_failure_evidence(record):
             if line not in recent_failures and len(recent_failures) < 4:
                 recent_failures.append(line)
@@ -102,7 +114,20 @@ def collect_recent_execution_feedback(
         if int(bucket.get("count", 0)) >= 2
     ][:4]
 
-    if not any([current_stage, recent_failures, effective_actions, avoid_repeats, evidence_refs]):
+    failure_patterns = list(recent_failures)
+    recovery_patterns = list(effective_actions)
+    if not any(
+        [
+            current_stage,
+            recent_failures,
+            effective_actions,
+            avoid_repeats,
+            evidence_refs,
+            capability_refs,
+            environment_refs,
+            risk_levels,
+        ],
+    ):
         return {}
     return {
         "current_stage": current_stage,
@@ -110,6 +135,11 @@ def collect_recent_execution_feedback(
         "effective_actions": effective_actions,
         "avoid_repeats": avoid_repeats,
         "evidence_refs": evidence_refs,
+        "capability_refs": capability_refs,
+        "environment_refs": environment_refs,
+        "risk_levels": risk_levels,
+        "failure_patterns": failure_patterns,
+        "recovery_patterns": recovery_patterns,
     }
 
 

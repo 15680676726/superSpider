@@ -26,7 +26,11 @@ from .main_brain_result_committer import (
 from .query_execution_resident_runtime import _QueryExecutionResidentRuntimeMixin
 from .query_execution_shared import *  # noqa: F401,F403
 from .query_execution_usage_runtime import _QueryExecutionUsageRuntimeMixin
-from .runtime_outcome import build_execution_diagnostics
+from .runtime_outcome import (
+    build_execution_diagnostics,
+    build_execution_knowledge_writeback,
+    classify_runtime_outcome,
+)
 
 
 def CoPawAgent(*args, **kwargs):
@@ -1903,6 +1907,47 @@ class _QueryExecutionRuntimeMixin(
             return
         blocking_error = resolved_error if should_block_runtime_error(resolved_error) else None
         degradation = _mapping_value((execution_context or {}).get("degradation"))
+        main_brain_runtime_payload = _mapping_value(
+            (execution_context or {}).get("main_brain_runtime"),
+        )
+        work_context_id = _first_non_empty((execution_context or {}).get("work_context_id"))
+        environment_ref = _query_environment_ref(execution_context) or channel
+        risk_level = _first_non_empty(
+            main_brain_runtime_payload.get("risk_level"),
+            "auto",
+        )
+        outcome = classify_runtime_outcome(
+            resolved_error,
+            success=resolved_error is None,
+            phase="blocked" if blocking_error else None,
+        )
+        diagnostics = build_execution_diagnostics(
+            phase=outcome,
+            error=resolved_error,
+            summary=final_summary,
+        )
+        knowledge_writeback = build_execution_knowledge_writeback(
+            scope_type="work_context" if work_context_id else "task" if task_id else "agent",
+            scope_id=(
+                work_context_id
+                or task_id
+                or agent_id
+            ),
+            outcome_ref=_first_non_empty(checkpoint_id, task_id, session_id, agent_id) or agent_id,
+            outcome=outcome,
+            summary=final_summary,
+            capability_ref="system:dispatch_query",
+            environment_ref=environment_ref,
+            risk_level=risk_level,
+            failure_source=diagnostics.get("failure_source"),
+            blocked_next_step=diagnostics.get("blocked_next_step"),
+            evidence_refs=[checkpoint_id] if checkpoint_id else None,
+            recovery_summary=(
+                diagnostics.get("remediation_summary")
+                if outcome in {"failed", "blocked", "cancelled", "timeout"}
+                else None
+            ),
+        )
         main_brain_runtime = self._merge_main_brain_runtime_contexts(
             dict(runtime.metadata or {}).get("main_brain_runtime"),
             (execution_context or {}).get("main_brain_runtime"),
@@ -1923,6 +1968,7 @@ class _QueryExecutionRuntimeMixin(
                 if degradation
                 else "completed"
             ),
+            "knowledge_writeback": knowledge_writeback,
         }
         if degradation:
             metadata["runtime_degradation"] = degradation

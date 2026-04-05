@@ -305,8 +305,9 @@ def test_runtime_center_memory_activation_route_returns_activation_result(tmp_pa
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["activated_neurons"]
+    assert payload["activated_count"] >= 1
     assert payload["top_constraints"] == ["Only approve outbound after evidence review."]
+    assert "activated_neurons" not in payload
 
 
 def test_runtime_center_memory_activation_route_preserves_scope_priority(tmp_path) -> None:
@@ -517,8 +518,9 @@ def test_runtime_center_memory_profile_includes_activation_summary_when_requeste
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["activation"]["activated_neurons"]
+    assert payload["activation"]["activated_count"] >= 1
     assert payload["activation"]["top_constraints"] == ["Only approve outbound after evidence review."]
+    assert "activated_neurons" not in payload["activation"]
 
 
 def test_runtime_center_memory_episodes_can_include_activation_refs(tmp_path) -> None:
@@ -551,3 +553,4 @@ def test_runtime_center_memory_episodes_can_include_activation_refs(tmp_path) ->
     payload = response.json()
     assert payload
     assert payload[0]["activation"]["support_refs"]
+    assert "activated_neurons" not in payload[0]["activation"]

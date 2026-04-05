@@ -10,6 +10,12 @@ from copaw.capabilities.system_team_handlers import SystemTeamCapabilityFacade
 from copaw.industry import IndustryBootstrapInstallItem, IndustryCapabilityRecommendation
 from copaw.kernel.persistence import decode_kernel_task_metadata
 from copaw.memory.activation_models import ActivationResult
+from copaw.memory.knowledge_graph_models import (
+    KnowledgeGraphNode,
+    KnowledgeGraphRelation,
+    KnowledgeGraphScope,
+    TaskSubgraph,
+)
 from copaw.state import (
     AgentReportRecord,
     AssignmentRecord,
@@ -1350,6 +1356,86 @@ class _FakePlanningActivationService:
         )
 
 
+class _EmptyPlanningActivationService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def activate_for_query(self, **kwargs: object) -> ActivationResult:
+        self.calls.append(dict(kwargs))
+        return ActivationResult(
+            query=str(kwargs.get("query") or ""),
+            scope_type="industry",
+            scope_id=str(kwargs.get("industry_instance_id") or "industry-1"),
+        )
+
+
+class _FakePlanningSubgraphActivationService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def activate_for_query(self, **kwargs: object) -> TaskSubgraph:
+        self.calls.append(dict(kwargs))
+        scope = KnowledgeGraphScope(
+            scope_type="industry",
+            scope_id=str(kwargs.get("industry_instance_id") or "industry-1"),
+            owner_agent_id="copaw-agent-runner",
+            industry_instance_id=str(kwargs.get("industry_instance_id") or "industry-1"),
+        )
+        return TaskSubgraph(
+            scope=scope,
+            query_text=str(kwargs.get("query") or ""),
+            seed_refs=["memory:weekend-variance-gap"],
+            top_constraint_refs=["Do not publish until the approval contradiction is resolved."],
+            top_evidence_refs=["memory:weekend-variance-gap"],
+            nodes=[
+                KnowledgeGraphNode(
+                    node_id="capability:browser:partner-portal",
+                    node_type="capability",
+                    scope=scope,
+                    title="Partner portal browser capability",
+                    summary="Needed to inspect and update the governed partner portal.",
+                    source_refs=["capability:browser:partner-portal"],
+                ),
+                KnowledgeGraphNode(
+                    node_id="environment:browser-session",
+                    node_type="environment",
+                    scope=scope,
+                    title="Partner portal browser session",
+                    summary="Governed browser session for partner portal work.",
+                    source_refs=["environment:browser:partner-portal"],
+                ),
+                KnowledgeGraphNode(
+                    node_id="failure:stale-approval-cache",
+                    node_type="failure_pattern",
+                    scope=scope,
+                    title="Stale approval cache",
+                    summary="Stale approval cache can block a correct publish.",
+                    source_refs=["failure-pattern:stale-approval-cache"],
+                ),
+            ],
+            relations=[
+                KnowledgeGraphRelation(
+                    relation_id="relation-weekend-variance",
+                    relation_type="contradicts",
+                    source_id="entity:weekend-variance",
+                    target_id="opinion:publish-readiness",
+                    scope=scope,
+                    source_refs=["memory:weekend-variance-gap"],
+                    evidence_refs=["memory:weekend-variance-gap"],
+                    metadata={
+                        "summary": "Weekend variance contradicts publish readiness until approval evidence is refreshed.",
+                    },
+                )
+            ],
+            metadata={
+                "top_entities": ["weekend-variance", "inventory"],
+                "top_opinions": ["approval:caution:contradiction"],
+                "top_relations": ["weekend variance contradicts publish readiness"],
+                "top_relation_kinds": ["contradicts"],
+            },
+        )
+
+
 def test_run_operating_cycle_dispatches_materialized_execution_assignment(tmp_path) -> None:
     app = _build_industry_app(tmp_path)
     client = TestClient(app)
@@ -1594,6 +1680,121 @@ def test_run_operating_cycle_persists_graph_focus_into_formal_planning_sidecar(t
     ]
     assert cycle_decision["affected_relation_ids"] == ["relation-weekend-variance"]
     assert cycle_decision["affected_relation_kinds"] == ["contradicts"]
+
+
+def test_run_operating_cycle_passes_task_subgraph_into_cycle_and_assignment_planners(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    execution_core_agent_id = preview_payload["draft"]["team"]["agents"][0]["agent_id"]
+    support_role = _build_support_role(execution_core_agent_id)
+    facade = _build_team_capability_facade(app)
+    created = asyncio.run(
+        facade.handle_update_industry_team(
+            {
+                "instance_id": instance_id,
+                "operation": "add-role",
+                "role": support_role.model_dump(mode="json"),
+            },
+        ),
+    )
+    assert created["success"] is True
+
+    activation_service = _EmptyPlanningActivationService()
+    subgraph_service = _FakePlanningSubgraphActivationService()
+    app.state.industry_service._memory_activation_service = activation_service
+    app.state.industry_service._subgraph_activation_service = subgraph_service
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    assert detail.lanes
+    app.state.industry_service._backlog_service.record_chat_writeback(
+        industry_instance_id=instance_id,
+        lane_id=str(detail.lanes[0]["lane_id"]),
+        title="Review weekend variance approval contradiction",
+        summary="Resolve the approval contradiction before any partner portal publish move.",
+        priority=5,
+        source_ref="test:formal-planning-task-subgraph",
+        metadata={
+            "owner_agent_id": support_role.agent_id,
+            "industry_role_id": support_role.role_id,
+            "industry_role_name": support_role.role_name,
+            "role_name": support_role.role_name,
+            "role_summary": support_role.role_summary,
+            "mission": support_role.mission,
+            "goal_kind": support_role.goal_kind,
+            "task_mode": "autonomy-cycle",
+            "report_back_mode": "summary",
+            "plan_steps": [
+                "Review the latest approval evidence.",
+                "Publish the governed partner update.",
+            ],
+        },
+    )
+
+    cycle_result = asyncio.run(
+        app.state.industry_service.run_operating_cycle(
+            instance_id=instance_id,
+            actor="test:formal-planning-task-subgraph",
+            force=True,
+        ),
+    )
+    assert cycle_result["count"] == 1
+    processed_instance = cycle_result["processed_instances"][0]
+    started_cycle_id = processed_instance["started_cycle_id"]
+    created_assignment_ids = list(processed_instance["created_assignment_ids"] or [])
+
+    assert started_cycle_id is not None
+    assert created_assignment_ids
+    assert activation_service.calls
+    assert subgraph_service.calls
+    assert activation_service.calls[0]["industry_instance_id"] == instance_id
+    assert subgraph_service.calls[0]["industry_instance_id"] == instance_id
+
+    cycle = app.state.operating_cycle_repository.get_cycle(started_cycle_id)
+    assert cycle is not None
+    formal_planning = dict((cycle.metadata or {}).get("formal_planning") or {})
+    strategy_constraints = dict(formal_planning.get("strategy_constraints") or {})
+    cycle_decision = dict(formal_planning.get("cycle_decision") or {})
+
+    assert strategy_constraints["graph_focus_entities"] == []
+    assert strategy_constraints["graph_focus_relations"] == []
+    assert cycle_decision["affected_relation_ids"] == ["relation-weekend-variance"]
+    assert cycle_decision["affected_relation_kinds"] == ["contradicts"]
+
+    assignment = app.state.assignment_repository.get_assignment(created_assignment_ids[0])
+    assert assignment is not None
+    assignment_plan = dict(
+        ((assignment.metadata or {}).get("formal_planning") or {}).get("assignment_plan") or {}
+    )
+    knowledge_subgraph = dict((assignment_plan.get("sidecar_plan") or {}).get("knowledge_subgraph") or {})
+
+    assert knowledge_subgraph["capability_refs"] == ["capability:browser:partner-portal"]
+    assert knowledge_subgraph["environment_refs"] == ["environment:browser:partner-portal"]
+    assert knowledge_subgraph["failure_patterns"] == ["Stale approval cache"]
+    assert knowledge_subgraph["relation_ids"] == ["relation-weekend-variance"]
 
 
 def test_run_operating_cycle_skips_unresolved_chat_writeback_gap_backlog(tmp_path) -> None:

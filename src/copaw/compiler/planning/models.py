@@ -7,6 +7,8 @@ from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ...memory.knowledge_graph_models import TaskSubgraph
+
 
 TPlanningModel = TypeVar("TPlanningModel", bound=BaseModel)
 
@@ -55,6 +57,13 @@ def _string_list(value: object | None) -> list[str]:
     return items
 
 
+def _merge_string_lists(*values: object) -> list[str]:
+    merged: list[str] = []
+    for value in values:
+        merged.extend(_string_list(value))
+    return _string_list(merged)
+
+
 def _coerce_model(model: type[TPlanningModel], value: object | None) -> TPlanningModel | None:
     if value is None:
         return None
@@ -82,6 +91,144 @@ def _coerce_model_list(model: type[TPlanningModel], value: object | None) -> lis
         if parsed is not None:
             items.append(parsed)
     return items
+
+
+def coerce_task_subgraph(value: object | None) -> TaskSubgraph | None:
+    return _coerce_model(TaskSubgraph, value)
+
+
+def _task_subgraph_node_titles(
+    subgraph: TaskSubgraph,
+    *,
+    node_type: str,
+) -> list[str]:
+    return _string_list(
+        [
+            node.title
+            for node in list(subgraph.nodes or [])
+            if getattr(node, "node_type", None) == node_type
+        ],
+    )
+
+
+def _task_subgraph_node_refs(
+    subgraph: TaskSubgraph,
+    *,
+    node_type: str,
+) -> list[str]:
+    refs: list[str] = []
+    for node in list(subgraph.nodes or []):
+        if getattr(node, "node_type", None) != node_type:
+            continue
+        source_refs = list(getattr(node, "source_refs", []) or [])
+        if source_refs:
+            refs.extend(source_refs)
+        else:
+            refs.append(getattr(node, "node_id", None))
+    return _string_list(refs)
+
+
+def project_task_subgraph_to_planning_focus(value: object | None) -> dict[str, Any]:
+    subgraph = coerce_task_subgraph(value)
+    if subgraph is None:
+        return {}
+    metadata = _mapping(subgraph.metadata)
+    top_entities = _merge_string_lists(
+        metadata.get("top_entities"),
+        [
+            *[
+                key
+                for node in list(subgraph.nodes or [])
+                if getattr(node, "node_type", None) == "entity"
+                for key in list(getattr(node, "entity_keys", []) or [])
+            ],
+            *_task_subgraph_node_titles(subgraph, node_type="entity"),
+        ],
+    )
+    top_opinions = _merge_string_lists(
+        metadata.get("top_opinions"),
+        [
+            *[
+                key
+                for node in list(subgraph.nodes or [])
+                if getattr(node, "node_type", None) in {"opinion", "constraint", "preference"}
+                for key in list(getattr(node, "opinion_keys", []) or [])
+            ],
+            *[
+                node.title
+                for node in list(subgraph.nodes or [])
+                if getattr(node, "node_type", None) in {"opinion", "constraint", "preference"}
+            ],
+        ],
+    )
+    relation_evidence: list[dict[str, Any]] = []
+    for relation in list(subgraph.relations or []):
+        payload = {
+            "relation_id": getattr(relation, "relation_id", None),
+            "relation_kind": getattr(relation, "relation_type", None),
+            "summary": _mapping(getattr(relation, "metadata", None)).get("summary"),
+            "source_node_id": getattr(relation, "source_id", None),
+            "target_node_id": getattr(relation, "target_id", None),
+            "source_refs": list(getattr(relation, "source_refs", []) or []),
+            "evidence_refs": list(getattr(relation, "evidence_refs", []) or []),
+        }
+        relation_evidence.append({key: value for key, value in payload.items() if value not in (None, [], {})})
+    top_relations = _merge_string_lists(
+        metadata.get("top_relations"),
+        [entry.get("summary") for entry in relation_evidence],
+    )
+    top_relation_kinds = _merge_string_lists(
+        metadata.get("top_relation_kinds"),
+        [entry.get("relation_kind") for entry in relation_evidence],
+    )
+    relation_ids = _string_list([entry.get("relation_id") for entry in relation_evidence])
+    relation_source_refs = _string_list(
+        *[entry.get("source_refs") for entry in relation_evidence],
+    )
+    capability_refs = _task_subgraph_node_refs(subgraph, node_type="capability")
+    environment_refs = _task_subgraph_node_refs(subgraph, node_type="environment")
+    failure_patterns = _task_subgraph_node_titles(subgraph, node_type="failure_pattern")
+    recovery_patterns = _task_subgraph_node_titles(subgraph, node_type="recovery_pattern")
+    capability_labels = _task_subgraph_node_titles(subgraph, node_type="capability")
+    environment_labels = _task_subgraph_node_titles(subgraph, node_type="environment")
+    if not any(
+        (
+            top_entities,
+            top_opinions,
+            top_relations,
+            relation_evidence,
+            capability_refs,
+            environment_refs,
+            failure_patterns,
+            recovery_patterns,
+            subgraph.top_constraint_refs,
+            subgraph.top_evidence_refs,
+            subgraph.focus_node_ids,
+            subgraph.seed_refs,
+        ),
+    ):
+        return {}
+    return {
+        "scope_type": subgraph.scope.scope_type,
+        "scope_id": subgraph.scope.scope_id,
+        "seed_refs": list(subgraph.seed_refs or []),
+        "focus_node_ids": list(subgraph.focus_node_ids or []),
+        "constraint_refs": list(subgraph.top_constraint_refs or []),
+        "evidence_refs": list(subgraph.top_evidence_refs or []),
+        "top_entities": top_entities,
+        "top_opinions": top_opinions,
+        "top_relations": top_relations,
+        "top_relation_kinds": top_relation_kinds,
+        "relation_ids": relation_ids,
+        "relation_source_refs": relation_source_refs,
+        "relation_evidence": relation_evidence,
+        "capability_refs": capability_refs,
+        "environment_refs": environment_refs,
+        "capability_labels": capability_labels,
+        "environment_labels": environment_labels,
+        "failure_patterns": failure_patterns,
+        "recovery_patterns": recovery_patterns,
+    }
 
 
 def _coerce_lane_weights(value: object | None) -> dict[str, float]:
@@ -344,6 +491,25 @@ class PlanningStrategyConstraints(BaseModel):
                     base.graph_focus_opinions,
                 ),
             ),
+            graph_focus_relations=_string_list(
+                _context_override(
+                    context,
+                    "strategy_graph_focus_relations",
+                    base.graph_focus_relations,
+                ),
+            ),
+            graph_relation_evidence=[
+                dict(item)
+                for item in list(
+                    _context_override(
+                        context,
+                        "strategy_graph_relation_evidence",
+                        base.graph_relation_evidence,
+                    )
+                    or []
+                )
+                if isinstance(item, Mapping)
+            ],
         )
 
     def is_empty(self) -> bool:
@@ -362,6 +528,8 @@ class PlanningStrategyConstraints(BaseModel):
                 self.strategy_trigger_rules,
                 self.graph_focus_entities,
                 self.graph_focus_opinions,
+                self.graph_focus_relations,
+                self.graph_relation_evidence,
             ),
         )
 

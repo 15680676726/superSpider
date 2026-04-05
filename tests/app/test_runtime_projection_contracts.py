@@ -414,6 +414,65 @@ def test_build_task_review_payload_projects_execution_runtime_visibility_from_fe
     assert any("host blocker" in risk.lower() for risk in payload["risks"])
 
 
+def test_build_task_review_payload_projects_execution_knowledge_writeback_from_runtime_metadata() -> None:
+    now = datetime(2026, 4, 6, 9, 30, tzinfo=timezone.utc)
+    task = SimpleNamespace(
+        id="task-knowledge-writeback-1",
+        title="Recover guarded browser path",
+        summary="Project recent execution knowledge writeback into Runtime Center review payload.",
+        owner_agent_id="agent-knowledge",
+        status="running",
+        acceptance_criteria='{"kernel":"meta"}',
+        updated_at=now,
+    )
+    runtime = SimpleNamespace(
+        current_phase="blocked",
+        last_result_summary="Browser publish stayed blocked at the approval gate.",
+        last_error_summary=None,
+        updated_at=now,
+        risk_level="guarded",
+        metadata={
+            "knowledge_writeback": {
+                "source": "execution-outcome",
+                "outcome": "blocked",
+                "summary": "Browser publish stayed blocked at the approval gate.",
+                "capability_ref": "tool:browser.publish",
+                "environment_ref": "env:browser:industry",
+                "risk_level": "guarded",
+                "failure_source": "waiting-confirm",
+                "blocked_next_step": "Collect operator approval evidence before retry.",
+                "recovery_summary": "Resume after evidence-backed approval is recorded.",
+                "node_types": ["runtime_outcome", "failure_pattern", "recovery_pattern"],
+                "relation_types": ["indicates", "mitigates"],
+                "evidence_refs": ["evidence:approval-gate-1"],
+            }
+        },
+    )
+
+    payload = build_task_review_payload(
+        task=task,
+        runtime=runtime,
+        decisions=[],
+        evidence=[],
+        execution_feedback={"current_stage": "approval gate"},
+        child_results=[],
+        owner_agent={"name": "Knowledge Runtime"},
+        task_route=task_route("task-knowledge-writeback-1"),
+    )
+
+    knowledge_writeback = payload["execution_runtime"]["knowledge_writeback"]
+    assert knowledge_writeback["outcome"] == "blocked"
+    assert knowledge_writeback["failure_source"] == "waiting-confirm"
+    assert knowledge_writeback["blocked_next_step"] == "Collect operator approval evidence before retry."
+    assert knowledge_writeback["recovery_summary"] == "Resume after evidence-backed approval is recorded."
+    assert knowledge_writeback["node_types"] == [
+        "runtime_outcome",
+        "failure_pattern",
+        "recovery_pattern",
+    ]
+    assert knowledge_writeback["relation_types"] == ["indicates", "mitigates"]
+
+
 def test_build_task_review_payload_does_not_fallback_to_runtime_metadata_sections() -> None:
     now = datetime(2026, 3, 26, 10, 0, tzinfo=timezone.utc)
     task = SimpleNamespace(

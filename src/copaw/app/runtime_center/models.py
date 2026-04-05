@@ -256,11 +256,32 @@ class RuntimeActivationSummary(BaseModel):
     activated_count: int = 0
     contradiction_count: int = 0
     top_entities: list[str] = Field(default_factory=list)
+    top_opinions: list[str] = Field(default_factory=list)
+    top_relations: list[str] = Field(default_factory=list)
+    top_relation_kinds: list[str] = Field(default_factory=list)
     top_constraints: list[str] = Field(default_factory=list)
     top_next_actions: list[str] = Field(default_factory=list)
     support_refs: list[str] = Field(default_factory=list)
+    top_evidence_refs: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
     strategy_refs: list[str] = Field(default_factory=list)
+
+
+class RuntimeKnowledgeWritebackSummary(BaseModel):
+    """Compact Runtime Center projection for recent execution knowledge writeback."""
+
+    source: str
+    outcome: str
+    summary: str
+    capability_ref: str | None = None
+    environment_ref: str | None = None
+    risk_level: str | None = None
+    failure_source: str | None = None
+    blocked_next_step: str | None = None
+    recovery_summary: str | None = None
+    node_types: list[str] = Field(default_factory=list)
+    relation_types: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
 
 
 class RuntimeOverviewEntry(BaseModel):

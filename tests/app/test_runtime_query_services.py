@@ -1323,10 +1323,13 @@ def test_runtime_task_detail_projector_keeps_review_and_activation_surfaces(tmp_
                 "activated_neurons": [{"id": "neuron-1"}],
                 "contradictions": [],
                 "top_entities": ["runtime-owner"],
+                "top_opinions": ["guarded approval is still unresolved"],
+                "top_relations": ["runtime-owner depends on approval evidence"],
+                "top_relation_kinds": ["depends_on"],
                 "top_constraints": ["respect detail context"],
                 "top_next_actions": ["finish detail projector split"],
                 "support_refs": ["report:detail"],
-                "evidence_refs": [],
+                "evidence_refs": ["evidence:detail-approval"],
                 "strategy_refs": [],
             }
 
@@ -1344,6 +1347,18 @@ def test_runtime_task_detail_projector_keeps_review_and_activation_surfaces(tmp_
                 "name": "Runtime Owner",
                 "status": "active",
                 "route": "/api/runtime-center/agents/runtime-owner",
+                "latest_knowledge_writeback": {
+                    "source": "execution-outcome",
+                    "outcome": "blocked",
+                    "summary": "Detail runtime stayed blocked on guarded approval.",
+                    "capability_ref": "system:dispatch_query",
+                    "failure_source": "waiting-confirm",
+                    "blocked_next_step": "Confirm approval evidence before retry.",
+                    "recovery_summary": "Resume after the approval checkpoint clears.",
+                    "node_types": ["runtime_outcome", "failure_pattern"],
+                    "relation_types": ["indicates"],
+                    "evidence_refs": ["evidence:detail-approval"],
+                },
             }
             for _ in [agent_ids]
             if "runtime-owner" in agent_ids
@@ -1372,6 +1387,18 @@ def test_runtime_task_detail_projector_keeps_review_and_activation_surfaces(tmp_
                 "name": "Runtime Owner",
                 "status": "active",
                 "route": "/api/runtime-center/agents/runtime-owner",
+                "latest_knowledge_writeback": {
+                    "source": "execution-outcome",
+                    "outcome": "blocked",
+                    "summary": "Detail runtime stayed blocked on guarded approval.",
+                    "capability_ref": "system:dispatch_query",
+                    "failure_source": "waiting-confirm",
+                    "blocked_next_step": "Confirm approval evidence before retry.",
+                    "recovery_summary": "Resume after the approval checkpoint clears.",
+                    "node_types": ["runtime_outcome", "failure_pattern"],
+                    "relation_types": ["indicates"],
+                    "evidence_refs": ["evidence:detail-approval"],
+                },
             }
             for _ in [agent_ids]
             if "runtime-owner" in agent_ids
@@ -1389,17 +1416,49 @@ def test_runtime_task_detail_projector_keeps_review_and_activation_surfaces(tmp_
         "activated_count": 1,
         "contradiction_count": 0,
         "top_entities": ["runtime-owner"],
+        "top_opinions": ["guarded approval is still unresolved"],
+        "top_relations": ["runtime-owner depends on approval evidence"],
+        "top_relation_kinds": ["depends_on"],
         "top_constraints": ["respect detail context"],
         "top_next_actions": ["finish detail projector split"],
         "support_refs": ["report:detail"],
-        "evidence_refs": [],
+        "evidence_refs": ["evidence:detail-approval"],
+        "top_evidence_refs": ["evidence:detail-approval", "report:detail"],
         "strategy_refs": [],
+    }
+    assert detail["knowledge_writeback"] == {
+        "source": "execution-outcome",
+        "outcome": "blocked",
+        "summary": "Detail runtime stayed blocked on guarded approval.",
+        "capability_ref": "system:dispatch_query",
+        "environment_ref": None,
+        "risk_level": None,
+        "failure_source": "waiting-confirm",
+        "blocked_next_step": "Confirm approval evidence before retry.",
+        "recovery_summary": "Resume after the approval checkpoint clears.",
+        "node_types": ["runtime_outcome", "failure_pattern"],
+        "relation_types": ["indicates"],
+        "evidence_refs": ["evidence:detail-approval"],
     }
 
     review = projector.get_task_review("task-detail")
     assert review is not None
     assert review["route"] == "/api/runtime-center/tasks/task-detail/review"
     assert review["review"]["review_route"] == "/api/runtime-center/tasks/task-detail/review"
+    assert review["review"]["execution_runtime"]["knowledge_writeback"] == {
+        "source": "execution-outcome",
+        "outcome": "blocked",
+        "summary": "Detail runtime stayed blocked on guarded approval.",
+        "capability_ref": "system:dispatch_query",
+        "environment_ref": None,
+        "risk_level": None,
+        "failure_source": "waiting-confirm",
+        "blocked_next_step": "Confirm approval evidence before retry.",
+        "recovery_summary": "Resume after the approval checkpoint clears.",
+        "node_types": ["runtime_outcome", "failure_pattern"],
+        "relation_types": ["indicates"],
+        "evidence_refs": ["evidence:detail-approval"],
+    }
 
 
 def test_runtime_work_context_projector_uses_runtime_owner_for_detail_rollups(
