@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import importlib
 import json
 
 from copaw.state import SQLiteStateStore, StrategyMemoryRecord
@@ -9,6 +10,12 @@ from copaw.state.strategy_memory_service import (
     StateStrategyMemoryService,
     resolve_strategy_payload,
 )
+
+
+def test_runtime_outcome_import_does_not_hit_state_memory_cycle() -> None:
+    module = importlib.import_module("copaw.kernel.runtime_outcome")
+
+    assert hasattr(module, "classify_runtime_outcome")
 
 
 def test_strategy_memory_service_persists_and_reads_active_strategy(tmp_path) -> None:

@@ -1,53 +1,50 @@
 # -*- coding: utf-8 -*-
-from .activation_models import ActivationInput, ActivationResult, KnowledgeNeuron
-from .activation_service import MemoryActivationService
-from .derived_index_service import (
-    DerivedMemoryIndexService,
-    build_scope_candidates,
-    normalize_memory_scope_type,
-    normalize_scope_id,
-    parse_memory_document_id,
-    selector_matches_scope,
-    source_route_for_entry,
-)
-from .models import (
-    MemoryBackendDescriptor,
-    MemoryRecallHit,
-    MemoryRecallResponse,
-    MemoryRebuildSummary,
-    MemoryReflectionSummary,
-    MemoryScopeSelector,
-)
-from .precedence import MemoryEntryPartition, MemoryPrecedenceService
-from .profile_service import MemoryProfile, MemoryProfileService, SharedMemoryViews
-from .recall_service import MemoryRecallService
-from .reflection_service import MemoryReflectionService
-from .retain_service import MemoryRetainService
+from __future__ import annotations
 
-__all__ = [
-    "ActivationInput",
-    "ActivationResult",
-    "DerivedMemoryIndexService",
-    "KnowledgeNeuron",
-    "MemoryBackendDescriptor",
-    "MemoryActivationService",
-    "MemoryEntryPartition",
-    "MemoryPrecedenceService",
-    "MemoryProfile",
-    "MemoryProfileService",
-    "MemoryRecallHit",
-    "MemoryRecallResponse",
-    "MemoryRecallService",
-    "MemoryRebuildSummary",
-    "MemoryReflectionService",
-    "MemoryReflectionSummary",
-    "MemoryRetainService",
-    "MemoryScopeSelector",
-    "SharedMemoryViews",
-    "build_scope_candidates",
-    "normalize_memory_scope_type",
-    "normalize_scope_id",
-    "parse_memory_document_id",
-    "selector_matches_scope",
-    "source_route_for_entry",
-]
+from importlib import import_module
+from typing import Any
+
+_EXPORTS: dict[str, tuple[str, str]] = {
+    "ActivationInput": (".activation_models", "ActivationInput"),
+    "ActivationResult": (".activation_models", "ActivationResult"),
+    "KnowledgeNeuron": (".activation_models", "KnowledgeNeuron"),
+    "MemoryActivationService": (".activation_service", "MemoryActivationService"),
+    "DerivedMemoryIndexService": (".derived_index_service", "DerivedMemoryIndexService"),
+    "build_scope_candidates": (".derived_index_service", "build_scope_candidates"),
+    "normalize_memory_scope_type": (".derived_index_service", "normalize_memory_scope_type"),
+    "normalize_scope_id": (".derived_index_service", "normalize_scope_id"),
+    "parse_memory_document_id": (".derived_index_service", "parse_memory_document_id"),
+    "selector_matches_scope": (".derived_index_service", "selector_matches_scope"),
+    "source_route_for_entry": (".derived_index_service", "source_route_for_entry"),
+    "MemoryBackendDescriptor": (".models", "MemoryBackendDescriptor"),
+    "MemoryRecallHit": (".models", "MemoryRecallHit"),
+    "MemoryRecallResponse": (".models", "MemoryRecallResponse"),
+    "MemoryRebuildSummary": (".models", "MemoryRebuildSummary"),
+    "MemoryReflectionSummary": (".models", "MemoryReflectionSummary"),
+    "MemoryScopeSelector": (".models", "MemoryScopeSelector"),
+    "MemoryEntryPartition": (".precedence", "MemoryEntryPartition"),
+    "MemoryPrecedenceService": (".precedence", "MemoryPrecedenceService"),
+    "MemoryProfile": (".profile_service", "MemoryProfile"),
+    "MemoryProfileService": (".profile_service", "MemoryProfileService"),
+    "SharedMemoryViews": (".profile_service", "SharedMemoryViews"),
+    "MemoryRecallService": (".recall_service", "MemoryRecallService"),
+    "MemoryReflectionService": (".reflection_service", "MemoryReflectionService"),
+    "MemoryRetainService": (".retain_service", "MemoryRetainService"),
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_name, attr_name = _EXPORTS[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+    module = import_module(module_name, __name__)
+    value = getattr(module, attr_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

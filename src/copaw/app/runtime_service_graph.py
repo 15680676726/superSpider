@@ -157,6 +157,8 @@ from .runtime_events import RuntimeEventBus
 from .runtime_health_service import RuntimeHealthService
 from .runtime_threads import SessionRuntimeThreadHistoryReader
 
+logger = logging.getLogger(__name__)
+
 
 async def initialize_mcp_manager(
     *,
@@ -377,6 +379,7 @@ def _build_kernel_runtime(
     experience_memory_service: AgentExperienceMemoryService | None,
     state_store: SQLiteStateStore,
     work_context_service: WorkContextService,
+    external_runtime_service: object | None = None,
 ) -> tuple[
     LearningService,
     GovernanceService,
@@ -399,6 +402,7 @@ def _build_kernel_runtime(
         experience_memory_service=experience_memory_service,
         state_store=state_store,
         work_context_service=work_context_service,
+        external_runtime_service=external_runtime_service,
         patch_executor_cls=PatchExecutor,
         learning_service_cls=LearningService,
         governance_service_cls=GovernanceService,

@@ -89,9 +89,11 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
         work_context_repository=object(),
         industry_instance_repository=SimpleNamespace(list_instances=lambda limit=None: []),
         human_assist_task_repository=object(),
+        external_runtime_repository=SimpleNamespace(list_runtimes=lambda **kwargs: []),
     )
     capability_service = SimpleNamespace(
         set_turn_executor=lambda value: calls.setdefault("turn_executor", value),
+        list_public_capabilities=lambda enabled_only=True: [],
     )
     governance_service = SimpleNamespace(
         set_environment_service=lambda value: calls.setdefault("governance_environment_service", value),
@@ -559,6 +561,11 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
         work_context_service=object(),
         learning_service=_LearningService(),
         capability_service=_CapabilityService(),
+        capability_candidate_service=object(),
+        capability_donor_service=object(),
+        capability_portfolio_service=object(),
+        skill_trial_service=object(),
+        skill_lifecycle_decision_service=object(),
         kernel_dispatcher=object(),
         kernel_tool_bridge=object(),
         actor_mailbox_service=object(),

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
-from .models import StrategyMemoryRecord
-from .repositories import BaseStrategyMemoryRepository
+from .models_reporting import StrategyMemoryRecord
+
+if TYPE_CHECKING:
+    from .repositories.base import BaseStrategyMemoryRepository
 
 _MAX_STRATEGY_TITLE_LENGTH = 160
 _MAX_STRATEGY_SUMMARY_LENGTH = 320
