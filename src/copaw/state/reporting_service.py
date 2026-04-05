@@ -656,6 +656,30 @@ class StateReportingService:
             },
         }
 
+    def build_knowledge_writeback_projection(
+        self,
+        *,
+        window: ReportWindow = "weekly",
+        scope_type: ReportScopeType = "global",
+        scope_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        until = _utc_now()
+        since = until - timedelta(days=_WINDOW_DAYS[window])
+        snapshot = self._build_scope_snapshot(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            since=since,
+            until=until,
+        )
+        dataset = self._collect_window_dataset(
+            window=window,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            until=until,
+            snapshot=snapshot,
+        )
+        return self._build_knowledge_writeback_projection(dataset)
+
     def _collect_window_dataset(
         self,
         *,
@@ -799,6 +823,90 @@ class StateReportingService:
             window_goal_ids=window_goal_ids,
             window_task_ids=window_task_ids,
         )
+
+    def _build_knowledge_writeback_projection(
+        self,
+        dataset: _WindowDataset,
+    ) -> list[dict[str, Any]]:
+        projections: list[dict[str, Any]] = []
+        for task in sorted(
+            dataset.tasks,
+            key=lambda item: _timestamp_key(
+                _task_activity_at(item, dataset.runtimes_by_task.get(item.id)),
+            ),
+            reverse=True,
+        ):
+            if task.id not in dataset.window_task_ids:
+                continue
+            runtime = dataset.runtimes_by_task.get(task.id)
+            task_decisions = [
+                decision
+                for decision in dataset.decisions
+                if decision.task_id == task.id
+                and decision.status not in {"approved", "rejected", "resolved", "cancelled"}
+            ]
+            task_evidence = [
+                record
+                for record in dataset.evidence
+                if record.task_id == task.id
+            ]
+            task_patches = [
+                patch
+                for patch in dataset.patches
+                if getattr(patch, "task_id", None) == task.id
+            ]
+            task_growth = [
+                event
+                for event in dataset.growth
+                if getattr(event, "task_id", None) == task.id
+            ]
+            failure_reason = (
+                _normalize_text(runtime.last_error_summary if runtime is not None else None)
+                or next(
+                    (
+                        _normalize_text(record.result_summary)
+                        for record in task_evidence
+                        if getattr(record, "status", None) in {"failed", "timeout", "cancelled"}
+                    ),
+                    None,
+                )
+                or (
+                    _normalize_text(task.summary)
+                    if task.status in {"failed", "blocked", "needs-confirm"}
+                    else None
+                )
+            )
+            if (
+                failure_reason is None
+                and not task_decisions
+                and not task_patches
+                and not task_growth
+            ):
+                continue
+            projections.append(
+                {
+                    "task_id": task.id,
+                    "work_context_id": _normalize_text(getattr(task, "work_context_id", None)),
+                    "failure_reason": failure_reason,
+                    "open_decision_summaries": _unique_strings(
+                        decision.summary
+                        for decision in task_decisions
+                    ),
+                    "evidence_refs": _unique_strings(
+                        record.id
+                        for record in task_evidence
+                    ),
+                    "patch_ids": _unique_strings(
+                        getattr(patch, "id", None)
+                        for patch in task_patches
+                    ),
+                    "growth_ids": _unique_strings(
+                        getattr(event, "id", None)
+                        for event in task_growth
+                    ),
+                },
+            )
+        return projections
 
     def _build_scope_snapshot(
         self,

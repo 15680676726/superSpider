@@ -23,6 +23,7 @@ def _report(
     recommendation: str | None = None,
     needs_followup: bool = False,
     followup_reason: str | None = None,
+    evidence_ids: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
     updated_at: datetime | None = None,
 ) -> AgentReportRecord:
@@ -42,6 +43,7 @@ def _report(
         recommendation=recommendation,
         needs_followup=needs_followup,
         followup_reason=followup_reason,
+        evidence_ids=evidence_ids or [],
         metadata=metadata or {},
         updated_at=updated_at,
     )
@@ -656,3 +658,25 @@ def test_report_replan_engine_turns_activation_report_contradictions_into_strate
     assert _decision_kind(decision) == "strategy_review_required"
     assert _strategy_change(decision)["trigger_family"] == "repeated_evidence_contradiction"
     assert "strategy review" in decision.summary.lower()
+
+
+def test_synthesize_reports_emits_knowledge_writeback_summary() -> None:
+    report = _report(
+        headline="Warehouse approval review",
+        owner_agent_id="agent-a",
+        result="completed",
+        findings=["Warehouse approval is verified."],
+        recommendation="Keep the release paused until finance handoff clears.",
+        evidence_ids=["evidence-1"],
+        metadata={"verified_findings": True},
+    )
+
+    synthesis = synthesize_reports([report])
+
+    writeback = synthesis["knowledge_writeback"]
+    assert writeback["scope_type"] == "industry"
+    assert "report" in writeback["node_types"]
+    assert "fact" in writeback["node_types"]
+    assert "opinion" in writeback["node_types"]
+    assert "derived_from" in writeback["relation_types"]
+    assert "evidence-1" in writeback["evidence_refs"]

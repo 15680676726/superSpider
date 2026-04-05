@@ -4,6 +4,7 @@ from __future__ import annotations
 from hashlib import sha1
 from typing import Any, Sequence
 
+from ..memory.knowledge_writeback_service import KnowledgeWritebackService
 from ..state import AgentReportRecord
 
 _SUCCESS_RESULTS = {"completed", "success"}
@@ -480,6 +481,7 @@ def synthesize_reports(
     reports: Sequence[AgentReportRecord],
     *,
     activation_result: object | None = None,
+    knowledge_writeback_service: object | None = None,
 ) -> dict[str, Any]:
     normalized_reports = [report for report in reports if isinstance(report, AgentReportRecord)]
     latest_reports = _latest_reports(normalized_reports)
@@ -506,6 +508,32 @@ def synthesize_reports(
         conflicts=conflicts,
         activation_reason_ids=activation_reason_ids,
     )
+    knowledge_writeback = None
+    service = knowledge_writeback_service
+    if service is None:
+        service = KnowledgeWritebackService()
+    build_writeback = getattr(service, "build_report_synthesis_writeback", None)
+    summarize_change = getattr(service, "summarize_change", None)
+    if callable(build_writeback) and callable(summarize_change):
+        writeback_change = build_writeback(
+            reports=latest_reports,
+            activation_result=activation_result,
+        )
+        writeback_summary = summarize_change(writeback_change)
+        if isinstance(writeback_summary, dict) and (
+            writeback_summary.get("node_ids")
+            or writeback_summary.get("relation_ids")
+        ):
+            writeback_summary = dict(writeback_summary)
+            writeback_summary["source_report_ids"] = [
+                report.id
+                for report in latest_reports
+            ]
+            writeback_summary["topic_keys"] = _unique_strings(
+                _report_topic_key(report)
+                for report in latest_reports
+            )
+            knowledge_writeback = writeback_summary
     payload = {
         "latest_findings": _latest_findings(normalized_reports),
         "conflicts": conflicts,
@@ -523,6 +551,8 @@ def synthesize_reports(
     }
     if activation_payload is not None:
         payload["activation"] = activation_payload
+    if knowledge_writeback is not None:
+        payload["knowledge_writeback"] = knowledge_writeback
     return payload
 
 

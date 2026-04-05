@@ -327,3 +327,27 @@ def test_reporting_service_exposes_work_context_continuity_in_followup_outputs(t
     assert weekly.routes["work_contexts"] == [
         "/api/runtime-center/work-contexts/ctx-followup-chain"
     ]
+
+
+def test_reporting_service_builds_knowledge_writeback_projection_for_failed_followup_signals(tmp_path) -> None:
+    service = _build_service(
+        tmp_path,
+        task_two_work_context_id="ctx-followup-chain",
+    )
+
+    projection = service.build_knowledge_writeback_projection(window="weekly")
+
+    assert projection == [
+        {
+            "task_id": "task-2",
+            "work_context_id": "ctx-followup-chain",
+            "failure_reason": "Signal validation failed.",
+            "open_decision_summaries": [
+                "Confirm whether to rollback the signal change.",
+            ],
+            "evidence_refs": projection[0]["evidence_refs"],
+            "patch_ids": ["patch-1"],
+            "growth_ids": ["growth-1"],
+        },
+    ]
+    assert projection[0]["evidence_refs"]
