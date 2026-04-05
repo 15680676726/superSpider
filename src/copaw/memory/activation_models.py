@@ -70,10 +70,13 @@ class KnowledgeNeuron(BaseModel):
 
 class ActivationInput(BaseModel):
     query_text: str
+    scope_type: str | None = None
+    scope_id: str | None = None
     work_context_id: str | None = None
     task_id: str | None = None
     agent_id: str | None = None
     industry_instance_id: str | None = None
+    global_scope_id: str | None = None
     strategy_id: str | None = None
     lane_id: str | None = None
     backlog_item_id: str | None = None

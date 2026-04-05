@@ -536,6 +536,126 @@ def test_activation_service_activate_for_query_uses_shared_strategy_resolver_and
     assert result.top_relation_evidence[0].source_refs == ["chunk-approval-1"]
 
 
+def test_activation_service_activate_for_query_honors_explicit_scope_override() -> None:
+    calls: dict[str, list[dict[str, object]]] = {
+        "fact": [],
+    }
+
+    def _list_fact_entries(**kwargs: object) -> list[object]:
+        calls["fact"].append(dict(kwargs))
+        return [
+            _fact_entry(
+                "fact-agent",
+                scope_type="agent",
+                scope_id="agent-1",
+                title="Agent-specific execution note",
+                summary="The agent scope owns this execution constraint.",
+                entity_keys=["execution", "constraint"],
+            ),
+        ]
+
+    service = MemoryActivationService(
+        derived_index_service=SimpleNamespace(
+            list_fact_entries=_list_fact_entries,
+            list_entity_views=lambda **_: [],
+            list_opinion_views=lambda **_: [],
+            list_relation_views=lambda **_: [],
+        ),
+        strategy_memory_service=SimpleNamespace(),
+    )
+
+    with patch(
+        "copaw.memory.activation_service.resolve_strategy_payload",
+        return_value=None,
+    ):
+        result = service.activate_for_query(
+            query="agent execution constraint",
+            scope_type="agent",
+            scope_id="agent-1",
+            industry_instance_id="industry-1",
+            owner_agent_id="agent-main-brain",
+            limit=4,
+        )
+
+    assert calls["fact"][0]["scope_type"] == "agent"
+    assert calls["fact"][0]["scope_id"] == "agent-1"
+    assert result.scope_type == "agent"
+    assert result.scope_id == "agent-1"
+
+
+def test_activation_service_activate_for_query_prefers_agent_scope_over_industry_scope() -> None:
+    calls: dict[str, list[dict[str, object]]] = {
+        "fact": [],
+    }
+
+    def _list_fact_entries(**kwargs: object) -> list[object]:
+        calls["fact"].append(dict(kwargs))
+        return [
+            _fact_entry(
+                "fact-agent",
+                scope_type="agent",
+                scope_id="agent-1",
+                title="Agent execution constraint",
+                summary="The agent scope should outrank the industry scope.",
+                entity_keys=["execution", "constraint"],
+            ),
+        ]
+
+    service = MemoryActivationService(
+        derived_index_service=SimpleNamespace(
+            list_fact_entries=_list_fact_entries,
+            list_entity_views=lambda **_: [],
+            list_opinion_views=lambda **_: [],
+            list_relation_views=lambda **_: [],
+        ),
+        strategy_memory_service=SimpleNamespace(),
+    )
+
+    with patch(
+        "copaw.memory.activation_service.resolve_strategy_payload",
+        return_value=None,
+    ):
+        result = service.activate_for_query(
+            query="agent execution constraint",
+            agent_id="agent-1",
+            industry_instance_id="industry-1",
+            owner_agent_id="agent-main-brain",
+            limit=4,
+        )
+
+    assert calls["fact"][0]["scope_type"] == "agent"
+    assert calls["fact"][0]["scope_id"] == "agent-1"
+    assert result.scope_type == "agent"
+    assert result.scope_id == "agent-1"
+
+
+def test_activation_service_activate_for_query_does_not_create_fake_strategy_payload_when_missing() -> None:
+    service = MemoryActivationService(
+        derived_index_service=SimpleNamespace(
+            list_fact_entries=lambda **_: [],
+            list_entity_views=lambda **_: [],
+            list_opinion_views=lambda **_: [],
+            list_relation_views=lambda **_: [],
+        ),
+        strategy_memory_service=SimpleNamespace(),
+    )
+
+    with patch(
+        "copaw.memory.activation_service.resolve_strategy_payload",
+        return_value=None,
+    ):
+        result = service.activate_for_query(
+            query="missing strategy should stay missing",
+            scope_type="work_context",
+            scope_id="ctx-1",
+            owner_agent_id="agent-main-brain",
+            limit=4,
+        )
+
+    assert result.strategy_refs == []
+    assert not any(item.kind == "strategy" for item in result.activated_neurons)
+
+
 def test_derived_index_service_persists_relation_views_from_fact_entity_links() -> None:
     fact_entries = [
         _fact_entry(

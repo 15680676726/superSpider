@@ -62,13 +62,16 @@ class MemoryActivationService:
         include_reports: bool = True,
         limit: int = 12,
     ) -> ActivationResult:
-        _ = (role, scope_type, scope_id, global_scope_id)
+        _ = role
         activation_input = ActivationInput(
             query_text=query,
+            scope_type=scope_type,
+            scope_id=scope_id,
             work_context_id=work_context_id,
             task_id=task_id,
-            agent_id=agent_id or owner_agent_id,
+            agent_id=agent_id,
             industry_instance_id=industry_instance_id,
+            global_scope_id=global_scope_id,
             owner_agent_id=owner_agent_id,
             capability_ref=capability_ref,
             environment_ref=environment_ref,
@@ -427,6 +430,16 @@ class MemoryActivationService:
         return float(overlap * 4)
 
     def _scope_score(self, neuron: KnowledgeNeuron, activation_input: ActivationInput) -> float:
+        resolved_scope_type = self._resolve_scope_type(activation_input)
+        resolved_scope_id = self._resolve_scope_id(activation_input)
+        if neuron.scope_type == resolved_scope_type and neuron.scope_id == resolved_scope_id:
+            return {
+                "work_context": 40.0,
+                "task": 34.0,
+                "agent": 30.0,
+                "industry": 26.0,
+                "global": 12.0,
+            }.get(resolved_scope_type, 18.0)
         if (
             activation_input.work_context_id
             and neuron.scope_type == "work_context"
@@ -435,14 +448,14 @@ class MemoryActivationService:
             return 40.0
         if activation_input.task_id and neuron.scope_type == "task" and neuron.scope_id == activation_input.task_id:
             return 34.0
+        if activation_input.agent_id and neuron.scope_type == "agent" and neuron.scope_id == activation_input.agent_id:
+            return 22.0
         if (
             activation_input.industry_instance_id
             and neuron.scope_type == "industry"
             and neuron.scope_id == activation_input.industry_instance_id
         ):
-            return 26.0
-        if activation_input.agent_id and neuron.scope_type == "agent" and neuron.scope_id == activation_input.agent_id:
-            return 22.0
+            return 18.0
         if neuron.scope_type == "global":
             return 12.0
         return 0.0
@@ -454,22 +467,15 @@ class MemoryActivationService:
         owner_agent_id: str | None,
         industry_instance_id: str | None,
     ) -> dict[str, Any] | None:
-        strategy_payload = resolve_strategy_payload(
+        _ = industry_instance_id
+        strategy_owner = owner_agent_id or activation_input.owner_agent_id or activation_input.agent_id
+        return resolve_strategy_payload(
             service=self._strategy_memory_service,
-            scope_type=(
-                "industry"
-                if industry_instance_id
-                else "global"
-            ),
-            scope_id=industry_instance_id or "runtime",
-            owner_agent_id=owner_agent_id,
+            scope_type=self._resolve_scope_type(activation_input),
+            scope_id=self._resolve_scope_id(activation_input),
+            owner_agent_id=strategy_owner,
+            fallback_owner_agent_ids=(None,) if strategy_owner else (),
         )
-        if strategy_payload is not None:
-            return strategy_payload
-        return {
-            "scope_type": self._resolve_scope_type(activation_input),
-            "scope_id": self._resolve_scope_id(activation_input),
-        }
 
     def _freshness_score(self, value: object | None) -> float:
         if not isinstance(value, datetime):
@@ -479,22 +485,31 @@ class MemoryActivationService:
         return max(0.0, min(1.0, 1.0 - min(age_days / 30.0, 1.0)))
 
     def _resolve_scope_type(self, activation_input: ActivationInput) -> str:
+        explicit_scope_type = self._optional_text(activation_input.scope_type)
+        explicit_scope_id = self._optional_text(activation_input.scope_id)
+        if explicit_scope_type and explicit_scope_id:
+            return self._normalize_scope_type(explicit_scope_type)
         if activation_input.work_context_id:
             return "work_context"
         if activation_input.task_id:
             return "task"
-        if activation_input.industry_instance_id:
-            return "industry"
         if activation_input.agent_id:
             return "agent"
+        if activation_input.industry_instance_id:
+            return "industry"
         return "global"
 
     def _resolve_scope_id(self, activation_input: ActivationInput) -> str:
+        explicit_scope_type = self._optional_text(activation_input.scope_type)
+        explicit_scope_id = self._optional_text(activation_input.scope_id)
+        if explicit_scope_type and explicit_scope_id:
+            return explicit_scope_id
         return (
             activation_input.work_context_id
             or activation_input.task_id
-            or activation_input.industry_instance_id
             or activation_input.agent_id
+            or activation_input.industry_instance_id
+            or activation_input.global_scope_id
             or "runtime"
         )
 
@@ -604,3 +619,9 @@ class MemoryActivationService:
     def _optional_text(self, value: object | None) -> str | None:
         text = str(value or "").strip()
         return text or None
+
+    def _normalize_scope_type(self, scope_type: str | None) -> str:
+        normalized = str(scope_type or "").strip().lower()
+        if normalized in {"global", "industry", "agent", "task", "work_context"}:
+            return normalized
+        return "global"
