@@ -769,7 +769,7 @@ describe("MainBrainCockpitPanel", () => {
   it("renders compact buddy summary when runtime center receives buddy projection", () => {
     renderPanel(unifiedPayload, { buddySummary });
 
-    expect(screen.getByText("Buddy summary")).toBeInTheDocument();
+    expect(screen.getByText("伙伴摘要")).toBeInTheDocument();
     expect(screen.getByText("Nova")).toBeInTheDocument();
     expect(
       screen.getByText("Build an independent creator-business growth path"),

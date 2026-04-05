@@ -45,11 +45,7 @@ class BuddyProjectionService:
         self._current_focus_resolver = current_focus_resolver
 
     def build_chat_surface(self, *, profile_id: str | None = None) -> BuddySurfacePayload:
-        profile = (
-            self._profile_repository.get_profile(profile_id)
-            if profile_id
-            else self._profile_repository.get_latest_profile()
-        )
+        profile = self._resolve_profile(profile_id)
         if profile is None:
             raise ValueError("Buddy profile is not available")
         target = self._growth_target_repository.get_active_target(profile.profile_id)
@@ -71,16 +67,29 @@ class BuddyProjectionService:
             if relationship is not None and relationship.buddy_name.strip()
             else "你的伙伴"
         )
-        communication_count = len(session.transcript) if session is not None else 0
+        onboarding_turn_count = len(session.transcript) if session is not None else 0
+        relationship_communication_count = (
+            int(relationship.communication_count) if relationship is not None else 0
+        )
+        communication_count = onboarding_turn_count + relationship_communication_count
         completed_support_runs = self._completed_support_runs(profile.profile_id)
         completed_assisted_closures = self._completed_assisted_closures(profile.profile_id)
         knowledge_value = max(0, len(profile.interests) * 10 + len(profile.strengths) * 12 + (10 if target else 0))
         skill_value = max(0, completed_support_runs * 15 + completed_assisted_closures * 10)
-        pleasant_interaction_score = min(100, communication_count * 6 + completed_support_runs * 4)
+        relationship_pleasant_score = (
+            int(relationship.pleasant_interaction_score) if relationship is not None else 0
+        )
+        pleasant_interaction_score = min(
+            100,
+            relationship_pleasant_score + communication_count * 4 + completed_support_runs * 4,
+        )
         intimacy = min(100, communication_count * 8 + (15 if relationship and relationship.buddy_name.strip() else 0))
         affinity = min(100, intimacy // 2 + pleasant_interaction_score // 2)
-        companion_experience = (
-            communication_count * 5
+        relationship_experience = (
+            int(relationship.companion_experience) if relationship is not None else 0
+        )
+        companion_experience = relationship_experience + (
+            onboarding_turn_count * 5
             + completed_support_runs * 10
             + completed_assisted_closures * 8
             + len(profile.strengths) * 3
@@ -145,14 +154,24 @@ class BuddyProjectionService:
             "why_now_summary": surface.presentation.why_now_summary,
         }
 
+    def _resolve_profile(self, profile_id: str | None) -> HumanProfile | None:
+        if profile_id:
+            return self._profile_repository.get_profile(profile_id)
+        if self._profile_repository.count_profiles() > 1:
+            raise ValueError("Buddy surface requires explicit profile_id when multiple profiles exist")
+        return self._profile_repository.get_latest_profile()
+
     def _fallback_current_task_summary(self, profile_id: str) -> str:
         service = self._human_assist_task_service
         getter = getattr(service, "list_tasks", None)
         if callable(getter):
-            tasks = getter(limit=20)
+            try:
+                tasks = getter(limit=20, profile_id=profile_id)
+            except TypeError:
+                tasks = getter(limit=20)
             for task in tasks:
                 task_profile_id = getattr(task, "profile_id", None)
-                if task_profile_id not in {None, profile_id}:
+                if task_profile_id != profile_id:
                     continue
                 status = str(getattr(task, "status", "")).strip().lower()
                 if status in {"closed", "cancelled", "expired"}:
@@ -176,9 +195,13 @@ class BuddyProjectionService:
         if not callable(getter):
             return 0
         count = 0
-        for task in getter(limit=100):
+        try:
+            tasks = getter(limit=100, profile_id=profile_id)
+        except TypeError:
+            tasks = getter(limit=100)
+        for task in tasks:
             task_profile_id = getattr(task, "profile_id", None)
-            if task_profile_id not in {None, profile_id}:
+            if task_profile_id != profile_id:
                 continue
             status = str(getattr(task, "status", "")).strip().lower()
             if status in {"resume_queued", "closed"}:
@@ -191,9 +214,13 @@ class BuddyProjectionService:
         if not callable(getter):
             return 0
         count = 0
-        for task in getter(limit=100):
+        try:
+            tasks = getter(limit=100, profile_id=profile_id)
+        except TypeError:
+            tasks = getter(limit=100)
+        for task in tasks:
             task_profile_id = getattr(task, "profile_id", None)
-            if task_profile_id not in {None, profile_id}:
+            if task_profile_id != profile_id:
                 continue
             status = str(getattr(task, "status", "")).strip().lower()
             if status == "closed":

@@ -19,6 +19,10 @@ import type {
   BuddyConfirmDirectionResponse,
   BuddyIdentityResponse,
 } from "../../api/modules/buddy";
+import {
+  readBuddyProfileId,
+  writeBuddyProfileId,
+} from "../../runtime/buddyProfileBinding";
 
 const { Paragraph, Title } = Typography;
 const { TextArea } = Input;
@@ -35,7 +39,7 @@ type IdentityFormValues = {
 
 function parseLines(value?: string | null): string[] {
   return (value || "")
-    .split(/[\n,，、]/g)
+    .split(/[\n,，、]/)
     .map((item) => item.trim())
     .filter(Boolean);
 }
@@ -58,15 +62,20 @@ export default function BuddyOnboardingPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const surface = await api.getBuddySurface();
+        const boundProfileId = readBuddyProfileId();
+        const surface = await api.getBuddySurface(boundProfileId);
         if (!cancelled && surface?.profile?.profile_id) {
-          navigate("/chat", { replace: true });
+          writeBuddyProfileId(surface.profile.profile_id);
+          navigate(
+            `/chat?buddy_profile=${encodeURIComponent(surface.profile.profile_id)}`,
+            { replace: true },
+          );
           return;
         }
       } catch (rawError) {
         if (cancelled) return;
         if (!isApiError(rawError) || rawError.status !== 404) {
-          setError(rawError instanceof Error ? rawError.message : "Buddy onboarding load failed");
+          setError(rawError instanceof Error ? rawError.message : "伙伴建档加载失败");
         }
       } finally {
         if (!cancelled) {
@@ -92,11 +101,12 @@ export default function BuddyOnboardingPage() {
         constraints: parseLines(values.constraints),
         goal_intention: values.goal_intention,
       });
+      writeBuddyProfileId(result.profile.profile_id);
       setIdentity(result);
       setClarification(null);
       setSelectedDirection("");
     } catch (rawError) {
-      setError(rawError instanceof Error ? rawError.message : "Identity submit failed");
+      setError(rawError instanceof Error ? rawError.message : "身份建档失败");
     } finally {
       setSubmitting(false);
     }
@@ -118,7 +128,7 @@ export default function BuddyOnboardingPage() {
         setSelectedDirection(result.recommended_direction);
       }
     } catch (rawError) {
-      setError(rawError instanceof Error ? rawError.message : "Clarification failed");
+      setError(rawError instanceof Error ? rawError.message : "方向澄清失败");
     } finally {
       setSubmitting(false);
     }
@@ -135,11 +145,11 @@ export default function BuddyOnboardingPage() {
       });
       setConfirmPayload(result);
       navigate(
-        `/chat?buddy_session=${encodeURIComponent(identity.session_id)}&buddy_needs_name=1`,
+        `/chat?buddy_session=${encodeURIComponent(identity.session_id)}&buddy_needs_name=1&buddy_profile=${encodeURIComponent(identity.profile.profile_id)}`,
         { replace: true },
       );
     } catch (rawError) {
-      setError(rawError instanceof Error ? rawError.message : "Direction confirmation failed");
+      setError(rawError instanceof Error ? rawError.message : "主方向确认失败");
     } finally {
       setSubmitting(false);
     }
@@ -163,7 +173,7 @@ export default function BuddyOnboardingPage() {
             Buddy 初始建档
           </Title>
           <Paragraph style={{ margin: 0 }}>
-            先让我认真了解你，再一起收口一个足够大的长期方向。默认不会把整棵计划树压给你，只会帮你先看清最终目标和眼前这一步。
+            先让我认真了解你，再一起收口一个足够大的长期方向。默认不会把整棵计划树压给你，只会先帮你看清最终目标和眼前这一步。
           </Paragraph>
           <Steps
             current={stepIndex}
@@ -265,7 +275,7 @@ export default function BuddyOnboardingPage() {
       ) : null}
 
       {identity && clarification?.finished ? (
-        <Card title="我先给你 2-3 个候选大方向，但你只能确认 1 个主方向">
+        <Card title="我先给你 2-3 个候选大方向，但你只确认 1 个主方向">
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <Paragraph style={{ marginBottom: 0 }}>
               主方向必须足够大，不能是零碎愿望。后面的阶段目标和当前任务，都会从这个方向里拆出来。

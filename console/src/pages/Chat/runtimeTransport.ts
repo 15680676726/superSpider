@@ -123,6 +123,7 @@ const RUNTIME_BIZ_PARAM_ALLOWLIST = new Set<string>([
   "session_id",
   "user_id",
   "channel",
+  "buddy_profile_id",
 ]);
 
 function sanitizeRuntimeBizParams(

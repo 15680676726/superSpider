@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
 from ..state import CompanionRelationship, GrowthTarget, HumanProfile
+from ..state.main_brain_service import (
+    AssignmentService,
+    BacklogService,
+    OperatingCycleService,
+    OperatingLaneService,
+)
+from ..state.models import IndustryInstanceRecord
 from ..state.repositories_buddy import (
     BuddyOnboardingSessionRecord,
     SqliteBuddyOnboardingSessionRepository,
@@ -14,6 +22,7 @@ from ..state.repositories_buddy import (
     SqliteGrowthTargetRepository,
     SqliteHumanProfileRepository,
 )
+from ..state.repositories import SqliteIndustryInstanceRepository
 
 
 class BuddyIdentitySubmitResult(BaseModel):
@@ -67,11 +76,21 @@ class BuddyOnboardingService:
         growth_target_repository: SqliteGrowthTargetRepository,
         relationship_repository: SqliteCompanionRelationshipRepository,
         onboarding_session_repository: SqliteBuddyOnboardingSessionRepository,
+        industry_instance_repository: SqliteIndustryInstanceRepository | None = None,
+        operating_lane_service: OperatingLaneService | None = None,
+        backlog_service: BacklogService | None = None,
+        operating_cycle_service: OperatingCycleService | None = None,
+        assignment_service: AssignmentService | None = None,
     ) -> None:
         self._profile_repository = profile_repository
         self._growth_target_repository = growth_target_repository
         self._relationship_repository = relationship_repository
         self._onboarding_session_repository = onboarding_session_repository
+        self._industry_instance_repository = industry_instance_repository
+        self._operating_lane_service = operating_lane_service
+        self._backlog_service = backlog_service
+        self._operating_cycle_service = operating_cycle_service
+        self._assignment_service = assignment_service
 
     def submit_identity(
         self,
@@ -203,6 +222,10 @@ class BuddyOnboardingService:
                 },
             ),
         )
+        growth_target = self._ensure_growth_scaffold(
+            profile=profile,
+            growth_target=growth_target,
+        )
         updated_session = self._onboarding_session_repository.upsert_session(
             session.model_copy(
                 update={
@@ -217,6 +240,41 @@ class BuddyOnboardingService:
             growth_target=growth_target,
             relationship=relationship,
         )
+
+    def record_chat_interaction(
+        self,
+        *,
+        profile_id: str,
+        user_message: str,
+        interaction_mode: str | None = None,
+    ) -> CompanionRelationship | None:
+        profile = self._profile_repository.get_profile(profile_id)
+        if profile is None:
+            return None
+        relationship = self._relationship_repository.get_relationship(profile_id)
+        if relationship is None:
+            relationship = CompanionRelationship(profile_id=profile_id)
+        normalized_message = str(user_message or "").strip()
+        if not normalized_message:
+            return relationship
+        pleasant_delta = 6
+        if len(normalized_message) >= 48:
+            pleasant_delta += 4
+        strong_pull = str(interaction_mode or "").strip().lower() == "strong-pull"
+        experience_delta = 8 if strong_pull else 5
+        updated = relationship.model_copy(
+            update={
+                "communication_count": relationship.communication_count + 1,
+                "pleasant_interaction_score": min(
+                    100,
+                    relationship.pleasant_interaction_score + pleasant_delta,
+                ),
+                "companion_experience": relationship.companion_experience + experience_delta,
+                "strong_pull_count": relationship.strong_pull_count + (1 if strong_pull else 0),
+                "last_interaction_at": _utc_now().isoformat(),
+            },
+        )
+        return self._relationship_repository.upsert_relationship(updated)
 
     def name_buddy(
         self,
@@ -313,6 +371,180 @@ class BuddyOnboardingService:
         if profile.goal_intention.strip():
             return profile.goal_intention.strip()
         return f"{profile.display_name} wants a growth direction that is meaningful and sustainable."
+
+    def _ensure_growth_scaffold(
+        self,
+        *,
+        profile: HumanProfile,
+        growth_target: GrowthTarget,
+    ) -> GrowthTarget:
+        if (
+            self._industry_instance_repository is None
+            or self._operating_lane_service is None
+            or self._backlog_service is None
+            or self._operating_cycle_service is None
+            or self._assignment_service is None
+        ):
+            return growth_target
+        instance_id = f"buddy:{profile.profile_id}"
+        existing_instance = self._industry_instance_repository.get_instance(instance_id)
+        instance = IndustryInstanceRecord(
+            instance_id=instance_id,
+            label=profile.display_name,
+            summary=growth_target.final_goal,
+            owner_scope=profile.profile_id,
+            status="active",
+            profile_payload={
+                "profile_id": profile.profile_id,
+                "display_name": profile.display_name,
+                "profession": profile.profession,
+                "current_stage": profile.current_stage,
+                "goal_intention": profile.goal_intention,
+                "interests": list(profile.interests),
+                "strengths": list(profile.strengths),
+                "constraints": list(profile.constraints),
+            },
+            execution_core_identity_payload={
+                "profile_id": profile.profile_id,
+                "primary_direction": growth_target.primary_direction,
+                "final_goal": growth_target.final_goal,
+            },
+            goal_ids=list(existing_instance.goal_ids) if existing_instance is not None else [],
+            agent_ids=list(existing_instance.agent_ids) if existing_instance is not None else [],
+            schedule_ids=list(existing_instance.schedule_ids) if existing_instance is not None else [],
+            lifecycle_status="running",
+            autonomy_status="guided",
+            current_cycle_id=existing_instance.current_cycle_id if existing_instance is not None else None,
+            next_cycle_due_at=existing_instance.next_cycle_due_at if existing_instance is not None else None,
+            last_cycle_started_at=existing_instance.last_cycle_started_at if existing_instance is not None else None,
+            created_at=existing_instance.created_at if existing_instance is not None else _utc_now(),
+            updated_at=_utc_now(),
+        )
+        persisted_instance = self._industry_instance_repository.upsert_instance(instance)
+        lanes = self._operating_lane_service.seed_from_roles(
+            industry_instance_id=instance_id,
+            roles=self._build_lane_roles(profile=profile, growth_target=growth_target),
+        )
+        backlog_items = [
+            self._backlog_service.record_generated_item(
+                industry_instance_id=instance_id,
+                lane_id=lane_id,
+                title=title,
+                summary=summary,
+                priority=priority,
+                source_kind="buddy-bootstrap",
+                source_ref=source_ref,
+                metadata={"profile_id": profile.profile_id, "primary_direction": growth_target.primary_direction},
+            )
+            for lane_id, title, summary, priority, source_ref in self._build_initial_backlog_specs(
+                profile=profile,
+                growth_target=growth_target,
+                lanes=lanes,
+            )
+        ]
+        focus_lane_ids = [lane.id for lane in lanes[:2]] or [lane.id for lane in lanes]
+        cycle = self._operating_cycle_service.start_cycle(
+            industry_instance_id=instance_id,
+            label=profile.display_name,
+            cycle_kind="daily",
+            status="active",
+            focus_lane_ids=focus_lane_ids,
+            backlog_item_ids=[item.id for item in backlog_items],
+            source_ref=f"buddy-onboarding:{profile.profile_id}",
+            summary=f"Buddy onboarding cycle for {profile.display_name}",
+            metadata={"profile_id": profile.profile_id, "primary_direction": growth_target.primary_direction},
+        )
+        assignments = self._assignment_service.ensure_assignments(
+            industry_instance_id=instance_id,
+            cycle_id=cycle.id,
+            specs=[
+                {
+                    "lane_id": item.lane_id,
+                    "backlog_item_id": item.id,
+                    "title": item.title,
+                    "summary": item.summary,
+                    "status": "queued" if index == 0 else "planned",
+                    "metadata": {
+                        "profile_id": profile.profile_id,
+                        "primary_direction": growth_target.primary_direction,
+                    },
+                }
+                for index, item in enumerate(backlog_items)
+            ],
+        )
+        self._industry_instance_repository.upsert_instance(
+            persisted_instance.model_copy(
+                update={
+                    "current_cycle_id": cycle.id,
+                    "last_cycle_started_at": cycle.started_at,
+                    "next_cycle_due_at": cycle.due_at,
+                    "updated_at": _utc_now(),
+                },
+            ),
+        )
+        return self._growth_target_repository.upsert_target(
+            growth_target.model_copy(update={"current_cycle_label": cycle.title}),
+        )
+
+    def _build_lane_roles(
+        self,
+        *,
+        profile: HumanProfile,
+        growth_target: GrowthTarget,
+    ) -> list[dict[str, str]]:
+        del growth_target
+        return [
+            {
+                "role_id": "growth-focus",
+                "role_name": "Growth Focus",
+                "goal_kind": "growth-focus",
+                "mission": f"Keep {profile.display_name} aligned to the chosen long-term direction.",
+            },
+            {
+                "role_id": "proof-of-work",
+                "role_name": "Proof Of Work",
+                "goal_kind": "proof-of-work",
+                "mission": f"Turn {profile.display_name}'s current direction into visible proof and momentum.",
+            },
+        ]
+
+    def _build_initial_backlog_specs(
+        self,
+        *,
+        profile: HumanProfile,
+        growth_target: GrowthTarget,
+        lanes: list[object],
+    ) -> list[tuple[str | None, str, str, int, str]]:
+        lane_ids = [getattr(lane, "id", None) for lane in lanes]
+        primary_lane_id = lane_ids[0] if lane_ids else None
+        proof_lane_id = lane_ids[1] if len(lane_ids) > 1 else primary_lane_id
+        return [
+            (
+                primary_lane_id,
+                "Clarify the first concrete proof point",
+                f"Define the first concrete proof that shows {profile.display_name} is moving toward {growth_target.primary_direction}.",
+                3,
+                f"profile:{profile.profile_id}:proof-point",
+            ),
+            (
+                proof_lane_id,
+                "Ship the first visible growth artifact",
+                f"Create one visible artifact that starts moving '{growth_target.final_goal}' out of imagination and into evidence.",
+                2,
+                f"profile:{profile.profile_id}:first-artifact",
+            ),
+            (
+                primary_lane_id,
+                "Stabilize the weekly rhythm",
+                f"Establish a weekly rhythm that {profile.display_name} can realistically sustain without burning out.",
+                1,
+                f"profile:{profile.profile_id}:weekly-rhythm",
+            ),
+        ]
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 __all__ = [

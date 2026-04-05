@@ -20,6 +20,7 @@ import {
   type RuntimeSurfaceSection,
   requestRuntimeSurface,
 } from "../../runtime/runtimeSurfaceClient";
+import { readBuddyProfileId } from "../../runtime/buddyProfileBinding";
 import {
   formatRuntimeActionLabel,
   localizeRuntimeText,
@@ -276,7 +277,9 @@ export function useRuntimeCenter() {
         const [payload, buddyPayload] = await Promise.all([
           requestRuntimeSurface<RuntimeCenterSurfaceResponse>(options),
           shouldLoadBuddySummary
-            ? requestRuntimeBuddySummary<RuntimeMainBrainBuddySummary>().catch(
+            ? requestRuntimeBuddySummary<RuntimeMainBrainBuddySummary>(
+                readBuddyProfileId(),
+              ).catch(
                 () => null,
               )
             : Promise.resolve(null),

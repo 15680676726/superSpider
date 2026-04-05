@@ -86,6 +86,7 @@ class HumanAssistTaskRecord(UpdatedRecord):
     """Formal host-side task for blocked-by-proof or human-owned checkpoints."""
 
     id: str = Field(default_factory=_new_record_id, min_length=1)
+    profile_id: str | None = None
     industry_instance_id: str | None = None
     assignment_id: str | None = None
     task_id: str | None = None

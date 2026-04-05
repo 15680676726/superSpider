@@ -27,6 +27,7 @@ from ..kernel import (
     KernelTurnExecutor,
     TaskDelegationService,
 )
+from ..kernel.buddy_runtime_focus import build_buddy_current_focus_resolver
 from ..learning import LearningService, PatchExecutor
 from ..media import MediaService
 from ..memory import (
@@ -406,19 +407,10 @@ def build_runtime_bootstrap(
         evidence_ledger=evidence_ledger,
         runtime_event_bus=runtime_event_bus,
     )
-    buddy_onboarding_service = BuddyOnboardingService(
-        profile_repository=SqliteHumanProfileRepository(state_store),
-        growth_target_repository=SqliteGrowthTargetRepository(state_store),
-        relationship_repository=SqliteCompanionRelationshipRepository(state_store),
-        onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(state_store),
-    )
-    buddy_projection_service = BuddyProjectionService(
-        profile_repository=SqliteHumanProfileRepository(state_store),
-        growth_target_repository=SqliteGrowthTargetRepository(state_store),
-        relationship_repository=SqliteCompanionRelationshipRepository(state_store),
-        onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(state_store),
-        human_assist_task_service=human_assist_task_service,
-    )
+    buddy_profile_repository = SqliteHumanProfileRepository(state_store)
+    buddy_growth_target_repository = SqliteGrowthTargetRepository(state_store)
+    buddy_relationship_repository = SqliteCompanionRelationshipRepository(state_store)
+    buddy_onboarding_session_repository = SqliteBuddyOnboardingSessionRepository(state_store)
     donor_source_service = DonorSourceService(
         state_store=state_store,
     )
@@ -568,6 +560,32 @@ def build_runtime_bootstrap(
     query_execution_service = domain_services.query_execution_service
     main_brain_chat_service = domain_services.main_brain_chat_service
     main_brain_orchestrator = domain_services.main_brain_orchestrator
+    buddy_current_focus_resolver = build_buddy_current_focus_resolver(
+        agent_profile_service=agent_profile_service,
+        growth_target_repository=buddy_growth_target_repository,
+        industry_instance_repository=repositories.industry_instance_repository,
+        assignment_service=assignment_service,
+        backlog_service=backlog_service,
+    )
+    buddy_onboarding_service = BuddyOnboardingService(
+        profile_repository=buddy_profile_repository,
+        growth_target_repository=buddy_growth_target_repository,
+        relationship_repository=buddy_relationship_repository,
+        onboarding_session_repository=buddy_onboarding_session_repository,
+        industry_instance_repository=repositories.industry_instance_repository,
+        operating_lane_service=operating_lane_service,
+        backlog_service=backlog_service,
+        operating_cycle_service=operating_cycle_service,
+        assignment_service=assignment_service,
+    )
+    buddy_projection_service = BuddyProjectionService(
+        profile_repository=buddy_profile_repository,
+        growth_target_repository=buddy_growth_target_repository,
+        relationship_repository=buddy_relationship_repository,
+        onboarding_session_repository=buddy_onboarding_session_repository,
+        human_assist_task_service=human_assist_task_service,
+        current_focus_resolver=buddy_current_focus_resolver,
+    )
     try:
         capability_candidate_service.import_active_baseline_artifacts(
             mounts=capability_service.list_public_capabilities(enabled_only=True),

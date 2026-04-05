@@ -562,6 +562,7 @@ class GovernanceService:
         try:
             ensure_task(
                 chat_thread_id=chat_thread_id,
+                profile_id=_first_non_empty(payload.get("buddy_profile_id")),
                 title=f"Return host handoff for {task_title}",
                 summary=summary,
                 required_action=required_action,

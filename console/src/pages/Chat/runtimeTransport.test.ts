@@ -118,6 +118,7 @@ describe("runtimeTransport", () => {
         control_thread_id: "industry-chat:industry-1:execution-core",
         owner_scope: "industry",
         session_kind: "industry-control-thread",
+        buddy_profile_id: "profile-1",
       },
       pendingMediaSources: [
         {
@@ -139,6 +140,7 @@ describe("runtimeTransport", () => {
     expect(request.control_thread_id).toBe(
       "industry-chat:industry-1:execution-core",
     );
+    expect(request.buddy_profile_id).toBe("profile-1");
     expect(request.context_key).toBe(
       "control-thread:industry-chat:industry-1:execution-core",
     );
@@ -157,6 +159,38 @@ describe("runtimeTransport", () => {
     expect(request.industry_role_name).toBe("执行中枢");
     expect(request.interaction_mode).toBe("auto");
     expect(request.stream).toBe(true);
+  });
+
+  it("preserves buddy profile identity from biz params when thread meta does not provide one", () => {
+    const request = buildRuntimeChatRequest({
+      data: {
+        input: [
+          {
+            session: {
+              session_id: "session-thread",
+              user_id: "session-user",
+              channel: "session-channel",
+            },
+          },
+        ],
+        biz_params: {
+          buddy_profile_id: "profile-from-biz",
+        },
+      },
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      threadMeta: {
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      },
+      pendingMediaSources: [],
+      selectedMediaAnalysisIds: [],
+    });
+
+    expect(request.buddy_profile_id).toBe("profile-from-biz");
   });
 
   it("prefers bound thread agent identity over window user for canonical chat session keys", () => {

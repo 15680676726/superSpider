@@ -66,6 +66,10 @@ import { useChatMedia } from "./useChatMedia";
 import { useChatRuntimeState } from "./useChatRuntimeState";
 import styles from "./index.module.less";
 import { useRuntimeBinding } from "./useRuntimeBinding";
+import {
+  readBuddyProfileId,
+  writeBuddyProfileId,
+} from "../../runtime/buddyProfileBinding";
 
 interface CustomWindow extends Window {
   currentChannel?: string;
@@ -287,9 +291,17 @@ export default function ChatPage() {
     () => new URLSearchParams(location.search).get("buddy_session"),
     [location.search],
   );
+  const buddyProfileIdFromQuery = useMemo(
+    () => new URLSearchParams(location.search).get("buddy_profile"),
+    [location.search],
+  );
   const needsBuddyNaming = useMemo(
     () => new URLSearchParams(location.search).get("buddy_needs_name") === "1",
     [location.search],
+  );
+  const buddyProfileId = useMemo(
+    () => buddyProfileIdFromQuery?.trim() || readBuddyProfileId(),
+    [buddyProfileIdFromQuery],
   );
 
   const [showModelPrompt, setShowModelPrompt] = useState(false);
@@ -301,6 +313,13 @@ export default function ChatPage() {
   const [threadBootstrapError, setThreadBootstrapError] = useState<string | null>(null);
   const [threadMeta, setThreadMeta] = useState<Record<string, unknown>>(
     normalizeThreadMeta(requestedThreadId ? window.currentThreadMeta : null),
+  );
+  const effectiveThreadMeta = useMemo<Record<string, unknown>>(
+    () => ({
+      ...threadMeta,
+      ...(buddyProfileId ? { buddy_profile_id: buddyProfileId } : {}),
+    }),
+    [buddyProfileId, threadMeta],
   );
 
   const {
@@ -314,7 +333,7 @@ export default function ChatPage() {
   } = useRuntimeBinding({
     navigate,
     requestedThreadId,
-    threadMeta,
+    threadMeta: effectiveThreadMeta,
     windowThreadId: window.currentThreadId,
   });
 
@@ -338,8 +357,8 @@ export default function ChatPage() {
   const refreshActiveModels = useModelStore((s) => s.refreshActiveModels);
 
   const activeWorkContextId =
-    typeof threadMeta.work_context_id === "string" && threadMeta.work_context_id.trim()
-      ? threadMeta.work_context_id.trim()
+    typeof effectiveThreadMeta.work_context_id === "string" && effectiveThreadMeta.work_context_id.trim()
+      ? effectiveThreadMeta.work_context_id.trim()
       : null;
   const {
     clearMediaError,
@@ -390,8 +409,11 @@ export default function ChatPage() {
     setBuddyLoading(true);
     setBuddyError(null);
     try {
-      const surface = await api.getBuddySurface();
+      const surface = await api.getBuddySurface(buddyProfileId);
       setBuddySurface(surface);
+      if (surface?.profile?.profile_id) {
+        writeBuddyProfileId(surface.profile.profile_id);
+      }
       setBuddyNameDraft("");
     } catch (error) {
       setBuddySurface(null);
@@ -401,11 +423,17 @@ export default function ChatPage() {
     } finally {
       setBuddyLoading(false);
     }
-  }, []);
+  }, [buddyProfileId]);
 
   useEffect(() => {
     void loadBuddySurface();
   }, [loadBuddySurface]);
+
+  useEffect(() => {
+    if (buddyProfileIdFromQuery?.trim()) {
+      writeBuddyProfileId(buddyProfileIdFromQuery);
+    }
+  }, [buddyProfileIdFromQuery]);
 
   useEffect(() => {
     if (location.pathname !== "/chat") return;
@@ -511,7 +539,7 @@ export default function ChatPage() {
     suggestedTeams,
     threadBootstrapError,
     threadBootstrapPending,
-    threadMeta,
+    threadMeta: effectiveThreadMeta,
   });
 
   const {
@@ -541,7 +569,7 @@ export default function ChatPage() {
   } = resolveThreadRuntimePresentation({
     currentGoal,
     sessionKind: sessionKind || "",
-    threadMeta,
+    threadMeta: effectiveThreadMeta,
   });
 
   const effectiveThreadPending = threadBootstrapPending || autoBindingPending;
@@ -593,6 +621,9 @@ export default function ChatPage() {
       const params = new URLSearchParams(location.search);
       params.delete("buddy_needs_name");
       params.delete("buddy_session");
+      if (buddyProfileId) {
+        params.set("buddy_profile", buddyProfileId);
+      }
       const nextSearch = params.toString();
       navigate(nextSearch ? `/chat?${nextSearch}` : "/chat", { replace: true });
     } catch (error) {
@@ -600,7 +631,7 @@ export default function ChatPage() {
     } finally {
       setBuddyNamingBusy(false);
     }
-  }, [buddyNameDraft, buddySessionId, loadBuddySurface, location.search, navigate]);
+  }, [buddyNameDraft, buddyProfileId, buddySessionId, loadBuddySurface, location.search, navigate]);
 
   // ============================================================
   return (
@@ -652,7 +683,7 @@ export default function ChatPage() {
           />
           <ChatHumanAssistPanel
             activeChatThreadId={activeChatThreadId}
-            threadMeta={threadMeta}
+            threadMeta={effectiveThreadMeta}
           />
           {needsBuddyNaming && buddySessionId ? (
             <Alert

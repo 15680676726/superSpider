@@ -173,6 +173,7 @@ class HumanAssistTaskService:
     def list_tasks(
         self,
         *,
+        profile_id: str | None = None,
         chat_thread_id: str | None = None,
         industry_instance_id: str | None = None,
         assignment_id: str | None = None,
@@ -181,6 +182,7 @@ class HumanAssistTaskService:
         limit: int | None = None,
     ) -> list[HumanAssistTaskRecord]:
         return self._repository.list_tasks(
+            profile_id=profile_id,
             chat_thread_id=chat_thread_id,
             industry_instance_id=industry_instance_id,
             assignment_id=assignment_id,
@@ -223,6 +225,7 @@ class HumanAssistTaskService:
         self,
         *,
         chat_thread_id: str,
+        profile_id: str | None = None,
         title: str,
         summary: str,
         required_action: str,
@@ -244,10 +247,13 @@ class HumanAssistTaskService:
                 continue
             if existing.task_type != "host-handoff-return":
                 continue
+            if _string(existing.profile_id) != _string(profile_id):
+                continue
             if normalized_task_id is not None and existing.task_id not in {None, normalized_task_id}:
                 continue
             updated = existing.model_copy(
                 update={
+                    "profile_id": _string(profile_id),
                     "submission_payload": _merge_submission_payload(
                         existing.submission_payload,
                         continuation_context,
@@ -267,6 +273,7 @@ class HumanAssistTaskService:
         )
         anchor_hint = f"“{anchor}”" if anchor else "完成返回条件"
         record = HumanAssistTaskRecord(
+            profile_id=_string(profile_id),
             industry_instance_id=_string(industry_instance_id),
             assignment_id=_string(assignment_id),
             task_id=normalized_task_id,
