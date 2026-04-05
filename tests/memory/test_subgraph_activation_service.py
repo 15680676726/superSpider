@@ -4,6 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from copaw.memory.activation_models import ActivationRelationEvidence, ActivationResult, KnowledgeNeuron
+from copaw.memory.knowledge_graph_models import KnowledgeGraphPath
 from copaw.memory.activation_service import MemoryActivationService
 from copaw.memory.subgraph_activation_service import SubgraphActivationService
 
@@ -120,6 +121,18 @@ def test_subgraph_activation_service_preserves_activation_metadata_in_subgraph()
                         source_refs=["evidence-1"],
                     ),
                 ],
+                support_paths=[
+                    KnowledgeGraphPath(
+                        path_type="support",
+                        score=6.0,
+                        node_ids=["fact-1", "strategy-1"],
+                        relation_ids=["relation-1"],
+                        relation_kinds=["supports"],
+                        summary="Constraint fact supports the strategy.",
+                        evidence_refs=["evidence-1"],
+                        source_refs=["evidence-1"],
+                    )
+                ],
                 metadata={"seed_term_count": 2},
             )
 
@@ -138,3 +151,5 @@ def test_subgraph_activation_service_preserves_activation_metadata_in_subgraph()
     assert subgraph.metadata["top_relation_kinds"] == ["supports"]
     assert subgraph.metadata["strategy_refs"] == ["strategy-1"]
     assert subgraph.metadata["contradiction_node_ids"] == ["fact-contradiction"]
+    assert subgraph.support_paths[0].path_type == "support"
+    assert subgraph.support_paths[0].relation_kinds == ["supports"]

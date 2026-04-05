@@ -12,6 +12,7 @@ from .activation_models import (
     ActivationResult,
     KnowledgeNeuron,
 )
+from .relation_traversal import pack_relation_paths, traversal_score
 from ..state.strategy_memory_service import resolve_strategy_payload
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{1,}")
@@ -164,7 +165,12 @@ class MemoryActivationService:
             neuron.activation_score = self._score_neuron(neuron, activation_input, seed_terms)
 
         self._spread_relations(neurons)
-        top_relations, top_relation_kinds, top_relation_evidence = self._summarize_relations(
+        (
+            top_relations,
+            top_relation_kinds,
+            top_relation_evidence,
+            path_bundle,
+        ) = self._summarize_relations(
             relation_views=relation_views or [],
             activation_input=activation_input,
             seed_terms=seed_terms,
@@ -216,6 +222,11 @@ class MemoryActivationService:
             top_relations=top_relations,
             top_relation_kinds=top_relation_kinds,
             top_relation_evidence=top_relation_evidence,
+            support_paths=list(path_bundle["support"]),
+            contradiction_paths=list(path_bundle["contradiction"]),
+            dependency_paths=list(path_bundle["dependency"]),
+            blocker_paths=list(path_bundle["blocker"]),
+            recovery_paths=list(path_bundle["recovery"]),
             top_constraints=_dedupe((strategy_payload or {}).get("execution_constraints") or []),
             top_next_actions=_dedupe((strategy_payload or {}).get("current_focuses") or []),
             metadata={
@@ -227,6 +238,11 @@ class MemoryActivationService:
                     item.model_dump(mode="json", exclude_none=True)
                     for item in top_relation_evidence
                 ],
+                "relation_paths": {
+                    key: [item.model_dump(mode="json", exclude_none=True) for item in value]
+                    for key, value in path_bundle.items()
+                    if value
+                },
             },
         )
 
@@ -564,7 +580,12 @@ class MemoryActivationService:
         relation_views: Iterable[object],
         activation_input: ActivationInput,
         seed_terms: list[str],
-    ) -> tuple[list[str], list[str], list[ActivationRelationEvidence]]:
+    ) -> tuple[
+        list[str],
+        list[str],
+        list[ActivationRelationEvidence],
+        dict[str, list[object]],
+    ]:
         scored: list[tuple[float, ActivationRelationEvidence]] = []
         for relation in list(relation_views or []):
             relation_kind = self._optional_text(getattr(relation, "relation_kind", None)) or "references"
@@ -588,28 +609,21 @@ class MemoryActivationService:
                 confidence=float(getattr(relation, "confidence", 0.0) or 0.0),
                 source_refs=_dedupe(getattr(relation, "source_refs", []) or []),
             )
-            score = 0.0
-            if (
+            scope_match = (
                 self._optional_text(getattr(relation, "scope_type", None))
                 == self._resolve_scope_type(activation_input)
                 and self._optional_text(getattr(relation, "scope_id", None))
                 == self._resolve_scope_id(activation_input)
-            ):
-                score += 10.0
-            score += float(
-                sum(
-                    1
-                    for term in seed_terms
-                    if term in set(
-                        _tokenize(summary)
-                        + _tokenize(relation_kind)
-                        + _tokenize(evidence.source_node_id)
-                        + _tokenize(evidence.target_node_id)
-                    )
-                )
-                * 4
             )
-            score += evidence.confidence * 5.0
+            score = traversal_score(
+                relation_kind=relation_kind,
+                summary=summary,
+                source_node_id=evidence.source_node_id,
+                target_node_id=evidence.target_node_id,
+                seed_terms=seed_terms,
+                confidence=evidence.confidence,
+                scope_match=scope_match,
+            )
             scored.append((score, evidence))
         scored.sort(
             key=lambda item: (
@@ -620,10 +634,12 @@ class MemoryActivationService:
             reverse=True,
         )
         top_relation_evidence = [evidence for _score, evidence in scored[:6]]
+        path_bundle = pack_relation_paths(scored_relations=scored)
         return (
             _dedupe(item.summary for item in top_relation_evidence),
             _dedupe(item.relation_kind for item in top_relation_evidence),
             top_relation_evidence,
+            path_bundle,
         )
 
     def _optional_text(self, value: object | None) -> str | None:

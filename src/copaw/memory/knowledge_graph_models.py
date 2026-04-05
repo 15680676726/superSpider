@@ -8,6 +8,13 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 KnowledgeGraphScopeType = Literal["global", "industry", "agent", "task", "work_context"]
+KnowledgeGraphPathType = Literal[
+    "support",
+    "contradiction",
+    "dependency",
+    "blocker",
+    "recovery",
+]
 
 WORLD_KNOWLEDGE_NODE_TYPES = (
     "entity",
@@ -304,12 +311,41 @@ class KnowledgeGraphRelation(BaseModel):
         return self.scope.scope_id
 
 
+class KnowledgeGraphPath(BaseModel):
+    path_type: KnowledgeGraphPathType
+    score: float = Field(default=0.0)
+    node_ids: list[str] = Field(default_factory=list)
+    relation_ids: list[str] = Field(default_factory=list)
+    relation_kinds: list[str] = Field(default_factory=list)
+    summary: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator(
+        "node_ids",
+        "relation_ids",
+        "relation_kinds",
+        "evidence_refs",
+        "source_refs",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_path_lists(cls, value: object) -> list[str]:
+        return _normalize_string_list(value)
+
+
 class TaskSubgraph(BaseModel):
     scope: KnowledgeGraphScope
     query_text: str = ""
     seed_refs: list[str] = Field(default_factory=list)
     nodes: list[KnowledgeGraphNode] = Field(default_factory=list)
     relations: list[KnowledgeGraphRelation] = Field(default_factory=list)
+    support_paths: list[KnowledgeGraphPath] = Field(default_factory=list)
+    contradiction_paths: list[KnowledgeGraphPath] = Field(default_factory=list)
+    dependency_paths: list[KnowledgeGraphPath] = Field(default_factory=list)
+    blocker_paths: list[KnowledgeGraphPath] = Field(default_factory=list)
+    recovery_paths: list[KnowledgeGraphPath] = Field(default_factory=list)
     focus_node_ids: list[str] = Field(default_factory=list)
     top_constraint_refs: list[str] = Field(default_factory=list)
     top_evidence_refs: list[str] = Field(default_factory=list)

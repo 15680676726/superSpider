@@ -61,6 +61,15 @@ class SubgraphActivationService:
             metadata["top_relations"] = list(result.top_relations)
         if result.top_relation_kinds:
             metadata["top_relation_kinds"] = list(result.top_relation_kinds)
+        relation_paths = {
+            "support_paths": [item.model_dump(mode="json", exclude_none=True) for item in list(result.support_paths or [])],
+            "contradiction_paths": [item.model_dump(mode="json", exclude_none=True) for item in list(result.contradiction_paths or [])],
+            "dependency_paths": [item.model_dump(mode="json", exclude_none=True) for item in list(result.dependency_paths or [])],
+            "blocker_paths": [item.model_dump(mode="json", exclude_none=True) for item in list(result.blocker_paths or [])],
+            "recovery_paths": [item.model_dump(mode="json", exclude_none=True) for item in list(result.recovery_paths or [])],
+        }
+        if any(relation_paths.values()):
+            metadata["relation_paths"] = {key: value for key, value in relation_paths.items() if value}
         if result.strategy_refs:
             metadata["strategy_refs"] = list(result.strategy_refs)
         if result.contradictions:

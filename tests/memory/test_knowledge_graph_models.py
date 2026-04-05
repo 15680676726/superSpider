@@ -207,3 +207,31 @@ def test_knowledge_graph_writeback_change_tracks_upserts_and_invalidations() -> 
     assert [item.relation_type for item in change.upsert_relations] == ["derived_from"]
     assert change.invalidate_node_ids == ["fact-old"]
     assert change.invalidate_relation_ids == ["rel-old"]
+
+
+def test_task_subgraph_can_carry_runtime_relation_paths_without_creating_new_truth_objects() -> None:
+    graph_models = _load_graph_models()
+    scope = graph_models.KnowledgeGraphScope(scope_type="task", scope_id="task-1")
+    path = graph_models.KnowledgeGraphPath(
+        path_type="blocker",
+        score=7.2,
+        node_ids=["fact-1", "assignment-1"],
+        relation_ids=["relation-block-1"],
+        relation_kinds=["blocks"],
+        summary="Current approval contradiction blocks assignment launch.",
+        evidence_refs=["evidence-1"],
+        source_refs=["memory:blocker-1"],
+    )
+
+    subgraph = graph_models.TaskSubgraph(
+        scope=scope,
+        support_paths=[],
+        contradiction_paths=[],
+        dependency_paths=[],
+        blocker_paths=[path],
+        recovery_paths=[],
+    )
+
+    assert subgraph.blocker_paths[0].path_type == "blocker"
+    assert subgraph.blocker_paths[0].relation_kinds == ["blocks"]
+    assert not hasattr(subgraph.blocker_paths[0], "scope")

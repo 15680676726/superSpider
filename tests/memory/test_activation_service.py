@@ -484,6 +484,16 @@ def test_activation_service_activate_for_query_uses_shared_strategy_resolver_and
                 summary="Inventory evidence supports the weekend staffing caution.",
                 source_refs=["chunk-weekend-1"],
             ),
+            _relation_view(
+                "relation-3",
+                relation_kind="depends_on",
+                scope_type="industry",
+                scope_id="industry-1",
+                summary="Warehouse release depends on refreshed approval evidence.",
+                source_refs=["chunk-approval-2"],
+                source_node_id="assignment:warehouse-release",
+                target_node_id="fact:approval-refresh",
+            ),
         ]
 
     strategy_service = SimpleNamespace(
@@ -523,17 +533,28 @@ def test_activation_service_activate_for_query_uses_shared_strategy_resolver_and
     resolve_strategy_payload_mock.assert_called_once()
     assert calls["relation"][0]["scope_type"] == "industry"
     assert calls["relation"][0]["scope_id"] == "industry-1"
-    assert result.metadata["top_relation_kinds"] == ["contradicts", "supports"]
+    assert result.metadata["top_relation_kinds"] == ["depends_on", "contradicts", "supports"]
     assert result.metadata["top_relations"] == [
+        "Warehouse release depends on refreshed approval evidence.",
         "Approval evidence contradicts the current warehouse release assumption.",
         "Inventory evidence supports the weekend staffing caution.",
     ]
     assert [item.relation_id for item in result.top_relation_evidence] == [
+        "relation-3",
         "relation-1",
         "relation-2",
     ]
-    assert result.top_relation_evidence[0].relation_kind == "contradicts"
-    assert result.top_relation_evidence[0].source_refs == ["chunk-approval-1"]
+    assert result.top_relation_evidence[0].relation_kind == "depends_on"
+    assert result.top_relation_evidence[0].source_refs == ["chunk-approval-2"]
+    assert result.contradiction_paths
+    assert result.contradiction_paths[0].path_type == "contradiction"
+    assert result.contradiction_paths[0].relation_ids == ["relation-1"]
+    assert result.dependency_paths
+    assert result.dependency_paths[0].path_type == "dependency"
+    assert result.dependency_paths[0].relation_ids == ["relation-3"]
+    assert result.support_paths
+    assert result.support_paths[0].path_type == "support"
+    assert "relation_paths" in result.metadata
 
 
 def test_activation_service_activate_for_query_honors_explicit_scope_override() -> None:

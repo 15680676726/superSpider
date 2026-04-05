@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from .knowledge_graph_models import (
+    KnowledgeGraphPath,
     KnowledgeGraphNode,
     KnowledgeGraphRelation,
     KnowledgeGraphScope,
@@ -137,6 +138,11 @@ class ActivationResult(BaseModel):
     top_relations: list[str] = Field(default_factory=list)
     top_relation_kinds: list[str] = Field(default_factory=list)
     top_relation_evidence: list[ActivationRelationEvidence] = Field(default_factory=list)
+    support_paths: list[KnowledgeGraphPath] = Field(default_factory=list)
+    contradiction_paths: list[KnowledgeGraphPath] = Field(default_factory=list)
+    dependency_paths: list[KnowledgeGraphPath] = Field(default_factory=list)
+    blocker_paths: list[KnowledgeGraphPath] = Field(default_factory=list)
+    recovery_paths: list[KnowledgeGraphPath] = Field(default_factory=list)
     top_constraints: list[str] = Field(default_factory=list)
     top_next_actions: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -153,6 +159,11 @@ class ActivationResult(BaseModel):
             seed_refs=list(seed_refs or []),
             nodes=graph_nodes,
             relations=graph_relations,
+            support_paths=list(self.support_paths or []),
+            contradiction_paths=list(self.contradiction_paths or []),
+            dependency_paths=list(self.dependency_paths or []),
+            blocker_paths=list(self.blocker_paths or []),
+            recovery_paths=list(self.recovery_paths or []),
             focus_node_ids=[item.node_id for item in graph_nodes[:5]],
             top_constraint_refs=list(self.top_constraints),
             top_evidence_refs=list(self.evidence_refs or self.support_refs),
