@@ -42,8 +42,8 @@ describe("runtimePresentation", () => {
   });
 
   it("renders media analysis empty state copy when no analyses exist", () => {
-    render(renderMediaAnalysisList([], { emptyText: "No preview analysis yet." }));
-    expect(screen.getByText("No preview analysis yet.")).toBeInTheDocument();
+    render(renderMediaAnalysisList([], { emptyText: "当前预览还没有素材分析。" }));
+    expect(screen.getByText("当前预览还没有素材分析。")).toBeInTheDocument();
   });
 
   it("renders media analysis rows with summary and adopted tag", () => {
@@ -73,12 +73,12 @@ describe("runtimePresentation", () => {
 
     render(
       renderMediaAnalysisList(analyses, {
-        adoptedTag: "Included",
+        adoptedTag: "已纳入",
       }),
     );
 
     expect(screen.getByText("Northwind insight")).toBeInTheDocument();
     expect(screen.getByText("A structured summary from the analysis pipeline.")).toBeInTheDocument();
-    expect(screen.getByText("Included")).toBeInTheDocument();
+    expect(screen.getByText("已纳入")).toBeInTheDocument();
   });
 });

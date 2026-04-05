@@ -84,17 +84,17 @@ type IndustryDetailLoadOptions = {
   backlogItemId?: string | null;
 };
 
-type BootstrapChatContext = Pick<
+type CarrierAdjustmentChatContext = Pick<
   IndustryInstanceSummary,
   "instance_id" | "label" | "owner_scope" | "team"
 >;
 
-function resolveBootstrapChatContext(
+function resolveCarrierAdjustmentChatContext(
   payload: IndustryBootstrapResponse,
-): BootstrapChatContext | null {
+): CarrierAdjustmentChatContext | null {
   const rawSummary = payload.routes?.instance_summary;
   if (rawSummary && typeof rawSummary === "object" && !Array.isArray(rawSummary)) {
-    const summary = rawSummary as Partial<BootstrapChatContext>;
+    const summary = rawSummary as Partial<CarrierAdjustmentChatContext>;
     const instanceId =
       typeof summary.instance_id === "string" ? summary.instance_id.trim() : "";
     if (instanceId) {
@@ -143,7 +143,7 @@ export function useIndustryPageState({
   const [loadingInstances, setLoadingInstances] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [bootstrapLoading, setBootstrapLoading] = useState(false);
+  const [applyCarrierLoading, setApplyCarrierLoading] = useState(false);
   const [deletingInstanceId, setDeletingInstanceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [briefModalOpen, setBriefModalOpen] = useState(false);
@@ -416,12 +416,12 @@ export function useIndustryPageState({
     }
   }, [briefMediaItems, draftForm]);
 
-  const handleBootstrap = useCallback(async () => {
+  const handleApplyCarrierAdjustment = useCallback(async () => {
     if (!preview) {
       message.warning(INDUSTRY_TEXT.previewBeforeActivate);
       return;
     }
-    setBootstrapLoading(true);
+    setApplyCarrierLoading(true);
     try {
       setError(null);
       const draft = normalizeDraftPlan(draftForm.getFieldsValue(true));
@@ -439,10 +439,10 @@ export function useIndustryPageState({
         ? await api.updateIndustryTeam(draftSourceInstanceId || "", requestPayload)
         : await api.bootstrapIndustry(requestPayload);
       const instanceId = payload.team.team_id;
-      const bootstrapChatContext = resolveBootstrapChatContext(payload);
+      const carrierAdjustmentChatContext = resolveCarrierAdjustmentChatContext(payload);
       const executionCoreRole =
-        !isEditingExistingTeam && bootstrapChatContext
-          ? resolveIndustryExecutionCoreRole(bootstrapChatContext)
+        !isEditingExistingTeam && carrierAdjustmentChatContext
+          ? resolveIndustryExecutionCoreRole(carrierAdjustmentChatContext)
           : null;
       setSelectedInstanceId(instanceId);
       setPreview(null);
@@ -456,11 +456,11 @@ export function useIndustryPageState({
           ? INDUSTRY_TEXT.updateSuccess
           : INDUSTRY_EXPERIENCE_TEXT.activateSuccess,
       );
-      if (!isEditingExistingTeam && bootstrapChatContext && executionCoreRole) {
-        setBootstrapLoading(false);
+      if (!isEditingExistingTeam && carrierAdjustmentChatContext && executionCoreRole) {
+        setApplyCarrierLoading(false);
         try {
           await openRuntimeChat(
-            buildIndustryRoleChatBinding(bootstrapChatContext, executionCoreRole),
+            buildIndustryRoleChatBinding(carrierAdjustmentChatContext, executionCoreRole),
             navigate,
           );
           return;
@@ -482,7 +482,7 @@ export function useIndustryPageState({
       setError(nextError);
       message.error(nextError);
     } finally {
-      setBootstrapLoading(false);
+      setApplyCarrierLoading(false);
     }
   }, [draftForm, draftSourceInstanceId, installPlan, loadDetail, loadInstances, navigate, preview]);
 
@@ -806,7 +806,7 @@ export function useIndustryPageState({
 
   return {
     allTeams,
-    bootstrapLoading,
+    applyCarrierLoading,
     briefMediaBusy,
     briefMediaItems,
     briefMediaLink,
@@ -826,7 +826,7 @@ export function useIndustryPageState({
     error,
     handleAddBriefMediaLink,
     handleAddCustomInstallItem,
-    handleBootstrap,
+    handleApplyCarrierAdjustment,
     handleBriefMediaModeChange,
     handleBriefUploadChange,
     handleChangeRecommendationReviewAcknowledgement,

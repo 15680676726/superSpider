@@ -20,7 +20,6 @@ import {
   Typography,
 } from "antd";
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
-import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type {
   IndustryDraftPlan,
@@ -85,7 +84,7 @@ export default function IndustryPage() {
   const [draftForm] = Form.useForm<IndustryDraftPlan>();
   const {
     allTeams,
-    bootstrapLoading,
+    applyCarrierLoading,
     briefMediaBusy,
     briefMediaItems,
     briefMediaLink,
@@ -103,7 +102,7 @@ export default function IndustryPage() {
     error,
     handleAddBriefMediaLink,
     handleAddCustomInstallItem,
-    handleBootstrap,
+    handleApplyCarrierAdjustment,
     handleBriefMediaModeChange,
     handleBriefUploadChange,
     handleChangeRecommendationReviewAcknowledgement,
@@ -155,13 +154,6 @@ export default function IndustryPage() {
     protectedCarrierInstanceId
     && (detail?.instance_id || selectedSummary?.instance_id) === protectedCarrierInstanceId,
   );
-  const [legacyDraftEditorVisible, setLegacyDraftEditorVisible] = useState(false);
-
-  useEffect(() => {
-    if (!isEditing) {
-      setLegacyDraftEditorVisible(false);
-    }
-  }, [isEditing]);
 
   return (
     <div className="page-container" style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 24 }}>
@@ -451,7 +443,7 @@ export default function IndustryPage() {
               {isEditing
                 ? (
                   isEditingExistingTeam
-                    ? (selectedIsCurrentBuddyCarrier ? INDUSTRY_TEXT.previewTitle : INDUSTRY_TEXT.updateTeam)
+                    ? (selectedIsCurrentBuddyCarrier ? INDUSTRY_TEXT.currentCarrierAdjustment : INDUSTRY_TEXT.updateTeam)
                     : INDUSTRY_TEXT.previewTitle
                 )
                 : (detail?.team?.label || selectedSummary?.label || INDUSTRY_TEXT.industryDetail)}
@@ -460,14 +452,13 @@ export default function IndustryPage() {
           extra={
             isEditing ? (
               <Space wrap>
-                <Button
-                  data-testid="industry-open-legacy-draft-editor"
-                  onClick={() => setLegacyDraftEditorVisible((current) => !current)}
-                >
-                  {legacyDraftEditorVisible ? "收起草案编辑器" : "打开草案编辑器"}
-                </Button>
                 <Button onClick={() => setBriefModalOpen(true)}>{INDUSTRY_TEXT.regenerateDraft}</Button>
-                <Button type="primary" disabled={!preview?.can_activate} loading={bootstrapLoading} onClick={() => void handleBootstrap()}>
+                <Button
+                  type="primary"
+                  disabled={!preview?.can_activate}
+                  loading={applyCarrierLoading}
+                  onClick={() => void handleApplyCarrierAdjustment()}
+                >
                   {isEditingExistingTeam ? INDUSTRY_TEXT.updateTeam : INDUSTRY_TEXT.activateTeam}
                 </Button>
                 <Button onClick={() => { setPreview(null); setDraftSourceInstanceId(null); }}>取消</Button>
@@ -505,10 +496,7 @@ export default function IndustryPage() {
                   />
                 </div>
               ) : null}
-              <div
-                data-testid="industry-legacy-draft-editor"
-                style={{ display: legacyDraftEditorVisible ? "block" : "none" }}
-              >
+              <div data-testid="industry-carrier-adjustment-editor">
                 <Form form={draftForm} layout="vertical">
                   <Space direction="vertical" size={24} style={{ width: "100%" }}>
                 {!preview?.can_activate ? <Alert type="warning" showIcon message={INDUSTRY_TEXT.previewBlockedWarning} /> : null}
@@ -534,7 +522,8 @@ export default function IndustryPage() {
                     素材分析
                   </Text>
                   <Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
-                    Preview-stage media analyses appear here and will remain available as shared context after the identity is created.                  </Paragraph>
+                    {INDUSTRY_TEXT.previewMediaAnalysisSummary}
+                  </Paragraph>
                   {(preview?.media_warnings || []).map((warning) => (
                     <Alert
                       key={`preview-media-warning:${warning}`}
@@ -545,8 +534,8 @@ export default function IndustryPage() {
                     />
                   ))}
                   {renderMediaAnalysisList(preview?.media_analyses || [], {
-                    emptyText: "No media analysis is available in this preview yet.",
-                    adoptedTag: "Included",
+                    emptyText: INDUSTRY_TEXT.previewMediaAnalysisEmpty,
+                    adoptedTag: INDUSTRY_TEXT.previewMediaAnalysisAdoptedTag,
                   })}
                 </div>
 

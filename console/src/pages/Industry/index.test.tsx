@@ -79,7 +79,7 @@ function createPageState(overrides: Record<string, unknown> = {}) {
         routes: {},
       },
     ],
-    bootstrapLoading: false,
+    applyCarrierLoading: false,
     briefMediaBusy: false,
     briefMediaItems: [],
     briefMediaLink: "",
@@ -180,7 +180,7 @@ function createPageState(overrides: Record<string, unknown> = {}) {
     error: null,
     handleAddBriefMediaLink: vi.fn(),
     handleAddCustomInstallItem: vi.fn(),
-    handleBootstrap: vi.fn(),
+    handleApplyCarrierAdjustment: vi.fn(),
     handleBriefMediaModeChange: vi.fn(),
     handleBriefUploadChange: vi.fn(),
     handleChangeRecommendationReviewAcknowledgement: vi.fn(),
@@ -828,7 +828,7 @@ describe("IndustryPage", () => {
     expect(screen.getByText("Evidence snapshot entry")).toBeTruthy();
   });
 
-  it("keeps runtime cockpit visible while editing and gates legacy draft editor behind explicit action", () => {
+  it("keeps runtime cockpit visible while editing and shows the carrier adjustment form directly", () => {
     useIndustryPageStateMock.mockReturnValue(
       createPageState({
         isEditing: true,
@@ -852,17 +852,8 @@ describe("IndustryPage", () => {
     render(<IndustryPage />);
 
     expect(screen.getByText("运行驾驶舱")).toBeTruthy();
-    expect(
-      screen.getByTestId("industry-open-legacy-draft-editor"),
-    ).toBeTruthy();
-    expect(screen.getByTestId("industry-legacy-draft-editor")).toHaveStyle({
-      display: "none",
-    });
-
-    fireEvent.click(screen.getByTestId("industry-open-legacy-draft-editor"));
-    expect(screen.getByTestId("industry-legacy-draft-editor")).toHaveStyle({
-      display: "block",
-    });
+    expect(screen.queryByTestId("industry-open-legacy-draft-editor")).toBeNull();
+    expect(screen.getByTestId("industry-carrier-adjustment-editor")).toBeTruthy();
   });
 
   it("does not use legacy goal_* metadata as actor current focus", () => {
