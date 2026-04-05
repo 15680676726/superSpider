@@ -1677,7 +1677,7 @@ def test_capability_market_project_install_from_source_url_materializes_candidat
     assert trials[0].candidate_source_lineage == "donor:github:psf/black"
 
 
-def test_capability_market_project_install_accepts_legacy_candidate_pkg_ref_when_raw_source_ref_exists(
+def test_capability_market_project_install_accepts_candidate_source_url(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1697,15 +1697,14 @@ def test_capability_market_project_install_accepts_legacy_candidate_pkg_ref_when
         target_role_id="execution-core",
         target_seat_ref="seat-1",
         candidate_source_kind="external_remote",
-        candidate_source_ref="pkg:github:psf/black",
+        candidate_source_ref="https://github.com/psf/black",
         candidate_source_version="main",
         candidate_source_lineage="donor:github:psf/black",
         ingestion_mode="discovery",
         proposed_skill_name="black",
-        summary="Legacy normalized project donor candidate.",
+        summary="Normalized project donor candidate.",
         canonical_package_id="pkg:github:psf/black",
         metadata={
-            "raw_source_refs": ["https://github.com/psf/black"],
             "provider": "github-repo",
             "install_supported": True,
         },

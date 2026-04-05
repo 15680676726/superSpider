@@ -897,28 +897,9 @@ def _resolve_project_candidate(
             raise HTTPException(400, detail="Capability candidate is not a project donor")
     resolved_source_url = str(source_url or "").strip()
     if not resolved_source_url and candidate is not None:
-        metadata = getattr(candidate, "metadata", None)
-        metadata_payload = metadata if isinstance(metadata, dict) else {}
-        raw_source_refs = metadata_payload.get("raw_source_refs")
-        candidate_source_options: list[str] = [
-            str(getattr(candidate, "candidate_source_ref", "") or "").strip(),
-            str(metadata_payload.get("repository_url") or "").strip(),
-            str(metadata_payload.get("source_url") or "").strip(),
-        ]
-        if isinstance(raw_source_refs, (list, tuple)):
-            candidate_source_options.extend(
-                str(item).strip() for item in raw_source_refs if str(item).strip()
-            )
-        for candidate_source in candidate_source_options:
-            if not candidate_source:
-                continue
-            try:
-                resolved_source_url = _normalize_github_project_source_url(
-                    candidate_source,
-                )
-                break
-            except HTTPException:
-                continue
+        resolved_source_url = str(
+            getattr(candidate, "candidate_source_ref", "") or "",
+        ).strip()
     resolved_version = str(version or "").strip() or str(
         getattr(candidate, "candidate_source_version", "") or ""
     ).strip()
