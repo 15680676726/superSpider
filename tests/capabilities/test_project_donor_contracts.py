@@ -105,6 +105,46 @@ def test_resolve_installed_python_project_contract_prefers_console_script_path(
     assert contract.healthcheck_command.endswith('Scripts\\openspace.exe" --help')
 
 
+def test_resolve_installed_python_project_contract_keeps_project_package_run_command_runnable(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from copaw.capabilities.project_donor_contracts import (
+        resolve_installed_python_project_contract,
+    )
+
+    monkeypatch.setattr(
+        "copaw.capabilities.project_donor_contracts.inspect_installed_python_distribution",
+        lambda **kwargs: {
+            "distribution_name": "black",
+            "package_version": "25.0.0",
+            "entry_points": [
+                {
+                    "group": "console_scripts",
+                    "name": "black",
+                    "value": "black:patched_main",
+                },
+            ],
+        },
+    )
+
+    scripts_dir = tmp_path / "Scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "black.exe").write_text("", encoding="utf-8")
+
+    contract = resolve_installed_python_project_contract(
+        python_path="D:/fake/.venv/Scripts/python.exe",
+        scripts_dir=str(scripts_dir),
+        distribution_name="black",
+        capability_kind="project-package",
+    )
+
+    assert contract.runtime_kind == "cli"
+    assert contract.execute_command.endswith('Scripts\\black.exe"')
+    assert not contract.execute_command.endswith('--version')
+    assert contract.healthcheck_command.endswith('Scripts\\black.exe" --version')
+
+
 def test_resolve_installed_python_project_contract_exposes_runtime_contract_prediction(
     monkeypatch,
     tmp_path,

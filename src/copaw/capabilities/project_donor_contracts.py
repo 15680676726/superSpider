@@ -177,7 +177,7 @@ def _shell_command_for_capability(
         if capability_kind == "runtime-component":
             return script, f"{script} --help"
         if capability_kind == "project-package":
-            return f"{script} --version", f"{script} --version"
+            return script, f"{script} --version"
         return script, script
     python_exe = f'"{python_path}"'
     if capability_kind == "runtime-component":
@@ -187,7 +187,7 @@ def _shell_command_for_capability(
         )
     if capability_kind == "project-package":
         return (
-            f"{python_exe} -m {entry_module} --version",
+            f"{python_exe} -m {entry_module}",
             f"{python_exe} -m {entry_module} --version",
         )
     return (

@@ -42,7 +42,13 @@ def _package_command(mount: CapabilityMount, *, key: str) -> str:
 def _append_args(command: str, args: list[str]) -> str:
     if not args:
         return command
-    rendered = " ".join(shlex.quote(str(item)) for item in args if str(item).strip())
+    normalized = [str(item) for item in args if str(item).strip()]
+    if not normalized:
+        return command
+    if os.name == "nt":
+        rendered = subprocess.list2cmdline(normalized)
+    else:
+        rendered = " ".join(shlex.quote(item) for item in normalized)
     return f"{command} {rendered}".strip()
 
 
