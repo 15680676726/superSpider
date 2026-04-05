@@ -65,9 +65,16 @@ export default function CapabilityMarketPage() {
     handleRefreshAll,
     installingCuratedId,
     loadCurated,
+    loadMcpCatalog,
+    loadProjects,
     mcpCatalog,
     mcpCatalogLoading,
     mcpQuery,
+    installedCapabilities,
+    projectInstallKey,
+    projectLoading,
+    projectQuery,
+    projectResults,
     requestedTemplateId,
     selectedTemplate,
     setCuratedCategory,
@@ -76,8 +83,11 @@ export default function CapabilityMarketPage() {
     setCuratedReviewAcknowledgements,
     setInstallingCuratedId,
     setMcpQuery,
+    setProjectInstallKey,
+    setProjectQuery,
     setTemplateActionKey,
     setTemplateInstallSummary,
+    skills,
     templateActionKey,
     templateInstallSummary,
     templates,
@@ -99,6 +109,10 @@ export default function CapabilityMarketPage() {
     setCuratedPage(1);
     await loadCurated(curatedQuery.trim());
   }, [curatedQuery, loadCurated, setCuratedPage]);
+
+  const handleProjectSearch = useCallback(async () => {
+    await loadProjects(projectQuery.trim());
+  }, [loadProjects, projectQuery]);
 
   const installCuratedSkill = useCallback(
     async (item: CuratedSkillCatalogEntry) => {
@@ -149,6 +163,39 @@ export default function CapabilityMarketPage() {
       setTemplateActionKey(null);
     }
   }, [buildTemplateConfigPayload, requestedTemplateId, setTemplateActionKey, setTemplateInstallSummary]);
+
+  const installProject = useCallback(
+    async (item: {
+      source_url: string;
+      version?: string;
+      candidate_kind?: string;
+      display_name?: string;
+    }) => {
+      const installKey = item.source_url || item.display_name || "project";
+      setProjectInstallKey(installKey);
+      try {
+        await api.installCapabilityMarketProject({
+          source_url: item.source_url,
+          version: item.version,
+          capability_kind:
+            item.candidate_kind === "adapter"
+              ? "adapter"
+              : item.candidate_kind === "runtime-component"
+                ? "runtime-component"
+                : "project-package",
+          overwrite: true,
+          enable: true,
+        });
+        message.success("Installed");
+        await handleRefreshAll();
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : String(error));
+      } finally {
+        setProjectInstallKey(null);
+      }
+    },
+    [handleRefreshAll, setProjectInstallKey],
+  );
 
   const renderTemplateConfigField = useCallback((field: TemplateConfigField) => {
     const fieldType = String(field.field_type || "string").trim().toLowerCase();
@@ -208,6 +255,53 @@ export default function CapabilityMarketPage() {
             ),
           },
           {
+            key: "projects",
+            label: "Projects",
+            children: (
+              <Card>
+                <Space direction="vertical" style={{ width: "100%" }}>
+                  <Space.Compact style={{ width: "100%" }}>
+                    <Input
+                      value={projectQuery}
+                      onChange={(e) => setProjectQuery(e.currentTarget.value)}
+                      onPressEnter={() => void handleProjectSearch()}
+                      placeholder="GitHub repo or query"
+                    />
+                    <Button onClick={() => void handleProjectSearch()}>Search</Button>
+                  </Space.Compact>
+                  {projectLoading ? <Spin /> : null}
+                  <List
+                    dataSource={projectResults}
+                    locale={{ emptyText: <Empty /> }}
+                    renderItem={(item) => (
+                      <List.Item
+                        actions={[
+                          <Button
+                            key="install"
+                            loading={projectInstallKey === (item.source_url || item.display_name)}
+                            onClick={() => void installProject(item)}
+                          >
+                            Install
+                          </Button>,
+                        ]}
+                      >
+                        <List.Item.Meta
+                          title={item.display_name}
+                          description={
+                            <Space direction="vertical" size={4}>
+                              <Text>{item.summary || item.source_url}</Text>
+                              <Text type="secondary">{item.source_url}</Text>
+                            </Space>
+                          }
+                        />
+                      </List.Item>
+                    )}
+                  />
+                </Space>
+              </Card>
+            ),
+          },
+          {
             key: "install-templates",
             label: "安装模板",
             children: (
@@ -227,14 +321,52 @@ export default function CapabilityMarketPage() {
               </div>
             ),
           },
-          { key: "installed", label: "已安装", children: <Card><List dataSource={[]} renderItem={() => null} /></Card> },
-          { key: "skills", label: "技能", children: <Card><List dataSource={[]} renderItem={() => null} /></Card> },
+          {
+            key: "installed",
+            label: "已安装",
+            children: (
+              <Card>
+                <List
+                  dataSource={installedCapabilities}
+                  locale={{ emptyText: <Empty /> }}
+                  renderItem={(item) => (
+                    <List.Item>
+                      <List.Item.Meta title={item.name} description={item.id} />
+                    </List.Item>
+                  )}
+                />
+              </Card>
+            ),
+          },
+          {
+            key: "skills",
+            label: "技能",
+            children: (
+              <Card>
+                <List
+                  dataSource={skills}
+                  locale={{ emptyText: <Empty /> }}
+                  renderItem={(item) => (
+                    <List.Item>
+                      <List.Item.Meta title={item.name} description={item.source} />
+                    </List.Item>
+                  )}
+                />
+              </Card>
+            ),
+          },
           {
             key: "mcp",
             label: "MCP",
             children: (
               <Card>
-                <Input value={mcpQuery} onChange={(e) => setMcpQuery(e.currentTarget.value)} onPressEnter={() => void loadCurated(mcpQuery)} />
+                <Input
+                  value={mcpQuery}
+                  onChange={(e) => setMcpQuery(e.currentTarget.value)}
+                  onPressEnter={() =>
+                    void loadMcpCatalog({ query: mcpQuery, category: "all", cursor: null, page: 1 })
+                  }
+                />
                 {mcpCatalogLoading ? <Spin /> : <Tag>{mcpCatalog?.items?.length || 0}</Tag>}
               </Card>
             ),

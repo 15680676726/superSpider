@@ -869,3 +869,15 @@ def test_live_focus_payload_keeps_focus_selection_without_overriding_runtime_foc
     assert payload["current_backlog_id"] == "backlog-1"
     assert payload["current_focus_id"] is None
     assert payload["current_focus_title"] is None
+
+
+def test_industry_runtime_routes_point_to_runtime_center_surface(tmp_path: Path) -> None:
+    runtime_views = Path("src/copaw/industry/service_runtime_views.py").read_text(
+        encoding="utf-8",
+    )
+    service_strategy = Path("src/copaw/industry/service_strategy.py").read_text(
+        encoding="utf-8",
+    )
+
+    assert '"runtime_center": "/api/runtime-center/surface"' in runtime_views
+    assert '"runtime_center": "/api/runtime-center/surface"' in service_strategy

@@ -824,7 +824,7 @@ def _cooperative_template_routes(template_id: str) -> dict[str, str]:
         "example_run": (
             f"/api/capability-market/install-templates/{template_id}/example-run"
         ),
-        "runtime_center": "/api/runtime-center",
+        "runtime_center": "/api/runtime-center/surface",
         "environments": "/api/runtime-center/environments",
         "sessions": "/api/runtime-center/sessions",
     }

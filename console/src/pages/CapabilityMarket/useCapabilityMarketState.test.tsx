@@ -12,6 +12,7 @@ vi.mock("../../api", async () => {
     default: {
       ...actual.default,
       getCapabilityMarketOverview: vi.fn(),
+      searchCapabilityMarketProjects: vi.fn(),
       searchCapabilityMarketMcpCatalog: vi.fn(),
       listCapabilityMarketInstallTemplates: vi.fn(),
       searchCapabilityMarketCuratedCatalog: vi.fn(),
@@ -23,6 +24,7 @@ import api from "../../api";
 import { useCapabilityMarketState } from "./useCapabilityMarketState";
 
 const mockedGetOverview = vi.mocked(api.getCapabilityMarketOverview);
+const mockedSearchProjects = vi.mocked(api.searchCapabilityMarketProjects);
 const mockedSearchMcpCatalog = vi.mocked(api.searchCapabilityMarketMcpCatalog);
 const mockedListTemplates = vi.mocked(api.listCapabilityMarketInstallTemplates);
 const mockedSearchCurated = vi.mocked(api.searchCapabilityMarketCuratedCatalog);
@@ -30,6 +32,7 @@ const mockedSearchCurated = vi.mocked(api.searchCapabilityMarketCuratedCatalog);
 describe("useCapabilityMarketState", () => {
   afterEach(() => {
     mockedGetOverview.mockReset();
+    mockedSearchProjects.mockReset();
     mockedSearchMcpCatalog.mockReset();
     mockedListTemplates.mockReset();
     mockedSearchCurated.mockReset();
@@ -37,6 +40,7 @@ describe("useCapabilityMarketState", () => {
 
   it("loads and refreshes market surfaces through the extracted page-state hook", async () => {
     mockedGetOverview.mockResolvedValue({ installed: [], mcp_clients: [] } as never);
+    mockedSearchProjects.mockResolvedValue([] as never);
     mockedSearchMcpCatalog.mockResolvedValue({
       items: [],
       categories: [{ key: "all", label: "全部" }],
@@ -71,12 +75,14 @@ describe("useCapabilityMarketState", () => {
 
     await waitFor(() => {
       expect(mockedGetOverview.mock.calls.length).toBeGreaterThan(initialOverviewCalls);
+      expect(mockedSearchProjects).toHaveBeenCalled();
       expect(mockedListTemplates.mock.calls.length).toBeGreaterThan(initialTemplateCalls);
     });
   });
 
   it("uses a readable Chinese fallback label for the MCP category list", async () => {
     mockedGetOverview.mockResolvedValue({ installed: [], mcp_clients: [] } as never);
+    mockedSearchProjects.mockResolvedValue([] as never);
     mockedSearchMcpCatalog.mockResolvedValue({
       items: [],
       categories: [],

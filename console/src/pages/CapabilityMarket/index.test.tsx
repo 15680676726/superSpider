@@ -1,11 +1,19 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const stateMock = vi.fn();
 
 vi.mock("./useCapabilityMarketState", () => ({
-  useCapabilityMarketState: vi.fn(() => ({
+  useCapabilityMarketState: (...args: unknown[]) => stateMock(...args),
+}));
+
+import CapabilityMarketPage from "./index";
+
+describe("CapabilityMarketPage", () => {
+  const baseState = {
     activeTab: "install-templates",
     categoryCounts: { all: 0 },
     curatedCategory: "all",
@@ -16,12 +24,21 @@ vi.mock("./useCapabilityMarketState", () => ({
     curatedRangeText: "暂无结果",
     curatedReviewAcknowledgements: {},
     filteredCuratedItems: [],
+    pagedCuratedItems: [],
     handleRefreshAll: vi.fn(),
+    installedCapabilities: [],
     installingCuratedId: null,
     loadCurated: vi.fn(),
+    loadMcpCatalog: vi.fn(),
+    loadProjects: vi.fn(),
     mcpCatalog: { items: [], categories: [], next_cursor: null },
     mcpCatalogLoading: false,
+    mcpClients: [],
     mcpQuery: "",
+    projectInstallKey: null,
+    projectLoading: false,
+    projectQuery: "",
+    projectResults: [],
     requestedTemplateId: "browser-companion",
     selectedTemplate: {
       id: "browser-companion",
@@ -37,8 +54,10 @@ vi.mock("./useCapabilityMarketState", () => ({
     setCuratedReviewAcknowledgements: vi.fn(),
     setInstallingCuratedId: vi.fn(),
     setMcpQuery: vi.fn(),
+    setProjectQuery: vi.fn(),
     setTemplateActionKey: vi.fn(),
     setTemplateInstallSummary: vi.fn(),
+    skills: [],
     templateActionKey: null,
     templateInstallSummary: null,
     templates: [
@@ -52,30 +71,85 @@ vi.mock("./useCapabilityMarketState", () => ({
     ],
     templatesLoading: false,
     updateSearchParams: vi.fn(),
-  })),
-}));
+  };
 
-import CapabilityMarketPage from "./index";
+  beforeEach(() => {
+    stateMock.mockReset();
+    stateMock.mockReturnValue(baseState);
+  });
 
-describe("CapabilityMarketPage", () => {
-  it("renders key capability market labels in readable Chinese", () => {
+  it("renders the new projects tab alongside the existing market tabs", () => {
     render(
       <MemoryRouter>
         <CapabilityMarketPage />
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("刷新")).toBeInTheDocument();
-    expect(screen.getByText("安装模板")).toBeInTheDocument();
-    expect(screen.getByText("模板")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "技能" })).toBeInTheDocument();
-    expect(screen.getByText("待安装")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /安\s*装/ }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("tab", { name: "Projects" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "安装模板" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "MCP" })).toBeInTheDocument();
+  });
 
-    expect(screen.queryByText("鍒锋柊")).not.toBeInTheDocument();
-    expect(screen.queryByText("瀹夎妯℃澘")).not.toBeInTheDocument();
-    expect(screen.queryByText("妯℃澘")).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Skills" })).not.toBeInTheDocument();
-    expect(screen.queryByText("new")).not.toBeInTheDocument();
+  it("renders installed capabilities and skills from page state instead of hard-coded empty lists", () => {
+    stateMock.mockReturnValue({
+      ...baseState,
+      activeTab: "installed",
+      installedCapabilities: [
+        { id: "project:black", name: "Black", enabled: true },
+      ],
+    });
+
+    const { rerender } = render(
+      <MemoryRouter>
+        <CapabilityMarketPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Black")).toBeInTheDocument();
+
+    stateMock.mockReturnValue({
+      ...baseState,
+      activeTab: "skills",
+      skills: [
+        {
+          name: "research",
+          source: "customized",
+          enabled: true,
+          content: "# skill",
+        },
+      ],
+    });
+
+    rerender(
+      <MemoryRouter>
+        <CapabilityMarketPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("research")).toBeInTheDocument();
+  });
+
+  it("uses MCP catalog search when pressing Enter in the MCP tab", () => {
+    const loadCurated = vi.fn();
+    const loadMcpCatalog = vi.fn();
+    stateMock.mockReturnValue({
+      ...baseState,
+      activeTab: "mcp",
+      loadCurated,
+      loadMcpCatalog,
+      mcpQuery: "filesystem",
+    });
+
+    render(
+      <MemoryRouter>
+        <CapabilityMarketPage />
+      </MemoryRouter>,
+    );
+
+    const input = screen.getByDisplayValue("filesystem");
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter", charCode: 13 });
+
+    expect(loadMcpCatalog).toHaveBeenCalled();
+    expect(loadCurated).not.toHaveBeenCalled();
   });
 });

@@ -189,9 +189,9 @@ def _build_normalized_hit(cluster: list[DiscoveryHit]) -> NormalizedDiscoveryHit
         display_name=_string(preferred.display_name),
         summary=str(preferred.summary or ""),
         candidate_source_ref=(
-            canonical_package_id
-            or _string(preferred.candidate_source_ref)
+            _string(preferred.candidate_source_ref)
             or _string(preferred.display_name)
+            or canonical_package_id
         ),
         candidate_source_version=_string(preferred.candidate_source_version),
         candidate_source_lineage=candidate_source_lineage,

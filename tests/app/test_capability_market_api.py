@@ -1677,6 +1677,87 @@ def test_capability_market_project_install_from_source_url_materializes_candidat
     assert trials[0].candidate_source_lineage == "donor:github:psf/black"
 
 
+def test_capability_market_project_install_accepts_legacy_candidate_pkg_ref_when_raw_source_ref_exists(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    candidate_service = CapabilityCandidateService(state_store=app.state.state_store)
+    trial_service = SkillTrialService(state_store=app.state.state_store)
+    app.state.capability_candidate_service = candidate_service
+    app.state.skill_trial_service = trial_service
+    app.state.agent_profile_service = SimpleNamespace(
+        get_agent=lambda agent_id: {"agent_id": agent_id},
+    )
+    client = TestClient(app)
+
+    candidate = candidate_service.normalize_candidate_source(
+        candidate_kind="project",
+        target_scope="seat",
+        target_role_id="execution-core",
+        target_seat_ref="seat-1",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="pkg:github:psf/black",
+        candidate_source_version="main",
+        candidate_source_lineage="donor:github:psf/black",
+        ingestion_mode="discovery",
+        proposed_skill_name="black",
+        summary="Legacy normalized project donor candidate.",
+        canonical_package_id="pkg:github:psf/black",
+        metadata={
+            "raw_source_refs": ["https://github.com/psf/black"],
+            "provider": "github-repo",
+            "install_supported": True,
+        },
+    )
+
+    monkeypatch.setattr(
+        "copaw.app.routers.capability_market._install_external_project_capability",
+        lambda **kwargs: {
+            "installed": True,
+            "name": "black",
+            "enabled": True,
+            "source_url": kwargs["source_url"],
+            "installed_capability_ids": ["project:black"],
+            "capability_kind": "project-package",
+            "execution_mode": "shell",
+        },
+    )
+
+    async def _fake_dispatch(*args, **kwargs):
+        return {
+            "success": True,
+            "summary": "Capability lifecycle attached.",
+            "trial_attachment": {
+                "success": True,
+                "selected_scope": "seat",
+                "scope_type": "seat",
+                "scope_ref": "seat-1",
+            },
+        }
+
+    monkeypatch.setattr(
+        "copaw.app.routers.capability_market._dispatch_market_mutation",
+        _fake_dispatch,
+    )
+
+    response = client.post(
+        "/capability-market/projects/install",
+        json={
+            "candidate_id": candidate.candidate_id,
+            "capability_kind": "project-package",
+            "target_agent_id": "copaw-agent-runner",
+            "selected_seat_ref": "seat-1",
+            "overwrite": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source_url"] == "https://github.com/psf/black"
+    assert payload["installed_capability_ids"] == ["project:black"]
+
+
 def test_capability_market_install_template_config_is_applied_to_desktop_install(
     tmp_path,
 ) -> None:

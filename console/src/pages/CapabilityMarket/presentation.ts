@@ -6,7 +6,14 @@ import type {
   McpRegistryInstallOption,
 } from "../../api/modules/capabilityMarket";
 
-export const MARKET_TAB_KEYS = ["curated", "install-templates", "installed", "skills", "mcp"] as const;
+export const MARKET_TAB_KEYS = [
+  "curated",
+  "projects",
+  "install-templates",
+  "installed",
+  "skills",
+  "mcp",
+] as const;
 export type MarketTabKey = (typeof MARKET_TAB_KEYS)[number];
 export const MARKET_TAB_KEY_SET = new Set<string>(MARKET_TAB_KEYS);
 

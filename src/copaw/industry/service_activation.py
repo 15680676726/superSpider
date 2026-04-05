@@ -542,7 +542,7 @@ class _IndustryActivationMixin:
             readiness_checks=plan.readiness_checks,
             media_analyses=adopted_media_analyses,
             routes={
-                "runtime_center": "/api/runtime-center",
+                "runtime_center": "/api/runtime-center/surface",
                 "instance": f"/api/industry/v1/instances/{team_id}",
                 "runtime_detail": f"/api/runtime-center/industry/{team_id}",
                 "agents": [

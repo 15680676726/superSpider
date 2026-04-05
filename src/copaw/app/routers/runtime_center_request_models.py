@@ -34,7 +34,7 @@ class GovernanceResumeRequest(BaseModel):
 
 
 class GovernanceDecisionBatchRequest(BaseModel):
-    decision_ids: list[str] = Field(default_factory=list)
+    decision_ids: list[str] = Field(min_length=1)
     actor: str = Field(default="runtime-center")
     resolution: str | None = Field(default=None)
     execute: bool | None = Field(default=None)
@@ -46,7 +46,7 @@ class GovernanceDecisionBatchRequest(BaseModel):
 
 
 class GovernancePatchBatchRequest(BaseModel):
-    patch_ids: list[str] = Field(default_factory=list)
+    patch_ids: list[str] = Field(min_length=1)
     actor: str = Field(default="runtime-center")
 
 

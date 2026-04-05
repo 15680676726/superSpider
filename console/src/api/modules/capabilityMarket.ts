@@ -224,6 +224,33 @@ export interface CapabilityMarketCuratedInstallResponse
   review_notes: string[];
 }
 
+export interface CapabilityMarketProjectCandidate {
+  display_name: string;
+  summary: string;
+  source_kind: string;
+  candidate_kind: string;
+  source_url: string;
+  version: string;
+  source_lineage?: string | null;
+  canonical_package_id?: string | null;
+  capability_keys: string[];
+  install_supported: boolean;
+  metadata: Record<string, unknown>;
+  routes: Record<string, string>;
+}
+
+export interface CapabilityMarketProjectInstallResponse {
+  installed: boolean;
+  candidate_id?: string | null;
+  name: string;
+  enabled: boolean;
+  source_url: string;
+  capability_kind: string;
+  installed_capability_ids: string[];
+  target_agent_id?: string | null;
+  trial_attachment?: Record<string, unknown> | null;
+}
+
 export interface McpRegistryCategory {
   key: string;
   label: string;
@@ -375,6 +402,36 @@ export const capabilityMarketApi = {
     request<HubSkillSpec[]>(
       `/capability-market/hub/search?q=${encodeURIComponent(query)}&limit=${limit}`,
     ),
+
+  searchCapabilityMarketProjects: (query = "", limit = 20) =>
+    request<CapabilityMarketProjectCandidate[]>(
+      `/capability-market/projects/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+    ),
+
+  installCapabilityMarketProject: (payload: {
+    candidate_id?: string;
+    source_url?: string;
+    version?: string;
+    capability_kind?: "project-package" | "adapter" | "runtime-component";
+    entry_module?: string;
+    execute_command?: string;
+    healthcheck_command?: string;
+    enable?: boolean;
+    overwrite?: boolean;
+    actor?: string;
+    target_agent_id?: string;
+    selected_seat_ref?: string;
+    target_role_id?: string;
+    capability_ids?: string[];
+    replacement_capability_ids?: string[];
+    replacement_target_ids?: string[];
+    capability_assignment_mode?: "replace" | "merge";
+    trial_scope?: "single-agent" | "single-seat" | "wider-rollout";
+  }) =>
+    request<CapabilityMarketProjectInstallResponse>("/capability-market/projects/install", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   listCapabilityMarketCuratedSources: () =>
     request<CuratedSkillCatalogSource[]>("/capability-market/curated-sources"),

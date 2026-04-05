@@ -171,3 +171,29 @@ def test_candidate_import_deduplicates_before_fan_out_and_keeps_portfolio_counts
         item.metadata.get("source_aliases") == ["github", "gitee"]
         for item in imported
     )
+
+
+def test_normalize_discovery_hits_preserves_installable_project_source_ref() -> None:
+    normalized = normalize_discovery_hits(
+        [
+            DiscoveryHit(
+                source_id="github-repo",
+                source_kind="github-repo",
+                source_alias="github",
+                candidate_kind="project",
+                display_name="psf/black",
+                summary="Python formatter donor.",
+                candidate_source_ref="https://github.com/psf/black",
+                candidate_source_version="main",
+                candidate_source_lineage="donor:github:psf/black",
+                canonical_package_id="pkg:github:psf/black",
+                capability_keys=("formatting", "python"),
+            ),
+        ],
+    )
+
+    assert len(normalized) == 1
+    assert normalized[0].candidate_kind == "project"
+    assert normalized[0].candidate_source_ref == "https://github.com/psf/black"
+    assert normalized[0].canonical_package_id == "pkg:github:psf/black"
+    assert normalized[0].metadata["raw_source_refs"] == ["https://github.com/psf/black"]

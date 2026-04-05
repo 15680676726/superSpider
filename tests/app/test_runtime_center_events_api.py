@@ -704,6 +704,64 @@ def test_runtime_center_capability_lifecycle_decisions_endpoint_returns_state_qu
     ]
 
 
+def test_runtime_center_governance_patch_batch_rejects_empty_or_malformed_ids() -> None:
+    app = _build_app()
+
+    class _Result:
+        def model_dump(self, *, mode: str = "json"):
+            _ = mode
+            return {"requested": 1}
+
+    class _GovernanceService:
+        def batch_patches(self, *, patch_ids, action, actor):
+            _ = (patch_ids, action, actor)
+            return _Result()
+
+    app.state.governance_service = _GovernanceService()
+    client = TestClient(app)
+
+    empty_response = client.post(
+        "/runtime-center/governance/patches/apply",
+        json={"actor": "tester"},
+    )
+    malformed_response = client.post(
+        "/runtime-center/governance/patches/apply",
+        json={"patch_id": "patch-1", "actor": "tester"},
+    )
+
+    assert empty_response.status_code == 422
+    assert malformed_response.status_code == 422
+
+
+def test_runtime_center_governance_decision_batch_rejects_empty_or_malformed_ids() -> None:
+    app = _build_app()
+
+    class _Result:
+        def model_dump(self, *, mode: str = "json"):
+            _ = mode
+            return {"requested": 1}
+
+    class _GovernanceService:
+        async def batch_decisions(self, *, decision_ids, action, actor, resolution, execute):
+            _ = (decision_ids, action, actor, resolution, execute)
+            return _Result()
+
+    app.state.governance_service = _GovernanceService()
+    client = TestClient(app)
+
+    empty_response = client.post(
+        "/runtime-center/governance/decisions/approve",
+        json={"actor": "tester"},
+    )
+    malformed_response = client.post(
+        "/runtime-center/governance/decisions/approve",
+        json={"decision_id": "decision-1", "actor": "tester"},
+    )
+
+    assert empty_response.status_code == 422
+    assert malformed_response.status_code == 422
+
+
 def test_conversation_compaction_service_builds_visibility_payload() -> None:
     payload = ConversationCompactionService.build_visibility_payload(
         {

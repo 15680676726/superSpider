@@ -10,6 +10,7 @@ import api, {
 import type {
   CapabilityMarketInstallTemplateDoctorReport,
   CapabilityMarketInstallTemplateExampleRunRecord,
+  CapabilityMarketProjectCandidate,
   CapabilityMarketInstallTemplateSpec,
   McpRegistryCatalogDetailResponse,
   McpRegistryCatalogSearchResponse,
@@ -72,6 +73,12 @@ export function useCapabilityMarketState({
   const [installingCuratedId, setInstallingCuratedId] = useState<string | null>(null);
   const [curatedReviewAcknowledgements, setCuratedReviewAcknowledgements] =
     useState<Record<string, boolean>>({});
+
+  const [projectQuery, setProjectQuery] = useState("");
+  const [projectResults, setProjectResults] = useState<CapabilityMarketProjectCandidate[]>([]);
+  const [projectLoading, setProjectLoading] = useState(false);
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [projectInstallKey, setProjectInstallKey] = useState<string | null>(null);
 
   const [mcpQuery, setMcpQuery] = useState("");
   const [mcpCategory, setMcpCategory] = useState("all");
@@ -237,6 +244,19 @@ export function useCapabilityMarketState({
     }
   }, []);
 
+  const loadProjects = useCallback(async (query = "") => {
+    setProjectLoading(true);
+    setProjectError(null);
+    try {
+      const payload = await api.searchCapabilityMarketProjects(query, 20);
+      setProjectResults(Array.isArray(payload) ? payload : []);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setProjectLoading(false);
+    }
+  }, []);
+
   const loadIndustryInstances = useCallback(async () => {
     try {
       const payload = await api.listIndustryInstances({ limit: 50 });
@@ -248,11 +268,12 @@ export function useCapabilityMarketState({
 
   useEffect(() => {
     void loadOverview();
+    void loadProjects("");
     void loadMcpCatalog({ query: "", category: "all", cursor: null, page: 1 });
     void loadTemplates();
     void loadCurated("");
     void loadIndustryInstances();
-  }, [loadCurated, loadIndustryInstances, loadMcpCatalog, loadOverview, loadTemplates]);
+  }, [loadCurated, loadIndustryInstances, loadMcpCatalog, loadOverview, loadProjects, loadTemplates]);
 
   useEffect(() => {
     if (activeTab === "install-templates" && !requestedTemplateId && templates[0]?.id) {
@@ -396,6 +417,7 @@ export function useCapabilityMarketState({
   const handleRefreshAll = useCallback(async () => {
     await Promise.all([
       loadOverview(),
+      loadProjects(projectQuery.trim()),
       loadMcpCatalog({
         query: mcpQuery,
         category: mcpCategory,
@@ -419,6 +441,7 @@ export function useCapabilityMarketState({
     loadMcpCatalog,
     loadMcpDetail,
     loadOverview,
+    loadProjects,
     loadTemplateDetail,
     loadTemplates,
     mcpCategory,
@@ -426,6 +449,7 @@ export function useCapabilityMarketState({
     mcpDetail?.item.server_name,
     mcpPage,
     mcpQuery,
+    projectQuery,
     requestedTemplateId,
   ]);
 
@@ -450,6 +474,7 @@ export function useCapabilityMarketState({
     loadMcpCatalog,
     loadMcpDetail,
     loadOverview,
+    loadProjects,
     loadTemplateDetail,
     loadTemplates,
     mcpActionKey,
@@ -476,6 +501,11 @@ export function useCapabilityMarketState({
     overviewError,
     overviewLoading,
     pagedCuratedItems,
+    projectError,
+    projectInstallKey,
+    projectLoading,
+    projectQuery,
+    projectResults,
     requestedTemplateId,
     selectedMcpInstance,
     selectedMcpOption,
@@ -495,6 +525,8 @@ export function useCapabilityMarketState({
     setMcpSelectedOptionKey,
     setMcpTargetAgentIds,
     setMcpTargetInstanceId,
+    setProjectInstallKey,
+    setProjectQuery,
     setTemplateActionKey,
     setTemplateDoctorReport,
     setTemplateExampleRun,

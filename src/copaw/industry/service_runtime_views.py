@@ -3403,7 +3403,7 @@ class _IndustryRuntimeViewsMixin:
 
                 "runtime_detail": f"/api/runtime-center/industry/{record.instance_id}",
 
-                "runtime_center": "/api/runtime-center",
+                "runtime_center": "/api/runtime-center/surface",
 
                 "strategy_memory": (
 
