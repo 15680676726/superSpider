@@ -355,11 +355,39 @@ class MCPConfig(BaseModel):
     )
 
 
+class ExternalCapabilityPackageConfig(BaseModel):
+    """Config-backed external open-source capability mount."""
+
+    capability_id: str
+    name: str
+    summary: str = ""
+    enabled: bool = True
+    kind: Literal["project-package", "adapter", "runtime-component"] = (
+        "project-package"
+    )
+    source_kind: Literal["project", "adapter", "runtime"] = "project"
+    source_url: str = ""
+    package_ref: str = ""
+    package_kind: str = "git-repo"
+    package_version: str = ""
+    execution_mode: Literal["shell"] = "shell"
+    install_command: str = ""
+    execute_command: str = ""
+    healthcheck_command: str = ""
+    environment_requirements: List[str] = Field(default_factory=list)
+    evidence_contract: List[str] = Field(default_factory=lambda: ["shell-command"])
+    provider_ref: str = "github"
+    metadata: Dict[str, object] = Field(default_factory=dict)
+
+
 class Config(BaseModel):
     """Root config (config.json)."""
 
     channels: ChannelConfig = ChannelConfig()
     mcp: MCPConfig = MCPConfig()
+    external_capability_packages: Dict[str, ExternalCapabilityPackageConfig] = Field(
+        default_factory=dict,
+    )
     last_api: LastApiConfig = LastApiConfig()
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     last_dispatch: Optional[LastDispatchConfig] = None

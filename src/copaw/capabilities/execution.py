@@ -207,6 +207,22 @@ class CapabilityExecutionFacade:
 
             return _system_executor
 
+        if capability_id.startswith(("project:", "adapter:", "runtime:")):
+
+            async def _external_package_executor(
+                action: str | None = None,
+                timeout: int | None = None,
+                payload: dict[str, object] | None = None,
+            ):
+                return await self._execute_external_package(
+                    capability_id,
+                    action=action,
+                    timeout=timeout,
+                    payload=payload,
+                )
+
+            return _external_package_executor
+
         return None
 
     async def execute_task(self, task: "KernelTask") -> dict[str, object]:
@@ -1092,6 +1108,76 @@ class CapabilityExecutionFacade:
                 "payload": tool_args,
                 "tool_output": response_payload,
                 "error": None if success else summary,
+            },
+        )
+
+    async def _execute_external_package(
+        self,
+        capability_id: str,
+        *,
+        action: str | None = None,
+        timeout: int | None = None,
+        payload: dict[str, object] | None = None,
+    ):
+        mount = self._get_capability(capability_id)
+        if mount is None:
+            return _json_tool_response(
+                {"success": False, "error": f"Capability '{capability_id}' not found"},
+            )
+        resolved_payload = payload or {}
+        resolved_action = str(
+            action or resolved_payload.get("action") or "run",
+        ).strip().lower()
+        metadata = dict(mount.metadata or {})
+        if resolved_action == "describe":
+            return _json_tool_response(
+                {
+                    "success": True,
+                    "summary": f"Loaded external capability '{capability_id}'.",
+                    "capability": mount.model_dump(mode="json"),
+                },
+            )
+        command = ""
+        if resolved_action in {"healthcheck", "doctor"}:
+            command = str(metadata.get("healthcheck_command") or "").strip()
+        if not command:
+            command = str(
+                resolved_payload.get("command")
+                or metadata.get("execute_command")
+                or metadata.get("healthcheck_command")
+                or ""
+            ).strip()
+        if not command:
+            return _json_tool_response(
+                {
+                    "success": False,
+                    "error": (
+                        f"External capability '{capability_id}' does not declare an executable command"
+                    ),
+                },
+            )
+        timeout_value = timeout or resolved_payload.get("timeout")
+        timeout_value = (
+            int(timeout_value)
+            if isinstance(timeout_value, int) and timeout_value > 0
+            else 180
+        )
+        cwd_value = str(resolved_payload.get("cwd") or metadata.get("cwd") or "").strip()
+        response = await execute_shell_command(
+            command=command,
+            timeout=timeout_value,
+            cwd=cwd_value or None,
+        )
+        summary = _tool_response_summary(response)
+        success = _tool_response_success(response)
+        return _json_tool_response(
+            {
+                "success": success,
+                "summary": summary,
+                "command": command,
+                "cwd": cwd_value or None,
+                "error": None if success else summary,
+                "output": _tool_response_payload(response),
             },
         )
 

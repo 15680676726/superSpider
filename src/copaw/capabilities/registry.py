@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 
 from .models import CapabilityMount
+from .sources.external_packages import list_external_package_capabilities
 from .sources.cooperative import list_cooperative_capabilities
 from .sources.mcp import list_mcp_capabilities
 from .sources.skills import list_skill_capabilities
@@ -21,6 +22,7 @@ class CapabilityRegistry:
         for loader in (
             list_tool_capabilities,
             list_skill_capabilities,
+            list_external_package_capabilities,
             list_mcp_capabilities,
             list_cooperative_capabilities,
             list_system_capabilities,

@@ -18,7 +18,10 @@ Current verified runtime reality:
 - Runtime Center donor/package/trust/scout read surfaces exist
 - runtime bootstrap discovery executor is wired to real external providers instead of an empty placeholder
 - opportunity radar now carries bounded default feeds instead of `feeds={}`
-- GitHub donor discovery is on the runtime discovery path; the currently live-verified GitHub adoption boundary is SKILL-backed repositories that expose a valid `SKILL.md` bundle
+- GitHub donor discovery is on the runtime discovery path
+- GitHub donor now has two live-verified adoption landings:
+  - `SKILL.md` bundle repositories
+  - governed open-source project landings as `project-package / adapter / runtime-component`
 - SkillHub / curated results suppress dead bundles before default search results are returned
 - source-chain now records `empty` distinctly, advances to the next source, and only records last-known-good snapshot success when a source actually yields results
 
@@ -31,6 +34,10 @@ Fresh live-verified surfaces now include:
 - desktop-windows template install -> live connection
 - GitHub donor discovery through the runtime discovery executor
 - direct GitHub repo query (`https://github.com/owner/repo` or `owner/repo`) -> project search -> install -> scoped trial for SKILL-backed repositories
+- direct GitHub repo query (`https://github.com/owner/repo` or `owner/repo`) -> project search -> install -> unified capability execution for:
+  - `project-package`
+  - `adapter`
+  - `runtime-component`
 - scout gap/opportunity runs importing real donor candidates
 - snapshot fallback after forced primary-source failure
 - offline-private cache-backed discovery path
@@ -40,6 +47,7 @@ Therefore this plan must be read as:
 - the formal donor-first spine exists
 - the live discovery/installability gaps previously listed here have been closed
 - completion claims for this plan are now backed by real discovery/install/use evidence, not only code/read-model/tests
+- GitHub donor adoption is no longer limited to skill-shaped repositories; mature open-source projects can now land in the formal capability graph when they fit the current governed Python/archive install contract
 
 ## Execution Coupling Rule
 

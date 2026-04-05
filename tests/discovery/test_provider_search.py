@@ -23,12 +23,6 @@ def test_search_github_repository_donors_builds_normalized_hits(monkeypatch) -> 
             ],
         },
     )
-    monkeypatch.setattr(
-        provider_search_module,
-        "remote_skill_bundle_is_installable",
-        lambda bundle_url, version="": True,
-    )
-
     hits = provider_search_module.search_github_repository_donors(
         "browser automation github",
         limit=5,
@@ -43,9 +37,10 @@ def test_search_github_repository_donors_builds_normalized_hits(monkeypatch) -> 
     assert hit.candidate_source_lineage == "donor:github:acme/browser-pilot"
     assert "browser" in hit.capability_keys
     assert "automation" in hit.capability_keys
+    assert hit.metadata["materialization_strategy"] == "pip-git"
 
 
-def test_search_github_repository_donors_suppresses_non_installable_repositories(
+def test_search_github_repository_donors_keeps_open_source_project_candidates(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -76,18 +71,15 @@ def test_search_github_repository_donors_suppresses_non_installable_repositories
             ],
         },
     )
-    monkeypatch.setattr(
-        provider_search_module,
-        "remote_skill_bundle_is_installable",
-        lambda bundle_url, version="": bundle_url.endswith("browser-pilot"),
-    )
-
     hits = provider_search_module.search_github_repository_donors(
         "browser automation github",
         limit=5,
     )
 
-    assert [hit.display_name for hit in hits] == ["acme/browser-pilot"]
+    assert [hit.display_name for hit in hits] == [
+        "acme/broken-browser",
+        "acme/browser-pilot",
+    ]
     assert hits[0].metadata["install_supported"] is True
 
 
@@ -101,12 +93,6 @@ def test_search_github_repository_donors_supports_direct_repo_query(
             AssertionError("search API should not run for direct repo query"),
         ),
     )
-    monkeypatch.setattr(
-        provider_search_module,
-        "remote_skill_bundle_is_installable",
-        lambda bundle_url, version="": bundle_url == "https://github.com/acme/browser-pilot",
-    )
-
     hits = provider_search_module.search_github_repository_donors(
         "https://github.com/acme/browser-pilot",
         limit=5,

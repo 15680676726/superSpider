@@ -11,9 +11,6 @@ from urllib.request import Request, urlopen
 
 from ..agents.skills_hub import search_hub_skills
 from ..capabilities.mcp_registry import McpRegistryCatalog
-from ..capabilities.remote_skill_contract import (
-    remote_skill_bundle_is_installable,
-)
 from ..capabilities.remote_skill_catalog import search_curated_skill_catalog
 from .models import DiscoveryHit, OpportunityRadarItem
 
@@ -118,8 +115,6 @@ def search_github_repository_donors(
     if direct_repo is not None:
         owner, repo = direct_repo
         source_url = f"https://github.com/{owner}/{repo}"
-        if not remote_skill_bundle_is_installable(source_url):
-            return []
         return [
             DiscoveryHit(
                 source_id="github-repo",
@@ -138,6 +133,7 @@ def search_github_repository_donors(
                     "install_supported": True,
                     "repository_url": source_url,
                     "direct_query": True,
+                    "materialization_strategy": "pip-git",
                 },
             ),
         ]
@@ -152,11 +148,6 @@ def search_github_repository_donors(
         if not full_name or not html_url:
             continue
         default_branch = _normalize_text(item.get("default_branch")) or "main"
-        if not remote_skill_bundle_is_installable(
-            html_url,
-            version=default_branch,
-        ):
-            continue
         topics = _unique_strings(item.get("topics") or [])
         capability_keys = _unique_strings(
             query_tokens,
@@ -185,6 +176,7 @@ def search_github_repository_donors(
                     "stars": stars,
                     "topics": list(topics),
                     "updated_at": pushed_at,
+                    "materialization_strategy": "pip-git",
                 },
             ),
         )

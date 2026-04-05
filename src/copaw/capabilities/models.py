@@ -10,11 +10,14 @@ CapabilityKind = Literal[
     "local-tool",
     "remote-mcp",
     "skill-bundle",
+    "project-package",
+    "adapter",
+    "runtime-component",
     "provider-admin",
     "system-op",
 ]
 
-SourceKind = Literal["tool", "skill", "mcp", "system"]
+SourceKind = Literal["tool", "skill", "mcp", "project", "adapter", "runtime", "system"]
 
 
 class CapabilityMount(BaseModel):

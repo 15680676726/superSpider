@@ -34,6 +34,32 @@
 
 ---
 
+## 1.2 `2026-04-05` donor-first 开源项目能力落位补充
+
+- GitHub open-source donor 不再只以 `SKILL.md` bundle 形式落地。
+- 正式新增的一等 capability landing：
+  - `project-package`
+  - `adapter`
+  - `runtime-component`
+- `/capability-market/projects/install` 已改为真实开源项目 materialization 前门，不再先降成 `skill:*` 再冒充 project donor。
+- config-backed external capability mounts 已接入统一 `capability graph / catalog / execution`，可以被正式列出、切换、删除、执行。
+- 当前默认 materialization 已从脆弱的 `git+https` partial clone 切成 GitHub archive zip，以适配当前真实网络环境。
+- `2026-04-05` fresh regression：
+  - `80 passed`
+- `2026-04-05` live smoke 已真实验证：
+  - GitHub donor search：
+    - `psf/black`
+    - `pywinauto/pywinauto`
+    - `pallets/flask`
+  - real install + unified execution：
+    - `project:black`
+    - `adapter:pywinauto`
+    - `runtime:flask`
+  - real API front-door：
+    - `/capability-market/projects/install` 对 `https://github.com/psf/black` 返回真实 `candidate_id`，并安装 `project:black`
+
+---
+
 ## 1.1 `2026-03-25` 硬切维护窗口说明
 
 - 当前仓库已进入一次性 `hard-cut autonomy rebuild` 维护窗口，允许短期停机与阶段性功能不完整。

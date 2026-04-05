@@ -173,6 +173,22 @@ class CapabilityCatalogFacade:
             self._save_config(config)
             return {"toggled": True, "id": capability_id, "enabled": enabled}
 
+        if mount.source_kind in {"project", "adapter", "runtime"}:
+            config = self._load_config()
+            packages = dict(getattr(config, "external_capability_packages", {}) or {})
+            config_key = _external_package_config_key(mount)
+            package = packages.get(config_key)
+            if package is None:
+                return {
+                    "toggled": False,
+                    "error": f"External capability '{capability_id}' not found in config",
+                }
+            package.enabled = enabled
+            packages[config_key] = package
+            config.external_capability_packages = packages
+            self._save_config(config)
+            return {"toggled": True, "id": capability_id, "enabled": enabled}
+
         return {"toggled": False, "error": f"Toggle not supported for source_kind '{mount.source_kind}'"}
 
     def delete_capability(self, capability_id: str) -> dict[str, object]:
@@ -191,6 +207,20 @@ class CapabilityCatalogFacade:
             if key not in config.mcp.clients:
                 return {"deleted": False, "error": f"MCP client '{key}' not found in config"}
             del config.mcp.clients[key]
+            self._save_config(config)
+            return {"deleted": True, "id": capability_id}
+
+        if mount.source_kind in {"project", "adapter", "runtime"}:
+            config = self._load_config()
+            packages = dict(getattr(config, "external_capability_packages", {}) or {})
+            config_key = _external_package_config_key(mount)
+            if config_key not in packages:
+                return {
+                    "deleted": False,
+                    "error": f"External capability '{capability_id}' not found in config",
+                }
+            del packages[config_key]
+            config.external_capability_packages = packages
             self._save_config(config)
             return {"deleted": True, "id": capability_id}
 
@@ -548,6 +578,13 @@ def _capability_name_from_id(capability_id: str, *, prefix: str) -> str:
     if capability_id.startswith(prefix):
         return capability_id[len(prefix) :]
     return capability_id
+
+
+def _external_package_config_key(mount: CapabilityMount) -> str:
+    config_key = str((mount.metadata or {}).get("config_key") or "").strip()
+    if config_key:
+        return config_key
+    return mount.id
 
 
 def _mask_mapping(value: dict[str, str] | None) -> dict[str, str]:

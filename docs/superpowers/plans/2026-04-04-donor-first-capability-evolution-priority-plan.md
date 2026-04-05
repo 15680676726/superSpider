@@ -19,7 +19,10 @@ That runtime boundary is now satisfied for this donor-first wave. The gaps that 
 
 - autonomous scout now runs on a real default discovery executor
 - opportunity radar now ships with bounded default feeds
-- GitHub donor search is on the runtime path, with current live closure scoped to SKILL-backed repositories that expose a valid `SKILL.md` bundle
+- GitHub donor search is on the runtime path
+- GitHub donor live closure now covers both:
+  - `SKILL.md` bundle repositories
+  - governed open-source project landings as `project-package / adapter / runtime-component`
 - SkillHub/curated search now suppresses dead bundles before default results are returned
 
 So this plan should be executed as:
@@ -27,6 +30,12 @@ So this plan should be executed as:
 - keep the donor-first lifecycle/resolver/read-model work already landed
 - treat the live external supply-chain boundary as verified for this wave
 - report donor-first capability evolution closure only with the live evidence matrix recorded in `TASK_STATUS.md`
+
+Reality note after the open-source project landing:
+
+- `skill-bundle` is no longer the only practical GitHub donor landing
+- mature open-source projects can now materialize into config-backed formal capability mounts and execute through the unified capability graph
+- the remaining GitHub donor limit is not "only skills", but "only repositories that can be safely materialized through the current governed archive/Python install contract"
 
 ---
 

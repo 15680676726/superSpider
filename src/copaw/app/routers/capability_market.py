@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import inspect
 import re
+import subprocess
+import sys
 from typing import Any, Literal
 from urllib.parse import urlparse
+from urllib.request import Request as URLRequest, urlopen
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -52,7 +56,8 @@ from ...capabilities.remote_skill_catalog import (
 from ...capabilities.remote_skill_contract import (
     remote_skill_bundle_is_installable,
 )
-from ...config import load_config
+from ...config import load_config, save_config
+from ...config.config import ExternalCapabilityPackageConfig
 from ...discovery.models import DiscoveryHit, NormalizedDiscoveryHit
 from ...discovery.provider_search import search_github_repository_donors
 from ...state import SQLiteStateStore
@@ -138,6 +143,12 @@ class CapabilityMarketProjectInstallRequest(BaseModel):
     candidate_id: str | None = None
     source_url: str | None = None
     version: str = ""
+    capability_kind: Literal["project-package", "adapter", "runtime-component"] = (
+        "project-package"
+    )
+    entry_module: str | None = None
+    execute_command: str | None = None
+    healthcheck_command: str | None = None
     enable: bool = True
     overwrite: bool = False
     actor: str = Field(default="copaw-operator")
@@ -157,6 +168,7 @@ class CapabilityMarketProjectInstallResponse(BaseModel):
     name: str
     enabled: bool
     source_url: str
+    capability_kind: str = "project-package"
     installed_capability_ids: list[str] = Field(default_factory=list)
     target_agent_id: str | None = None
     trial_attachment: dict[str, Any] | None = None
@@ -554,6 +566,298 @@ def _normalize_project_install_name(
     return candidate or "github_project_donor"
 
 
+def _normalize_external_capability_kind(
+    value: object | None,
+) -> Literal["project-package", "adapter", "runtime-component"]:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"project-package", "adapter", "runtime-component"}:
+        return normalized  # type: ignore[return-value]
+    return "project-package"
+
+
+def _external_capability_prefix(
+    capability_kind: Literal["project-package", "adapter", "runtime-component"],
+) -> str:
+    return {
+        "project-package": "project",
+        "adapter": "adapter",
+        "runtime-component": "runtime",
+    }[capability_kind]
+
+
+def _external_source_kind(
+    capability_kind: Literal["project-package", "adapter", "runtime-component"],
+) -> Literal["project", "adapter", "runtime"]:
+    return {
+        "project-package": "project",
+        "adapter": "adapter",
+        "runtime-component": "runtime",
+    }[capability_kind]
+
+
+def _normalize_entry_module(value: object | None, *, fallback_name: str) -> str:
+    candidate = str(value or "").strip()
+    if not candidate:
+        candidate = fallback_name
+    candidate = candidate.replace("-", "_").strip("_")
+    return candidate or "external_capability"
+
+
+def _build_external_capability_id(
+    capability_kind: Literal["project-package", "adapter", "runtime-component"],
+    *,
+    install_name: str,
+) -> str:
+    return f"{_external_capability_prefix(capability_kind)}:{install_name}"
+
+
+def _normalize_github_project_source_url(source_url: str) -> str:
+    normalized = str(source_url or "").strip().rstrip("/")
+    parsed = urlparse(normalized)
+    host = (parsed.netloc or "").strip().lower()
+    if parsed.scheme not in {"http", "https"} or host not in {
+        "github.com",
+        "www.github.com",
+    }:
+        raise HTTPException(
+            400,
+            detail="Project donor currently supports GitHub repository URLs only",
+        )
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2:
+        raise HTTPException(
+            400,
+            detail="Project donor source_url must point to a GitHub owner/repository",
+        )
+    return f"https://github.com/{parts[0]}/{parts[1]}"
+
+
+def _github_owner_repo(source_url: str) -> tuple[str, str]:
+    parsed = urlparse(source_url)
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2:
+        raise HTTPException(
+            400,
+            detail="Project donor source_url must point to a GitHub owner/repository",
+        )
+    return parts[0], parts[1]
+
+
+def _resolve_github_default_ref(source_url: str) -> str:
+    owner, repo = _github_owner_repo(source_url)
+    request = URLRequest(
+        f"https://api.github.com/repos/{owner}/{repo}",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "copaw-donor-discovery/1.0",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    with urlopen(request, timeout=20.0) as response:
+        payload = json.loads(response.read().decode("utf-8", errors="replace"))
+    default_branch = str(payload.get("default_branch") or "").strip()
+    return default_branch or "main"
+
+
+def _build_github_archive_package_ref(source_url: str, *, version: str) -> str:
+    owner, repo = _github_owner_repo(source_url)
+    normalized_version = str(version or "").strip() or _resolve_github_default_ref(
+        source_url,
+    )
+    return f"https://github.com/{owner}/{repo}/archive/refs/heads/{normalized_version}.zip"
+
+
+def _default_external_execute_command(
+    capability_kind: Literal["project-package", "adapter", "runtime-component"],
+    *,
+    entry_module: str,
+) -> str:
+    python_exe = sys.executable
+    if capability_kind == "adapter":
+        return (
+            f'"{python_exe}" -c "import {entry_module}; '
+            f"print(getattr({entry_module}, '__name__', '{entry_module}'))\""
+        )
+    if capability_kind == "runtime-component":
+        return f'"{python_exe}" -m {entry_module} --help'
+    return f'"{python_exe}" -m {entry_module} --version'
+
+
+def _default_environment_requirements(
+    capability_kind: Literal["project-package", "adapter", "runtime-component"],
+) -> list[str]:
+    if capability_kind == "adapter":
+        return ["desktop", "process"]
+    if capability_kind == "runtime-component":
+        return ["process", "network"]
+    return ["workspace", "process"]
+
+
+def _default_evidence_contract(
+    capability_kind: Literal["project-package", "adapter", "runtime-component"],
+) -> list[str]:
+    if capability_kind == "adapter":
+        return ["shell-command", "runtime-event", "environment-session"]
+    if capability_kind == "runtime-component":
+        return ["shell-command", "runtime-event"]
+    return ["shell-command", "call-record"]
+
+
+async def _run_external_project_process(
+    command_parts: list[str],
+    *,
+    timeout: int,
+) -> tuple[bool, str]:
+    def _run() -> tuple[bool, str]:
+        try:
+            completed = subprocess.run(
+                command_parts,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return False, "Command timed out"
+        output = (completed.stdout or "").strip()
+        error_output = (completed.stderr or "").strip()
+        summary = (
+            output
+            or error_output
+            or f"Process exited with code {completed.returncode}"
+        )
+        return completed.returncode == 0, summary
+
+    return await asyncio.to_thread(_run)
+
+
+async def _install_external_project_capability(
+    *,
+    source_url: str,
+    version: str,
+    capability_kind: Literal["project-package", "adapter", "runtime-component"],
+    entry_module: str | None,
+    execute_command: str | None,
+    healthcheck_command: str | None,
+    enable: bool,
+    overwrite: bool,
+) -> dict[str, object]:
+    normalized_source_url = _normalize_github_project_source_url(source_url)
+    install_name = _normalize_project_install_name(
+        source_url=normalized_source_url,
+        proposed_name=None,
+    )
+    normalized_entry_module = _normalize_entry_module(
+        entry_module,
+        fallback_name=install_name,
+    )
+    capability_id = _build_external_capability_id(
+        capability_kind,
+        install_name=install_name,
+    )
+    package_ref = _build_github_archive_package_ref(
+        normalized_source_url,
+        version=version,
+    )
+    config = load_config()
+    packages = dict(getattr(config, "external_capability_packages", {}) or {})
+    if capability_id in packages and not overwrite:
+        raise HTTPException(
+            409,
+            detail=(
+                f"External capability '{capability_id}' already exists. "
+                "Use overwrite=true to replace it."
+            ),
+        )
+    install_command_parts = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--user",
+        "--disable-pip-version-check",
+    ]
+    if overwrite:
+        install_command_parts.extend(["--upgrade", "--force-reinstall"])
+    install_command_parts.append(package_ref)
+    success, summary = await _run_external_project_process(
+        install_command_parts,
+        timeout=600,
+    )
+    if not success:
+        raise HTTPException(
+            400,
+            detail=f"External project install failed: {summary}",
+        )
+    resolved_execute_command = str(execute_command or "").strip() or _default_external_execute_command(
+        capability_kind,
+        entry_module=normalized_entry_module,
+    )
+    resolved_healthcheck_command = (
+        str(healthcheck_command or "").strip() or resolved_execute_command
+    )
+    if resolved_healthcheck_command:
+        verify_success, verify_summary = await _run_external_project_process(
+            (
+                [sys.executable, "-m", normalized_entry_module, "--version"]
+                if capability_kind == "project-package"
+                else (
+                    [sys.executable, "-m", normalized_entry_module, "--help"]
+                    if capability_kind == "runtime-component"
+                    else [
+                        sys.executable,
+                        "-c",
+                        f"import {normalized_entry_module}; print('ok')",
+                    ]
+                )
+            ),
+            timeout=180,
+        )
+        if not verify_success:
+            raise HTTPException(
+                400,
+                detail=f"External project verification failed: {verify_summary}",
+            )
+    packages[capability_id] = ExternalCapabilityPackageConfig(
+        capability_id=capability_id,
+        name=install_name,
+        summary=f"External open-source donor from {normalized_source_url}",
+        enabled=enable,
+        kind=capability_kind,
+        source_kind=_external_source_kind(capability_kind),
+        source_url=normalized_source_url,
+        package_ref=package_ref,
+        package_kind="github-archive",
+        package_version=version,
+        execution_mode="shell",
+        install_command=subprocess.list2cmdline(install_command_parts),
+        execute_command=resolved_execute_command,
+        healthcheck_command=resolved_healthcheck_command,
+        environment_requirements=_default_environment_requirements(capability_kind),
+        evidence_contract=_default_evidence_contract(capability_kind),
+        provider_ref="github",
+        metadata={
+            "entry_module": normalized_entry_module,
+            "provider": "github-repo",
+            "open_source_project": True,
+        },
+    )
+    config.external_capability_packages = packages
+    save_config(config)
+    return {
+        "installed": True,
+        "name": install_name,
+        "enabled": enable,
+        "source_url": normalized_source_url,
+        "installed_capability_ids": [capability_id],
+        "capability_kind": capability_kind,
+        "execution_mode": "shell",
+        "summary": summary,
+    }
+
+
 def _project_target_scope(
     *,
     trial_scope: str,
@@ -584,7 +888,12 @@ def _resolve_project_candidate(
         candidate = candidate_service.get_candidate(candidate_id.strip())
         if candidate is None:
             raise HTTPException(404, detail=f"Capability candidate '{candidate_id}' not found")
-        if str(candidate.candidate_kind or "").strip().lower() != "project":
+        if str(candidate.candidate_kind or "").strip().lower() not in {
+            "project",
+            "project-package",
+            "adapter",
+            "runtime-component",
+        }:
             raise HTTPException(400, detail="Capability candidate is not a project donor")
     resolved_source_url = str(source_url or "").strip() or str(
         getattr(candidate, "candidate_source_ref", "") or ""
@@ -594,18 +903,7 @@ def _resolve_project_candidate(
     ).strip()
     if not resolved_source_url:
         raise HTTPException(400, detail="Project donor source_url is required")
-    if not remote_skill_bundle_is_installable(
-        resolved_source_url,
-        version=resolved_version,
-    ):
-        raise HTTPException(
-            400,
-            detail=(
-                "Project donor is not installable through the current GitHub skill contract. "
-                "The repository must expose a valid SKILL.md bundle."
-            ),
-        )
-    return candidate, resolved_source_url, resolved_version
+    return candidate, _normalize_github_project_source_url(resolved_source_url), resolved_version
 
 
 def _materialize_project_candidate(
@@ -616,6 +914,7 @@ def _materialize_project_candidate(
     target_role_id: str | None,
     target_seat_ref: str | None,
     trial_scope: str,
+    candidate_kind: str = "project",
 ):
     if candidate is not None:
         return candidate
@@ -637,7 +936,7 @@ def _materialize_project_candidate(
             source_id="github-repo",
             source_kind="github-repo",
             source_alias="github",
-            candidate_kind="project",
+            candidate_kind=candidate_kind,
             display_name=source_url,
             summary="GitHub donor repository",
             candidate_source_ref=source_url,
@@ -651,7 +950,7 @@ def _materialize_project_candidate(
             },
         )
     normalized_hit = NormalizedDiscoveryHit(
-        candidate_kind=hit.candidate_kind,
+        candidate_kind=str(hit.candidate_kind or candidate_kind),
         candidate_source_kind="external_remote",
         display_name=hit.display_name,
         summary=hit.summary,
@@ -1904,6 +2203,7 @@ async def install_market_project_donor(
     request: Request,
     payload: CapabilityMarketProjectInstallRequest,
 ) -> CapabilityMarketProjectInstallResponse:
+    capability_kind = _normalize_external_capability_kind(payload.capability_kind)
     candidate, source_url, version = _resolve_project_candidate(
         request,
         candidate_id=payload.candidate_id,
@@ -1920,52 +2220,89 @@ async def install_market_project_donor(
         target_role_id=str(payload.target_role_id or "").strip() or None,
         target_seat_ref=str(payload.selected_seat_ref or "").strip() or None,
         trial_scope=payload.trial_scope,
+        candidate_kind=capability_kind,
     )
     resolved_candidate_id = str(
         getattr(candidate, "candidate_id", "") or payload.candidate_id or "",
     ).strip() or None
-    project_candidate_payload = _build_project_remote_candidate_payload(
-        candidate=candidate,
+    install_result = _install_external_project_capability(
         source_url=source_url,
         version=version,
-        capability_ids=payload.capability_ids,
+        capability_kind=capability_kind,
+        entry_module=payload.entry_module,
+        execute_command=payload.execute_command,
+        healthcheck_command=payload.healthcheck_command,
+        enable=payload.enable,
+        overwrite=payload.overwrite,
     )
-    result = await _dispatch_market_mutation(
-        request,
-        capability_ref="system:trial_remote_skill_assignment",
-        title=(
-            f"Install project donor {source_url}"
-            + (f" for {target_agent_id}" if target_agent_id else "")
-        ),
-        payload={
-            "candidate": project_candidate_payload,
-            "candidate_id": resolved_candidate_id,
-            "target_agent_id": target_agent_id,
-            "selected_seat_ref": str(payload.selected_seat_ref or "").strip() or None,
-            "target_role_id": str(payload.target_role_id or "").strip() or None,
-            "capability_ids": _normalize_capability_ids(payload.capability_ids),
-            "replacement_capability_ids": _normalize_capability_ids(
-                payload.replacement_capability_ids,
-            ),
-            "replacement_target_ids": _normalize_capability_ids(
-                payload.replacement_target_ids,
-            ),
-            "capability_assignment_mode": payload.capability_assignment_mode,
-            "trial_scope": payload.trial_scope,
-            "enable": payload.enable,
-            "overwrite": payload.overwrite,
-            "actor": payload.actor,
-        },
-        fallback_risk="guarded",
+    if inspect.isawaitable(install_result):
+        install_result = await install_result
+    result = dict(install_result)
+    installed_capability_ids = _normalize_capability_ids(
+        list(result.get("installed_capability_ids") or []),
     )
-    result = _unwrap_market_mutation_result(result)
-    if not result.get("success"):
-        detail = str(
-            result.get("error")
-            or result.get("summary")
-            or "Project donor install failed"
+    trial_attachment: dict[str, Any] | None = None
+    if target_agent_id is not None:
+        lifecycle_result = await _dispatch_market_mutation(
+            request,
+            capability_ref="system:apply_capability_lifecycle",
+            title=(
+                f"Attach project donor {source_url}"
+                + (f" for {target_agent_id}" if target_agent_id else "")
+            ),
+            payload={
+                "decision_kind": "continue_trial",
+                "candidate_id": resolved_candidate_id,
+                "target_agent_id": target_agent_id,
+                "selected_seat_ref": str(payload.selected_seat_ref or "").strip() or None,
+                "selected_scope": _project_target_scope(
+                    trial_scope=payload.trial_scope,
+                    selected_seat_ref=str(payload.selected_seat_ref or "").strip() or None,
+                    target_role_id=str(payload.target_role_id or "").strip() or None,
+                ),
+                "scope_ref": (
+                    str(payload.selected_seat_ref or "").strip()
+                    or target_agent_id
+                ),
+                "target_role_id": str(payload.target_role_id or "").strip() or None,
+                "capability_ids": installed_capability_ids,
+                "replacement_capability_ids": _normalize_capability_ids(
+                    payload.replacement_capability_ids,
+                ),
+                "replacement_target_ids": _normalize_capability_ids(
+                    payload.replacement_target_ids,
+                ),
+                "capability_assignment_mode": payload.capability_assignment_mode,
+                "actor": payload.actor,
+            },
+            fallback_risk="guarded",
         )
-        raise HTTPException(_market_error_status(detail), detail=detail)
+        lifecycle_result = _unwrap_market_mutation_result(lifecycle_result)
+        if not lifecycle_result.get("success"):
+            detail = str(
+                lifecycle_result.get("error")
+                or lifecycle_result.get("summary")
+                or "Project donor trial attach failed"
+            )
+            raise HTTPException(_market_error_status(detail), detail=detail)
+        if isinstance(lifecycle_result.get("trial_attachment"), dict):
+            trial_attachment = dict(lifecycle_result.get("trial_attachment"))
+        else:
+            trial_attachment = {
+                "success": True,
+                "selected_scope": _project_target_scope(
+                    trial_scope=payload.trial_scope,
+                    selected_seat_ref=str(payload.selected_seat_ref or "").strip() or None,
+                    target_role_id=str(payload.target_role_id or "").strip() or None,
+                ),
+                "scope_type": _project_target_scope(
+                    trial_scope=payload.trial_scope,
+                    selected_seat_ref=str(payload.selected_seat_ref or "").strip() or None,
+                    target_role_id=str(payload.target_role_id or "").strip() or None,
+                ),
+                "scope_ref": str(payload.selected_seat_ref or "").strip() or target_agent_id,
+            }
+    result["trial_attachment"] = trial_attachment
     _sync_project_trial_truth(
         request,
         candidate_id=resolved_candidate_id,
@@ -1978,6 +2315,7 @@ async def install_market_project_donor(
         name=str(result.get("name") or ""),
         enabled=bool(result.get("enabled", payload.enable)),
         source_url=str(result.get("source_url") or source_url),
+        capability_kind=str(result.get("capability_kind") or capability_kind),
         installed_capability_ids=[
             str(item).strip()
             for item in list(result.get("installed_capability_ids") or [])

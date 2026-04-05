@@ -1388,7 +1388,13 @@ def test_capability_market_project_install_trials_github_candidate_and_records_t
     monkeypatch,
 ) -> None:
     app = build_runtime_app(tmp_path)
+    app.state.agent_profile_service = SimpleNamespace(
+        get_agent=lambda agent_id: {"agent_id": agent_id},
+    )
     client = TestClient(app)
+    app.state.agent_profile_service = SimpleNamespace(
+        get_agent=lambda agent_id: {"agent_id": agent_id},
+    )
     candidate_service = CapabilityCandidateService(state_store=app.state.state_store)
     trial_service = SkillTrialService(state_store=app.state.state_store)
     app.state.capability_candidate_service = candidate_service
@@ -1414,17 +1420,20 @@ def test_capability_market_project_install_trials_github_candidate_and_records_t
     )
 
     monkeypatch.setattr(
-        "copaw.app.routers.capability_market.remote_skill_bundle_is_installable",
-        lambda bundle_url, version="": True,
+        "copaw.app.routers.capability_market._install_external_project_capability",
+        lambda **kwargs: {
+            "installed": True,
+            "name": "browser-pilot",
+            "enabled": True,
+            "source_url": "https://github.com/acme/browser-pilot",
+            "installed_capability_ids": ["project:browser-pilot"],
+            "capability_kind": "project-package",
+            "execution_mode": "shell",
+        },
     )
     async def _fake_dispatch(*args, **kwargs):
         return {
             "success": True,
-            "installed": True,
-            "name": "browser_pilot",
-            "enabled": True,
-            "source_url": "https://github.com/acme/browser-pilot",
-            "installed_capability_ids": ["skill:browser_pilot"],
             "trial_attachment": {
                 "success": True,
                 "selected_scope": "seat",
@@ -1453,8 +1462,8 @@ def test_capability_market_project_install_trials_github_candidate_and_records_t
     payload = response.json()
     assert payload["installed"] is True
     assert payload["candidate_id"] == candidate.candidate_id
-    assert payload["name"] == "browser_pilot"
-    assert payload["installed_capability_ids"] == ["skill:browser_pilot"]
+    assert payload["name"] == "browser-pilot"
+    assert payload["installed_capability_ids"] == ["project:browser-pilot"]
     assert payload["trial_attachment"]["selected_scope"] == "seat"
     assert payload["trial_attachment"]["scope_ref"] == "seat-browser-primary"
 
@@ -1519,41 +1528,45 @@ def test_capability_market_project_install_unwraps_kernel_output_payload(
     monkeypatch,
 ) -> None:
     app = build_runtime_app(tmp_path)
+    app.state.agent_profile_service = SimpleNamespace(
+        get_agent=lambda agent_id: {"agent_id": agent_id},
+    )
     client = TestClient(app)
 
     monkeypatch.setattr(
-        "copaw.app.routers.capability_market.remote_skill_bundle_is_installable",
-        lambda bundle_url, version="": True,
+        "copaw.app.routers.capability_market._install_external_project_capability",
+        lambda **kwargs: {
+            "installed": True,
+            "name": "black",
+            "enabled": True,
+            "source_url": "https://github.com/psf/black",
+            "installed_capability_ids": ["project:black"],
+            "capability_kind": "project-package",
+            "execution_mode": "shell",
+        },
     )
-
     async def _fake_dispatch(*args, **kwargs):
         return {
             "success": True,
-            "summary": "Kernel task completed.",
-            "output": {
-                "installed": True,
-                "name": "create-teammate",
-                "enabled": True,
-                "source_url": "https://github.com/LeoYeAI/teammate-skill",
-                "installed_capability_ids": ["skill:create-teammate"],
-                "trial_attachment": {
-                    "success": True,
-                    "selected_scope": "seat",
-                    "scope_type": "seat",
-                    "scope_ref": "seat-1",
-                },
+            "summary": "Capability lifecycle attached.",
+            "trial_attachment": {
+                "success": True,
+                "selected_scope": "seat",
+                "scope_type": "seat",
+                "scope_ref": "seat-1",
             },
         }
 
-    monkeypatch.setattr(
-        "copaw.app.routers.capability_market._dispatch_market_mutation",
-        _fake_dispatch,
-    )
+    monkeypatch.setattr("copaw.app.routers.capability_market._dispatch_market_mutation", _fake_dispatch)
 
     response = client.post(
         "/capability-market/projects/install",
         json={
-            "source_url": "https://github.com/LeoYeAI/teammate-skill",
+            "source_url": "https://github.com/psf/black",
+            "capability_kind": "project-package",
+            "entry_module": "black",
+            "target_agent_id": "copaw-agent-runner",
+            "selected_seat_ref": "seat-1",
             "overwrite": True,
         },
     )
@@ -1561,9 +1574,9 @@ def test_capability_market_project_install_unwraps_kernel_output_payload(
     assert response.status_code == 200
     payload = response.json()
     assert payload["installed"] is True
-    assert payload["name"] == "create-teammate"
-    assert payload["source_url"] == "https://github.com/LeoYeAI/teammate-skill"
-    assert payload["installed_capability_ids"] == ["skill:create-teammate"]
+    assert payload["name"] == "black"
+    assert payload["source_url"] == "https://github.com/psf/black"
+    assert payload["installed_capability_ids"] == ["project:black"]
     assert payload["trial_attachment"]["scope_ref"] == "seat-1"
 
 
@@ -1576,12 +1589,11 @@ def test_capability_market_project_install_from_source_url_materializes_candidat
     trial_service = SkillTrialService(state_store=app.state.state_store)
     app.state.capability_candidate_service = candidate_service
     app.state.skill_trial_service = trial_service
+    app.state.agent_profile_service = SimpleNamespace(
+        get_agent=lambda agent_id: {"agent_id": agent_id},
+    )
     client = TestClient(app)
 
-    monkeypatch.setattr(
-        "copaw.app.routers.capability_market.remote_skill_bundle_is_installable",
-        lambda bundle_url, version="": True,
-    )
     monkeypatch.setattr(
         "copaw.app.routers.capability_market.search_github_repository_donors",
         lambda query, limit=1: [
@@ -1590,37 +1602,43 @@ def test_capability_market_project_install_from_source_url_materializes_candidat
                 source_kind="github-repo",
                 source_alias="github",
                 candidate_kind="project",
-                display_name="LeoYeAI/teammate-skill",
+                display_name="psf/black",
                 summary="Installable GitHub donor",
-                candidate_source_ref="https://github.com/LeoYeAI/teammate-skill",
+                candidate_source_ref="https://github.com/psf/black",
                 candidate_source_version="main",
-                candidate_source_lineage="donor:github:leoyeai/teammate-skill",
-                canonical_package_id="pkg:github:leoyeai/teammate-skill",
-                capability_keys=("teamwork", "automation"),
+                candidate_source_lineage="donor:github:psf/black",
+                canonical_package_id="pkg:github:psf/black",
+                capability_keys=("formatting", "python"),
                 metadata={
                     "provider": "github-repo",
                     "install_supported": True,
-                    "repository_url": "https://github.com/LeoYeAI/teammate-skill",
+                    "repository_url": "https://github.com/psf/black",
                 },
             ),
         ],
+    )
+    monkeypatch.setattr(
+        "copaw.app.routers.capability_market._install_external_project_capability",
+        lambda **kwargs: {
+            "installed": True,
+            "name": "black",
+            "enabled": True,
+            "source_url": "https://github.com/psf/black",
+            "installed_capability_ids": ["project:black"],
+            "capability_kind": "project-package",
+            "execution_mode": "shell",
+        },
     )
 
     async def _fake_dispatch(*args, **kwargs):
         return {
             "success": True,
-            "output": {
-                "installed": True,
-                "name": "create-teammate",
-                "enabled": True,
-                "source_url": "https://github.com/LeoYeAI/teammate-skill",
-                "installed_capability_ids": ["skill:create-teammate"],
-                "trial_attachment": {
-                    "success": True,
-                    "selected_scope": "seat",
-                    "scope_type": "seat",
-                    "scope_ref": "seat-1",
-                },
+            "summary": "Capability lifecycle attached.",
+            "trial_attachment": {
+                "success": True,
+                "selected_scope": "seat",
+                "scope_type": "seat",
+                "scope_ref": "seat-1",
             },
         }
 
@@ -1632,7 +1650,10 @@ def test_capability_market_project_install_from_source_url_materializes_candidat
     response = client.post(
         "/capability-market/projects/install",
         json={
-            "source_url": "https://github.com/LeoYeAI/teammate-skill",
+            "source_url": "https://github.com/psf/black",
+            "capability_kind": "project-package",
+            "entry_module": "black",
+            "target_agent_id": "copaw-agent-runner",
             "selected_seat_ref": "seat-1",
             "target_role_id": "execution-core",
             "overwrite": True,
@@ -1642,17 +1663,18 @@ def test_capability_market_project_install_from_source_url_materializes_candidat
     assert response.status_code == 200
     payload = response.json()
     assert payload["candidate_id"]
+    assert payload["installed_capability_ids"] == ["project:black"]
 
     candidate = candidate_service.get_candidate(payload["candidate_id"])
     assert candidate is not None
-    assert candidate.candidate_source_ref == "https://github.com/LeoYeAI/teammate-skill"
+    assert candidate.candidate_source_ref == "https://github.com/psf/black"
     assert candidate.lifecycle_stage == "trial"
     assert candidate.status == "trial"
 
     trials = trial_service.list_trials(candidate_id=payload["candidate_id"])
     assert len(trials) == 1
     assert trials[0].scope_ref == "seat-1"
-    assert trials[0].candidate_source_lineage == "donor:github:leoyeai/teammate-skill"
+    assert trials[0].candidate_source_lineage == "donor:github:psf/black"
 
 
 def test_capability_market_install_template_config_is_applied_to_desktop_install(
