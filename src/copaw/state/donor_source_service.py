@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime
 from typing import Any
 
@@ -36,6 +37,17 @@ def _string(value: object | None) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _query_terms(value: object | None) -> tuple[str, ...]:
+    seen: set[str] = set()
+    terms: list[str] = []
+    for token in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", str(value or "").lower()):
+        if token in seen:
+            continue
+        seen.add(token)
+        terms.append(token)
+    return tuple(terms)
 
 
 _DISCOVERY_PROFILE_TYPE = "discovery-source"
@@ -379,6 +391,55 @@ class DonorSourceService:
             ),
         )
 
+    def search_offline_cache(
+        self,
+        *,
+        request: object,
+        source: object | None = None,
+    ) -> tuple[DiscoveryHit, ...]:
+        query_terms = _query_terms(getattr(request, "query", None))
+        limit = max(1, int(getattr(request, "limit", 20) or 20))
+        ranked: list[tuple[int, str, DiscoveryHit]] = []
+        seen_keys: set[str] = set()
+
+        for row in self._list_all_profile_rows():
+            record = self._row_to_source_profile(row)
+            metadata = dict(record.metadata or {})
+            snapshot_items = list(metadata.get("last_known_good_snapshot") or [])
+            if not snapshot_items:
+                continue
+            for item in snapshot_items:
+                if not isinstance(item, dict):
+                    continue
+                hit = DiscoveryHit.from_payload(item)
+                cache_key = (
+                    _string(hit.canonical_package_id)
+                    or _string(hit.candidate_source_ref)
+                    or _string(hit.display_name)
+                )
+                if cache_key is None or cache_key in seen_keys:
+                    continue
+                score = self._offline_hit_score(hit, query_terms)
+                if query_terms and score <= 0:
+                    continue
+                seen_keys.add(cache_key)
+                ranked.append((score, cache_key, hit))
+
+        ranked.sort(key=lambda item: (-item[0], item[1]))
+        offline_source_id = _string(getattr(source, "source_id", None)) or "offline-cache"
+        return tuple(
+            DiscoveryHit.from_payload(
+                {
+                    **hit.to_payload(),
+                    "source_id": offline_source_id,
+                    "source_kind": _string(getattr(source, "source_kind", None))
+                    or hit.source_kind,
+                    "source_alias": offline_source_id,
+                },
+            )
+            for _score, _cache_key, hit in ranked[:limit]
+        )
+
     def _ensure_default_profiles(self) -> None:
         for profile_name, sources in _default_discovery_source_profiles().items():
             for source in sources:
@@ -438,17 +499,48 @@ class DonorSourceService:
         )
         if preferred_provider:
             normalized = preferred_provider.lower()
-            return (normalized, "skillhub-catalog", "github-repo", "mcp-registry")
+            return (
+                normalized,
+                "skillhub-catalog",
+                "github-repo",
+                "mcp-registry",
+                "offline-cache",
+                "snapshot",
+            )
         if any(keyword in query_lower for keyword in ("mcp", "registry", "modelcontextprotocol")):
-            return ("mcp-registry", "github-repo", "skillhub-catalog", "snapshot")
+            return (
+                "mcp-registry",
+                "github-repo",
+                "skillhub-catalog",
+                "offline-cache",
+                "snapshot",
+            )
         if any(
             keyword in query_lower
             for keyword in ("github", "repo", "repository", "open source", "opensource", "project", "release")
         ):
-            return ("github-repo", "skillhub-catalog", "mcp-registry", "snapshot")
+            return (
+                "github-repo",
+                "skillhub-catalog",
+                "mcp-registry",
+                "offline-cache",
+                "snapshot",
+            )
         if any(keyword in query_lower for keyword in ("curated", "skill", "automation", "browser")):
-            return ("skillhub-catalog", "github-repo", "mcp-registry", "snapshot")
-        return ("skillhub-catalog", "github-repo", "mcp-registry", "snapshot")
+            return (
+                "skillhub-catalog",
+                "github-repo",
+                "mcp-registry",
+                "offline-cache",
+                "snapshot",
+            )
+        return (
+            "skillhub-catalog",
+            "github-repo",
+            "mcp-registry",
+            "offline-cache",
+            "snapshot",
+        )
 
     def _list_profile_rows(self, profile_name: str):
         with self._state_store.connection() as conn:
@@ -480,6 +572,36 @@ class DonorSourceService:
                 (_source_key(profile_name, source_id),),
             ).fetchone()
         return self._row_to_source_profile(row) if row is not None else None
+
+    def _list_all_profile_rows(self) -> list[Any]:
+        with self._state_store.connection() as conn:
+            return conn.execute(
+                """
+                SELECT *
+                FROM capability_source_profiles
+                ORDER BY updated_at DESC, source_profile_id DESC
+                """,
+            ).fetchall()
+
+    def _offline_hit_score(
+        self,
+        hit: DiscoveryHit,
+        query_terms: tuple[str, ...],
+    ) -> int:
+        if not query_terms:
+            return 1
+        haystacks = [
+            (_string(hit.display_name) or "").lower(),
+            (_string(hit.summary) or "").lower(),
+            (_string(hit.canonical_package_id) or "").lower(),
+            (_string(hit.candidate_source_ref) or "").lower(),
+            " ".join(str(item).lower() for item in (hit.capability_keys or ())),
+        ]
+        score = 0
+        for term in query_terms:
+            if any(term in haystack for haystack in haystacks):
+                score += 1
+        return score
 
     def _row_to_spec(self, row) -> DiscoverySourceSpec:
         metadata = _json_load_dict(row["metadata_json"])

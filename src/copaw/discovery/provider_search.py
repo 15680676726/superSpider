@@ -60,9 +60,14 @@ def _unique_strings(*groups: object) -> tuple[str, ...]:
     return tuple(values)
 
 
-def _github_api_json(query: str, limit: int = 10) -> dict[str, Any]:
+def _github_api_json(
+    query: str,
+    limit: int = 10,
+    *,
+    search_url: str | None = None,
+) -> dict[str, Any]:
     request = Request(
-        f"{_GITHUB_SEARCH_URL}?{urlencode({'q': _normalize_text(query), 'sort': 'stars', 'order': 'desc', 'per_page': max(1, min(int(limit), 25))})}",
+        f"{str(search_url or '').strip() or _GITHUB_SEARCH_URL}?{urlencode({'q': _normalize_text(query), 'sort': 'stars', 'order': 'desc', 'per_page': max(1, min(int(limit), 25))})}",
         headers={
             "Accept": "application/vnd.github+json",
             "User-Agent": "copaw-donor-discovery/1.0",
@@ -82,8 +87,9 @@ def search_github_repository_donors(
     query: str,
     *,
     limit: int = 10,
+    search_url: str | None = None,
 ) -> list[DiscoveryHit]:
-    payload = _github_api_json(query, limit=limit)
+    payload = _github_api_json(query, limit=limit, search_url=search_url)
     query_tokens = _query_terms(query)
     hits: list[DiscoveryHit] = []
     for item in list(payload.get("items") or []):
@@ -129,9 +135,10 @@ def search_skillhub_discovery_hits(
     query: str,
     *,
     limit: int = 10,
+    search_url: str | None = None,
 ) -> list[DiscoveryHit]:
     hits: list[DiscoveryHit] = []
-    for item in search_hub_skills(query, limit=limit):
+    for item in search_hub_skills(query, limit=limit, search_url=search_url):
         slug = _string(getattr(item, "slug", None))
         source_url = _string(getattr(item, "source_url", None))
         if slug is None or source_url is None:
@@ -159,8 +166,13 @@ def search_curated_discovery_hits(
     query: str,
     *,
     limit: int = 10,
+    search_url: str | None = None,
 ) -> list[DiscoveryHit]:
-    response = search_curated_skill_catalog(query, limit=limit)
+    response = search_curated_skill_catalog(
+        query,
+        limit=limit,
+        skillhub_search_url=search_url,
+    )
     hits: list[DiscoveryHit] = []
     for item in list(response.items or []):
         source_ref = _string(item.bundle_url)
@@ -194,8 +206,9 @@ def search_mcp_registry_discovery_hits(
     query: str,
     *,
     limit: int = 10,
+    base_url: str | None = None,
 ) -> list[DiscoveryHit]:
-    catalog = McpRegistryCatalog()
+    catalog = McpRegistryCatalog(base_url=base_url)
     response = catalog.list_catalog(query=query, limit=limit)
     hits: list[DiscoveryHit] = []
     for item in list(response.items or []):

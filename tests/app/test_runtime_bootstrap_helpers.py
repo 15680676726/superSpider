@@ -274,7 +274,7 @@ def test_runtime_discovery_executor_dispatches_provider_hits(monkeypatch) -> Non
     monkeypatch.setattr(
         runtime_service_graph_module,
         "_search_github_repository_donors",
-        lambda query, limit=20: [
+        lambda query, limit=20, search_url=None: [
             runtime_service_graph_module.DiscoveryHit(
                 source_id="global-github",
                 source_kind="github-repo",
@@ -311,6 +311,105 @@ def test_runtime_discovery_executor_dispatches_provider_hits(monkeypatch) -> Non
 
     assert len(hits) == 1
     assert hits[0].canonical_package_id == "pkg:github:acme/browser-pilot"
+
+
+def test_runtime_discovery_executor_forwards_source_endpoint_to_providers(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_github(query, limit=20, search_url=None):
+        captured["github"] = {
+            "query": query,
+            "limit": limit,
+            "search_url": search_url,
+        }
+        return []
+
+    def _fake_skillhub(query, limit=20, search_url=None):
+        captured["skillhub"] = {
+            "query": query,
+            "limit": limit,
+            "search_url": search_url,
+        }
+        return []
+
+    def _fake_mcp(query, limit=20, base_url=None):
+        captured["mcp"] = {
+            "query": query,
+            "limit": limit,
+            "base_url": base_url,
+        }
+        return []
+
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "_search_github_repository_donors",
+        _fake_github,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "_search_skillhub_discovery_hits",
+        _fake_skillhub,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "_search_mcp_registry_discovery_hits",
+        _fake_mcp,
+        raising=False,
+    )
+
+    _execute_runtime_discovery_action(
+        DiscoverySourceSpec(
+            source_id="global-github",
+            chain_role="primary",
+            source_kind="catalog",
+            display_name="GitHub",
+            endpoint="https://mirror.example/github-search",
+            metadata={"provider": "github-repo"},
+        ),
+        DiscoveryActionRequest(
+            action_id="discover-github",
+            query="browser automation github",
+            limit=5,
+        ),
+    )
+    _execute_runtime_discovery_action(
+        DiscoverySourceSpec(
+            source_id="global-skillhub",
+            chain_role="primary",
+            source_kind="catalog",
+            display_name="SkillHub",
+            endpoint="https://mirror.example/skillhub-search",
+            metadata={"provider": "skillhub-catalog"},
+        ),
+        DiscoveryActionRequest(
+            action_id="discover-skillhub",
+            query="browser automation",
+            limit=4,
+        ),
+    )
+    _execute_runtime_discovery_action(
+        DiscoverySourceSpec(
+            source_id="global-mcp-registry",
+            chain_role="fallback",
+            source_kind="catalog",
+            display_name="MCP Registry",
+            endpoint="https://mirror.example/mcp-registry",
+            metadata={"provider": "mcp-registry"},
+        ),
+        DiscoveryActionRequest(
+            action_id="discover-mcp",
+            query="filesystem",
+            limit=3,
+        ),
+    )
+
+    assert captured["github"]["search_url"] == "https://mirror.example/github-search"
+    assert captured["skillhub"]["search_url"] == "https://mirror.example/skillhub-search"
+    assert captured["mcp"]["base_url"] == "https://mirror.example/mcp-registry"
 
 
 def test_attach_runtime_state_binds_capability_candidate_service() -> None:

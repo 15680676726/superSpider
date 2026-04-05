@@ -1201,8 +1201,9 @@ def test_search_curated_skill_catalog_uses_skillhub_dynamic_source() -> None:
 def test_search_curated_skill_catalog_aggregates_skillhub_featured_sources() -> None:
     clear_curated_skill_catalog_cache()
 
-    def _fake_search(query: str, limit: int = 20):
+    def _fake_search(query: str, limit: int = 20, search_url: str | None = None):
         _ = limit
+        _ = search_url
         mapping = {
             "automation": [
                 SimpleNamespace(

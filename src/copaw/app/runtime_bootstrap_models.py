@@ -178,8 +178,6 @@ class RuntimeBootstrap:
     runtime_health_service: RuntimeHealthService
     runtime_provider: ProviderRuntimeSurface
     provider_admin_service: Any
-    buddy_onboarding_service: BuddyOnboardingService | None = None
-    buddy_projection_service: BuddyProjectionService | None = None
     state_query_service: RuntimeCenterStateQueryService
     evidence_query_service: RuntimeCenterEvidenceQueryService
     donor_source_service: Any | None
@@ -228,6 +226,8 @@ class RuntimeBootstrap:
     actor_mailbox_service: ActorMailboxService
     actor_worker: ActorWorker
     actor_supervisor: ActorSupervisor
+    buddy_onboarding_service: BuddyOnboardingService | None = None
+    buddy_projection_service: BuddyProjectionService | None = None
     main_brain_orchestrator: MainBrainOrchestrator | None = None
 
 

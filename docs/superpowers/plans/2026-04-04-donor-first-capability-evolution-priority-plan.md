@@ -15,18 +15,18 @@ This priority plan is still valid, but it must now be read with a stricter runti
 - Task 1-4 landing in code/read-model/tests does not by itself prove live donor-first closure
 - donor-first evolution is only "closed" when external discovery, external installability, and downstream use are all live-verified
 
-The live gaps that still block a truthful completion claim are:
+That runtime boundary is now satisfied for this donor-first wave. The gaps that previously blocked a truthful completion claim have been closed:
 
-- autonomous scout still lacks a real default discovery executor
-- opportunity radar still lacks real default feeds
-- generic GitHub/open-source donor search is not yet on the runtime path
-- SkillHub/curated search still needs dead-bundle suppression before results can be trusted by default
+- autonomous scout now runs on a real default discovery executor
+- opportunity radar now ships with bounded default feeds
+- generic GitHub/open-source donor search is on the runtime path
+- SkillHub/curated search now suppresses dead bundles before default results are returned
 
 So this plan should be executed as:
 
 - keep the donor-first lifecycle/resolver/read-model work already landed
-- finish the live external supply-chain gaps
-- only then report full donor-first capability evolution closure
+- treat the live external supply-chain boundary as verified for this wave
+- report donor-first capability evolution closure only with the live evidence matrix recorded in `TASK_STATUS.md`
 
 ---
 

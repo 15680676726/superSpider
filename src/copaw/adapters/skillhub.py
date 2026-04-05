@@ -131,7 +131,12 @@ def _presentation_helpers():
     )
 
 
-def search_skillhub_skills(query: str, limit: int = 20) -> list[SkillHubSearchResult]:
+def search_skillhub_skills(
+    query: str,
+    limit: int = 20,
+    *,
+    search_url: str | None = None,
+) -> list[SkillHubSearchResult]:
     normalized_query = str(query or "").strip()
     if not skillhub_enabled():
         return []
@@ -141,7 +146,7 @@ def search_skillhub_skills(query: str, limit: int = 20) -> list[SkillHubSearchRe
         present_remote_skill_summary,
     ) = _presentation_helpers()
     payload = _http_json_get(
-        _skillhub_search_url(),
+        str(search_url or "").strip() or _skillhub_search_url(),
         {
             "q": normalized_query,
             "limit": max(1, int(limit)),

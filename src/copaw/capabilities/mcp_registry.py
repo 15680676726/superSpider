@@ -50,6 +50,10 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _registry_base_url(base_url: str | None = None) -> str:
+    return str(base_url or "").strip() or _REGISTRY_BASE_URL
+
+
 def _normalize_text(value: object | None) -> str:
     return " ".join(str(value or "").strip().split())
 
@@ -229,9 +233,9 @@ def _website_url(server: dict[str, Any]) -> str:
     return _normalize_text(server.get("websiteUrl"))
 
 
-def _source_url(server_name: str) -> str:
+def _source_url(server_name: str, *, base_url: str | None = None) -> str:
     return (
-        f"{_REGISTRY_BASE_URL}/v0/servers/"
+        f"{_registry_base_url(base_url)}/v0/servers/"
         f"{quote(server_name, safe='')}/versions/latest"
     )
 
@@ -507,6 +511,7 @@ def _build_catalog_item(
     server: dict[str, Any],
     *,
     installed_clients: dict[str, MCPClientConfig] | None = None,
+    base_url: str | None = None,
 ) -> McpRegistryCatalogItem:
     server_name = _normalize_text(server.get("name"))
     options = build_mcp_registry_install_options(server)
@@ -535,7 +540,7 @@ def _build_catalog_item(
         title=_display_title(server),
         description=_normalize_text(server.get("description")),
         version=_normalize_text(server.get("version")),
-        source_url=_source_url(server_name),
+        source_url=_source_url(server_name, base_url=base_url),
         repository_url=_repository_url(server),
         website_url=_website_url(server),
         category_keys=category_keys,
@@ -562,8 +567,14 @@ def _server_matches_category(server: dict[str, Any], category: str) -> bool:
     return category in categories
 
 
-def _list_url(*, query: str, cursor: str | None, limit: int) -> str:
-    parts = [f"{_REGISTRY_BASE_URL}/v0/servers?limit={limit}"]
+def _list_url(
+    *,
+    query: str,
+    cursor: str | None,
+    limit: int,
+    base_url: str | None = None,
+) -> str:
+    parts = [f"{_registry_base_url(base_url)}/v0/servers?limit={limit}"]
     if query:
         parts.append(f"search={quote(query)}")
     if cursor:
@@ -571,20 +582,32 @@ def _list_url(*, query: str, cursor: str | None, limit: int) -> str:
     return "&".join(parts)
 
 
-def _detail_url(server_name: str) -> str:
+def _detail_url(server_name: str, *, base_url: str | None = None) -> str:
     return (
-        f"{_REGISTRY_BASE_URL}/v0/servers/"
+        f"{_registry_base_url(base_url)}/v0/servers/"
         f"{quote(server_name, safe='')}/versions/latest"
     )
 
 
-def _load_registry_list_page(*, query: str, cursor: str | None, limit: int) -> dict[str, Any]:
-    payload = _registry_request(_list_url(query=query, cursor=cursor, limit=limit))
+def _load_registry_list_page(
+    *,
+    query: str,
+    cursor: str | None,
+    limit: int,
+    base_url: str | None = None,
+) -> dict[str, Any]:
+    payload = _registry_request(
+        _list_url(query=query, cursor=cursor, limit=limit, base_url=base_url),
+    )
     return payload if isinstance(payload, dict) else {}
 
 
-def _load_registry_server_detail(server_name: str) -> dict[str, Any]:
-    payload = _registry_request(_detail_url(server_name))
+def _load_registry_server_detail(
+    server_name: str,
+    *,
+    base_url: str | None = None,
+) -> dict[str, Any]:
+    payload = _registry_request(_detail_url(server_name, base_url=base_url))
     if not isinstance(payload, dict):
         return {}
     server = payload.get("server")
@@ -602,6 +625,7 @@ def search_mcp_registry_catalog(
     cursor: str | None = None,
     limit: int = 12,
     installed_clients: dict[str, MCPClientConfig] | None = None,
+    base_url: str | None = None,
 ) -> McpRegistryCatalogSearchResponse:
     normalized_query = _normalize_text(query)
     normalized_category = _normalize_category(category)
@@ -616,6 +640,7 @@ def search_mcp_registry_catalog(
             query=normalized_query,
             cursor=next_cursor,
             limit=max(normalized_limit * 2, _LIST_FETCH_LIMIT),
+            base_url=base_url,
         )
         servers = payload.get("servers")
         if not isinstance(servers, list):
@@ -627,7 +652,11 @@ def search_mcp_registry_catalog(
             if not _server_matches_category(server, normalized_category):
                 continue
             collected.append(
-                _build_catalog_item(server, installed_clients=installed_clients),
+                _build_catalog_item(
+                    server,
+                    installed_clients=installed_clients,
+                    base_url=base_url,
+                ),
             )
             if len(collected) >= normalized_limit:
                 break
@@ -655,11 +684,16 @@ def get_mcp_registry_catalog_detail(
     server_name: str,
     *,
     installed_clients: dict[str, MCPClientConfig] | None = None,
+    base_url: str | None = None,
 ) -> McpRegistryCatalogDetailResponse:
-    detail = _load_registry_server_detail(server_name)
+    detail = _load_registry_server_detail(server_name, base_url=base_url)
     if not detail:
         raise ValueError(f"MCP registry server '{server_name}' not found")
-    item = _build_catalog_item(detail, installed_clients=installed_clients)
+    item = _build_catalog_item(
+        detail,
+        installed_clients=installed_clients,
+        base_url=base_url,
+    )
     matched_registry_input_values: dict[str, Any] = {}
     if (
         item.installed_client_key
@@ -932,6 +966,9 @@ def materialize_mcp_registry_install_plan(
 class McpRegistryCatalog:
     """Thin service wrapper for official MCP registry read/write materialization."""
 
+    def __init__(self, *, base_url: str | None = None) -> None:
+        self._base_url = _registry_base_url(base_url)
+
     def list_catalog(
         self,
         *,
@@ -947,6 +984,7 @@ class McpRegistryCatalog:
             cursor=cursor,
             limit=limit,
             installed_clients=installed_clients,
+            base_url=self._base_url,
         )
 
     def get_catalog_detail(
@@ -958,6 +996,7 @@ class McpRegistryCatalog:
         return get_mcp_registry_catalog_detail(
             server_name,
             installed_clients=installed_clients,
+            base_url=self._base_url,
         )
 
     def materialize_install_plan(

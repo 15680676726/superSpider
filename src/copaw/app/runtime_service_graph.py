@@ -205,19 +205,36 @@ def _execute_runtime_discovery_action(
     request: DiscoveryActionRequest,
 ) -> list[DiscoveryHit]:
     source_metadata = getattr(source, "metadata", None)
+    source_endpoint = str(getattr(source, "endpoint", "") or "").strip() or None
     provider = ""
     if isinstance(source_metadata, dict):
         provider = str(source_metadata.get("provider") or "").strip().lower()
     limit = max(1, int(getattr(request, "limit", 20) or 20))
     query = str(getattr(request, "query", "") or "").strip()
     if provider == "github-repo":
-        return _search_github_repository_donors(query, limit=limit)
+        return _search_github_repository_donors(
+            query,
+            limit=limit,
+            search_url=source_endpoint,
+        )
     if provider == "skillhub-catalog":
-        return _search_skillhub_discovery_hits(query, limit=limit)
+        return _search_skillhub_discovery_hits(
+            query,
+            limit=limit,
+            search_url=source_endpoint,
+        )
     if provider == "skillhub-curated":
-        return _search_curated_discovery_hits(query, limit=limit)
+        return _search_curated_discovery_hits(
+            query,
+            limit=limit,
+            search_url=source_endpoint,
+        )
     if provider == "mcp-registry":
-        return _search_mcp_registry_discovery_hits(query, limit=limit)
+        return _search_mcp_registry_discovery_hits(
+            query,
+            limit=limit,
+            base_url=source_endpoint,
+        )
     return []
 
 

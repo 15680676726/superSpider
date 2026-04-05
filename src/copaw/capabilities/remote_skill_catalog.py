@@ -243,13 +243,17 @@ def search_curated_skill_catalog(
     query: str = "",
     *,
     limit: int = 20,
+    skillhub_search_url: str | None = None,
 ) -> CuratedSkillCatalogSearchResponse:
     normalized_query = " ".join(str(query or "").strip().split())
     normalized_limit = max(1, min(int(limit), 500))
     warnings: list[str] = []
     if normalized_query:
         source = _dynamic_query_source(normalized_query, limit=normalized_limit)
-        items, source_warnings = _load_source_entries(source)
+        items, source_warnings = _load_source_entries(
+            source,
+            skillhub_search_url=skillhub_search_url,
+        )
         warnings.extend(source_warnings)
         return CuratedSkillCatalogSearchResponse(
             sources=[source],
@@ -262,7 +266,10 @@ def search_curated_skill_catalog(
     aggregated: list[CuratedSkillCatalogEntry] = []
     seen_keys: set[str] = set()
     for source in sources:
-        source_items, source_warnings = _load_source_entries(source)
+        source_items, source_warnings = _load_source_entries(
+            source,
+            skillhub_search_url=skillhub_search_url,
+        )
         warnings.extend(source_warnings)
         for item in source_items:
             key = _entry_key(item)
@@ -316,6 +323,8 @@ def _dynamic_query_source(query: str, *, limit: int) -> CuratedSkillCatalogSourc
 
 def _load_source_entries(
     source: CuratedSkillCatalogSource,
+    *,
+    skillhub_search_url: str | None = None,
 ) -> tuple[list[CuratedSkillCatalogEntry], list[str]]:
     cache_key = _source_cache_key(source)
     cached = _CATALOG_CACHE.get(cache_key)
@@ -323,7 +332,11 @@ def _load_source_entries(
     if cached is not None and cached[0] >= now:
         return list(cached[1]), list(cached[2])
     try:
-        results = search_skillhub_skills(source.query, limit=source.max_items)
+        results = search_skillhub_skills(
+            source.query,
+            limit=source.max_items,
+            search_url=skillhub_search_url,
+        )
     except Exception as exc:
         warnings = [f"{source.label} 当前不可用：{exc}"]
         _CATALOG_CACHE[cache_key] = (

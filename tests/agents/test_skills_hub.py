@@ -10,7 +10,7 @@ def test_search_hub_skills_prefers_skillhub_results(monkeypatch) -> None:
     monkeypatch.setattr(
         skills_hub_module,
         "search_skillhub_skills",
-        lambda query, limit=20: [
+        lambda query, limit=20, search_url=None: [
             SimpleNamespace(
                 slug="vibesku",
                 name="Vibesku",
@@ -47,7 +47,7 @@ def test_search_hub_skills_returns_empty_when_skillhub_empty(
     monkeypatch.setattr(
         skills_hub_module,
         "search_skillhub_skills",
-        lambda query, limit=20: [],
+        lambda query, limit=20, search_url=None: [],
     )
     monkeypatch.setattr(
         skills_hub_module,
@@ -68,7 +68,7 @@ def test_search_hub_skills_suppresses_non_installable_skillhub_results(
     monkeypatch.setattr(
         skills_hub_module,
         "search_skillhub_skills",
-        lambda query, limit=20: [
+        lambda query, limit=20, search_url=None: [
             SimpleNamespace(
                 slug="broken-browser",
                 name="Broken Browser",

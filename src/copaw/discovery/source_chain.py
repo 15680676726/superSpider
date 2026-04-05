@@ -19,6 +19,13 @@ def _string(value: object | None) -> str | None:
     return text or None
 
 
+def _source_provider(source: DiscoverySourceSpec) -> str:
+    metadata = getattr(source, "metadata", None)
+    if isinstance(metadata, dict):
+        return (_string(metadata.get("provider")) or "").lower()
+    return ""
+
+
 def _bind_hit_to_source(
     *,
     source: DiscoverySourceSpec,
@@ -48,7 +55,21 @@ def execute_discovery_action(
 
     for source in profile.sources:
         try:
-            raw_hits = list(executor(source, request) or [])
+            provider = _source_provider(source)
+            if provider == "offline-cache":
+                offline_loader = getattr(source_service, "search_offline_cache", None)
+                if callable(offline_loader):
+                    raw_hits = list(
+                        offline_loader(
+                            request=request,
+                            source=source,
+                        )
+                        or []
+                    )
+                else:
+                    raw_hits = []
+            else:
+                raw_hits = list(executor(source, request) or [])
         except Exception as exc:  # pragma: no cover - exercised by tests
             last_error = _string(exc) or exc.__class__.__name__
             record_failure = getattr(source_service, "record_source_failure", None)

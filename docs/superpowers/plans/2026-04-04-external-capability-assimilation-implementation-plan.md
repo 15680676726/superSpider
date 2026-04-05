@@ -10,28 +10,35 @@
 
 ## Reality Correction (`2026-04-05`)
 
-This plan's code-structure wave has largely landed, but that does **not** mean live external donor closure was already complete.
+This plan's code-structure wave has landed, and the previously listed live external donor gaps have now been closed with real discovery/install/use verification.
 
-Current verified reality:
+Current verified runtime reality:
 
 - donor/package/source/trial/lifecycle truth is in the mainline codebase
 - Runtime Center donor/package/trust/scout read surfaces exist
-- capability-market can already search/install a subset of external supply paths
-- official MCP registry search -> install -> live connection has been proven
+- runtime bootstrap discovery executor is wired to real external providers instead of an empty placeholder
+- opportunity radar now carries bounded default feeds instead of `feeds={}`
+- generic open-source / GitHub donor search is on the runtime discovery path
+- SkillHub / curated results suppress dead bundles before default search results are returned
+- source-chain now records `empty` distinctly, advances to the next source, and only records last-known-good snapshot success when a source actually yields results
 
-Current still-real gaps:
+Fresh live-verified surfaces now include:
 
-- runtime bootstrap discovery executor is still not wired to real external providers
-- opportunity radar has code and tests, but default runtime feeds are still empty
-- generic open-source / GitHub donor search is not yet a real product path
-- SkillHub / curated results still include dead bundles unless installability is checked
-- source-chain currently treats empty-hit execution as success, which overstates source health
+- SkillHub search -> install
+- curated catalog search -> install with suppressed dead-bundle warnings
+- official MCP registry search -> detail -> install -> live connection
+- browser-local template install -> start -> attach -> stop
+- desktop-windows template install -> live connection
+- GitHub donor discovery through the runtime discovery executor
+- scout gap/opportunity runs importing real donor candidates
+- snapshot fallback after forced primary-source failure
+- offline-private cache-backed discovery path
 
 Therefore this plan must be read as:
 
 - the formal donor-first spine exists
-- the remaining work is to close the live discovery/installability gaps above
-- "code baseline landed" must not be reported as "real donor expansion fully closed"
+- the live discovery/installability gaps previously listed here have been closed
+- completion claims for this plan are now backed by real discovery/install/use evidence, not only code/read-model/tests
 
 ## Execution Coupling Rule
 

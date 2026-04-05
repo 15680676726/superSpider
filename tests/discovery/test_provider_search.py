@@ -8,7 +8,7 @@ def test_search_github_repository_donors_builds_normalized_hits(monkeypatch) -> 
     monkeypatch.setattr(
         provider_search_module,
         "_github_api_json",
-        lambda _query, limit=10: {
+        lambda _query, limit=10, search_url=None: {
             "items": [
                 {
                     "full_name": "acme/browser-pilot",

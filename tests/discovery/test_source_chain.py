@@ -165,3 +165,53 @@ def test_source_chain_treats_empty_hits_as_empty_and_retries_next_source(
     assert result.active_source_id == profile.sources[1].source_id
     assert health["last_status"] == "empty"
     assert health["success_count"] == 0
+
+
+def test_source_chain_offline_private_uses_cached_hits_without_remote_executor(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(tmp_path)
+    global_profile = service.resolve_source_profile("global")
+    service.record_source_success(
+        profile_name="global",
+        source_id=global_profile.sources[0].source_id,
+        discovery_hits=[
+            DiscoveryHit(
+                source_id=global_profile.sources[0].source_id,
+                source_kind=global_profile.sources[0].source_kind,
+                source_alias=global_profile.sources[0].source_id,
+                candidate_kind="project",
+                display_name="Aider",
+                summary="Cached GitHub donor.",
+                candidate_source_ref="https://github.com/Aider-AI/aider",
+                candidate_source_version="main",
+                candidate_source_lineage="donor:github:aider-ai/aider",
+                canonical_package_id="pkg:github:aider-ai/aider",
+                capability_keys=("coding", "terminal"),
+            ),
+        ],
+    )
+    request = DiscoveryActionRequest(
+        action_id="discover-offline-cache",
+        query="aider coding",
+        source_profile="offline-private",
+        discovery_mode="gap",
+        limit=5,
+    )
+
+    def executor(_source, _discovery_request):
+        raise AssertionError("offline cache should not require remote executor")
+
+    result = execute_discovery_action(
+        request=request,
+        source_service=service,
+        executor=executor,
+    )
+
+    assert result.status == "ok"
+    assert result.active_source_id == "offline-cache"
+    assert result.used_snapshot is False
+    assert [attempt.status for attempt in result.attempts] == ["succeeded"]
+    assert [item.canonical_package_id for item in result.discovery_hits] == [
+        "pkg:github:aider-ai/aider",
+    ]

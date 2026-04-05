@@ -1179,13 +1179,22 @@ def _legacy_search_hub_skills(query: str, limit: int = 20) -> list[HubSkillResul
     return results
 
 
-def search_hub_skills(query: str, limit: int = 20) -> list[HubSkillResult]:
+def search_hub_skills(
+    query: str,
+    limit: int = 20,
+    *,
+    search_url: str | None = None,
+) -> list[HubSkillResult]:
     normalized_query = str(query or "").strip()
     if not normalized_query:
         return []
     try:
         fetch_limit = max(int(limit), min(max(int(limit) * 3, int(limit)), 60))
-        skillhub_results = search_skillhub_skills(normalized_query, limit=fetch_limit)
+        skillhub_results = search_skillhub_skills(
+            normalized_query,
+            limit=fetch_limit,
+            search_url=search_url,
+        )
     except Exception as exc:
         logger.warning("SkillHub search failed: %s", exc)
         return []
