@@ -603,6 +603,12 @@ def build_runtime_bootstrap(
         human_assist_task_service=human_assist_task_service,
         current_focus_resolver=buddy_current_focus_resolver,
     )
+    set_query_buddy_projection = getattr(query_execution_service, "set_buddy_projection_service", None)
+    if callable(set_query_buddy_projection):
+        set_query_buddy_projection(buddy_projection_service)
+    set_chat_buddy_projection = getattr(main_brain_chat_service, "set_buddy_projection_service", None)
+    if callable(set_chat_buddy_projection):
+        set_chat_buddy_projection(buddy_projection_service)
     try:
         capability_candidate_service.import_active_baseline_artifacts(
             mounts=capability_service.list_public_capabilities(enabled_only=True),

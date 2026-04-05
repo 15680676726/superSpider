@@ -92,9 +92,11 @@ const mockBuddySummary: RuntimeMainBrainBuddySummary = {
   growth_level: 4,
   intimacy: 24,
   affinity: 19,
-  current_goal_summary: "Build an independent creator-business growth path",
-  current_task_summary: "Write the first meaningful piece today",
-  why_now_summary: "This is the smallest move that keeps momentum real.",
+  current_goal_summary: "建立独立创作与内容事业的长期成长路径",
+  current_task_summary: "今天先写出第一篇真正能代表自己的作品",
+  why_now_summary: "这是让长期方向不再停留在想象里的最小推进。",
+  single_next_action_summary: "现在先打开文档，写下标题和三条核心观点。",
+  companion_strategy_summary: "先接住情绪，再把任务缩成一个最小动作。",
 };
 
 vi.mock("../../runtime/runtimeSurfaceClient", () => ({

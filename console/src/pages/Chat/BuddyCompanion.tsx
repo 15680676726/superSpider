@@ -17,12 +17,14 @@ export function BuddyCompanion({
   onOpen: () => void;
 }) {
   const [tick, setTick] = useState(0);
+
   useEffect(() => {
     const timer = window.setInterval(() => {
       setTick((current) => current + 1);
     }, BUDDY_ANIMATION_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, []);
+
   const evolution = resolveBuddyEvolutionView({
     evolutionStage: surface.growth.evolution_stage,
     rarity: surface.presentation.rarity,
@@ -59,9 +61,7 @@ export function BuddyCompanion({
           <Tag color={evolution.accentTone} data-testid="buddy-companion-species">
             {avatar.speciesLabel}
           </Tag>
-          <Tag color={evolution.accentTone}>
-            {presentBuddyStageLabel(evolution.stage)}
-          </Tag>
+          <Tag color={evolution.accentTone}>{presentBuddyStageLabel(evolution.stage)}</Tag>
           <Tag color="gold" data-testid="buddy-companion-rarity">
             {avatar.rarityStars}
           </Tag>

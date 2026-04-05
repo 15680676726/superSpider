@@ -1,48 +1,20 @@
 import type { BuddySurfaceResponse } from "../../api/modules/buddy";
+import { BUDDY_BODY_FRAMES } from "../../assets/buddy/base/bodyFrames";
+import { BUDDY_PRESENCE_AURAS, BUDDY_STAGE_AURAS } from "../../assets/buddy/effects/auras";
 import {
-  BUDDY_BODY_FRAMES,
-  BUDDY_HAT_LINES,
-  BUDDY_PRESENCE_AURAS,
-  BUDDY_STAGE_AURAS,
-} from "./buddySpriteAssets";
-
-export const BUDDY_SPECIES = [
-  "duck",
-  "goose",
-  "blob",
-  "cat",
-  "dragon",
-  "octopus",
-  "owl",
-  "penguin",
-  "turtle",
-  "snail",
-  "ghost",
-  "axolotl",
-  "capybara",
-  "cactus",
-  "robot",
-  "rabbit",
-  "mushroom",
-  "chonk",
-] as const;
-
-export const BUDDY_HATS = [
-  "none",
-  "crown",
-  "tophat",
-  "propeller",
-  "halo",
-  "wizard",
-  "beanie",
-  "tinyduck",
-] as const;
-
-export const BUDDY_EYES = ["o", "^", "*", "@", "-", "u"] as const;
+  BUDDY_EYES,
+  BUDDY_HATS,
+  BUDDY_HAT_LABELS,
+  BUDDY_SPECIES,
+  BUDDY_SPECIES_LABELS,
+} from "../../assets/buddy/forms/catalog";
+import { BUDDY_HAT_LINES } from "../../assets/buddy/parts/hats";
 
 type BuddySpecies = (typeof BUDDY_SPECIES)[number];
 type BuddyHat = (typeof BUDDY_HATS)[number];
 type BuddyEye = (typeof BUDDY_EYES)[number];
+
+export { BUDDY_SPECIES, BUDDY_HATS, BUDDY_EYES };
 
 export const BUDDY_ANIMATION_INTERVAL_MS = 640;
 
@@ -125,69 +97,11 @@ function moodEye(eye: BuddyEye, mood?: string | null, presence?: string | null):
 }
 
 function speciesLabel(species: BuddySpecies): string {
-  switch (species) {
-    case "duck":
-      return "小鸭";
-    case "goose":
-      return "白鹅";
-    case "blob":
-      return "团子";
-    case "cat":
-      return "小猫";
-    case "dragon":
-      return "幼龙";
-    case "octopus":
-      return "章章";
-    case "owl":
-      return "猫头鹰";
-    case "penguin":
-      return "企鹅";
-    case "turtle":
-      return "小龟";
-    case "snail":
-      return "蜗牛";
-    case "ghost":
-      return "小幽灵";
-    case "axolotl":
-      return "六角";
-    case "capybara":
-      return "水豚";
-    case "cactus":
-      return "仙人掌";
-    case "robot":
-      return "机器人";
-    case "rabbit":
-      return "小兔";
-    case "mushroom":
-      return "蘑菇";
-    case "chonk":
-      return "团宠";
-    default:
-      return species;
-  }
+  return BUDDY_SPECIES_LABELS[species] ?? species;
 }
 
 function hatLabel(hat: BuddyHat): string {
-  switch (hat) {
-    case "none":
-      return "无帽";
-    case "crown":
-      return "王冠";
-    case "tophat":
-      return "礼帽";
-    case "propeller":
-      return "螺旋帽";
-    case "halo":
-      return "光环";
-    case "wizard":
-      return "巫师帽";
-    case "beanie":
-      return "毛线帽";
-    case "tinyduck":
-      return "小鸭帽";
-    default:
-      return hat;
-  }
+  return BUDDY_HAT_LABELS[hat] ?? hat;
 }
 
 function resolvePresenceStep(presenceState?: string | null, tick = 0): number {

@@ -65,6 +65,132 @@ def _unique(items: list[str]) -> list[str]:
     return result
 
 
+def _build_buddy_question(
+    *,
+    profile: HumanProfile,
+    question_count: int,
+    tightened: bool = False,
+) -> str:
+    if tightened:
+        return (
+            f"{profile.display_name}，如果现在只能先改变一件事，"
+            "你最想摆脱的是什么，为什么必须是现在？"
+        )
+    prompts = [
+        "先告诉我，你最想真正改变的人生部分是什么？",
+        "如果接下来一年只允许有一个明显进步，你最希望是哪一块？",
+        "什么样的长期方向，会让你觉得自己是在为真正想要的人生前进？",
+        "你最不想继续重复的旧状态是什么？",
+        "如果我现在只能陪你先抓住一个方向，你最不想放弃的东西是什么？",
+    ]
+    index = min(max(question_count - 1, 0), len(prompts) - 1)
+    return prompts[index]
+
+
+def _derive_candidate_directions(
+    *,
+    profile: HumanProfile,
+    transcript: list[str],
+) -> list[str]:
+    source = " ".join(
+        [
+            profile.profession,
+            profile.current_stage,
+            profile.goal_intention,
+            *profile.interests,
+            *profile.strengths,
+            *transcript,
+        ],
+    ).lower()
+    directions: list[str] = []
+    if any(
+        token in source
+        for token in (
+            "content",
+            "creator",
+            "writing",
+            "write",
+            "audience",
+            "内容",
+            "创作",
+            "写作",
+            "作品",
+            "表达",
+            "自媒体",
+            "影响力",
+        )
+    ):
+        directions.append("建立独立创作与内容事业的长期成长路径")
+    if any(
+        token in source
+        for token in (
+            "design",
+            "designer",
+            "product",
+            "systems",
+            "设计",
+            "产品",
+            "系统",
+            "体验",
+            "策略",
+            "品牌",
+        )
+    ):
+        directions.append("建立高杠杆的设计与系统领导力成长路径")
+    if any(
+        token in source
+        for token in (
+            "operator",
+            "operations",
+            "process",
+            "execution",
+            "运营",
+            "执行",
+            "流程",
+            "管理",
+            "落地",
+            "组织",
+        )
+    ):
+        directions.append("建立从执行型走向策略型的长期职业跃迁路径")
+    if any(
+        token in source
+        for token in (
+            "health",
+            "discipline",
+            "energy",
+            "exercise",
+            "健康",
+            "自律",
+            "精力",
+            "运动",
+            "作息",
+            "身体",
+        )
+    ):
+        directions.append("建立自律、健康与自我掌控的人生重建路径")
+    directions.append("建立稳定、自主、长期向上的人生成长主方向")
+    return _unique(directions)[:3]
+
+
+def _derive_final_goal(*, profile: HumanProfile, direction: str) -> str:
+    if "独立创作与内容事业" in direction:
+        return f"帮助{profile.display_name}建立可持续的创作事业与独立成长轨道"
+    if "设计与系统领导力" in direction:
+        return f"帮助{profile.display_name}成长为高杠杆的设计与系统领导者"
+    if "执行型走向策略型" in direction:
+        return f"帮助{profile.display_name}从高执行消耗转向更稳定的策略型掌控"
+    if "自律、健康与自我掌控" in direction:
+        return f"帮助{profile.display_name}重建健康、自律且可持续的人生状态"
+    return f"帮助{profile.display_name}建立真正属于自己的长期成长方向与自主掌控感"
+
+
+def _derive_why_it_matters(*, profile: HumanProfile) -> str:
+    if profile.goal_intention.strip():
+        return profile.goal_intention.strip()
+    return f"因为{profile.display_name}需要一条真正有意义、而且能长期走下去的成长方向。"
+
+
 class BuddyOnboardingService:
     MAX_QUESTIONS = 9
     TIGHTEN_AFTER = 5
@@ -118,7 +244,7 @@ class BuddyOnboardingService:
             BuddyOnboardingSessionRecord(
                 profile_id=profile.profile_id,
                 question_count=1,
-                next_question=self._build_question(profile=profile, question_count=1),
+                next_question=_build_buddy_question(profile=profile, question_count=1),
                 transcript=[profile.goal_intention],
             ),
         )
@@ -145,16 +271,20 @@ class BuddyOnboardingService:
             max(existing_question_count or 0, session.question_count + 1),
         )
         tightened = question_count > self.TIGHTEN_AFTER
-        candidate_directions = self._candidate_directions(
+        candidate_directions = _derive_candidate_directions(
             profile=profile,
             transcript=merged_transcript,
         )
         recommended = candidate_directions[0] if candidate_directions else ""
         finished = question_count >= self.MAX_QUESTIONS
-        next_question = "" if finished else self._build_question(
-            profile=profile,
-            question_count=question_count,
-            tightened=tightened,
+        next_question = (
+            ""
+            if finished
+            else _build_buddy_question(
+                profile=profile,
+                question_count=question_count,
+                tightened=tightened,
+            )
         )
         updated = self._onboarding_session_repository.upsert_session(
             session.model_copy(
@@ -208,8 +338,8 @@ class BuddyOnboardingService:
             GrowthTarget(
                 profile_id=profile.profile_id,
                 primary_direction=normalized,
-                final_goal=self._final_goal(profile=profile, direction=normalized),
-                why_it_matters=self._why_it_matters(profile=profile),
+                final_goal=_derive_final_goal(profile=profile, direction=normalized),
+                why_it_matters=_derive_why_it_matters(profile=profile),
                 current_cycle_label="Cycle 1",
             ),
         )
@@ -219,6 +349,19 @@ class BuddyOnboardingService:
                 update={
                     "profile_id": profile.profile_id,
                     "encouragement_style": "old-friend",
+                    "effective_reminders": _unique(
+                        list((existing_relationship.effective_reminders if existing_relationship else []) or [])
+                        + ["先把任务缩成一个最小动作", "先把今天这一小步做完"],
+                    )[:3],
+                    "ineffective_reminders": _unique(
+                        list((existing_relationship.ineffective_reminders if existing_relationship else []) or [])
+                        + ["高压催促", "空泛说教"],
+                    )[:3],
+                    "avoidance_patterns": self._seed_avoidance_patterns(
+                        profile=profile,
+                        transcript=session.transcript,
+                        existing=existing_relationship.avoidance_patterns if existing_relationship else None,
+                    )[:3],
                 },
             ),
         )
@@ -262,8 +405,20 @@ class BuddyOnboardingService:
             pleasant_delta += 4
         strong_pull = str(interaction_mode or "").strip().lower() == "strong-pull"
         experience_delta = 8 if strong_pull else 5
+        effective_reminders = list(relationship.effective_reminders)
+        ineffective_reminders = list(relationship.ineffective_reminders)
+        avoidance_patterns = list(relationship.avoidance_patterns)
+        if strong_pull and "先把任务缩成一个最小动作" not in effective_reminders:
+            effective_reminders.append("先把任务缩成一个最小动作")
+        if any(token in normalized_message for token in ("拖延", "刷手机", "刷短视频", "分心", "逃避", "不想做")):
+            avoidance_patterns = _unique([*avoidance_patterns, "拖延回避"])
+        if any(token in normalized_message for token in ("别催", "太压", "有压力", "烦")):
+            ineffective_reminders = _unique([*ineffective_reminders, "高压催促"])
         updated = relationship.model_copy(
             update={
+                "effective_reminders": effective_reminders[:3],
+                "ineffective_reminders": ineffective_reminders[:3],
+                "avoidance_patterns": avoidance_patterns[:3],
                 "communication_count": relationship.communication_count + 1,
                 "pleasant_interaction_score": min(
                     100,
@@ -346,31 +501,32 @@ class BuddyOnboardingService:
         ).lower()
         directions: list[str] = []
         if any(token in source for token in ("content", "creator", "writing", "write", "audience")):
-            directions.append("Build an independent creator-business growth path")
+            directions.append("建立独立创作与内容事业的长期成长路径")
         if any(token in source for token in ("design", "designer", "product", "systems")):
-            directions.append("Build a high-leverage design and systems leadership path")
+            directions.append("建立高杠杆的设计与系统领导力成长路径")
         if any(token in source for token in ("operator", "operations", "process", "execution")):
-            directions.append("Build a resilient operator-to-strategist career path")
+            directions.append("建立从执行型走向策略型的长期职业跃迁路径")
         if any(token in source for token in ("health", "discipline", "energy", "exercise")):
-            directions.append("Build a disciplined health-and-self-mastery growth path")
-        directions.append("Build a stable self-directed growth path with increasing autonomy")
+            directions.append("建立自律、健康与自我掌控的人生重建路径")
+        directions.append("建立稳定、自主、长期向上的人生成长主方向")
         unique = _unique(directions)
         return unique[:3]
 
     def _final_goal(self, *, profile: HumanProfile, direction: str) -> str:
-        lowered = direction.lower()
-        if "creator-business" in lowered:
-            return f"Help {profile.display_name} build a durable creator-business and independent growth trajectory"
-        if "design and systems" in lowered:
-            return f"Help {profile.display_name} become a high-leverage builder of design and systems leadership"
-        if "operator-to-strategist" in lowered:
-            return f"Help {profile.display_name} transition from execution-heavy work into resilient strategic ownership"
-        return f"Help {profile.display_name} build a stable long-term growth direction with real personal agency"
+        if "独立创作与内容事业" in direction:
+            return f"帮助{profile.display_name}建立可持续的创作事业与独立成长轨道"
+        if "设计与系统领导力" in direction:
+            return f"帮助{profile.display_name}成长为高杠杆的设计与系统领导者"
+        if "执行型走向策略型" in direction:
+            return f"帮助{profile.display_name}从高执行消耗转向更稳定的策略型掌控"
+        if "自律、健康与自我掌控" in direction:
+            return f"帮助{profile.display_name}重建健康、自律且可持续的人生状态"
+        return f"帮助{profile.display_name}建立真正属于自己的长期成长方向与自主掌控感"
 
     def _why_it_matters(self, *, profile: HumanProfile) -> str:
         if profile.goal_intention.strip():
             return profile.goal_intention.strip()
-        return f"{profile.display_name} wants a growth direction that is meaningful and sustainable."
+        return f"因为{profile.display_name}需要一条真正有意义、而且能长期走下去的成长方向。"
 
     def _ensure_growth_scaffold(
         self,
@@ -496,15 +652,15 @@ class BuddyOnboardingService:
         return [
             {
                 "role_id": "growth-focus",
-                "role_name": "Growth Focus",
+                "role_name": "成长主线",
                 "goal_kind": "growth-focus",
-                "mission": f"Keep {profile.display_name} aligned to the chosen long-term direction.",
+                "mission": f"持续确保{profile.display_name}没有偏离已经确认的长期主方向。",
             },
             {
                 "role_id": "proof-of-work",
-                "role_name": "Proof Of Work",
+                "role_name": "成果证明",
                 "goal_kind": "proof-of-work",
-                "mission": f"Turn {profile.display_name}'s current direction into visible proof and momentum.",
+                "mission": f"把{profile.display_name}当前的方向，尽快变成看得见的证据、作品与推进势能。",
             },
         ]
 
@@ -521,26 +677,45 @@ class BuddyOnboardingService:
         return [
             (
                 primary_lane_id,
-                "Clarify the first concrete proof point",
-                f"Define the first concrete proof that shows {profile.display_name} is moving toward {growth_target.primary_direction}.",
+                "先确认第一份可见证明",
+                f"明确第一份什么样的证明，才能说明{profile.display_name}已经开始朝“{growth_target.primary_direction}”真实前进。",
                 3,
                 f"profile:{profile.profile_id}:proof-point",
             ),
             (
                 proof_lane_id,
-                "Ship the first visible growth artifact",
-                f"Create one visible artifact that starts moving '{growth_target.final_goal}' out of imagination and into evidence.",
+                "产出第一份可见成长成果",
+                f"做出一份真正看得见的成果，让“{growth_target.final_goal}”开始从想象进入证据链。",
                 2,
                 f"profile:{profile.profile_id}:first-artifact",
             ),
             (
                 primary_lane_id,
-                "Stabilize the weekly rhythm",
-                f"Establish a weekly rhythm that {profile.display_name} can realistically sustain without burning out.",
+                "稳定每周推进节奏",
+                f"建立一套{profile.display_name}现实可持续、不会很快透支的每周推进节奏。",
                 1,
                 f"profile:{profile.profile_id}:weekly-rhythm",
             ),
         ]
+
+    def _seed_avoidance_patterns(
+        self,
+        *,
+        profile: HumanProfile,
+        transcript: list[str],
+        existing: list[str] | None = None,
+    ) -> list[str]:
+        source = " ".join(
+            [profile.goal_intention, *profile.constraints, *transcript],
+        )
+        patterns = list(existing or [])
+        if any(token in source for token in ("拖延", "分心", "刷", "逃避", "不想做")):
+            patterns.append("拖延回避")
+        if any(token in source for token in ("迷茫", "没方向", "不知道")):
+            patterns.append("方向摇摆")
+        if any(token in source for token in ("时间", "精力", "累", "疲惫")):
+            patterns.append("精力透支")
+        return _unique(patterns)
 
 
 def _utc_now() -> datetime:

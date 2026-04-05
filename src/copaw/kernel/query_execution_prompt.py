@@ -220,6 +220,9 @@ class _QueryExecutionPromptMixin:
             lines.append(f"- Current focus: {focus_text}")
         if current_task_id:
             lines.append(f"- Current task: {current_task_id}")
+        buddy_persona_lines = self._build_buddy_persona_lines(request=request)
+        if buddy_persona_lines:
+            lines.extend(["", *buddy_persona_lines])
         if task_segment:
             segment_kind = _first_non_empty(task_segment.get("segment_kind"))
             segment_index = task_segment.get("index")
@@ -373,6 +376,61 @@ class _QueryExecutionPromptMixin:
             ],
         )
         return "\n".join(lines)
+
+    def _build_buddy_persona_lines(self, *, request: Any) -> list[str]:
+        profile_id = _first_non_empty(getattr(request, "buddy_profile_id", None))
+        service = getattr(self, "_buddy_projection_service", None)
+        if profile_id is None or service is None:
+            return []
+        try:
+            surface = service.build_chat_surface(profile_id=str(profile_id))
+        except Exception:
+            return []
+        profile = _mapping_value(getattr(surface, "profile", None))
+        target = _mapping_value(getattr(surface, "growth_target", None))
+        relationship = _mapping_value(getattr(surface, "relationship", None))
+        presentation = _mapping_value(getattr(surface, "presentation", None))
+        buddy_name = _first_non_empty(presentation.get("buddy_name"), "你的伙伴")
+        display_name = _first_non_empty(profile.get("display_name"))
+        profession = _first_non_empty(profile.get("profession"))
+        current_stage = _first_non_empty(profile.get("current_stage"))
+        primary_direction = _first_non_empty(target.get("primary_direction"))
+        final_goal = _first_non_empty(presentation.get("current_goal_summary"))
+        current_task = _first_non_empty(presentation.get("current_task_summary"))
+        why_now = _first_non_empty(presentation.get("why_now_summary"))
+        next_action = _first_non_empty(presentation.get("single_next_action_summary"))
+        strategy = _first_non_empty(presentation.get("companion_strategy_summary"))
+        encouragement_style = _first_non_empty(relationship.get("encouragement_style"))
+        lines = [
+            "# Buddy 对外人格",
+            f"- 伙伴名：{buddy_name}",
+            "- 对外统一按这个伙伴人格说话，但不能丢掉主脑的真实判断。",
+        ]
+        if display_name or profession or current_stage:
+            lines.append(
+                f"- 正在陪伴的人：{display_name or '未命名用户'} / {profession or '职业待补充'} / {current_stage or '阶段待补充'}",
+            )
+        if primary_direction:
+            lines.append(f"- 长期主方向：{primary_direction}")
+        if final_goal:
+            lines.append(f"- 最终目标：{final_goal}")
+        if current_task:
+            lines.append(f"- 当前任务：{current_task}")
+        if why_now:
+            lines.append(f"- 为什么现在做：{why_now}")
+        if next_action:
+            lines.append(f"- 唯一下一步：{next_action}")
+        if strategy:
+            lines.append(f"- 陪伴策略：{strategy}")
+        if encouragement_style:
+            lines.append(f"- 鼓励风格代号：{encouragement_style}")
+        lines.extend(
+            [
+                "- 默认只给最终目标、当前任务、为什么现在做、以及唯一下一步。",
+                "- 先接住情绪，再把对方带回当前任务，不要让 Buddy 人格和执行位前台打架。",
+            ],
+        )
+        return lines
 
     def _build_main_brain_runtime_lines(
         self,

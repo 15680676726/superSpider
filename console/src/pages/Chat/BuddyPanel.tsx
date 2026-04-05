@@ -9,6 +9,7 @@ import {
 } from "./buddyAvatar";
 import { resolveBuddyEvolutionView } from "./buddyEvolution";
 import {
+  presentBuddyEncouragementStyleLabel,
   presentBuddyMoodLabel,
   presentBuddyPresenceLabel,
   presentBuddyStageLabel,
@@ -113,8 +114,17 @@ export function BuddyPanel({
                 </Col>
               </Row>
               <Paragraph style={{ marginTop: 12, marginBottom: 0 }}>
-                鼓励风格：{surface.relationship?.encouragement_style || "老朋友"}
+                鼓励风格：
+                {presentBuddyEncouragementStyleLabel(
+                  surface.relationship?.encouragement_style,
+                )}
               </Paragraph>
+              {surface.presentation.companion_strategy_summary ? (
+                <Paragraph style={{ marginBottom: 0 }}>
+                  <Text strong>陪伴策略：</Text>
+                  {surface.presentation.companion_strategy_summary}
+                </Paragraph>
+              ) : null}
             </Card>
           </Col>
           <Col span={24}>
@@ -155,9 +165,13 @@ export function BuddyPanel({
                 <Text strong>当前任务：</Text>
                 {surface.presentation.current_task_summary}
               </Paragraph>
-              <Paragraph style={{ marginBottom: 0 }}>
+              <Paragraph>
                 <Text strong>为什么现在做：</Text>
                 {surface.presentation.why_now_summary}
+              </Paragraph>
+              <Paragraph style={{ marginBottom: 0 }}>
+                <Text strong>唯一下一步：</Text>
+                {surface.presentation.single_next_action_summary || "先把任务缩成一个最小动作。"}
               </Paragraph>
             </Card>
           </Col>

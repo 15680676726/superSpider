@@ -24,20 +24,22 @@ export function resolveHumanAssistStatusPresentation(
   status: string | null | undefined,
 ): { label: string; color: string } {
   const normalized = String(status || "").trim().toLowerCase();
-  if (normalized === "issued") return { label: "待提交", color: "blue" };
+  if (normalized === "issued") return { label: "待你完成", color: "blue" };
   if (normalized === "submitted") return { label: "已提交", color: "gold" };
   if (normalized === "verifying") return { label: "验证中", color: "processing" };
   if (normalized === "accepted") return { label: "已通过", color: "success" };
-  if (normalized === "need_more_evidence") return { label: "待补证", color: "warning" };
+  if (normalized === "need_more_evidence") {
+    return { label: "待补证", color: "warning" };
+  }
   if (normalized === "resume_queued") return { label: "已验收", color: "success" };
   if (normalized === "handoff_blocked") {
-    return { label: "\u6062\u590d\u53d7\u963b", color: "warning" };
+    return { label: "恢复受阻", color: "warning" };
   }
   if (normalized === "rejected") return { label: "未通过", color: "warning" };
   if (normalized === "closed") return { label: "已关闭", color: "default" };
   if (normalized === "expired") return { label: "已过期", color: "default" };
   if (normalized === "cancelled") return { label: "已取消", color: "default" };
-  return { label: status || "未知", color: "default" };
+  return { label: status || "未知状态", color: "default" };
 }
 
 function formatDateTime(value: string | null | undefined): string | null {
@@ -48,9 +50,7 @@ function formatDateTime(value: string | null | undefined): string | null {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleString("zh-CN", {
-    hour12: false,
-  });
+  return date.toLocaleString("zh-CN", { hour12: false });
 }
 
 function buildErrorMessage(error: unknown, fallback: string): string {
@@ -111,7 +111,7 @@ export function ChatHumanAssistPanel({
         setPanelError(null);
         return;
       }
-      setPanelError(buildErrorMessage(error, "任务状态刷新失败"));
+      setPanelError(buildErrorMessage(error, "现实动作状态刷新失败"));
     }
   }, [activeChatThreadId]);
 
@@ -123,7 +123,7 @@ export function ChatHumanAssistPanel({
       setPanelError(null);
     } catch (error) {
       setSelectedTaskDetail(null);
-      setPanelError(buildErrorMessage(error, "任务详情加载失败"));
+      setPanelError(buildErrorMessage(error, "协作详情加载失败"));
     } finally {
       setDetailLoading(false);
     }
@@ -155,7 +155,7 @@ export function ChatHumanAssistPanel({
       } catch (error) {
         setTasks([]);
         setSelectedTaskDetail(null);
-        setPanelError(buildErrorMessage(error, "任务记录加载失败"));
+        setPanelError(buildErrorMessage(error, "协作记录加载失败"));
       } finally {
         setTaskListLoading(false);
       }
@@ -201,30 +201,30 @@ export function ChatHumanAssistPanel({
     rewardPreview,
     rewardResult,
   } = detailPresentation;
-  const hasTaskStrip = Boolean(activeChatThreadId);
-  const currentTaskTitle = currentTask ? currentTask.title : "当前无待协作任务";
   const currentTaskStatusPresentation = resolveHumanAssistStatusPresentation(
     currentTask?.status,
   );
+  const currentTaskTitle = currentTask?.title || "";
   const currentTaskSummary = currentTask
     ? firstNonEmptyString(
-        currentTask.required_action,
         currentTask.summary,
         currentTask.reason_summary,
-      ) || "请在聊天窗口提交完成证明，系统会自动验收。"
-    : "点击任务记录查看本线程的协作任务历史、验收结果和奖励记录。";
+        currentTask.required_action,
+      ) || "这一步必须由你亲自完成，完成后直接在聊天里告诉我。"
+    : "";
   const detailSummary = selectedTaskDetail
     ? firstNonEmptyString(
         selectedTaskDetail.task.summary,
         selectedTaskDetail.task.reason_summary,
-      ) || "无补充说明"
+      ) || "暂无补充说明"
     : null;
   const detailAction = selectedTaskDetail
-    ? firstNonEmptyString(selectedTaskDetail.task.required_action) || "无"
+    ? firstNonEmptyString(selectedTaskDetail.task.required_action) || "暂无"
     : null;
   const detailStatusPresentation = selectedTaskDetail
     ? resolveHumanAssistStatusPresentation(selectedTaskDetail.task.status)
     : null;
+  const showExceptionStrip = Boolean(activeChatThreadId && currentTask);
   const armHumanAssistSubmission = useCallback(() => {
     if (!activeChatThreadId || !currentTask) {
       return;
@@ -232,53 +232,54 @@ export function ChatHumanAssistPanel({
     queueHumanAssistSubmissionForNextMessage(activeChatThreadId);
   }, [activeChatThreadId, currentTask]);
 
-  if (!hasTaskStrip) {
+  if (!activeChatThreadId) {
+    return null;
+  }
+
+  if (!showExceptionStrip && !taskListOpen) {
     return null;
   }
 
   return (
     <>
-      <div
-        className={`${styles.humanAssistStrip} ${
-          currentTask ? styles.humanAssistStripActive : styles.humanAssistStripIdle
-        }`}
-      >
-        <div className={styles.humanAssistStripMain}>
-          <div className={styles.humanAssistStripBadge}>任务</div>
-          <div className={styles.humanAssistStripBody}>
-            <div className={styles.humanAssistStripTitleRow}>
-              <span className={styles.humanAssistStripTitle} title={currentTaskTitle}>
-                {currentTaskTitle}
-              </span>
-              <Tag bordered={false} color={currentTaskStatusPresentation.color}>
-                {currentTask ? currentTaskStatusPresentation.label : "空闲"}
-              </Tag>
-            </div>
-            <div className={styles.humanAssistStripSummary} title={currentTaskSummary}>
-              {currentTaskSummary}
+      {showExceptionStrip ? (
+        <div className={`${styles.humanAssistStrip} ${styles.humanAssistStripActive}`}>
+          <div className={styles.humanAssistStripMain}>
+            <div className={styles.humanAssistStripBadge}>伙伴提醒</div>
+            <div className={styles.humanAssistStripBody}>
+              <div className={styles.humanAssistStripTitleRow}>
+                <span
+                  className={styles.humanAssistStripTitle}
+                  title={currentTaskTitle}
+                >
+                  {currentTaskTitle}
+                </span>
+                <Tag bordered={false} color={currentTaskStatusPresentation.color}>
+                  {currentTaskStatusPresentation.label}
+                </Tag>
+              </div>
+              <div
+                className={styles.humanAssistStripSummary}
+                title={currentTaskSummary}
+              >
+                {currentTaskSummary}
+              </div>
             </div>
           </div>
+          <div className={styles.humanAssistStripActions}>
+            <Button size="small" type="primary" onClick={armHumanAssistSubmission}>
+              我已在聊天里完成
+            </Button>
+            <Button
+              size="small"
+              type="default"
+              onClick={() => void openTaskList(currentTask?.id || null)}
+            >
+              查看协作记录
+            </Button>
+          </div>
         </div>
-        <div className={styles.humanAssistStripActions}>
-          {currentTask ? (
-            <>
-              <Button size="small" type="primary" onClick={armHumanAssistSubmission}>
-                提交任务
-              </Button>
-              <Button size="small" onClick={() => void openTaskList(currentTask.id)}>
-                查看详情
-              </Button>
-            </>
-          ) : null}
-          <Button
-            size="small"
-            type={currentTask ? "primary" : "default"}
-            onClick={() => void openTaskList(currentTask?.id || null)}
-          >
-            任务记录
-          </Button>
-        </div>
-      </div>
+      ) : null}
 
       <Modal
         open={taskListOpen}
@@ -287,7 +288,7 @@ export function ChatHumanAssistPanel({
         width={980}
         centered
         destroyOnHidden={false}
-        title="共生协作任务"
+        title="需要你亲自完成的现实动作"
       >
         {panelError ? (
           <Alert
@@ -300,11 +301,11 @@ export function ChatHumanAssistPanel({
 
         <div className={styles.humanAssistModalLayout}>
           <div className={styles.humanAssistTaskList}>
-            <div className={styles.humanAssistSectionTitle}>任务列表</div>
+            <div className={styles.humanAssistSectionTitle}>协作记录</div>
             {taskListLoading ? (
               <Skeleton active paragraph={{ rows: 8 }} />
             ) : tasks.length === 0 ? (
-              <Empty description="当前线程还没有协作任务记录" />
+              <Empty description="当前线程还没有需要你亲自处理的现实动作。" />
             ) : (
               <div className={styles.humanAssistTaskListInner}>
                 {tasks.map((item) => {
@@ -317,7 +318,7 @@ export function ChatHumanAssistPanel({
                       item.required_action,
                       item.summary,
                       item.reason_summary,
-                    ) || "无说明";
+                    ) || "暂无说明";
                   return (
                     <button
                       key={item.id}
@@ -360,7 +361,7 @@ export function ChatHumanAssistPanel({
           </div>
 
           <div className={styles.humanAssistDetailPane}>
-            <div className={styles.humanAssistSectionTitle}>任务详情</div>
+            <div className={styles.humanAssistSectionTitle}>现实动作详情</div>
             {detailLoading ? (
               <Skeleton active paragraph={{ rows: 10 }} />
             ) : selectedTaskDetail ? (
@@ -381,12 +382,12 @@ export function ChatHumanAssistPanel({
                     </div>
                   </div>
                   <Tag bordered={false} color={detailStatusPresentation?.color || "default"}>
-                    {detailStatusPresentation?.label || "未知"}
+                    {detailStatusPresentation?.label || "未知状态"}
                   </Tag>
                 </div>
 
                 <div className={styles.humanAssistDetailBlock}>
-                  <div className={styles.humanAssistDetailLabel}>宿主动作</div>
+                  <div className={styles.humanAssistDetailLabel}>你需要亲自完成的动作</div>
                   <div
                     className={styles.humanAssistDetailValue}
                     title={detailAction || undefined}
@@ -399,17 +400,21 @@ export function ChatHumanAssistPanel({
                   <div className={styles.humanAssistDetailBlock}>
                     <div className={styles.humanAssistDetailLabel}>强制锚点</div>
                     <Space size={[6, 6]} wrap>
-                      {hardAnchors.length > 0 ? hardAnchors.map((item) => (
-                        <Tag key={item}>{item}</Tag>
-                      )) : <span className={styles.humanAssistMuted}>未定义</span>}
+                      {hardAnchors.length > 0 ? (
+                        hardAnchors.map((item) => <Tag key={item}>{item}</Tag>)
+                      ) : (
+                        <span className={styles.humanAssistMuted}>未定义</span>
+                      )}
                     </Space>
                   </div>
                   <div className={styles.humanAssistDetailBlock}>
                     <div className={styles.humanAssistDetailLabel}>结果锚点</div>
                     <Space size={[6, 6]} wrap>
-                      {resultAnchors.length > 0 ? resultAnchors.map((item) => (
-                        <Tag key={item}>{item}</Tag>
-                      )) : <span className={styles.humanAssistMuted}>未定义</span>}
+                      {resultAnchors.length > 0 ? (
+                        resultAnchors.map((item) => <Tag key={item}>{item}</Tag>)
+                      ) : (
+                        <span className={styles.humanAssistMuted}>未定义</span>
+                      )}
                     </Space>
                   </div>
                 </div>
@@ -417,11 +422,15 @@ export function ChatHumanAssistPanel({
                 <div className={styles.humanAssistDetailBlock}>
                   <div className={styles.humanAssistDetailLabel}>负向锚点</div>
                   <Space size={[6, 6]} wrap>
-                    {negativeAnchors.length > 0 ? negativeAnchors.map((item) => (
-                      <Tag key={item} color="warning">
-                        {item}
-                      </Tag>
-                    )) : <span className={styles.humanAssistMuted}>未定义</span>}
+                    {negativeAnchors.length > 0 ? (
+                      negativeAnchors.map((item) => (
+                        <Tag key={item} color="warning">
+                          {item}
+                        </Tag>
+                      ))
+                    ) : (
+                      <span className={styles.humanAssistMuted}>未定义</span>
+                    )}
                   </Space>
                 </div>
 
@@ -429,21 +438,29 @@ export function ChatHumanAssistPanel({
                   <div className={styles.humanAssistDetailBlock}>
                     <div className={styles.humanAssistDetailLabel}>预览奖励</div>
                     <Space size={[6, 6]} wrap>
-                      {rewardPreview.length > 0 ? rewardPreview.map(([key, value]) => (
-                        <Tag key={`${key}:${value}`} color="blue">
-                          {`${key} +${value}`}
-                        </Tag>
-                      )) : <span className={styles.humanAssistMuted}>暂无</span>}
+                      {rewardPreview.length > 0 ? (
+                        rewardPreview.map(([key, value]) => (
+                          <Tag key={`${key}:${value}`} color="blue">
+                            {`${key} +${value}`}
+                          </Tag>
+                        ))
+                      ) : (
+                        <span className={styles.humanAssistMuted}>暂无</span>
+                      )}
                     </Space>
                   </div>
                   <div className={styles.humanAssistDetailBlock}>
                     <div className={styles.humanAssistDetailLabel}>已发奖励</div>
                     <Space size={[6, 6]} wrap>
-                      {rewardResult.length > 0 ? rewardResult.map(([key, value]) => (
-                        <Tag key={`${key}:${value}`} color="success">
-                          {`${key} +${value}`}
-                        </Tag>
-                      )) : <span className={styles.humanAssistMuted}>暂无</span>}
+                      {rewardResult.length > 0 ? (
+                        rewardResult.map(([key, value]) => (
+                          <Tag key={`${key}:${value}`} color="success">
+                            {`${key} +${value}`}
+                          </Tag>
+                        ))
+                      ) : (
+                        <span className={styles.humanAssistMuted}>暂无</span>
+                      )}
                     </Space>
                   </div>
                 </div>
@@ -464,7 +481,7 @@ export function ChatHumanAssistPanel({
                 </div>
               </div>
             ) : (
-              <Empty description="选择左侧任务以查看详情" />
+              <Empty description="选择左侧记录以查看详情" />
             )}
           </div>
         </div>

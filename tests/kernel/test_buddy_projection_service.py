@@ -34,6 +34,7 @@ def _build_services(tmp_path):
             "profile_id": profile_id,
             "current_task_summary": "Ship the first portfolio case study",
             "why_now_summary": "Because this is the first proof that moves the final goal out of imagination.",
+            "single_next_action_summary": "Open the draft and write the headline plus three proof points.",
         },
     )
     return onboarding, projection
@@ -68,6 +69,9 @@ def test_buddy_projection_derives_growth_from_formal_truth(tmp_path) -> None:
     assert projection_payload.presentation.buddy_name == "Nova"
     assert projection_payload.presentation.current_task_summary == "Ship the first portfolio case study"
     assert projection_payload.presentation.why_now_summary.startswith("Because this is the first proof")
+    assert projection_payload.presentation.single_next_action_summary == (
+        "Open the draft and write the headline plus three proof points."
+    )
 
 
 def test_buddy_projection_requires_profile_scope_when_multiple_profiles_exist(tmp_path) -> None:
@@ -151,4 +155,46 @@ def test_buddy_projection_filters_human_assist_fallback_by_profile(tmp_path) -> 
     payload = projection.build_chat_surface(profile_id=target_profile_id)
 
     assert payload.presentation.current_task_summary == "Ship the scoped task"
+
+
+def test_buddy_projection_turns_relationship_memory_into_companion_strategy(tmp_path) -> None:
+    onboarding, projection = _build_services(tmp_path)
+    identity = onboarding.submit_identity(
+        display_name="Kai",
+        profession="Designer",
+        current_stage="restart",
+        interests=["writing"],
+        strengths=["clarity"],
+        constraints=["time"],
+        goal_intention="I want a durable direction with visible proof of work.",
+    )
+    clarification = onboarding.answer_clarification_turn(
+        session_id=identity.session_id,
+        answer="I want a long-term direction with proof, leverage, and less drift.",
+        existing_question_count=9,
+    )
+    onboarding.confirm_primary_direction(
+        session_id=identity.session_id,
+        selected_direction=clarification.recommended_direction,
+    )
+    onboarding.name_buddy(session_id=identity.session_id, buddy_name="Nova")
+    relationship = projection._relationship_repository.get_relationship(  # pylint: disable=protected-access
+        identity.profile.profile_id,
+    )
+    assert relationship is not None
+    projection._relationship_repository.upsert_relationship(  # pylint: disable=protected-access
+        relationship.model_copy(
+            update={
+                "effective_reminders": ["先把任务缩成一个最小动作"],
+                "ineffective_reminders": ["高压催促"],
+                "avoidance_patterns": ["刷短视频逃避"],
+            },
+        ),
+    )
+
+    payload = projection.build_chat_surface(profile_id=identity.profile.profile_id)
+
+    assert "最小动作" in payload.presentation.companion_strategy_summary
+    assert "高压催促" in payload.presentation.companion_strategy_summary
+    assert "刷短视频逃避" in payload.presentation.companion_strategy_summary
 

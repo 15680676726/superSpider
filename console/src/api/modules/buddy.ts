@@ -99,6 +99,8 @@ export interface BuddySurfaceResponse {
     current_goal_summary: string;
     current_task_summary: string;
     why_now_summary: string;
+    single_next_action_summary: string;
+    companion_strategy_summary: string;
   };
   growth: {
     profile_id: string;

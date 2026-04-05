@@ -422,9 +422,11 @@ const buddySummary: RuntimeMainBrainBuddySummary = {
   growth_level: 4,
   intimacy: 24,
   affinity: 19,
-  current_goal_summary: "Build an independent creator-business growth path",
-  current_task_summary: "Write the first meaningful piece today",
-  why_now_summary: "This is the smallest move that keeps momentum real.",
+  current_goal_summary: "建立独立创作与内容事业的长期成长路径",
+  current_task_summary: "今天先写出第一篇真正能代表自己的作品",
+  why_now_summary: "这是让长期方向不再停留在想象里的最小推进。",
+  single_next_action_summary: "现在先打开文档，写下标题和三条核心观点。",
+  companion_strategy_summary: "先接住情绪，再把任务缩成一个最小动作。",
 };
 
 function renderPanel(
@@ -772,11 +774,13 @@ describe("MainBrainCockpitPanel", () => {
     expect(screen.getByText("伙伴摘要")).toBeInTheDocument();
     expect(screen.getByText("Nova")).toBeInTheDocument();
     expect(
-      screen.getByText("Build an independent creator-business growth path"),
+      screen.getByText("建立独立创作与内容事业的长期成长路径"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Write the first meaningful piece today")).toBeInTheDocument();
+    expect(screen.getByText("今天先写出第一篇真正能代表自己的作品")).toBeInTheDocument();
     expect(
-      screen.getByText("This is the smallest move that keeps momentum real."),
+      screen.getByText("这是让长期方向不再停留在想象里的最小推进。"),
     ).toBeInTheDocument();
+    expect(screen.getByText("现在先打开文档，写下标题和三条核心观点。")).toBeInTheDocument();
+    expect(screen.getByText("先接住情绪，再把任务缩成一个最小动作。")).toBeInTheDocument();
   });
 });

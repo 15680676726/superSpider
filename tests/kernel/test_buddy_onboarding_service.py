@@ -9,19 +9,18 @@ from copaw.state.main_brain_service import (
     OperatingCycleService,
     OperatingLaneService,
 )
-from copaw.state.models import IndustryInstanceRecord
-from copaw.state.repositories_buddy import (
-    SqliteBuddyOnboardingSessionRepository,
-    SqliteCompanionRelationshipRepository,
-    SqliteGrowthTargetRepository,
-    SqliteHumanProfileRepository,
-)
 from copaw.state.repositories import (
     SqliteAssignmentRepository,
     SqliteBacklogItemRepository,
     SqliteIndustryInstanceRepository,
     SqliteOperatingCycleRepository,
     SqliteOperatingLaneRepository,
+)
+from copaw.state.repositories_buddy import (
+    SqliteBuddyOnboardingSessionRepository,
+    SqliteCompanionRelationshipRepository,
+    SqliteGrowthTargetRepository,
+    SqliteHumanProfileRepository,
 )
 
 
@@ -92,6 +91,29 @@ def test_buddy_onboarding_caps_clarification_questions(tmp_path) -> None:
     assert capped.recommended_direction in capped.candidate_directions
 
 
+def test_buddy_onboarding_derives_direction_candidates_from_chinese_profile(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    identity = service.submit_identity(
+        display_name="林夏",
+        profession="内容运营",
+        current_stage="转型期",
+        interests=["写作", "内容", "表达"],
+        strengths=["长期主义", "表达能力"],
+        constraints=["时间有限"],
+        goal_intention="我想找到能长期积累、能靠作品和内容建立独立收入的方向。",
+    )
+
+    result = service.answer_clarification_turn(
+        session_id=identity.session_id,
+        answer="我不想一直做零碎执行，我想慢慢建立自己的内容作品和长期影响力。",
+        existing_question_count=9,
+    )
+
+    assert result.finished is True
+    assert any("独立创作与内容事业" in item for item in result.candidate_directions)
+    assert "独立创作与内容事业" in result.recommended_direction
+
+
 def test_buddy_onboarding_requires_exactly_one_primary_direction(tmp_path) -> None:
     service = _build_service(tmp_path)
     identity = service.submit_identity(
@@ -111,12 +133,10 @@ def test_buddy_onboarding_requires_exactly_one_primary_direction(tmp_path) -> No
 
     result = service.confirm_primary_direction(
         session_id=identity.session_id,
-        selected_direction="Build an independent creator-business growth path",
+        selected_direction="建立独立创作与内容事业的长期成长路径",
     )
 
-    assert result.growth_target.primary_direction == (
-        "Build an independent creator-business growth path"
-    )
+    assert result.growth_target.primary_direction == "建立独立创作与内容事业的长期成长路径"
     assert result.relationship.encouragement_style == "old-friend"
 
 
@@ -138,7 +158,7 @@ def test_buddy_naming_updates_relationship(tmp_path) -> None:
     )
     service.confirm_primary_direction(
         session_id=identity.session_id,
-        selected_direction="Build an independent creator-business growth path",
+        selected_direction="建立独立创作与内容事业的长期成长路径",
     )
 
     relationship = service.name_buddy(
@@ -168,7 +188,7 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
 
     result = service.confirm_primary_direction(
         session_id=identity.session_id,
-        selected_direction="Build an independent creator-business growth path",
+        selected_direction="建立独立创作与内容事业的长期成长路径",
     )
 
     industry_repository = SqliteIndustryInstanceRepository(store)

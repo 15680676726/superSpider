@@ -627,7 +627,7 @@ export default function ChatPage() {
       const nextSearch = params.toString();
       navigate(nextSearch ? `/chat?${nextSearch}` : "/chat", { replace: true });
     } catch (error) {
-      setBuddyError(error instanceof Error ? error.message : "Buddy naming failed");
+      setBuddyError(error instanceof Error ? error.message : "伙伴命名失败");
     } finally {
       setBuddyNamingBusy(false);
     }
@@ -736,7 +736,7 @@ export default function ChatPage() {
           {/* 聊天画布 */}
           <div className={styles.canvas}>
             {buddyLoading ? (
-              <div className={styles.buddyLoading}>Buddy 正在靠近你…</div>
+              <div className={styles.buddyLoading}>伙伴正在靠近你…</div>
             ) : null}
             {buddySurface ? (
               <BuddyCompanion

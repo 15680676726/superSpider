@@ -58,10 +58,18 @@ class BuddyProjectionService:
         ) or {}
         current_task_summary = str(current_focus.get("current_task_summary") or "").strip()
         why_now_summary = str(current_focus.get("why_now_summary") or "").strip()
+        single_next_action_summary = str(
+            current_focus.get("single_next_action_summary") or "",
+        ).strip()
         if not current_task_summary:
             current_task_summary = self._fallback_current_task_summary(profile.profile_id)
         if not why_now_summary:
             why_now_summary = self._fallback_why_now_summary(target)
+        if not single_next_action_summary:
+            single_next_action_summary = self._fallback_single_next_action_summary(
+                profile_id=profile.profile_id,
+                current_task_summary=current_task_summary,
+            )
         buddy_name = (
             relationship.buddy_name.strip()
             if relationship is not None and relationship.buddy_name.strip()
@@ -103,6 +111,9 @@ class BuddyProjectionService:
             lifecycle_state = "bonded"
         presence_state = "focused" if current_task_summary else "attentive"
         mood_state = "determined" if current_task_summary else "warm"
+        companion_strategy_summary = self._build_companion_strategy_summary(
+            relationship=relationship,
+        )
         presentation = BuddyPresentation(
             profile_id=profile.profile_id,
             buddy_name=buddy_name,
@@ -114,6 +125,8 @@ class BuddyProjectionService:
             current_goal_summary=target.final_goal if target is not None else profile.goal_intention,
             current_task_summary=current_task_summary,
             why_now_summary=why_now_summary,
+            single_next_action_summary=single_next_action_summary,
+            companion_strategy_summary=companion_strategy_summary,
         )
         growth = BuddyGrowthProjection(
             profile_id=profile.profile_id,
@@ -152,6 +165,8 @@ class BuddyProjectionService:
             "current_goal_summary": surface.presentation.current_goal_summary,
             "current_task_summary": surface.presentation.current_task_summary,
             "why_now_summary": surface.presentation.why_now_summary,
+            "single_next_action_summary": surface.presentation.single_next_action_summary,
+            "companion_strategy_summary": surface.presentation.companion_strategy_summary,
         }
 
     def _resolve_profile(self, profile_id: str | None) -> HumanProfile | None:
@@ -188,6 +203,20 @@ class BuddyProjectionService:
         if target is not None and target.why_it_matters.strip():
             return target.why_it_matters.strip()
         return "因为只有先推进当前这一步，你最终想去的地方才不会继续停在原地。"
+
+    def _fallback_single_next_action_summary(
+        self,
+        *,
+        profile_id: str,
+        current_task_summary: str,
+    ) -> str:
+        task_summary = str(current_task_summary or "").strip()
+        if task_summary:
+            return f"现在先完成这一步：{task_summary}"
+        fallback = self._fallback_current_task_summary(profile_id)
+        if fallback:
+            return f"现在先完成这一步：{fallback}"
+        return "现在先做一个最小动作，我们再一起看下一步。"
 
     def _completed_support_runs(self, profile_id: str) -> int:
         service = self._human_assist_task_service
@@ -253,6 +282,60 @@ class BuddyProjectionService:
         span = max(1, next_threshold - previous_threshold)
         progress = min(100, max(0, ((experience - previous_threshold) * 100) // span))
         return current_stage, current_rarity, progress
+
+    def _build_companion_strategy_summary(
+        self,
+        *,
+        relationship: CompanionRelationship | None,
+    ) -> str:
+        if relationship is None:
+            return (
+                "先像老朋友一样接住情绪，再把任务收成一个最小动作；"
+                "默认只围绕最终目标、当前任务、为什么现在做和唯一下一步展开。"
+            )
+        style = self._present_encouragement_style(relationship.encouragement_style)
+        parts = [f"先按“{style}”的方式接住情绪，再把对话收成一个最小动作。"]
+        if relationship.effective_reminders:
+            parts.append(
+                "优先提醒："
+                + "；".join(
+                    str(item).strip()
+                    for item in relationship.effective_reminders[:2]
+                    if str(item).strip()
+                ),
+            )
+        if relationship.ineffective_reminders:
+            parts.append(
+                "避免："
+                + "；".join(
+                    str(item).strip()
+                    for item in relationship.ineffective_reminders[:2]
+                    if str(item).strip()
+                ),
+            )
+        if relationship.avoidance_patterns:
+            parts.append(
+                "如果出现"
+                + "、".join(
+                    str(item).strip()
+                    for item in relationship.avoidance_patterns[:2]
+                    if str(item).strip()
+                )
+                + "，就立刻把任务缩成一个最小动作。",
+            )
+        elif relationship.strong_pull_count > 0:
+            parts.append("一旦明显拖延，就直接发起一次短陪跑，把任务缩成一个最小动作。")
+        return "".join(part for part in parts if part)
+
+    def _present_encouragement_style(self, style: str | None) -> str:
+        normalized = str(style or "").strip().lower()
+        if normalized == "old-friend":
+            return "老朋友式陪跑"
+        if normalized == "steady-coach":
+            return "稳住节奏的教练式提醒"
+        if normalized == "gentle-push":
+            return "温柔但坚定的推进"
+        return "陪你一起往前走"
 
 
 __all__ = ["BuddyProjectionService", "BuddySurfacePayload"]

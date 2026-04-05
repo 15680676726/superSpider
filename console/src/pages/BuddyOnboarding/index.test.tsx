@@ -3,6 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
 import { resetBuddyProfileBindingForTests } from "../../runtime/buddyProfileBinding";
 
 const { navigateMock, apiMock } = vi.hoisted(() => ({
@@ -57,15 +58,15 @@ describe("BuddyOnboardingPage", () => {
       finished: true,
       next_question: "",
       candidate_directions: [
-        "建立可持续的个人创作与商业增长路径",
-        "建立更稳定、更自主的人生增长轨道",
+        "建立独立创作与内容事业的长期成长路径",
+        "建立稳定、自主、长期向上的人生成长主方向",
       ],
-      recommended_direction: "建立可持续的个人创作与商业增长路径",
+      recommended_direction: "建立独立创作与内容事业的长期成长路径",
     });
     apiMock.confirmBuddyDirection.mockResolvedValue({
       session: { session_id: "session-1" },
       growth_target: {
-        primary_direction: "建立可持续的个人创作与商业增长路径",
+        primary_direction: "建立独立创作与内容事业的长期成长路径",
       },
       relationship: { encouragement_style: "old-friend" },
     });
@@ -78,16 +79,16 @@ describe("BuddyOnboardingPage", () => {
       expect(apiMock.getBuddySurface).toHaveBeenCalled();
     });
 
-    fireEvent.change(screen.getByPlaceholderText("你希望我怎么称呼你"), {
+    fireEvent.change(screen.getByPlaceholderText("你希望我怎么称呼你？"), {
       target: { value: "Alex" },
     });
-    fireEvent.change(screen.getByPlaceholderText("你现在主要在做什么"), {
+    fireEvent.change(screen.getByPlaceholderText("你现在主要在做什么？"), {
       target: { value: "设计师" },
     });
     fireEvent.change(screen.getByPlaceholderText("例如：探索期、转型期、重建期、稳定增长期"), {
       target: { value: "转型期" },
     });
-    fireEvent.change(screen.getByPlaceholderText("先说你隐约想改变什么，模糊也没关系"), {
+    fireEvent.change(screen.getByPlaceholderText("先说你隐约想改变什么，模糊也没有关系"), {
       target: { value: "我想建立真正长期的方向。" },
     });
 
@@ -109,7 +110,7 @@ describe("BuddyOnboardingPage", () => {
       expect(screen.getByTestId("buddy-direction-recommendation")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByLabelText(/建立可持续的个人创作与商业增长路径/));
+    fireEvent.click(screen.getByLabelText(/建立独立创作与内容事业的长期成长路径/));
     fireEvent.click(screen.getByTestId("buddy-direction-confirm"));
 
     await waitFor(() => {
@@ -128,26 +129,32 @@ describe("BuddyOnboardingPage", () => {
         display_name: "Existing",
       },
       growth: {
-        buddy_name: null,
         growth_level: 1,
         intimacy: 0,
         affinity: 0,
-        knowledge: 0,
-        skill: 0,
+        knowledge_value: 0,
+        skill_value: 0,
         pleasant_interaction_score: 0,
         communication_count: 0,
         companion_experience: 0,
+        completed_support_runs: 0,
+        completed_assisted_closures: 0,
         evolution_stage: "seed",
-        rarity: "common",
+        progress_to_next_stage: 0,
       },
       presentation: {
+        profile_id: "profile-existing",
+        buddy_name: "小澜",
         lifecycle_state: "named",
         presence_state: "available",
         mood_state: "warm",
-        current_goal_summary: null,
-        current_task_summary: null,
-        why_now_summary: null,
-        relationship_summary: null,
+        current_form: "seed",
+        rarity: "common",
+        current_goal_summary: "",
+        current_task_summary: "",
+        why_now_summary: "",
+        single_next_action_summary: "",
+        companion_strategy_summary: "",
       },
     });
     window.localStorage.setItem("copaw.buddy_profile_id", "profile-existing");

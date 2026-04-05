@@ -112,6 +112,48 @@ class _PromptCapturingResponseModel:
         return SimpleNamespace(content=self.text)
 
 
+class _FakeBuddyProjectionService:
+    def build_chat_surface(self, *, profile_id: str | None = None):
+        assert profile_id == "profile-buddy"
+        return SimpleNamespace(
+            profile=SimpleNamespace(
+                profile_id="profile-buddy",
+                display_name="阿澄",
+                profession="自由创作者",
+                current_stage="重建期",
+                interests=["写作", "内容系统"],
+                strengths=["持续整理", "表达"],
+                constraints=["时间紧"],
+                goal_intention="想建立真正属于自己的长期成长路径。",
+            ),
+            growth_target=SimpleNamespace(
+                primary_direction="建立独立创作与内容事业的长期成长路径",
+                final_goal="帮助阿澄建立可持续的创作事业与独立成长轨道",
+                why_it_matters="因为她不想再把真正想过的人生继续往后拖。",
+            ),
+            relationship=SimpleNamespace(
+                encouragement_style="old-friend",
+                effective_reminders=["先把任务缩成一个最小动作"],
+                ineffective_reminders=["高压催促"],
+                avoidance_patterns=["刷短视频逃避"],
+            ),
+            presentation=SimpleNamespace(
+                buddy_name="小澄",
+                current_goal_summary="帮助阿澄建立可持续的创作事业与独立成长轨道",
+                current_task_summary="写出第一篇真正能代表自己的案例文章",
+                why_now_summary="因为这是把长期方向从想象拉进现实的第一份证据。",
+                single_next_action_summary="现在先打开文档，写下这篇案例的标题和三条核心观点。",
+                companion_strategy_summary="先接住情绪，再把任务缩成一个最小动作；避免高压催促；一旦出现刷短视频逃避，就立刻拉回一个最小动作。",
+            ),
+            growth=SimpleNamespace(
+                intimacy=42,
+                affinity=36,
+                growth_level=3,
+                evolution_stage="bonded",
+            ),
+        )
+
+
 class _StreamingResponseModel:
     def __init__(self, *parts: str) -> None:
         self.parts = list(parts)
@@ -1157,6 +1199,36 @@ def test_main_brain_chat_service_prompt_adds_plan_shell_tail_without_claiming_ex
     assert "Acceptance criteria" in joined_prompt
     assert "Verification steps" in joined_prompt
     assert "dispatch_query" not in joined_prompt
+
+
+def test_main_brain_chat_service_prompt_includes_buddy_persona_block():
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        model_factory=lambda: _StaticResponseModel("ok"),
+        buddy_projection_service=_FakeBuddyProjectionService(),
+    )
+    request = SimpleNamespace(
+        session_id="sess-buddy-chat",
+        user_id="user-buddy-chat",
+        industry_instance_id=None,
+        work_context_id=None,
+        agent_id=None,
+        buddy_profile_id="profile-buddy",
+    )
+
+    prompt_messages = service._build_prompt_messages(  # pylint: disable=protected-access
+        request=request,
+        query="我又想拖了，你拉我一把。",
+        prior_messages=[],
+        current_messages=[],
+    )
+
+    joined_prompt = "\n".join(message["content"] for message in prompt_messages)
+    assert "# Buddy 对外人格" in joined_prompt
+    assert "伙伴名：小澄" in joined_prompt
+    assert "默认只给用户最终目标、当前任务、为什么现在做、以及唯一下一步" in joined_prompt
+    assert "唯一下一步：现在先打开文档，写下这篇案例的标题和三条核心观点。" in joined_prompt
+    assert "避免高压催促" in joined_prompt
 
 
 @pytest.mark.parametrize(

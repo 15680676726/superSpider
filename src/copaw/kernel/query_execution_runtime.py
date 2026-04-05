@@ -650,6 +650,7 @@ class _QueryExecutionRuntimeMixin(
         knowledge_service: Any | None = None,
         memory_recall_service: Any | None = None,
         memory_activation_service: Any | None = None,
+        buddy_projection_service: Any | None = None,
         actor_mailbox_service: Any | None = None,
         agent_runtime_repository: Any | None = None,
         governance_control_repository: Any | None = None,
@@ -674,6 +675,7 @@ class _QueryExecutionRuntimeMixin(
         self._knowledge_service = knowledge_service
         self._memory_recall_service = memory_recall_service
         self._memory_activation_service = memory_activation_service
+        self._buddy_projection_service = buddy_projection_service
         self._actor_mailbox_service = actor_mailbox_service
         self._agent_runtime_repository = agent_runtime_repository
         self._governance_control_repository = governance_control_repository
@@ -737,6 +739,9 @@ class _QueryExecutionRuntimeMixin(
 
     def set_memory_recall_service(self, memory_recall_service: Any | None) -> None:
         self._memory_recall_service = memory_recall_service
+
+    def set_buddy_projection_service(self, buddy_projection_service: Any | None) -> None:
+        self._buddy_projection_service = buddy_projection_service
 
     def set_memory_activation_service(self, memory_activation_service: Any | None) -> None:
         self._memory_activation_service = memory_activation_service

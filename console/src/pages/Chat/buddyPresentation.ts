@@ -26,7 +26,7 @@ export function presentBuddyPresenceLabel(presence?: string | null): string {
     case "supporting":
       return "正在陪跑";
     case "pulling-back":
-      return "拉你回航";
+      return "把你拉回正轨";
     case "celebrating":
       return "陪你庆祝";
     case "resting":
@@ -53,6 +53,19 @@ export function presentBuddyMoodLabel(mood?: string | null): string {
     case "calm":
     default:
       return "平静";
+  }
+}
+
+export function presentBuddyEncouragementStyleLabel(style?: string | null): string {
+  switch ((style || "").trim()) {
+    case "old-friend":
+      return "像老朋友";
+    case "coach":
+      return "像成长教练";
+    case "steady":
+      return "稳稳陪着你";
+    default:
+      return "像老朋友";
   }
 }
 

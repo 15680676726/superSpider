@@ -922,51 +922,76 @@ export default function MainBrainCockpitPanel({
         </div>
       </Card>
 
-      {buddySummary ? (
-        <Card size="small" title="伙伴摘要" style={{ marginBottom: 16 }}>
-          <div className={styles.briefGrid}>
-            <div className={styles.briefCard}>
-              <div className={styles.briefTitle}>{buddySummary.buddy_name}</div>
-              <div className={styles.briefList}>
-                <div className={styles.briefItem}>
-                  {localizeRuntimeText(
-                    `${presentBuddyStageLabel(buddySummary.evolution_stage)} / 心情 ${presentBuddyMoodLabel(buddySummary.mood_state)}`,
-                  )}
+      {buddySummary
+        ? (() => {
+            const summary = buddySummary;
+            return (
+              <Card size="small" title="伙伴摘要" style={{ marginBottom: 16 }}>
+                <div className={styles.briefGrid}>
+                  <div className={styles.briefCard}>
+                    <div className={styles.briefTitle}>{summary.buddy_name}</div>
+                    <div className={styles.briefList}>
+                      <div className={styles.briefItem}>
+                        {localizeRuntimeText(
+                          `${presentBuddyStageLabel(summary.evolution_stage)} / 心情 ${presentBuddyMoodLabel(summary.mood_state)}`,
+                        )}
+                      </div>
+                      <div className={styles.briefItem}>
+                        {localizeRuntimeText(
+                          `等级 ${summary.growth_level} / 亲密度 ${summary.intimacy} / 契合度 ${summary.affinity}`,
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className={styles.briefCard}>
+                    <div className={styles.briefTitle}>最终目标</div>
+                    <div className={styles.briefList}>
+                      <div className={styles.briefItem}>
+                        {localizeRuntimeText(summary.current_goal_summary)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className={styles.briefCard}>
+                    <div className={styles.briefTitle}>当前任务</div>
+                    <div className={styles.briefList}>
+                      <div className={styles.briefItem}>
+                        {localizeRuntimeText(summary.current_task_summary)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className={styles.briefCard}>
+                    <div className={styles.briefTitle}>为什么现在做</div>
+                    <div className={styles.briefList}>
+                      <div className={styles.briefItem}>
+                        {localizeRuntimeText(summary.why_now_summary)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className={styles.briefCard}>
+                    <div className={styles.briefTitle}>唯一下一步</div>
+                    <div className={styles.briefList}>
+                      <div className={styles.briefItem}>
+                        {localizeRuntimeText(
+                          summary.single_next_action_summary || "先把任务缩成一个最小动作。",
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className={styles.briefCard}>
+                    <div className={styles.briefTitle}>陪伴策略</div>
+                    <div className={styles.briefList}>
+                      <div className={styles.briefItem}>
+                        {localizeRuntimeText(
+                          summary.companion_strategy_summary || "先接住情绪，再把任务缩成一个最小动作。",
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className={styles.briefItem}>
-                  {localizeRuntimeText(
-                    `等级 ${buddySummary.growth_level} / 亲密度 ${buddySummary.intimacy} / 契合度 ${buddySummary.affinity}`,
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className={styles.briefCard}>
-              <div className={styles.briefTitle}>最终目标</div>
-              <div className={styles.briefList}>
-                <div className={styles.briefItem}>
-                  {localizeRuntimeText(buddySummary.current_goal_summary)}
-                </div>
-              </div>
-            </div>
-            <div className={styles.briefCard}>
-              <div className={styles.briefTitle}>当前任务</div>
-              <div className={styles.briefList}>
-                <div className={styles.briefItem}>
-                  {localizeRuntimeText(buddySummary.current_task_summary)}
-                </div>
-              </div>
-            </div>
-            <div className={styles.briefCard}>
-              <div className={styles.briefTitle}>为什么现在做</div>
-              <div className={styles.briefList}>
-                <div className={styles.briefItem}>
-                  {localizeRuntimeText(buddySummary.why_now_summary)}
-                </div>
-              </div>
-            </div>
-          </div>
-        </Card>
-      ) : null}
+              </Card>
+            );
+          })()
+        : null}
 
       <Descriptions
         size="small"

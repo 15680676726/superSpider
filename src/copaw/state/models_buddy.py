@@ -111,6 +111,8 @@ class BuddyPresentation(UpdatedRecord):
     current_goal_summary: str = ""
     current_task_summary: str = ""
     why_now_summary: str = ""
+    single_next_action_summary: str = ""
+    companion_strategy_summary: str = ""
 
 
 class BuddyGrowthProjection(UpdatedRecord):

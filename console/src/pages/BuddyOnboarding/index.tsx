@@ -170,10 +170,11 @@ export default function BuddyOnboardingPage() {
       <Card>
         <Space direction="vertical" size={8} style={{ width: "100%" }}>
           <Title level={2} style={{ margin: 0 }}>
-            Buddy 初始建档
+            Buddy 初次建档
           </Title>
           <Paragraph style={{ margin: 0 }}>
-            先让我认真了解你，再一起收口一个足够大的长期方向。默认不会把整棵计划树压给你，只会先帮你看清最终目标和眼前这一步。
+            先让我认真了解你，再一起收口一个足够大的长期方向。默认不会把整棵计划树压给你，
+            只会先帮你看清最终目标和眼前这一小步。
           </Paragraph>
           <Steps
             current={stepIndex}
@@ -198,13 +199,13 @@ export default function BuddyOnboardingPage() {
           >
             <Form.Item label="姓名" name="display_name" rules={[{ required: true }]}>
               <Input
-                placeholder="你希望我怎么称呼你"
+                placeholder="你希望我怎么称呼你？"
                 data-testid="buddy-identity-display-name"
               />
             </Form.Item>
             <Form.Item label="职业" name="profession" rules={[{ required: true }]}>
               <Input
-                placeholder="你现在主要在做什么"
+                placeholder="你现在主要在做什么？"
                 data-testid="buddy-identity-profession"
               />
             </Form.Item>
@@ -226,7 +227,7 @@ export default function BuddyOnboardingPage() {
             <Form.Item label="目标意向" name="goal_intention" rules={[{ required: true }]}>
               <TextArea
                 rows={3}
-                placeholder="先说你隐约想改变什么，模糊也没关系"
+                placeholder="先说你隐约想改变什么，模糊也没有关系"
                 data-testid="buddy-identity-goal-intention"
               />
             </Form.Item>

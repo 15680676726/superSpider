@@ -13,6 +13,12 @@ def build_buddy_current_focus_resolver(
     assignment_service: object,
     backlog_service: object,
 ) -> object:
+    def _single_next_action(summary: str) -> str:
+        text = str(summary or "").strip()
+        if not text:
+            return ""
+        return f"现在先完成这一步：{text}"
+
     def _resolve(profile_id: str) -> dict[str, str] | None:
         get_agent = getattr(agent_profile_service, "get_agent", None)
         profile = get_agent(EXECUTION_CORE_AGENT_ID) if callable(get_agent) else None
@@ -24,6 +30,7 @@ def build_buddy_current_focus_resolver(
             return {
                 "current_task_summary": current_focus,
                 "why_now_summary": why_now,
+                "single_next_action_summary": _single_next_action(current_focus),
             }
         get_instance = getattr(industry_instance_repository, "get_instance", None)
         instance = get_instance(f"buddy:{profile_id}") if callable(get_instance) else None
@@ -48,6 +55,7 @@ def build_buddy_current_focus_resolver(
                     return {
                         "current_task_summary": summary,
                         "why_now_summary": why_now,
+                        "single_next_action_summary": _single_next_action(summary),
                     }
         list_open_items = getattr(backlog_service, "list_open_items", None)
         if callable(list_open_items):
@@ -61,6 +69,7 @@ def build_buddy_current_focus_resolver(
                     return {
                         "current_task_summary": summary,
                         "why_now_summary": why_now,
+                        "single_next_action_summary": _single_next_action(summary),
                     }
         return {"why_now_summary": why_now} if why_now else None
 
