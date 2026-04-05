@@ -8,6 +8,7 @@ from copaw.compiler.planning import (
 )
 from copaw.memory.knowledge_graph_models import (
     KnowledgeGraphNode,
+    KnowledgeGraphPath,
     KnowledgeGraphRelation,
     KnowledgeGraphScope,
     TaskSubgraph,
@@ -112,6 +113,54 @@ def _task_subgraph() -> TaskSubgraph:
                 },
             )
         ],
+        contradiction_paths=[
+            KnowledgeGraphPath(
+                path_type="contradiction",
+                score=8.5,
+                node_ids=["entity:weekend-variance", "opinion:approval-caution"],
+                relation_ids=["relation-approval-1"],
+                relation_kinds=["contradicts"],
+                summary="Weekend variance contradicts publish readiness until approval evidence is refreshed.",
+                evidence_refs=["memory:weekend-variance-gap"],
+                source_refs=["memory:weekend-variance-gap"],
+            )
+        ],
+        dependency_paths=[
+            KnowledgeGraphPath(
+                path_type="dependency",
+                score=9.1,
+                node_ids=["assignment:partner-release", "fact:approval-refresh"],
+                relation_ids=["relation-approval-2"],
+                relation_kinds=["depends_on"],
+                summary="Partner release depends on refreshed approval evidence.",
+                evidence_refs=["memory:weekend-variance-gap"],
+                source_refs=["memory:weekend-variance-gap"],
+            )
+        ],
+        blocker_paths=[
+            KnowledgeGraphPath(
+                path_type="blocker",
+                score=8.8,
+                node_ids=["fact:approval-contradiction", "assignment:partner-release"],
+                relation_ids=["relation-approval-3"],
+                relation_kinds=["blocks"],
+                summary="Approval contradiction blocks partner release until review is complete.",
+                evidence_refs=["memory:weekend-variance-gap"],
+                source_refs=["memory:weekend-variance-gap"],
+            )
+        ],
+        recovery_paths=[
+            KnowledgeGraphPath(
+                path_type="recovery",
+                score=7.9,
+                node_ids=["failure:stale-approval-cache", "recovery:refresh-approval-state"],
+                relation_ids=["relation-approval-4"],
+                relation_kinds=["recovers_with"],
+                summary="Refresh approval state before any governed publish move.",
+                evidence_refs=["memory:weekend-variance-gap"],
+                source_refs=["memory:weekend-variance-gap"],
+            )
+        ],
         metadata={
             "top_entities": ["weekend-variance", "inventory"],
             "top_opinions": ["approval:caution:contradiction"],
@@ -136,11 +185,18 @@ def test_cycle_planner_uses_task_subgraph_focus_without_hidden_recall() -> None:
         next_cycle_due_at=None,
         open_backlog=[
             _backlog_item(
-                "generic-publish-refresh",
+                "publish-partner-release",
                 lane_id="lane-ops",
                 priority=3,
-                title="Refresh publish checklist",
-                summary="Refresh the generic checklist before the next publish window.",
+                title="Publish partner release now",
+                summary="Publish the partner release after the generic checklist is green.",
+            ),
+            _backlog_item(
+                "approval-evidence-refresh",
+                lane_id="lane-ops",
+                priority=3,
+                title="Refresh approval evidence before release",
+                summary="Refresh approval evidence and verify the release dependency before any publish move.",
             ),
             _backlog_item(
                 "approval-contradiction-review",
@@ -157,9 +213,22 @@ def test_cycle_planner_uses_task_subgraph_focus_without_hidden_recall() -> None:
     )
 
     assert decision.should_start is True
-    assert decision.selected_backlog_item_ids[0] == "approval-contradiction-review"
-    assert decision.affected_relation_ids == ["relation-approval-1"]
-    assert decision.affected_relation_kinds == ["contradicts"]
+    assert decision.selected_backlog_item_ids[:2] == [
+        "approval-evidence-refresh",
+        "approval-contradiction-review",
+    ]
+    assert decision.affected_relation_ids == [
+        "relation-approval-1",
+        "relation-approval-2",
+        "relation-approval-3",
+        "relation-approval-4",
+    ]
+    assert decision.affected_relation_kinds == [
+        "contradicts",
+        "depends_on",
+        "blocks",
+        "recovers_with",
+    ]
 
 
 def test_assignment_planner_projects_task_subgraph_into_execution_contract() -> None:
@@ -200,6 +269,9 @@ def test_assignment_planner_projects_task_subgraph_into_execution_contract() -> 
     assert knowledge["failure_patterns"] == ["Stale approval cache"]
     assert knowledge["recovery_patterns"] == ["Refresh approval state before publish"]
     assert knowledge["relation_ids"] == ["relation-approval-1"]
+    assert knowledge["dependency_paths"][0]["path_type"] == "dependency"
+    assert knowledge["blocker_paths"][0]["path_type"] == "blocker"
+    assert knowledge["recovery_paths"][0]["path_type"] == "recovery"
     assert any(
         checkpoint["kind"] == "capability-ready"
         and checkpoint["label"] == "Partner portal browser capability"
@@ -213,5 +285,20 @@ def test_assignment_planner_projects_task_subgraph_into_execution_contract() -> 
     assert any(
         checkpoint["kind"] == "failure-watch"
         and checkpoint["label"] == "Stale approval cache"
+        for checkpoint in envelope.checkpoints
+    )
+    assert any(
+        checkpoint["kind"] == "dependency-path"
+        and "depends on refreshed approval evidence" in checkpoint["label"]
+        for checkpoint in envelope.checkpoints
+    )
+    assert any(
+        checkpoint["kind"] == "blocker-path"
+        and "blocks partner release" in checkpoint["label"]
+        for checkpoint in envelope.checkpoints
+    )
+    assert any(
+        checkpoint["kind"] == "recovery-path"
+        and "Refresh approval state" in checkpoint["label"]
         for checkpoint in envelope.checkpoints
     )

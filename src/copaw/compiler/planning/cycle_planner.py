@@ -360,6 +360,33 @@ class CyclePlanningCompiler:
             if relation_id is not None:
                 seen_relation_ids.add(relation_id)
             relation_evidence.append(dict(entry))
+        for path_group in (
+            "support_paths",
+            "contradiction_paths",
+            "dependency_paths",
+            "blocker_paths",
+            "recovery_paths",
+        ):
+            for entry in list(projection.get(path_group) or []):
+                if not isinstance(entry, dict):
+                    continue
+                relation_id = _string((entry.get("relation_ids") or [None])[0])
+                if relation_id is not None and relation_id in seen_relation_ids:
+                    continue
+                if relation_id is not None:
+                    seen_relation_ids.add(relation_id)
+                relation_evidence.append(
+                    {
+                        "relation_id": relation_id,
+                        "relation_kind": _string((entry.get("relation_kinds") or [None])[0]),
+                        "summary": _string(entry.get("summary")),
+                        "source_refs": list(entry.get("source_refs") or []),
+                        "source_node_id": _string((entry.get("node_ids") or [None])[0]),
+                        "target_node_id": _string((entry.get("node_ids") or [None, None])[1]),
+                        "path_type": _string(entry.get("path_type")),
+                        "path_score": _number(entry.get("score")),
+                    },
+                )
         return constraints.model_copy(
             update={
                 "current_focuses": _unique_strings(
@@ -459,6 +486,7 @@ class CyclePlanningCompiler:
             _backlog_followup_overdue_score(item),
             1 if _backlog_is_report_followup(item) else 0,
             int(item.priority or 0),
+            self._path_ordering_score(item=item, constraints=constraints),
             self._relation_focus_score(item=item, constraints=constraints),
             self._graph_focus_score(item=item, constraints=constraints),
             self._strategy_priority_score(item=item, constraints=constraints),
@@ -889,6 +917,55 @@ class CyclePlanningCompiler:
             )["score"],
         )
 
+    def _path_ordering_score(
+        self,
+        *,
+        item: BacklogItemRecord,
+        constraints: PlanningStrategyConstraints,
+    ) -> int:
+        item_tokens = self._item_tokens(item)
+        if not item_tokens:
+            return 0
+        score = 0
+        for entry in list(getattr(constraints, "graph_relation_evidence", []) or []):
+            if not isinstance(entry, dict):
+                continue
+            path_type = _string(entry.get("path_type"))
+            if path_type is None:
+                continue
+            path_tokens = set(
+                _tokenize(
+                    " ".join(
+                        _unique_strings(
+                            entry.get("summary"),
+                            entry.get("relation_kind"),
+                            entry.get("source_node_id"),
+                            entry.get("target_node_id"),
+                            entry.get("source_refs"),
+                        ),
+                    ),
+                ),
+            )
+            overlap = item_tokens & path_tokens
+            if not overlap:
+                continue
+            if path_type == "dependency":
+                score += 12 + len(overlap)
+                if item_tokens.intersection({"refresh", "verify", "evidence", "dependency"}):
+                    score += 10
+            elif path_type == "contradiction":
+                score += 8 + len(overlap)
+            elif path_type == "recovery":
+                score += 6 + len(overlap)
+            elif path_type == "support":
+                score += 4 + len(overlap)
+            elif path_type == "blocker":
+                if item_tokens.intersection({"refresh", "verify", "resolve", "unblock", "clear"}):
+                    score += 10 + len(overlap)
+                elif item_tokens.intersection({"publish", "release", "launch", "ship", "deploy"}):
+                    score -= 12
+        return score
+
     def _relation_focus_projection(
         self,
         *,
@@ -959,7 +1036,23 @@ class CyclePlanningCompiler:
             overlap = item_tokens & relation_tokens
             if not overlap:
                 continue
-            score += len(overlap)
+            path_type = _string(entry.get("path_type"))
+            path_score = _number(entry.get("path_score"))
+            bonus = len(overlap)
+            if path_type == "dependency":
+                bonus += 8
+            elif path_type == "contradiction":
+                bonus += 3
+            elif path_type == "support":
+                bonus += 2
+            elif path_type == "recovery":
+                bonus += 2
+            elif path_type == "blocker":
+                if item_tokens.intersection({"resolve", "review", "refresh", "verify", "clarify", "unblock"}):
+                    bonus += 5
+                if item_tokens.intersection({"publish", "release", "launch", "ship", "deploy"}):
+                    bonus -= 6
+            score += bonus + int(path_score // 4)
             relation_id = _string(entry.get("relation_id"))
             if relation_id is not None and relation_id not in relation_ids:
                 relation_ids.append(relation_id)

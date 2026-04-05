@@ -128,6 +128,23 @@ def _task_subgraph_node_refs(
     return _string_list(refs)
 
 
+def _task_subgraph_paths(
+    subgraph: TaskSubgraph,
+    *,
+    attribute: str,
+) -> list[dict[str, Any]]:
+    paths = getattr(subgraph, attribute, None)
+    if not isinstance(paths, list):
+        return []
+    items: list[dict[str, Any]] = []
+    for path in paths:
+        if isinstance(path, BaseModel):
+            payload = path.model_dump(mode="python", exclude_none=True)
+            if isinstance(payload, dict):
+                items.append(payload)
+    return items
+
+
 def project_task_subgraph_to_planning_focus(value: object | None) -> dict[str, Any]:
     subgraph = coerce_task_subgraph(value)
     if subgraph is None:
@@ -191,6 +208,11 @@ def project_task_subgraph_to_planning_focus(value: object | None) -> dict[str, A
     recovery_patterns = _task_subgraph_node_titles(subgraph, node_type="recovery_pattern")
     capability_labels = _task_subgraph_node_titles(subgraph, node_type="capability")
     environment_labels = _task_subgraph_node_titles(subgraph, node_type="environment")
+    support_paths = _task_subgraph_paths(subgraph, attribute="support_paths")
+    contradiction_paths = _task_subgraph_paths(subgraph, attribute="contradiction_paths")
+    dependency_paths = _task_subgraph_paths(subgraph, attribute="dependency_paths")
+    blocker_paths = _task_subgraph_paths(subgraph, attribute="blocker_paths")
+    recovery_paths = _task_subgraph_paths(subgraph, attribute="recovery_paths")
     if not any(
         (
             top_entities,
@@ -201,6 +223,11 @@ def project_task_subgraph_to_planning_focus(value: object | None) -> dict[str, A
             environment_refs,
             failure_patterns,
             recovery_patterns,
+            support_paths,
+            contradiction_paths,
+            dependency_paths,
+            blocker_paths,
+            recovery_paths,
             subgraph.top_constraint_refs,
             subgraph.top_evidence_refs,
             subgraph.focus_node_ids,
@@ -228,6 +255,11 @@ def project_task_subgraph_to_planning_focus(value: object | None) -> dict[str, A
         "environment_labels": environment_labels,
         "failure_patterns": failure_patterns,
         "recovery_patterns": recovery_patterns,
+        "support_paths": support_paths,
+        "contradiction_paths": contradiction_paths,
+        "dependency_paths": dependency_paths,
+        "blocker_paths": blocker_paths,
+        "recovery_paths": recovery_paths,
     }
 
 

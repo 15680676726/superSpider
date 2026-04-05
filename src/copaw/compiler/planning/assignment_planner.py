@@ -274,6 +274,21 @@ class AssignmentPlanningCompiler:
             {"kind": "failure-watch", "label": label}
             for label in list(knowledge_subgraph.get("failure_patterns") or [])
         )
+        checkpoints.extend(
+            {"kind": "dependency-path", "label": str(entry.get("summary"))}
+            for entry in list(knowledge_subgraph.get("dependency_paths") or [])
+            if _string(entry.get("summary")) is not None
+        )
+        checkpoints.extend(
+            {"kind": "blocker-path", "label": str(entry.get("summary"))}
+            for entry in list(knowledge_subgraph.get("blocker_paths") or [])
+            if _string(entry.get("summary")) is not None
+        )
+        checkpoints.extend(
+            {"kind": "recovery-path", "label": str(entry.get("summary"))}
+            for entry in list(knowledge_subgraph.get("recovery_paths") or [])
+            if _string(entry.get("summary")) is not None
+        )
         if not any("verify" in step.lower() for step in plan_steps):
             checkpoints.append(
                 {"kind": "verify", "label": "Verify the result and supporting evidence."},
@@ -308,6 +323,12 @@ class AssignmentPlanningCompiler:
             lane.owner_role_id if lane is not None else None
         )
         report_back_mode = _string(metadata.get("report_back_mode")) or "summary"
+        execution_ordering_hints = _string_list(
+            [entry.get("summary") for entry in list(knowledge_subgraph.get("dependency_paths") or [])],
+            [entry.get("summary") for entry in list(knowledge_subgraph.get("blocker_paths") or [])],
+            [entry.get("summary") for entry in list(knowledge_subgraph.get("recovery_paths") or [])],
+            [entry.get("summary") for entry in list(knowledge_subgraph.get("contradiction_paths") or [])],
+        )
         return AssignmentPlanEnvelope(
             assignment_id=assignment_id,
             backlog_item_id=backlog_item.id,
@@ -332,6 +353,7 @@ class AssignmentPlanningCompiler:
                 "local_replan_policy": local_replan_policy,
                 "planning_policy": list(constraints.planning_policy or []),
                 "knowledge_subgraph": dict(knowledge_subgraph),
+                "execution_ordering_hints": execution_ordering_hints,
             },
             planning_shell=build_planning_shell_payload(
                 mode="assignment-planning-shell",
