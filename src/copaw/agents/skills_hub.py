@@ -538,6 +538,41 @@ def _is_supported_bundle_source(url: str) -> bool:
     )
 
 
+def remote_skill_bundle_is_installable(
+    bundle_url: str,
+    *,
+    version: str = "",
+) -> bool:
+    if not bundle_url or not _is_http_url(bundle_url):
+        return False
+    if not _is_supported_bundle_source(bundle_url):
+        return False
+    if is_skillhub_url(bundle_url):
+        return _skillhub_bundle_is_installable(bundle_url)
+    try:
+        if _extract_skills_sh_spec(bundle_url) is not None:
+            data, _source_url = _fetch_bundle_from_skills_sh_url(
+                bundle_url,
+                requested_version=version,
+            )
+        elif _extract_github_spec(bundle_url) is not None:
+            data, _source_url = _fetch_bundle_from_github_url(
+                bundle_url,
+                requested_version=version,
+            )
+        elif _extract_skillsmp_slug(bundle_url):
+            data, _source_url = _fetch_bundle_from_skillsmp_url(
+                bundle_url,
+                requested_version=version,
+            )
+        else:
+            return False
+        _normalize_bundle(data)
+        return True
+    except Exception:
+        return False
+
+
 def _inject_package_metadata(
     content: str,
     *,
@@ -1069,6 +1104,81 @@ def _fetch_bundle_from_repo_and_skill_hint(
     return {"name": skill_name or repo, "files": files}, source_url
 
 
+def _github_raw_content_url(
+    owner: str,
+    repo: str,
+    branch: str,
+    path: str,
+) -> str:
+    normalized_path = path.strip("/")
+    return (
+        f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{normalized_path}"
+    )
+
+
+def _fetch_bundle_from_github_raw_fallback(
+    *,
+    owner: str,
+    repo: str,
+    path_hint: str,
+    requested_version: str,
+    default_branch: str = "main",
+) -> tuple[Any, str]:
+    branch_candidates = (
+        [requested_version.strip()]
+        if requested_version.strip()
+        else ["main", "master"]
+    )
+    if default_branch and default_branch not in branch_candidates:
+        branch_candidates.append(default_branch)
+    normalized_hint = path_hint.strip("/")
+    if normalized_hint.endswith("/SKILL.md"):
+        normalized_hint = normalized_hint[: -len("/SKILL.md")]
+    elif normalized_hint == "SKILL.md":
+        normalized_hint = ""
+    root_candidates = []
+    for root in [
+        normalized_hint,
+        _join_repo_path("skills", normalized_hint) if normalized_hint else "",
+        "",
+    ]:
+        root = root.strip("/")
+        if root not in root_candidates:
+            root_candidates.append(root)
+    for branch in branch_candidates:
+        for root in root_candidates:
+            skill_md_path = _join_repo_path(root, "SKILL.md")
+            try:
+                content = _http_text_get(
+                    _github_raw_content_url(
+                        owner,
+                        repo,
+                        branch,
+                        skill_md_path,
+                    ),
+                )
+            except Exception:
+                continue
+            source_url = f"https://github.com/{owner}/{repo}"
+            if root:
+                source_url = f"{source_url}/tree/{branch}/{root}"
+            skill_name = ""
+            try:
+                skill_post = frontmatter.loads(content)
+                skill_name = str(skill_post.get("name") or "").strip()
+            except Exception:
+                skill_name = ""
+            if not skill_name:
+                skill_name = root.split("/")[-1].strip() if root else repo
+            return {
+                "name": skill_name or repo,
+                "files": {"SKILL.md": content},
+            }, source_url
+    raise ValueError(
+        f"Could not find raw SKILL.md in source repository https://github.com/{owner}/{repo}.",
+    )
+
+
 def _fetch_bundle_from_github_url(
     bundle_url: str,
     requested_version: str,
@@ -1093,13 +1203,25 @@ def _fetch_bundle_from_github_url(
         default_branch = _github_get_default_branch(owner, repo)
     except Exception:
         pass
-    return _fetch_bundle_from_repo_and_skill_hint(
-        owner=owner,
-        repo=repo,
-        skill_hint=path_hint,
-        requested_version=branch,
-        default_branch=default_branch or "main",
-    )
+    try:
+        return _fetch_bundle_from_repo_and_skill_hint(
+            owner=owner,
+            repo=repo,
+            skill_hint=path_hint,
+            requested_version=branch,
+            default_branch=default_branch or "main",
+        )
+    except Exception as exc:
+        try:
+            return _fetch_bundle_from_github_raw_fallback(
+                owner=owner,
+                repo=repo,
+                path_hint=path_hint,
+                requested_version=branch,
+                default_branch=default_branch or "main",
+            )
+        except Exception:
+            raise exc
 
 
 def _fetch_bundle_from_skillsmp_url(

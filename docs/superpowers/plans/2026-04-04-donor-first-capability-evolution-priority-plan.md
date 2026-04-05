@@ -19,7 +19,7 @@ That runtime boundary is now satisfied for this donor-first wave. The gaps that 
 
 - autonomous scout now runs on a real default discovery executor
 - opportunity radar now ships with bounded default feeds
-- generic GitHub/open-source donor search is on the runtime path
+- GitHub donor search is on the runtime path, with current live closure scoped to SKILL-backed repositories that expose a valid `SKILL.md` bundle
 - SkillHub/curated search now suppresses dead bundles before default results are returned
 
 So this plan should be executed as:

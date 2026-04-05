@@ -18,7 +18,7 @@ Current verified runtime reality:
 - Runtime Center donor/package/trust/scout read surfaces exist
 - runtime bootstrap discovery executor is wired to real external providers instead of an empty placeholder
 - opportunity radar now carries bounded default feeds instead of `feeds={}`
-- generic open-source / GitHub donor search is on the runtime discovery path
+- GitHub donor discovery is on the runtime discovery path; the currently live-verified GitHub adoption boundary is SKILL-backed repositories that expose a valid `SKILL.md` bundle
 - SkillHub / curated results suppress dead bundles before default search results are returned
 - source-chain now records `empty` distinctly, advances to the next source, and only records last-known-good snapshot success when a source actually yields results
 
@@ -30,6 +30,7 @@ Fresh live-verified surfaces now include:
 - browser-local template install -> start -> attach -> stop
 - desktop-windows template install -> live connection
 - GitHub donor discovery through the runtime discovery executor
+- direct GitHub repo query (`https://github.com/owner/repo` or `owner/repo`) -> project search -> install -> scoped trial for SKILL-backed repositories
 - scout gap/opportunity runs importing real donor candidates
 - snapshot fallback after forced primary-source failure
 - offline-private cache-backed discovery path

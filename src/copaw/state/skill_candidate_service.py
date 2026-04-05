@@ -158,6 +158,27 @@ class CapabilityCandidateService:
             ).fetchone()
         return self._row_to_record(row) if row is not None else None
 
+    def update_candidate_status(
+        self,
+        candidate_id: str,
+        *,
+        status: str | None = None,
+        lifecycle_stage: str | None = None,
+        metadata_updates: dict[str, Any] | None = None,
+    ) -> CapabilityCandidateRecord | None:
+        record = self.get_candidate(candidate_id)
+        if record is None:
+            return None
+        updated = record.model_copy(
+            update={
+                "status": _string(status) or record.status,
+                "lifecycle_stage": _string(lifecycle_stage) or record.lifecycle_stage,
+                "metadata": _merge_metadata(record.metadata, metadata_updates or {}),
+            },
+        )
+        self._upsert_record(updated)
+        return updated
+
     def summarize_candidates(self) -> dict[str, object]:
         items = self.list_candidates()
         by_kind: dict[str, int] = {}
@@ -392,8 +413,8 @@ class CapabilityCandidateService:
         imported: list[CapabilityCandidateRecord] = []
         for hit in normalized_hits:
             candidate_source_ref = (
-                _string(hit.canonical_package_id)
-                or _string(hit.candidate_source_ref)
+                _string(hit.candidate_source_ref)
+                or _string(hit.canonical_package_id)
                 or _string(hit.display_name)
             )
             existing = self._find_existing_candidate(

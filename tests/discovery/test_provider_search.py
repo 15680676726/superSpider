@@ -23,6 +23,11 @@ def test_search_github_repository_donors_builds_normalized_hits(monkeypatch) -> 
             ],
         },
     )
+    monkeypatch.setattr(
+        provider_search_module,
+        "remote_skill_bundle_is_installable",
+        lambda bundle_url, version="": True,
+    )
 
     hits = provider_search_module.search_github_repository_donors(
         "browser automation github",
@@ -38,3 +43,75 @@ def test_search_github_repository_donors_builds_normalized_hits(monkeypatch) -> 
     assert hit.candidate_source_lineage == "donor:github:acme/browser-pilot"
     assert "browser" in hit.capability_keys
     assert "automation" in hit.capability_keys
+
+
+def test_search_github_repository_donors_suppresses_non_installable_repositories(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        provider_search_module,
+        "_github_api_json",
+        lambda _query, limit=10, search_url=None: {
+            "items": [
+                {
+                    "full_name": "acme/broken-browser",
+                    "html_url": "https://github.com/acme/broken-browser",
+                    "description": "Not installable",
+                    "topics": ["browser"],
+                    "language": "Python",
+                    "default_branch": "main",
+                    "stargazers_count": 10,
+                    "updated_at": "2026-04-05T09:00:00Z",
+                },
+                {
+                    "full_name": "acme/browser-pilot",
+                    "html_url": "https://github.com/acme/browser-pilot",
+                    "description": "Installable browser donor",
+                    "topics": ["browser", "automation"],
+                    "language": "Python",
+                    "default_branch": "main",
+                    "stargazers_count": 1200,
+                    "updated_at": "2026-04-05T09:00:00Z",
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        provider_search_module,
+        "remote_skill_bundle_is_installable",
+        lambda bundle_url, version="": bundle_url.endswith("browser-pilot"),
+    )
+
+    hits = provider_search_module.search_github_repository_donors(
+        "browser automation github",
+        limit=5,
+    )
+
+    assert [hit.display_name for hit in hits] == ["acme/browser-pilot"]
+    assert hits[0].metadata["install_supported"] is True
+
+
+def test_search_github_repository_donors_supports_direct_repo_query(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        provider_search_module,
+        "_github_api_json",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("search API should not run for direct repo query"),
+        ),
+    )
+    monkeypatch.setattr(
+        provider_search_module,
+        "remote_skill_bundle_is_installable",
+        lambda bundle_url, version="": bundle_url == "https://github.com/acme/browser-pilot",
+    )
+
+    hits = provider_search_module.search_github_repository_donors(
+        "https://github.com/acme/browser-pilot",
+        limit=5,
+    )
+
+    assert len(hits) == 1
+    assert hits[0].display_name == "acme/browser-pilot"
+    assert hits[0].candidate_source_ref == "https://github.com/acme/browser-pilot"

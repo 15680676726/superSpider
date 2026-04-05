@@ -6,11 +6,14 @@ import os
 import re
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from ..agents.skills_hub import search_hub_skills
 from ..capabilities.mcp_registry import McpRegistryCatalog
+from ..capabilities.remote_skill_contract import (
+    remote_skill_bundle_is_installable,
+)
 from ..capabilities.remote_skill_catalog import search_curated_skill_catalog
 from .models import DiscoveryHit, OpportunityRadarItem
 
@@ -38,6 +41,28 @@ def _query_terms(query: str) -> tuple[str, ...]:
         seen.add(token)
         items.append(token)
     return tuple(items)
+
+
+def _direct_github_repo_query(query: str) -> tuple[str, str] | None:
+    normalized_query = _normalize_text(query)
+    if not normalized_query:
+        return None
+    parsed = urlparse(normalized_query)
+    if parsed.scheme in {"http", "https"}:
+        host = (parsed.netloc or "").strip().lower()
+        if host not in {"github.com", "www.github.com"}:
+            return None
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) < 2:
+            return None
+        return parts[0], parts[1]
+    match = re.fullmatch(
+        r"(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)",
+        normalized_query,
+    )
+    if match is None:
+        return None
+    return match.group("owner"), match.group("repo")
 
 
 def _unique_strings(*groups: object) -> tuple[str, ...]:
@@ -89,6 +114,33 @@ def search_github_repository_donors(
     limit: int = 10,
     search_url: str | None = None,
 ) -> list[DiscoveryHit]:
+    direct_repo = _direct_github_repo_query(query)
+    if direct_repo is not None:
+        owner, repo = direct_repo
+        source_url = f"https://github.com/{owner}/{repo}"
+        if not remote_skill_bundle_is_installable(source_url):
+            return []
+        return [
+            DiscoveryHit(
+                source_id="github-repo",
+                source_kind="github-repo",
+                source_alias="github",
+                candidate_kind="project",
+                display_name=f"{owner}/{repo}",
+                summary="GitHub donor repository",
+                candidate_source_ref=source_url,
+                candidate_source_version="",
+                candidate_source_lineage=f"donor:github:{owner.lower()}/{repo.lower()}",
+                canonical_package_id=f"pkg:github:{owner.lower()}/{repo.lower()}",
+                capability_keys=_query_terms(f"{owner} {repo}"),
+                metadata={
+                    "provider": "github-repo",
+                    "install_supported": True,
+                    "repository_url": source_url,
+                    "direct_query": True,
+                },
+            ),
+        ]
     payload = _github_api_json(query, limit=limit, search_url=search_url)
     query_tokens = _query_terms(query)
     hits: list[DiscoveryHit] = []
@@ -98,6 +150,12 @@ def search_github_repository_donors(
         full_name = _normalize_text(item.get("full_name"))
         html_url = _normalize_text(item.get("html_url"))
         if not full_name or not html_url:
+            continue
+        default_branch = _normalize_text(item.get("default_branch")) or "main"
+        if not remote_skill_bundle_is_installable(
+            html_url,
+            version=default_branch,
+        ):
             continue
         topics = _unique_strings(item.get("topics") or [])
         capability_keys = _unique_strings(
@@ -116,12 +174,14 @@ def search_github_repository_donors(
                 display_name=full_name,
                 summary=_normalize_text(item.get("description")) or "GitHub donor repository",
                 candidate_source_ref=html_url,
-                candidate_source_version=_normalize_text(item.get("default_branch")) or "main",
+                candidate_source_version=default_branch,
                 candidate_source_lineage=f"donor:github:{full_name.lower()}",
                 canonical_package_id=f"pkg:github:{full_name.lower()}",
                 capability_keys=capability_keys,
                 metadata={
                     "provider": "github-repo",
+                    "install_supported": True,
+                    "repository_url": html_url,
                     "stars": stars,
                     "topics": list(topics),
                     "updated_at": pushed_at,
