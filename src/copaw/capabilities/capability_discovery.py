@@ -43,7 +43,7 @@ from ..industry.service_recommendation_search import (
     _unique_strings,
 )
 from .mcp_registry import McpRegistryCatalog
-from ..state import SQLiteStateStore
+from ..state.store import SQLiteStateStore
 from .browser_runtime import BrowserRuntimeService
 from .install_templates import list_install_templates
 from .recommendation_builders import build_remote_skill_recommendation

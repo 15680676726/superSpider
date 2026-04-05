@@ -18,7 +18,7 @@ from ..agents.tools.browser_control import (
 from ..constant import WORKING_DIR
 from ..environments.cooperative.browser_attach_runtime import BrowserAttachRuntime
 from ..environments.cooperative.browser_companion import BrowserCompanionRuntime
-from ..state import SQLiteStateStore
+from ..state.store import SQLiteStateStore
 
 
 def _utc_now() -> datetime:

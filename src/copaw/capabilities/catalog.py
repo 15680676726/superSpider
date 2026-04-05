@@ -9,6 +9,7 @@ from ..industry.identity import normalize_industry_role_id
 from .mcp_registry import resolve_mcp_registry_package_binding
 from .models import CapabilityMount, CapabilitySummary
 from .registry import CapabilityRegistry
+from .sources.skills import build_skill_capabilities
 from .skill_service import (
     CapabilitySkillService,
     _normalize_package_ref,
@@ -69,8 +70,11 @@ class CapabilityCatalogFacade:
         kind: str | None = None,
         enabled_only: bool = False,
     ) -> list[CapabilityMount]:
+        registry_mounts = self._registry.list_capabilities()
+        if type(self._registry) is CapabilityRegistry:
+            registry_mounts = self._rebind_skill_mounts(registry_mounts)
         mounts = self._bind_package_metadata(
-            self._apply_overrides(self._registry.list_capabilities()),
+            self._apply_overrides(registry_mounts),
         )
         if kind:
             mounts = [mount for mount in mounts if mount.kind == kind]
@@ -420,6 +424,22 @@ class CapabilityCatalogFacade:
                 ),
             )
         return bound_mounts
+
+    def _rebind_skill_mounts(
+        self,
+        mounts: list[CapabilityMount],
+    ) -> list[CapabilityMount]:
+        dynamic_skill_mounts = build_skill_capabilities(self._skill_service)
+        if not dynamic_skill_mounts:
+            return mounts
+        payload = {
+            mount.id: mount
+            for mount in mounts
+            if mount.source_kind != "skill"
+        }
+        for mount in dynamic_skill_mounts:
+            payload[mount.id] = mount
+        return sorted(payload.values(), key=lambda item: (item.kind, item.id))
 
     def _read_skill_package_binding(self, skill: Any) -> dict[str, str | None]:
         reader = getattr(self._skill_service, "read_skill_package_binding", None)

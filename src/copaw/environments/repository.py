@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from ..state import SQLiteStateStore
+from ..state.store import SQLiteStateStore
 from .models import EnvironmentMount, SessionMount
 
 

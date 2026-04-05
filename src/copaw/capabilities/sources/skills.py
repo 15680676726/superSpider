@@ -5,10 +5,10 @@ from ..skill_service import default_skill_service
 from ..models import CapabilityMount
 
 
-def list_skill_capabilities() -> list[CapabilityMount]:
-    enabled = set(default_skill_service.list_available_skill_names())
+def build_skill_capabilities(skill_service: object) -> list[CapabilityMount]:
+    enabled = set(skill_service.list_available_skill_names())
     mounts: list[CapabilityMount] = []
-    for skill in default_skill_service.list_all_skills():
+    for skill in skill_service.list_all_skills():
         environment_requirements: list[str] = []
         if skill.references:
             environment_requirements.append("workspace")
@@ -72,9 +72,16 @@ def list_skill_capabilities() -> list[CapabilityMount]:
     return mounts
 
 
+def list_skill_capabilities() -> list[CapabilityMount]:
+    return build_skill_capabilities(default_skill_service)
+
+
 def _skill_summary(content: str) -> str:
     for line in content.splitlines():
         stripped = line.strip().lstrip("#").strip()
         if stripped:
             return stripped
     return "Skill bundle"
+
+
+__all__ = ["build_skill_capabilities", "list_skill_capabilities"]

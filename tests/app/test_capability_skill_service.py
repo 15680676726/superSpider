@@ -157,6 +157,17 @@ def test_capability_service_skill_service_handles_file_load_and_sync() -> None:
     assert ("sync", (["research"], False)) in skill_service.calls
 
 
+def test_capability_service_get_capability_reads_injected_skill_service() -> None:
+    skill_service = _FakeSkillService()
+    service = CapabilityService(skill_service=skill_service)
+
+    mount = service.get_capability("skill:research")
+
+    assert mount is not None
+    assert mount.id == "skill:research"
+    assert mount.enabled is True
+
+
 def test_capability_skill_service_install_hub_skill_persists_package_binding(
     monkeypatch,
     tmp_path,
