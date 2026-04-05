@@ -6,6 +6,13 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from ..memory.knowledge_graph_models import (
+    KnowledgeGraphNode,
+    KnowledgeGraphRelation,
+    KnowledgeGraphScope,
+    map_memory_fact_type_to_graph_node_type,
+    map_memory_relation_kind_to_graph_relation_type,
+)
 from .model_support import (
     UpdatedRecord,
     _new_record_id,
@@ -91,6 +98,45 @@ class MemoryFactIndexRecord(UpdatedRecord):
         if self.valid_from is None:
             self.valid_from = self.created_at
         return self
+
+    def as_knowledge_graph_node(self) -> KnowledgeGraphNode:
+        node_type = self.metadata.get("knowledge_graph_node_type") or map_memory_fact_type_to_graph_node_type(
+            self.memory_type
+        )
+        return KnowledgeGraphNode(
+            node_id=self.id,
+            node_type=str(node_type),
+            scope=KnowledgeGraphScope(
+                scope_type=self.scope_type,
+                scope_id=self.scope_id,
+                owner_agent_id=self.owner_agent_id,
+                industry_instance_id=self.industry_instance_id,
+            ),
+            title=self.title,
+            summary=self.summary,
+            content=self.content_text or self.content_excerpt,
+            entity_keys=self.entity_keys,
+            opinion_keys=self.opinion_keys,
+            tags=[self.memory_type, *self.tags],
+            source_refs=[self.source_ref],
+            evidence_refs=self.evidence_refs,
+            confidence=self.confidence,
+            quality_score=self.quality_score,
+            status="active" if self.is_latest else "superseded",
+            metadata={
+                **self.metadata,
+                "memory_type": self.memory_type,
+                "relation_kind": self.relation_kind,
+                "owner_scope": self.owner_scope,
+                "role_bindings": list(self.role_bindings),
+                "supersedes_entry_id": self.supersedes_entry_id,
+                "source_updated_at": self.source_updated_at.isoformat()
+                if self.source_updated_at is not None
+                else None,
+                "valid_from": self.valid_from.isoformat() if self.valid_from is not None else None,
+                "expires_at": self.expires_at.isoformat() if self.expires_at is not None else None,
+            },
+        )
 
 
 class MemoryProfileViewRecord(UpdatedRecord):
@@ -207,6 +253,28 @@ class MemoryRelationViewRecord(UpdatedRecord):
     @classmethod
     def _normalize_relation_lists(cls, value: object) -> list[str]:
         return _normalize_text_list(value)
+
+    def as_knowledge_graph_relation(self) -> KnowledgeGraphRelation:
+        return KnowledgeGraphRelation(
+            relation_id=self.relation_id,
+            relation_type=map_memory_relation_kind_to_graph_relation_type(self.relation_kind),
+            source_id=self.source_node_id,
+            target_id=self.target_node_id,
+            scope=KnowledgeGraphScope(
+                scope_type=self.scope_type,
+                scope_id=self.scope_id,
+                owner_agent_id=self.owner_agent_id,
+                industry_instance_id=self.industry_instance_id,
+            ),
+            confidence=self.confidence,
+            source_refs=self.source_refs,
+            evidence_refs=self.source_refs,
+            metadata={
+                **self.metadata,
+                "summary": self.summary,
+                "memory_relation_kind": self.relation_kind,
+            },
+        )
 
 
 class MemoryOpinionViewRecord(UpdatedRecord):
