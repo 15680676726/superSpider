@@ -243,7 +243,7 @@ class CapabilityCatalogFacade:
                     enabled=skill.name in enabled_names,
                 ),
             )
-        return payload
+        return self._dedupe_skill_specs(payload)
 
     def list_available_skill_specs(self) -> list[dict[str, object]]:
         mounts = self.list_capabilities(kind="skill-bundle", enabled_only=True)
@@ -263,7 +263,7 @@ class CapabilityCatalogFacade:
                     enabled=True,
                 ),
             )
-        return payload
+        return self._dedupe_skill_specs(payload)
 
     def list_mcp_client_infos(self) -> list[dict[str, object]]:
         config = self._load_config()
@@ -441,13 +441,14 @@ class CapabilityCatalogFacade:
                 }
         return _fallback_skill_package_binding(skill)
 
-    @staticmethod
     def _build_skill_spec_payload(
+        self,
         *,
         mount: CapabilityMount,
         skill: Any,
         enabled: bool,
     ) -> dict[str, object]:
+        metadata_summary = self._read_skill_metadata_summary(skill, mount)
         return {
             "name": skill.name,
             "content": skill.content,
@@ -459,7 +460,114 @@ class CapabilityCatalogFacade:
             "package_ref": mount.package_ref,
             "package_kind": mount.package_kind,
             "package_version": mount.package_version,
+            "metadata_summary": metadata_summary,
         }
+
+    def _read_skill_metadata_summary(
+        self,
+        skill: Any,
+        mount: CapabilityMount,
+    ) -> dict[str, object]:
+        reader = getattr(self._skill_service, "read_skill_metadata_summary", None)
+        if callable(reader):
+            summary = reader(skill)
+            if isinstance(summary, dict):
+                return {
+                    **self._fallback_skill_metadata_summary(skill, mount),
+                    **summary,
+                }
+        return self._fallback_skill_metadata_summary(skill, mount)
+
+    @staticmethod
+    def _fallback_skill_metadata_summary(
+        skill: Any,
+        mount: CapabilityMount,
+    ) -> dict[str, object]:
+        binding = _fallback_skill_package_binding(skill)
+        target_scope = "global"
+        target_role_id = None
+        target_seat_ref = None
+        content = getattr(skill, "content", "")
+        if isinstance(content, str) and content.strip():
+            try:
+                post = parse_skill_frontmatter(content)
+            except SkillFrontmatterError:
+                post = None
+            if post is not None:
+                target_scope = str(post.get("target_scope") or "global").strip().lower() or "global"
+                target_role_id = str(post.get("target_role_id") or "").strip() or None
+                target_seat_ref = str(post.get("target_seat_ref") or "").strip() or None
+        canonical_skill_root = _normalize_package_ref(
+            getattr(skill, "path", None),
+            package_kind="filesystem",
+        ) or None
+        return {
+            "package_ref": binding.get("package_ref") or mount.package_ref,
+            "package_kind": binding.get("package_kind") or mount.package_kind,
+            "package_version": binding.get("package_version") or mount.package_version,
+            "canonical_skill_root": canonical_skill_root,
+            "target_scope": target_scope,
+            "target_role_id": target_role_id,
+            "target_seat_ref": target_seat_ref,
+            "activation_scope_key": f"{target_scope}:{target_role_id or '*'}:{target_seat_ref or '*'}",
+            "path_scoped_activation": bool(
+                target_scope != "global" or target_role_id is not None or target_seat_ref is not None
+            ),
+            "package_bound": bool((binding.get('package_ref') or mount.package_ref)),
+        }
+
+    @staticmethod
+    def _skill_spec_identity(spec: dict[str, object]) -> tuple[str, str]:
+        metadata = spec.get("metadata_summary")
+        summary = metadata if isinstance(metadata, dict) else {}
+        package_ref = _normalize_package_ref(
+            summary.get("package_ref") or spec.get("package_ref"),
+            package_kind=summary.get("package_kind") or spec.get("package_kind"),
+        )
+        package_kind = _normalize_package_kind(
+            summary.get("package_kind") or spec.get("package_kind"),
+        ) or ""
+        package_version = _normalize_package_version(
+            summary.get("package_version") or spec.get("package_version"),
+        ) or ""
+        if package_ref:
+            return ("package", f"{package_ref}|{package_kind}|{package_version}")
+        canonical_skill_root = _normalize_package_ref(
+            summary.get("canonical_skill_root") or spec.get("path"),
+            package_kind="filesystem",
+        ) or ""
+        return ("path", canonical_skill_root or str(spec.get("name") or ""))
+
+    @staticmethod
+    def _prefer_skill_spec(candidate: dict[str, object], current: dict[str, object]) -> bool:
+        candidate_enabled = bool(candidate.get("enabled"))
+        current_enabled = bool(current.get("enabled"))
+        if candidate_enabled != current_enabled:
+            return candidate_enabled
+        candidate_summary = candidate.get("metadata_summary")
+        current_summary = current.get("metadata_summary")
+        candidate_package_bound = bool(
+            isinstance(candidate_summary, dict) and candidate_summary.get("package_bound")
+        )
+        current_package_bound = bool(
+            isinstance(current_summary, dict) and current_summary.get("package_bound")
+        )
+        if candidate_package_bound != current_package_bound:
+            return candidate_package_bound
+        candidate_source = str(candidate.get("source") or "").strip().lower()
+        current_source = str(current.get("source") or "").strip().lower()
+        if candidate_source != current_source:
+            return candidate_source == "customized"
+        return str(candidate.get("name") or "") < str(current.get("name") or "")
+
+    def _dedupe_skill_specs(self, payload: list[dict[str, object]]) -> list[dict[str, object]]:
+        deduped: dict[tuple[str, str], dict[str, object]] = {}
+        for item in payload:
+            key = self._skill_spec_identity(item)
+            existing = deduped.get(key)
+            if existing is None or self._prefer_skill_spec(item, existing):
+                deduped[key] = item
+        return sorted(deduped.values(), key=lambda item: str(item.get("name") or ""))
 
     def _resolve_agent_profile(self, agent_id: str | None) -> "AgentProfile | None":
         if self._agent_profile_service is None or not agent_id:

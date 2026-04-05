@@ -118,6 +118,11 @@ def _normalize_optional_text(value: object | None) -> str | None:
     return normalized or None
 
 
+def _normalize_target_scope(value: object | None) -> str:
+    normalized = (_normalize_optional_text(value) or "global").lower()
+    return normalized or "global"
+
+
 def _normalize_string_list(value: object | None) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -300,18 +305,50 @@ class CapabilitySkillService:
             package_version=package_version,
         )
 
-    def read_skill_upgrade_metadata(self, skill: Any) -> dict[str, object]:
+    def _read_skill_post(self, skill: Any) -> frontmatter.Post | None:
         content = getattr(skill, "content", "")
         if (not isinstance(content, str) or not content.strip()) and getattr(skill, "path", None):
             skill_md_path = Path(str(getattr(skill, "path", "") or "")).expanduser() / "SKILL.md"
             if skill_md_path.exists():
                 content = skill_md_path.read_text(encoding="utf-8")
         if not isinstance(content, str) or not content.strip():
-            return _normalize_skill_upgrade_metadata()
+            return None
         try:
-            post = parse_skill_frontmatter(content)
+            return parse_skill_frontmatter(content)
         except SkillFrontmatterError as exc:
             raise ValueError(str(exc)) from exc
+
+    def read_skill_metadata_summary(self, skill: Any) -> dict[str, object]:
+        binding = self.read_skill_package_binding(skill)
+        post = self._read_skill_post(skill)
+        target_scope = "global"
+        target_role_id = None
+        target_seat_ref = None
+        if post is not None:
+            target_scope = _normalize_target_scope(post.get("target_scope"))
+            target_role_id = _normalize_optional_text(post.get("target_role_id"))
+            target_seat_ref = _normalize_optional_text(post.get("target_seat_ref"))
+        canonical_skill_root = _normalize_skill_root(skill) or None
+        path_scoped_activation = bool(
+            target_scope != "global" or target_role_id is not None or target_seat_ref is not None
+        )
+        return {
+            "package_ref": binding.get("package_ref"),
+            "package_kind": binding.get("package_kind"),
+            "package_version": binding.get("package_version"),
+            "canonical_skill_root": canonical_skill_root,
+            "target_scope": target_scope,
+            "target_role_id": target_role_id,
+            "target_seat_ref": target_seat_ref,
+            "activation_scope_key": f"{target_scope}:{target_role_id or '*'}:{target_seat_ref or '*'}",
+            "path_scoped_activation": path_scoped_activation,
+            "package_bound": bool(binding.get("package_ref")),
+        }
+
+    def read_skill_upgrade_metadata(self, skill: Any) -> dict[str, object]:
+        post = self._read_skill_post(skill)
+        if post is None:
+            return _normalize_skill_upgrade_metadata()
         return _normalize_skill_upgrade_metadata(
             lifecycle_stage=post.get("lifecycle_stage"),
             next_lifecycle_stage=post.get("next_lifecycle_stage"),

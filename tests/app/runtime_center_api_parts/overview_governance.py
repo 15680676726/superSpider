@@ -2124,6 +2124,58 @@ def test_runtime_center_governance_status_includes_capability_governance_project
     assert "portfolio-density" in components
 
 
+def test_runtime_center_governance_status_surfaces_structured_portfolio_actions() -> None:
+    app = build_runtime_center_app()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.prediction_service = FakePredictionService()
+
+    class _PortfolioService:
+        def get_runtime_portfolio_summary(self) -> dict[str, object]:
+            return {
+                "donor_count": 4,
+                "active_donor_count": 1,
+                "candidate_donor_count": 3,
+                "trial_donor_count": 3,
+                "trusted_source_count": 1,
+                "watchlist_source_count": 1,
+                "degraded_donor_count": 1,
+                "replace_pressure_count": 1,
+                "retire_pressure_count": 1,
+                "over_budget_scope_count": 1,
+                "governance_actions": [
+                    {
+                        "action": "compact_over_budget_scope",
+                        "priority": "high",
+                        "scope_key": "seat:researcher:seat-1",
+                        "target_scope": "seat",
+                        "target_role_id": "researcher",
+                        "target_seat_ref": "seat-1",
+                        "budget_limit": 3,
+                        "donor_count": 4,
+                        "route": "/api/runtime-center/capabilities/portfolio",
+                    },
+                ],
+                "planning_actions": [
+                    {
+                        "action": "compact_over_budget_scope",
+                        "summary": "One scope exceeded donor density budget.",
+                    },
+                ],
+            }
+
+    app.state.capability_portfolio_service = _PortfolioService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/governance/status")
+
+    assert response.status_code == 200
+    portfolio = response.json()["capability_governance"]["portfolio"]
+    assert portfolio["governance_actions"][0]["action"] == "compact_over_budget_scope"
+    assert portfolio["governance_actions"][0]["scope_key"] == "seat:researcher:seat-1"
+    assert portfolio["governance_actions"][0]["budget_limit"] == 3
+
+
 def test_runtime_center_governance_status_projects_full_capability_delta_diagnostics() -> None:
     app = build_runtime_center_app()
     app.state.governance_service = FakeGovernanceService()
