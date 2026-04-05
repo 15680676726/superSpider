@@ -13,8 +13,8 @@ function readMetaString(
   return typeof value === "string" ? value.trim() : "";
 }
 
-function presentFocusLabel(currentGoal: string | null): string | null {
-  return currentGoal?.trim() ? `焦点：${currentGoal.trim()}` : null;
+function presentFocusLabel(currentFocus: string | null): string | null {
+  return currentFocus?.trim() ? `焦点：${currentFocus.trim()}` : null;
 }
 
 function presentThreadKindChipLabel(sessionKind: string): string | null {
@@ -45,11 +45,11 @@ function presentWritebackTarget(target: ChatWritebackTarget): string {
 }
 
 export function resolveThreadRuntimePresentation({
-  currentGoal,
+  currentFocus,
   sessionKind,
   threadMeta,
 }: {
-  currentGoal: string | null;
+  currentFocus: string | null;
   sessionKind: string;
   threadMeta: Record<string, unknown>;
 }): {
@@ -62,7 +62,7 @@ export function resolveThreadRuntimePresentation({
 } {
   const focusKind = readMetaString(threadMeta, "current_focus_kind");
   const focusId = readMetaString(threadMeta, "current_focus_id");
-  const focusLabel = presentFocusLabel(currentGoal);
+  const focusLabel = presentFocusLabel(currentFocus);
   const focusHintParts = [
     focusKind ? `kind=${focusKind}` : "",
     focusId ? `id=${focusId}` : "",

@@ -76,7 +76,7 @@ type UseChatRuntimeStateArgs = {
 type UseChatRuntimeStateResult = {
   agentLabel: string;
   bindingLabel: string | null;
-  currentGoal: string;
+  currentFocus: string;
   executionCoreSuggestions: IndustryInstanceSummary[];
   hasAgentBinding: boolean;
   hasBoundAgentContext: boolean;
@@ -278,7 +278,7 @@ export function useChatRuntimeState({
     typeof threadMeta.agent_name === "string"
       ? normalizeSpiderMeshBrand(threadMeta.agent_name)
       : activeAgentId || runtimeWindow.currentUserId || "";
-  const currentGoal =
+  const currentFocus =
     typeof threadMeta.current_focus === "string"
       ? threadMeta.current_focus
       : "";
@@ -497,7 +497,7 @@ export function useChatRuntimeState({
   return {
     agentLabel,
     bindingLabel,
-    currentGoal,
+    currentFocus,
     executionCoreSuggestions,
     hasAgentBinding,
     hasBoundAgentContext,

@@ -66,14 +66,15 @@ import { useChatMedia } from "./useChatMedia";
 import { useChatRuntimeState } from "./useChatRuntimeState";
 import styles from "./index.module.less";
 import { useRuntimeBinding } from "./useRuntimeBinding";
-import {
-  readBuddyProfileId,
-  writeBuddyProfileId,
-} from "../../runtime/buddyProfileBinding";
+import { writeBuddyProfileId } from "../../runtime/buddyProfileBinding";
 import {
   BUDDY_IDENTITY_CENTER_ROUTE,
   resolveBuddyNamingState,
 } from "../../runtime/buddyFlow";
+import {
+  resolveBuddyProfileIdFromBuddySurface,
+  resolveRequestedBuddyProfileId,
+} from "./buddyProfileSource";
 
 interface CustomWindow extends Window {
   currentChannel?: string;
@@ -299,8 +300,12 @@ export default function ChatPage() {
     () => new URLSearchParams(location.search).get("buddy_profile"),
     [location.search],
   );
+  const requestedBuddyProfileId = useMemo(
+    () => resolveRequestedBuddyProfileId(buddyProfileIdFromQuery),
+    [buddyProfileIdFromQuery],
+  );
   const [resolvedBuddyProfileId, setResolvedBuddyProfileId] = useState<string | null>(
-    () => buddyProfileIdFromQuery?.trim() || readBuddyProfileId(),
+    () => requestedBuddyProfileId,
   );
   const buddyProfileId = resolvedBuddyProfileId;
 
@@ -409,30 +414,31 @@ export default function ChatPage() {
     setBuddyLoading(true);
     setBuddyError(null);
     try {
-      const explicitProfileId = buddyProfileIdFromQuery?.trim() || undefined;
+      const explicitProfileId = requestedBuddyProfileId || undefined;
       const surface = await api.getBuddySurface(explicitProfileId);
       setBuddySurface(surface);
-      const nextProfileId =
-        surface?.profile?.profile_id?.trim() ||
-        explicitProfileId ||
-        readBuddyProfileId();
+      const surfaceProfileId = resolveRequestedBuddyProfileId(
+        surface?.profile?.profile_id,
+      );
+      const nextProfileId = resolveBuddyProfileIdFromBuddySurface({
+        requestedProfileId: requestedBuddyProfileId,
+        surfaceProfileId,
+      });
       setResolvedBuddyProfileId(nextProfileId || null);
-      if (nextProfileId) {
-        writeBuddyProfileId(nextProfileId);
+      if (surfaceProfileId) {
+        writeBuddyProfileId(surfaceProfileId);
       }
       setBuddyNameDraft("");
     } catch (error) {
       setBuddySurface(null);
-      setResolvedBuddyProfileId(
-        buddyProfileIdFromQuery?.trim() || readBuddyProfileId(),
-      );
+      setResolvedBuddyProfileId(requestedBuddyProfileId);
       if (error instanceof Error) {
         setBuddyError(error.message);
       }
     } finally {
       setBuddyLoading(false);
     }
-  }, [buddyProfileIdFromQuery]);
+  }, [requestedBuddyProfileId]);
 
   useEffect(() => {
     void loadBuddySurface();
@@ -444,13 +450,8 @@ export default function ChatPage() {
   );
 
   useEffect(() => {
-    const explicitProfileId = buddyProfileIdFromQuery?.trim();
-    const nextProfileId = explicitProfileId || readBuddyProfileId();
-    setResolvedBuddyProfileId(nextProfileId || null);
-    if (explicitProfileId) {
-      writeBuddyProfileId(explicitProfileId);
-    }
-  }, [buddyProfileIdFromQuery]);
+    setResolvedBuddyProfileId(requestedBuddyProfileId);
+  }, [requestedBuddyProfileId]);
 
   useEffect(() => {
     if (location.pathname !== "/chat") return;
@@ -561,7 +562,7 @@ export default function ChatPage() {
 
   const {
     bindingLabel,
-    currentGoal,
+    currentFocus,
     executionCoreSuggestions,
     hasBoundAgentContext,
     hasSuggestedTeams,
@@ -584,7 +585,7 @@ export default function ChatPage() {
     writebackLabel,
     writebackHint,
   } = resolveThreadRuntimePresentation({
-    currentGoal,
+    currentFocus,
     sessionKind: sessionKind || "",
     threadMeta: effectiveThreadMeta,
   });

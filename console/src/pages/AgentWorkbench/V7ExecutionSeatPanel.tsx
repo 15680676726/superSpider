@@ -259,6 +259,14 @@ export default function V7ExecutionSeatPanel({
     agentId: agent.agent_id,
     employmentMode: seatEmploymentMode,
   });
+  const seatLifecycleLabel =
+    seatLifecycleState === "Pending approval"
+      ? "待审批"
+      : seatLifecycleState === "Pending promotion"
+        ? "待转正"
+        : seatLifecycleState === "Temporary seat"
+          ? "临时岗位"
+          : "正式岗位";
   const staffingPresentation = buildStaffingPresentation(industryDetail.staffing);
   const targetedProposal = industryDetail.staffing.pending_proposals.find(
     (proposal) => normalizeNonEmpty(proposal.target_agent_id || undefined) === agent.agent_id,
@@ -303,15 +311,15 @@ export default function V7ExecutionSeatPanel({
               ? "info"
               : "success"
         }
-        message={`Seat lifecycle: ${seatLifecycleState}`}
+        message={`岗位生命周期：${seatLifecycleLabel}`}
         description={
           seatLifecycleState === "Pending promotion"
-            ? `当前临时 seat 正在等待长期岗位审批${targetedProposal?.decision_request_id ? `，decision ${targetedProposal.decision_request_id}` : ""}。`
+            ? `当前临时岗位正在等待长期岗位审批${targetedProposal?.decision_request_id ? `（决策单 ${targetedProposal.decision_request_id}）` : ""}。`
             : seatLifecycleState === "Pending approval"
-              ? `当前 seat 变更尚未获批${targetedProposal?.decision_request_id ? `，decision ${targetedProposal.decision_request_id}` : ""}。`
+              ? `当前岗位变更尚未获批${targetedProposal?.decision_request_id ? `（决策单 ${targetedProposal.decision_request_id}）` : ""}。`
               : seatLifecycleState === "Temporary seat"
                 ? "临时岗位用于承接阶段性任务，当前派单、任务和汇报清空后会自动退出。"
-                : "这个 seat 属于正式长期岗位。"
+                : "这个岗位属于正式长期岗位。"
         }
         style={{ marginBottom: 16 }}
       />
@@ -561,7 +569,7 @@ export default function V7ExecutionSeatPanel({
                 <Text strong>待办：</Text> {currentAssignment.backlog_item_id || "-"}
               </Paragraph>
               <Paragraph>
-                <Text strong>目标：</Text> {currentAssignment.goal_id || "-"}
+                <Text strong>所属目标：</Text> {currentAssignment.goal_id || "-"}
               </Paragraph>
               <Paragraph style={{ marginBottom: 0 }}>
                 <Text strong>最近更新：</Text>{" "}
@@ -647,15 +655,15 @@ export default function V7ExecutionSeatPanel({
               : agent.thread_id || "-"}
           </Paragraph>
           <Paragraph>
-            <Text strong>Mailbox：</Text>{" "}
+            <Text strong>邮箱：</Text>{" "}
             {agentDetail?.runtime?.current_mailbox_id || agent.current_mailbox_id || "-"}
           </Paragraph>
           <Paragraph style={{ marginBottom: 0 }}>
-            <Text strong>当前焦点车道：</Text>{" "}
-            {focusLaneLabels.length > 0 ? focusLaneLabels.join(" / ") : "当前周期没有声明 focus lane"}
+            <Text strong>当前焦点航道：</Text>{" "}
+            {focusLaneLabels.length > 0 ? focusLaneLabels.join(" / ") : "当前周期没有声明焦点航道"}
           </Paragraph>
         </Card>
-        <Card className="baize-card" size="small" title="Main-brain control chain">
+        <Card className="baize-card" size="small" title="主脑控制链">
           {controlChain.nodes.length > 0 ? (
             <>
               <Space wrap size={[6, 6]} style={{ marginBottom: 12 }}>
@@ -682,11 +690,11 @@ export default function V7ExecutionSeatPanel({
                         <Tag color={runtimeStatusColor(node.status)}>{node.statusLabel}</Tag>
                         {node.currentRef ? <Tag>{node.currentRef}</Tag> : null}
                         {node.currentRef && seatRefs.has(node.currentRef) ? (
-                          <Tag color="blue">This seat</Tag>
+                          <Tag color="blue">当前执行位</Tag>
                         ) : null}
                       </Space>
                       <Text type="secondary">
-                        {normalizeSpiderMeshBrand(node.summary || "") || "No chain summary yet."}
+                        {normalizeSpiderMeshBrand(node.summary || "") || "暂无控制链摘要。"}
                       </Text>
                     </Space>
                   </List.Item>
@@ -694,13 +702,13 @@ export default function V7ExecutionSeatPanel({
               />
               {controlChain.synthesis ? (
                 <Paragraph style={{ marginBottom: 0, marginTop: 12 }}>
-                  <Text strong>Synthesis:</Text> {controlChain.synthesis.summary}
+                  <Text strong>综合结论：</Text> {controlChain.synthesis.summary}
                 </Paragraph>
               ) : null}
             </>
           ) : (
             <Empty
-              description="No main-brain control chain is available yet."
+              description="当前暂无可用的主脑控制链。"
               image={Empty.PRESENTED_IMAGE_SIMPLE}
             />
           )}

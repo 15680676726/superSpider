@@ -4,6 +4,11 @@ import { presentRuntimeStatusLabel } from "../../runtime/executionPresentation";
 import { agentWorkbenchText, getStatusLabel, workspaceText } from "./copy";
 
 describe("AgentWorkbench copy", () => {
+  it("uses current focus wording instead of legacy current goal wording", () => {
+    expect(agentWorkbenchText.currentFocusLabel).toBe("当前焦点");
+    expect(agentWorkbenchText.currentFocusLabel).not.toContain("目标");
+  });
+
   it("locks the new top-level tab copy", () => {
     expect(agentWorkbenchText.tabDaily).toBe("今日简报");
     expect(agentWorkbenchText.tabWeekly).toBe("周报");

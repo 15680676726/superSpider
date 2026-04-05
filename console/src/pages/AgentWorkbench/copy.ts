@@ -243,7 +243,7 @@ export const agentWorkbenchText = {
   reportsToLabel: "汇报对象",
   industryTeamLabel: "身份",
   linkedGoalLabel: "关联目标",
-  currentGoalLabel: "当前焦点",
+  currentFocusLabel: "当前焦点",
   environmentLabel: "环境摘要",
   environmentConstraintsLabel: "环境约束",
   todayLabel: "今日产出",

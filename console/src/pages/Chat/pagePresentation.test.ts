@@ -6,7 +6,7 @@ describe("pagePresentation", () => {
   it("derives thread, focus, and writeback labels/hints for runtime header chips", () => {
     expect(
       resolveThreadRuntimePresentation({
-        currentGoal: "Ship phase split",
+        currentFocus: "Ship phase split",
         sessionKind: "industry-control-thread",
         threadMeta: {
           chat_writeback_target_match_signals: [{ id: "s-1" }, { id: "s-2" }],
@@ -31,7 +31,7 @@ describe("pagePresentation", () => {
   it("prefers explicit writeback targets from thread meta", () => {
     expect(
       resolveThreadRuntimePresentation({
-        currentGoal: "",
+        currentFocus: "",
         sessionKind: "industry-control-thread",
         threadMeta: {
           chat_writeback_targets: ["lane"],

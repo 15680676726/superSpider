@@ -1,0 +1,120 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    if value is None:
+        return {}
+    namespace_dict = getattr(value, "__dict__", None)
+    if isinstance(namespace_dict, dict):
+        return dict(namespace_dict)
+    return {}
+
+
+def _first_non_empty(*values: Any) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _clip_text(value: Any, *, limit: int) -> str:
+    text = _first_non_empty(value) or ""
+    if len(text) <= limit:
+        return text
+    if limit <= 1:
+        return text[:limit]
+    return text[: limit - 1] + "…"
+
+
+def build_buddy_persona_prompt(
+    surface: Any,
+    heading: str = "##",
+) -> tuple[list[str], str]:
+    profile = _as_mapping(getattr(surface, "profile", None))
+    target = _as_mapping(getattr(surface, "growth_target", None))
+    relationship = _as_mapping(getattr(surface, "relationship", None))
+    presentation = _as_mapping(getattr(surface, "presentation", None))
+
+    profile_id = _clip_text(
+        _first_non_empty(profile.get("profile_id"), getattr(surface, "profile_id", None)),
+        limit=96,
+    ) or "unknown"
+
+    buddy_name = _clip_text(
+        _first_non_empty(presentation.get("buddy_name"), "你的伙伴"),
+        limit=48,
+    )
+    display_name = _clip_text(_first_non_empty(profile.get("display_name")), limit=48)
+    profession = _clip_text(_first_non_empty(profile.get("profession")), limit=48)
+    current_stage = _clip_text(_first_non_empty(profile.get("current_stage")), limit=48)
+    primary_direction = _clip_text(
+        _first_non_empty(target.get("primary_direction")),
+        limit=96,
+    )
+    final_goal = _clip_text(
+        _first_non_empty(presentation.get("current_goal_summary")),
+        limit=140,
+    )
+    current_task = _clip_text(
+        _first_non_empty(presentation.get("current_task_summary")),
+        limit=140,
+    )
+    why_now = _clip_text(
+        _first_non_empty(presentation.get("why_now_summary")),
+        limit=160,
+    )
+    next_action = _clip_text(
+        _first_non_empty(presentation.get("single_next_action_summary")),
+        limit=160,
+    )
+    strategy = _clip_text(
+        _first_non_empty(presentation.get("companion_strategy_summary")),
+        limit=200,
+    )
+    encouragement_style = _clip_text(
+        _first_non_empty(relationship.get("encouragement_style")),
+        limit=48,
+    )
+    heading_text = _first_non_empty(heading, "##") or "##"
+    lines = [
+        f"{heading_text} Buddy 对外人格",
+        f"- 伙伴名：{buddy_name}",
+        "- 你现在以主脑显化出来的伙伴人格对外说话，但本质仍然是主脑。",
+        f"- 你陪伴的人：{display_name or '未命名用户'} / {profession or '当前职业待补充'} / {current_stage or '当前阶段待补充'}",
+        f"- 当前确认的长期主方向：{primary_direction or '先帮对方收口一个足够大的长期方向'}",
+        "- 默认只给用户最终目标、当前任务、为什么现在做、以及唯一下一步；不要一上来展开整棵计划树。",
+        f"- 最终目标：{final_goal or '先把长期目标收成一句真正对人有意义的话'}",
+        f"- 当前任务：{current_task or '先把眼前这一小步收清楚'}",
+        f"- 为什么现在做：{why_now or '因为现在这一步决定后续是不是还在真正前进'}",
+        f"- 唯一下一步：{next_action or '先把当前任务缩成一个最小动作'}",
+        f"- 陪伴策略：{strategy or '先接住情绪，再把任务缩成一个最小动作'}",
+    ]
+    if encouragement_style:
+        lines.append(f"- 当前鼓励风格代号：{encouragement_style}")
+    lines.extend(
+        [
+            "- 说话方式要像老朋友，先接住情绪，再把对方带回当前任务。",
+            "- 不要暴露后台执行位抢前台，也不要把系统内部结构直接甩给用户。",
+        ],
+    )
+    signature = "|".join(
+        (
+            f"buddy:{profile_id}",
+            buddy_name,
+            final_goal,
+            current_task,
+            why_now,
+            next_action,
+            strategy,
+        ),
+    )
+    return lines, signature
