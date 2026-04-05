@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -25,6 +25,22 @@ const mockOverview = {
   generated_at: "2026-03-29T09:00:00Z",
   surface,
   cards: [],
+};
+
+const mockBuddySummary: RuntimeMainBrainBuddySummary = {
+  buddy_name: "Nova",
+  lifecycle_state: "named",
+  presence_state: "available",
+  mood_state: "warm",
+  evolution_stage: "bonded",
+  growth_level: 4,
+  intimacy: 24,
+  affinity: 19,
+  current_goal_summary: "建立独立创作与内容事业的长期成长路径",
+  current_task_summary: "今天先写出第一篇真正能代表自己的作品",
+  why_now_summary: "这是让长期方向不再停留在想象里的最小推进。",
+  single_next_action_summary: "现在先打开文档，写下标题和三条核心观点。",
+  companion_strategy_summary: "先接住情绪，再把任务缩成一个最小动作。",
 };
 
 function createAgentsCard(
@@ -64,6 +80,7 @@ const mockMainBrain: RuntimeMainBrainResponse = {
   patches: { count: 0, summary: "", route: null, entries: [], meta: {} },
   signals: {},
   meta: { control_chain: [] },
+  buddy_summary: mockBuddySummary,
 };
 
 const mockSurface = (
@@ -77,33 +94,14 @@ const mockSurface = (
 });
 
 const requestRuntimeSurfaceMock = vi.fn();
-const requestRuntimeBuddySummaryMock = vi.fn();
 const readBuddyProfileIdMock = vi.fn();
 let runtimeEventHandler:
   | ((event: { event_name: string; payload: Record<string, unknown> }) => void)
   | null = null;
 
-const mockBuddySummary: RuntimeMainBrainBuddySummary = {
-  buddy_name: "Nova",
-  lifecycle_state: "named",
-  presence_state: "available",
-  mood_state: "warm",
-  evolution_stage: "bonded",
-  growth_level: 4,
-  intimacy: 24,
-  affinity: 19,
-  current_goal_summary: "建立独立创作与内容事业的长期成长路径",
-  current_task_summary: "今天先写出第一篇真正能代表自己的作品",
-  why_now_summary: "这是让长期方向不再停留在想象里的最小推进。",
-  single_next_action_summary: "现在先打开文档，写下标题和三条核心观点。",
-  companion_strategy_summary: "先接住情绪，再把任务缩成一个最小动作。",
-};
-
 vi.mock("../../runtime/runtimeSurfaceClient", () => ({
   normalizeRuntimePath: vi.fn((path: string) => path),
   requestRuntimeSurface: (...args: unknown[]) => requestRuntimeSurfaceMock(...args),
-  requestRuntimeBuddySummary: (...args: unknown[]) =>
-    requestRuntimeBuddySummaryMock(...args),
   requestRuntimeRecord: vi.fn(),
 }));
 
@@ -126,7 +124,6 @@ describe("useRuntimeCenter", () => {
     runtimeEventHandler = null;
     readBuddyProfileIdMock.mockReturnValue("profile-bound");
     requestRuntimeSurfaceMock.mockResolvedValue(mockSurface());
-    requestRuntimeBuddySummaryMock.mockResolvedValue(mockBuddySummary);
   });
 
   it("loads canonical surface once and derives business agents from overview cards", async () => {
@@ -140,7 +137,9 @@ describe("useRuntimeCenter", () => {
     const { result } = renderHook(() => useRuntimeCenter());
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
-    expect(requestRuntimeBuddySummaryMock).toHaveBeenCalledWith("profile-bound");
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledWith({
+      buddyProfileId: "profile-bound",
+    });
 
     resolveSurface(
       mockSurface({
@@ -208,7 +207,7 @@ describe("useRuntimeCenter", () => {
     );
 
     expect(result.current.mainBrainData).toBeNull();
-    expect(result.current.buddySummary).toEqual(mockBuddySummary);
+    expect(result.current.buddySummary).toBeNull();
     expect(result.current.mainBrainUnavailable).toBe(true);
     expect(result.current.mainBrainError).toBeNull();
   });
@@ -217,60 +216,60 @@ describe("useRuntimeCenter", () => {
     requestRuntimeSurfaceMock.mockResolvedValue(
       mockSurface({
         cards: [
-        {
-          key: "goals",
-          title: "Goals",
-          source: "goal-service",
-          status: "state-service",
-          count: 1,
-          summary: "legacy goals",
-          entries: [],
-          meta: {},
-        },
-        {
-          key: "schedules",
-          title: "Schedules",
-          source: "schedule-service",
-          status: "state-service",
-          count: 1,
-          summary: "legacy schedules",
-          entries: [],
-          meta: {},
-        },
-        {
-          key: "main-brain",
-          title: "Main-Brain",
-          source: "state-service",
-          status: "state-service",
-          count: 1,
-          summary: "main brain",
-          entries: [],
-          meta: {},
-        },
-        createAgentsCard({
-          id: "agent-ops-2",
-          title: "Closer Nine",
-          kind: "agent",
-          status: "active",
-          owner: "Closer",
-          summary: "Working backlog",
-          actions: {},
-          meta: {
-            current_focus_kind: "backlog_item",
-            current_focus_id: "backlog-2",
-            current_focus: "Follow up warm leads",
+          {
+            key: "goals",
+            title: "Goals",
+            source: "goal-service",
+            status: "state-service",
+            count: 1,
+            summary: "legacy goals",
+            entries: [],
+            meta: {},
           },
-        }),
-        {
-          key: "tasks",
-          title: "Tasks",
-          source: "task-service",
-          status: "state-service",
-          count: 1,
-          summary: "active tasks",
-          entries: [],
-          meta: {},
-        },
+          {
+            key: "schedules",
+            title: "Schedules",
+            source: "schedule-service",
+            status: "state-service",
+            count: 1,
+            summary: "legacy schedules",
+            entries: [],
+            meta: {},
+          },
+          {
+            key: "main-brain",
+            title: "Main-Brain",
+            source: "state-service",
+            status: "state-service",
+            count: 1,
+            summary: "main brain",
+            entries: [],
+            meta: {},
+          },
+          createAgentsCard({
+            id: "agent-ops-2",
+            title: "Closer Nine",
+            kind: "agent",
+            status: "active",
+            owner: "Closer",
+            summary: "Working backlog",
+            actions: {},
+            meta: {
+              current_focus_kind: "backlog_item",
+              current_focus_id: "backlog-2",
+              current_focus: "Follow up warm leads",
+            },
+          }),
+          {
+            key: "tasks",
+            title: "Tasks",
+            source: "task-service",
+            status: "state-service",
+            count: 1,
+            summary: "active tasks",
+            entries: [],
+            meta: {},
+          },
         ],
       }),
     );
@@ -289,7 +288,6 @@ describe("useRuntimeCenter", () => {
       "agent-ops-2",
     ]);
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
-    expect(requestRuntimeBuddySummaryMock).toHaveBeenCalledTimes(1);
   });
 
   it("requests buddy summary with null profile when no binding exists", async () => {
@@ -304,7 +302,9 @@ describe("useRuntimeCenter", () => {
         !result.current.businessAgentsLoading,
     );
 
-    expect(requestRuntimeBuddySummaryMock).toHaveBeenCalledWith(null);
+    expect(requestRuntimeSurfaceMock).toHaveBeenCalledWith({
+      buddyProfileId: null,
+    });
   });
 
   it("refreshes only the main-brain section on assignment events", async () => {
@@ -320,17 +320,19 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
 
     vi.useFakeTimers();
-    runtimeEventHandler?.({
-      event_name: "assignment.updated",
-      payload: { assignment_id: "assignment-1" },
+    await act(async () => {
+      runtimeEventHandler?.({
+        event_name: "assignment.updated",
+        payload: { assignment_id: "assignment-1" },
+      });
+      await vi.advanceTimersByTimeAsync(300);
     });
-    await vi.advanceTimersByTimeAsync(300);
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
     expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
       sections: ["main_brain"],
+      buddyProfileId: "profile-bound",
     });
-    expect(requestRuntimeBuddySummaryMock).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
 
@@ -345,11 +347,13 @@ describe("useRuntimeCenter", () => {
     );
 
     vi.useFakeTimers();
-    runtimeEventHandler?.({
-      event_name: "runtime.heartbeat",
-      payload: {},
+    await act(async () => {
+      runtimeEventHandler?.({
+        event_name: "runtime.heartbeat",
+        payload: {},
+      });
+      await vi.advanceTimersByTimeAsync(300);
     });
-    await vi.advanceTimersByTimeAsync(300);
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
@@ -368,17 +372,19 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
 
     vi.useFakeTimers();
-    runtimeEventHandler?.({
-      event_name: "agent.updated",
-      payload: { agent_id: "agent-ops-2" },
+    await act(async () => {
+      runtimeEventHandler?.({
+        event_name: "agent.updated",
+        payload: { agent_id: "agent-ops-2" },
+      });
+      await vi.advanceTimersByTimeAsync(300);
     });
-    await vi.advanceTimersByTimeAsync(300);
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
     expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
       sections: ["cards"],
+      buddyProfileId: "profile-bound",
     });
-    expect(requestRuntimeBuddySummaryMock).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 
@@ -395,19 +401,22 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
 
     vi.useFakeTimers();
-    runtimeEventHandler?.({
-      event_name: "agent.updated",
-      payload: { agent_id: "agent-ops-2" },
+    await act(async () => {
+      runtimeEventHandler?.({
+        event_name: "agent.updated",
+        payload: { agent_id: "agent-ops-2" },
+      });
+      runtimeEventHandler?.({
+        event_name: "assignment.updated",
+        payload: { assignment_id: "assignment-1" },
+      });
+      await vi.advanceTimersByTimeAsync(300);
     });
-    runtimeEventHandler?.({
-      event_name: "assignment.updated",
-      payload: { assignment_id: "assignment-1" },
-    });
-    await vi.advanceTimersByTimeAsync(300);
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(2);
     expect(requestRuntimeSurfaceMock).toHaveBeenLastCalledWith({
       sections: ["cards", "main_brain"],
+      buddyProfileId: "profile-bound",
     });
     vi.useRealTimers();
   });
@@ -423,11 +432,13 @@ describe("useRuntimeCenter", () => {
     );
 
     vi.useFakeTimers();
-    runtimeEventHandler?.({
-      event_name: "tool.updated",
-      payload: { tool_id: "browser" },
+    await act(async () => {
+      runtimeEventHandler?.({
+        event_name: "tool.updated",
+        payload: { tool_id: "browser" },
+      });
+      await vi.advanceTimersByTimeAsync(300);
     });
-    await vi.advanceTimersByTimeAsync(300);
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
     vi.useRealTimers();

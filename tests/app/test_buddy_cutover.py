@@ -46,7 +46,7 @@ def _build_client(tmp_path) -> TestClient:
     return TestClient(app)
 
 
-def test_buddy_surface_and_runtime_center_summary_share_same_projection(tmp_path) -> None:
+def test_buddy_surface_and_runtime_center_surface_share_same_projection(tmp_path) -> None:
     client = _build_client(tmp_path)
     identity = client.post(
         "/buddy/onboarding/identity",
@@ -81,8 +81,19 @@ def test_buddy_surface_and_runtime_center_summary_share_same_projection(tmp_path
     )
 
     surface = client.get("/buddy/surface").json()
-    summary = client.get("/runtime-center/main-brain/buddy-summary").json()
+    runtime_surface = client.get(
+        f"/runtime-center/surface?sections=main_brain&buddy_profile_id={surface['profile']['profile_id']}",
+    ).json()
+    summary = runtime_surface["main_brain"]["buddy_summary"]
 
     assert surface["presentation"]["buddy_name"] == "Mochi"
     assert summary["buddy_name"] == "Mochi"
     assert summary["current_task_summary"] == "Finish today's current task"
+
+
+def test_runtime_center_legacy_buddy_summary_route_is_removed(tmp_path) -> None:
+    client = _build_client(tmp_path)
+
+    response = client.get("/runtime-center/main-brain/buddy-summary")
+
+    assert response.status_code == 404

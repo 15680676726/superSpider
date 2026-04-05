@@ -332,6 +332,7 @@ class RuntimeCenterAppStateView:
     strategy_memory_service: Any = None
     routine_service: Any = None
     query_execution_service: Any = None
+    buddy_projection_service: Any = None
     cron_manager: Any = None
     automation_overview: list[dict[str, Any]] = field(default_factory=list)
     actor_supervisor_overview: dict[str, Any] | None = None
@@ -384,6 +385,7 @@ class RuntimeCenterAppStateView:
             strategy_memory_service=getattr(app_state, "strategy_memory_service", None),
             routine_service=getattr(app_state, "routine_service", None),
             query_execution_service=getattr(app_state, "query_execution_service", None),
+            buddy_projection_service=getattr(app_state, "buddy_projection_service", None),
             cron_manager=getattr(app_state, "cron_manager", None),
             automation_overview=_normalize_automation_overview_payload(
                 automation_tasks=automation_tasks,
@@ -607,6 +609,7 @@ class RuntimeMainBrainResponse(BaseModel):
     )
     recovery: dict[str, Any] = Field(default_factory=dict)
     automation: dict[str, Any] = Field(default_factory=dict)
+    buddy_summary: dict[str, Any] | None = None
     evidence: RuntimeMainBrainSection = Field(default_factory=RuntimeMainBrainSection)
     decisions: RuntimeMainBrainSection = Field(default_factory=RuntimeMainBrainSection)
     patches: RuntimeMainBrainSection = Field(default_factory=RuntimeMainBrainSection)

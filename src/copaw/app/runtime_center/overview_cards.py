@@ -974,6 +974,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
         *,
         prebuilt_cards: Sequence[RuntimeOverviewCard] | None = None,
         surface: RuntimeCenterSurfaceInfo | None = None,
+        buddy_profile_id: str | None = None,
     ) -> RuntimeMainBrainResponse:
         main_brain_card = self._select_prebuilt_card(prebuilt_cards, "main-brain")
         if main_brain_card is None:
@@ -1087,6 +1088,17 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             industry_instance_id=industry_instance_id,
             normalized_reports=normalized_reports,
         )
+        buddy_summary = None
+        buddy_projection_service = app_state.buddy_projection_service
+        if callable(getattr(buddy_projection_service, "build_cockpit_summary", None)):
+            try:
+                buddy_summary = dict(
+                    buddy_projection_service.build_cockpit_summary(
+                        profile_id=buddy_profile_id,
+                    ),
+                )
+            except ValueError:
+                buddy_summary = None
         main_brain_planning = RuntimeMainBrainPlanningPayload.model_validate(
             self._mapping(industry_detail.get("main_brain_planning")) or {},
         )
@@ -1121,6 +1133,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             governance=governance,
             recovery=recovery,
             automation=automation,
+            buddy_summary=buddy_summary,
             evidence=self._build_main_brain_section(evidence_card),
             decisions=self._build_main_brain_section(decisions_card),
             patches=self._build_main_brain_section(patches_card),
@@ -1666,9 +1679,14 @@ class RuntimeCenterOverviewBuilder:
     async def build_main_brain_payload(
         self,
         app_state: RuntimeCenterAppStateView,
+        *,
+        buddy_profile_id: str | None = None,
     ) -> RuntimeMainBrainResponse:
         support = _RuntimeCenterOverviewCardsSupport(item_limit=self._item_limit)
-        return await support.build_main_brain_payload(app_state)
+        return await support.build_main_brain_payload(
+            app_state,
+            buddy_profile_id=buddy_profile_id,
+        )
 
     async def build_surface_payload(
         self,
@@ -1676,6 +1694,7 @@ class RuntimeCenterOverviewBuilder:
         *,
         include_cards: bool = True,
         include_main_brain: bool = True,
+        buddy_profile_id: str | None = None,
     ) -> RuntimeCenterSurfaceResponse:
         support = _RuntimeCenterOverviewCardsSupport(item_limit=self._item_limit)
         cards: list[RuntimeOverviewCard] = []
@@ -1694,6 +1713,7 @@ class RuntimeCenterOverviewBuilder:
                 app_state,
                 prebuilt_cards=cards if include_cards else None,
                 surface=surface if include_cards else None,
+                buddy_profile_id=buddy_profile_id,
             )
             if not include_cards and main_brain is not None:
                 surface = main_brain.surface

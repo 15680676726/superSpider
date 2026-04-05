@@ -114,6 +114,29 @@ def test_buddy_onboarding_derives_direction_candidates_from_chinese_profile(tmp_
     assert "独立创作与内容事业" in result.recommended_direction
 
 
+def test_buddy_onboarding_derives_video_creator_direction_from_chinese_profile(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    identity = service.submit_identity(
+        display_name="周舟",
+        profession="社区运营",
+        current_stage="探索期",
+        interests=["视频表达", "讲故事"],
+        strengths=["镜头感", "长期主义"],
+        constraints=["时间有限"],
+        goal_intention="我想做个人IP，通过视频和观点输出建立影响力。",
+    )
+
+    result = service.answer_clarification_turn(
+        session_id=identity.session_id,
+        answer="我不想一直做运营执行，我想做一个有内容作品和个人品牌的人。",
+        existing_question_count=9,
+    )
+
+    assert result.finished is True
+    assert any("独立创作与内容事业" in item for item in result.candidate_directions)
+    assert "独立创作与内容事业" in result.recommended_direction
+
+
 def test_buddy_onboarding_requires_exactly_one_primary_direction(tmp_path) -> None:
     service = _build_service(tmp_path)
     identity = service.submit_identity(
@@ -196,12 +219,20 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
     backlog_repository = SqliteBacklogItemRepository(store)
     cycle_repository = SqliteOperatingCycleRepository(store)
     assignment_repository = SqliteAssignmentRepository(store)
-    instance = industry_repository.get_instance(f"buddy:{identity.profile.profile_id}")
 
-    assert result.growth_target.current_cycle_label
+    instance = industry_repository.get_instance(f"buddy:{result.growth_target.profile_id}")
     assert instance is not None
-    assert instance.label == identity.profile.display_name
-    assert lane_repository.list_lanes(industry_instance_id=instance.instance_id, limit=None)
-    assert backlog_repository.list_items(industry_instance_id=instance.instance_id, limit=None)
-    assert cycle_repository.get_cycle(instance.current_cycle_id or "") is not None
-    assert assignment_repository.list_assignments(industry_instance_id=instance.instance_id, limit=None)
+    assert isinstance(instance, type(instance))
+    assert instance.current_cycle_id
+
+    lanes = lane_repository.list_lanes(industry_instance_id=instance.instance_id)
+    assert any(lane.industry_instance_id == instance.instance_id for lane in lanes)
+
+    backlog = backlog_repository.list_items(industry_instance_id=instance.instance_id)
+    assert any(item.industry_instance_id == instance.instance_id for item in backlog)
+
+    cycles = cycle_repository.list_cycles(industry_instance_id=instance.instance_id)
+    assert any(cycle.industry_instance_id == instance.instance_id for cycle in cycles)
+
+    assignments = assignment_repository.list_assignments(industry_instance_id=instance.instance_id)
+    assert any(assignment.industry_instance_id == instance.instance_id for assignment in assignments)

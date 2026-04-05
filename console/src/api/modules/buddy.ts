@@ -117,6 +117,19 @@ export interface BuddySurfaceResponse {
     evolution_stage: string;
     progress_to_next_stage: number;
   };
+  onboarding: {
+    session_id: string | null;
+    status: string;
+    question_count: number;
+    tightened: boolean;
+    next_question: string;
+    candidate_directions: string[];
+    recommended_direction: string;
+    selected_direction: string;
+    requires_direction_confirmation: boolean;
+    requires_naming: boolean;
+    completed: boolean;
+  };
 }
 
 export const buddyApi = {

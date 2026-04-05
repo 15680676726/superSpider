@@ -19,11 +19,26 @@ class BuddySurfacePayload(BaseModel):
     profile: HumanProfile
     growth_target: GrowthTarget | None = None
     relationship: CompanionRelationship | None = None
+    onboarding: "BuddyOnboardingProjection"
     presentation: BuddyPresentation
     growth: BuddyGrowthProjection
 
 
 CurrentFocusResolver = Callable[[str], dict[str, str] | None]
+
+
+class BuddyOnboardingProjection(BaseModel):
+    session_id: str | None = None
+    status: str = "unborn"
+    question_count: int = 0
+    tightened: bool = False
+    next_question: str = ""
+    candidate_directions: list[str] = Field(default_factory=list)
+    recommended_direction: str = ""
+    selected_direction: str = ""
+    requires_direction_confirmation: bool = False
+    requires_naming: bool = False
+    completed: bool = False
 
 
 class BuddyProjectionService:
@@ -51,6 +66,11 @@ class BuddyProjectionService:
         target = self._growth_target_repository.get_active_target(profile.profile_id)
         relationship = self._relationship_repository.get_relationship(profile.profile_id)
         session = self._onboarding_session_repository.get_latest_session_for_profile(profile.profile_id)
+        onboarding = self._build_onboarding_projection(
+            session=session,
+            target=target,
+            relationship=relationship,
+        )
         current_focus = (
             self._current_focus_resolver(profile.profile_id)
             if callable(self._current_focus_resolver)
@@ -147,6 +167,7 @@ class BuddyProjectionService:
             profile=profile,
             growth_target=target,
             relationship=relationship,
+            onboarding=onboarding,
             presentation=presentation,
             growth=growth,
         )
@@ -175,6 +196,52 @@ class BuddyProjectionService:
         if self._profile_repository.count_profiles() > 1:
             raise ValueError("Buddy surface requires explicit profile_id when multiple profiles exist")
         return self._profile_repository.get_latest_profile()
+
+    def _build_onboarding_projection(
+        self,
+        *,
+        session: Any | None,
+        target: GrowthTarget | None,
+        relationship: CompanionRelationship | None,
+    ) -> BuddyOnboardingProjection:
+        buddy_name = (
+            str(getattr(relationship, "buddy_name", "") or "").strip()
+            if relationship is not None
+            else ""
+        )
+        status = str(getattr(session, "status", "") or "").strip() or "unborn"
+        question_count = int(getattr(session, "question_count", 0) or 0)
+        tightened = bool(getattr(session, "tightened", False))
+        next_question = str(getattr(session, "next_question", "") or "").strip()
+        candidate_directions = list(getattr(session, "candidate_directions", []) or [])
+        recommended_direction = str(getattr(session, "recommended_direction", "") or "").strip()
+        selected_direction = str(getattr(session, "selected_direction", "") or "").strip()
+        if target is not None and not selected_direction:
+            selected_direction = target.primary_direction
+        if target is not None and not recommended_direction:
+            recommended_direction = selected_direction
+        if target is not None and status in {"unborn", "clarifying", "direction-ready"}:
+            status = "confirmed"
+        if buddy_name and status in {"confirmed", "direction-ready", "clarifying", "unborn"}:
+            status = "named"
+        requires_direction_confirmation = target is None and (
+            status == "direction-ready" or bool(candidate_directions)
+        )
+        requires_naming = target is not None and not buddy_name
+        completed = target is not None and bool(buddy_name)
+        return BuddyOnboardingProjection(
+            session_id=str(getattr(session, "session_id", "") or "").strip() or None,
+            status=status,
+            question_count=question_count,
+            tightened=tightened,
+            next_question=next_question,
+            candidate_directions=candidate_directions,
+            recommended_direction=recommended_direction,
+            selected_direction=selected_direction,
+            requires_direction_confirmation=requires_direction_confirmation,
+            requires_naming=requires_naming,
+            completed=completed,
+        )
 
     def _fallback_current_task_summary(self, profile_id: str) -> str:
         service = self._human_assist_task_service
@@ -338,4 +405,8 @@ class BuddyProjectionService:
         return "陪你一起往前走"
 
 
-__all__ = ["BuddyProjectionService", "BuddySurfacePayload"]
+__all__ = [
+    "BuddyOnboardingProjection",
+    "BuddyProjectionService",
+    "BuddySurfacePayload",
+]

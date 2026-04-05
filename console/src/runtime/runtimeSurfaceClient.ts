@@ -28,20 +28,17 @@ export function buildRuntimeConversationsPath(threadId: string): string {
 
 export async function requestRuntimeSurface<T>(options?: {
   sections?: RuntimeSurfaceSection[];
+  buddyProfileId?: string | null;
 }): Promise<T> {
-  const query = options?.sections?.length
-    ? `?sections=${encodeURIComponent(options.sections.join(","))}`
-    : "";
+  const params = new URLSearchParams();
+  if (options?.sections?.length) {
+    params.set("sections", options.sections.join(","));
+  }
+  if (options?.buddyProfileId) {
+    params.set("buddy_profile_id", options.buddyProfileId);
+  }
+  const query = params.toString() ? `?${params.toString()}` : "";
   return request<T>(`/runtime-center/surface${query}`);
-}
-
-export async function requestRuntimeBuddySummary<T>(
-  profileId?: string | null,
-): Promise<T> {
-  const suffix = profileId
-    ? `?profile_id=${encodeURIComponent(profileId)}`
-    : "";
-  return request<T>(`/runtime-center/main-brain/buddy-summary${suffix}`);
 }
 
 export async function requestRuntimeRecord<T>(path: string): Promise<T> {

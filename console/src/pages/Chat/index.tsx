@@ -70,6 +70,7 @@ import {
   readBuddyProfileId,
   writeBuddyProfileId,
 } from "../../runtime/buddyProfileBinding";
+import { resolveBuddyNamingState } from "../../runtime/buddyFlow";
 
 interface CustomWindow extends Window {
   currentChannel?: string;
@@ -295,10 +296,6 @@ export default function ChatPage() {
     () => new URLSearchParams(location.search).get("buddy_profile"),
     [location.search],
   );
-  const needsBuddyNaming = useMemo(
-    () => new URLSearchParams(location.search).get("buddy_needs_name") === "1",
-    [location.search],
-  );
   const buddyProfileId = useMemo(
     () => buddyProfileIdFromQuery?.trim() || readBuddyProfileId(),
     [buddyProfileIdFromQuery],
@@ -428,6 +425,11 @@ export default function ChatPage() {
   useEffect(() => {
     void loadBuddySurface();
   }, [loadBuddySurface]);
+
+  const buddyNamingState = useMemo(
+    () => resolveBuddyNamingState(buddySurface, buddySessionId),
+    [buddySessionId, buddySurface],
+  );
 
   useEffect(() => {
     if (buddyProfileIdFromQuery?.trim()) {
@@ -610,16 +612,15 @@ export default function ChatPage() {
   );
 
   const submitBuddyNaming = useCallback(async () => {
-    if (!buddySessionId || !buddyNameDraft.trim()) return;
+    if (!buddyNamingState.sessionId || !buddyNameDraft.trim()) return;
     setBuddyNamingBusy(true);
     try {
       await api.nameBuddy({
-        session_id: buddySessionId,
+        session_id: buddyNamingState.sessionId,
         buddy_name: buddyNameDraft.trim(),
       });
       await loadBuddySurface();
       const params = new URLSearchParams(location.search);
-      params.delete("buddy_needs_name");
       params.delete("buddy_session");
       if (buddyProfileId) {
         params.set("buddy_profile", buddyProfileId);
@@ -631,7 +632,7 @@ export default function ChatPage() {
     } finally {
       setBuddyNamingBusy(false);
     }
-  }, [buddyNameDraft, buddyProfileId, buddySessionId, loadBuddySurface, location.search, navigate]);
+  }, [buddyNameDraft, buddyNamingState.sessionId, buddyProfileId, loadBuddySurface, location.search, navigate]);
 
   // ============================================================
   return (
@@ -685,7 +686,7 @@ export default function ChatPage() {
             activeChatThreadId={activeChatThreadId}
             threadMeta={effectiveThreadMeta}
           />
-          {needsBuddyNaming && buddySessionId ? (
+          {buddyNamingState.needsNaming && buddyNamingState.sessionId ? (
             <Alert
               type="info"
               showIcon

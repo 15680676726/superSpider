@@ -433,6 +433,7 @@ export interface RuntimeMainBrainResponse {
   governance: RuntimeMainBrainGovernance;
   recovery: RuntimeMainBrainRecord;
   automation: RuntimeMainBrainAutomation;
+  buddy_summary?: RuntimeMainBrainBuddySummary | null;
   evidence: RuntimeMainBrainSection;
   decisions: RuntimeMainBrainSection;
   patches: RuntimeMainBrainSection;
