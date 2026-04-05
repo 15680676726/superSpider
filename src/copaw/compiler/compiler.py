@@ -135,6 +135,7 @@ class SemanticCompiler:
         feedback_lines = _feedback_prompt_lines(unit.context)
         strategy_lines = _strategy_prompt_lines(unit.context)
         knowledge_lines = _knowledge_prompt_lines(unit.context)
+        execution_path_lines = _execution_path_guidance_lines(unit.context)
         runtime_lines = _runtime_execution_prompt_lines(unit.context)
         steps = [
             str(step).strip()
@@ -169,6 +170,7 @@ class SemanticCompiler:
                             *feedback_lines,
                             *strategy_lines,
                             *knowledge_lines,
+                            *execution_path_lines,
                             f"Planned step {current_step_index + 1}/{len(steps)}: {step}",
                             "Execute only this planned step and report the result.",
                         ]
@@ -195,6 +197,7 @@ class SemanticCompiler:
                 *feedback_lines,
                 *strategy_lines,
                 *knowledge_lines,
+                *execution_path_lines,
                 "Produce the next concrete execution step for this goal and carry it out.",
             ]
             if part
@@ -228,6 +231,7 @@ class SemanticCompiler:
         feedback_lines = _feedback_prompt_lines(unit.context)
         strategy_lines = _strategy_prompt_lines(unit.context)
         knowledge_lines = _knowledge_prompt_lines(unit.context)
+        execution_path_lines = _execution_path_guidance_lines(unit.context)
         runtime_lines = _runtime_execution_prompt_lines(unit.context)
         return [
             self._build_dispatch_query_spec(
@@ -242,6 +246,7 @@ class SemanticCompiler:
                             *feedback_lines,
                             *strategy_lines,
                             *knowledge_lines,
+                            *execution_path_lines,
                             "Focus only on this step, execute it, and report the result.",
                         ]
                         if part
@@ -310,6 +315,7 @@ class SemanticCompiler:
         feedback_lines = _feedback_prompt_lines(unit.context)
         strategy_lines = _strategy_prompt_lines(unit.context)
         knowledge_lines = _knowledge_prompt_lines(unit.context)
+        execution_path_lines = _execution_path_guidance_lines(unit.context)
         runtime_lines = _runtime_execution_prompt_lines(unit.context)
         prompt_text = "\n".join(
             part
@@ -319,6 +325,7 @@ class SemanticCompiler:
                 *feedback_lines,
                 *strategy_lines,
                 *knowledge_lines,
+                *execution_path_lines,
             ]
             if part
         )
@@ -859,7 +866,14 @@ class SemanticCompiler:
         checkpoints = unit.context.get("assignment_plan_checkpoints")
         acceptance_criteria = unit.context.get("assignment_plan_acceptance_criteria")
         sidecar_plan = unit.context.get("assignment_sidecar_plan")
-        return {
+        resolved_sidecar_plan = (
+            dict(sidecar_plan)
+            if isinstance(sidecar_plan, dict)
+            else dict(envelope.get("sidecar_plan"))
+            if isinstance(envelope.get("sidecar_plan"), dict)
+            else {}
+        )
+        payload = {
             "assignment_plan_envelope": dict(envelope),
             "assignment_plan_checkpoints": _checkpoint_context_list(
                 checkpoints if isinstance(checkpoints, list) else envelope.get("checkpoints"),
@@ -869,14 +883,14 @@ class SemanticCompiler:
                 if isinstance(acceptance_criteria, list)
                 else envelope.get("acceptance_criteria"),
             ),
-            "assignment_sidecar_plan": (
-                dict(sidecar_plan)
-                if isinstance(sidecar_plan, dict)
-                else dict(envelope.get("sidecar_plan"))
-                if isinstance(envelope.get("sidecar_plan"), dict)
-                else {}
-            ),
+            "assignment_sidecar_plan": resolved_sidecar_plan,
         }
+        execution_path_guidance = _execution_path_guidance_payload(
+            {"assignment_sidecar_plan": resolved_sidecar_plan},
+        )
+        if execution_path_guidance:
+            payload["execution_path_guidance"] = execution_path_guidance
+        return payload
 
 
 def _string_context_list(value: object) -> list[str]:
@@ -893,6 +907,21 @@ def _string_context_list(value: object) -> list[str]:
         seen.add(text)
         normalized.append(text)
     return normalized
+
+
+def _merge_string_context_lists(*values: object) -> list[str]:
+    merged: list[str] = []
+    for value in values:
+        if isinstance(value, str):
+            merged.append(value)
+            continue
+        if isinstance(value, list):
+            merged.extend(
+                item
+                for item in value
+                if isinstance(item, str)
+            )
+    return _string_context_list(merged)
 
 
 def _string_context_value(*values: object) -> str | None:
@@ -924,6 +953,120 @@ def _mapping_context_list(value: object) -> list[dict[str, object]]:
         if isinstance(item, dict):
             items.append(dict(item))
     return items
+
+
+def _path_context_summary(value: object) -> str | None:
+    if isinstance(value, dict):
+        return _string_context_value(value.get("summary"), value.get("label"))
+    return _string_context_value(getattr(value, "summary", None), getattr(value, "label", None))
+
+
+def _path_context_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    items: list[dict[str, object]] = []
+    for entry in value:
+        if isinstance(entry, dict):
+            if _path_context_summary(entry) is None:
+                continue
+            items.append(dict(entry))
+            continue
+        summary = _path_context_summary(entry)
+        if summary is None:
+            continue
+        items.append(
+            {
+                "summary": summary,
+                "path_type": _string_context_value(getattr(entry, "path_type", None)),
+                "relation_ids": _string_context_list(getattr(entry, "relation_ids", None)),
+                "relation_kinds": _string_context_list(getattr(entry, "relation_kinds", None)),
+                "source_refs": _string_context_list(getattr(entry, "source_refs", None)),
+                "evidence_refs": _string_context_list(getattr(entry, "evidence_refs", None)),
+            },
+        )
+    return items
+
+
+def _execution_path_guidance_payload(context: dict[str, object]) -> dict[str, object]:
+    sidecar_plan = context.get("assignment_sidecar_plan")
+    if not isinstance(sidecar_plan, dict):
+        return {}
+    knowledge_subgraph = (
+        dict(sidecar_plan.get("knowledge_subgraph"))
+        if isinstance(sidecar_plan.get("knowledge_subgraph"), dict)
+        else {}
+    )
+    dependency_paths = _path_context_list(knowledge_subgraph.get("dependency_paths"))
+    blocker_paths = _path_context_list(knowledge_subgraph.get("blocker_paths"))
+    recovery_paths = _path_context_list(knowledge_subgraph.get("recovery_paths"))
+    contradiction_paths = _path_context_list(knowledge_subgraph.get("contradiction_paths"))
+    execution_ordering_hints = _merge_string_context_lists(
+        sidecar_plan.get("execution_ordering_hints"),
+        [entry.get("summary") for entry in dependency_paths],
+        [entry.get("summary") for entry in blocker_paths],
+        [entry.get("summary") for entry in recovery_paths],
+        [entry.get("summary") for entry in contradiction_paths],
+    )
+    if not any(
+        (
+            execution_ordering_hints,
+            dependency_paths,
+            blocker_paths,
+            recovery_paths,
+            contradiction_paths,
+        ),
+    ):
+        return {}
+    return {
+        "execution_ordering_hints": execution_ordering_hints,
+        "dependency_paths": dependency_paths,
+        "blocker_paths": blocker_paths,
+        "recovery_paths": recovery_paths,
+        "contradiction_paths": contradiction_paths,
+    }
+
+
+def _execution_path_guidance_lines(context: dict[str, object]) -> list[str]:
+    guidance = _execution_path_guidance_payload(context)
+    if not guidance:
+        return []
+    lines = ["Execution path guidance for this assignment:"]
+    ordering_hints = _string_context_list(guidance.get("execution_ordering_hints"))
+    if ordering_hints:
+        lines.extend(f"- {item}" for item in ordering_hints[:4])
+    dependency_paths = _path_context_list(guidance.get("dependency_paths"))
+    if dependency_paths:
+        lines.append("Resolve these dependencies first:")
+        lines.extend(
+            f"- {summary}"
+            for entry in dependency_paths[:3]
+            if (summary := _path_context_summary(entry)) is not None
+        )
+    blocker_paths = _path_context_list(guidance.get("blocker_paths"))
+    if blocker_paths:
+        lines.append("Known blockers that should stop forward motion:")
+        lines.extend(
+            f"- {summary}"
+            for entry in blocker_paths[:3]
+            if (summary := _path_context_summary(entry)) is not None
+        )
+    recovery_paths = _path_context_list(guidance.get("recovery_paths"))
+    if recovery_paths:
+        lines.append("Preferred recovery moves when blocked:")
+        lines.extend(
+            f"- {summary}"
+            for entry in recovery_paths[:3]
+            if (summary := _path_context_summary(entry)) is not None
+        )
+    contradiction_paths = _path_context_list(guidance.get("contradiction_paths"))
+    if contradiction_paths:
+        lines.append("Contradictions to resolve before claiming success:")
+        lines.extend(
+            f"- {summary}"
+            for entry in contradiction_paths[:3]
+            if (summary := _path_context_summary(entry)) is not None
+        )
+    return lines
 
 
 def _runtime_execution_prompt_lines(context: dict[str, object]) -> list[str]:

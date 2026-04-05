@@ -40,6 +40,29 @@ def _string_list(values: Any) -> list[str]:
     return normalized
 
 
+def _path_summary(value: Any) -> str | None:
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, dict):
+        return _first_non_empty(value.get("summary"), value.get("label"))
+    return _first_non_empty(getattr(value, "summary", None), getattr(value, "label", None))
+
+
+def _path_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        summary = _path_summary(value)
+        if summary is None or summary in seen:
+            continue
+        seen.add(summary)
+        normalized.append(summary)
+    return normalized
+
+
 def _normalize_main_brain_runtime_context(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
@@ -75,6 +98,11 @@ def execution_feedback_prompt_lines(feedback: dict[str, Any]) -> list[str]:
     capability_refs = _string_list(feedback.get("capability_refs"))
     environment_refs = _string_list(feedback.get("environment_refs"))
     risk_levels = _string_list(feedback.get("risk_levels"))
+    execution_ordering_hints = _string_list(feedback.get("execution_ordering_hints"))
+    dependency_paths = _path_list(feedback.get("dependency_paths"))
+    blocker_paths = _path_list(feedback.get("blocker_paths"))
+    recovery_paths = _path_list(feedback.get("recovery_paths"))
+    contradiction_paths = _path_list(feedback.get("contradiction_paths"))
     if current_stage:
         lines.append("Current execution stage to continue from:")
         lines.append(f"- {current_stage}")
@@ -95,6 +123,31 @@ def execution_feedback_prompt_lines(feedback: dict[str, Any]) -> list[str]:
     if avoid_repeats:
         lines.append("Do not repeat these patterns:")
         lines.extend(f"- {item}" for item in avoid_repeats[:4])
+    if any(
+        (
+            execution_ordering_hints,
+            dependency_paths,
+            blocker_paths,
+            recovery_paths,
+            contradiction_paths,
+        ),
+    ):
+        lines.append("Execution path guidance:")
+        if execution_ordering_hints:
+            lines.append("Top ordering hints:")
+            lines.extend(f"- {item}" for item in execution_ordering_hints[:4])
+        if dependency_paths:
+            lines.append("Resolve these dependencies first:")
+            lines.extend(f"- {item}" for item in dependency_paths[:4])
+        if blocker_paths:
+            lines.append("Known blockers that should stop forward motion:")
+            lines.extend(f"- {item}" for item in blocker_paths[:4])
+        if recovery_paths:
+            lines.append("Preferred recovery moves when blocked:")
+            lines.extend(f"- {item}" for item in recovery_paths[:4])
+        if contradiction_paths:
+            lines.append("Contradictions to resolve before claiming success:")
+            lines.extend(f"- {item}" for item in contradiction_paths[:4])
     return lines
 
 

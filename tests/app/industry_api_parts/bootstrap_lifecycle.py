@@ -11,6 +11,7 @@ from copaw.industry import IndustryBootstrapInstallItem, IndustryCapabilityRecom
 from copaw.kernel.persistence import decode_kernel_task_metadata
 from copaw.memory.activation_models import ActivationResult
 from copaw.memory.knowledge_graph_models import (
+    KnowledgeGraphPath,
     KnowledgeGraphNode,
     KnowledgeGraphRelation,
     KnowledgeGraphScope,
@@ -1387,6 +1388,39 @@ class _FakePlanningSubgraphActivationService:
             seed_refs=["memory:weekend-variance-gap"],
             top_constraint_refs=["Do not publish until the approval contradiction is resolved."],
             top_evidence_refs=["memory:weekend-variance-gap"],
+            dependency_paths=[
+                KnowledgeGraphPath(
+                    path_type="dependency",
+                    score=0.94,
+                    summary="Refresh approval evidence before drafting the partner update.",
+                    relation_ids=["relation-dependency-1"],
+                    relation_kinds=["depends_on"],
+                    source_refs=["memory:approval-refresh"],
+                    evidence_refs=["memory:approval-refresh"],
+                ),
+            ],
+            blocker_paths=[
+                KnowledgeGraphPath(
+                    path_type="blocker",
+                    score=0.88,
+                    summary="Do not publish until the approval contradiction is resolved.",
+                    relation_ids=["relation-blocker-1"],
+                    relation_kinds=["blocks"],
+                    source_refs=["memory:weekend-variance-gap"],
+                    evidence_refs=["memory:weekend-variance-gap"],
+                ),
+            ],
+            recovery_paths=[
+                KnowledgeGraphPath(
+                    path_type="recovery",
+                    score=0.79,
+                    summary="If blocked, rerun the governed approval refresh and verify the cache state.",
+                    relation_ids=["relation-recovery-1"],
+                    relation_kinds=["recovers_with"],
+                    source_refs=["memory:approval-recovery"],
+                    evidence_refs=["memory:approval-recovery"],
+                ),
+            ],
             nodes=[
                 KnowledgeGraphNode(
                     node_id="capability:browser:partner-portal",
@@ -1781,8 +1815,18 @@ def test_run_operating_cycle_passes_task_subgraph_into_cycle_and_assignment_plan
 
     assert strategy_constraints["graph_focus_entities"] == []
     assert strategy_constraints["graph_focus_relations"] == []
-    assert cycle_decision["affected_relation_ids"] == ["relation-weekend-variance"]
-    assert cycle_decision["affected_relation_kinds"] == ["contradicts"]
+    assert cycle_decision["affected_relation_ids"] == [
+        "relation-weekend-variance",
+        "relation-dependency-1",
+        "relation-blocker-1",
+        "relation-recovery-1",
+    ]
+    assert cycle_decision["affected_relation_kinds"] == [
+        "contradicts",
+        "depends_on",
+        "blocks",
+        "recovers_with",
+    ]
 
     assignment = app.state.assignment_repository.get_assignment(created_assignment_ids[0])
     assert assignment is not None
@@ -1795,6 +1839,16 @@ def test_run_operating_cycle_passes_task_subgraph_into_cycle_and_assignment_plan
     assert knowledge_subgraph["environment_refs"] == ["environment:browser:partner-portal"]
     assert knowledge_subgraph["failure_patterns"] == ["Stale approval cache"]
     assert knowledge_subgraph["relation_ids"] == ["relation-weekend-variance"]
+    assert knowledge_subgraph["top_relation_kinds"] == ["contradicts"]
+    assert knowledge_subgraph["dependency_paths"][0]["summary"] == (
+        "Refresh approval evidence before drafting the partner update."
+    )
+    assert knowledge_subgraph["blocker_paths"][0]["summary"] == (
+        "Do not publish until the approval contradiction is resolved."
+    )
+    assert knowledge_subgraph["recovery_paths"][0]["summary"] == (
+        "If blocked, rerun the governed approval refresh and verify the cache state."
+    )
 
 
 def test_run_operating_cycle_skips_unresolved_chat_writeback_gap_backlog(tmp_path) -> None:
@@ -3216,6 +3270,11 @@ def test_run_operating_cycle_auto_dispatch_keeps_assignment_formal_planning_in_c
     )
     assert created["success"] is True
 
+    activation_service = _EmptyPlanningActivationService()
+    subgraph_service = _FakePlanningSubgraphActivationService()
+    app.state.industry_service._memory_activation_service = activation_service
+    app.state.industry_service._subgraph_activation_service = subgraph_service
+
     detail = app.state.industry_service.get_instance_detail(instance_id)
     assert detail is not None
     assert detail.lanes
@@ -3275,6 +3334,21 @@ def test_run_operating_cycle_auto_dispatch_keeps_assignment_formal_planning_in_c
     assert task_seed["assignment_plan_envelope"] == assignment_plan
     assert compiler_meta["assignment_sidecar_plan"] == assignment_plan.get("sidecar_plan", {})
     assert task_seed["assignment_sidecar_plan"] == assignment_plan.get("sidecar_plan", {})
+    assert subgraph_service.calls
+    assert compiler_meta["assignment_sidecar_plan"]["execution_ordering_hints"] == [
+        "Refresh approval evidence before drafting the partner update.",
+        "Do not publish until the approval contradiction is resolved.",
+        "If blocked, rerun the governed approval refresh and verify the cache state.",
+    ]
+    assert (
+        compiler_meta["assignment_sidecar_plan"]["knowledge_subgraph"]["dependency_paths"][0]["summary"]
+        == "Refresh approval evidence before drafting the partner update."
+    )
+    assert (
+        compiler_meta["prompt_text"]
+        and "Execution path guidance for this assignment:" in compiler_meta["prompt_text"]
+    )
+    assert "Refresh approval evidence before drafting the partner update." in compiler_meta["prompt_text"]
 
 
 def test_runtime_detail_exposes_first_class_main_brain_cognitive_surface_with_continuity_refs(

@@ -199,7 +199,7 @@ def project_task_subgraph_to_planning_focus(value: object | None) -> dict[str, A
         [entry.get("relation_kind") for entry in relation_evidence],
     )
     relation_ids = _string_list([entry.get("relation_id") for entry in relation_evidence])
-    relation_source_refs = _string_list(
+    relation_source_refs = _merge_string_lists(
         *[entry.get("source_refs") for entry in relation_evidence],
     )
     capability_refs = _task_subgraph_node_refs(subgraph, node_type="capability")

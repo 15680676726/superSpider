@@ -3,6 +3,39 @@ from __future__ import annotations
 
 from .shared import *  # noqa: F401,F403
 
+
+def test_execution_feedback_prompt_lines_include_relation_path_guidance() -> None:
+    from copaw.kernel.query_execution_confirmation import execution_feedback_prompt_lines
+
+    lines = execution_feedback_prompt_lines(
+        {
+            "current_stage": "Resolve approval blocker",
+            "dependency_paths": [
+                "Refresh approval evidence before drafting the outbound package.",
+            ],
+            "blocker_paths": [
+                "Do not publish while the approval contradiction remains unresolved.",
+            ],
+            "recovery_paths": [
+                "If blocked, rerun approval refresh and verify the cache state.",
+            ],
+            "contradiction_paths": [
+                "Current approval evidence contradicts immediate publish readiness.",
+            ],
+        },
+    )
+
+    prompt_appendix = "\n".join(lines)
+    assert "Execution path guidance:" in prompt_appendix
+    assert "Resolve these dependencies first:" in prompt_appendix
+    assert "Refresh approval evidence before drafting the outbound package." in prompt_appendix
+    assert "Known blockers that should stop forward motion:" in prompt_appendix
+    assert "Do not publish while the approval contradiction remains unresolved." in prompt_appendix
+    assert "Preferred recovery moves when blocked:" in prompt_appendix
+    assert "If blocked, rerun approval refresh and verify the cache state." in prompt_appendix
+    assert "Contradictions to resolve before claiming success:" in prompt_appendix
+    assert "Current approval evidence contradicts immediate publish readiness." in prompt_appendix
+
 def test_query_execution_service_manages_environment_lease_lifecycle(
     tmp_path,
     monkeypatch,

@@ -17,6 +17,7 @@ from copaw.memory import (
     MemoryReflectionService,
     MemoryRetainService,
 )
+from copaw.memory.knowledge_graph_models import KnowledgeGraphPath
 from copaw.memory.models import MemoryRecallHit, MemoryRecallResponse
 from copaw.state import GoalRecord, MemoryFactIndexRecord, SQLiteStateStore
 from copaw.evidence import EvidenceLedger
@@ -190,6 +191,50 @@ class _FakeMemoryActivationService:
             evidence_refs=["evidence-1"],
             top_constraints=["Evidence review stays mandatory before outbound approval."],
             top_next_actions=["Review the shared checklist before approving outbound media."],
+            dependency_paths=[
+                KnowledgeGraphPath(
+                    path_type="dependency",
+                    score=0.95,
+                    summary="Refresh the governed approval evidence before outbound approval.",
+                    relation_ids=["relation-dependency-1"],
+                    relation_kinds=["depends_on"],
+                    source_refs=["memory:approval-evidence"],
+                    evidence_refs=["evidence-approval-1"],
+                ),
+            ],
+            blocker_paths=[
+                KnowledgeGraphPath(
+                    path_type="blocker",
+                    score=0.88,
+                    summary="Do not approve outbound while the stale approval cache remains unresolved.",
+                    relation_ids=["relation-blocker-1"],
+                    relation_kinds=["blocks"],
+                    source_refs=["memory:approval-cache"],
+                    evidence_refs=["evidence-cache-1"],
+                ),
+            ],
+            recovery_paths=[
+                KnowledgeGraphPath(
+                    path_type="recovery",
+                    score=0.81,
+                    summary="If blocked, clear the approval cache and rerun the governed checklist.",
+                    relation_ids=["relation-recovery-1"],
+                    relation_kinds=["recovers_with"],
+                    source_refs=["memory:approval-recovery"],
+                    evidence_refs=["evidence-recovery-1"],
+                ),
+            ],
+            contradiction_paths=[
+                KnowledgeGraphPath(
+                    path_type="contradiction",
+                    score=0.76,
+                    summary="Current approval evidence contradicts immediate outbound readiness.",
+                    relation_ids=["relation-contradiction-1"],
+                    relation_kinds=["contradicts"],
+                    source_refs=["memory:approval-contradiction"],
+                    evidence_refs=["evidence-contradiction-1"],
+                ),
+            ],
         )
 
 
@@ -321,6 +366,14 @@ def test_query_execution_prompt_uses_activation_result_before_recall_hits() -> N
     assert "# Activation Context" in joined
     assert "Activation: evidence review sequence" in joined
     assert "Evidence review stays mandatory before outbound approval." in joined
+    assert "Activation dependency paths:" in joined
+    assert "Refresh the governed approval evidence before outbound approval." in joined
+    assert "Activation blocker paths:" in joined
+    assert "Do not approve outbound while the stale approval cache remains unresolved." in joined
+    assert "Activation recovery paths:" in joined
+    assert "If blocked, clear the approval cache and rerun the governed checklist." in joined
+    assert "Activation contradiction paths:" in joined
+    assert "Current approval evidence contradicts immediate outbound readiness." in joined
     assert joined.index("# Activation Context") < joined.index(
         "# Truth-First Lexical Recall",
     )

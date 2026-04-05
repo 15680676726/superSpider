@@ -14,6 +14,11 @@ from copaw.goals import GoalService
 from copaw.kernel.persistence import decode_kernel_task_metadata
 from copaw.kernel import AgentProfileService, KernelDispatcher, KernelTaskStore
 from copaw.learning import LearningEngine, LearningService, PatchExecutor
+from copaw.memory.knowledge_graph_models import (
+    KnowledgeGraphPath,
+    KnowledgeGraphScope,
+    TaskSubgraph,
+)
 from copaw.state import (
     DecisionRequestRecord,
     GoalOverrideRecord,
@@ -899,7 +904,65 @@ def test_compile_goal_carries_assignment_local_planning_shell_as_sidecar(
         ),
     )
 
-    compiled_payload = _compile_goal(app, goal_id)
+    compiled_payload = _compile_goal(
+        app,
+        goal_id,
+        context={
+            "task_subgraph": TaskSubgraph(
+                scope=KnowledgeGraphScope(
+                    scope_type="industry",
+                    scope_id="industry-1",
+                    owner_agent_id="ops-agent",
+                    industry_instance_id="industry-1",
+                ),
+                query_text="Prepare the outbound assignment package.",
+                dependency_paths=[
+                    KnowledgeGraphPath(
+                        path_type="dependency",
+                        score=0.95,
+                        summary="Refresh the operator brief evidence before drafting the package.",
+                        relation_ids=["relation-dependency-1"],
+                        relation_kinds=["depends_on"],
+                        source_refs=["memory:operator-brief"],
+                        evidence_refs=["evidence:operator-brief"],
+                    ),
+                ],
+                blocker_paths=[
+                    KnowledgeGraphPath(
+                        path_type="blocker",
+                        score=0.84,
+                        summary="Do not publish the package while the approval contradiction remains unresolved.",
+                        relation_ids=["relation-blocker-1"],
+                        relation_kinds=["blocks"],
+                        source_refs=["memory:approval-contradiction"],
+                        evidence_refs=["evidence:approval-contradiction"],
+                    ),
+                ],
+                recovery_paths=[
+                    KnowledgeGraphPath(
+                        path_type="recovery",
+                        score=0.79,
+                        summary="If blocked, refresh approval evidence and rerun verification.",
+                        relation_ids=["relation-recovery-1"],
+                        relation_kinds=["recovers_with"],
+                        source_refs=["memory:approval-recovery"],
+                        evidence_refs=["evidence:approval-recovery"],
+                    ),
+                ],
+                contradiction_paths=[
+                    KnowledgeGraphPath(
+                        path_type="contradiction",
+                        score=0.73,
+                        summary="Approval evidence contradicts immediate outbound readiness.",
+                        relation_ids=["relation-contradiction-1"],
+                        relation_kinds=["contradicts"],
+                        source_refs=["memory:approval-gap"],
+                        evidence_refs=["evidence:approval-gap"],
+                    ),
+                ],
+            ),
+        },
+    )
     assert len(compiled_payload) == 1
     payload = compiled_payload[0]["payload"]
     compiler_meta = payload["compiler"]
@@ -957,6 +1020,24 @@ def test_compile_goal_carries_assignment_local_planning_shell_as_sidecar(
         assert node["assignment_sidecar_plan"]["local_replan_policy"] == (
             envelope["local_replan_policy"]
         )
+        assert node["assignment_sidecar_plan"]["execution_ordering_hints"] == [
+            "Refresh the operator brief evidence before drafting the package.",
+            "Do not publish the package while the approval contradiction remains unresolved.",
+            "If blocked, refresh approval evidence and rerun verification.",
+            "Approval evidence contradicts immediate outbound readiness.",
+        ]
+        assert (
+            node["assignment_sidecar_plan"]["knowledge_subgraph"]["dependency_paths"][0]["summary"]
+            == "Refresh the operator brief evidence before drafting the package."
+        )
+        assert (
+            node["assignment_sidecar_plan"]["knowledge_subgraph"]["blocker_paths"][0]["summary"]
+            == "Do not publish the package while the approval contradiction remains unresolved."
+        )
+        assert (
+            node["assignment_sidecar_plan"]["knowledge_subgraph"]["recovery_paths"][0]["summary"]
+            == "If blocked, refresh approval evidence and rerun verification."
+        )
         assert "private_notes" not in node["assignment_sidecar_plan"]
         assert any(
             checkpoint["kind"] == "dependency"
@@ -999,6 +1080,11 @@ def test_compile_goal_carries_assignment_local_planning_shell_as_sidecar(
         compiler_meta["assignment_plan_envelope"]["assignment_id"]
         == payload["request_context"]["assignment_id"]
     )
+    prompt_text = payload["request"]["input"][0]["content"][0]["text"]
+    assert "Execution path guidance for this assignment:" in prompt_text
+    assert "Refresh the operator brief evidence before drafting the package." in prompt_text
+    assert "Do not publish the package while the approval contradiction remains unresolved." in prompt_text
+    assert "If blocked, refresh approval evidence and rerun verification." in prompt_text
 
     [persisted_task] = app.state.task_repository.list_tasks(goal_id=goal_id)
     metadata = decode_kernel_task_metadata(persisted_task.acceptance_criteria)

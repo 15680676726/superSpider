@@ -314,6 +314,30 @@ execution 侧不能只把路径塞进提示词。
 
 它不替代治理层，不绕过 `auto / guarded / confirm`。
 
+### 8.4 本次实际落地边界
+
+本次实现已经落到 4 个真实消费面：
+
+- activation
+  - 现在会稳定产出 `support / contradiction / dependency / blocker / recovery` 五类路径包
+- planner
+  - cycle planner 会把路径 relation evidence 计入排序和 affected relation surface
+  - assignment planner 会把路径编译进 checkpoint、`knowledge_subgraph` 和 `execution_ordering_hints`
+- compiler
+  - compiler 会把 assignment sidecar 中的路径提示暴露进 compiled payload / task seed
+  - 这些提示会直接写进执行 prompt 文本，而不只是留在 relation ids 里
+- execution
+  - query execution prompt 会在 activation context 下显式展示 dependency / blocker / recovery / contradiction 路径
+  - execution feedback appendix 会把路径作为排序/守护提示显示出来
+
+明确没有落地的内容：
+
+- 没有新增第二套持久化 truth
+- 没有把路径包写成正式 graph truth 对象
+- 没有引入 graph DB / vector-first memory
+- 没有做 Runtime Center UI 新读面
+- 没有让路径绕过治理层直接触发动作
+
 ---
 
 ## 9. 与 MAGMA 的关系
@@ -361,6 +385,7 @@ execution 侧不能只把路径塞进提示词。
 需要证明：
 
 - execution 会根据路径改变动作顺序
+- execution 会在 prompt / feedback appendix 中显式看到路径提示
 - 遇到高匹配失败链会避开原路径
 - 有 recovery path 时会优先采用更稳的恢复顺序
 
@@ -394,4 +419,3 @@ execution 侧不能只把路径塞进提示词。
 这次升级的最终定义是：
 
 > 保留 CoPaw 当前知识图谱底座，只新增一层关系路径推演，让主脑和执行器真正能顺着关系链思考、排序和避坑。
-

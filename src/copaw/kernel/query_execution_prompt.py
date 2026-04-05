@@ -6,6 +6,26 @@ from .buddy_persona_prompt import build_buddy_persona_prompt
 from .query_execution_shared import *  # noqa: F401,F403
 
 
+def _path_guidance_summary(value: Any) -> str | None:
+    if isinstance(value, dict):
+        return _first_non_empty(value.get("summary"), value.get("label"))
+    return _first_non_empty(getattr(value, "summary", None), getattr(value, "label", None))
+
+
+def _path_guidance_lines(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    lines: list[str] = []
+    seen: set[str] = set()
+    for entry in value:
+        summary = _path_guidance_summary(entry)
+        if summary is None or summary in seen:
+            continue
+        seen.add(summary)
+        lines.append(summary)
+    return lines
+
+
 class _QueryExecutionPromptMixin:
     def _assert_bound_chat_context(
         self,
@@ -1437,7 +1457,30 @@ class _QueryExecutionPromptMixin:
                 lines.append("# Truth-First Memory History")
                 lines.extend(_knowledge_line(chunk) for chunk in history_entries[:2])
         activated_neurons = list(getattr(activation_result, "activated_neurons", []) or [])
-        if activated_neurons:
+        dependency_paths = _path_guidance_lines(
+            getattr(activation_result, "dependency_paths", None),
+        )
+        blocker_paths = _path_guidance_lines(
+            getattr(activation_result, "blocker_paths", None),
+        )
+        recovery_paths = _path_guidance_lines(
+            getattr(activation_result, "recovery_paths", None),
+        )
+        contradiction_paths = _path_guidance_lines(
+            getattr(activation_result, "contradiction_paths", None),
+        )
+        support_paths = _path_guidance_lines(
+            getattr(activation_result, "support_paths", None),
+        )
+        if activated_neurons or any(
+            (
+                dependency_paths,
+                blocker_paths,
+                recovery_paths,
+                contradiction_paths,
+                support_paths,
+            ),
+        ):
             if lines:
                 lines.append("")
             lines.append("# Activation Context")
@@ -1454,6 +1497,21 @@ class _QueryExecutionPromptMixin:
             evidence_refs = list(getattr(activation_result, "evidence_refs", []) or [])
             if evidence_refs:
                 lines.append(f"- Activation evidence refs: {', '.join(str(item) for item in evidence_refs[:4])}")
+            if dependency_paths:
+                lines.append("Activation dependency paths:")
+                lines.extend(f"- {item}" for item in dependency_paths[:3])
+            if blocker_paths:
+                lines.append("Activation blocker paths:")
+                lines.extend(f"- {item}" for item in blocker_paths[:3])
+            if recovery_paths:
+                lines.append("Activation recovery paths:")
+                lines.extend(f"- {item}" for item in recovery_paths[:3])
+            if contradiction_paths:
+                lines.append("Activation contradiction paths:")
+                lines.extend(f"- {item}" for item in contradiction_paths[:3])
+            if support_paths:
+                lines.append("Activation support paths:")
+                lines.extend(f"- {item}" for item in support_paths[:3])
         if memory_chunks:
             if lines:
                 lines.append("")
