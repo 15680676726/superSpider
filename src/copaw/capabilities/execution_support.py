@@ -27,6 +27,11 @@ from ..config.config import (
     VoiceChannelConfig,
 )
 from ..constant import WORKING_DIR
+from ..kernel.runtime_outcome import (
+    is_blocked_runtime_error,
+    is_cancellation_runtime_error,
+    is_timeout_runtime_error,
+)
 
 
 def _build_channel_config(channel_name: str, payload: object) -> object:
@@ -143,6 +148,9 @@ def _tool_response_success(response: object) -> bool:
         or normalized.startswith("failed to execute tool")
         or normalized.startswith("traceback")
         or normalized.startswith("command failed with exit code")
+        or is_cancellation_runtime_error(summary)
+        or is_timeout_runtime_error(summary)
+        or is_blocked_runtime_error(summary)
     )
 
 

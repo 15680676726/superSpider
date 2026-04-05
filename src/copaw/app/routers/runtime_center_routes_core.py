@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from uuid import uuid4
 
+from pydantic import BaseModel, Field
 from .runtime_center_shared_core import *  # noqa: F401,F403
 from ..runtime_center.models import RuntimeCenterAppStateView
 from ..runtime_center.overview_cards import (
@@ -21,10 +23,26 @@ from agentscope_runtime.engine.schemas.agent_schemas import (
 )
 from starlette.background import BackgroundTask
 
+from ...kernel import KernelTask
 from ...kernel.main_brain_turn_result import MainBrainCommitState
 
 _HUMAN_ASSIST_RESUME_MAX_ATTEMPTS = 2
 _HUMAN_ASSIST_RESUME_RETRY_DELAY_SECONDS = 0.15
+
+
+class RuntimeCenterExternalRuntimeActionRequest(BaseModel):
+    capability_id: str
+    action: str = "describe"
+    runtime_id: str | None = None
+    session_mount_id: str | None = None
+    work_context_id: str | None = None
+    environment_ref: str | None = None
+    owner_agent_id: str | None = None
+    args: list[str] = Field(default_factory=list)
+    retention_policy: str | None = None
+    port_override: int | None = None
+    health_path_override: str | None = None
+    metadata: dict[str, object] = Field(default_factory=dict)
 
 
 def _merge_runtime_chat_requested_actions(
@@ -965,6 +983,83 @@ async def list_runtime_center_capability_lifecycle_decisions(
         candidate_id=candidate_id,
         limit=limit,
     )
+
+
+@router.get("/external-runtimes", response_model=list[dict[str, object]])
+async def list_runtime_center_external_runtimes(
+    request: Request,
+    response: Response,
+    capability_id: str | None = None,
+    status: str | None = None,
+    scope_kind: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, object]]:
+    return await _runtime_center_list_query(
+        request=request,
+        response=response,
+        query_methods=("list_external_runtimes",),
+        not_available_detail="External runtime view is not available.",
+        capability_id=capability_id,
+        status=status,
+        scope_kind=scope_kind,
+        limit=limit,
+    )
+
+
+@router.get("/external-runtimes/{runtime_id}", response_model=dict[str, object])
+async def get_runtime_center_external_runtime_detail(
+    runtime_id: str,
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    return await _runtime_center_detail_query(
+        request=request,
+        response=response,
+        query_methods=("get_external_runtime_detail",),
+        not_available_detail="External runtime detail view is not available.",
+        not_found_detail=f"External runtime '{runtime_id}' was not found.",
+        payload_key="runtime",
+        runtime_id=runtime_id,
+    )
+
+
+@router.post("/external-runtimes/actions", response_model=dict[str, object])
+async def act_on_runtime_center_external_runtime(
+    payload: RuntimeCenterExternalRuntimeActionRequest,
+    request: Request,
+    response: Response,
+) -> dict[str, object]:
+    apply_runtime_center_surface_headers(response, surface="runtime-center")
+    capability_service = getattr(request.app.state, "capability_service", None)
+    if capability_service is None:
+        raise HTTPException(503, detail="Capability service is not available.")
+    resolved_action = str(payload.action or "").strip().lower() or "describe"
+    task_payload: dict[str, object] = {
+        "action": resolved_action,
+        "session_mount_id": payload.session_mount_id,
+        "work_context_id": payload.work_context_id,
+        "environment_ref": payload.environment_ref,
+        "owner_agent_id": payload.owner_agent_id or "runtime-center",
+        "metadata": dict(payload.metadata or {}),
+    }
+    if payload.runtime_id is not None:
+        task_payload["runtime_id"] = payload.runtime_id
+    if resolved_action in {"run", "start", "restart"}:
+        task_payload["args"] = list(payload.args or [])
+    if resolved_action in {"start", "restart"}:
+        task_payload["retention_policy"] = payload.retention_policy
+        task_payload["port_override"] = payload.port_override
+        task_payload["health_path_override"] = payload.health_path_override
+    task = KernelTask(
+        id=f"runtime-center-external-runtime:{uuid4()}",
+        title=f"{resolved_action} {payload.capability_id}",
+        capability_ref=payload.capability_id,
+        owner_agent_id=payload.owner_agent_id or "runtime-center",
+        environment_ref=payload.environment_ref,
+        work_context_id=payload.work_context_id,
+        payload=task_payload,
+    )
+    return await capability_service.execute_task(task)
 
 
 @router.get(

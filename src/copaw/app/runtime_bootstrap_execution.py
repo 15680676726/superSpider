@@ -68,6 +68,7 @@ def build_runtime_execution_stack(
     experience_memory_service: AgentExperienceMemoryService | None,
     state_store: SQLiteStateStore,
     work_context_service: WorkContextService,
+    external_runtime_service: object | None = None,
     patch_executor_cls: type[PatchExecutor] = PatchExecutor,
     learning_service_cls: type[LearningService] = LearningService,
     governance_service_cls: type[GovernanceService] = GovernanceService,
@@ -120,6 +121,7 @@ def build_runtime_execution_stack(
         override_repository=repositories.capability_override_repository,
         agent_profile_override_repository=repositories.agent_profile_override_repository,
         state_store=state_store,
+        external_runtime_service=external_runtime_service,
         environment_service=environment_service,
     )
     kernel_dispatcher = kernel_dispatcher_cls(

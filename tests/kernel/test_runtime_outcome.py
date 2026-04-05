@@ -10,3 +10,12 @@ def test_classify_runtime_outcome_does_not_treat_successful_help_text_as_timeout
     )
 
     assert classify_runtime_outcome(summary, success=True) == "completed"
+
+
+def test_classify_runtime_outcome_does_not_treat_failed_help_text_as_timeout() -> None:
+    summary = (
+        "usage: openspace [-h] [--timeout TIMEOUT]\n"
+        "OpenSpace help output"
+    )
+
+    assert classify_runtime_outcome(summary, success=False) == "failed"

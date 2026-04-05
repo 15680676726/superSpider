@@ -29,6 +29,7 @@ from .models import (
     CapabilityOverrideRecord,
     DecisionRequestRecord,
     ExecutionRoutineRecord,
+    ExternalCapabilityRuntimeInstanceRecord,
     FixedSopBindingRecord,
     FixedSopTemplateRecord,
     GovernanceControlRecord,
@@ -90,6 +91,7 @@ from .donor_source_service import DonorSourceService
 from .donor_trust_service import DonorTrustService
 from .skill_lifecycle_decision_service import SkillLifecycleDecisionService
 from .skill_trial_service import SkillTrialService
+from .external_runtime_service import ExternalCapabilityRuntimeService
 from .store import SQLiteStateStore, STATE_SCHEMA_VERSION
 
 __all__ = [
@@ -122,6 +124,8 @@ __all__ = [
     "DonorSourceService",
     "DonorTrustService",
     "ExecutionRoutineRecord",
+    "ExternalCapabilityRuntimeInstanceRecord",
+    "ExternalCapabilityRuntimeService",
     "FixedSopBindingRecord",
     "FixedSopTemplateRecord",
     "GovernanceControlRecord",

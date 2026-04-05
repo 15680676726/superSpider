@@ -180,6 +180,7 @@ class CapabilityMarketProjectInstallResponse(BaseModel):
     source_url: str
     capability_kind: str = "project-package"
     installed_capability_ids: list[str] = Field(default_factory=list)
+    runtime_contract: dict[str, Any] = Field(default_factory=dict)
     target_agent_id: str | None = None
     trial_attachment: dict[str, Any] | None = None
 
@@ -677,6 +678,36 @@ def _build_github_archive_package_ref(source_url: str, *, version: str) -> str:
     return f"https://github.com/{owner}/{repo}/archive/refs/heads/{normalized_version}.zip"
 
 
+def _external_project_transport_priority(kind: str) -> int:
+    normalized = str(kind or "").strip().lower()
+    if normalized == "codeload-tar-gz":
+        return 0
+    if normalized == "github-archive-zip":
+        return 1
+    if normalized == "git":
+        return 2
+    return 99
+
+
+def _prioritize_external_project_transports(transports: list[object]) -> list[object]:
+    return sorted(
+        list(transports or []),
+        key=lambda transport: (
+            _external_project_transport_priority(
+                str(getattr(transport, "kind", "") or ""),
+            ),
+            str(getattr(transport, "package_ref", "") or ""),
+        ),
+    )
+
+
+def _external_project_install_timeout_seconds(kind: str) -> int:
+    normalized = str(kind or "").strip().lower()
+    if normalized == "git":
+        return 60
+    return 300
+
+
 def _default_external_execute_command(
     capability_kind: Literal["project-package", "adapter", "runtime-component"],
     *,
@@ -711,6 +742,54 @@ def _default_evidence_contract(
     if capability_kind == "runtime-component":
         return ["shell-command", "runtime-event"]
     return ["shell-command", "call-record"]
+
+
+def _serialize_installed_runtime_contract(
+    *,
+    package: object | None = None,
+    contract: object | None = None,
+    execute_command: str | None = None,
+    healthcheck_command: str | None = None,
+) -> dict[str, object]:
+    if package is not None:
+        ready_probe_config = dict(getattr(package, "ready_probe_config", {}) or {})
+        return {
+            "runtime_kind": str(getattr(package, "runtime_kind", "") or "").strip() or None,
+            "supported_actions": [
+                str(item).strip()
+                for item in list(getattr(package, "supported_actions", []) or [])
+                if str(item).strip()
+            ],
+            "scope_policy": str(getattr(package, "scope_policy", "") or "").strip() or "session",
+            "ready_probe_kind": str(getattr(package, "ready_probe_kind", "") or "").strip() or "none",
+            "ready_probe_config": ready_probe_config,
+            "stop_strategy": str(getattr(package, "stop_strategy", "") or "").strip() or "terminate",
+            "startup_entry_ref": str(getattr(package, "startup_entry_ref", "") or "").strip() or None,
+            "predicted_default_port": ready_probe_config.get("predicted_default_port"),
+            "predicted_health_path": ready_probe_config.get("predicted_health_path"),
+        }
+    if contract is None:
+        return {}
+    ready_probe_config = dict(getattr(contract, "ready_probe_config", {}) or {})
+    if str(healthcheck_command or "").strip():
+        ready_probe_config["command"] = str(healthcheck_command or "").strip()
+    if str(execute_command or "").strip():
+        ready_probe_config.setdefault("startup_command", str(execute_command or "").strip())
+    return {
+        "runtime_kind": str(getattr(contract, "runtime_kind", "") or "").strip() or None,
+        "supported_actions": [
+            str(item).strip()
+            for item in list(getattr(contract, "supported_actions", ()) or [])
+            if str(item).strip()
+        ],
+        "scope_policy": str(getattr(contract, "scope_policy", "") or "").strip() or "session",
+        "ready_probe_kind": str(getattr(contract, "ready_probe_kind", "") or "").strip() or "none",
+        "ready_probe_config": ready_probe_config,
+        "stop_strategy": str(getattr(contract, "stop_strategy", "") or "").strip() or "terminate",
+        "startup_entry_ref": str(getattr(contract, "startup_entry_ref", "") or "").strip() or None,
+        "predicted_default_port": getattr(contract, "predicted_default_port", None),
+        "predicted_health_path": getattr(contract, "predicted_health_path", None),
+    }
 
 
 def _external_project_environments_dir() -> Path:
@@ -955,10 +1034,15 @@ async def _install_external_project_capability(
     )
     final_environment: dict[str, str] | None = None
     try:
-        for transport in build_github_python_project_transport_chain(
-            source_url=normalized_source_url,
-            ref=resolved_version,
-        ):
+        transports = _prioritize_external_project_transports(
+            list(
+                build_github_python_project_transport_chain(
+                    source_url=normalized_source_url,
+                    ref=resolved_version,
+                ),
+            ),
+        )
+        for transport in transports:
             with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=".json",
@@ -978,7 +1062,7 @@ async def _install_external_project_capability(
             install_command_parts.append(transport.package_ref)
             attempt = await _run_external_project_install_attempt(
                 command_parts=install_command_parts,
-                timeout=900,
+                timeout=_external_project_install_timeout_seconds(transport.kind),
                 report_path=report_path,
             )
             install_summary = str(attempt.get("summary") or "").strip()
@@ -1051,16 +1135,6 @@ async def _install_external_project_capability(
             or resolved_contract.healthcheck_command
             or resolved_execute_command
         )
-        if resolved_healthcheck_command:
-            verify_success, verify_summary = await _run_external_project_shell_command(
-                resolved_healthcheck_command,
-                timeout=180,
-            )
-            if not verify_success:
-                raise HTTPException(
-                    400,
-                    detail=f"External project verification failed: {verify_summary}",
-                )
         staged_environment = {}
         for key, package in existing_source_matches:
             packages.pop(key, None)
@@ -1089,11 +1163,21 @@ async def _install_external_project_capability(
             ),
             execute_command=resolved_execute_command,
             healthcheck_command=resolved_healthcheck_command,
+            runtime_kind=resolved_contract.runtime_kind,
+            supported_actions=list(resolved_contract.supported_actions),
+            scope_policy=str(resolved_contract.scope_policy or "session"),
+            ready_probe_kind=str(resolved_contract.ready_probe_kind or "none"),
+            ready_probe_config={
+                **dict(resolved_contract.ready_probe_config or {}),
+                "command": resolved_healthcheck_command,
+            },
+            stop_strategy=str(resolved_contract.stop_strategy or "terminate"),
+            startup_entry_ref=str(resolved_contract.startup_entry_ref or ""),
             environment_root=final_environment["environment_root"],
             python_path=final_environment["python_path"],
             scripts_dir=final_environment["scripts_dir"],
-            environment_requirements=_default_environment_requirements(capability_kind),
-            evidence_contract=_default_evidence_contract(capability_kind),
+            environment_requirements=list(resolved_contract.environment_requirements),
+            evidence_contract=list(resolved_contract.evidence_contract),
             provider_ref="github",
             metadata={
                 "entry_module": resolved_contract.entry_module,
@@ -1117,6 +1201,11 @@ async def _install_external_project_capability(
             "capability_kind": capability_kind,
             "execution_mode": "shell",
             "summary": install_summary,
+            "runtime_contract": _serialize_installed_runtime_contract(
+                contract=resolved_contract,
+                execute_command=resolved_execute_command,
+                healthcheck_command=resolved_healthcheck_command,
+            ),
         }
     finally:
         if staged_environment:
@@ -2590,6 +2679,11 @@ async def install_market_project_donor(
             for item in list(result.get("installed_capability_ids") or [])
             if str(item).strip()
         ],
+        runtime_contract=(
+            dict(result.get("runtime_contract"))
+            if isinstance(result.get("runtime_contract"), dict)
+            else {}
+        ),
         target_agent_id=target_agent_id,
         trial_attachment=(
             dict(result.get("trial_attachment"))

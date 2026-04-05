@@ -8,6 +8,7 @@ from ..config import load_config, save_config
 from ..evidence import EvidenceLedger, EvidenceRecord
 from .capability_discovery import CapabilityDiscoveryService
 from .catalog import CapabilityCatalogFacade, summarize_capability_mounts
+from .external_runtime_execution import ExternalRuntimeExecution
 from .execution import CapabilityExecutionFacade
 from .models import CapabilityMount, CapabilitySummary
 from .registry import CapabilityRegistry
@@ -53,6 +54,7 @@ class CapabilityService:
         industry_service: object | None = None,
         skill_service: CapabilitySkillService | None = None,
         state_store: "SQLiteStateStore | None" = None,
+        external_runtime_service: object | None = None,
         environment_service: object | None = None,
         cron_manager: object | None = None,
         load_config_fn: Callable[[], Any] | None = None,
@@ -77,6 +79,7 @@ class CapabilityService:
         self._industry_service = industry_service
         self._skill_service = skill_service or default_skill_service
         self._state_store = state_store
+        self._external_runtime_service = external_runtime_service
         self._environment_service = environment_service
         self._cron_manager = cron_manager
         self._load_config_fn = load_config_fn or (lambda: load_config())
@@ -129,6 +132,13 @@ class CapabilityService:
             is_mount_accessible_fn=self._is_mount_accessible,
             append_execution_evidence_fn=self._append_execution_evidence,
             skill_service=self._skill_service,
+            external_runtime_execution=(
+                ExternalRuntimeExecution(
+                    runtime_service=self._external_runtime_service,
+                )
+                if self._external_runtime_service is not None
+                else None
+            ),
             tool_bridge=self._tool_bridge,
             environment_service=self._environment_service,
             mcp_manager=self._mcp_manager,

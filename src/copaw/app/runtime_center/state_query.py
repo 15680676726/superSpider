@@ -67,6 +67,7 @@ class RuntimeCenterStateQueryService:
         agent_profile_service: object | None = None,
         human_assist_task_service: object | None = None,
         environment_service: object | None = None,
+        external_runtime_service: object | None = None,
         memory_activation_service: object | None = None,
     ) -> None:
         self._task_repository = task_repository
@@ -91,6 +92,7 @@ class RuntimeCenterStateQueryService:
         self._agent_profile_service = agent_profile_service
         self._human_assist_task_service = human_assist_task_service
         self._environment_service = environment_service
+        self._external_runtime_service = external_runtime_service
         self._memory_activation_service = memory_activation_service
         self._skill_gap_detector = SkillGapDetector()
         self._environment_feedback_projector = RuntimeCenterEnvironmentFeedbackProjector(
@@ -282,6 +284,53 @@ class RuntimeCenterStateQueryService:
             if isinstance(serialized, dict):
                 payload.append(serialized)
         return payload
+
+    def list_external_runtimes(
+        self,
+        *,
+        capability_id: str | None = None,
+        status: str | None = None,
+        scope_kind: str | None = None,
+        limit: int | None = 20,
+    ) -> list[dict[str, object]]:
+        service = getattr(self, "_external_runtime_service", None)
+        lister = getattr(service, "list_runtimes", None)
+        if not callable(lister):
+            return []
+        items = lister(
+            capability_id=capability_id,
+            status=status,
+            scope_kind=scope_kind,
+            limit=limit,
+        )
+        payload: list[dict[str, object]] = []
+        for item in items:
+            model_dump = getattr(item, "model_dump", None)
+            serialized = model_dump(mode="json") if callable(model_dump) else None
+            if not isinstance(serialized, dict):
+                continue
+            runtime_id = str(serialized.get("runtime_id") or "").strip()
+            if runtime_id:
+                serialized["route"] = f"/api/runtime-center/external-runtimes/{runtime_id}"
+            payload.append(serialized)
+        return payload
+
+    def get_external_runtime_detail(self, runtime_id: str) -> dict[str, object] | None:
+        service = getattr(self, "_external_runtime_service", None)
+        getter = getattr(service, "get_runtime", None)
+        if not callable(getter):
+            return None
+        item = getter(runtime_id)
+        if item is None:
+            return None
+        model_dump = getattr(item, "model_dump", None)
+        payload = model_dump(mode="json") if callable(model_dump) else None
+        if not isinstance(payload, dict):
+            payload = {}
+        return {
+            "runtime": payload,
+            "route": f"/api/runtime-center/external-runtimes/{runtime_id}",
+        }
 
     def list_capability_donors(
         self,

@@ -100,6 +100,7 @@ def build_runtime_state_bindings(
         "latest_recovery_report": latest_recovery_report,
         "session_mount_repository": repositories.session_mount_repository,
         "automation_loop_runtime_repository": repositories.automation_loop_runtime_repository,
+        "external_runtime_repository": repositories.external_runtime_repository,
         "state_query_service": bootstrap.state_query_service,
         "evidence_query_service": bootstrap.evidence_query_service,
         "capability_candidate_service": bootstrap.capability_candidate_service,
@@ -144,6 +145,7 @@ def build_runtime_state_bindings(
         "actor_mailbox_service": bootstrap.actor_mailbox_service,
         "actor_worker": bootstrap.actor_worker,
         "actor_supervisor": bootstrap.actor_supervisor,
+        "external_runtime_service": bootstrap.external_runtime_service,
         "automation_tasks": _materialize_automation_tasks(automation_tasks),
     }
 
