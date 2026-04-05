@@ -49,6 +49,14 @@ def _int_value(value: object | None) -> int | None:
         return None
 
 
+def _merge_adapter_metadata(*payloads: object) -> dict[str, Any]:
+    from ..capabilities.external_adapter_contracts import (
+        merge_adapter_attribution_metadata,
+    )
+
+    return merge_adapter_attribution_metadata(*payloads)
+
+
 class _PredictionServiceCoreMixin:
     def __init__(
         self,
@@ -719,7 +727,9 @@ class _PredictionServiceCoreMixin:
             ),
             protection_lifted=False,
             applied_by=_string(actor) or "prediction-service",
-            metadata={
+            metadata=_merge_adapter_metadata(
+                metadata,
+                {
                 "source_recommendation_id": source_recommendation_id,
                 "execution_status": "executed",
                 "gap_kind": _string(metadata.get("gap_kind")),
@@ -727,7 +737,8 @@ class _PredictionServiceCoreMixin:
                 "selected_seat_ref": _string(action_payload.get("selected_seat_ref"))
                 or _string(metadata.get("selected_seat_ref"))
                 or _string(metadata.get("source_trial_seat_ref")),
-            },
+                },
+            ),
         )
 
     def get_active_team_role_gap_recommendation(

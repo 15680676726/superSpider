@@ -412,11 +412,17 @@ def test_query_execution_runtime_exposes_bounded_donor_trial_carry_forward_contr
             "source_profile_id",
             "candidate_source_kind",
             "resolution_kind",
+            "protocol_surface_kind",
+            "transport_kind",
+            "compiled_adapter_id",
+            "selected_adapter_action_id",
         ],
         "accepted_list_fields": [
             "replacement_target_ids",
             "rollback_target_ids",
             "capability_ids",
+            "compiled_action_ids",
+            "adapter_blockers",
         ],
         "max_list_items": 3,
         "acceptance": "bounded-runtime-metadata",
@@ -837,6 +843,58 @@ def test_query_execution_runtime_bounds_trial_attribution_list_carry_forward() -
         "tool:browser_use",
     ]
     assert "ignored_key" not in metadata
+
+
+def test_query_execution_runtime_carries_adapter_attribution_into_evidence_metadata() -> None:
+    class _ToolBridge:
+        def __init__(self) -> None:
+            self.shell_calls: list[dict[str, object]] = []
+
+        def record_shell_event(self, task_id: str, payload: dict[str, object]) -> None:
+            self.shell_calls.append({"task_id": task_id, "payload": payload})
+
+    bridge = _ToolBridge()
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        tool_bridge=bridge,
+    )
+
+    shell_sink = service._make_shell_evidence_sink(  # pylint: disable=protected-access
+        "ktask:query-tool",
+        capability_trial_attribution={
+            "skill_candidate_id": "candidate-openspace",
+            "skill_trial_id": "trial-openspace-seat-1",
+            "skill_lifecycle_stage": "trial",
+            "selected_scope": "seat",
+            "protocol_surface_kind": "native_mcp",
+            "transport_kind": "mcp",
+            "compiled_adapter_id": "adapter:openspace",
+            "compiled_action_ids": ["execute_task"],
+            "selected_adapter_action_id": "execute_task",
+        },
+    )
+    assert shell_sink is not None
+
+    shell_sink(
+        {
+            "tool_name": "execute_shell_command",
+            "command": "git status",
+            "cwd": "D:/word/copaw",
+            "timeout_seconds": 60,
+            "status": "success",
+            "returncode": 0,
+            "stdout": "ok",
+            "stderr": "",
+            "metadata": {},
+        },
+    )
+
+    metadata = bridge.shell_calls[0]["payload"]["metadata"]
+    assert metadata["protocol_surface_kind"] == "native_mcp"
+    assert metadata["transport_kind"] == "mcp"
+    assert metadata["compiled_adapter_id"] == "adapter:openspace"
+    assert metadata["compiled_action_ids"] == ["execute_task"]
+    assert metadata["selected_adapter_action_id"] == "execute_task"
 
 
 @pytest.mark.asyncio

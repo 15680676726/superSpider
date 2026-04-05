@@ -8,6 +8,7 @@ from ..config import load_config, save_config
 from ..evidence import EvidenceLedger, EvidenceRecord
 from .capability_discovery import CapabilityDiscoveryService
 from .catalog import CapabilityCatalogFacade, summarize_capability_mounts
+from .external_adapter_execution import ExternalAdapterExecution
 from .external_runtime_execution import ExternalRuntimeExecution
 from .execution import CapabilityExecutionFacade
 from .models import CapabilityMount, CapabilitySummary
@@ -132,6 +133,10 @@ class CapabilityService:
             is_mount_accessible_fn=self._is_mount_accessible,
             append_execution_evidence_fn=self._append_execution_evidence,
             skill_service=self._skill_service,
+            external_adapter_execution=ExternalAdapterExecution(
+                mcp_manager=self._mcp_manager,
+                environment_service=self._environment_service,
+            ),
             external_runtime_execution=(
                 ExternalRuntimeExecution(
                     runtime_service=self._external_runtime_service,

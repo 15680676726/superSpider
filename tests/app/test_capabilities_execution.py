@@ -103,7 +103,7 @@ class FakeMCPClient:
 
 class FakeMCPManager:
     async def get_client(self, client_key: str):
-        if client_key == "browser":
+        if client_key in {"browser", "openspace"}:
             return FakeMCPClient()
         return None
 
@@ -3163,3 +3163,122 @@ def test_service_start_waits_until_runtime_is_ready(
     assert attempts["count"] >= 2
     assert updated is not None
     assert updated.status == "ready"
+
+
+def test_adapter_capability_executes_compiled_action_through_mcp_transport() -> None:
+    config = Config(
+        external_capability_packages={
+            "adapter:openspace": ExternalCapabilityPackageConfig(
+                capability_id="adapter:openspace",
+                name="openspace",
+                summary="OpenSpace adapter",
+                kind="adapter",
+                source_kind="adapter",
+                source_url="https://github.com/HKUDS/OpenSpace",
+                package_ref="git+https://github.com/HKUDS/OpenSpace.git",
+                package_kind="git-repo",
+                enabled=True,
+                execution_mode="shell",
+                runtime_kind=None,
+                supported_actions=[],
+                scope_policy="seat",
+                ready_probe_kind="none",
+                stop_strategy="terminate",
+                startup_entry_ref="script:openspace-mcp",
+                intake_protocol_kind="native_mcp",
+                call_surface_ref="mcp:openspace",
+                adapter_contract={
+                    "compiled_adapter_id": "adapter:openspace",
+                    "transport_kind": "mcp",
+                    "call_surface_ref": "mcp:openspace",
+                    "actions": [
+                        {
+                            "action_id": "execute_task",
+                            "transport_action_ref": "execute_task",
+                            "input_schema": {"type": "object"},
+                            "output_schema": {},
+                        },
+                    ],
+                },
+            ),
+        },
+    )
+
+    with (
+        patch("copaw.capabilities.service.load_config", return_value=config),
+        patch("copaw.capabilities.service.save_config"),
+        patch("copaw.capabilities.sources.mcp.load_config", return_value=config),
+        patch(
+            "copaw.capabilities.sources.external_packages.load_config",
+            return_value=config,
+        ),
+    ):
+        service = CapabilityService(mcp_manager=FakeMCPManager())
+        result = asyncio.run(
+            service.execute_task(
+                KernelTask(
+                    id="task-external-adapter",
+                    title="Execute adapter action",
+                    capability_ref="adapter:openspace",
+                    owner_agent_id="copaw-operator",
+                    payload={"action": "execute_task", "task": "hello"},
+                ),
+            ),
+    )
+
+    assert result["success"] is True
+    assert result["capability_id"] == "adapter:openspace"
+    assert result["output"]["adapter_action"] == "execute_task"
+    assert result["output"]["transport_kind"] == "mcp"
+
+
+def test_runtime_only_capability_rejects_business_adapter_action() -> None:
+    config = Config(
+        external_capability_packages={
+            "runtime:flask": ExternalCapabilityPackageConfig(
+                capability_id="runtime:flask",
+                name="flask",
+                summary="Flask runtime component",
+                kind="runtime-component",
+                source_kind="runtime",
+                source_url="https://github.com/pallets/flask",
+                package_ref="git+https://github.com/pallets/flask.git",
+                package_kind="git-repo",
+                enabled=True,
+                execution_mode="shell",
+                execute_command='python -m flask --version',
+                healthcheck_command='python -m flask --version',
+                runtime_kind="service",
+                supported_actions=["describe", "start", "healthcheck", "stop", "restart"],
+                scope_policy="session",
+                ready_probe_kind="command",
+                stop_strategy="terminate",
+                startup_entry_ref="module:flask",
+            ),
+        },
+    )
+
+    with (
+        patch("copaw.capabilities.service.load_config", return_value=config),
+        patch("copaw.capabilities.service.save_config"),
+        patch("copaw.capabilities.sources.mcp.load_config", return_value=config),
+        patch(
+            "copaw.capabilities.sources.external_packages.load_config",
+            return_value=config,
+        ),
+    ):
+        service = CapabilityService()
+        result = asyncio.run(
+            service.execute_task(
+                KernelTask(
+                    id="task-runtime-only",
+                    title="Execute unsupported adapter action",
+                    capability_ref="runtime:flask",
+                    owner_agent_id="copaw-operator",
+                    payload={"action": "execute_task"},
+                ),
+            ),
+        )
+
+    assert result["success"] is False
+    assert "formal adapter" in result["summary"].lower()

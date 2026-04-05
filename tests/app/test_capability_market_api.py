@@ -1687,6 +1687,119 @@ def test_capability_market_project_install_from_source_url_materializes_candidat
     assert trials[0].candidate_source_lineage == "donor:github:psf/black"
 
 
+def test_capability_market_project_install_syncs_adapter_attribution_to_candidate_and_trial(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    candidate_service = CapabilityCandidateService(state_store=app.state.state_store)
+    trial_service = SkillTrialService(state_store=app.state.state_store)
+    app.state.capability_candidate_service = candidate_service
+    app.state.skill_trial_service = trial_service
+    app.state.agent_profile_service = SimpleNamespace(
+        get_agent=lambda agent_id: {"agent_id": agent_id},
+    )
+    client = TestClient(app)
+
+    monkeypatch.setattr(
+        "copaw.app.routers.capability_market.search_github_repository_donors",
+        lambda query, limit=1: [
+            DiscoveryHit(
+                source_id="github-repo",
+                source_kind="github-repo",
+                source_alias="github",
+                candidate_kind="project",
+                display_name="example/openspace-donor",
+                summary="Installable adapter donor",
+                candidate_source_ref="https://github.com/example/openspace-donor",
+                candidate_source_version="main",
+                candidate_source_lineage="donor:github:example/openspace-donor",
+                canonical_package_id="pkg:github:example/openspace-donor",
+                capability_keys=("automation", "agent"),
+                metadata={
+                    "provider": "github-repo",
+                    "install_supported": True,
+                    "repository_url": "https://github.com/example/openspace-donor",
+                },
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        "copaw.app.routers.capability_market._install_external_project_capability",
+        lambda **kwargs: {
+            "installed": True,
+            "name": "openspace",
+            "enabled": True,
+            "source_url": "https://github.com/example/openspace-donor",
+            "installed_capability_ids": ["adapter:openspace"],
+            "capability_kind": "adapter",
+            "execution_mode": "shell",
+            "adapter_contract": {
+                "compiled_adapter_id": "adapter:openspace",
+                "transport_kind": "mcp",
+                "actions": [
+                    {
+                        "action_id": "execute_task",
+                        "transport_action_ref": "execute_task",
+                    },
+                ],
+                "promotion_blockers": [],
+            },
+            "protocol_surface_kind": "native_mcp",
+            "transport_kind": "mcp",
+            "compiled_adapter_id": "adapter:openspace",
+            "compiled_action_ids": ["execute_task"],
+            "adapter_blockers": [],
+        },
+    )
+
+    async def _fake_dispatch(*args, **kwargs):
+        return {
+            "success": True,
+            "summary": "Capability lifecycle attached.",
+            "trial_attachment": {
+                "success": True,
+                "selected_scope": "seat",
+                "scope_type": "seat",
+                "scope_ref": "seat-1",
+            },
+        }
+
+    monkeypatch.setattr(
+        "copaw.app.routers.capability_market._dispatch_market_mutation",
+        _fake_dispatch,
+    )
+
+    response = client.post(
+        "/capability-market/projects/install",
+        json={
+            "source_url": "https://github.com/example/openspace-donor",
+            "capability_kind": "adapter",
+            "entry_module": "openspace",
+            "target_agent_id": "copaw-agent-runner",
+            "selected_seat_ref": "seat-1",
+            "target_role_id": "execution-core",
+            "overwrite": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    candidate = candidate_service.get_candidate(payload["candidate_id"])
+    assert candidate is not None
+    assert candidate.metadata["protocol_surface_kind"] == "native_mcp"
+    assert candidate.metadata["transport_kind"] == "mcp"
+    assert candidate.metadata["compiled_adapter_id"] == "adapter:openspace"
+    assert candidate.metadata["compiled_action_ids"] == ["execute_task"]
+
+    trials = trial_service.list_trials(candidate_id=payload["candidate_id"])
+    assert len(trials) == 1
+    assert trials[0].metadata["protocol_surface_kind"] == "native_mcp"
+    assert trials[0].metadata["transport_kind"] == "mcp"
+    assert trials[0].metadata["compiled_adapter_id"] == "adapter:openspace"
+    assert trials[0].metadata["compiled_action_ids"] == ["execute_task"]
+
+
 def test_capability_market_project_install_accepts_candidate_source_url(
     tmp_path,
     monkeypatch,

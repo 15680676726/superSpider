@@ -665,6 +665,76 @@ def test_runtime_center_state_query_candidate_projection_exposes_provenance_hist
     assert "rollback" in payload[0]["drift_reentry"]["reasons"]
 
 
+def test_runtime_center_state_query_candidate_projection_exposes_adapter_assimilation_status(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "runtime-center-adapter-state.db")
+    candidate_service = CapabilityCandidateService(state_store=state_store)
+    trial_service = SkillTrialService(state_store=state_store)
+    decision_service = SkillLifecycleDecisionService(state_store=state_store)
+
+    candidate = candidate_service.normalize_candidate_source(
+        candidate_kind="project",
+        target_scope="seat",
+        target_role_id="execution-core",
+        target_seat_ref="seat-primary",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://github.com/example/openspace-donor",
+        candidate_source_version="main",
+        candidate_source_lineage="donor:github:example/openspace-donor",
+        canonical_package_id="pkg:github:example/openspace-donor",
+        ingestion_mode="capability-market",
+        proposed_skill_name="openspace_donor",
+        summary="Governed external donor candidate.",
+        metadata={
+            "protocol_surface_kind": "native_mcp",
+            "transport_kind": "mcp",
+            "compiled_adapter_id": "adapter:openspace",
+            "compiled_action_ids": ["execute_task"],
+            "adapter_blockers": [],
+        },
+    )
+    trial_service.create_or_update_trial(
+        candidate_id=candidate.candidate_id,
+        donor_id=candidate.donor_id,
+        package_id=candidate.package_id,
+        source_profile_id=candidate.source_profile_id,
+        canonical_package_id=candidate.canonical_package_id,
+        scope_type="seat",
+        scope_ref="seat-primary",
+        verdict="passed",
+        summary="Seat-local adapter trial completed.",
+        metadata={
+            "protocol_surface_kind": "native_mcp",
+            "transport_kind": "mcp",
+            "compiled_adapter_id": "adapter:openspace",
+            "compiled_action_ids": ["execute_task"],
+        },
+    )
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=object(),
+        task_runtime_repository=object(),
+        runtime_frame_repository=None,
+        schedule_repository=object(),
+        goal_repository=None,
+        work_context_repository=None,
+        decision_request_repository=object(),
+        capability_candidate_service=candidate_service,
+        skill_trial_service=trial_service,
+        skill_lifecycle_decision_service=decision_service,
+    )
+
+    payload = state_query.list_capability_candidates(limit=5)
+
+    assert len(payload) == 1
+    assert payload[0]["protocol_surface_kind"] == "native_mcp"
+    assert payload[0]["transport_kind"] == "mcp"
+    assert payload[0]["compiled_adapter_id"] == "adapter:openspace"
+    assert payload[0]["compiled_action_ids"] == ["execute_task"]
+    assert payload[0]["promotion_blockers"] == []
+
+
 def test_runtime_center_capability_lifecycle_decisions_endpoint_returns_state_query_projection() -> None:
     app = _build_app()
 

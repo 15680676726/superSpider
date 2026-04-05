@@ -457,6 +457,10 @@ class RuntimeCenterStateQueryService:
             return None
         candidate_id = str(serialized.get("candidate_id") or "").strip()
         lifecycle_history = self._candidate_lifecycle_history(candidate_id)
+        adapter_status = self._candidate_adapter_assimilation_status(
+            candidate_id,
+            candidate_payload=serialized,
+        )
         return {
             **serialized,
             "supply_path": self._candidate_supply_path(serialized),
@@ -473,6 +477,7 @@ class RuntimeCenterStateQueryService:
                 "canonical_package_id": serialized.get("canonical_package_id"),
                 "protection_flags": list(serialized.get("protection_flags") or []),
             },
+            **adapter_status,
             "lifecycle_history": lifecycle_history,
             "drift_reentry": self._skill_gap_detector.build_reentry_summary(
                 trial_summary=lifecycle_history,
@@ -552,6 +557,65 @@ class RuntimeCenterStateQueryService:
                 else {}
             ),
         }
+
+    def _candidate_adapter_assimilation_status(
+        self,
+        candidate_id: str,
+        *,
+        candidate_payload: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        candidate_metadata = self._mapping_payload(
+            self._mapping_payload(candidate_payload).get("metadata"),
+        )
+        trial_service = getattr(self, "_skill_trial_service", None)
+        decision_service = getattr(self, "_skill_lifecycle_decision_service", None)
+        list_trials = getattr(trial_service, "list_trials", None)
+        list_decisions = getattr(decision_service, "list_decisions", None)
+        trial_metadata = {}
+        decision_metadata = {}
+        if candidate_id:
+            trials = (
+                list_trials(candidate_id=candidate_id, limit=1)
+                if callable(list_trials)
+                else []
+            )
+            if trials:
+                trial_metadata = self._mapping_payload(getattr(trials[0], "metadata", None))
+            decisions = (
+                list_decisions(candidate_id=candidate_id, limit=1)
+                if callable(list_decisions)
+                else []
+            )
+            if decisions:
+                decision_metadata = self._mapping_payload(
+                    getattr(decisions[0], "metadata", None),
+                )
+
+        merged: dict[str, object] = {}
+        for payload in (candidate_metadata, trial_metadata, decision_metadata):
+            if not payload:
+                continue
+            for key in (
+                "protocol_surface_kind",
+                "transport_kind",
+                "compiled_adapter_id",
+                "selected_adapter_action_id",
+            ):
+                value = first_non_empty(payload.get(key))
+                if value is not None:
+                    merged[key] = value
+            compiled_action_ids = string_list_from_values(payload.get("compiled_action_ids"))
+            if compiled_action_ids:
+                merged["compiled_action_ids"] = compiled_action_ids
+            promotion_blockers = string_list_from_values(
+                payload.get("adapter_blockers"),
+                payload.get("promotion_blockers"),
+            )
+            if promotion_blockers:
+                merged["promotion_blockers"] = promotion_blockers
+        merged.setdefault("compiled_action_ids", [])
+        merged.setdefault("promotion_blockers", [])
+        return merged
 
     def list_work_contexts(self, limit: int | None = 5) -> list[dict[str, object]]:
         return self._work_context_projector.list_work_contexts(limit=limit)

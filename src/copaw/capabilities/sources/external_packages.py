@@ -52,6 +52,16 @@ def _runtime_contract_projection(package: object) -> dict[str, object]:
     }
 
 
+def _adapter_contract_projection(package: object) -> dict[str, object]:
+    contract = dict(getattr(package, "adapter_contract", {}) or {})
+    if not contract:
+        return {}
+    actions = contract.get("actions")
+    if not isinstance(actions, list):
+        contract["actions"] = []
+    return contract
+
+
 def list_external_package_capabilities() -> list[CapabilityMount]:
     config = load_config()
     mounts: list[CapabilityMount] = []
@@ -66,6 +76,7 @@ def list_external_package_capabilities() -> list[CapabilityMount]:
         ).strip()
         metadata = dict(getattr(package, "metadata", {}) or {})
         runtime_contract = _runtime_contract_projection(package)
+        adapter_contract = _adapter_contract_projection(package)
         environment_requirements = list(
             getattr(package, "environment_requirements", None) or []
         )
@@ -93,16 +104,34 @@ def list_external_package_capabilities() -> list[CapabilityMount]:
                     getattr(package, "execution_mode", "shell") or "shell"
                 ),
                 "source_url": str(getattr(package, "source_url", "") or ""),
+                "intake_protocol_kind": str(
+                    getattr(package, "intake_protocol_kind", "") or "unknown"
+                ),
+                "call_surface_ref": (
+                    str(getattr(package, "call_surface_ref", "") or "").strip() or None
+                ),
+                "adapter_contract": adapter_contract,
                 "runtime_contract": runtime_contract,
             },
         )
+        executor_ref = execute_command or healthcheck_command or capability_id
+        if (
+            str(getattr(package, "kind", "") or "").strip() == "adapter"
+            and adapter_contract
+        ):
+            executor_ref = "external-adapter"
         mounts.append(
             CapabilityMount(
                 id=capability_id,
                 name=str(getattr(package, "name", "") or capability_id),
-                summary=str(
-                    getattr(package, "summary", "")
-                    or "External open-source capability"
+                summary=(
+                    "Governed external adapter compiled into formal CoPaw business actions."
+                    if str(getattr(package, "kind", "") or "").strip() == "adapter"
+                    and adapter_contract
+                    else str(
+                        getattr(package, "summary", "")
+                        or "External open-source capability"
+                    )
                 ),
                 kind=str(
                     getattr(package, "kind", "project-package")
@@ -124,7 +153,7 @@ def list_external_package_capabilities() -> list[CapabilityMount]:
                     "Records installation and runtime calls for the external donor package."
                 ),
                 role_access_policy=[],
-                executor_ref=execute_command or healthcheck_command or capability_id,
+                executor_ref=executor_ref,
                 provider_ref=str(getattr(package, "provider_ref", "github") or "github"),
                 timeout_policy="external-package",
                 package_ref=str(getattr(package, "package_ref", "") or None) or None,

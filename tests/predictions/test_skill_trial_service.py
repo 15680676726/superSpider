@@ -247,3 +247,53 @@ def test_skill_trial_service_builds_candidate_verdict_summary_across_scopes(tmp_
         "seat-primary": "passed",
         "seat-secondary": "failed",
     }
+
+
+def test_skill_trial_service_preserves_adapter_attribution_metadata_across_updates(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.db")
+    candidate_service = CapabilityCandidateService(state_store=state_store)
+    trial_service = SkillTrialService(state_store=state_store)
+
+    candidate = candidate_service.normalize_candidate_source(
+        candidate_kind="project",
+        target_scope="seat",
+        target_role_id="execution-core",
+        target_seat_ref="seat-primary",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://github.com/example/donor-app",
+        candidate_source_version="main",
+        ingestion_mode="capability-market",
+        proposed_skill_name="donor_app",
+        summary="Governed external donor candidate.",
+    )
+
+    trial_service.create_or_update_trial(
+        candidate_id=candidate.candidate_id,
+        scope_type="seat",
+        scope_ref="seat-primary",
+        verdict="pending",
+        metadata={
+            "protocol_surface_kind": "native_mcp",
+            "transport_kind": "mcp",
+            "compiled_adapter_id": "adapter:demo",
+            "compiled_action_ids": ["execute_task"],
+        },
+    )
+    updated = trial_service.create_or_update_trial(
+        candidate_id=candidate.candidate_id,
+        scope_type="seat",
+        scope_ref="seat-primary",
+        verdict="passed",
+        summary="Seat-local adapter trial completed.",
+        metadata={
+            "selected_adapter_action_id": "execute_task",
+        },
+    )
+
+    assert updated.metadata["protocol_surface_kind"] == "native_mcp"
+    assert updated.metadata["transport_kind"] == "mcp"
+    assert updated.metadata["compiled_adapter_id"] == "adapter:demo"
+    assert updated.metadata["compiled_action_ids"] == ["execute_task"]
+    assert updated.metadata["selected_adapter_action_id"] == "execute_task"

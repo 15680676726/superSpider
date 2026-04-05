@@ -55,6 +55,21 @@ def test_external_packages_are_loaded_as_first_class_capabilities() -> None:
                 ready_probe_kind="none",
                 stop_strategy="terminate",
                 startup_entry_ref="module:pywinauto",
+                intake_protocol_kind="native_mcp",
+                call_surface_ref="mcp:pywinauto",
+                adapter_contract={
+                    "compiled_adapter_id": "adapter:pywinauto",
+                    "transport_kind": "mcp",
+                    "call_surface_ref": "mcp:pywinauto",
+                    "actions": [
+                        {
+                            "action_id": "focus_window",
+                            "transport_action_ref": "focus_window",
+                            "input_schema": {"type": "object"},
+                            "output_schema": {},
+                        },
+                    ],
+                },
             ),
             "runtime:flask": ExternalCapabilityPackageConfig(
                 capability_id="runtime:flask",
@@ -105,6 +120,10 @@ def test_external_packages_are_loaded_as_first_class_capabilities() -> None:
     assert mounts["project:black"].source_kind == "project"
     assert mounts["adapter:pywinauto"].kind == "adapter"
     assert mounts["adapter:pywinauto"].source_kind == "adapter"
+    assert mounts["adapter:pywinauto"].metadata["adapter_contract"]["transport_kind"] == "mcp"
+    assert mounts["adapter:pywinauto"].metadata["adapter_contract"]["actions"][0]["action_id"] == "focus_window"
+    assert mounts["adapter:pywinauto"].metadata["intake_protocol_kind"] == "native_mcp"
+    assert mounts["adapter:pywinauto"].metadata["call_surface_ref"] == "mcp:pywinauto"
     assert mounts["runtime:flask"].kind == "runtime-component"
     assert mounts["runtime:flask"].source_kind == "runtime"
     assert mounts["runtime:flask"].metadata["runtime_contract"]["runtime_kind"] == "service"

@@ -11,6 +11,7 @@ from ..industry.models import (
     resolve_runtime_effective_capability_ids,
 )
 from ..memory.conversation_compaction_service import ConversationCompactionService
+from ..memory.knowledge_writeback_service import KnowledgeWritebackService
 from .main_brain_intake import (
     build_industry_chat_action_kwargs,
     read_attached_main_brain_intake_contract,
@@ -90,11 +91,17 @@ _QUERY_TRIAL_ATTRIBUTION_SCALAR_FIELDS = (
     "source_profile_id",
     "candidate_source_kind",
     "resolution_kind",
+    "protocol_surface_kind",
+    "transport_kind",
+    "compiled_adapter_id",
+    "selected_adapter_action_id",
 )
 _QUERY_TRIAL_ATTRIBUTION_LIST_FIELDS = (
     "replacement_target_ids",
     "rollback_target_ids",
     "capability_ids",
+    "compiled_action_ids",
+    "adapter_blockers",
 )
 _QUERY_TRIAL_ATTRIBUTION_FIELD_SET = frozenset(
     _QUERY_TRIAL_ATTRIBUTION_SCALAR_FIELDS + _QUERY_TRIAL_ATTRIBUTION_LIST_FIELDS,
@@ -281,23 +288,11 @@ def _query_tool_contract_metadata(
     )
     metadata["preflight_policy"] = tool_contract.preflight_policy
     if capability_trial_attribution:
-        for key in (
-            "candidate_id",
-            "skill_candidate_id",
-            "skill_trial_id",
-            "skill_lifecycle_stage",
-            "selected_scope",
-            "selected_seat_ref",
-            "donor_id",
-            "package_id",
-            "source_profile_id",
-            "candidate_source_kind",
-            "resolution_kind",
-        ):
+        for key in _QUERY_TRIAL_ATTRIBUTION_SCALAR_FIELDS:
             resolved = _first_non_empty(capability_trial_attribution.get(key))
             if resolved is not None:
                 metadata[key] = resolved
-        for key in ("replacement_target_ids", "rollback_target_ids", "capability_ids"):
+        for key in _QUERY_TRIAL_ATTRIBUTION_LIST_FIELDS:
             resolved_items = _string_list(capability_trial_attribution.get(key))
             if resolved_items:
                 metadata[key] = resolved_items
@@ -352,6 +347,10 @@ def _normalize_capability_trial_attribution(
         "source_profile_id",
         "candidate_source_kind",
         "resolution_kind",
+        "protocol_surface_kind",
+        "transport_kind",
+        "compiled_adapter_id",
+        "selected_adapter_action_id",
     ):
         resolved = _first_non_empty(raw_payload.get(key))
         if resolved is not None:
@@ -1926,6 +1925,9 @@ class _QueryExecutionRuntimeMixin(
             error=resolved_error,
             summary=final_summary,
         )
+        knowledge_writeback_service = KnowledgeWritebackService(
+            knowledge_service=self._knowledge_service,
+        )
         knowledge_writeback = build_execution_knowledge_writeback(
             scope_type="work_context" if work_context_id else "task" if task_id else "agent",
             scope_id=(
@@ -1947,6 +1949,8 @@ class _QueryExecutionRuntimeMixin(
                 if outcome in {"failed", "blocked", "cancelled", "timeout"}
                 else None
             ),
+            knowledge_writeback_service=knowledge_writeback_service,
+            persist=True,
         )
         main_brain_runtime = self._merge_main_brain_runtime_contexts(
             dict(runtime.metadata or {}).get("main_brain_runtime"),

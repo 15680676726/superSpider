@@ -55,6 +55,14 @@ def _float_value(value: object | None) -> float | None:
         return None
 
 
+def _merge_adapter_metadata(*payloads: object) -> dict[str, Any]:
+    from ..capabilities.external_adapter_contracts import (
+        merge_adapter_attribution_metadata,
+    )
+
+    return merge_adapter_attribution_metadata(*payloads)
+
+
 class SkillTrialService:
     def __init__(self, *, state_store: SQLiteStateStore) -> None:
         self._state_store = state_store
@@ -87,6 +95,10 @@ class SkillTrialService:
         metadata: dict[str, Any] | None = None,
     ) -> SkillTrialRecord:
         existing = self.get_trial(candidate_id=candidate_id, scope_type=scope_type, scope_ref=scope_ref)
+        metadata_payload = _merge_adapter_metadata(
+            existing.metadata if existing is not None else None,
+            metadata or {},
+        )
         record = (
             existing.model_copy(
                 update={
@@ -115,7 +127,7 @@ class SkillTrialService:
                     "handoff_count": max(0, int(handoff_count)),
                     "operator_intervention_count": max(0, int(operator_intervention_count)),
                     "latency_summary": dict(latency_summary or {}),
-                    "metadata": dict(metadata or {}),
+                    "metadata": metadata_payload,
                 },
             )
             if existing is not None
@@ -141,7 +153,7 @@ class SkillTrialService:
                 handoff_count=max(0, int(handoff_count)),
                 operator_intervention_count=max(0, int(operator_intervention_count)),
                 latency_summary=dict(latency_summary or {}),
-                metadata=dict(metadata or {}),
+                metadata=metadata_payload,
             )
         )
         self._upsert_record(record)

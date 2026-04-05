@@ -44,6 +44,7 @@ from .execution_support import (
     _tool_response_summary,
 )
 from .external_runtime_actions import parse_external_runtime_action_payload
+from .external_adapter_execution import ExternalAdapterExecution
 from .external_runtime_execution import ExternalRuntimeExecution
 from .skill_service import CapabilitySkillService
 from .tool_execution_contracts import ToolExecutionContract, get_tool_execution_contract
@@ -113,6 +114,7 @@ class CapabilityExecutionFacade:
         is_mount_accessible_fn: Callable[..., bool],
         append_execution_evidence_fn: Callable[..., str | None],
         skill_service: CapabilitySkillService,
+        external_adapter_execution: ExternalAdapterExecution | None = None,
         external_runtime_execution: ExternalRuntimeExecution | None = None,
         tool_bridge: "KernelToolBridge | None" = None,
         environment_service: object | None = None,
@@ -127,6 +129,7 @@ class CapabilityExecutionFacade:
         self._is_mount_accessible = is_mount_accessible_fn
         self._append_execution_evidence = append_execution_evidence_fn
         self._skill_service = skill_service
+        self._external_adapter_execution = external_adapter_execution
         self._external_runtime_execution = external_runtime_execution
         self._tool_bridge = tool_bridge
         self._environment_service = environment_service
@@ -138,9 +141,13 @@ class CapabilityExecutionFacade:
 
     def set_environment_service(self, environment_service: object | None) -> None:
         self._environment_service = environment_service
+        if self._external_adapter_execution is not None:
+            self._external_adapter_execution.set_environment_service(environment_service)
 
     def set_mcp_manager(self, mcp_manager: object | None) -> None:
         self._mcp_manager = mcp_manager
+        if self._external_adapter_execution is not None:
+            self._external_adapter_execution.set_mcp_manager(mcp_manager)
 
     def set_system_handler(self, system_handler: "SystemCapabilityHandler | None") -> None:
         self._system_handler = system_handler
@@ -1138,6 +1145,7 @@ class CapabilityExecutionFacade:
             action or resolved_payload.get("action") or "run",
         ).strip().lower()
         metadata = dict(mount.metadata or {})
+        adapter_contract = dict(metadata.get("adapter_contract") or {})
         runtime_contract = dict(metadata.get("runtime_contract") or {})
         if resolved_action == "describe":
             return _json_tool_response(
@@ -1147,7 +1155,39 @@ class CapabilityExecutionFacade:
                     "capability": mount.model_dump(mode="json"),
                 },
             )
+        if adapter_contract:
+            if self._external_adapter_execution is None:
+                message = "External adapter execution service is not available."
+                return _json_tool_response(
+                    {
+                        "success": False,
+                        "error": message,
+                        "summary": message,
+                    },
+                )
+            response = await self._external_adapter_execution.execute_action(
+                mount=mount,
+                action_id=resolved_action,
+                payload=resolved_payload,
+            )
+            return _json_tool_response(response)
         if runtime_contract.get("runtime_kind") in {"cli", "service"}:
+            supported_runtime_actions = {
+                str(item).strip().lower()
+                for item in list(runtime_contract.get("supported_actions") or [])
+                if str(item).strip()
+            }
+            if resolved_action not in supported_runtime_actions | {"describe"}:
+                message = (
+                    f"External capability '{capability_id}' is not a formal adapter and does not expose business action '{resolved_action}'."
+                )
+                return _json_tool_response(
+                    {
+                        "success": False,
+                        "error": message,
+                        "summary": message,
+                    },
+                )
             typed_payload, validation_error = parse_external_runtime_action_payload(
                 mount=mount,
                 action=resolved_action,

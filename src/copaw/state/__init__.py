@@ -69,6 +69,7 @@ from .models_memory import (
     MemoryEntityViewRecord,
     MemoryFactIndexRecord,
     MemoryOpinionViewRecord,
+    MemoryRelationViewRecord,
     MemoryReflectionRunRecord,
 )
 from .models_work_context import WorkContextRecord
@@ -143,6 +144,7 @@ __all__ = [
     "MemoryEntityViewRecord",
     "MemoryFactIndexRecord",
     "MemoryOpinionViewRecord",
+    "MemoryRelationViewRecord",
     "MemoryReflectionRunRecord",
     "MetricRecord",
     "OperatingCycleService",

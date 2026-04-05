@@ -18,6 +18,14 @@ def _float_from_payload(value: object | None) -> float:
         return 0.0
 
 
+def _merge_adapter_metadata(*payloads: object) -> dict[str, Any]:
+    from ..capabilities.external_adapter_contracts import (
+        merge_adapter_attribution_metadata,
+    )
+
+    return merge_adapter_attribution_metadata(*payloads)
+
+
 def rank_donor_recommendation_candidates(candidates: list[object]) -> list[object]:
     def _sort_key(item: object) -> tuple[object, ...]:
         source_kind = (_string(getattr(item, "candidate_source_kind", None)) or "").lower()
@@ -194,6 +202,9 @@ class _PredictionServiceRecommendationMixin:
             "selected_package_id": _string(resolution.get("selected_package_id")),
             "selected_donor_id": _string(resolution.get("selected_donor_id")),
             "governance_path_kind": "donor-assimilation",
+            **_merge_adapter_metadata(
+                _safe_dict(getattr(record, "metadata", None)),
+            ),
         }
         action_payload = {
             **action_payload,
@@ -203,6 +214,9 @@ class _PredictionServiceRecommendationMixin:
             "source_profile_id": _string(getattr(record, "source_profile_id", None)),
             "candidate_kind": _string(getattr(record, "candidate_kind", None)),
             "resolution_kind": _string(resolution.get("resolution_kind")),
+            **_merge_adapter_metadata(
+                _safe_dict(getattr(record, "metadata", None)),
+            ),
         }
         return metadata, action_payload
 
@@ -251,13 +265,16 @@ class _PredictionServiceRecommendationMixin:
             ),
             protection_lifted=False,
             applied_by="prediction-service",
-            metadata={
+            metadata=_merge_adapter_metadata(
+                metadata,
+                {
                 "source_recommendation_id": source_recommendation_id,
                 "gap_kind": gap_kind,
                 "trial_scope": _string(metadata.get("trial_scope")),
                 "selected_seat_ref": _string(metadata.get("selected_seat_ref"))
                 or _string(metadata.get("source_trial_seat_ref")),
-            },
+                },
+            ),
         )
     def _resolve_agent_scope_payload(
         self,

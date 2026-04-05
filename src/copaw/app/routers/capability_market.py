@@ -53,6 +53,7 @@ from ...capabilities.external_adapter_compiler import (
     compile_external_adapter_contract,
 )
 from ...capabilities.external_adapter_contracts import (
+    merge_adapter_attribution_metadata,
     classify_external_protocol_surface,
     protocol_surface_metadata,
 )
@@ -1242,6 +1243,19 @@ async def _install_external_project_capability(
                 if compiled_adapter_contract is not None
                 else {}
             ),
+            "protocol_surface_kind": protocol_surface.protocol_surface_kind,
+            "transport_kind": protocol_surface.transport_kind,
+            "adapter_blockers": list(protocol_surface.blockers),
+            "compiled_adapter_id": (
+                compiled_adapter_contract.compiled_adapter_id
+                if compiled_adapter_contract is not None
+                else None
+            ),
+            "compiled_action_ids": (
+                [item.action_id for item in compiled_adapter_contract.actions]
+                if compiled_adapter_contract is not None
+                else []
+            ),
         }
     finally:
         if staged_environment:
@@ -1451,6 +1465,24 @@ def _sync_project_trial_truth(
         for item in list(result.get("installed_capability_ids") or [])
         if str(item).strip()
     ]
+    adapter_contract = dict(result.get("adapter_contract") or {})
+    compiled_action_ids = [
+        str(item.get("action_id")).strip()
+        for item in list(adapter_contract.get("actions") or [])
+        if isinstance(item, dict) and str(item.get("action_id") or "").strip()
+    ]
+    adapter_metadata = merge_adapter_attribution_metadata(
+        getattr(candidate, "metadata", None),
+        result,
+        {
+            "compiled_adapter_id": str(
+                adapter_contract.get("compiled_adapter_id") or "",
+            ).strip()
+            or None,
+            "compiled_action_ids": compiled_action_ids,
+            "adapter_blockers": list(adapter_contract.get("promotion_blockers") or []),
+        },
+    )
     candidate_service.update_candidate_status(
         normalized_candidate_id,
         status="trial",
@@ -1460,6 +1492,7 @@ def _sync_project_trial_truth(
             "selected_scope": selected_scope,
             "installed_capability_ids": installed_capability_ids,
             "target_agent_id": str(target_agent_id or "").strip() or None,
+            **adapter_metadata,
         },
     )
     trial_service.create_or_update_trial(
@@ -1481,6 +1514,7 @@ def _sync_project_trial_truth(
             "target_agent_id": str(target_agent_id or "").strip() or None,
             "selected_scope": selected_scope,
             "installed_capability_ids": installed_capability_ids,
+            **adapter_metadata,
         },
     )
 

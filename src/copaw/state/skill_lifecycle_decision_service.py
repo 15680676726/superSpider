@@ -55,6 +55,14 @@ def _float_value(value: object | None) -> float | None:
         return None
 
 
+def _merge_adapter_metadata(*payloads: object) -> dict[str, Any]:
+    from ..capabilities.external_adapter_contracts import (
+        merge_adapter_attribution_metadata,
+    )
+
+    return merge_adapter_attribution_metadata(*payloads)
+
+
 class SkillLifecycleDecisionService:
     def __init__(self, *, state_store: SQLiteStateStore) -> None:
         self._state_store = state_store
@@ -86,6 +94,7 @@ class SkillLifecycleDecisionService:
         applied_by: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> SkillLifecycleDecisionRecord:
+        metadata_payload = _merge_adapter_metadata(metadata or {})
         record = SkillLifecycleDecisionRecord(
             candidate_id=candidate_id,
             donor_id=_string(donor_id),
@@ -108,7 +117,7 @@ class SkillLifecycleDecisionService:
             replacement_target_ids=list(replacement_target_ids or []),
             protection_lifted=bool(protection_lifted),
             applied_by=_string(applied_by),
-            metadata=dict(metadata or {}),
+            metadata=metadata_payload,
         )
         self._upsert_record(record)
         return record

@@ -14,6 +14,16 @@ ProtocolSurfaceKind = Literal[
     "unknown",
 ]
 TransportKind = Literal["mcp", "http", "sdk"]
+ADAPTER_ATTRIBUTION_SCALAR_FIELDS = (
+    "protocol_surface_kind",
+    "transport_kind",
+    "compiled_adapter_id",
+    "selected_adapter_action_id",
+)
+ADAPTER_ATTRIBUTION_LIST_FIELDS = (
+    "compiled_action_ids",
+    "adapter_blockers",
+)
 
 
 def _string(value: object | None) -> str | None:
@@ -175,11 +185,55 @@ def protocol_surface_from_metadata(
     )
 
 
+def adapter_attribution_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    payload = dict(metadata or {})
+    normalized: dict[str, Any] = {}
+    protocol_surface_kind = _string(payload.get("protocol_surface_kind"))
+    if protocol_surface_kind in {"native_mcp", "api", "sdk", "cli_runtime", "unknown"}:
+        normalized["protocol_surface_kind"] = protocol_surface_kind
+    transport_kind = _string(payload.get("transport_kind"))
+    if transport_kind in {"mcp", "http", "sdk"}:
+        normalized["transport_kind"] = transport_kind
+    compiled_adapter_id = _string(payload.get("compiled_adapter_id"))
+    if compiled_adapter_id is not None:
+        normalized["compiled_adapter_id"] = compiled_adapter_id
+    selected_adapter_action_id = _string(payload.get("selected_adapter_action_id"))
+    if selected_adapter_action_id is not None:
+        normalized["selected_adapter_action_id"] = selected_adapter_action_id
+    compiled_action_ids = _string_list(payload.get("compiled_action_ids"))
+    if compiled_action_ids:
+        normalized["compiled_action_ids"] = compiled_action_ids
+    adapter_blockers = _string_list(
+        payload.get("adapter_blockers") or payload.get("promotion_blockers"),
+    )
+    if adapter_blockers:
+        normalized["adapter_blockers"] = adapter_blockers
+    return normalized
+
+
+def merge_adapter_attribution_metadata(
+    *payloads: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for payload in payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        merged.update(dict(payload))
+        merged.update(adapter_attribution_metadata(payload))
+    return merged
+
+
 __all__ = [
+    "ADAPTER_ATTRIBUTION_LIST_FIELDS",
+    "ADAPTER_ATTRIBUTION_SCALAR_FIELDS",
     "CompiledAdapterAction",
     "CompiledAdapterContract",
     "ExternalProtocolSurface",
+    "adapter_attribution_metadata",
     "classify_external_protocol_surface",
+    "merge_adapter_attribution_metadata",
     "protocol_surface_from_metadata",
     "protocol_surface_metadata",
 ]
