@@ -60,6 +60,27 @@
 
 ---
 
+## 1.3 `2026-04-05` 内部统一知识图谱设计补充
+
+- 已新增正式设计文档：
+  - `docs/superpowers/specs/2026-04-05-internal-unified-knowledge-graph-design.md`
+- 该设计的核心口径是：
+  - CoPaw 内部只能有一套正式知识图谱
+  - 图谱主语是世界、目标、行动、结果，不是聊天记录或人类本身
+  - 主脑运行时只读“当前任务子图”，不直接扫总图
+  - 人类只作为最高指令源、治理边界与必要时的讨论伙伴进入图谱
+  - activation / strategy / planning / execution / report 继续复用现有正式主链，不另造第二条 memory 或 planning truth
+- 这份文档当前是知识图谱总设计，不替代：
+  - `docs/superpowers/specs/2026-04-01-knowledge-activation-layer-design.md`
+  - `MEMORY_VNEXT_PLAN.md`
+  - `V7_MAIN_BRAIN_AUTONOMY_PLAN.md`
+- 后续如进入实现，第一优先级不是扩外部知识源，而是：
+  - 统一对象与关系模型
+  - 统一任务子图激活入口
+  - 统一 report / execution 回写总图
+
+---
+
 ## 1.1 `2026-03-25` 硬切维护窗口说明
 
 - 当前仓库已进入一次性 `hard-cut autonomy rebuild` 维护窗口，允许短期停机与阶段性功能不完整。
