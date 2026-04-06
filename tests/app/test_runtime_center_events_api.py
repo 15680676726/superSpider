@@ -657,11 +657,49 @@ def test_runtime_center_state_query_candidate_projection_exposes_provenance_hist
     assert payload[0]["supply_path"] == "healthy-reuse"
     assert payload[0]["provenance"]["candidate_kind"] == "mcp-bundle"
     assert payload[0]["provenance"]["candidate_source_kind"] == "external_catalog"
+    assert payload[0]["provenance"]["candidate_source_ref"] == "registry://browser-runtime"
+    assert payload[0]["provenance"]["candidate_source_version"] == "2026.04.04"
+    assert payload[0]["provenance"]["candidate_source_lineage"] == "donor:browser-runtime"
+    assert payload[0]["provenance"]["ingestion_mode"] == "prediction-recommendation"
     assert payload[0]["provenance"]["donor_id"] == candidate.donor_id
+    assert payload[0]["provenance"]["protection_flags"] == []
+    assert payload[0]["target_scope_projection"] == {
+        "target_scope": "seat",
+        "target_role_id": "operator",
+        "target_seat_ref": "seat-primary",
+    }
     assert payload[0]["lifecycle_history"]["trial_count"] == 1
+    assert payload[0]["lifecycle_history"]["decision_count"] == 1
     assert payload[0]["lifecycle_history"]["latest_trial_verdict"] == "failed"
     assert payload[0]["lifecycle_history"]["latest_decision_kind"] == "rollback"
+    assert payload[0]["lifecycle_history"]["history"][0]["entry_kind"] == "decision"
+    assert payload[0]["lifecycle_history"]["history"][0]["decision_kind"] == "rollback"
+    assert payload[0]["lifecycle_history"]["history"][1]["entry_kind"] == "trial"
+    assert payload[0]["lifecycle_history"]["history"][1]["scope_ref"] == "seat-primary"
+    assert payload[0]["lifecycle_history"]["trial_scopes"] == [
+        {
+            "scope_key": "seat:seat-primary",
+            "scope_type": "seat",
+            "scope_ref": "seat-primary",
+            "verdict": "failed",
+            "operator_intervention_count": 1,
+            "success_count": 0,
+            "failure_count": 2,
+        },
+    ]
+    assert payload[0]["replacement_lineage"] == {
+        "lineage_root_id": candidate.candidate_id,
+        "supersedes": [],
+        "superseded_by": [],
+        "replacement_target_ids": ["mcp:browser_runtime"],
+        "rollback_target_ids": [],
+        "replacement_relation": None,
+    }
     assert payload[0]["drift_reentry"]["status"] == "pressure"
+    assert payload[0]["drift_reentry"]["reentry_kind"] == "replacement"
+    assert payload[0]["drift_reentry"]["replacement_pressure"] is True
+    assert payload[0]["drift_reentry"]["retirement_pressure"] is False
+    assert payload[0]["drift_reentry"]["revision_pressure"] is False
     assert "rollback" in payload[0]["drift_reentry"]["reasons"]
 
 
@@ -733,6 +771,103 @@ def test_runtime_center_state_query_candidate_projection_exposes_adapter_assimil
     assert payload[0]["compiled_adapter_id"] == "adapter:openspace"
     assert payload[0]["compiled_action_ids"] == ["execute_task"]
     assert payload[0]["promotion_blockers"] == []
+
+
+def test_runtime_center_state_query_candidate_projection_exposes_baseline_protection_and_active_pack_composition(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "runtime-center-baseline-state.db")
+    candidate_service = CapabilityCandidateService(state_store=state_store)
+    trial_service = SkillTrialService(state_store=state_store)
+    decision_service = SkillLifecycleDecisionService(state_store=state_store)
+
+    candidate = candidate_service.normalize_candidate_source(
+        candidate_kind="mcp-bundle",
+        target_scope="seat",
+        target_role_id="operator",
+        target_seat_ref="seat-browser",
+        candidate_source_kind="external_catalog",
+        candidate_source_ref="registry://browser-runtime",
+        candidate_source_version="2026.04.04",
+        candidate_source_lineage="baseline:browser-runtime",
+        ingestion_mode="baseline-import",
+        proposed_skill_name="browser_runtime",
+        summary="Baseline browser runtime.",
+        status="active",
+        lifecycle_stage="baseline",
+        protection_flags=[
+            "protected_from_auto_replace",
+            "required_by_role_blueprint",
+        ],
+    )
+
+    class _AgentProfileService:
+        def get_agent_detail(self, _agent_id: str):
+            return {
+                "runtime": {
+                    "metadata": {
+                        "capability_layers": {
+                            "role_prototype_capability_ids": ["mcp:browser_runtime"],
+                            "seat_instance_capability_ids": ["mcp:clipboard"],
+                            "cycle_delta_capability_ids": ["skill:research_pack"],
+                            "session_overlay_capability_ids": ["skill:browser_helper"],
+                            "effective_capability_ids": [
+                                "mcp:browser_runtime",
+                                "mcp:clipboard",
+                                "skill:research_pack",
+                                "skill:browser_helper",
+                            ],
+                        }
+                    }
+                }
+            }
+
+    state_query = RuntimeCenterStateQueryService(
+        task_repository=object(),
+        task_runtime_repository=object(),
+        runtime_frame_repository=None,
+        schedule_repository=object(),
+        goal_repository=None,
+        work_context_repository=None,
+        decision_request_repository=object(),
+        capability_candidate_service=candidate_service,
+        skill_trial_service=trial_service,
+        skill_lifecycle_decision_service=decision_service,
+        agent_profile_service=_AgentProfileService(),
+    )
+
+    payload = state_query.list_capability_candidates(limit=5)
+
+    assert len(payload) == 1
+    assert payload[0]["supply_path"] == "baseline-import"
+    assert payload[0]["provenance"]["protection_flags"] == [
+        "protected_from_auto_replace",
+        "required_by_role_blueprint",
+    ]
+    assert payload[0]["baseline_projection"] == {
+        "is_baseline_import": True,
+        "is_active": True,
+        "protection_flags": [
+            "protected_from_auto_replace",
+            "required_by_role_blueprint",
+        ],
+    }
+    assert payload[0]["active_pack_composition"] == {
+        "target_scope": "seat",
+        "target_role_id": "operator",
+        "target_seat_ref": "seat-browser",
+        "role_prototype_capability_ids": ["mcp:browser_runtime"],
+        "seat_instance_capability_ids": ["mcp:clipboard"],
+        "cycle_delta_capability_ids": ["skill:research_pack"],
+        "session_overlay_capability_ids": ["skill:browser_helper"],
+        "effective_capability_ids": [
+            "mcp:browser_runtime",
+            "mcp:clipboard",
+            "skill:research_pack",
+            "skill:browser_helper",
+        ],
+        "active_candidate_member": True,
+    }
 
 
 def test_runtime_center_capability_lifecycle_decisions_endpoint_returns_state_query_projection() -> None:

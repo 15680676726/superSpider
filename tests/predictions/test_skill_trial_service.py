@@ -249,6 +249,84 @@ def test_skill_trial_service_builds_candidate_verdict_summary_across_scopes(tmp_
     }
 
 
+def test_skill_gap_detector_builds_formal_drift_reentry_kinds() -> None:
+    from copaw.learning.skill_gap_detector import SkillGapDetector
+
+    detector = SkillGapDetector()
+
+    replacement = detector.build_reentry_summary(
+        trial_summary={
+            "aggregate_verdict": "rollback_recommended",
+            "operator_intervention_count": 1,
+            "scope_verdicts": {
+                "seat-primary": "passed",
+                "seat-secondary": "failed",
+            },
+            "history": [
+                {
+                    "entry_kind": "decision",
+                    "decision_kind": "rollback",
+                    "replacement_target_ids": ["skill:legacy_outreach"],
+                },
+            ],
+        },
+        latest_decision_kind="rollback",
+    )
+    revision = detector.build_reentry_summary(
+        trial_summary={
+            "aggregate_verdict": "mixed",
+            "operator_intervention_count": 1,
+            "scope_verdicts": {
+                "seat-primary": "passed",
+                "session:followup-1": "passed",
+            },
+            "history": [
+                {
+                    "entry_kind": "trial",
+                    "scope_type": "session",
+                    "scope_ref": "followup-1",
+                    "verdict": "passed",
+                    "operator_intervention_count": 1,
+                },
+            ],
+        },
+        latest_decision_kind="continue_trial",
+    )
+    retirement = detector.build_reentry_summary(
+        trial_summary={
+            "aggregate_verdict": "passed",
+            "operator_intervention_count": 0,
+            "scope_verdicts": {
+                "seat-primary": "passed",
+            },
+            "history": [
+                {
+                    "entry_kind": "decision",
+                    "decision_kind": "retire",
+                },
+            ],
+        },
+        latest_decision_kind="retire",
+    )
+
+    assert replacement["reentry_kind"] == "replacement"
+    assert replacement["replacement_pressure"] is True
+    assert replacement["revision_pressure"] is False
+    assert replacement["retirement_pressure"] is False
+    assert "rollback" in replacement["reasons"]
+
+    assert revision["reentry_kind"] == "revision"
+    assert revision["revision_pressure"] is True
+    assert revision["replacement_pressure"] is False
+    assert revision["retirement_pressure"] is False
+    assert "human-takeover" in revision["reasons"]
+
+    assert retirement["reentry_kind"] == "retirement"
+    assert retirement["retirement_pressure"] is True
+    assert retirement["replacement_pressure"] is False
+    assert retirement["revision_pressure"] is False
+
+
 def test_skill_trial_service_preserves_adapter_attribution_metadata_across_updates(
     tmp_path,
 ) -> None:

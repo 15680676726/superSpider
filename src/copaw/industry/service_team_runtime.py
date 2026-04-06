@@ -4,6 +4,9 @@ from __future__ import annotations
 from ..capabilities.lifecycle_assignment import (
     build_capability_lifecycle_assignment_payload,
 )
+from .service_capability_governance import (
+    resolve_industry_capability_governance_service,
+)
 from .service_context import *  # noqa: F401,F403
 from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
@@ -54,15 +57,25 @@ class _IndustryTeamRuntimeMixin:
             for capability_id in effective_capability_ids
             if capability_id not in role_prototype_capability_set
         ]
-        metadata["capability_layers"] = IndustrySeatCapabilityLayers(
+        current_trial = (
+            dict(metadata.get("current_capability_trial"))
+            if isinstance(metadata.get("current_capability_trial"), dict)
+            else {}
+        )
+        snapshot = resolve_industry_capability_governance_service(
+            self,
+        ).recompose_runtime_capability_layers(
             role_prototype_capability_ids=role_prototype_capability_ids,
             seat_instance_capability_ids=seat_instance_capability_ids,
             cycle_delta_capability_ids=list(layers.cycle_delta_capability_ids),
-            session_overlay_capability_ids=list(
-                layers.session_overlay_capability_ids,
-            ),
-            effective_capability_ids=effective_capability_ids,
-        ).to_metadata_payload()
+            session_overlay_capability_ids=list(layers.session_overlay_capability_ids),
+            current_capability_trial=current_trial,
+            target_role_id=_string(getattr(runtime, "industry_role_id", None)),
+            target_seat_ref=_string(metadata.get("selected_seat_ref")),
+            selected_scope=_string(current_trial.get("selected_scope")),
+            candidate_id=_string(current_trial.get("candidate_id")),
+        )
+        metadata["capability_layers"] = snapshot.layers_payload
         repository.upsert_runtime(
             runtime.model_copy(
                 update={
@@ -120,29 +133,32 @@ class _IndustryTeamRuntimeMixin:
             if capability_assignment_mode in {"merge", "replace"}
             else "merge"
         )
-        effective_capability_ids = self._mutate_scope_capabilities(
-            existing_capability_ids=layers.merged_capability_ids(),
-            capability_ids=normalized_capability_ids,
-            replacement_capability_ids=normalized_replacement_ids,
-            capability_assignment_mode=assignment_mode,
+        resolved_target_role_id = _string(target_role_id) or _string(
+            getattr(runtime, "industry_role_id", None),
+        )
+        resolved_seat_ref = _string(selected_seat_ref) or _string(
+            metadata.get("selected_seat_ref"),
+        )
+        governance_service = resolve_industry_capability_governance_service(self)
+        replacement_pressure = governance_service.resolve_replacement_pressure(
+            replacement_target_ids=normalized_replacement_ids,
+            target_role_id=resolved_target_role_id,
+            target_seat_ref=resolved_seat_ref,
+            selected_scope=normalized_scope,
+        )
+        allowed_replacement_ids = list(
+            replacement_pressure.get("allowed_replacement_target_ids") or [],
         )
         if normalized_scope == "session":
             session_overlay_capability_ids = self._mutate_scope_capabilities(
                 existing_capability_ids=layers.session_overlay_capability_ids,
                 capability_ids=normalized_capability_ids,
-                replacement_capability_ids=normalized_replacement_ids,
+                replacement_capability_ids=allowed_replacement_ids,
                 capability_assignment_mode=assignment_mode,
-            )
-            updated_layers = IndustrySeatCapabilityLayers(
-                role_prototype_capability_ids=list(layers.role_prototype_capability_ids),
-                seat_instance_capability_ids=list(layers.seat_instance_capability_ids),
-                cycle_delta_capability_ids=list(layers.cycle_delta_capability_ids),
-                session_overlay_capability_ids=session_overlay_capability_ids,
-                effective_capability_ids=effective_capability_ids,
             )
             scope_type = "session"
             resolved_scope_ref = _string(scope_ref) or _string(selected_seat_ref) or target_agent_id
-            metadata["current_session_overlay"] = {
+            current_session_overlay = {
                 "overlay_scope": "session",
                 "overlay_mode": "additive",
                 "session_id": resolved_scope_ref,
@@ -150,30 +166,25 @@ class _IndustryTeamRuntimeMixin:
                 "status": "active",
                 "candidate_id": candidate_id,
             }
+            seat_instance_capability_ids = list(layers.seat_instance_capability_ids)
         else:
             seat_instance_capability_ids = self._mutate_scope_capabilities(
                 existing_capability_ids=layers.seat_instance_capability_ids,
                 capability_ids=normalized_capability_ids,
-                replacement_capability_ids=normalized_replacement_ids,
+                replacement_capability_ids=allowed_replacement_ids,
                 capability_assignment_mode=assignment_mode,
             )
-            updated_layers = IndustrySeatCapabilityLayers(
-                role_prototype_capability_ids=list(layers.role_prototype_capability_ids),
-                seat_instance_capability_ids=seat_instance_capability_ids,
-                cycle_delta_capability_ids=list(layers.cycle_delta_capability_ids),
-                session_overlay_capability_ids=list(layers.session_overlay_capability_ids),
-                effective_capability_ids=effective_capability_ids,
-            )
+            session_overlay_capability_ids = list(layers.session_overlay_capability_ids)
             scope_type = "seat" if _string(selected_seat_ref) is not None else "agent"
             resolved_scope_ref = _string(scope_ref) or _string(selected_seat_ref) or target_agent_id
             metadata.pop("current_session_overlay", None)
+            current_session_overlay = None
         trial_id = (
             f"trial:{candidate_id}:{resolved_scope_ref}"
             if candidate_id
             else f"trial:{target_agent_id}:{resolved_scope_ref}"
         )
-        metadata["capability_layers"] = updated_layers.to_metadata_payload()
-        metadata["current_capability_trial"] = {
+        current_trial = {
             "candidate_id": _string(candidate_id),
             "skill_trial_id": trial_id,
             "skill_candidate_id": _string(candidate_id),
@@ -195,6 +206,26 @@ class _IndustryTeamRuntimeMixin:
             "next_lifecycle_stage": _string(next_lifecycle_stage),
             "preflight": dict(preflight or {}),
         }
+        snapshot = governance_service.recompose_runtime_capability_layers(
+            role_prototype_capability_ids=list(layers.role_prototype_capability_ids),
+            seat_instance_capability_ids=seat_instance_capability_ids,
+            cycle_delta_capability_ids=list(layers.cycle_delta_capability_ids),
+            session_overlay_capability_ids=session_overlay_capability_ids,
+            current_capability_trial=current_trial,
+            target_role_id=resolved_target_role_id,
+            target_seat_ref=resolved_seat_ref,
+            selected_scope=normalized_scope,
+            candidate_id=_string(candidate_id),
+        )
+        metadata["capability_layers"] = snapshot.layers_payload
+        metadata["current_capability_trial"] = current_trial
+        if current_session_overlay is not None:
+            metadata["current_session_overlay"] = {
+                **current_session_overlay,
+                "capability_ids": list(
+                    snapshot.layers_payload.get("session_overlay_capability_ids") or [],
+                ),
+            }
         repository.upsert_runtime(
             runtime.model_copy(
                 update={
@@ -217,6 +248,7 @@ class _IndustryTeamRuntimeMixin:
                 replacement_target_ids,
                 normalized_replacement_ids,
             ),
+            "governance_result": snapshot.governance_result,
         }
 
     def _seed_agent_runtime_for_scope_attach(
@@ -322,16 +354,25 @@ class _IndustryTeamRuntimeMixin:
         existing_layers = IndustrySeatCapabilityLayers.from_metadata(
             existing_metadata.get("capability_layers"),
         )
-        return IndustrySeatCapabilityLayers(
+        current_trial = (
+            dict(existing_metadata.get("current_capability_trial"))
+            if isinstance(existing_metadata.get("current_capability_trial"), dict)
+            else {}
+        )
+        snapshot = resolve_industry_capability_governance_service(
+            self,
+        ).recompose_runtime_capability_layers(
             role_prototype_capability_ids=list(agent.allowed_capabilities),
-            seat_instance_capability_ids=list(
-                existing_layers.seat_instance_capability_ids,
-            ),
+            seat_instance_capability_ids=list(existing_layers.seat_instance_capability_ids),
             cycle_delta_capability_ids=list(existing_layers.cycle_delta_capability_ids),
-            session_overlay_capability_ids=list(
-                existing_layers.session_overlay_capability_ids,
-            ),
-        ).to_metadata_payload()
+            session_overlay_capability_ids=list(existing_layers.session_overlay_capability_ids),
+            current_capability_trial=current_trial,
+            target_role_id=_string(agent.role_id),
+            target_seat_ref=_string(existing_metadata.get("selected_seat_ref")),
+            selected_scope=_string(current_trial.get("selected_scope")),
+            candidate_id=_string(current_trial.get("candidate_id")),
+        )
+        return snapshot.layers_payload
 
     def _ensure_execution_core_work_context(
         self,
@@ -694,10 +735,25 @@ class _IndustryTeamRuntimeMixin:
         current_focus_kind = _string(metadata.get("current_focus_kind"))
         current_focus_id = _string(metadata.get("current_focus_id"))
         current_focus = _string(metadata.get("current_focus"))
+        assignment_terminal = bool(
+            assignment_id and assignment_status in {"completed", "failed", "cancelled"}
+        )
         if assignment_active:
             current_focus_kind = "assignment"
             current_focus_id = assignment_id
             current_focus = assignment_title or assignment_summary or assignment_id
+        elif goal_id is not None:
+            current_focus_kind = "goal"
+            current_focus_id = goal_id
+            current_focus = goal_title or goal_id
+        elif current_focus_kind == "assignment" and (
+            assignment_id is None
+            or assignment_terminal
+            or current_focus_id == assignment_id
+        ):
+            current_focus_kind = None
+            current_focus_id = None
+            current_focus = None
         metadata.pop("goal_id", None)
         metadata.pop("goal_title", None)
         metadata.update(
@@ -716,12 +772,24 @@ class _IndustryTeamRuntimeMixin:
                 "retired": status == "retired",
             },
         )
-        assignment_metadata = {
-            "current_assignment_id": assignment_id,
-            "current_assignment_title": assignment_title,
-            "current_assignment_summary": assignment_summary,
-            "current_assignment_status": assignment_status,
-        }
+        for key in ("current_focus_kind", "current_focus_id", "current_focus"):
+            if metadata.get(key) is None:
+                metadata.pop(key, None)
+        assignment_metadata = (
+            {
+                "current_assignment_id": None,
+                "current_assignment_title": None,
+                "current_assignment_summary": None,
+                "current_assignment_status": None,
+            }
+            if assignment_terminal
+            else {
+                "current_assignment_id": assignment_id,
+                "current_assignment_title": assignment_title,
+                "current_assignment_summary": assignment_summary,
+                "current_assignment_status": assignment_status,
+            }
+        )
         for key, value in assignment_metadata.items():
             if value is None:
                 metadata.pop(key, None)

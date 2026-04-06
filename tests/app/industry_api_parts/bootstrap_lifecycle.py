@@ -22,6 +22,9 @@ from copaw.memory.knowledge_graph_models import (
 from copaw.state import (
     AgentReportRecord,
     AssignmentRecord,
+    BacklogItemRecord,
+    IndustryInstanceRecord,
+    OperatingCycleRecord,
 )
 
 
@@ -917,6 +920,223 @@ def test_industry_auto_gap_closure_replace_mode_swaps_seat_delta_capabilities(
     assert "tool:browser_use" in capability_layers["role_prototype_capability_ids"]
 
 
+def test_industry_auto_gap_closure_replace_mode_preserves_session_overlay_truth(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(
+        tmp_path,
+        draft_generator=BrowserIndustryDraftGenerator(),
+    )
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Customer Operations",
+            "company_name": "Northwind Robotics",
+            "product": "browser onboarding workflows",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    draft = preview_payload["draft"]
+    target_role = next(
+        agent
+        for agent in draft["team"]["agents"]
+        if agent["agent_class"] == "business" and agent["role_id"] != "execution-core"
+    )
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": draft,
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    target_agent_id = target_role["agent_id"]
+
+    legacy_override = app.state.agent_profile_override_repository.get_override(target_agent_id)
+    assert legacy_override is not None
+    app.state.agent_profile_override_repository.upsert_override(
+        legacy_override.model_copy(
+            update={
+                "capabilities": ["skill:legacy-seat-pack"],
+                "reason": "seed legacy seat delta",
+            },
+        ),
+    )
+    app.state.industry_service.sync_agent_runtime_capability_override(
+        agent_id=target_agent_id,
+        capability_ids=["skill:legacy-seat-pack"],
+    )
+    attached = app.state.industry_service.attach_candidate_to_scope(
+        target_agent_id=target_agent_id,
+        capability_ids=["mcp:browser-temp"],
+        selected_scope="session",
+        scope_ref="session-browser-temp",
+        selected_seat_ref="seat-browser-primary",
+        candidate_id="candidate-temp-overlay",
+        replacement_target_ids=[],
+        rollback_target_ids=[],
+        reason="seed session overlay",
+    )
+    assert attached["success"] is True
+
+    recommendation = IndustryCapabilityRecommendation(
+        recommendation_id="desktop-windows-preserve-overlay-gap",
+        install_kind="mcp-template",
+        template_id="desktop-windows",
+        title="Desktop Windows Runtime",
+        default_client_key="desktop_windows",
+        capability_ids=["mcp:desktop_windows"],
+        target_agent_ids=[target_agent_id],
+        risk_level="auto",
+        source_kind="install-template",
+    )
+
+    with (
+        patch("copaw.capabilities.service.load_config") as mock_load,
+        patch("copaw.capabilities.service.save_config"),
+        patch("copaw.capabilities.sources.mcp.load_config") as mock_mcp_load,
+        patch("copaw.industry.service_activation.load_config") as mock_industry_load,
+    ):
+        config = SimpleNamespace(mcp=SimpleNamespace(clients={}))
+        mock_load.return_value = config
+        mock_mcp_load.return_value = config
+        mock_industry_load.return_value = config
+        result = asyncio.run(
+            app.state.industry_service.auto_close_capability_gap_for_instance(
+                instance_id,
+                recommendation,
+                target_agent_ids=[target_agent_id],
+                capability_assignment_mode="replace",
+            ),
+        )
+
+    assert result.status == "installed"
+    runtime = app.state.agent_runtime_repository.get_runtime(target_agent_id)
+    assert runtime is not None
+    capability_layers = runtime.metadata["capability_layers"]
+    assert capability_layers["seat_instance_capability_ids"] == ["mcp:desktop_windows"]
+    assert capability_layers["session_overlay_capability_ids"] == ["mcp:browser-temp"]
+    assert "mcp:browser-temp" in capability_layers["effective_capability_ids"]
+
+
+def test_industry_auto_gap_closure_protected_replace_stays_in_governed_waiting_confirm(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(
+        tmp_path,
+        draft_generator=BrowserIndustryDraftGenerator(),
+    )
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Customer Operations",
+            "company_name": "Northwind Robotics",
+            "product": "browser onboarding workflows",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    draft = preview_payload["draft"]
+    target_role = next(
+        agent
+        for agent in draft["team"]["agents"]
+        if agent["agent_class"] == "business" and agent["role_id"] != "execution-core"
+    )
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": draft,
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    target_agent_id = target_role["agent_id"]
+
+    legacy_override = app.state.agent_profile_override_repository.get_override(target_agent_id)
+    assert legacy_override is not None
+    app.state.agent_profile_override_repository.upsert_override(
+        legacy_override.model_copy(
+            update={
+                "capabilities": ["skill:legacy-seat-pack"],
+                "reason": "seed protected seat delta",
+            },
+        ),
+    )
+    app.state.industry_service.sync_agent_runtime_capability_override(
+        agent_id=target_agent_id,
+        capability_ids=["skill:legacy-seat-pack"],
+    )
+
+    recommendation = IndustryCapabilityRecommendation(
+        recommendation_id="desktop-windows-protected-replace-gap",
+        install_kind="mcp-template",
+        template_id="desktop-windows",
+        title="Desktop Windows Runtime",
+        default_client_key="desktop_windows",
+        capability_ids=["mcp:desktop_windows"],
+        target_agent_ids=[target_agent_id],
+        risk_level="auto",
+        source_kind="install-template",
+    )
+
+    original_builder = app.state.industry_service._build_capability_lifecycle_assignment_payload
+    app.state.industry_service._build_capability_lifecycle_assignment_payload = (
+        lambda **kwargs: {
+            **original_builder(**kwargs),
+            "replacement_relation": "replace_requested",
+            "protection_flags": ["protected_from_auto_replace"],
+        }
+    )
+    try:
+        with (
+            patch("copaw.capabilities.service.load_config") as mock_load,
+            patch("copaw.capabilities.service.save_config"),
+            patch("copaw.capabilities.sources.mcp.load_config") as mock_mcp_load,
+            patch("copaw.industry.service_activation.load_config") as mock_industry_load,
+        ):
+            config = SimpleNamespace(mcp=SimpleNamespace(clients={}))
+            mock_load.return_value = config
+            mock_mcp_load.return_value = config
+            mock_industry_load.return_value = config
+            result = asyncio.run(
+                app.state.industry_service.auto_close_capability_gap_for_instance(
+                    instance_id,
+                    recommendation,
+                    target_agent_ids=[target_agent_id],
+                    capability_assignment_mode="replace",
+                ),
+            )
+    finally:
+        app.state.industry_service._build_capability_lifecycle_assignment_payload = (
+            original_builder
+        )
+
+    assert result.status == "installed"
+    assert result.assignment_results
+    assert result.assignment_results[0].status == "failed"
+    assert "protection" in result.assignment_results[0].detail.lower()
+    runtime = app.state.agent_runtime_repository.get_runtime(target_agent_id)
+    assert runtime is not None
+    capability_layers = runtime.metadata["capability_layers"]
+    assert capability_layers["seat_instance_capability_ids"] == ["skill:legacy-seat-pack"]
+    lifecycle_tasks = app.state.task_repository.list_tasks(
+        task_type="system:apply_capability_lifecycle",
+    )
+    assert lifecycle_tasks
+    assert any(task.status == "blocked" or task.status == "pending" or task.status == "failed" for task in lifecycle_tasks)
+
+
 def test_industry_auto_gap_closure_skips_guarded_recommendation(
     tmp_path,
 ) -> None:
@@ -1292,7 +1512,7 @@ def test_industry_bootstrap_retire_previous_active_instance_globally(tmp_path) -
     )
     assert retired_strategies
     assert retired_strategies[0].status == "retired"
-    assert retired_strategies[0].active_goal_ids == []
+    assert retired_strategies[0].current_focuses == []
 
 
 def test_public_bootstrap_auto_activate_keeps_instance_active_without_legacy_goal_dispatch(
@@ -1339,7 +1559,7 @@ def test_public_bootstrap_auto_activate_keeps_instance_active_without_legacy_goa
         limit=5,
     )
     assert strategies
-    assert strategies[0].active_goal_ids == []
+    assert isinstance(strategies[0].current_focuses, list)
 
 
 def test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch(
@@ -1430,7 +1650,9 @@ def test_chat_writeback_schedule_creation_does_not_expand_instance_schedule_trut
     instance_id = bootstrap.json()["team"]["team_id"]
     baseline = app.state.industry_instance_repository.get_instance(instance_id)
     assert baseline is not None
-    baseline_schedule_ids = list(baseline.schedule_ids or [])
+    baseline_schedule_ids = app.state.industry_service._list_schedule_ids_for_instance(
+        instance_id,
+    )
 
     result = asyncio.run(
         app.state.industry_service.apply_execution_chat_writeback(
@@ -1454,7 +1676,9 @@ def test_chat_writeback_schedule_creation_does_not_expand_instance_schedule_trut
     assert result["created_schedule_ids"]
     updated = app.state.industry_instance_repository.get_instance(instance_id)
     assert updated is not None
-    assert updated.schedule_ids == baseline_schedule_ids
+    assert app.state.industry_service._list_schedule_ids_for_instance(instance_id) == (
+        baseline_schedule_ids + result["created_schedule_ids"]
+    )
 
 
 
@@ -3716,6 +3940,92 @@ def test_run_operating_cycle_auto_dispatch_keeps_assignment_formal_planning_in_c
     assert runtime_task_entry["task_subgraph"]["dependency_paths"] == [
         "Refresh approval evidence before drafting the partner update.",
     ]
+
+
+def test_run_operating_cycle_auto_dispatch_uses_assignment_checklist_instead_of_generic_steps(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    service = app.state.industry_service
+
+    record = IndustryInstanceRecord(
+        instance_id="industry-v1-checklist-priority",
+        label="Checklist Priority Industry",
+        owner_scope="industry-v1-checklist-priority",
+    )
+    item = BacklogItemRecord(
+        id="backlog-checklist-priority",
+        industry_instance_id=record.instance_id,
+        lane_id=None,
+        title="Continue the verified browser remediation move",
+        summary="Keep execution on the concrete remediation checklist instead of falling back to generic reporting steps.",
+        source_kind="operator",
+        source_ref="test:assignment-checklist-overrides-generic-steps",
+        metadata={
+            "owner_agent_id": "industry-support-specialist-checklist",
+            "industry_role_id": "support-specialist",
+            "industry_role_name": "Support Specialist",
+            "role_name": "Support Specialist",
+            "role_summary": "Owns the browser remediation path.",
+            "mission": "Complete the remediation move with evidence.",
+            "goal_kind": "support-specialist",
+            "task_mode": "autonomy-cycle",
+            "report_back_mode": "summary",
+            "plan_steps": [
+                "Confirm the backlog goal and the expected delivery boundary.",
+                "Return the completion summary together with the next recommendation.",
+            ],
+        },
+    )
+    cycle = OperatingCycleRecord(
+        id="cycle-checklist-priority",
+        industry_instance_id=record.instance_id,
+        cycle_kind="daily",
+        title="Checklist priority cycle",
+        status="active",
+    )
+    checklist = [
+        "Open the verified browser session and inspect the current remediation state.",
+        "Apply the remediation step, capture evidence, and verify the browser result.",
+        "Report the concrete outcome and next move based on the verified browser state.",
+    ]
+    assignment = AssignmentRecord(
+        id="assignment-checklist-priority",
+        industry_instance_id=record.instance_id,
+        cycle_id=cycle.id,
+        backlog_item_id=item.id,
+        owner_agent_id="industry-support-specialist-checklist",
+        owner_role_id="support-specialist",
+        title=item.title,
+        summary=item.summary,
+        report_back_mode="summary",
+        metadata={
+            "formal_planning": {
+                "assignment_plan": {
+                    "assignment_id": "assignment-checklist-priority",
+                    "report_back_mode": "summary",
+                    "sidecar_plan": {
+                        "checklist": list(checklist),
+                    },
+                },
+            },
+        },
+    )
+
+    unit = service._build_operating_cycle_assignment_unit(
+        record=record,
+        item=item,
+        cycle=cycle,
+        assignment=assignment,
+        actor="test:assignment-checklist-overrides-generic-steps",
+    )
+
+    assert unit.context["steps"] == checklist
+    assert unit.context["steps"][0] == checklist[0]
+    assert "Confirm the backlog goal and the expected delivery boundary." not in unit.context["steps"]
+    assert "Return the completion summary together with the next recommendation." not in unit.context["steps"]
+    assert unit.context["assignment_sidecar_plan"]["checklist"] == checklist
+    assert unit.context["assignment_plan_envelope"]["sidecar_plan"]["checklist"] == checklist
 
 
 def test_runtime_detail_exposes_first_class_main_brain_cognitive_surface_with_continuity_refs(

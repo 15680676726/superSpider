@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from copaw.capabilities.models import CapabilityMount, CapabilitySummary
+from copaw.capabilities.system_skill_handlers import SystemSkillCapabilityFacade
 
 from copaw.app.routers.capabilities import router as capabilities_router
 
@@ -44,6 +45,13 @@ class _FakeCapabilityService:
                 id="system:set_capability_enabled",
                 name="Set Capability Enabled",
                 summary="Governed mutation for toggling capability enablement.",
+                kind="system-op",
+                risk_level="guarded",
+            ),
+            "system:apply_capability_lifecycle": CapabilityMount(
+                id="system:apply_capability_lifecycle",
+                name="Apply Capability Lifecycle",
+                summary="Governed lifecycle mutation.",
                 kind="system-op",
                 risk_level="guarded",
             ),
@@ -143,3 +151,129 @@ def test_shared_governed_mutation_helper_translates_dispatcher_errors() -> None:
         translate_dispatcher_error(KeyError("missing-task"))
 
     assert "404" in str(exc_info.value) or "missing-task" in str(exc_info.value)
+
+
+class _FakeIndustryService:
+    def __init__(self) -> None:
+        self.attach_calls: list[dict[str, object]] = []
+
+    def attach_candidate_to_scope(self, **payload):
+        self.attach_calls.append(dict(payload))
+        return {
+            "success": True,
+            "summary": "Attached to seat scope.",
+            "selected_scope": payload.get("selected_scope") or "seat",
+            "scope_ref": payload.get("scope_ref"),
+        }
+
+
+def _surface_payload(
+    *,
+    effective: list[str],
+    role: list[str],
+    seat: list[str],
+    session: list[str],
+) -> dict[str, object]:
+    return {
+        "effective_capabilities": list(effective),
+        "runtime": {
+            "metadata": {
+                "selected_seat_ref": "seat-browser-primary",
+                "capability_layers": {
+                    "role_prototype_capability_ids": list(role),
+                    "seat_instance_capability_ids": list(seat),
+                    "cycle_delta_capability_ids": [],
+                    "session_overlay_capability_ids": list(session),
+                    "effective_capability_ids": list(effective),
+                },
+            },
+        },
+    }
+
+
+def test_lifecycle_replace_existing_blocks_protected_replace_without_lift() -> None:
+    facade = SystemSkillCapabilityFacade(
+        skill_service=SimpleNamespace(),
+        agent_profile_service=SimpleNamespace(
+            get_capability_surface=lambda _agent_id: _surface_payload(
+                effective=["tool:browser_use", "skill:legacy-seat-pack", "mcp:browser-temp"],
+                role=["tool:browser_use"],
+                seat=["skill:legacy-seat-pack"],
+                session=["mcp:browser-temp"],
+            ),
+        ),
+        industry_service=_FakeIndustryService(),
+        apply_role_handler=lambda _payload: {
+            "success": True,
+            "summary": "apply_role should not run for protected replacements",
+        },
+    )
+
+    result = asyncio.run(
+        facade.handle_apply_capability_lifecycle(
+            {
+                "decision_kind": "replace_existing",
+                "target_agent_id": "agent-1",
+                "target_capability_ids": ["mcp:desktop_windows"],
+                "replacement_target_ids": ["skill:legacy-seat-pack"],
+                "selected_scope": "seat",
+                "selected_seat_ref": "seat-browser-primary",
+                "protection_flags": ["protected_from_auto_replace"],
+                "replacement_relation": "replace_requested",
+            },
+        ),
+    )
+
+    assert result["success"] is False
+    assert result["decision_kind"] == "replace_existing"
+    assert result["blocked_reason"] == "protected_from_auto_replace"
+    assert result["governed_path_required"] is True
+    assert "protection" in result["summary"].lower()
+
+
+def test_lifecycle_rollback_restores_prior_seat_truth_without_dropping_session_overlay() -> None:
+    applied_payloads: list[dict[str, object]] = []
+    industry_service = _FakeIndustryService()
+
+    facade = SystemSkillCapabilityFacade(
+        skill_service=SimpleNamespace(),
+        agent_profile_service=SimpleNamespace(
+            get_capability_surface=lambda _agent_id: _surface_payload(
+                effective=["tool:browser_use", "mcp:desktop_windows", "mcp:browser-temp"],
+                role=["tool:browser_use"],
+                seat=["mcp:desktop_windows"],
+                session=["mcp:browser-temp"],
+            ),
+        ),
+        industry_service=industry_service,
+        apply_role_handler=lambda payload: (
+            applied_payloads.append(dict(payload))
+            or {"success": True, "summary": "Updated seat truth."}
+        ),
+    )
+
+    result = asyncio.run(
+        facade.handle_apply_capability_lifecycle(
+            {
+                "decision_kind": "rollback",
+                "target_agent_id": "agent-1",
+                "target_capability_ids": ["mcp:desktop_windows"],
+                "rollback_target_ids": ["skill:legacy-seat-pack"],
+                "replacement_target_ids": ["mcp:desktop_windows"],
+                "selected_scope": "seat",
+                "selected_seat_ref": "seat-browser-primary",
+                "governed_mutation": True,
+            },
+        ),
+    )
+
+    assert result["success"] is True
+    assert applied_payloads == []
+    assert industry_service.attach_calls
+    apply_payload = industry_service.attach_calls[0]
+    assert apply_payload["capability_ids"] == ["skill:legacy-seat-pack"]
+    assert apply_payload["capability_assignment_mode"] == "replace"
+    assert apply_payload["selected_scope"] == "seat"
+    assert apply_payload["selected_seat_ref"] == "seat-browser-primary"
+    assert result["restored_capability_ids"] == ["skill:legacy-seat-pack"]
+    assert result["preserved_overlay_capability_ids"] == ["mcp:browser-temp"]

@@ -11,6 +11,26 @@ from ..kernel.governed_mutation_dispatch import dispatch_governed_mutation_runti
 
 
 class _IndustryActivationMixin:
+    def _build_capability_lifecycle_assignment_payload(
+        self,
+        *,
+        agent_id: str,
+        capability_ids: list[str],
+        capability_assignment_mode: str,
+        reason: str,
+        actor: str,
+    ) -> dict[str, object]:
+        payload = build_capability_lifecycle_assignment_payload(
+            agent_profile_service=self._agent_profile_service,
+            target_agent_id=agent_id,
+            capability_ids=capability_ids,
+            capability_assignment_mode=capability_assignment_mode,
+            reason=reason,
+            actor=actor,
+        )
+        payload["governed_mutation"] = True
+        return payload
+
     async def auto_close_capability_gap_for_instance(
         self,
         instance_id: str,
@@ -176,8 +196,6 @@ class _IndustryActivationMixin:
         placeholder = self._build_instance_record(
             plan,
             existing=existing,
-            goal_ids=[],
-            schedule_ids=[],
             status="active" if auto_activate else "draft",
             lifecycle_status="running" if auto_activate else "draft",
             autonomy_status="waiting-confirm" if pending_chat_kickoff else "coordinating" if auto_activate else "draft",
@@ -352,7 +370,6 @@ class _IndustryActivationMixin:
                     for item in backlog_items
                     if item.goal_id is not None
                 ],
-                goal_ids=goal_ids,
                 source_ref="industry-bootstrap",
                 summary="Bootstrap operating cycle.",
                 metadata={"formal_planning": bootstrap_cycle_planning_metadata},
@@ -465,7 +482,6 @@ class _IndustryActivationMixin:
         if current_cycle is not None and self._operating_cycle_service is not None:
             current_cycle = self._operating_cycle_service.update_cycle_links(
                 current_cycle,
-                goal_ids=goal_ids,
                 assignment_ids=[assignment.id for assignment in assignments],
             )
         if self._backlog_service is not None and current_cycle is not None:
@@ -545,8 +561,8 @@ class _IndustryActivationMixin:
                 agent=agent,
                 instance_id=team_id,
                 owner_scope=plan.owner_scope,
-                goal_id=None,
-                goal_title=None,
+                goal_id=goal_link[0] if goal_link is not None else None,
+                goal_title=goal_link[1] if goal_link is not None else None,
                 status=initial_agent_status,
             )
         await self._finalize_install_assignments(
@@ -566,8 +582,6 @@ class _IndustryActivationMixin:
         final_record = self._build_instance_record(
             plan,
             existing=existing,
-            goal_ids=[],
-            schedule_ids=[],
             status="active" if auto_activate else "draft",
             lifecycle_status="running" if auto_activate else "draft",
             autonomy_status="waiting-confirm" if pending_chat_kickoff else "coordinating" if auto_activate else "draft",
@@ -1254,6 +1268,8 @@ class _IndustryActivationMixin:
             normalized_payload = dict(payload)
             normalized_payload.setdefault("actor", governed_actor)
             normalized_payload.setdefault("owner_agent_id", governed_owner_agent_id)
+            if capability_ref == "system:apply_capability_lifecycle":
+                normalized_payload["governed_mutation"] = True
             if governed_mode:
                 response = await self._dispatch_industry_governed_mutation(
                     capability_ref=capability_ref,
@@ -2071,9 +2087,8 @@ class _IndustryActivationMixin:
 
             assignment_results: list[IndustryBootstrapInstallAssignmentResult] = []
             for agent_id in target_agent_ids:
-                lifecycle_payload = build_capability_lifecycle_assignment_payload(
-                    agent_profile_service=self._agent_profile_service,
-                    target_agent_id=agent_id,
+                lifecycle_payload = self._build_capability_lifecycle_assignment_payload(
+                    agent_id=agent_id,
                     capability_ids=capability_ids,
                     capability_assignment_mode=item.capability_assignment_mode,
                     reason=f"Industry bootstrap install plan: {item.template_id}",

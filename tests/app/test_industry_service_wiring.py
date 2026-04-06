@@ -34,6 +34,11 @@ from copaw.state.repositories import (
     SqliteTaskRepository,
 )
 from copaw.industry.models import IndustryRoleBlueprint
+from copaw.state.skill_candidate_service import CapabilityCandidateService
+from copaw.state.skill_lifecycle_decision_service import (
+    SkillLifecycleDecisionService,
+)
+from copaw.state.skill_trial_service import SkillTrialService
 
 
 class _DummyGoalService:
@@ -659,7 +664,6 @@ def test_reconcile_instance_status_for_goal_uses_targeted_goal_lookup(
             instance_id="industry-demo",
             label="Demo Industry",
             owner_scope="industry-demo",
-            goal_ids=["goal-demo"],
         ),
     )
 
@@ -671,9 +675,19 @@ def test_reconcile_instance_status_for_goal_uses_targeted_goal_lookup(
         ),
     )
     monkeypatch.setattr(
-        repository,
-        "list_instances_for_goal",
-        lambda goal_id: [record] if goal_id == "goal-demo" else [],
+        industry_service._goal_service,
+        "get_goal",
+        lambda goal_id: (
+            GoalRecord(
+                id="goal-demo",
+                title="Demo goal",
+                summary="Goal owned by the industry instance.",
+                owner_scope="industry-demo",
+                industry_instance_id="industry-demo",
+            )
+            if goal_id == "goal-demo"
+            else None
+        ),
         raising=False,
     )
     monkeypatch.setattr(
@@ -720,7 +734,7 @@ def test_kickoff_execution_from_chat_records_trigger_message_context_in_assignme
 ) -> None:
     state_store = SQLiteStateStore(tmp_path / "state.db")
     goal_service = _DispatchGoalService()
-    goal_service.list_goals = lambda owner_scope=None: []
+    goal_service.list_goals = lambda owner_scope=None, industry_instance_id=None: []
     goal_service.get_goal = lambda goal_id: None
     industry_instance_repository = SqliteIndustryInstanceRepository(state_store)
     industry_service = IndustryService(
@@ -1039,3 +1053,226 @@ def test_industry_service_syncs_formal_capability_layers_into_actor_runtime(
             "mcp:browser-temp",
         ],
     }
+
+
+def test_attach_candidate_to_scope_blocks_protected_baseline_replacement_and_recomputes_budgets(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(
+        tmp_path / "industry-runtime-capability-governance-attach.db",
+    )
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-support",
+            actor_key="industry-1:support-specialist",
+            actor_fingerprint="fingerprint-old",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            metadata={
+                "selected_seat_ref": "seat-1",
+                "capability_layers": {
+                    "schema_version": "industry-seat-capability-layers-v1",
+                    "role_prototype_capability_ids": ["tool:read_file"],
+                    "seat_instance_capability_ids": ["skill:crm-seat-playbook"],
+                    "cycle_delta_capability_ids": [
+                        "mcp:legacy_browser",
+                        "mcp:campaign-dashboard",
+                    ],
+                    "session_overlay_capability_ids": [],
+                    "effective_capability_ids": [
+                        "tool:read_file",
+                        "skill:crm-seat-playbook",
+                        "mcp:legacy_browser",
+                        "mcp:campaign-dashboard",
+                    ],
+                },
+            },
+        ),
+    )
+    runtime_bindings = build_industry_service_runtime_bindings(
+        agent_runtime_repository=runtime_repository,
+    )
+    industry_service = IndustryService(
+        goal_service=_DummyGoalService(),
+        industry_instance_repository=SqliteIndustryInstanceRepository(state_store),
+        goal_override_repository=SqliteGoalOverrideRepository(state_store),
+        agent_profile_override_repository=SqliteAgentProfileOverrideRepository(
+            state_store,
+        ),
+        runtime_bindings=runtime_bindings,
+    )
+    candidate_service = CapabilityCandidateService(state_store=state_store)
+    trial_service = SkillTrialService(state_store=state_store)
+    decision_service = SkillLifecycleDecisionService(state_store=state_store)
+    candidate_service.normalize_candidate_source(
+        candidate_kind="mcp-bundle",
+        target_scope="seat",
+        target_role_id="support-specialist",
+        target_seat_ref="seat-1",
+        candidate_source_kind="external_catalog",
+        candidate_source_ref="registry://legacy-browser",
+        candidate_source_version="2026.04.06",
+        ingestion_mode="baseline-import",
+        proposed_skill_name="legacy-browser",
+        summary="Protected legacy browser baseline.",
+        status="active",
+        lifecycle_stage="baseline",
+        protection_flags=[
+            "protected_from_auto_replace",
+            "protected_from_auto_retire",
+            "required_by_role_blueprint",
+        ],
+        canonical_package_id="pkg:browser-runtime",
+        metadata={"mount_id": "mcp:legacy_browser"},
+    )
+    candidate = candidate_service.normalize_candidate_source(
+        candidate_kind="mcp-bundle",
+        target_scope="seat",
+        target_role_id="support-specialist",
+        target_seat_ref="seat-1",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://example.com/browser-runtime-next.zip",
+        candidate_source_version="2026.04.06",
+        candidate_source_lineage="donor:browser-runtime",
+        ingestion_mode="prediction-recommendation",
+        proposed_skill_name="browser-runtime-next",
+        summary="Next governed browser runtime.",
+        status="trial",
+        lifecycle_stage="trial",
+        canonical_package_id="pkg:browser-runtime",
+        metadata={"mount_id": "mcp:browser_runtime_next"},
+    )
+    industry_service._prediction_service = SimpleNamespace(
+        _capability_candidate_service=candidate_service,
+        _skill_trial_service=trial_service,
+        _skill_lifecycle_decision_service=decision_service,
+        _capability_portfolio_service=None,
+    )
+
+    result = industry_service.attach_candidate_to_scope(  # pylint: disable=protected-access
+        target_agent_id="agent-support",
+        capability_ids=["mcp:browser_runtime_next"],
+        replacement_target_ids=["mcp:legacy_browser"],
+        capability_assignment_mode="replace",
+        selected_scope="session",
+        scope_ref="session-seat-1",
+        selected_seat_ref="seat-1",
+        candidate_id=candidate.candidate_id,
+        target_role_id="support-specialist",
+        lifecycle_stage="trial",
+        trial_scope="session",
+        reason="Mount the verified browser runtime candidate.",
+    )
+
+    assert result["success"] is True
+    assert result["governance_result"]["replacement_pressure"][
+        "blocked_replacement_target_ids"
+    ] == ["mcp:legacy_browser"]
+    assert result["governance_result"]["install_discipline"]["preferred_action"] == (
+        "mount_existing_candidate"
+    )
+    assert result["governance_result"]["budgets"]["mcp"]["over_budget"] is True
+    runtime = runtime_repository.get_runtime("agent-support")
+    assert runtime is not None
+    assert runtime.metadata["capability_layers"]["session_overlay_capability_ids"] == [
+        "mcp:browser_runtime_next",
+    ]
+    assert runtime.metadata["capability_layers"]["effective_capability_ids"] == [
+        "tool:read_file",
+        "skill:crm-seat-playbook",
+        "mcp:legacy_browser",
+        "mcp:campaign-dashboard",
+        "mcp:browser_runtime_next",
+    ]
+
+
+def test_sync_actor_runtime_surface_recomputes_effective_capabilities_after_trial_replacement(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(
+        tmp_path / "industry-runtime-capability-governance-sync.db",
+    )
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-support",
+            actor_key="industry-1:support-specialist",
+            actor_fingerprint="fingerprint-old",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="idle",
+            metadata={
+                "capability_layers": {
+                    "schema_version": "industry-seat-capability-layers-v1",
+                    "role_prototype_capability_ids": ["tool:read_file"],
+                    "seat_instance_capability_ids": [
+                        "skill:crm-seat-playbook",
+                        "skill:crm-seat-playbook-v2",
+                    ],
+                    "cycle_delta_capability_ids": ["mcp:campaign-dashboard"],
+                    "session_overlay_capability_ids": ["mcp:browser-temp"],
+                    "effective_capability_ids": [
+                        "tool:read_file",
+                        "skill:crm-seat-playbook",
+                        "skill:crm-seat-playbook-v2",
+                        "mcp:campaign-dashboard",
+                        "mcp:browser-temp",
+                    ],
+                },
+                "current_capability_trial": {
+                    "candidate_id": "cand-seat-playbook-v2",
+                    "selected_scope": "seat",
+                    "selected_seat_ref": "seat-1",
+                    "capability_ids": ["skill:crm-seat-playbook-v2"],
+                    "replacement_target_ids": ["skill:crm-seat-playbook"],
+                },
+            },
+        ),
+    )
+    runtime_bindings = build_industry_service_runtime_bindings(
+        agent_runtime_repository=runtime_repository,
+    )
+    industry_service = IndustryService(
+        goal_service=_DummyGoalService(),
+        industry_instance_repository=SqliteIndustryInstanceRepository(state_store),
+        goal_override_repository=SqliteGoalOverrideRepository(state_store),
+        agent_profile_override_repository=SqliteAgentProfileOverrideRepository(
+            state_store,
+        ),
+        runtime_bindings=runtime_bindings,
+    )
+    role = IndustryRoleBlueprint(
+        role_id="support-specialist",
+        agent_id="agent-support",
+        name="Support Specialist",
+        role_name="Support Specialist",
+        role_summary="Handle support and follow-up work.",
+        mission="Close support work with the correct capability pack.",
+        goal_kind="support-specialist",
+        allowed_capabilities=["tool:read_file", "mcp:salesforce"],
+    )
+
+    industry_service._sync_actor_runtime_surface(  # pylint: disable=protected-access
+        agent=role,
+        instance_id="industry-1",
+        owner_scope="industry:industry-1",
+        goal_id=None,
+        goal_title=None,
+        status="waiting",
+        assignment_id="assignment-1",
+        assignment_title="Handle support follow-up",
+        assignment_summary="Review the support queue and prepare the next action.",
+        assignment_status="queued",
+    )
+
+    runtime = runtime_repository.get_runtime("agent-support")
+    assert runtime is not None
+    assert runtime.metadata["capability_layers"]["effective_capability_ids"] == [
+        "tool:read_file",
+        "mcp:salesforce",
+        "skill:crm-seat-playbook-v2",
+        "mcp:campaign-dashboard",
+        "mcp:browser-temp",
+    ]

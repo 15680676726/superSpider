@@ -500,6 +500,36 @@ class RuntimeCenterStateQueryService:
             candidate_id,
             candidate_payload=serialized,
         )
+        lifecycle_replacement_target_ids = string_list_from_values(
+            lifecycle_history.get("replacement_target_ids"),
+        )
+        target_scope_projection = {
+            "target_scope": first_non_empty(serialized.get("target_scope")) or "seat",
+            "target_role_id": first_non_empty(serialized.get("target_role_id")),
+            "target_seat_ref": first_non_empty(serialized.get("target_seat_ref")),
+        }
+        baseline_projection = {
+            "is_baseline_import": (
+                first_non_empty(serialized.get("ingestion_mode")) == "baseline-import"
+            ),
+            "is_active": str(serialized.get("status") or "").strip().lower() == "active",
+            "protection_flags": list(serialized.get("protection_flags") or []),
+        }
+        replacement_lineage = {
+            "lineage_root_id": first_non_empty(
+                serialized.get("lineage_root_id"),
+                serialized.get("candidate_id"),
+            ),
+            "supersedes": list(serialized.get("supersedes") or []),
+            "superseded_by": list(serialized.get("superseded_by") or []),
+            "replacement_target_ids": (
+                lifecycle_replacement_target_ids
+                or list(serialized.get("replacement_target_ids") or [])
+            ),
+            "rollback_target_ids": list(serialized.get("rollback_target_ids") or []),
+            "replacement_relation": first_non_empty(serialized.get("replacement_relation")),
+        }
+        active_pack_composition = self._candidate_active_pack_composition(serialized)
         return {
             **serialized,
             "supply_path": self._candidate_supply_path(serialized),
@@ -517,7 +547,11 @@ class RuntimeCenterStateQueryService:
                 "protection_flags": list(serialized.get("protection_flags") or []),
             },
             **adapter_status,
+            "target_scope_projection": target_scope_projection,
+            "baseline_projection": baseline_projection,
             "lifecycle_history": lifecycle_history,
+            "replacement_lineage": replacement_lineage,
+            "active_pack_composition": active_pack_composition,
             "drift_reentry": self._skill_gap_detector.build_reentry_summary(
                 trial_summary=lifecycle_history,
                 latest_decision_kind=str(lifecycle_history.get("latest_decision_kind") or ""),
@@ -553,6 +587,8 @@ class RuntimeCenterStateQueryService:
                 "decision_count": 0,
                 "latest_trial_verdict": None,
                 "latest_decision_kind": None,
+                "history": [],
+                "trial_scopes": [],
             }
         trial_service = getattr(self, "_skill_trial_service", None)
         decision_service = getattr(self, "_skill_lifecycle_decision_service", None)
@@ -574,6 +610,57 @@ class RuntimeCenterStateQueryService:
         latest_decision_kind = None
         if decisions:
             latest_decision_kind = getattr(decisions[0], "decision_kind", None)
+        history: list[dict[str, object]] = []
+        for item in decisions:
+            history.append(
+                {
+                    "entry_kind": "decision",
+                    "updated_at": getattr(item, "updated_at", None),
+                    "decision_kind": getattr(item, "decision_kind", None),
+                    "from_stage": getattr(item, "from_stage", None),
+                    "to_stage": getattr(item, "to_stage", None),
+                    "replacement_target_ids": list(
+                        getattr(item, "replacement_target_ids", None) or []
+                    ),
+                    "reason": getattr(item, "reason", None),
+                },
+            )
+        trial_scopes: list[dict[str, object]] = []
+        for item in trials:
+            scope_type = first_non_empty(getattr(item, "scope_type", None)) or "seat"
+            scope_ref = first_non_empty(getattr(item, "scope_ref", None))
+            trial_payload = {
+                "scope_key": f"{scope_type}:{scope_ref}" if scope_ref is not None else scope_type,
+                "scope_type": scope_type,
+                "scope_ref": scope_ref,
+                "verdict": getattr(item, "verdict", None),
+                "operator_intervention_count": getattr(
+                    item,
+                    "operator_intervention_count",
+                    0,
+                ),
+                "success_count": getattr(item, "success_count", 0),
+                "failure_count": getattr(item, "failure_count", 0),
+            }
+            trial_scopes.append(trial_payload)
+            history.append(
+                {
+                    "entry_kind": "trial",
+                    "updated_at": getattr(item, "updated_at", None),
+                    "scope_type": scope_type,
+                    "scope_ref": scope_ref,
+                    "verdict": getattr(item, "verdict", None),
+                    "operator_intervention_count": getattr(
+                        item,
+                        "operator_intervention_count",
+                        0,
+                    ),
+                },
+            )
+        history.sort(
+            key=lambda item: str(item.get("updated_at") or ""),
+            reverse=True,
+        )
         return {
             "trial_count": len(trials),
             "decision_count": len(decisions),
@@ -595,6 +682,14 @@ class RuntimeCenterStateQueryService:
                 and isinstance(summary.get("scope_verdicts"), Mapping)
                 else {}
             ),
+            "replacement_target_ids": string_list_from_values(
+                *[
+                    getattr(item, "replacement_target_ids", None)
+                    for item in decisions
+                ],
+            ),
+            "history": history,
+            "trial_scopes": trial_scopes,
         }
 
     def _candidate_adapter_assimilation_status(
@@ -655,6 +750,63 @@ class RuntimeCenterStateQueryService:
         merged.setdefault("compiled_action_ids", [])
         merged.setdefault("promotion_blockers", [])
         return merged
+
+    def _candidate_active_pack_composition(
+        self,
+        candidate_payload: Mapping[str, object],
+    ) -> dict[str, object]:
+        target_role_id = first_non_empty(candidate_payload.get("target_role_id"))
+        target_seat_ref = first_non_empty(candidate_payload.get("target_seat_ref"))
+        target_scope = first_non_empty(candidate_payload.get("target_scope")) or "seat"
+        role_prototype_capability_ids: list[str] = []
+        seat_instance_capability_ids: list[str] = []
+        cycle_delta_capability_ids: list[str] = []
+        session_overlay_capability_ids: list[str] = []
+        effective_capability_ids: list[str] = []
+        service = getattr(self, "_agent_profile_service", None)
+        detail_getter = getattr(service, "get_agent_detail", None)
+        if callable(detail_getter) and target_role_id is not None:
+            try:
+                detail = detail_getter(target_role_id)
+            except Exception:
+                detail = None
+            detail_payload = self._mapping_payload(detail)
+            runtime_payload = self._mapping_payload(detail_payload.get("runtime"))
+            metadata_payload = self._mapping_payload(runtime_payload.get("metadata"))
+            layers = IndustrySeatCapabilityLayers.from_metadata(
+                metadata_payload.get("capability_layers"),
+            )
+            role_prototype_capability_ids = list(layers.role_prototype_capability_ids)
+            seat_instance_capability_ids = list(layers.seat_instance_capability_ids)
+            cycle_delta_capability_ids = list(layers.cycle_delta_capability_ids)
+            session_overlay_capability_ids = list(layers.session_overlay_capability_ids)
+            effective_capability_ids = list(layers.merged_capability_ids())
+        proposed_skill_name = first_non_empty(candidate_payload.get("proposed_skill_name"))
+        candidate_capability_id = (
+            f"mcp:{proposed_skill_name}"
+            if first_non_empty(candidate_payload.get("candidate_kind")) == "mcp-bundle"
+            and proposed_skill_name is not None
+            else (
+                f"skill:{proposed_skill_name}"
+                if proposed_skill_name is not None
+                else None
+            )
+        )
+        return {
+            "target_scope": target_scope,
+            "target_role_id": target_role_id,
+            "target_seat_ref": target_seat_ref,
+            "role_prototype_capability_ids": role_prototype_capability_ids,
+            "seat_instance_capability_ids": seat_instance_capability_ids,
+            "cycle_delta_capability_ids": cycle_delta_capability_ids,
+            "session_overlay_capability_ids": session_overlay_capability_ids,
+            "effective_capability_ids": effective_capability_ids,
+            "active_candidate_member": (
+                candidate_capability_id in effective_capability_ids
+                if candidate_capability_id is not None
+                else False
+            ),
+        }
 
     def list_work_contexts(self, limit: int | None = 5) -> list[dict[str, object]]:
         return self._work_context_projector.list_work_contexts(limit=limit)

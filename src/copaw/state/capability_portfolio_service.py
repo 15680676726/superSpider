@@ -296,6 +296,7 @@ class CapabilityPortfolioService:
 
         donor_replace: set[str] = set()
         donor_retire: set[str] = set()
+        donor_revision: set[str] = set()
         for item in decisions:
             candidate = candidate_by_id.get(_string(getattr(item, "candidate_id", None)) or "")
             donor_id = _string(getattr(candidate, "donor_id", None)) if candidate is not None else None
@@ -306,6 +307,17 @@ class CapabilityPortfolioService:
                 donor_retire.add(donor_id)
             if decision_kind in {"replace_existing", "rollback"}:
                 donor_replace.add(donor_id)
+        for item in trials:
+            candidate = candidate_by_id.get(_string(getattr(item, "candidate_id", None)) or "")
+            donor_id = _string(getattr(candidate, "donor_id", None)) if candidate is not None else None
+            if donor_id is None:
+                continue
+            if (
+                _int(getattr(item, "operator_intervention_count", None)) > 0
+                or _int(getattr(item, "handoff_count", None)) > 0
+            ):
+                donor_revision.add(donor_id)
+        donor_revision.difference_update(donor_replace)
 
         degraded_donor_ids = {
             donor_id
@@ -345,6 +357,7 @@ class CapabilityPortfolioService:
             "degraded_donor_count": len(degraded_donor_ids),
             "replace_pressure_count": len(donor_replace),
             "retire_pressure_count": len(donor_retire),
+            "revision_pressure_count": len(donor_revision),
             "over_budget_scope_count": len(over_budget_scopes),
             "over_budget_scopes": over_budget_scopes,
             "governance_actions": governance_actions,
@@ -433,6 +446,7 @@ class CapabilityPortfolioService:
 
         replace_pressure_ids: set[str] = set()
         retire_pressure_ids: set[str] = set()
+        revision_pressure_ids: set[str] = set()
         for item in decisions:
             candidate = candidate_by_id.get(_string(getattr(item, "candidate_id", None)) or "")
             donor_id = _string(getattr(candidate, "donor_id", None)) if candidate is not None else None
@@ -443,6 +457,17 @@ class CapabilityPortfolioService:
                 retire_pressure_ids.add(donor_id)
             if decision_kind in {"replace_existing", "rollback"}:
                 replace_pressure_ids.add(donor_id)
+        for item in trials:
+            candidate = candidate_by_id.get(_string(getattr(item, "candidate_id", None)) or "")
+            donor_id = _string(getattr(candidate, "donor_id", None)) if candidate is not None else None
+            if donor_id is None:
+                continue
+            if (
+                _int(getattr(item, "operator_intervention_count", None)) > 0
+                or _int(getattr(item, "handoff_count", None)) > 0
+            ):
+                revision_pressure_ids.add(donor_id)
+        revision_pressure_ids.difference_update(replace_pressure_ids)
 
         degraded_donor_ids = {
             donor_id
@@ -492,6 +517,7 @@ class CapabilityPortfolioService:
             "degraded_donor_count": len(degraded_donor_ids),
             "replace_pressure_count": len(replace_pressure_ids),
             "retire_pressure_count": len(retire_pressure_ids),
+            "revision_pressure_count": len(revision_pressure_ids),
             "over_budget_scope_count": len(over_budget_scopes),
             "over_budget_scopes": over_budget_scopes,
             "fallback_only_candidate_count": len(fallback_candidates),

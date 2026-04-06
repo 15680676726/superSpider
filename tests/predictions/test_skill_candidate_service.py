@@ -6,9 +6,18 @@ from pathlib import Path
 
 from copaw.capabilities.models import CapabilityMount
 from copaw.discovery.models import NormalizedDiscoveryHit
+from copaw.learning.skill_gap_detector import SkillGapDetector
+from copaw.predictions.service_context import _PredictionServiceContextMixin
+from copaw.predictions.service_recommendations import _PredictionServiceRecommendationMixin
+from copaw.predictions.service_shared import _FactPack
 from copaw.state import SQLiteStateStore
 from copaw.state.capability_donor_service import CapabilityDonorService
 from copaw.state.capability_portfolio_service import CapabilityPortfolioService
+from copaw.state.models_prediction import (
+    PredictionCaseRecord,
+    PredictionRecommendationRecord,
+    PredictionSignalRecord,
+)
 from copaw.state.skill_lifecycle_decision_service import SkillLifecycleDecisionService
 from copaw.state.skill_candidate_service import (
     CapabilityCandidateService,
@@ -51,6 +60,102 @@ def _build_portfolio_services(
         decision_service,
         portfolio_service,
     )
+
+
+class _RecordingRecommendationRepository:
+    def __init__(
+        self,
+        recommendations: list[PredictionRecommendationRecord] | None = None,
+    ) -> None:
+        self._recommendations = list(recommendations or [])
+
+    def list_recommendations(self, **_kwargs):
+        return list(self._recommendations)
+
+
+class _RecordingLifecycleDecisionService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def list_decisions(
+        self,
+        *,
+        candidate_id: str | None = None,
+        limit: int | None = None,
+    ):
+        _ = (candidate_id, limit)
+        return []
+
+    def create_decision(self, **kwargs):
+        self.calls.append(dict(kwargs))
+
+
+class _TrialFollowupHarness(_PredictionServiceContextMixin):
+    def __init__(self, recommendations: list[PredictionRecommendationRecord]) -> None:
+        self._recommendation_repository = _RecordingRecommendationRepository(
+            recommendations=recommendations,
+        )
+        self._skill_gap_detector = SkillGapDetector()
+
+
+class _RevisionRecommendationHarness(_PredictionServiceRecommendationMixin):
+    def __init__(self, finding: dict[str, object]) -> None:
+        self._finding = dict(finding)
+        self._skill_lifecycle_decision_service = _RecordingLifecycleDecisionService()
+        self._capability_service = object()
+
+    def _hottest_agent(self, facts: _FactPack):
+        _ = facts
+        return None
+
+    def _case_confidence(self, signals, reviews):
+        _ = (signals, reviews)
+        return 0.58
+
+    def _team_role_gap_findings(self, *, case: PredictionCaseRecord, facts: _FactPack):
+        _ = (case, facts)
+        return {}
+
+    def _register_capability_candidate(
+        self,
+        *,
+        case: PredictionCaseRecord,
+        summary: str,
+        metadata: dict[str, object],
+        action_payload: dict[str, object],
+    ):
+        _ = (case, summary)
+        return metadata, action_payload
+
+    def _capability_telemetry(self, *, case: PredictionCaseRecord, facts: _FactPack):
+        _ = (case, facts)
+        return {}
+
+    def _missing_donor_capability_findings(self, *, facts: _FactPack):
+        _ = facts
+        return []
+
+    def _underperforming_donor_capability_findings(
+        self,
+        *,
+        facts: _FactPack,
+        telemetry: dict[tuple[str, str], dict[str, object]],
+    ):
+        _ = (facts, telemetry)
+        return []
+
+    def _trial_followup_findings(
+        self,
+        *,
+        case: PredictionCaseRecord,
+        facts: _FactPack,
+        telemetry: dict[tuple[str, str], dict[str, object]],
+    ):
+        _ = (case, facts, telemetry)
+        return [dict(self._finding)]
+
+    def _json_safe(self, payload):
+        return payload
 
 
 def test_capability_candidate_service_normalizes_external_and_local_sources(
@@ -464,6 +569,280 @@ def test_capability_portfolio_service_emits_structured_governance_actions(
         item["action"] == "compact_over_budget_scope"
         for item in portfolio["planning_actions"]
     )
+
+
+def test_skill_gap_detector_distinguishes_revision_replace_and_retire_pressures() -> None:
+    detector = SkillGapDetector()
+
+    replacement = detector.build_reentry_summary(
+        trial_summary={
+            "aggregate_verdict": "rollback_recommended",
+            "operator_intervention_count": 1,
+            "history": [
+                {
+                    "entry_kind": "decision",
+                    "decision_kind": "rollback",
+                    "replacement_target_ids": ["skill:legacy"],
+                },
+            ],
+        },
+        latest_decision_kind="rollback",
+    )
+    revision = detector.build_reentry_summary(
+        trial_summary={
+            "aggregate_verdict": "mixed",
+            "operator_intervention_count": 1,
+            "history": [
+                {
+                    "entry_kind": "trial",
+                    "scope_type": "session",
+                    "scope_ref": "session-1",
+                    "verdict": "passed",
+                },
+            ],
+        },
+        latest_decision_kind="continue_trial",
+    )
+    retirement = detector.build_reentry_summary(
+        trial_summary={
+            "aggregate_verdict": "passed",
+            "operator_intervention_count": 0,
+            "history": [
+                {
+                    "entry_kind": "decision",
+                    "decision_kind": "retire",
+                },
+            ],
+        },
+        latest_decision_kind="retire",
+    )
+
+    assert replacement["reentry_kind"] == "replacement"
+    assert replacement["replacement_pressure"] is True
+    assert replacement["revision_pressure"] is False
+    assert replacement["retirement_pressure"] is False
+
+    assert revision["reentry_kind"] == "revision"
+    assert revision["replacement_pressure"] is False
+    assert revision["revision_pressure"] is True
+    assert revision["retirement_pressure"] is False
+
+    assert retirement["reentry_kind"] == "retirement"
+    assert retirement["replacement_pressure"] is False
+    assert retirement["revision_pressure"] is False
+    assert retirement["retirement_pressure"] is True
+
+
+def test_prediction_trial_followup_emits_revision_reentry_for_mixed_trial_drift() -> None:
+    service = _TrialFollowupHarness(
+        recommendations=[
+            PredictionRecommendationRecord(
+                recommendation_id="rec-trial-nextgen",
+                case_id="case-trial-history",
+                recommendation_type="capability_recommendation",
+                title="Trial nextgen outreach",
+                summary="Executed governed trial for the new outreach candidate.",
+                action_kind="system:trial_remote_skill_assignment",
+                executable=True,
+                status="executed",
+                target_agent_id="industry-solution-lead-demo",
+                target_capability_ids=[
+                    "skill:legacy_outreach",
+                    "skill:nextgen_outreach",
+                ],
+                action_payload={
+                    "candidate": {"install_name": "nextgen_outreach"},
+                    "target_agent_id": "industry-solution-lead-demo",
+                    "capability_ids": ["skill:nextgen_outreach"],
+                    "replacement_capability_ids": ["skill:legacy_outreach"],
+                    "capability_assignment_mode": "replace",
+                },
+                metadata={
+                    "gap_kind": "underperforming_capability",
+                    "optimization_stage": "trial",
+                    "industry_instance_id": "industry-demo",
+                    "candidate_id": "candidate-nextgen-outreach",
+                    "target_agent_id": "industry-solution-lead-demo",
+                    "replacement_capability_ids": ["skill:legacy_outreach"],
+                    "replacement_capability_id": "skill:legacy_outreach",
+                    "installed_capability_ids": ["skill:nextgen_outreach"],
+                    "selected_seat_ref": "env-browser-primary",
+                    "trial_scope": "single-seat",
+                    "candidate_source_kind": "external_remote",
+                    "candidate_source_ref": "hub:nextgen-outreach",
+                    "candidate_source_lineage": "hub:nextgen-outreach",
+                    "last_execution_output": {
+                        "installed_capability_ids": ["skill:nextgen_outreach"],
+                    },
+                },
+            ),
+        ],
+    )
+    case = PredictionCaseRecord(
+        case_id="case-trial-history",
+        title="Trial history",
+        summary="Seed case for revision follow-up.",
+        industry_instance_id="industry-demo",
+        owner_scope="industry-demo-scope",
+    )
+    facts = _FactPack(
+        scope_type="industry",
+        scope_id="industry-demo",
+        report={},
+        performance={},
+        goals=[],
+        tasks=[],
+        workflows=[],
+        agents=[],
+        capabilities=[],
+        strategy={},
+    )
+
+    findings = service._trial_followup_findings(
+        case=case,
+        facts=facts,
+        telemetry={
+            ("industry-solution-lead-demo", "skill:nextgen_outreach"): {
+                "manual_intervention_rate": 0.5,
+                "success_rate": 0.5,
+                "failure_rate": 0.0,
+                "sample_count": 2,
+            },
+            ("industry-solution-lead-demo", "skill:legacy_outreach"): {
+                "manual_intervention_rate": 0.5,
+                "success_rate": 0.5,
+                "failure_rate": 0.0,
+                "sample_count": 2,
+            },
+        },
+    )
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["gap_kind"] == "capability_revision"
+    assert finding["optimization_stage"] == "revision"
+    assert finding["lifecycle_stage"] == "trial"
+    assert finding["candidate_lifecycle_stage"] == "trial"
+    assert finding["replacement_target_stage"] == "active"
+    assert finding["old_capability_id"] == "skill:legacy_outreach"
+    assert finding["new_capability_id"] == "skill:nextgen_outreach"
+    assert finding["target_agent_id"] == "industry-solution-lead-demo"
+    assert finding["candidate_id"] == "candidate-nextgen-outreach"
+    assert finding["source_recommendation_id"] == "rec-trial-nextgen"
+    assert finding["selected_seat_ref"] == "env-browser-primary"
+    assert finding["trial_scope"] == "single-seat"
+    assert finding["replacement_target_ids"] == ["skill:legacy_outreach"]
+    assert finding["rollback_target_ids"] == ["skill:legacy_outreach"]
+    assert finding["reentry_kind"] == "revision"
+    assert finding["drift_summary"]["status"] == "pressure"
+    assert finding["drift_summary"]["reentry_kind"] == "revision"
+    assert finding["drift_summary"]["revision_pressure"] is True
+    assert finding["drift_summary"]["replacement_pressure"] is False
+    assert finding["drift_summary"]["retirement_pressure"] is False
+    assert "human-takeover" in finding["drift_summary"]["reasons"]
+    assert finding["drift_summary"]["replacement_target_ids"] == [
+        "skill:legacy_outreach"
+    ]
+    assert finding["stats"]["new_stats"]["manual_intervention_rate"] == 0.5
+    assert finding["stats"]["old_stats"]["manual_intervention_rate"] == 0.5
+    assert finding["candidate_source_kind"] == "external_remote"
+    assert finding["candidate_source_ref"] == "hub:nextgen-outreach"
+    assert finding["candidate_source_lineage"] == "hub:nextgen-outreach"
+
+
+def test_prediction_recommendations_convert_revision_reentry_into_formal_continue_trial() -> None:
+    finding = {
+        "gap_kind": "capability_revision",
+        "optimization_stage": "revision",
+        "lifecycle_stage": "trial",
+        "candidate_lifecycle_stage": "trial",
+        "replacement_target_stage": "active",
+        "old_capability_id": "skill:legacy_outreach",
+        "new_capability_id": "skill:nextgen_outreach",
+        "target_agent_id": "industry-solution-lead-demo",
+        "candidate_id": "candidate-nextgen-outreach",
+        "source_recommendation_id": "rec-trial-nextgen",
+        "selected_seat_ref": "env-browser-primary",
+        "trial_scope": "single-seat",
+        "replacement_target_ids": ["skill:legacy_outreach"],
+        "rollback_target_ids": ["skill:legacy_outreach"],
+        "reentry_kind": "revision",
+        "drift_summary": {
+            "status": "pressure",
+            "reasons": ["human-takeover"],
+            "reentry_kind": "revision",
+            "replacement_pressure": False,
+            "retirement_pressure": False,
+            "revision_pressure": True,
+            "replacement_target_ids": ["skill:legacy_outreach"],
+        },
+        "stats": {
+            "new_stats": {"manual_intervention_rate": 0.5},
+            "old_stats": {"manual_intervention_rate": 0.0},
+        },
+        "candidate_source_kind": "external_remote",
+        "candidate_source_ref": "hub:nextgen-outreach",
+        "candidate_source_lineage": "hub:nextgen-outreach",
+    }
+    service = _RevisionRecommendationHarness(finding)
+    case = PredictionCaseRecord(
+        case_id="case-trial-history",
+        title="Trial history",
+        summary="Seed case for revision follow-up.",
+        industry_instance_id="industry-demo",
+        owner_scope="industry-demo-scope",
+    )
+    facts = _FactPack(
+        scope_type="industry",
+        scope_id="industry-demo",
+        report={},
+        performance={},
+        goals=[],
+        tasks=[],
+        workflows=[],
+        agents=[],
+        capabilities=[],
+        strategy={},
+    )
+
+    recommendations = service._build_recommendations(
+        case=case,
+        facts=facts,
+        signals=[
+            PredictionSignalRecord(
+                case_id=case.case_id,
+                label="trial drift",
+                summary="Trial stayed mixed and still needs operator intervention.",
+                source_kind="report",
+                source_ref="report:weekly",
+                direction="negative",
+                strength=0.4,
+            ),
+        ],
+    )
+
+    assert len(recommendations) == 1
+    recommendation = recommendations[0]
+    assert recommendation.metadata["gap_kind"] == "capability_revision"
+    assert recommendation.metadata["reentry_kind"] == "revision"
+    assert recommendation.metadata["drift_summary"]["revision_pressure"] is True
+    assert recommendation.action_kind == "system:apply_capability_lifecycle"
+    assert recommendation.action_payload["decision_kind"] == "continue_trial"
+    assert recommendation.action_payload["improvement_mode"] == "revision"
+    assert recommendation.action_payload["selected_scope"] == "seat"
+    assert recommendation.action_payload["selected_seat_ref"] == "env-browser-primary"
+    assert recommendation.action_payload["replacement_target_ids"] == [
+        "skill:legacy_outreach"
+    ]
+    assert recommendation.action_payload["rollback_target_ids"] == [
+        "skill:legacy_outreach"
+    ]
+    [created] = service._skill_lifecycle_decision_service.calls
+    assert created["decision_kind"] == "continue_trial"
+    assert created["from_stage"] == "trial"
+    assert created["to_stage"] == "trial"
+    assert created["metadata"]["gap_kind"] == "capability_revision"
+    assert created["metadata"]["trial_scope"] == "single-seat"
 
 
 def test_capability_candidate_service_persists_candidate_attribution_fields(

@@ -65,6 +65,8 @@ class SystemSkillCapabilityFacade:
             "summary": f"Created skill '{name}'.",
             "created": True,
             "name": name,
+            "role_activation_blocked": True,
+            "next_action": "system:apply_capability_lifecycle",
         }
 
     def handle_install_hub_skill(
@@ -100,6 +102,8 @@ class SystemSkillCapabilityFacade:
             "name": installed.name,
             "enabled": installed.enabled,
             "source_url": installed.source_url,
+            "role_activation_blocked": True,
+            "next_action": "system:apply_capability_lifecycle",
         }
 
     async def handle_trial_remote_skill_assignment(
@@ -275,7 +279,8 @@ class SystemSkillCapabilityFacade:
         target_agent_id = str(resolved_payload.get("target_agent_id") or "").strip()
         if not target_agent_id:
             return {"success": False, "error": "target_agent_id is required"}
-        current_capabilities = self._effective_capabilities_for_agent(target_agent_id)
+        layer_context = self._capability_layer_context_for_agent(target_agent_id)
+        current_capabilities = list(layer_context["effective_capability_ids"])
         target_capability_ids = [
             str(item).strip()
             for item in list(
@@ -295,6 +300,31 @@ class SystemSkillCapabilityFacade:
             for item in list(resolved_payload.get("rollback_target_ids") or [])
             if str(item).strip()
         ]
+        protection_flags = self._normalize_string_list(
+            resolved_payload.get("protection_flags"),
+        )
+        protection_lifted = bool(resolved_payload.get("protection_lifted"))
+        blocked = self._blocked_lifecycle_protection(
+            decision_kind=decision_kind,
+            replacement_relation=str(
+                resolved_payload.get("replacement_relation") or ""
+            ).strip()
+            or None,
+            protection_flags=protection_flags,
+            protection_lifted=protection_lifted,
+            candidate_id=candidate_id,
+            target_agent_id=target_agent_id,
+        )
+        if blocked is not None:
+            return blocked
+        if not bool(resolved_payload.get("governed_mutation")):
+            return {
+                "success": False,
+                "error": "capability lifecycle apply must come from governed mutation dispatch",
+                "governed_path_required": True,
+                "decision_kind": decision_kind,
+                "target_agent_id": target_agent_id,
+            }
         if decision_kind in {"continue_trial", "keep_seat_local"}:
             attachment_payload = {
                 **dict(resolved_payload),
@@ -313,6 +343,7 @@ class SystemSkillCapabilityFacade:
                     target_agent_id=target_agent_id,
                     resolved_payload=resolved_payload,
                 ),
+                "governed_mutation": True,
             }
             result = self._attach_trial_scope(attachment_payload)
             if inspect.isawaitable(result):
@@ -331,17 +362,83 @@ class SystemSkillCapabilityFacade:
             }
         if self._apply_role_handler is None:
             return {"success": False, "error": "apply_role handler is not available"}
-        final_capabilities = self._build_lifecycle_capabilities(
+        final_seat_capabilities = self._build_lifecycle_capabilities(
             decision_kind=decision_kind,
-            current_capabilities=current_capabilities,
+            current_capabilities=list(layer_context["seat_instance_capability_ids"]),
             target_capability_ids=target_capability_ids,
             replacement_target_ids=replacement_target_ids,
             rollback_target_ids=rollback_target_ids,
         )
+        role_capabilities = list(layer_context["role_prototype_capability_ids"])
+        final_capabilities = self._merge_unique_capabilities(
+            role_capabilities,
+            final_seat_capabilities,
+        )
+        selected_scope = self._resolve_trial_scope_kind(
+            selected_seat_ref=resolved_payload.get("selected_seat_ref"),
+            selected_scope=resolved_payload.get("selected_scope"),
+        )
+        selected_seat_ref = str(
+            resolved_payload.get("selected_seat_ref") or ""
+        ).strip() or None
+        if decision_kind in {"replace_existing", "rollback", "retire"} and (
+            selected_scope in {"seat", "session"} or selected_seat_ref is not None
+        ):
+            scope_payload = {
+                "candidate_id": candidate_id or None,
+                "target_agent_id": target_agent_id,
+                "capability_ids": final_seat_capabilities,
+                "replacement_capability_ids": replacement_target_ids,
+                "replacement_target_ids": replacement_target_ids,
+                "rollback_target_ids": rollback_target_ids,
+                "capability_assignment_mode": "replace",
+                "selected_scope": "seat" if selected_scope == "session" else selected_scope,
+                "scope_ref": self._resolve_trial_scope_ref(
+                    target_agent_id=target_agent_id,
+                    resolved_payload=resolved_payload,
+                ),
+                "selected_seat_ref": selected_seat_ref,
+                "target_role_id": str(
+                    resolved_payload.get("target_role_id")
+                    or layer_context.get("target_role_id")
+                    or ""
+                ).strip()
+                or None,
+            }
+            scope_result = self._attach_trial_scope(scope_payload)
+            if inspect.isawaitable(scope_result):
+                scope_result = await scope_result
+            lifecycle_result = (
+                dict(scope_result)
+                if isinstance(scope_result, dict)
+                else {"success": False, "error": "scope attach returned an unexpected result"}
+            )
+            return {
+                "success": bool(lifecycle_result.get("success")),
+                "summary": str(
+                    lifecycle_result.get("summary")
+                    or lifecycle_result.get("error")
+                    or f"Applied capability lifecycle '{decision_kind}'."
+                ),
+                "decision_kind": decision_kind,
+                "candidate_id": candidate_id,
+                "target_agent_id": target_agent_id,
+                "selected_scope": selected_scope,
+                "selected_seat_ref": selected_seat_ref,
+                "replacement_target_ids": replacement_target_ids,
+                "rollback_target_ids": rollback_target_ids,
+                "restored_capability_ids": list(final_seat_capabilities),
+                "preserved_overlay_capability_ids": list(
+                    layer_context["session_overlay_capability_ids"],
+                ),
+                "lifecycle_result": lifecycle_result,
+            }
         apply_payload = {
             "agent_id": target_agent_id,
             "capabilities": final_capabilities,
             "capability_assignment_mode": "replace",
+            "selected_scope": selected_scope,
+            "selected_seat_ref": selected_seat_ref,
             "reason": str(resolved_payload.get("reason") or "").strip()
             or f"system:apply_capability_lifecycle:{decision_kind}",
         }
@@ -353,6 +450,47 @@ class SystemSkillCapabilityFacade:
             if isinstance(result, dict)
             else {"success": False, "error": "apply_role returned an unexpected result"}
         )
+        restored_overlay_ids = list(layer_context["session_overlay_capability_ids"])
+        if bool(lifecycle_result.get("success")) and restored_overlay_ids:
+            overlay_payload = {
+                "candidate_id": candidate_id or None,
+                "target_agent_id": target_agent_id,
+                "capability_ids": restored_overlay_ids,
+                "replacement_capability_ids": [],
+                "replacement_target_ids": [],
+                "rollback_target_ids": [],
+                "capability_assignment_mode": "replace",
+                "selected_scope": "session",
+                "scope_ref": str(
+                    resolved_payload.get("scope_ref")
+                    or layer_context.get("selected_seat_ref")
+                    or target_agent_id
+                ).strip(),
+                "selected_seat_ref": str(
+                    resolved_payload.get("selected_seat_ref")
+                    or layer_context.get("selected_seat_ref")
+                    or ""
+                ).strip()
+                or None,
+                "target_role_id": str(
+                    resolved_payload.get("target_role_id")
+                    or layer_context.get("target_role_id")
+                    or ""
+                ).strip()
+                or None,
+                "lifecycle_stage": str(
+                    resolved_payload.get("lifecycle_stage") or ""
+                ).strip()
+                or "trial",
+                "reason": str(resolved_payload.get("reason") or "").strip()
+                or f"system:apply_capability_lifecycle:{decision_kind}:restore-session-overlay",
+                "governed_mutation": True,
+            }
+            overlay_result = self._attach_trial_scope(overlay_payload)
+            if inspect.isawaitable(overlay_result):
+                overlay_result = await overlay_result
+            if isinstance(overlay_result, dict):
+                lifecycle_result["overlay_restore"] = dict(overlay_result)
         return {
             "success": bool(lifecycle_result.get("success")),
             "summary": str(
@@ -373,6 +511,8 @@ class SystemSkillCapabilityFacade:
             or None,
             "replacement_target_ids": replacement_target_ids,
             "rollback_target_ids": rollback_target_ids,
+            "restored_capability_ids": list(final_seat_capabilities),
+            "preserved_overlay_capability_ids": restored_overlay_ids,
             "lifecycle_result": lifecycle_result,
         }
 
@@ -396,10 +536,7 @@ class SystemSkillCapabilityFacade:
         if not callable(handler):
             handler = getattr(self._industry_service, "attach_candidate_to_scope", None)
         if callable(handler):
-            try:
-                return handler(**payload)
-            except TypeError:
-                return handler(payload)
+            return handler(**payload)
         return {
             "success": False,
             "error": "industry trial scope attach is not available",
@@ -547,3 +684,119 @@ class SystemSkillCapabilityFacade:
             if isinstance(capabilities, list):
                 return [str(item).strip() for item in capabilities if str(item).strip()]
         return []
+
+    @staticmethod
+    def _normalize_string_list(value: object | None) -> list[str]:
+        if not isinstance(value, (list, tuple, set)):
+            return []
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            text = str(item).strip()
+            if not text:
+                continue
+            lowered = text.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(text)
+        return normalized
+
+    @classmethod
+    def _merge_unique_capabilities(cls, *values: object) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for item in values:
+            for capability_id in cls._normalize_string_list(item):
+                lowered = capability_id.lower()
+                if lowered in seen:
+                    continue
+                seen.add(lowered)
+                merged.append(capability_id)
+        return merged
+
+    def _capability_layer_context_for_agent(
+        self,
+        agent_id: str,
+    ) -> dict[str, object]:
+        surface_getter = getattr(self._agent_profile_service, "get_capability_surface", None)
+        surface = surface_getter(agent_id) if callable(surface_getter) else None
+        runtime_payload = (
+            dict(surface.get("runtime") or {})
+            if isinstance(surface, dict) and isinstance(surface.get("runtime"), dict)
+            else {}
+        )
+        metadata = (
+            dict(runtime_payload.get("metadata") or {})
+            if isinstance(runtime_payload.get("metadata"), dict)
+            else {}
+        )
+        layers = (
+            dict(metadata.get("capability_layers") or {})
+            if isinstance(metadata.get("capability_layers"), dict)
+            else {}
+        )
+        effective_capability_ids = self._normalize_string_list(
+            surface.get("effective_capabilities") if isinstance(surface, dict) else None,
+        )
+        if not effective_capability_ids:
+            effective_capability_ids = self._normalize_string_list(
+                layers.get("effective_capability_ids"),
+            )
+        return {
+            "role_prototype_capability_ids": self._normalize_string_list(
+                layers.get("role_prototype_capability_ids"),
+            ),
+            "seat_instance_capability_ids": self._normalize_string_list(
+                layers.get("seat_instance_capability_ids"),
+            ),
+            "session_overlay_capability_ids": self._normalize_string_list(
+                layers.get("session_overlay_capability_ids"),
+            ),
+            "effective_capability_ids": effective_capability_ids,
+            "selected_seat_ref": str(metadata.get("selected_seat_ref") or "").strip() or None,
+            "target_role_id": str(runtime_payload.get("industry_role_id") or "").strip() or None,
+        }
+
+    @classmethod
+    def _blocked_lifecycle_protection(
+        cls,
+        *,
+        decision_kind: str,
+        replacement_relation: str | None,
+        protection_flags: list[str],
+        protection_lifted: bool,
+        candidate_id: str,
+        target_agent_id: str,
+    ) -> dict[str, object] | None:
+        blocked_flag: str | None = None
+        if decision_kind == "replace_existing" and not protection_lifted:
+            if "protected_from_auto_replace" in protection_flags:
+                blocked_flag = "protected_from_auto_replace"
+            elif replacement_relation == "replace_requested":
+                for flag in (
+                    "required_by_role_blueprint",
+                    "pinned_by_operator",
+                ):
+                    if flag in protection_flags:
+                        blocked_flag = flag
+                        break
+        if decision_kind == "retire" and not protection_lifted:
+            if "protected_from_auto_retire" in protection_flags:
+                blocked_flag = "protected_from_auto_retire"
+            elif "pinned_by_operator" in protection_flags:
+                blocked_flag = "pinned_by_operator"
+        if blocked_flag is None:
+            return None
+        return {
+            "success": False,
+            "decision_kind": decision_kind,
+            "candidate_id": candidate_id,
+            "target_agent_id": target_agent_id,
+            "blocked_reason": blocked_flag,
+            "governed_path_required": True,
+            "summary": (
+                f"Lifecycle decision '{decision_kind}' is blocked because protection "
+                f"'{blocked_flag}' has not been lifted through the governed path."
+            ),
+        }

@@ -17,6 +17,11 @@ from copaw.state import (
 )
 from copaw.state import SQLiteStateStore
 from copaw.state.repositories import SqliteAgentRuntimeRepository
+from copaw.state.skill_candidate_service import CapabilityCandidateService
+from copaw.state.skill_lifecycle_decision_service import (
+    SkillLifecycleDecisionService,
+)
+from copaw.state.skill_trial_service import SkillTrialService
 
 
 class _StrategyServiceStub:
@@ -120,6 +125,10 @@ class _RuntimeViewsHarness(_IndustryRuntimeViewsMixin):
             return None
         summary = str(evidence.get("summary") or "").strip()
         return summary or None
+
+    def _list_schedule_ids_for_instance(self, instance_id: str) -> list[str]:
+        _ = instance_id
+        return []
 
 
 class _CapabilityGovernanceRuntimeViewsHarness(_RuntimeViewsHarness):
@@ -229,7 +238,8 @@ class _CapabilityGovernanceRuntimeViewsHarness(_RuntimeViewsHarness):
         return []
 
     def _resolve_instance_goal_ids(self, record: IndustryInstanceRecord) -> list[str]:
-        return list(record.goal_ids or [])
+        _ = record
+        return []
 
     def _list_instance_agents(self, agent_ids: set[str]) -> list[dict[str, object]]:
         assert agent_ids == {"agent-seat"}
@@ -388,6 +398,185 @@ def test_capability_governance_projection_exposes_current_capability_trial(tmp_p
     assert trial["selected_scope"] == "seat"
     assert trial["selected_seat_ref"] == "seat-primary"
     assert trial["replacement_target_ids"] == ["mcp:legacy_browser"]
+
+
+def test_capability_governance_projection_exposes_formal_governance_result(
+    tmp_path,
+) -> None:
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+        north_star="Keep governed capability packs coherent.",
+    )
+    state_store = SQLiteStateStore(tmp_path / "runtime-views-governance-result.db")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    candidate_service = CapabilityCandidateService(state_store=state_store)
+    trial_service = SkillTrialService(state_store=state_store)
+    decision_service = SkillLifecycleDecisionService(state_store=state_store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="agent-seat",
+            actor_key="runtime:agent-seat",
+            actor_fingerprint="fp-agent-seat",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="running",
+            metadata={
+                "selected_seat_ref": "seat-primary",
+                "capability_layers": {
+                    "role_prototype_capability_ids": [
+                        "skill:role-a",
+                        "skill:role-b",
+                        "skill:role-c",
+                        "skill:role-d",
+                        "skill:role-e",
+                    ],
+                    "seat_instance_capability_ids": [
+                        "skill:seat-a",
+                        "skill:seat-b",
+                        "skill:seat-c",
+                        "skill:seat-d",
+                    ],
+                    "cycle_delta_capability_ids": [
+                        "mcp:campaign-dashboard",
+                        "mcp:legacy_browser",
+                    ],
+                    "session_overlay_capability_ids": [
+                        "mcp:browser_runtime_next",
+                    ],
+                    "effective_capability_ids": [
+                        "skill:role-a",
+                        "skill:role-b",
+                        "skill:role-c",
+                        "skill:role-d",
+                        "skill:role-e",
+                        "skill:seat-a",
+                        "skill:seat-b",
+                        "skill:seat-c",
+                        "skill:seat-d",
+                        "mcp:campaign-dashboard",
+                        "mcp:legacy_browser",
+                        "mcp:browser_runtime_next",
+                    ],
+                },
+                "current_capability_trial": {
+                    "candidate_id": "cand-browser-runtime-next",
+                    "skill_trial_id": "trial-browser-runtime-seat-primary",
+                    "selected_scope": "session",
+                    "selected_seat_ref": "seat-primary",
+                    "capability_ids": ["mcp:browser_runtime_next"],
+                    "replacement_target_ids": ["mcp:legacy_browser"],
+                },
+            },
+        ),
+    )
+    baseline = candidate_service.normalize_candidate_source(
+        candidate_kind="mcp-bundle",
+        target_scope="seat",
+        target_role_id="support-seat",
+        target_seat_ref="seat-primary",
+        candidate_source_kind="external_catalog",
+        candidate_source_ref="registry://legacy-browser",
+        candidate_source_version="2026.04.06",
+        ingestion_mode="baseline-import",
+        proposed_skill_name="legacy-browser",
+        summary="Protected legacy browser baseline.",
+        status="active",
+        lifecycle_stage="baseline",
+        protection_flags=[
+            "protected_from_auto_replace",
+            "protected_from_auto_retire",
+            "required_by_role_blueprint",
+        ],
+        canonical_package_id="pkg:browser-runtime",
+        equivalence_class="browser-runtime",
+        capability_overlap_score=0.91,
+        metadata={"mount_id": "mcp:legacy_browser"},
+    )
+    candidate = candidate_service.normalize_candidate_source(
+        candidate_kind="mcp-bundle",
+        target_scope="seat",
+        target_role_id="support-seat",
+        target_seat_ref="seat-primary",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://example.com/browser-runtime-next.zip",
+        candidate_source_version="2026.04.06",
+        candidate_source_lineage="donor:browser-runtime",
+        ingestion_mode="prediction-recommendation",
+        proposed_skill_name="browser-runtime-next",
+        summary="Next governed browser runtime.",
+        status="trial",
+        lifecycle_stage="trial",
+        canonical_package_id="pkg:browser-runtime",
+        equivalence_class="browser-runtime",
+        capability_overlap_score=0.93,
+        metadata={"mount_id": "mcp:browser_runtime_next"},
+    )
+    trial_service.create_or_update_trial(
+        candidate_id=candidate.candidate_id,
+        canonical_package_id=candidate.canonical_package_id,
+        equivalence_class=candidate.equivalence_class,
+        capability_overlap_score=candidate.capability_overlap_score,
+        scope_type="seat",
+        scope_ref="seat-primary",
+        verdict="passed",
+        summary="Seat trial passed.",
+        success_count=1,
+        metadata={"selected_scope": "session"},
+    )
+    decision_service.create_decision(
+        candidate_id=candidate.candidate_id,
+        canonical_package_id=candidate.canonical_package_id,
+        equivalence_class=candidate.equivalence_class,
+        capability_overlap_score=candidate.capability_overlap_score,
+        decision_kind="replace_existing",
+        from_stage="trial",
+        to_stage="active",
+        reason="Promote the next browser runtime.",
+        replacement_target_ids=["mcp:legacy_browser"],
+    )
+    harness = _CapabilityGovernanceRuntimeViewsHarness(strategy, runtime_repository)
+    harness._prediction_service = SimpleNamespace(
+        _capability_candidate_service=candidate_service,
+        _skill_trial_service=trial_service,
+        _skill_lifecycle_decision_service=decision_service,
+        _capability_portfolio_service=None,
+    )
+
+    payload = harness._enrich_agent_capability_governance_payload(  # pylint: disable=protected-access
+        {
+            "agent_id": "agent-seat",
+            "status": "running",
+            "employment_mode": "temporary",
+            "activation_mode": "on-demand",
+        },
+    )
+
+    governance_result = payload["capability_governance"]["governance_result"]
+    assert governance_result["status"] == "guarded"
+    assert governance_result["budgets"]["role_skill"]["over_budget"] is True
+    assert governance_result["budgets"]["seat_skill"]["over_budget"] is True
+    assert governance_result["budgets"]["mcp"]["over_budget"] is True
+    assert governance_result["overlap"]["over_budget"] is True
+    assert governance_result["replacement_pressure"]["blocked_replacement_target_ids"] == [
+        "mcp:legacy_browser",
+    ]
+    assert governance_result["protection"]["protected_baseline_capability_ids"] == [
+        "mcp:legacy_browser",
+    ]
+    assert governance_result["install_discipline"]["preferred_action"] == (
+        "mount_existing_candidate"
+    )
+    assert any(
+        item["action"] == "compact_mcp_budget"
+        for item in governance_result["actions"]
+    )
+    assert any(
+        item["action"] == "review_protected_replacement"
+        for item in governance_result["actions"]
+    )
 
 
 def test_main_brain_planning_surface_exposes_uncertainty_register_from_durable_strategy_truth() -> None:

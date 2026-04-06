@@ -4,6 +4,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from .service_context import *  # noqa: F401,F403
+from .service_capability_governance import (
+    resolve_industry_capability_governance_service,
+)
 from .service_recommendation_search import *  # noqa: F401,F403
 from .service_recommendation_pack import *  # noqa: F401,F403
 from .main_brain_cognitive_surface import build_main_brain_cognitive_surface
@@ -13,6 +16,79 @@ from ..state.strategy_memory_service import resolve_strategy_payload
 
 
 class _IndustryRuntimeViewsMixin:
+    def _list_instance_schedules(
+        self,
+        instance_id: str,
+        *,
+        schedule_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        if self._schedule_repository is None:
+            return []
+        resolved_ids = list(schedule_ids) or self._list_schedule_ids_for_instance(
+            instance_id,
+        )
+        payload: list[dict[str, Any]] = []
+        for schedule_id in resolved_ids:
+            schedule = self._schedule_repository.get_schedule(schedule_id)
+            if schedule is None or schedule.status == "deleted":
+                continue
+            spec_payload = (
+                dict(schedule.spec_payload)
+                if isinstance(schedule.spec_payload, dict)
+                else {}
+            )
+            meta_mapping = (
+                dict(spec_payload.get("meta"))
+                if isinstance(spec_payload.get("meta"), dict)
+                else {}
+            )
+            payload.append(
+                {
+                    "schedule_id": schedule.id,
+                    "title": schedule.title,
+                    "status": schedule.status,
+                    "enabled": schedule.enabled,
+                    "cron": schedule.cron,
+                    "timezone": schedule.timezone,
+                    "dispatch_channel": _string(spec_payload.get("channel")) or "console",
+                    "dispatch_mode": _string(spec_payload.get("mode")) or "stream",
+                    "owner_agent_id": _string(meta_mapping.get("owner_agent_id")),
+                    "industry_role_id": _string(meta_mapping.get("industry_role_id")),
+                    "summary": _string(meta_mapping.get("summary")),
+                    "next_run_at": schedule.next_run_at,
+                    "last_run_at": schedule.last_run_at,
+                    "last_error": schedule.last_error,
+                    "updated_at": schedule.updated_at,
+                    "route": f"/api/runtime-center/schedules/{schedule.id}",
+                },
+            )
+        payload.sort(
+            key=lambda item: _sort_timestamp(item.get("updated_at")),
+            reverse=True,
+        )
+        return payload
+
+    def _list_schedule_ids_for_instance(self, instance_id: str) -> list[str]:
+        if self._schedule_repository is None:
+            return []
+        schedule_ids: list[str] = []
+        for schedule in self._schedule_repository.list_schedules():
+            if schedule.status == "deleted":
+                continue
+            spec_payload = (
+                dict(schedule.spec_payload)
+                if isinstance(schedule.spec_payload, dict)
+                else {}
+            )
+            meta_mapping = (
+                dict(spec_payload.get("meta"))
+                if isinstance(spec_payload.get("meta"), dict)
+                else {}
+            )
+            if _string(meta_mapping.get("industry_instance_id")) == instance_id:
+                schedule_ids.append(schedule.id)
+        return schedule_ids
+
     def _backlog_item_is_chat_writeback(
         self,
         item: dict[str, Any] | None,
@@ -1382,7 +1458,7 @@ class _IndustryRuntimeViewsMixin:
                     "assignment_count": len(assignments),
                     "report_count": len(agent_reports),
                     "agent_count": len(agents),
-                    "schedule_count": len(record.schedule_ids or []),
+                    "schedule_count": len(self._list_schedule_ids_for_instance(record.instance_id)),
                 },
             ),
             IndustryMainChainNode(
@@ -1904,6 +1980,25 @@ class _IndustryRuntimeViewsMixin:
                 ),
             }
         current_capability_trial = _mapping(metadata.get("current_capability_trial"))
+        governance_result = resolve_industry_capability_governance_service(
+            self,
+        ).build_runtime_governance_result(
+            layers=capability_layers,
+            current_capability_trial=current_capability_trial,
+            target_role_id=(
+                _string(getattr(runtime, "industry_role_id", None))
+                or _string(agent.get("role_id"))
+                or _string(agent.get("industry_role_id"))
+            ),
+            target_seat_ref=(
+                _string(metadata.get("selected_seat_ref"))
+                or _string(current_capability_trial.get("selected_seat_ref"))
+            ),
+            selected_scope=(
+                _string(current_capability_trial.get("selected_scope")) or "seat"
+            ),
+            candidate_id=_string(current_capability_trial.get("candidate_id")),
+        )
         return {
             **agent,
             "capability_governance": {
@@ -1932,6 +2027,7 @@ class _IndustryRuntimeViewsMixin:
                 "current_capability_trial": (
                     current_capability_trial if current_capability_trial else None
                 ),
+                "governance_result": governance_result,
                 "lifecycle": {
                     "employment_mode": (
                         _string(getattr(runtime, "employment_mode", None))
@@ -2388,8 +2484,6 @@ class _IndustryRuntimeViewsMixin:
 
                 "backlog_item_ids": list(current_cycle_record.backlog_item_ids or []),
 
-                "goal_ids": list(current_cycle_record.goal_ids or []),
-
                 "assignment_ids": list(current_cycle_record.assignment_ids or []),
 
                 "report_ids": list(current_cycle_record.report_ids or []),
@@ -2433,8 +2527,6 @@ class _IndustryRuntimeViewsMixin:
                 "focus_lane_ids": list(cycle.focus_lane_ids or []),
 
                 "backlog_item_ids": list(cycle.backlog_item_ids or []),
-
-                "goal_ids": list(cycle.goal_ids or []),
 
                 "assignment_ids": list(cycle.assignment_ids or []),
 
@@ -3061,7 +3153,7 @@ class _IndustryRuntimeViewsMixin:
 
             record.instance_id,
 
-            schedule_ids=record.schedule_ids,
+            schedule_ids=self._list_schedule_ids_for_instance(record.instance_id),
 
         )
 

@@ -8,6 +8,75 @@
 
 **Tech Stack:** Python, Pydantic, existing CoPaw `state / capabilities / industry / kernel / predictions / runtime_center`, pytest.
 
+## Status Correction (`2026-04-06`)
+
+This file is still the right high-level decomposition for the capability-evolution loop, but it is no longer the standalone source of truth for "what is currently done."
+
+Current reality:
+
+- the core governed spine from this plan is already in mainline code, including:
+  - `CapabilityCandidateRecord`
+  - `SkillTrialRecord`
+  - `SkillLifecycleDecisionRecord`
+  - donor-first candidate normalization
+  - donor/reuse/fallback resolution through `skill_evolution_service`
+  - runtime attribution on query execution
+  - Runtime Center candidate/trial/lifecycle read-model projection
+- the practical execution priority for this area was later corrected by:
+  - `docs/superpowers/plans/2026-04-04-donor-first-capability-evolution-priority-plan.md`
+  - `docs/superpowers/plans/2026-04-04-external-capability-assimilation-implementation-plan.md`
+  - `TASK_STATUS.md`
+- the unchecked step boxes below are retained as the original execution template; they must not be read as today's completion truth by themselves
+- live discovery/install/use closure must be judged from the newer donor-first documents and `TASK_STATUS.md`, not from this file alone
+
+Practical rule:
+
+- use this file to understand the original loop structure
+- use the newer donor-first plans plus `TASK_STATUS.md` to judge landed state, superseded ordering, and live-verified runtime scope
+
+## Completion Note (`2026-04-06`)
+
+The previously partial tail of this plan is now implemented in mainline code for the governed capability-evolution loop itself:
+
+- `Phase 6` is no longer partial:
+  - `system:apply_capability_lifecycle` now requires governed mutation admission
+  - protected replace / protected retire are explicitly gated
+  - rollback restores prior seat truth and preserves session overlay
+  - install/materialize success no longer implies direct role activation outside lifecycle apply
+- `Phase 7` is now landed through the formal governance path:
+  - `src/copaw/industry/service_capability_governance.py`
+  - recomposition/budget/protection/install-discipline now project through `service_team_runtime.py` and `service_runtime_views.py`
+- `Phase 8` is now landed in the Runtime Center read-model:
+  - candidate provenance
+  - baseline projection
+  - per-seat/per-session trial state
+  - lifecycle history
+  - replacement lineage
+  - active pack composition
+- `Phase 9` is now landed as formal drift governance, not just free-form summary:
+  - `SkillGapDetector` re-entry kinds
+  - Runtime Center drift projection
+  - portfolio `revision / replace / retire` pressure counters
+  - prediction re-entry recommendation wiring
+
+Focused verification used for this closure:
+
+```powershell
+PYTHONPATH=src python -m pytest tests/app/test_governed_mutations.py -q
+PYTHONPATH=src python -m pytest tests/predictions/test_skill_candidate_service.py tests/predictions/test_skill_trial_service.py tests/industry/test_runtime_views_split.py -q
+PYTHONPATH=src python -m pytest tests/app/test_industry_service_wiring.py -q
+PYTHONPATH=src python -m pytest tests/app/runtime_center_api_parts/overview_governance.py -q
+PYTHONPATH=src python -m pytest tests/app/test_runtime_center_events_api.py -q
+PYTHONPATH=src python -m pytest tests/app/test_capability_market_api.py -q
+PYTHONPATH=src python -m pytest tests/app/test_predictions_api.py -k "trial_and_retirement_loop" -q
+PYTHONPATH=src python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py -k "governed_kernel_tasks or replace_mode or protected_replace" -vv
+```
+
+Honest boundary:
+
+- this closes the governed capability-evolution loop in CoPaw's own truth/runtime/risk/evidence chain
+- it does not by itself expand donor discovery/use claims beyond the newer donor-first documents and `TASK_STATUS.md`
+
 ---
 
 ## Phase 1: Candidate Truth And Discovery
