@@ -5,7 +5,15 @@ from .shared import *  # noqa: F401,F403
 from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.kernel.governance import GovernanceService
 from copaw.kernel.models import KernelTask
-from copaw.state import AgentReportRecord, AssignmentRecord, SQLiteStateStore, ScheduleRecord
+from copaw.state import (
+    AgentReportRecord,
+    AssignmentRecord,
+    BacklogItemRecord,
+    OperatingCycleRecord,
+    OperatingLaneRecord,
+    SQLiteStateStore,
+    ScheduleRecord,
+)
 from copaw.state.repositories import SqliteGovernanceControlRepository
 from copaw.state.human_assist_task_service import HumanAssistTaskService
 from copaw.state.repositories import SqliteHumanAssistTaskRepository
@@ -729,11 +737,9 @@ def test_industry_chat_writeback_routes_matching_specialist_goal_schedule_and_st
         result["target_owner_agent_id"],
     )
     assert selected_override is not None
-    assert selected_override.current_focus_kind == "goal"
-    assert selected_override.current_focus_id in set(
-        app.state.industry_service._resolve_instance_goal_ids(record),
-    )
-    assert selected_override.current_focus
+    assert selected_override.current_focus_kind is None
+    assert selected_override.current_focus_id is None
+    assert not selected_override.current_focus
 
     duplicate = asyncio.run(
         app.state.industry_service.apply_execution_chat_writeback(
@@ -3460,6 +3466,151 @@ def test_industry_instance_status_completes_with_static_team_membership_only(
     assert app.state.industry_service.get_instance_record("industry-v1-staffed").status == (
         "completed"
     )
+
+
+def test_industry_instance_status_prefers_live_cycle_and_assignment_truth_over_blocked_goal(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    instance_id = "industry-v1-live-status"
+
+    app.state.industry_instance_repository.upsert_instance(
+        IndustryInstanceRecord(
+            instance_id=instance_id,
+            label="Live Status Industry",
+            summary="Instance status should follow live runtime truth first.",
+            owner_scope=instance_id,
+            status="active",
+            lifecycle_status="running",
+            autonomy_status="coordinating",
+            profile_payload={"industry": "Operations"},
+            team_payload={},
+            agent_ids=[],
+        ),
+    )
+    blocked_goal = app.state.goal_service.create_goal(
+        title="Legacy blocked goal",
+        summary="Historical blocked goal should not dominate live runtime truth.",
+        status="blocked",
+        owner_scope=instance_id,
+        industry_instance_id=instance_id,
+    )
+    cycle = app.state.operating_cycle_repository.upsert_cycle(
+        OperatingCycleRecord(
+            id="cycle:industry-v1-live-status:current",
+            industry_instance_id=instance_id,
+            cycle_kind="daily",
+            title="Live operating cycle",
+            summary="A live cycle is already in progress.",
+            status="active",
+            focus_lane_ids=[],
+            backlog_item_ids=[],
+            assignment_ids=["assignment:industry-v1-live-status:current"],
+            report_ids=[],
+        ),
+    )
+    app.state.assignment_repository.upsert_assignment(
+        AssignmentRecord(
+            id="assignment:industry-v1-live-status:current",
+            industry_instance_id=instance_id,
+            cycle_id=cycle.id,
+            goal_id=blocked_goal.id,
+            title="Live governed assignment",
+            summary="This assignment is the canonical live execution truth.",
+            status="queued",
+        ),
+    )
+    app.state.industry_instance_repository.upsert_instance(
+        app.state.industry_instance_repository.get_instance(instance_id).model_copy(
+            update={"current_cycle_id": cycle.id},
+        ),
+    )
+
+    reconciled = app.state.industry_service.reconcile_instance_status(instance_id)
+
+    assert reconciled is not None
+    assert reconciled.status == "active"
+
+
+def test_strategy_memory_does_not_promote_legacy_goal_titles_when_live_runtime_truth_exists(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    instance_id = "industry-v1-strategy-purity"
+
+    app.state.industry_instance_repository.upsert_instance(
+        IndustryInstanceRecord(
+            instance_id=instance_id,
+            label="Strategy Purity Industry",
+            summary="Strategy memory should use the formal live chain.",
+            owner_scope=instance_id,
+            status="active",
+            lifecycle_status="running",
+            autonomy_status="coordinating",
+            profile_payload={
+                "industry": "Operations",
+                "goals": ["Build a stable governed operating loop"],
+            },
+            team_payload={},
+            agent_ids=[],
+        ),
+    )
+    goal = app.state.goal_service.create_goal(
+        title="Legacy bootstrap goal title",
+        summary="Historical bootstrap goal title should not become strategy focus.",
+        status="active",
+        owner_scope=instance_id,
+        industry_instance_id=instance_id,
+    )
+    app.state.operating_lane_repository.upsert_lane(
+        OperatingLaneRecord(
+            id="lane:industry-v1-strategy-purity:ops",
+            industry_instance_id=instance_id,
+            lane_key="ops",
+            title="Operations lane",
+            summary="Primary operating lane.",
+            status="active",
+            priority=3,
+        ),
+    )
+    app.state.backlog_item_repository.upsert_item(
+        BacklogItemRecord(
+            id="backlog:industry-v1-strategy-purity:focus",
+            industry_instance_id=instance_id,
+            goal_id=goal.id,
+            title="Fresh backlog focus",
+            summary="Canonical backlog focus should drive strategy memory.",
+            status="open",
+            priority=3,
+            source_kind="operator",
+            source_ref="test:strategy-purity",
+        ),
+    )
+    app.state.assignment_repository.upsert_assignment(
+        AssignmentRecord(
+            id="assignment:industry-v1-strategy-purity:focus",
+            industry_instance_id=instance_id,
+            goal_id=goal.id,
+            title="Current assignment focus",
+            summary="Canonical assignment focus should drive strategy memory.",
+            status="queued",
+        ),
+    )
+    record = app.state.industry_service.get_instance_record(instance_id)
+    assert record is not None
+
+    app.state.industry_service._sync_strategy_memory_for_instance(record)
+
+    strategy = app.state.strategy_memory_service.get_active_strategy(
+        scope_type="industry",
+        scope_id=instance_id,
+        owner_agent_id="copaw-agent-runner",
+    )
+    assert strategy is not None
+    assert "Legacy bootstrap goal title" not in strategy.current_focuses
+    assert "Legacy bootstrap goal title" not in strategy.priority_order
+    assert strategy.current_focuses[0] == "Current assignment focus"
+
 
 def test_industry_detail_backfills_execution_core_identity_with_delegation_first_defaults(
     tmp_path,

@@ -359,7 +359,7 @@
 - 策略：`keep -> expand`
 - 迁移说明：
   - `POST /industry/v1/preview` 当前先把行业简报编译为 AI 生成、可编辑的 `IndustryDraftPlan`，而不是直接产生活跃实例
-  - `POST /industry/v1/bootstrap` 当前已经统一进入 goal/schedule/kernel 主链，并且只激活 operator 最终编辑后的 `profile + draft`，而不是另起行业执行器或重走固定模板编译
+  - `POST /industry/v1/bootstrap` 当前已经统一进入 assignment/backlog/cycle/kernel 主链，并且只激活 operator 最终编辑后的 `profile + draft`；legacy `goal/schedule` 只保留 leaf/history compatibility，不再作为 bootstrap 前门真相
   - `PUT /industry/v1/instances/{instance_id}/team` 当前已成为现有团队拓扑的 canonical 更新入口；它继续复用同一条 bootstrap 激活主链，但锁定现有 `instance_id` 做 team patch，使“新增/删除职业位”不再依赖隐式 re-bootstrap 语义
   - `system:update_industry_team` 当前已作为 kernel-governed team write capability 落地；prediction / recommendation 若发现执行中枢长期兜底某个叶子环路，会通过这条能力把“补岗位”正式回写到现有行业实例，而不是停留在手工说明层
   - `2026-03-20` 起 canonical team seat contract 已正式固定为 `employment_mode + activation_mode`：`employment_mode=career|temporary` 负责 seat 生命周期，`activation_mode=persistent|on-demand` 只负责唤醒方式；行业编译、团队运行态、Agent Workbench 与预测补位都必须复用这同一组字段，不再允许另造“临时/常驻/兼职”平行心智

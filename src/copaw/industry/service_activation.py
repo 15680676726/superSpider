@@ -501,51 +501,15 @@ class _IndustryActivationMixin:
                     assignment_id=assignment.id if assignment is not None else None,
                 )
 
-        deferred_background_dispatches: list[tuple[str, list[dict[str, object]]]] = []
         if auto_dispatch:
-            assignment_by_goal_id = {
-                assignment.goal_id: assignment
-                for assignment in assignments
-                if assignment.goal_id
-            }
-            dispatch_by_goal_id: dict[str, dict[str, Any]] = {}
-            for goal, _override, seed in goal_seed_links:
-                assignment = assignment_by_goal_id.get(goal.id)
-                dispatch_context = {
-                    **build_goal_dispatch_context(seed),
-                    "lane_id": goal.lane_id,
-                    "cycle_id": current_cycle.id if current_cycle is not None else None,
-                    "assignment_id": assignment.id if assignment is not None else None,
-                    "report_back_mode": "summary",
-                }
-                if execute:
-                    dispatch = await self._goal_service.dispatch_goal_deferred_background(
-                        goal.id,
-                        context=dispatch_context,
-                        owner_agent_id=seed.owner_agent_id,
-                        activate=auto_activate,
-                    )
-                else:
-                    dispatch = await self._goal_service.compile_goal_dispatch(
-                        goal.id,
-                        context=dispatch_context,
-                        owner_agent_id=seed.owner_agent_id,
-                        activate=auto_activate,
-                    )
-                deferred_results = [
-                    dict(item)
-                    for item in list(dispatch.get("dispatch_results") or [])
-                    if item.get("scheduled_execution") is True and item.get("task_id")
-                ]
-                if deferred_results:
-                    deferred_background_dispatches.append((goal.id, deferred_results))
-                dispatch_by_goal_id[goal.id] = dispatch
-            for index, item in enumerate(goal_results):
-                goal_id = _string(item.goal.get("id")) if isinstance(item.goal, dict) else None
-                if goal_id and goal_id in dispatch_by_goal_id:
-                    goal_results[index] = item.model_copy(
-                        update={"dispatch": dispatch_by_goal_id[goal_id]},
-                    )
+            await self._dispatch_operating_cycle_assignments(
+                instance_id=team_id,
+                assignment_ids=[assignment.id for assignment in assignments],
+                actor=EXECUTION_CORE_AGENT_ID,
+                allow_waiting_confirm=True,
+                include_execution_core=True,
+                execute_background=execute,
+            )
 
         for agent in plan.draft.team.agents:
             goal_link = goal_by_agent_id.get(agent.agent_id)
@@ -620,12 +584,6 @@ class _IndustryActivationMixin:
                 analysis_ids=plan.media_analysis_ids,
             )
         summary = self._build_instance_summary(final_record)
-        for goal_id, dispatch_results in deferred_background_dispatches:
-            self._goal_service.release_deferred_goal_dispatch(
-                goal_id=goal_id,
-                dispatch_results=dispatch_results,
-            )
-
         return IndustryBootstrapResponse(
             profile=plan.profile,
             team=plan.draft.team,

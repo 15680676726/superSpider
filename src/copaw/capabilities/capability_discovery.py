@@ -1267,7 +1267,7 @@ class CapabilityDiscoveryService:
         role_summary: str | None,
         mission: str | None,
         capability_hint: str | None,
-        goal_titles: list[str] | None = None,
+        focus_titles: list[str] | None = None,
         workflow_titles: list[str] | None = None,
         task_titles: list[str] | None = None,
         task_summaries: list[str] | None = None,
@@ -1276,7 +1276,7 @@ class CapabilityDiscoveryService:
             role_name,
             capability_hint,
             *(workflow_titles or []),
-            *(goal_titles or []),
+            *(focus_titles or []),
         )
         secondary = self._compose_query(
             capability_hint,

@@ -20,6 +20,30 @@ def _workflow_mapping(value: object) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def _workflow_goal_task_payloads(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    entries = detail.get("tasks")
+    if not isinstance(entries, list):
+        return payloads
+    for entry in list(entries):
+        if not isinstance(entry, dict):
+            continue
+        task_payload = _workflow_mapping(entry.get("task"))
+        if not task_payload:
+            continue
+        runtime_payload = _workflow_mapping(entry.get("runtime"))
+        if runtime_payload:
+            task_payload["runtime"] = runtime_payload
+        frames = entry.get("frames")
+        if isinstance(frames, list) and frames:
+            task_payload["frames"] = [dict(item) for item in frames if isinstance(item, dict)]
+        for key in ("decision_count", "evidence_count", "latest_evidence_id"):
+            if key in entry:
+                task_payload[key] = entry.get(key)
+        payloads.append(task_payload)
+    return payloads
+
+
 def _resolve_canonical_host_identity(
     host_payload: dict[str, Any] | None,
     *,
@@ -161,6 +185,7 @@ class _WorkflowServicePreviewMixin:
         decisions: list[dict[str, Any]] = []
         evidence: list[dict[str, Any]] = []
         goal_detail_by_id: dict[str, dict[str, Any]] = {}
+        step_seed_items = _workflow_step_execution_seed(run)
         goal_ids = _workflow_linked_resource_ids(run, key="linked_goal_ids")
         for goal_id in goal_ids:
             detail = self._goal_service.get_goal_detail(goal_id)
@@ -168,12 +193,27 @@ class _WorkflowServicePreviewMixin:
                 continue
             goal_detail_by_id[goal_id] = detail
             goals.append(detail.get("goal") or {})
-            tasks.extend(list(detail.get("tasks") or []))
+            tasks.extend(_workflow_goal_task_payloads(detail))
             decisions.extend(list(detail.get("decisions") or []))
             evidence.extend(list(detail.get("evidence") or []))
+        persisted_task_ids = _unique_strings(
+            *[
+                [
+                    str(item)
+                    for item in list(seed.get("linked_task_ids") or [])
+                    if str(item).strip()
+                ]
+                for seed in step_seed_items
+            ],
+        )
+        if self._task_repository is not None and persisted_task_ids:
+            tasks.extend(
+                task.model_dump(mode="json")
+                for task in self._task_repository.list_tasks(task_ids=persisted_task_ids)
+            )
         schedules: list[dict[str, Any]] = []
         schedule_by_id: dict[str, dict[str, Any]] = {}
-        schedule_ids = _workflow_linked_resource_ids(run, key="linked_schedule_ids")
+        schedule_ids = _workflow_schedule_ids_for_preview(run, preview)
         if self._schedule_repository is not None:
             for schedule_id in schedule_ids:
                 schedule = self._schedule_repository.get_schedule(schedule_id)
@@ -260,30 +300,85 @@ class _WorkflowServicePreviewMixin:
                 for item in list(seed.get("linked_goal_ids") or [])
                 if str(item).strip()
             ]
-            linked_schedule_ids = [
+            linked_schedule_ids = _unique_strings(
+                [
+                    str(item)
+                    for item in list(seed.get("linked_schedule_ids") or [])
+                    if str(item).strip()
+                ],
+                [
+                    _workflow_step_schedule_id(
+                        run,
+                        step_id=step.step_id,
+                        payload_preview=dict(step.payload_preview or {}),
+                    )
+                ]
+                if step.kind == "schedule"
+                else [],
+            )
+            persisted_task_ids = [
                 str(item)
-                for item in list(seed.get("linked_schedule_ids") or [])
+                for item in list(seed.get("linked_task_ids") or [])
+                if str(item).strip()
+            ]
+            persisted_decision_ids = [
+                str(item)
+                for item in list(seed.get("linked_decision_ids") or [])
+                if str(item).strip()
+            ]
+            persisted_evidence_ids = [
+                str(item)
+                for item in list(seed.get("linked_evidence_ids") or [])
                 if str(item).strip()
             ]
             linked_tasks = [
                 item
                 for item in tasks
                 if str(item.get("goal_id") or "") in linked_goal_ids
+                or str(item.get("id") or "") in set(persisted_task_ids)
             ]
+            linked_task_ids = _unique_strings(
+                [
+                    *persisted_task_ids,
+                    *(
+                        str(item.get("id") or "")
+                        for item in linked_tasks
+                        if str(item.get("id") or "").strip()
+                    ),
+                ],
+            )
             linked_decisions = [
                 item
                 for item in decisions
-                if str(item.get("task_id") or "") in {
-                    str(task.get("id") or "") for task in linked_tasks
-                }
+                if str(item.get("task_id") or "") in set(linked_task_ids)
+                or str(item.get("id") or "") in set(persisted_decision_ids)
             ]
+            linked_decision_ids = _unique_strings(
+                [
+                    *persisted_decision_ids,
+                    *(
+                        str(item.get("id") or "")
+                        for item in linked_decisions
+                        if str(item.get("id") or "").strip()
+                    ),
+                ],
+            )
             linked_evidence = [
                 item
                 for item in evidence
-                if str(item.get("task_id") or "") in {
-                    str(task.get("id") or "") for task in linked_tasks
-                }
+                if str(item.get("task_id") or "") in set(linked_task_ids)
+                or str(item.get("id") or "") in set(persisted_evidence_ids)
             ]
+            linked_evidence_ids = _unique_strings(
+                [
+                    *persisted_evidence_ids,
+                    *(
+                        str(item.get("id") or "")
+                        for item in linked_evidence
+                        if str(item.get("id") or "").strip()
+                    ),
+                ],
+            )
             linked_goals = [
                 detail.get("goal") or {}
                 for goal_id, detail in goal_detail_by_id.items()
@@ -330,21 +425,9 @@ class _WorkflowServicePreviewMixin:
                     owner_agent_id=step.owner_agent_id,
                     linked_goal_ids=linked_goal_ids,
                     linked_schedule_ids=linked_schedule_ids,
-                    linked_task_ids=[
-                        str(item.get("id") or "")
-                        for item in linked_tasks
-                        if str(item.get("id") or "").strip()
-                    ],
-                    linked_decision_ids=[
-                        str(item.get("id") or "")
-                        for item in linked_decisions
-                        if str(item.get("id") or "").strip()
-                    ],
-                    linked_evidence_ids=[
-                        str(item.get("id") or "")
-                        for item in linked_evidence
-                        if str(item.get("id") or "").strip()
-                    ],
+                    linked_task_ids=linked_task_ids,
+                    linked_decision_ids=linked_decision_ids,
+                    linked_evidence_ids=linked_evidence_ids,
                     blocked_reason_code=blocker.code if blocker is not None else None,
                     blocked_reason_message=blocker.message if blocker is not None else None,
                     summary=step.summary,
@@ -367,6 +450,12 @@ class _WorkflowServicePreviewMixin:
             return "blocked"
         if run_status == "cancelled":
             return "cancelled"
+        if linked_tasks:
+            task_statuses = {str(item.get("status") or "") for item in linked_tasks}
+            if "completed" in task_statuses and len(task_statuses) == 1:
+                return "completed"
+            if task_statuses & {"running", "in_progress"}:
+                return "running"
         if linked_goals:
             goal_statuses = {str(item.get("status") or "") for item in linked_goals}
             if goal_statuses and goal_statuses <= {"completed", "archived"}:
@@ -381,12 +470,6 @@ class _WorkflowServicePreviewMixin:
                 return "paused"
             if "scheduled" in schedule_statuses:
                 return "scheduled"
-        if linked_tasks:
-            task_statuses = {str(item.get("status") or "") for item in linked_tasks}
-            if "completed" in task_statuses and len(task_statuses) == 1:
-                return "completed"
-            if task_statuses & {"running", "in_progress"}:
-                return "running"
         return "planned"
 
     def _build_run_diagnosis(

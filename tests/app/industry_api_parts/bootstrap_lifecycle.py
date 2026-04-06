@@ -1562,6 +1562,47 @@ def test_public_bootstrap_auto_activate_keeps_instance_active_without_legacy_goa
     assert isinstance(strategies[0].current_focuses, list)
 
 
+def test_public_bootstrap_auto_dispatch_materializes_assignment_tasks_without_goal_dispatch(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    instance_id = payload["team"]["team_id"]
+    assert all(item["dispatch"] is None for item in payload["goals"])
+
+    created_tasks = app.state.task_repository.list_tasks(
+        industry_instance_id=instance_id,
+        limit=None,
+    )
+    assert created_tasks
+    assert all(task.assignment_id for task in created_tasks)
+
+
 def test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch(
     tmp_path,
 ) -> None:

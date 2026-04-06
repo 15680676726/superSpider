@@ -144,8 +144,9 @@ class _ReportingScope:
     scope_type: ReportScopeType
     scope_id: str | None
     label: str
-    goal_ids: set[str]
     agent_ids: set[str]
+    industry_instance_id: str | None = None
+    owner_scope: str | None = None
 
 
 @dataclass(slots=True)
@@ -1019,7 +1020,6 @@ class StateReportingService:
             for task in tasks
             if task.goal_id
         }
-        goal_ids.update(scope.goal_ids)
 
         goals_by_id = {
             goal.id: goal
@@ -1035,12 +1035,12 @@ class StateReportingService:
                     )
                 },
             )
-        goals = [
-            goal
-            for goal in goals_by_id.values()
-            if goal.id in goal_ids
-        ]
-        goal_ids = {goal.id for goal in goals}
+        goals = list(goals_by_id.values())
+        goal_ids = {
+            goal.id
+            for goal in goals
+            if goal.id in goal_ids or scope.scope_type == "global"
+        }
         decisions = [
             decision
             for decision in recent_decisions
@@ -1107,12 +1107,12 @@ class StateReportingService:
         if scope.scope_type == "global":
             return []
         tasks_by_id: dict[str, TaskRecord] = {}
-        if scope.goal_ids:
+        if scope.industry_instance_id:
             tasks_by_id.update(
                 {
                     task.id: task
                     for task in self._task_repository.list_tasks(
-                        goal_ids=sorted(scope.goal_ids),
+                        industry_instance_id=scope.industry_instance_id,
                     )
                 },
             )
@@ -1152,12 +1152,12 @@ class StateReportingService:
         if scope.scope_type == "global":
             return self._task_repository.list_tasks(activity_since=since)
         tasks_by_id: dict[str, TaskRecord] = {}
-        if scope.goal_ids:
+        if scope.industry_instance_id:
             tasks_by_id.update(
                 {
                     task.id: task
                     for task in self._task_repository.list_tasks(
-                        goal_ids=sorted(scope.goal_ids),
+                        industry_instance_id=scope.industry_instance_id,
                         activity_since=since,
                     )
                 },
@@ -1199,12 +1199,28 @@ class StateReportingService:
             return []
         if scope.scope_type == "global":
             return self._goal_repository.list_goals(activity_since=since)
-        if not scope.goal_ids:
-            return []
-        return self._goal_repository.list_goals(
-            goal_ids=sorted(scope.goal_ids),
-            activity_since=since,
-        )
+        goals_by_id: dict[str, GoalRecord] = {}
+        if scope.industry_instance_id:
+            goals_by_id.update(
+                {
+                    goal.id: goal
+                    for goal in self._goal_repository.list_goals(
+                        industry_instance_id=scope.industry_instance_id,
+                        activity_since=since,
+                    )
+                },
+            )
+        if scope.owner_scope:
+            goals_by_id.update(
+                {
+                    goal.id: goal
+                    for goal in self._goal_repository.list_goals(
+                        owner_scope=scope.owner_scope,
+                        activity_since=since,
+                    )
+                },
+            )
+        return list(goals_by_id.values())
 
     def _list_scope_evidence(
         self,
@@ -1526,7 +1542,6 @@ class StateReportingService:
                 scope_type=scope_type,
                 scope_id=None,
                 label="全局",
-                goal_ids=set(),
                 agent_ids=set(),
             )
         if scope_id is None:
@@ -1536,7 +1551,6 @@ class StateReportingService:
                 scope_type=scope_type,
                 scope_id=scope_id,
                 label=f"智能体 {scope_id}",
-                goal_ids=set(),
                 agent_ids={scope_id},
             )
         if self._industry_instance_repository is None:
@@ -1544,29 +1558,13 @@ class StateReportingService:
         instance = self._industry_instance_repository.get_instance(scope_id)
         if instance is None:
             raise KeyError(f"Industry instance '{scope_id}' not found")
-        goal_ids: set[str] = set()
-        if self._goal_repository is not None:
-            goal_ids.update(
-                goal.id
-                for goal in self._goal_repository.list_goals(
-                    industry_instance_id=scope_id,
-                )
-                if goal.id
-            )
-            if instance.owner_scope:
-                goal_ids.update(
-                    goal.id
-                    for goal in self._goal_repository.list_goals(
-                        owner_scope=instance.owner_scope,
-                    )
-                    if goal.id
-                )
         return _ReportingScope(
             scope_type=scope_type,
             scope_id=scope_id,
             label=instance.label,
-            goal_ids=goal_ids,
             agent_ids=set(instance.agent_ids or []),
+            industry_instance_id=scope_id,
+            owner_scope=instance.owner_scope,
         )
 
     def _task_matches_scope(
@@ -1578,6 +1576,11 @@ class StateReportingService:
     ) -> bool:
         if scope.scope_type == "global":
             return True
+        if (
+            scope.industry_instance_id is not None
+            and task.industry_instance_id == scope.industry_instance_id
+        ):
+            return True
         runtime = runtimes.get(task.id)
         owner_ids = {
             owner_id
@@ -1587,8 +1590,6 @@ class StateReportingService:
             )
             if owner_id
         }
-        if task.goal_id and task.goal_id in scope.goal_ids:
-            return True
         return bool(scope.agent_ids.intersection(owner_ids))
 
     def _learning_matches_scope(

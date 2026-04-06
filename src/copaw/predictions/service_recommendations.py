@@ -869,7 +869,7 @@ class _PredictionServiceRecommendationMixin:
                 return ""
             return " " + "；".join(notes) + "。"
 
-        strategic_goal_titles = _string_list(
+        strategic_focus_titles = _string_list(
             strategy.get("current_focuses"),
             strategy.get("priority_order"),
         )
@@ -920,7 +920,7 @@ class _PredictionServiceRecommendationMixin:
         def goal_alignment_score(goal: GoalRecord) -> int:
             score = 0
             haystack = f"{goal.title} {goal.summary}".lower()
-            for index, item in enumerate(strategic_goal_titles):
+            for index, item in enumerate(strategic_focus_titles):
                 normalized = item.lower()
                 if normalized and normalized in haystack:
                     score = max(score, 80 - (index * 5))
@@ -1744,12 +1744,16 @@ class _PredictionServiceRecommendationMixin:
                     metadata=dict(hottest_agent),
                 )
 
-        if not facts.workflows and facts.goals:
+        schedule_focus_items = _string_list(
+            strategic_focus_titles,
+            [task.title for task in facts.tasks[:5]],
+        )
+        if not facts.workflows and schedule_focus_items:
             append_recommendation(
                 recommendation_type="schedule_recommendation",
                 title="补充周期性自动化计划",
                 summary=(
-                    "当前范围内已有活跃目标，但缺少可见的自动化执行上下文。"
+                    "当前范围内已有活跃执行上下文，但缺少可见的自动化执行合同。"
                     "建议把周期性工作收口为固定 SOP 或运行计划。"
                 ),
                 priority=58,
@@ -1759,7 +1763,10 @@ class _PredictionServiceRecommendationMixin:
                 executable=False,
                 auto_eligible=False,
                 status="manual-only",
-                metadata={"goal_ids": [goal.id for goal in facts.goals[:5]]},
+                metadata={
+                    "task_ids": [task.id for task in facts.tasks[:5]],
+                    "focus_items": schedule_focus_items[:5],
+                },
             )
 
         if not recommendations:

@@ -9,6 +9,7 @@ from copaw.learning.models import GrowthEvent, Patch
 from copaw.state import (
     DecisionRequestRecord,
     GoalRecord,
+    IndustryInstanceRecord,
     SQLiteStateStore,
     TaskRecord,
     TaskRuntimeRecord,
@@ -17,6 +18,7 @@ from copaw.state.reporting_service import StateReportingService
 from copaw.state.repositories import (
     SqliteDecisionRequestRepository,
     SqliteGoalRepository,
+    SqliteIndustryInstanceRepository,
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
 )
@@ -351,3 +353,78 @@ def test_reporting_service_builds_knowledge_writeback_projection_for_failed_foll
         },
     ]
     assert projection[0]["evidence_refs"]
+
+
+def test_reporting_service_industry_scope_prefers_industry_task_truth_without_goal_anchor(
+    tmp_path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.db")
+    task_repository = SqliteTaskRepository(store)
+    task_runtime_repository = SqliteTaskRuntimeRepository(store)
+    goal_repository = SqliteGoalRepository(store)
+    decision_repository = SqliteDecisionRequestRepository(store)
+    industry_instance_repository = SqliteIndustryInstanceRepository(store)
+    evidence_ledger = EvidenceLedger(tmp_path / "evidence.db")
+    learning_service = LearningService(
+        engine=LearningEngine(tmp_path / "learning.db"),
+    )
+
+    industry_instance_repository.upsert_instance(
+        IndustryInstanceRecord(
+            instance_id="industry-live",
+            label="Industry Live",
+            summary="Industry scope should resolve from canonical task truth.",
+            owner_scope="industry-live-scope",
+            status="active",
+            agent_ids=[],
+        ),
+    )
+    task_repository.upsert_task(
+        TaskRecord(
+            id="task-industry-truth",
+            title="Assignment-native follow-up",
+            summary="Canonical industry task without any legacy goal anchor.",
+            task_type="analysis",
+            status="running",
+            industry_instance_id="industry-live",
+            owner_agent_id=None,
+        ),
+    )
+    task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-industry-truth",
+            runtime_status="active",
+            current_phase="executing",
+            last_result_summary="Industry follow-up still running.",
+        ),
+    )
+    evidence_ledger.append(
+        EvidenceRecord(
+            task_id="task-industry-truth",
+            actor_ref="copaw-agent-runner",
+            risk_level="guarded",
+            action_summary="Captured assignment-native progress",
+            result_summary="Industry follow-up remains active.",
+            capability_ref="analysis",
+        ),
+    )
+
+    service = StateReportingService(
+        task_repository=task_repository,
+        task_runtime_repository=task_runtime_repository,
+        goal_repository=goal_repository,
+        decision_request_repository=decision_repository,
+        evidence_ledger=evidence_ledger,
+        learning_service=learning_service,
+        industry_instance_repository=industry_instance_repository,
+    )
+
+    report = service.get_report(
+        window="weekly",
+        scope_type="industry",
+        scope_id="industry-live",
+    )
+
+    assert report.task_ids == ["task-industry-truth"]
+    assert report.task_count == 1
+    assert report.focus_items == ["Assignment-native follow-up"]

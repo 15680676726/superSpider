@@ -8,7 +8,7 @@
 
 Spider Mesh is a local execution system for long-running autonomous work. It brings goals, agents, tasks, environments, evidence, and patches into one Runtime Center so execution, observation, and evolution happen on the same visible surface.
 
-Its design is centered on four things: goal-first execution, persistent environments, evidence-first runtime behavior, and one local operating surface instead of scattered control panels.
+Its design is centered on four things: main-brain execution over assignment/backlog truth, persistent environments, evidence-first runtime behavior, and one local operating surface instead of scattered control panels.
 
 ## Current entry points
 

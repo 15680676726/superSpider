@@ -234,9 +234,10 @@ class _PredictionServiceCoreMixin:
                     "strategy_priority_order": _string_list(
                         (facts.strategy or {}).get("priority_order"),
                     )[:5],
+                    "focus_items": self._prediction_focus_titles(facts)[:8],
                     "report_route": facts.report.get("routes", {}).get("detail"),
                     "performance_route": facts.performance.get("routes", {}).get("report"),
-                    "goal_ids": [goal.id for goal in facts.goals],
+                    "task_ids": [task.id for task in facts.tasks],
                     "workflow_run_ids": [run.run_id for run in facts.workflows],
                     "question": payload.question or "",
                 },

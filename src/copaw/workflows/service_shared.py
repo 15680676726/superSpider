@@ -110,6 +110,35 @@ def _workflow_linked_resource_ids(
     )
 
 
+def _workflow_step_schedule_id(
+    run: WorkflowRunRecord,
+    *,
+    step_id: str,
+    payload_preview: dict[str, Any] | None = None,
+) -> str:
+    payload = dict(payload_preview or {})
+    return _string(payload.get("id")) or f"{run.run_id}:{step_id}"
+
+
+def _workflow_schedule_ids_for_preview(
+    run: WorkflowRunRecord,
+    preview: WorkflowTemplatePreview,
+) -> list[str]:
+    derived_ids = [
+        _workflow_step_schedule_id(
+            run,
+            step_id=step.step_id,
+            payload_preview=dict(step.payload_preview or {}),
+        )
+        for step in preview.steps
+        if step.kind == "schedule"
+    ]
+    return _unique_strings(
+        derived_ids,
+        _workflow_linked_resource_ids(run, key="linked_schedule_ids"),
+    )
+
+
 def _render_text(template: object | None, context: dict[str, Any]) -> str:
     if template is None:
         return ""

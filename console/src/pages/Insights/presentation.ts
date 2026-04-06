@@ -220,8 +220,8 @@ const EXACT_TEXT_MAP: Record<string, string> = {
     "当前运行轨迹会延续，由操作员进行选择性跟进，能力分配结构不会发生重大变化。",
   "Current blockers stay unresolved, overloaded actors continue to absorb work, and runtime quality degrades into more manual intervention.":
     "当前阻断项持续未解，过载执行体继续吸收工作，运行质量会继续退化并引发更多人工介入。",
-  "The current scope has active goals but no visible workflow run context. Package the recurring work into a workflow template or runtime schedule.":
-    "当前范围内存在活跃目标，但没有可见的自动化执行上下文。应把这类周期性工作沉淀为固定 SOP 或运行计划。",
+  "The current scope has active execution context but no visible workflow run contract. Package the recurring work into a workflow template or runtime schedule.":
+    "当前范围内存在活跃执行上下文，但没有可见的自动化执行合同。应把这类周期性工作沉淀为固定 SOP 或运行计划。",
   "Current facts do not safely map to a governed kernel action yet. Review the case and decide the next change manually.":
     "当前事实还不能安全映射到受治理的内核动作，需要人工复核后决定下一步变更。",
   "No strong structured signals were available, so the case falls back to baseline runtime facts.":

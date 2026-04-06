@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Sequence
 
 
 from .service_context import *  # noqa: F401,F403
@@ -14,7 +15,18 @@ from .main_brain_cognitive_surface import build_main_brain_cognitive_surface
 from .report_synthesis import synthesize_reports
 
 
-
+def _unique_by_id(*groups: Sequence[object]) -> list[object]:
+    resolved: list[object] = []
+    seen_ids: set[str] = set()
+    for group in groups:
+        for item in list(group or []):
+            item_id = _string(getattr(item, "id", None))
+            if item_id is not None:
+                if item_id in seen_ids:
+                    continue
+                seen_ids.add(item_id)
+            resolved.append(item)
+    return resolved
 
 
 class _IndustryStrategyMixin:
@@ -1859,48 +1871,6 @@ class _IndustryStrategyMixin:
 
         existing = existing_strategy or self._peek_strategy_memory(record)
 
-        goal_titles = self._list_strategy_goal_titles(
-            self._resolve_instance_goal_ids(record),
-        )
-
-        priority_order = _unique_strings(
-
-            list(existing.priority_order or []) if existing is not None else [],
-
-            goal_titles or list(resolved_profile.goals),
-
-        )
-
-        north_star = (
-
-            goal_titles[0]
-
-            if goal_titles
-
-            else _string((resolved_profile.goals or [None])[0])
-
-            or _string(record.summary)
-
-            or resolved_identity.mission
-
-        )
-
-        execution_constraints = _unique_strings(
-
-            resolved_profile.constraints,
-
-            resolved_identity.environment_constraints,
-
-            _build_operator_strategy_constraints(resolved_profile),
-
-            list(existing.execution_constraints or []) if existing is not None else [],
-
-        )
-
-        delegation_policy = _build_execution_core_delegation_policy()
-
-        direct_execution_policy = _build_execution_core_direct_execution_policy()
-
         lane_records = self._list_operating_lanes(record.instance_id, status=None)
 
         lane_weights = dict(existing.lane_weights or {}) if existing is not None else {}
@@ -1959,6 +1929,101 @@ class _IndustryStrategyMixin:
 
         )
 
+        active_assignment_records = (
+            self._list_assignment_records(
+                record.instance_id,
+                cycle_id=current_cycle.id if current_cycle is not None else None,
+                limit=None,
+            )
+            if current_cycle is not None
+            else []
+        )
+        if not active_assignment_records:
+            active_assignment_records = _unique_by_id(
+                self._list_assignment_records(
+                    record.instance_id,
+                    status="running",
+                    limit=None,
+                ),
+                self._list_assignment_records(
+                    record.instance_id,
+                    status="queued",
+                    limit=None,
+                ),
+                self._list_assignment_records(
+                    record.instance_id,
+                    status="planned",
+                    limit=None,
+                ),
+                self._list_assignment_records(
+                    record.instance_id,
+                    status="waiting-report",
+                    limit=None,
+                ),
+            )
+        backlog_focus_titles = [
+            title
+            for title in (
+                _string(item.title)
+                for item in open_backlog
+            )
+            if title is not None
+        ]
+        assignment_focus_titles = [
+            title
+            for title in (
+                _string(assignment.title)
+                for assignment in active_assignment_records
+            )
+            if title is not None
+        ]
+        live_focus_titles = _unique_strings(
+            assignment_focus_titles,
+            backlog_focus_titles,
+            [_string(current_cycle.title) if current_cycle is not None else None],
+            [report.headline for report in pending_reports],
+        )
+
+        priority_order = _unique_strings(
+
+            list(existing.priority_order or []) if existing is not None else [],
+
+            backlog_focus_titles,
+
+            [lane.title for lane in lane_records if _string(lane.title)],
+
+            list(resolved_profile.goals),
+
+        )
+
+        north_star = (
+
+            _string((list(existing.priority_order or [None])[0]) if existing is not None else None)
+
+            or _string((resolved_profile.goals or [None])[0])
+
+            or _string(record.summary)
+
+            or resolved_identity.mission
+
+        )
+
+        execution_constraints = _unique_strings(
+
+            resolved_profile.constraints,
+
+            resolved_identity.environment_constraints,
+
+            _build_operator_strategy_constraints(resolved_profile),
+
+            list(existing.execution_constraints or []) if existing is not None else [],
+
+        )
+
+        delegation_policy = _build_execution_core_delegation_policy()
+
+        direct_execution_policy = _build_execution_core_direct_execution_policy()
+
         main_brain_cognitive_surface = build_main_brain_cognitive_surface(
 
             current_cycle=current_cycle,
@@ -1989,11 +2054,13 @@ class _IndustryStrategyMixin:
 
         current_focuses = _unique_strings(
 
-            list(existing.current_focuses or []) if existing is not None else [],
+            live_focus_titles or [],
 
-            goal_titles,
+            [] if live_focus_titles else (
+                list(existing.current_focuses or []) if existing is not None else []
+            ),
 
-            list(resolved_profile.goals),
+            [] if live_focus_titles else list(resolved_profile.goals),
 
         )
 
@@ -2105,8 +2172,6 @@ class _IndustryStrategyMixin:
             current_focuses=_unique_strings(
 
                 current_focuses,
-
-                goal_titles,
 
                 [report.headline for report in pending_reports],
 
@@ -3223,11 +3288,11 @@ class _IndustryStrategyMixin:
 
             return "retired"
 
-        statuses = [status for status in self._collect_instance_goal_statuses(record) if status]
-
-        if not statuses and self._instance_has_live_operation_surface(record):
+        if self._instance_has_live_operation_surface(record):
 
             return "active"
+
+        statuses = [status for status in self._collect_instance_goal_statuses(record) if status]
 
         if not statuses:
 

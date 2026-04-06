@@ -246,7 +246,6 @@ class _WorkflowServiceRunMixin:
                 "owner_role_candidates": list(step.owner_role_candidates or []),
                 "owner_agent_id": step.owner_agent_id,
                 "linked_goal_ids": [],
-                "linked_schedule_ids": [],
             }
             for step in preview.steps
         ]
@@ -345,12 +344,11 @@ class _WorkflowServiceRunMixin:
                             activate=payload.activate,
                         )
             elif step.kind == "schedule":
-                schedule_id = str(step_payload.get("id") or f"{run.run_id}:{step.step_id}")
-                step_seed = step_seed_by_id.get(step.step_id)
-                if isinstance(step_seed, dict):
-                    linked_schedule_ids = list(step_seed.get("linked_schedule_ids") or [])
-                    linked_schedule_ids.append(schedule_id)
-                    step_seed["linked_schedule_ids"] = linked_schedule_ids
+                schedule_id = _workflow_step_schedule_id(
+                    run,
+                    step_id=step.step_id,
+                    payload_preview=step_payload,
+                )
                 schedule_meta = self._build_schedule_host_meta(
                     run=run,
                     template=template,
@@ -417,7 +415,8 @@ class _WorkflowServiceRunMixin:
                 continue
             self._goal_service.update_goal(goal_id, status="archived")
 
-        for schedule_id in _workflow_linked_resource_ids(run, key="linked_schedule_ids"):
+        preview = WorkflowTemplatePreview.model_validate(run.preview_payload or {})
+        for schedule_id in _workflow_schedule_ids_for_preview(run, preview):
             await self._pause_schedule(schedule_id)
 
         cancelled = run.model_copy(
@@ -473,33 +472,43 @@ class _WorkflowServiceRunMixin:
                     if isinstance(step_seed, dict)
                     else []
                 )
+                persisted_task_ids = (
+                    [
+                        str(item)
+                        for item in list(step_seed.get("linked_task_ids") or [])
+                        if str(item).strip()
+                    ]
+                    if isinstance(step_seed, dict)
+                    else []
+                )
                 if not linked_goal_ids:
-                    goal = self._goal_service.create_goal(
-                        title=step.title,
-                        summary=step.summary,
-                        status="active",
-                        priority=3,
-                        owner_scope=detail.preview.owner_scope,
-                    )
-                    linked_goal_ids = [goal.id]
-                    if isinstance(step_seed, dict):
-                        step_seed["linked_goal_ids"] = linked_goal_ids
-                    if self._goal_override_repository is not None:
-                        self._goal_override_repository.upsert_override(
-                            GoalOverrideRecord(
-                                goal_id=goal.id,
-                                plan_steps=list(step_payload.get("plan_steps") or []),
-                                compiler_context={
-                                    "workflow_run_id": run.run_id,
-                                    "workflow_template_id": template.template_id,
-                                    "workflow_step_id": step.step_id,
-                                    "workflow_execution_mode": step.execution_mode,
-                                    "industry_instance_id": detail.preview.industry_instance_id,
-                                    "resume_actor": actor,
-                                },
-                                reason=f"Workflow run resume: {template.template_id}",
-                            ),
+                    if not persisted_task_ids:
+                        goal = self._goal_service.create_goal(
+                            title=step.title,
+                            summary=step.summary,
+                            status="active",
+                            priority=3,
+                            owner_scope=detail.preview.owner_scope,
                         )
+                        linked_goal_ids = [goal.id]
+                        if isinstance(step_seed, dict):
+                            step_seed["linked_goal_ids"] = linked_goal_ids
+                        if self._goal_override_repository is not None:
+                            self._goal_override_repository.upsert_override(
+                                GoalOverrideRecord(
+                                    goal_id=goal.id,
+                                    plan_steps=list(step_payload.get("plan_steps") or []),
+                                    compiler_context={
+                                        "workflow_run_id": run.run_id,
+                                        "workflow_template_id": template.template_id,
+                                        "workflow_step_id": step.step_id,
+                                        "workflow_execution_mode": step.execution_mode,
+                                        "industry_instance_id": detail.preview.industry_instance_id,
+                                        "resume_actor": actor,
+                                    },
+                                    reason=f"Workflow run resume: {template.template_id}",
+                                ),
+                            )
                 for goal_id in linked_goal_ids:
                     goal = self._goal_service.get_goal(goal_id)
                     if goal is None or goal.status in {"completed", "archived"}:
@@ -527,15 +536,35 @@ class _WorkflowServiceRunMixin:
                             activate=True,
                         )
             elif step.kind == "schedule":
-                linked_schedule_ids = (
-                    list(step_seed.get("linked_schedule_ids") or [])
-                    if isinstance(step_seed, dict)
-                    else []
+                linked_schedule_ids = _unique_strings(
+                    (
+                        [
+                            str(item)
+                            for item in list(step_seed.get("linked_schedule_ids") or [])
+                            if str(item).strip()
+                        ]
+                        if isinstance(step_seed, dict)
+                        else []
+                    ),
+                    [
+                        _workflow_step_schedule_id(
+                            run,
+                            step_id=step.step_id,
+                            payload_preview=step_payload,
+                        )
+                    ],
                 )
-                if not linked_schedule_ids:
-                    schedule_id = str(step_payload.get("id") or f"{run.run_id}:{step.step_id}")
-                    if isinstance(step_seed, dict):
-                        step_seed["linked_schedule_ids"] = [schedule_id]
+                if linked_schedule_ids:
+                    missing_schedule_ids = [
+                        schedule_id
+                        for schedule_id in linked_schedule_ids
+                        if self._schedule_repository is None
+                        or self._schedule_repository.get_schedule(schedule_id) is None
+                    ]
+                else:
+                    missing_schedule_ids = []
+                if missing_schedule_ids:
+                    schedule_id = missing_schedule_ids[0]
                     schedule_meta = self._build_schedule_host_meta(
                         run=run,
                         template=template,

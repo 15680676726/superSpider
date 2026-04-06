@@ -695,9 +695,41 @@ def test_predictions_recommend_schedule_copy_points_to_fixed_sop_instead_of_work
     )
 
     assert recommendation["recommendation"]["summary"] == (
-        "当前范围内已有活跃目标，但缺少可见的自动化执行上下文。"
+        "当前范围内已有活跃执行上下文，但缺少可见的自动化执行合同。"
         "建议把周期性工作收口为固定 SOP 或运行计划。"
     )
+
+
+def test_prediction_service_collects_industry_tasks_without_goal_anchor(tmp_path) -> None:
+    app = _build_predictions_app(tmp_path)
+    app.state.task_repository.upsert_task(
+        TaskRecord(
+            id="task-industry-unowned",
+            title="Industry-owned blocker follow-up",
+            summary="This task belongs to the industry scope but has no goal or owner anchor.",
+            task_type="analysis",
+            status="failed",
+            industry_instance_id="industry-demo",
+            owner_agent_id=None,
+        ),
+    )
+    app.state.task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-industry-unowned",
+            runtime_status="terminated",
+            current_phase="failed",
+            last_error_summary="Industry blocker still unresolved.",
+        ),
+    )
+    client = TestClient(app)
+
+    created = _create_prediction_case(client)
+    case = PredictionCaseRecord.model_validate(created["case"])
+    facts = app.state.prediction_service._collect_facts(case)
+
+    assert any(task.id == "task-industry-unowned" for task in facts.tasks)
+    assert "goal_ids" not in created["case"]["input_payload"]
+    assert "task-industry-unowned" in created["case"]["input_payload"]["task_ids"]
 
 
 def test_prediction_cycle_case_deduplicates_same_operating_fingerprint(tmp_path) -> None:

@@ -605,16 +605,12 @@
   - `/runtime-center/industry/{instance_id}` 现在只接受 `assignment/backlog` focus
   - `report/lane/cycle` 与其他非 canonical focus 不再由 route 层注入伪 truth
   - `industry/service_runtime_views.py` 允许展示选中的 assignment/backlog detail，但不再借此伪造 `execution.current_focus_*`
-- industry lifecycle 的 legacy seam 本轮只完成了部分收口：
-  - public bootstrap 不再把 `auto_activate` 自动膨胀成 legacy goal dispatch
-  - chat writeback 创建 schedule 不再扩张 `IndustryInstanceRecord.schedule_ids` 真相
-  - `run_operating_cycle(...)` 已把 task subgraph 传入 cycle/assignment planners
-  - 但 kickoff / auto-resume 以及 `goal_ids / schedule_ids / active_goal_ids` 持续存在，仍不能写成“legacy goal/schedule 已完全退役”
-- acquisition decision 路由回归本轮已修：
-  - `Runtime Center` approve/reject acquisition decision 现在优先走 canonical dispatcher
-  - dispatcher 为 sync/async 都可兼容
+- industry lifecycle 的 legacy seam 当日 partial 记录已过时：
+  - 该段仅保留为施工轨迹；当前 authoritative status 以后文 `3.3.2 2026-04-06 authoritative closure update` 为准
+  - 当前真实状态：kickoff / auto-resume 已切离 legacy `goal/schedule`，`goal_ids / schedule_ids / active_goal_ids` 的正式运行期平行真相源已物理删除
+- acquisition decision / producer 收口已完成：
+  - `Runtime Center` approve/reject、learning review-gate、producer-side identity 现统一走 kernel-backed dispatcher / governed mutation 主链
   - runtime-center actor route 的 acquisition 专属 fallback 已删除；当 kernel task 缺失时会显式返回 `404`
-  - learning review-gate approve/reject 现在也已接到 canonical dispatcher；但 producer-side 单一化仍未完成
 - capability execution 前门本轮新增一条真实收口：
   - `POST /runtime-center/external-runtimes/actions` 现在已改成 `kernel dispatcher submit -> execute_task`
   - 该路由会继承 capability mount 的正式 `risk_level`，`waiting-confirm` 不再偷跑执行
@@ -1159,3 +1155,16 @@
   - `paused_schedule_ids` 这类与本轮删旧无关的 governance 控制字段。
 - 本轮权威验证矩阵：
   - `python -m pytest tests/app/test_predictions_api.py tests/app/test_workflow_templates_api.py tests/kernel/query_execution_environment_parts/lifecycle.py tests/app/runtime_center_api_parts/overview_governance.py tests/industry/test_runtime_views_split.py tests/state/test_strategy_memory_service.py tests/state/test_sqlite_repositories.py tests/app/test_industry_service_wiring.py tests/state/test_main_brain_hard_cut.py tests/app/test_goals_api.py tests/app/test_runtime_chat_media.py tests/app/test_startup_recovery.py tests/app/industry_api_parts/bootstrap_lifecycle.py::test_public_bootstrap_auto_activate_keeps_instance_active_without_legacy_goal_dispatch tests/app/industry_api_parts/bootstrap_lifecycle.py::test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch tests/app/industry_api_parts/bootstrap_lifecycle.py::test_chat_writeback_schedule_creation_does_not_expand_instance_schedule_truth tests/app/industry_api_parts/runtime_updates.py::test_industry_list_instances_hides_empty_placeholder_records tests/app/industry_api_parts/runtime_updates.py::test_industry_list_instances_uses_lightweight_summary_without_detail_build tests/app/industry_api_parts/runtime_updates.py::test_industry_instance_status_reconciles_from_goal_states tests/app/industry_api_parts/runtime_updates.py::test_industry_instance_status_completes_with_static_team_membership_only tests/app/industry_api_parts/runtime_updates.py::test_industry_detail_backfills_execution_core_identity_with_delegation_first_defaults -q` -> `242 passed`
+
+### 3.3.3 `2026-04-07` final-purity follow-up
+
+- industry bootstrap `auto_dispatch` 已从 activation write-path 切到 assignment dispatch 前门；bootstrap response 不再把 goal dispatch 当作现役执行语义。
+- workflow schedule step 已不再依赖持久化的 `linked_schedule_ids` 才能恢复/展示；run detail 与 resume 现在优先从 deterministic schedule identity 推导 runtime 资源。
+- workflow goal step 在存在 `linked_task_ids / linked_decision_ids / linked_evidence_ids` 时，不再为了 resume 强行回填 legacy `linked_goal_ids`；只有在完全没有 runtime context 时才会重建 goal link 兜底。
+- 本次追加 focused verification：
+  - `python -m pytest tests/app/industry_api_parts/runtime_updates.py -q` -> `43 passed`
+  - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py -k "public_bootstrap_auto_activate_keeps_instance_active_without_legacy_goal_dispatch or public_bootstrap_auto_dispatch_materializes_assignment_tasks_without_goal_dispatch or kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch or run_operating_cycle_dispatches_materialized_execution_assignment or run_operating_cycle_auto_dispatch_keeps_assignment_formal_planning_in_compiled_task or run_operating_cycle_auto_dispatch_uses_assignment_checklist_instead_of_generic_steps" -q` -> `6 passed, 38 deselected`
+  - `python -m pytest tests/app/test_workflow_templates_api.py -k "launch_materializes_run or run_step_detail_stays_read_only_and_service_resume_rehydrates_missing_links or step_detail_prefers_persisted_task_links_over_legacy_goal_links or resume_uses_persisted_runtime_context_without_rehydrating_legacy_links" -q` -> `4 passed, 24 deselected`
+  - `python -m pytest tests/state/test_reporting_service.py -q` -> `8 passed`
+  - `python -m pytest tests/app/test_predictions_api.py -k "create_list_and_detail or consume_strategy_trigger_rules_into_signals_and_recommendations or recommend_schedule_copy_points_to_fixed_sop_instead_of_workflow_templates or collects_industry_tasks_without_goal_anchor or reporting_surface_prediction_metrics" -q` -> `5 passed, 13 deselected`
+  - `cmd /c npm --prefix console run test -- src/pages/Insights/presentation.test.ts` -> `1 passed`

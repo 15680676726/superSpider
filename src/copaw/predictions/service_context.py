@@ -6,6 +6,22 @@ from .service_shared import *  # noqa: F401,F403
 
 
 class _PredictionServiceContextMixin:
+    def _prediction_focus_titles(self, facts: _FactPack) -> list[str]:
+        strategy = facts.strategy or {}
+        return _string_list(
+            strategy.get("current_focuses"),
+            strategy.get("priority_order"),
+            [task.title for task in facts.tasks[:4]],
+            [workflow.title for workflow in facts.workflows[:3]],
+            [goal.title for goal in facts.goals[:2]],
+        )
+
+    def _prediction_focus_summaries(self, facts: _FactPack) -> list[str]:
+        return _string_list(
+            [task.summary for task in facts.tasks[:4]],
+            [goal.summary for goal in facts.goals[:2]],
+        )
+
     def _summary(self, record: PredictionCaseRecord) -> PredictionCaseSummary:
         recommendations = [
             self._refresh_recommendation(item)[0]
@@ -96,13 +112,25 @@ class _PredictionServiceContextMixin:
                     ]
                 if goals:
                     return goals
-        report_goal_ids = _safe_list(report.get("goal_ids"))
-        if report_goal_ids:
-            return [
-                goal
-                for goal_id in report_goal_ids
-                if (goal := self._goal_repository.get_goal(str(goal_id))) is not None
-            ]
+        report_task_ids = [
+            str(task_id).strip()
+            for task_id in _safe_list(report.get("task_ids"))
+            if str(task_id).strip()
+        ]
+        if report_task_ids and self._task_repository is not None:
+            task_goal_ids = _string_list(
+                [
+                    task.goal_id
+                    for task in self._task_repository.list_tasks(task_ids=report_task_ids)
+                    if getattr(task, "goal_id", None)
+                ],
+            )
+            if task_goal_ids:
+                return [
+                    goal
+                    for goal_id in task_goal_ids
+                    if (goal := self._goal_repository.get_goal(str(goal_id))) is not None
+                ]
         return self._goal_repository.list_goals(owner_scope=case.owner_scope)
 
     def _workflows_for_scope(self, *, case: PredictionCaseRecord) -> list[WorkflowRunRecord]:
@@ -137,6 +165,20 @@ class _PredictionServiceContextMixin:
             if str(getattr(agent, "agent_id", "") or "").strip()
         ]
         task_map: dict[str, TaskRecord] = {}
+        if case.industry_instance_id:
+            for task in repository.list_tasks(
+                industry_instance_id=case.industry_instance_id,
+                activity_since=since,
+                limit=200,
+            ):
+                task_map[task.id] = task
+        if case.owner_agent_id:
+            for task in repository.list_tasks(
+                owner_agent_id=case.owner_agent_id,
+                activity_since=since,
+                limit=50,
+            ):
+                task_map[task.id] = task
         if goal_ids:
             for task in repository.list_tasks(
                 goal_ids=goal_ids,
@@ -149,13 +191,6 @@ class _PredictionServiceContextMixin:
                 owner_agent_ids=agent_ids,
                 activity_since=since,
                 limit=200,
-            ):
-                task_map[task.id] = task
-        if case.owner_agent_id:
-            for task in repository.list_tasks(
-                owner_agent_id=case.owner_agent_id,
-                activity_since=since,
-                limit=50,
             ):
                 task_map[task.id] = task
         tasks = list(task_map.values())
@@ -403,13 +438,14 @@ class _PredictionServiceContextMixin:
         if not callable(build_queries):
             return []
         profile = self._get_agent_profile(target_agent_id)
+        focus_titles = self._prediction_focus_titles(facts)
         return _string_list(
             build_queries(
                 role_name=_string(getattr(profile, "role_name", None)),
                 role_summary=_string(getattr(profile, "role_summary", None)),
                 mission=_string(getattr(profile, "mission", None)),
                 capability_hint=self._capability_hint(capability_id),
-                goal_titles=[goal.title for goal in facts.goals[:2]],
+                focus_titles=focus_titles,
                 workflow_titles=_string_list(workflow_titles),
                 task_titles=_string_list(task_titles),
                 task_summaries=_string_list(task_summaries),
@@ -1151,8 +1187,8 @@ class _PredictionServiceContextMixin:
                     step.get("title"),
                     step.get("summary"),
                     step.get("description"),
-                    [goal.title for goal in facts.goals[:3]],
-                    [goal.summary for goal in facts.goals[:3]],
+                    self._prediction_focus_titles(facts),
+                    self._prediction_focus_summaries(facts),
                 )
                 family_id = self._infer_team_gap_family(values)
                 if family_id is None or family_id in covered_families:
