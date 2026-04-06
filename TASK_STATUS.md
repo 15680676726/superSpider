@@ -30,7 +30,8 @@
 19. `docs/superpowers/plans/2026-04-04-external-capability-assimilation-implementation-plan.md`（如任务涉及 donor-first 外部能力吸纳的对象落地、discovery source chain、自主 scout、portfolio governance 与 Runtime Center 接线）
 20. `docs/superpowers/specs/2026-04-04-next-round-discipline-closure-spec.md`（如任务涉及下一轮 runtime/capability 纪律收口、熵控制、source chain、去重归一、写串行合同、child-run shell、MCP 生命周期、skill/package 元数据与 portfolio compaction）
 21. `docs/superpowers/plans/2026-04-04-donor-first-capability-evolution-priority-plan.md`（如任务涉及纠偏后的 capability evolution 下一轮施工顺序、donor-first 复用优先级、baseline import、MCP-native candidate、fallback-only local authored 边界）
-22. 与当前任务直接相关的源码和测试
+22. `docs/superpowers/specs/2026-04-06-universal-donor-execution-contract-design.md`（如任务涉及 donor formal provider injection、universal execution envelope、host compatibility contract、真实 donor “安装后不等于真正可用”的平台收口）
+23. 与当前任务直接相关的源码和测试
 
 ---
 
@@ -103,6 +104,22 @@
   - 不是“任意开源项目安装后都自动抽出 typed callable actions”
   - 现在真正 live-verified 的自动 install/start/health/stop 仍主要在 `project-package / runtime-component` 层
   - 对 `adapter` 而言，公共执行/治理主链已完成；但“从任意真实 donor 自动抽取 `mcp_tools / api_actions / sdk_actions`”仍未作为通用 live-verified discovery 合同落地
+
+## 1.2.2 `2026-04-06` universal donor execution contract 设计补充
+
+- 已新增正式设计文档：
+  - `docs/superpowers/specs/2026-04-06-universal-donor-execution-contract-design.md`
+- 该设计不是 `OpenSpace` 单项目修补，而是把真实 live probe 暴露出来的 3 个平台缺口上升成通用 donor 合同：
+  - `donor provider injection`
+  - `donor execution envelope / fail-fast`
+  - `donor host compatibility contract`
+- 该设计的核心口径是：
+  - donor 可以有不同 transport / packaging / startup 方式
+  - 但 provider 注入、执行超时/取消/心跳、host 兼容归一不能项目各搞一套
+  - `installed`、`runtime_operable`、`adapter_probe_passed`、`primary_action_verified` 必须被区分，不得把“装上了”夸成“完全可用”
+- 当前诚实状态：
+  - 这份文档是设计收口，不是实现完成
+  - 下一步应先压成 implementation plan，再进入代码施工
 
 ---
 
