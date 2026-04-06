@@ -18,7 +18,7 @@ import { localizeWorkbenchText } from "../localize";
 import type {
   AgentProfile,
   EvidenceListItem,
-  GoalTaskDetail,
+  WorkTaskDetail,
 } from "../useAgentWorkbench";
 import {
   DELEGATE_TASK_CAPABILITY,
@@ -34,13 +34,13 @@ import {
 
 const { Text } = Typography;
 
-export type GoalTaskGroup = {
-  parent: GoalTaskDetail;
-  children: GoalTaskDetail[];
+export type TaskGroup = {
+  parent: WorkTaskDetail;
+  children: WorkTaskDetail[];
 };
 
 export function latestTaskFeedback(
-  entry: GoalTaskDetail,
+  entry: WorkTaskDetail,
 ): { text: string | null; isError: boolean } {
   const errorText = normalizeNonEmpty(entry.runtime?.last_error_summary);
   if (errorText) {
@@ -56,16 +56,16 @@ export function latestTaskFeedback(
   };
 }
 
-export function buildGoalTaskGroups(tasks: GoalTaskDetail[]): {
-  groups: GoalTaskGroup[];
-  standalone: GoalTaskDetail[];
-  orphanChildren: GoalTaskDetail[];
+export function buildTaskGroups(tasks: WorkTaskDetail[]): {
+  groups: TaskGroup[];
+  standalone: WorkTaskDetail[];
+  orphanChildren: WorkTaskDetail[];
 } {
   const taskMap = new Map(tasks.map((entry) => [entry.task.id, entry]));
-  const childrenByParent = new Map<string, GoalTaskDetail[]>();
-  const groups: GoalTaskGroup[] = [];
-  const standalone: GoalTaskDetail[] = [];
-  const orphanChildren: GoalTaskDetail[] = [];
+  const childrenByParent = new Map<string, WorkTaskDetail[]>();
+  const groups: TaskGroup[] = [];
+  const standalone: WorkTaskDetail[] = [];
+  const orphanChildren: WorkTaskDetail[] = [];
 
   for (const entry of tasks) {
     const parentTaskId = normalizeNonEmpty(entry.task.parent_task_id);
@@ -151,13 +151,13 @@ export function formatDelegationEvidenceSummary(
   return parts.join(" | ");
 }
 
-export function GoalTaskSummary({
+export function TaskSummaryCard({
   entry,
   agents,
   tagLabel,
   tagColor,
 }: {
-  entry: GoalTaskDetail;
+  entry: WorkTaskDetail;
   agents: AgentProfile[];
   tagLabel: string;
   tagColor: string;

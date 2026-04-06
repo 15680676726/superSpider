@@ -4,7 +4,7 @@ import React from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { buildGoalTaskGroups } from "./sections/taskPanels";
+import { buildTaskGroups } from "./sections/taskPanels";
 import * as pageSections from "./pageSections";
 
 const { ProfileCard, TAB_KEYS } = pageSections;
@@ -45,7 +45,7 @@ describe("pageSections decomposition", () => {
   });
 
   it("groups parent tasks, standalone tasks, and orphan children via the extracted task panel module", () => {
-    const grouped = buildGoalTaskGroups([
+    const grouped = buildTaskGroups([
       {
         task: { id: "task-parent", parent_task_id: null },
         runtime: null,

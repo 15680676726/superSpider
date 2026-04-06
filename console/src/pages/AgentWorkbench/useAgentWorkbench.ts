@@ -397,7 +397,7 @@ export interface EvidenceListItem {
   replay_count?: number;
 }
 
-export interface GoalTaskDetail {
+export interface WorkTaskDetail {
   task: {
     id: string;
     title: string;
@@ -433,7 +433,7 @@ export interface GoalTaskDetail {
   latest_evidence_id: string | null;
 }
 
-export interface GoalDecisionItem {
+export interface WorkDecisionItem {
   id: string;
   task_id: string;
   decision_type: string;
@@ -446,7 +446,7 @@ export interface GoalDecisionItem {
   route?: string | null;
 }
 
-export interface GoalPatchItem {
+export interface WorkPatchItem {
   id: string;
   kind: string;
   title: string;
@@ -457,7 +457,7 @@ export interface GoalPatchItem {
   applied_at: string | null;
 }
 
-export interface GoalGrowthItem {
+export interface WorkGrowthItem {
   id: string;
   agent_id: string;
   change_type: string;
@@ -482,7 +482,7 @@ export interface AgentTaskListItem {
     current_risk_level?: string;
     updated_at?: string | null;
   };
-  runtime?: GoalTaskDetail["runtime"];
+  runtime?: WorkTaskDetail["runtime"];
   route?: string;
 }
 
@@ -503,10 +503,10 @@ export interface AgentDetail {
   thread_bindings: ActorThreadBindingItem[];
   teammates: ActorTeammateItem[];
   latest_collaboration: ActorMailboxItem[];
-  decisions: GoalDecisionItem[];
+  decisions: WorkDecisionItem[];
   evidence: EvidenceListItem[];
-  patches: GoalPatchItem[];
-  growth: GoalGrowthItem[];
+  patches: WorkPatchItem[];
+  growth: WorkGrowthItem[];
   environments: EnvironmentItem[];
   workspace: AgentWorkspaceSummary;
   capability_surface?: AgentCapabilitySurface | null;

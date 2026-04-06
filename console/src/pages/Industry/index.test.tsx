@@ -879,6 +879,6 @@ describe("IndustryPage", () => {
     );
 
     expect(items).toHaveLength(1);
-    expect(items[0].currentGoal).toBeNull();
+    expect(items[0].currentFocus).toBeNull();
   });
 });

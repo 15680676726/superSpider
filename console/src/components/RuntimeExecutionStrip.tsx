@@ -229,8 +229,8 @@ export default function RuntimeExecutionStrip({
               const nextStepText = localizeWorkbenchText(
                 item.nextStep || item.blockedReason || item.stuckReason || "",
               );
-              const currentGoalText = item.currentGoal
-                ? `焦点：${localizeWorkbenchText(item.currentGoal)}`
+              const currentFocusText = item.currentFocus
+                ? `焦点：${localizeWorkbenchText(item.currentFocus)}`
                 : null;
               const currentOwnerText = item.currentOwnerName
                 ? `负责人：${localizeWorkbenchText(item.currentOwnerName)}`
@@ -288,10 +288,10 @@ export default function RuntimeExecutionStrip({
                           {`派单：${assignmentStatusLabel}`}
                         </Tag>
                       ) : null}
-                      {currentGoalText ? (
-                        <Tag color="cyan" title={currentGoalText}>
-                          <span className={styles.tagText} title={currentGoalText}>
-                            {currentGoalText}
+                      {currentFocusText ? (
+                        <Tag color="cyan" title={currentFocusText}>
+                          <span className={styles.tagText} title={currentFocusText}>
+                            {currentFocusText}
                           </span>
                         </Tag>
                       ) : null}

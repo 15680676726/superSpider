@@ -19,7 +19,7 @@ vi.mock("../hooks/useRuntimeExecutionPulse", () => ({
 
 describe("RuntimeExecutionStrip", () => {
   it("adds hover titles to long line-level execution fields", () => {
-    const currentGoal = "请协助完成京东后台数据调取协调，仅执行“收集/调取数据”这一动作，不做后续分析。";
+    const currentFocus = "请协助完成京东后台数据调取协调，仅执行“收集/调取数据”这一动作，不做后续分析。";
     const currentWorkTitle = "京东后台数据调取协调任务正在等待浏览器与表格环境同时就绪，然后发起统一数据收集动作";
     const currentWorkSummary = "该执行位会先进入京东后台，再提取订单、商品、流量与售后相关数据，统一汇总到当前工作区。";
     const triggerReason = "环境里模型推断需显式指定模型或改用自定义提供方，因此当前任务需要先等待环境预检通过。";
@@ -42,7 +42,7 @@ describe("RuntimeExecutionStrip", () => {
           currentAssignmentStatus: "running",
           currentMailboxId: "mailbox-jd",
           currentEnvironmentId: "env-jd",
-          currentGoal,
+          currentFocus,
           currentWorkTitle,
           currentWorkSummary,
           executionState: "waiting-resource",
@@ -89,7 +89,7 @@ describe("RuntimeExecutionStrip", () => {
 
     expect(screen.getByText(currentWorkTitle)).toHaveAttribute("title", currentWorkTitle);
     expect(screen.getByText(currentWorkSummary)).toHaveAttribute("title", currentWorkSummary);
-    expect(screen.getByText(`焦点：${currentGoal}`)).toHaveAttribute("title", `焦点：${currentGoal}`);
+    expect(screen.getByText(`焦点：${currentFocus}`)).toHaveAttribute("title", `焦点：${currentFocus}`);
     expect(screen.getByText(`触发：${triggerReason}`)).toHaveAttribute("title", `触发：${triggerReason}`);
     expect(screen.getByText(`下一步：${nextStep}`)).toHaveAttribute("title", `下一步：${nextStep}`);
     expect(screen.getByText(`风险：${primaryRisk}`)).toHaveAttribute("title", `风险：${primaryRisk}`);

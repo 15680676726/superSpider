@@ -119,7 +119,7 @@ export interface ActorPulseItem {
   currentAssignmentStatus: string | null;
   currentMailboxId: string | null;
   currentEnvironmentId: string | null;
-  currentGoal: string | null;
+  currentFocus: string | null;
   currentWorkTitle: string | null;
   currentWorkSummary: string | null;
   executionState: string | null;
@@ -486,7 +486,7 @@ export function buildActorPulseItems(
       nextSnapshots.set(runtime.agent_id, snapshot);
 
       const metadata = runtime.metadata || {};
-      const currentGoal =
+      const currentFocus =
         textOrNull(metadata.current_focus) ||
         textOrNull(focusReview?.objective) ||
         assignment.title ||
@@ -507,7 +507,7 @@ export function buildActorPulseItems(
         currentAssignmentStatus: assignment.status,
         currentMailboxId: snapshot.mailboxId,
         currentEnvironmentId: textOrNull(runtime.current_environment_id),
-        currentGoal,
+        currentFocus,
         currentWorkTitle:
           textOrNull(focusReview?.objective) ||
           assignment.title ||
