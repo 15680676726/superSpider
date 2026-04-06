@@ -2939,6 +2939,43 @@ def test_encode_sse_event_falls_back_to_string_when_model_dump_also_raises() -> 
     assert "BrokenModelDumpFallbackEvent" in decoded
 
 
+class _BrokenNestedUsage:
+    pass
+
+
+class _BrokenCompletedEvent:
+    def __init__(self) -> None:
+        self.object = "response"
+        self.status = "completed"
+        self.output = [
+            {
+                "object": "message",
+                "status": "completed",
+                "usage": _BrokenNestedUsage(),
+            }
+        ]
+        self.usage = _BrokenNestedUsage()
+
+    def model_dump_json(self) -> str:
+        raise TypeError("model_dump_json broken")
+
+    def model_dump(self, mode: str = "json", fallback=None):
+        raise TypeError("model_dump broken too")
+
+
+def test_encode_sse_event_preserves_public_shape_when_dump_paths_fail() -> None:
+    payload = _encode_sse_event(_BrokenCompletedEvent())
+    decoded = json.loads(payload.removeprefix("data: ").strip())
+    assert isinstance(decoded, dict)
+    assert decoded["object"] == "response"
+    assert decoded["status"] == "completed"
+    assert isinstance(decoded["output"], list)
+    assert decoded["output"][0]["object"] == "message"
+    assert decoded["output"][0]["status"] == "completed"
+    assert isinstance(decoded["usage"], str)
+    assert "BrokenNestedUsage" in decoded["usage"]
+
+
 class _SnapshotSessionBackend:
     def __init__(self) -> None:
         self.snapshots: dict[tuple[str, str], dict[str, object]] = {}

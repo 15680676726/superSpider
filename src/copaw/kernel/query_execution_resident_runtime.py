@@ -5,6 +5,13 @@ from .query_execution_shared import *  # noqa: F401,F403
 
 
 class _QueryExecutionResidentRuntimeMixin:
+    @staticmethod
+    def _missing_session_lease_error(exc: Exception) -> bool:
+        if not isinstance(exc, KeyError):
+            return False
+        message = str(exc).lower()
+        return "session" in message and "not found" in message
+
     async def _get_or_create_resident_agent(
         self,
         *,
@@ -158,12 +165,19 @@ class _QueryExecutionResidentRuntimeMixin:
     ) -> LeaseHeartbeat | None:
         if session_lease is None and actor_lease is None:
             return None
+        lease_state = {
+            "session_lease": session_lease,
+            "actor_lease": actor_lease,
+        }
         return LeaseHeartbeat(
             label="interactive-query",
             interval_seconds=self._lease_heartbeat_interval_seconds,
-            heartbeat=lambda: self._heartbeat_query_leases(
-                session_lease=session_lease,
-                actor_lease=actor_lease,
+            heartbeat=lambda: lease_state.__setitem__(
+                "session_lease",
+                self._heartbeat_query_leases(
+                    session_lease=lease_state.get("session_lease"),
+                    actor_lease=lease_state.get("actor_lease"),
+                ),
             ),
         )
 
@@ -172,10 +186,17 @@ class _QueryExecutionResidentRuntimeMixin:
         *,
         session_lease: Any | None,
         actor_lease: Any | None,
-    ) -> None:
+    ) -> Any | None:
         if session_lease is not None and self._environment_service is not None:
-            self._environment_service.heartbeat_session_lease(
-                session_lease.id,
-                lease_token=session_lease.lease_token or "",
-            )
+            try:
+                self._environment_service.heartbeat_session_lease(
+                    session_lease.id,
+                    lease_token=session_lease.lease_token or "",
+                )
+            except Exception as exc:
+                if self._missing_session_lease_error(exc):
+                    session_lease = None
+                else:
+                    raise
         self._heartbeat_actor_runtime_lease(actor_lease)
+        return session_lease
