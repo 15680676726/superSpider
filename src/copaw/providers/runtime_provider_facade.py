@@ -50,6 +50,7 @@ class ProviderRuntimeFacade:
 
     def __init__(self, provider_manager: "ProviderManager") -> None:
         self._provider_manager = provider_manager
+        self._active_chat_model_cache: tuple[tuple[str, str] | None, ChatModelBase] | None = None
 
     @property
     def provider_manager(self) -> "ProviderManager":
@@ -88,10 +89,21 @@ class ProviderRuntimeFacade:
         return self._provider_manager.get_preferred_chat_model_class()
 
     def get_active_chat_model(self) -> ChatModelBase:
+        slot_getter = getattr(self._provider_manager, "get_active_model", None)
+        slot = slot_getter() if callable(slot_getter) else None
+        cache_key = None
+        if slot is not None:
+            cache_key = (slot.provider_id, slot.model)
+        cached = self._active_chat_model_cache
+        if cached is not None and cached[0] == cache_key:
+            return cached[1]
         factory = getattr(self._provider_manager, "_chat_model_factory", None)
         if factory is not None and hasattr(factory, "get_active_chat_model"):
-            return factory.get_active_chat_model()
-        return build_active_chat_model(self._provider_manager)
+            model = factory.get_active_chat_model()
+        else:
+            model = build_active_chat_model(self._provider_manager)
+        self._active_chat_model_cache = (cache_key, model)
+        return model
 
     def resolve_runtime_provider_contract(self) -> dict[str, Any]:
         slot, fallback_applied, resolution_reason, unavailable = (
