@@ -292,7 +292,6 @@ const ROUTE_TITLE_LABELS: Array<[string, string]> = [
   ["/routines/", "例行详情"],
   ["/runtime-center/tasks/", "任务详情"],
   ["/runtime-center/schedules/", "计划详情"],
-  ["/runtime-center/goals/", "目标详情"],
   ["/api/goals/", "目标详情"],
   ["/goals/", "目标详情"],
   ["/runtime-center/decisions/", "决策详情"],
@@ -642,15 +641,7 @@ export const COMMON_TEXT = {
 } as const;
 
 export const RUNTIME_CENTER_TEXT = {
-  detailSuffix: "详情",
-  runtimeDetail: "运行详情",
-  detailLoadFailed: "详情加载失败",
-  noDetailData: "暂无详情数据",
-  routesTitle: "关联路由",
   capabilitySurfaceSectionTitle: "角色能力面",
-  noContent: "暂无内容",
-  requestFailed: "请求失败",
-  eyebrow: "统一运行面",
   pageTitle: "运行中心",
   pageDescription: "从统一运行面查看状态、治理、恢复与自动化。",
   tabGovernanceDescription:
@@ -665,10 +656,6 @@ export const RUNTIME_CENTER_TEXT = {
   tabGovernance: "治理",
   tabRecovery: "恢复",
   tabAutomation: "自动化",
-  metricCards: "卡片数",
-  metricEntries: "条目数",
-  metricDecisions: "确认事项数",
-  metricAgents: "智能体数",
   cardEmpty: (title: string) => `${title}暂无内容`,
   governanceState: "运行状态",
   runtimePaused: "已暂停",
@@ -737,14 +724,6 @@ export const RUNTIME_CENTER_TEXT = {
   loadingSurfaceMetadata: "正在加载运行面元数据",
   surfaceNote:
     "运行中心是由共享状态、证据、目标、学习与环境服务支撑的统一操作面。",
-  taskDetail: "任务详情",
-  scheduleDetail: "计划详情",
-  goalDetail: "目标详情",
-  decisionDetail: "决策详情",
-  patchDetail: "补丁详情",
-  growthDetail: "成长详情",
-  agentDetail: "智能体详情",
-  industryDetail: "行业详情",
 } as const;
 
 export const AUTOMATION_TEXT = {

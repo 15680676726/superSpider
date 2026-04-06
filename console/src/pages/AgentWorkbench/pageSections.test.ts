@@ -5,7 +5,9 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { buildGoalTaskGroups } from "./sections/taskPanels";
-import { ProfileCard, TAB_KEYS } from "./pageSections";
+import * as pageSections from "./pageSections";
+
+const { ProfileCard, TAB_KEYS } = pageSections;
 
 if (!window.matchMedia) {
   Object.defineProperty(window, "matchMedia", {
@@ -24,6 +26,11 @@ if (!window.matchMedia) {
 }
 
 describe("pageSections decomposition", () => {
+  it("no longer exports retired goal detail widgets", () => {
+    expect(pageSections).not.toHaveProperty("GoalSelector");
+    expect(pageSections).not.toHaveProperty("GoalDetailPanel");
+  });
+
   it("keeps the new canonical tabs and legacy aliases in the shared tab key set", () => {
     expect(Array.from(TAB_KEYS).sort()).toEqual([
       "daily",
@@ -94,7 +101,6 @@ describe("pageSections decomposition", () => {
           capabilities: [],
           updated_at: null,
         },
-        linkedGoal: null,
         onOpenChat: vi.fn(),
       }),
     );

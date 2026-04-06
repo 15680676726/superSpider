@@ -397,23 +397,6 @@ export interface EvidenceListItem {
   replay_count?: number;
 }
 
-export interface GoalItem {
-  id: string;
-  title: string;
-  summary: string;
-  status: string;
-  priority: number;
-  owner_scope: string | null;
-  updated_at: string | null;
-}
-
-export interface GoalCompilationSpec {
-  title: string;
-  capability_ref: string;
-  risk_level: string;
-  environment_ref: string | null;
-}
-
 export interface GoalTaskDetail {
   task: {
     id: string;
@@ -486,57 +469,6 @@ export interface GoalGrowthItem {
   created_at: string | null;
 }
 
-export interface GoalDetail {
-  goal: GoalItem;
-  override: {
-    goal_id: string;
-    title: string | null;
-    summary: string | null;
-    status: string | null;
-    priority: number | null;
-    owner_scope: string | null;
-    plan_steps: string[] | null;
-    compiler_context: Record<string, unknown>;
-    source_patch_id: string | null;
-  } | null;
-  compilation: {
-    unit: {
-      id: string;
-      kind: string;
-      source_text: string;
-      context: Record<string, unknown>;
-    };
-    specs: GoalCompilationSpec[];
-  };
-  agents: AgentProfile[];
-  tasks: GoalTaskDetail[];
-  decisions: GoalDecisionItem[];
-  evidence: EvidenceListItem[];
-  patches: GoalPatchItem[];
-  growth: GoalGrowthItem[];
-  industry?: {
-    instance_id: string;
-    label?: string | null;
-    route: string;
-    profile?: Record<string, unknown> | null;
-    team?: Record<string, unknown> | null;
-    role?: Record<string, unknown> | null;
-  } | null;
-  stats: {
-    task_count: number;
-    mailbox_count: number;
-    checkpoint_count: number;
-    lease_count: number;
-    binding_count: number;
-    teammate_count: number;
-    decision_count: number;
-    evidence_count: number;
-    patch_count: number;
-    growth_count: number;
-    agent_count: number;
-  };
-}
-
 export interface AgentTaskListItem {
   task: {
     id: string;
@@ -564,7 +496,6 @@ export interface AgentWorkspaceSummary {
 export interface AgentDetail {
   agent: AgentProfile;
   runtime: ActorRuntimeDetail | null;
-  goals: GoalItem[];
   tasks: AgentTaskListItem[];
   mailbox: ActorMailboxItem[];
   checkpoints: ActorCheckpointItem[];

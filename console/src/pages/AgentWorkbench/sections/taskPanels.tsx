@@ -1,10 +1,7 @@
 import {
-  AimOutlined,
   FileTextOutlined,
 } from "@ant-design/icons";
 import {
-  Card,
-  Empty,
   Space,
   Tag,
   Typography,
@@ -12,7 +9,6 @@ import {
 
 import {
   agentWorkbenchText,
-  formatPriorityTag,
   getPhaseLabel,
   getRiskLabel,
   getStatusLabel,
@@ -23,7 +19,6 @@ import type {
   AgentProfile,
   EvidenceListItem,
   GoalTaskDetail,
-  GoalItem,
 } from "../useAgentWorkbench";
 import {
   DELEGATE_TASK_CAPABILITY,
@@ -37,7 +32,7 @@ import {
   statusColor,
 } from "./shared";
 
-const { Paragraph, Text } = Typography;
+const { Text } = Typography;
 
 export type GoalTaskGroup = {
   parent: GoalTaskDetail;
@@ -269,63 +264,5 @@ export function EvidenceRow({
         {item.environment_ref ? ` - ${item.environment_ref}` : ""}
       </Text>
     </div>
-  );
-}
-
-export function GoalSelector({
-  goals,
-  selectedGoalId,
-  onSelect,
-}: {
-  goals: GoalItem[];
-  selectedGoalId: string | null;
-  onSelect: (goalId: string) => void;
-}) {
-  if (goals.length === 0) {
-    return (
-      <Card className="baize-card" title={agentWorkbenchText.goalsTitle} style={{ marginBottom: 32 }}>
-        <Empty
-          description={agentWorkbenchText.noActiveGoals}
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-        />
-      </Card>
-    );
-  }
-
-  return (
-    <Card className="baize-card" title={agentWorkbenchText.goalsTitle} style={{ marginBottom: 32 }}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {goals.map((goal) => (
-          <Card className="baize-card"
-            key={goal.id}
-            size="small"
-            hoverable
-            onClick={() => onSelect(goal.id)}
-            style={{
-              minWidth: 240,
-              cursor: "pointer",
-              borderColor: selectedGoalId === goal.id ? "var(--baize-selected-border)" : undefined,
-            }}
-          >
-            <Space wrap>
-              <AimOutlined />
-              <Text strong>{localizeWorkbenchText(goal.title)}</Text>
-              <Tag color={statusColor(goal.status)}>
-                {getStatusLabel(goal.status)}
-              </Tag>
-              <Tag>{formatPriorityTag(goal.priority)}</Tag>
-            </Space>
-            {goal.summary ? (
-              <Paragraph
-                type="secondary"
-                style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}
-              >
-                {localizeWorkbenchText(goal.summary)}
-              </Paragraph>
-            ) : null}
-          </Card>
-        ))}
-      </div>
-    </Card>
   );
 }

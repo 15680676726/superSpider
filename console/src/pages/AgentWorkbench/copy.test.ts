@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { presentRuntimeStatusLabel } from "../../runtime/executionPresentation";
-import { agentWorkbenchText, getStatusLabel, workspaceText } from "./copy";
+import {
+  agentReportsText,
+  agentWorkbenchText,
+  commonText,
+  getStatusLabel,
+  workspaceText,
+} from "./copy";
 
 describe("AgentWorkbench copy", () => {
   it("uses current focus wording instead of legacy current goal wording", () => {
@@ -33,5 +39,60 @@ describe("AgentWorkbench copy", () => {
   it("keeps workbench-specific statuses local", () => {
     expect(getStatusLabel("scheduled")).toBe("已排期");
     expect(getStatusLabel("warn")).toBe("警告");
+  });
+  it("does not keep retired linked-panel copy keys after the legacy panels were removed", () => {
+    for (const key of [
+      "teammatesSectionTitle",
+      "noTeammates",
+      "openChatAction",
+      "latestCollaborationLabel",
+      "linkedAgentsTitle",
+      "noLinkedAgents",
+      "compiledTaskSpecsTitle",
+      "noCompiledSpecs",
+      "linkedTasksTitle",
+      "noLinkedTasks",
+      "decisionRequestsTitle",
+      "noDecisionRequests",
+      "linkedPatchesTitle",
+      "noLinkedPatches",
+      "growthTitle",
+      "noLinkedGrowth",
+      "planStepsLabel",
+      "industryContextLabel",
+      "recorded",
+      "metricTasks",
+      "metricDecisions",
+      "metricEvidence",
+      "metricPatches",
+      "metricGrowth",
+      "metricAgents",
+    ]) {
+      expect(agentWorkbenchText).not.toHaveProperty(key);
+    }
+    expect(commonText).not.toHaveProperty("openInChat");
+    expect(workspaceText).not.toHaveProperty("tabTitle");
+    for (const key of [
+      "evidenceToday",
+      "growthToday",
+      "proposalsToday",
+      "patchesToday",
+      "dailyFocusLabel",
+      "dailyFocusTraceable",
+      "dailyFocusGap",
+      "noEvidenceToday",
+      "latestEvidence",
+      "evidenceIn7d",
+      "growthIn7d",
+      "proposalsIn7d",
+      "patchesIn7d",
+      "weeklySignalLabel",
+      "weeklySignalActive",
+      "weeklySignalIncomplete",
+      "noAppliedPatches",
+      "appliedPatchHighlights",
+    ]) {
+      expect(agentReportsText).not.toHaveProperty(key);
+    }
   });
 });

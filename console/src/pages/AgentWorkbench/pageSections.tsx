@@ -14,7 +14,6 @@ import {
   message,
 } from "antd";
 import {
-  AimOutlined,
   SafetyOutlined,
   UserOutlined,
 } from "@ant-design/icons";
@@ -37,7 +36,6 @@ import {
   type AgentDetail,
   type AgentProfile,
   type EnvironmentItem,
-  type GoalItem,
 } from "./useAgentWorkbench";
 import type { CapabilityMount } from "../../api";
 import {
@@ -66,7 +64,6 @@ import {
   buildGoalTaskGroups,
   EvidenceRow,
   formatDelegationEvidenceSummary,
-  GoalSelector,
   GoalTaskSummary,
   latestTaskFeedback,
   translatedEvidenceAction,
@@ -74,7 +71,6 @@ import {
 } from "./sections/taskPanels";
 import {
   EvidencePanel,
-  GoalDetailPanel,
 } from "./sections/detailPanels";
 import { ActorRuntimePanel } from "./sections/runtimePanels";
 
@@ -93,11 +89,9 @@ function isExecutionCoreAgent(agent: AgentProfile | null | undefined): boolean {
 
 function ProfileCard({
   agent,
-  linkedGoal,
   onOpenChat,
 }: {
   agent: AgentProfile;
-  linkedGoal: GoalItem | null;
   onOpenChat: () => void;
 }) {
   return (
@@ -167,14 +161,6 @@ function ProfileCard({
         <Paragraph>
           <Text strong>{agentWorkbenchText.industryTeamLabel}:</Text>{" "}
           {agent.industry_instance_id}
-        </Paragraph>
-      ) : null}
-      {linkedGoal ? (
-        <Paragraph>
-          <Text strong>
-            <AimOutlined /> {agentWorkbenchText.linkedGoalLabel}:
-          </Text>{" "}
-          {localizeWorkbenchText(linkedGoal.title)}
         </Paragraph>
       ) : null}
       {agent.current_focus ? (
@@ -692,12 +678,10 @@ export {
   formatDelegationEvidenceSummary,
   GoalTaskSummary,
   EvidenceRow,
-  GoalSelector,
   isExecutionCoreAgent,
   ProfileCard,
   CapabilityGovernancePanel,
   ActorRuntimePanel,
-  GoalDetailPanel,
   EnvironmentPanel,
   EvidencePanel,
 };

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { presentRuntimeStatusLabel } from "../../runtime/executionPresentation";
 import {
   MAIN_BRAIN_COCKPIT_TEXT,
+  RUNTIME_CENTER_TEXT,
   formatMainBrainSignalLabel,
   formatRouteTitle,
   formatRuntimeSectionLabel,
@@ -42,13 +43,40 @@ describe("RuntimeCenter text", () => {
     );
   });
 
+  it("does not keep duplicate detail-label keys on the runtime center surface copy", () => {
+    for (const key of [
+      "detailSuffix",
+      "runtimeDetail",
+      "detailLoadFailed",
+      "noDetailData",
+      "routesTitle",
+      "noContent",
+      "requestFailed",
+      "eyebrow",
+      "metricCards",
+      "metricEntries",
+      "metricDecisions",
+      "metricAgents",
+      "taskDetail",
+      "scheduleDetail",
+      "decisionDetail",
+      "patchDetail",
+      "growthDetail",
+      "agentDetail",
+      "industryDetail",
+      "goalDetail",
+    ]) {
+      expect(RUNTIME_CENTER_TEXT).not.toHaveProperty(key);
+    }
+  });
+
   it("keeps explicit labels for execution-side host surfaces", () => {
     expect(formatRuntimeSectionLabel("host_twin")).toBe("宿主孪生");
     expect(formatRuntimeSectionLabel("workspace_graph")).toBe("工作区图谱");
   });
 
   it("labels the main-brain cockpit signals explicitly", () => {
-    expect(MAIN_BRAIN_COCKPIT_TEXT.title).toBe("主脑驾驶舱");
+    expect(MAIN_BRAIN_COCKPIT_TEXT.title).toBe("主脑今日运行简报");
     expect(formatMainBrainSignalLabel("carrier")).toBe("载体");
     expect(formatMainBrainSignalLabel("current_cycle")).toBe("当前周期");
     expect(formatMainBrainSignalLabel("agent_reports")).toBe("智能体汇报");

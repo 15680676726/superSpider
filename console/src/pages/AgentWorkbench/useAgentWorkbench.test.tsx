@@ -7,7 +7,6 @@ const requestMock = vi.fn();
 const requestRuntimeBusinessAgentsMock = vi.fn();
 const requestRuntimeEnvironmentListMock = vi.fn();
 const requestRuntimeEvidenceListMock = vi.fn();
-const requestRuntimeGoalsMock = vi.fn();
 const requestRuntimeAgentDetailMock = vi.fn();
 
 vi.mock("../../api", () => ({
@@ -22,7 +21,6 @@ vi.mock("../../runtime/runtimeSurfaceClient", () => ({
     requestRuntimeEnvironmentListMock(...args),
   requestRuntimeEvidenceList: (...args: unknown[]) =>
     requestRuntimeEvidenceListMock(...args),
-  requestRuntimeGoals: (...args: unknown[]) => requestRuntimeGoalsMock(...args),
   requestRuntimeAgentDetail: (...args: unknown[]) =>
     requestRuntimeAgentDetailMock(...args),
 }));
@@ -62,7 +60,6 @@ describe("useAgentWorkbench", () => {
     ]);
     requestRuntimeEnvironmentListMock.mockResolvedValue([]);
     requestRuntimeEvidenceListMock.mockResolvedValue([]);
-    requestRuntimeGoalsMock.mockResolvedValue([]);
     requestRuntimeAgentDetailMock.mockResolvedValue({
       agent: {
         agent_id: "agent-1",
@@ -89,7 +86,6 @@ describe("useAgentWorkbench", () => {
         updated_at: null,
       },
       runtime: null,
-      goals: [],
       tasks: [],
       mailbox: [],
       checkpoints: [],
@@ -136,7 +132,6 @@ describe("useAgentWorkbench", () => {
     expect(requestRuntimeBusinessAgentsMock).toHaveBeenCalledTimes(1);
     expect(requestRuntimeEnvironmentListMock).toHaveBeenCalledTimes(1);
     expect(requestRuntimeEvidenceListMock).toHaveBeenCalledTimes(1);
-    expect(requestRuntimeGoalsMock).not.toHaveBeenCalled();
   });
 
   it("routes capability review decisions through the governed runtime-center path", async () => {

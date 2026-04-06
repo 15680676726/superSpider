@@ -452,7 +452,6 @@ export default function AgentWorkbenchPage() {
                 {displayedAgent ? (
                   <ProfileCard
                     agent={displayedAgent}
-                    linkedGoal={null}
                     onOpenChat={() => {
                       void handleOpenChat(displayedAgent);
                     }}
