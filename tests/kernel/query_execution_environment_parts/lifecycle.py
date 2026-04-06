@@ -1760,7 +1760,6 @@ def test_query_execution_service_kicks_off_pending_industry_execution_from_chat(
     ]
     prompt_appendix = _FakeAgent.created[0].kwargs["prompt_appendix"]
     assert "# Initial Kickoff" in prompt_appendix
-    assert "Started default goal: 默认首轮验证" in prompt_appendix
-    assert "Resumed recurring loop: 默认巡检计划" in prompt_appendix
+    assert "Activated assignment: default kickoff assignment" in prompt_appendix
 
 

@@ -124,10 +124,10 @@ class SystemDispatchFacade:
         async for event in self._turn_executor.stream_request(
             request_payload,
             kernel_task_id=task_id or None,
-            skip_kernel_admission=True,
+            skip_kernel_admission=False,
         ):
+            last_event = event
             if mode == "final":
-                last_event = event
                 continue
             if (
                 dispatch_events
@@ -160,9 +160,37 @@ class SystemDispatchFacade:
                     meta=dispatch_meta,
                 )
 
+        event_status = ""
+        if isinstance(last_event, dict):
+            event_status = str(last_event.get("status") or "")
+        elif last_event is not None:
+            event_status = str(getattr(last_event, "status", "") or "")
+        normalized_status = event_status.strip().lower()
+        success = normalized_status not in {"failed", "error", "cancelled"}
+        error = None
+        if not success:
+            if isinstance(last_event, dict):
+                error_payload = last_event.get("error")
+                if isinstance(error_payload, dict):
+                    error = str(
+                        error_payload.get("message")
+                        or error_payload.get("detail")
+                        or "",
+                    ).strip() or None
+                elif error_payload is not None:
+                    error = str(error_payload).strip() or None
+            elif last_event is not None:
+                error_payload = getattr(last_event, "error", None)
+                if error_payload is not None:
+                    error = str(
+                        getattr(error_payload, "message", None) or error_payload,
+                    ).strip() or None
+
         return {
-            "success": True,
-            "summary": summary,
+            "success": success,
+            "summary": summary if success else (error or summary),
+            "error": error,
+            "dispatch_status": normalized_status or None,
             "task_id": task_id or None,
             "channel": channel or None,
             "user_id": user_id or None,

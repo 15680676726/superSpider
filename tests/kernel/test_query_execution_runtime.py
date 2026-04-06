@@ -927,9 +927,29 @@ async def test_query_execution_runtime_builds_capability_frontdoor_delegate_for_
             }
 
     capability_service = _CapabilityService()
+    class _Dispatcher:
+        def __init__(self, capability_service) -> None:
+            self.capability_service = capability_service
+            self.submitted: list[KernelTask] = []
+
+        def submit(self, task: KernelTask):
+            self.submitted.append(task)
+            return SimpleNamespace(
+                task_id=task.id,
+                phase="executing",
+                summary="admitted",
+                decision_request_id=None,
+            )
+
+        async def execute_task(self, task_id: str):
+            task = next(task for task in self.submitted if task.id == task_id)
+            return await self.capability_service.execute_task(task)
+
+    dispatcher = _Dispatcher(capability_service)
     service = KernelQueryExecutionService(
         session_backend=object(),
         capability_service=capability_service,
+        kernel_dispatcher=dispatcher,
     )
 
     delegate = service._build_query_tool_execution_delegate(  # pylint: disable=protected-access
@@ -953,7 +973,8 @@ async def test_query_execution_runtime_builds_capability_frontdoor_delegate_for_
 
     assert result["summary"] == "delegated-via-capability-frontdoor"
     [submitted] = capability_service.calls
-    assert submitted.id == "ktask:query-frontdoor"
+    assert submitted.parent_task_id == "ktask:query-frontdoor"
+    assert submitted.id.startswith("ktask:query-frontdoor:tool:tool-execute_shell_command:")
     assert submitted.capability_ref == "tool:execute_shell_command"
     assert submitted.owner_agent_id == "ops-agent"
     assert submitted.work_context_id == "work-context-1"
@@ -978,9 +999,29 @@ async def test_query_execution_runtime_delegate_and_wrapped_builtin_tool_form_en
             }
 
     capability_service = _CapabilityService()
+    class _Dispatcher:
+        def __init__(self, capability_service) -> None:
+            self.capability_service = capability_service
+            self.submitted: list[KernelTask] = []
+
+        def submit(self, task: KernelTask):
+            self.submitted.append(task)
+            return SimpleNamespace(
+                task_id=task.id,
+                phase="executing",
+                summary="admitted",
+                decision_request_id=None,
+            )
+
+        async def execute_task(self, task_id: str):
+            task = next(task for task in self.submitted if task.id == task_id)
+            return await self.capability_service.execute_task(task)
+
+    dispatcher = _Dispatcher(capability_service)
     service = KernelQueryExecutionService(
         session_backend=object(),
         capability_service=capability_service,
+        kernel_dispatcher=dispatcher,
     )
     delegate = service._build_query_tool_execution_delegate(  # pylint: disable=protected-access
         owner_agent_id="ops-agent",
@@ -1001,7 +1042,8 @@ async def test_query_execution_runtime_delegate_and_wrapped_builtin_tool_form_en
 
     assert response.content[0]["text"] == "delegated-e2e"
     [submitted] = capability_service.calls
-    assert submitted.id == "ktask:query-e2e-frontdoor"
+    assert submitted.parent_task_id == "ktask:query-e2e-frontdoor"
+    assert submitted.id.startswith("ktask:query-e2e-frontdoor:tool:tool-get_current_time:")
     assert submitted.capability_ref == "tool:get_current_time"
     assert submitted.owner_agent_id == "ops-agent"
     assert submitted.work_context_id == "work-context-e2e"

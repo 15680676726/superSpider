@@ -1489,31 +1489,6 @@ class _IndustryLifecycleMixin:
         normalized_role_id = normalize_industry_role_id(role_id)
         if normalized_agent_id is None or normalized_role_id is None:
             return False
-        live_goal_statuses = {"draft", "active", "paused", "blocked"}
-        for goal_id in self._resolve_instance_goal_ids(record):
-            goal = self._goal_service.get_goal(goal_id)
-            if goal is None:
-                continue
-            override = self._goal_override_repository.get_override(goal.id)
-            owner_agent_id = self._resolve_goal_owner_agent_id(
-                goal,
-                override=override,
-                record=record,
-            )
-            if owner_agent_id != normalized_agent_id:
-                continue
-            if goal.status in live_goal_statuses:
-                return True
-        for schedule in self._list_instance_schedules(
-            record.instance_id,
-            schedule_ids=self._list_schedule_ids_for_instance(record.instance_id),
-        ):
-            if (
-                _string(schedule.get("owner_agent_id")) == normalized_agent_id
-                or normalize_industry_role_id(_string(schedule.get("industry_role_id")))
-                == normalized_role_id
-            ):
-                return True
         for item in self._list_backlog_items(record.instance_id, limit=None):
             if item.status in {"completed", "deferred", "cancelled"}:
                 continue
@@ -1985,32 +1960,6 @@ class _IndustryLifecycleMixin:
                 continue
             live_assignments.append(assignment)
         return live_assignments
-    def _list_live_kickoff_goals(
-        self,
-        record: IndustryInstanceRecord,
-        *,
-        stage: str,
-    ) -> list[GoalRecord]:
-        live_goals: list[GoalRecord] = []
-        for goal_id in self._resolve_instance_goal_ids(record):
-            goal = self._goal_service.get_goal(goal_id)
-            if goal is None or goal.status not in {"active", "blocked"}:
-                continue
-            override = self._goal_override_repository.get_override(goal.id)
-            if not self._goal_belongs_to_instance(
-                goal,
-                record=record,
-                override=override,
-            ):
-                continue
-            if self._resolve_goal_kickoff_stage(
-                goal,
-                override=override,
-                record=record,
-            ) != stage:
-                continue
-            live_goals.append(goal)
-        return live_goals
     def _reconcile_kickoff_autonomy_status(
         self,
         record: IndustryInstanceRecord,
@@ -2018,10 +1967,6 @@ class _IndustryLifecycleMixin:
         if _string(record.lifecycle_status) == "retired":
             return record
         pending_assignments = self._list_pending_kickoff_assignments(record)
-        pending_schedule_ids = self._list_pending_chat_kickoff_schedule_ids(
-            instance_id=record.instance_id,
-            schedule_ids=self._list_schedule_ids_for_instance(record.instance_id),
-        )
         pending_learning = any(
             self._resolve_assignment_kickoff_stage(assignment) == "learning"
             for assignment in pending_assignments
@@ -2030,14 +1975,6 @@ class _IndustryLifecycleMixin:
             self._resolve_assignment_kickoff_stage(assignment) == "execution"
             for assignment in pending_assignments
         )
-        if self._schedule_repository is not None:
-            for schedule_id in pending_schedule_ids:
-                schedule = self._schedule_repository.get_schedule(schedule_id)
-                stage = self._resolve_schedule_kickoff_stage(schedule)
-                if stage == "learning":
-                    pending_learning = True
-                elif stage == "execution":
-                    pending_execution = True
         current_autonomy_status = _string(record.autonomy_status) or "waiting-confirm"
         next_autonomy_status = current_autonomy_status
         if self._list_live_kickoff_assignments(record, stage="learning"):
@@ -2233,10 +2170,6 @@ class _IndustryLifecycleMixin:
                     "warnings": ["acquisition-cycle-exception"],
                 }
         pending_assignments = self._list_pending_kickoff_assignments(record)
-        pending_schedule_ids = self._list_pending_chat_kickoff_schedule_ids(
-            instance_id=record.instance_id,
-            schedule_ids=self._list_schedule_ids_for_instance(record.instance_id),
-        )
         pending_assignment_entries = [
             (
                 assignment,
@@ -2248,14 +2181,7 @@ class _IndustryLifecycleMixin:
             )
             for assignment in pending_assignments
         ]
-        pending_schedule_entries: list[tuple[str, str]] = []
-        if self._schedule_repository is not None:
-            for schedule_id in pending_schedule_ids:
-                schedule = self._schedule_repository.get_schedule(schedule_id)
-                pending_schedule_entries.append(
-                    (schedule_id, self._resolve_schedule_kickoff_stage(schedule)),
-                )
-        if not pending_assignment_entries and not pending_schedule_entries:
+        if not pending_assignment_entries:
             if self._list_live_kickoff_assignments(record, stage="learning"):
                 return {
                     "activated": False,
@@ -2265,11 +2191,7 @@ class _IndustryLifecycleMixin:
                     "started_assignment_ids": [],
                     "started_assignment_titles": [],
                     "assignment_dispatches": [],
-                    "started_goal_ids": [],
-                    "started_goal_titles": [],
                     "goal_dispatches": [],
-                    "resumed_schedule_ids": [],
-                    "resumed_schedule_titles": [],
                     "pending_execution_remaining": False,
                     "acquisition_cycle": await _maybe_run_learning_acquisition_cycle(),
                 }
@@ -2277,7 +2199,7 @@ class _IndustryLifecycleMixin:
         has_pending_learning = any(
             stage == "learning"
             for _assignment, _backlog_item, stage in pending_assignment_entries
-        ) or any(stage == "learning" for _schedule_id, stage in pending_schedule_entries)
+        )
         if has_pending_learning:
             kickoff_stage = "learning"
         elif self._list_live_kickoff_assignments(record, stage="learning"):
@@ -2289,11 +2211,7 @@ class _IndustryLifecycleMixin:
                 "started_assignment_ids": [],
                 "started_assignment_titles": [],
                 "assignment_dispatches": [],
-                "started_goal_ids": [],
-                "started_goal_titles": [],
                 "goal_dispatches": [],
-                "resumed_schedule_ids": [],
-                "resumed_schedule_titles": [],
                 "pending_execution_remaining": True,
                 "acquisition_cycle": await _maybe_run_learning_acquisition_cycle(),
             }
@@ -2304,12 +2222,7 @@ class _IndustryLifecycleMixin:
             for assignment, backlog_item, stage in pending_assignment_entries
             if stage == kickoff_stage
         ]
-        selected_schedule_ids = [
-            schedule_id
-            for schedule_id, stage in pending_schedule_entries
-            if stage == kickoff_stage
-        ]
-        if not selected_assignment_entries and not selected_schedule_ids:
+        if not selected_assignment_entries:
             return None
         current_cycle = self._current_operating_cycle_record(record.instance_id)
         trigger_reason = (
@@ -2352,35 +2265,11 @@ class _IndustryLifecycleMixin:
             selected_assignment_by_id[assignment_id].title
             for assignment_id in started_assignment_ids
         ]
-        started_goal_ids = _unique_strings(
-            [
-                selected_assignment_by_id[assignment_id].goal_id
-                for assignment_id in started_assignment_ids
-                if selected_assignment_by_id[assignment_id].goal_id is not None
-            ],
-        )
-        started_goal_titles: list[str] = []
-        get_goal = getattr(self._goal_service, "get_goal", None)
-        for goal_id in started_goal_ids:
-            goal = get_goal(goal_id) if callable(get_goal) else None
-            if goal is not None:
-                started_goal_titles.append(goal.title)
-        resumed_schedule_ids = await self._resume_instance_schedules(
-            instance_id=record.instance_id,
-            schedule_ids=selected_schedule_ids,
-        )
-        resumed_schedule_titles: list[str] = []
-        if self._schedule_repository is not None:
-            for schedule_id in resumed_schedule_ids:
-                schedule = self._schedule_repository.get_schedule(schedule_id)
-                if schedule is not None:
-                    resumed_schedule_titles.append(schedule.title)
         pending_execution_transition = kickoff_stage == "learning" and (
             any(
                 stage == "execution"
                 for _assignment, _backlog_item, stage in pending_assignment_entries
             )
-            or any(stage == "execution" for _schedule_id, stage in pending_schedule_entries)
         )
         updated_record = self._industry_instance_repository.upsert_instance(
             record.model_copy(
@@ -2396,11 +2285,7 @@ class _IndustryLifecycleMixin:
         if current_cycle is not None and self._operating_cycle_service is not None:
             self._operating_cycle_service.reconcile_cycle(
                 current_cycle,
-                goal_statuses=[
-                    self._goal_service.get_goal(goal_id).status
-                    for goal_id in started_goal_ids
-                    if self._goal_service.get_goal(goal_id) is not None
-                ],
+                goal_statuses=[],
                 assignment_statuses=[
                     assignment.status
                     for assignment in self._list_assignment_records(
@@ -2432,16 +2317,12 @@ class _IndustryLifecycleMixin:
         if kickoff_stage == "learning":
             acquisition_cycle = await _maybe_run_learning_acquisition_cycle()
         return {
-            "activated": bool(started_assignment_ids or resumed_schedule_ids),
+            "activated": bool(started_assignment_ids),
             "kickoff_stage": kickoff_stage,
             "started_assignment_ids": started_assignment_ids,
             "started_assignment_titles": started_assignment_titles,
             "assignment_dispatches": assignment_dispatches,
-            "started_goal_ids": started_goal_ids,
-            "started_goal_titles": started_goal_titles,
             "goal_dispatches": [],
-            "resumed_schedule_ids": resumed_schedule_ids,
-            "resumed_schedule_titles": resumed_schedule_titles,
             "pending_execution_remaining": pending_execution_transition,
             "acquisition_cycle": acquisition_cycle,
         }
@@ -2456,10 +2337,6 @@ class _IndustryLifecycleMixin:
         if self._list_live_kickoff_assignments(record, stage="learning"):
             return False
         pending_assignments = self._list_pending_kickoff_assignments(record)
-        pending_schedule_ids = self._list_pending_chat_kickoff_schedule_ids(
-            instance_id=record.instance_id,
-            schedule_ids=self._list_schedule_ids_for_instance(record.instance_id),
-        )
         has_pending_learning = any(
             self._resolve_assignment_kickoff_stage(assignment) == "learning"
             for assignment in pending_assignments
@@ -2468,14 +2345,6 @@ class _IndustryLifecycleMixin:
             self._resolve_assignment_kickoff_stage(assignment) == "execution"
             for assignment in pending_assignments
         )
-        if self._schedule_repository is not None:
-            for schedule_id in pending_schedule_ids:
-                schedule = self._schedule_repository.get_schedule(schedule_id)
-                stage = self._resolve_schedule_kickoff_stage(schedule)
-                if stage == "learning":
-                    has_pending_learning = True
-                elif stage == "execution":
-                    has_pending_execution = True
         return not has_pending_learning and has_pending_execution
     async def _maybe_auto_resume_execution_stage(
         self,

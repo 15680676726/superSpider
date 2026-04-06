@@ -2151,12 +2151,60 @@ def test_system_dispatch_query_executes_through_kernel_query_execution_service()
     assert turn_executor.requests
     request_payload, kwargs = turn_executor.requests[0]
     assert request_payload["session_id"] == "goal-1"
-    assert kwargs["skip_kernel_admission"] is True
+    assert kwargs["skip_kernel_admission"] is False
     assert kwargs["kernel_task_id"] == payload["task_id"]
 
     evidence = evidence_ledger.list_by_task(payload["task_id"])
     assert len(evidence) == 1
     assert evidence[0].capability_ref == "system:dispatch_query"
+
+
+def test_system_dispatch_query_propagates_turn_executor_failure_status() -> None:
+    class _FailingTurnExecutor:
+        def __init__(self) -> None:
+            self.requests: list[tuple[object, dict[str, object]]] = []
+
+        async def stream_request(self, request, **kwargs):
+            self.requests.append((request, kwargs))
+            yield {
+                "object": "message",
+                "status": "failed",
+                "error": {"message": "query runtime failed"},
+                "request": request,
+            }
+
+    evidence_ledger = EvidenceLedger()
+    turn_executor = _FailingTurnExecutor()
+    capability_service = CapabilityService(
+        evidence_ledger=evidence_ledger,
+        turn_executor=turn_executor,
+    )
+    dispatcher = KernelDispatcher(capability_service=capability_service)
+
+    payload = _execute_capability_direct(
+        capability_service,
+        dispatcher,
+        capability_id="system:dispatch_query",
+        payload={
+            "request": {
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "hello kernel"}],
+                    },
+                ],
+                "session_id": "goal-2",
+                "user_id": "ops-agent",
+                "channel": "goal",
+            },
+            "mode": "final",
+            "dispatch_events": False,
+        },
+    )
+
+    assert payload["success"] is False
+    assert payload["phase"] == "failed"
+    assert payload["error"] == "query runtime failed"
 
 
 def test_system_discover_capabilities_executes_through_shared_discovery_service(

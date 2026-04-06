@@ -83,7 +83,7 @@ def test_wrap_tool_function_for_toolkit_delegates_builtin_tools_to_bound_frontdo
     assert response.content[0]["text"] == "delegated-via-capability-frontdoor"
 
 
-def test_wrap_tool_function_for_toolkit_falls_back_to_builtin_when_delegate_fails() -> None:
+def test_wrap_tool_function_for_toolkit_surfaces_delegate_failure_without_builtin_fallback() -> None:
     calls: list[tuple[str, dict[str, object]]] = []
 
     async def _delegate(capability_id: str, payload: dict[str, object]) -> dict[str, object]:
@@ -98,7 +98,7 @@ def test_wrap_tool_function_for_toolkit_falls_back_to_builtin_when_delegate_fail
     assert calls == [("tool:get_current_time", {})]
     assert isinstance(response, ToolResponse)
     assert response.content
-    assert "delegate-unavailable" not in response.content[0]["text"]
+    assert "delegate-unavailable" in response.content[0]["text"]
 
 
 def test_wrap_tool_function_for_toolkit_runs_preflight_before_delegate() -> None:

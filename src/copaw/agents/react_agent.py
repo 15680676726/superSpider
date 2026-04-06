@@ -135,6 +135,20 @@ def _coerce_tool_execution_delegate_result(value: Any) -> ToolResponse:
     return _coerce_tool_response(value)
 
 
+def _tool_execution_delegate_failure_response(
+    capability_id: str,
+    exc: Exception,
+) -> ToolResponse:
+    return ToolResponse(
+        content=[
+            TextBlock(
+                type="text",
+                text=f"Capability front door failed for {capability_id}: {exc}",
+            ),
+        ],
+    )
+
+
 def _tool_capability_id_for_function(
     tool_fn: Callable[..., Any],
 ) -> str | None:
@@ -297,11 +311,16 @@ def _wrap_tool_function_for_toolkit(
                         await delegate(capability_id, payload),
                     )
                     return
-                except Exception:
+                except Exception as exc:
                     logger.exception(
-                        "Tool execution delegate failed for '%s'; falling back to builtin tool",
+                        "Tool execution delegate failed for '%s'; blocking builtin fallback",
                         capability_id,
                     )
+                    yield _tool_execution_delegate_failure_response(
+                        capability_id,
+                        exc,
+                    )
+                    return
             async for item in tool_fn(*args, **kwargs):
                 yield _coerce_tool_response(item)
 
@@ -325,10 +344,14 @@ def _wrap_tool_function_for_toolkit(
                     return _coerce_tool_execution_delegate_result(
                         await delegate(capability_id, payload),
                     )
-                except Exception:
+                except Exception as exc:
                     logger.exception(
-                        "Tool execution delegate failed for '%s'; falling back to builtin tool",
+                        "Tool execution delegate failed for '%s'; blocking builtin fallback",
                         capability_id,
+                    )
+                    return _tool_execution_delegate_failure_response(
+                        capability_id,
+                        exc,
                     )
             return _coerce_tool_response(await tool_fn(*args, **kwargs))
 

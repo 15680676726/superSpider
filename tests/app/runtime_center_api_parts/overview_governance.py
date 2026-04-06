@@ -2666,7 +2666,8 @@ def test_runtime_center_chat_run_e2e_routes_builtin_tool_calls_through_capabilit
             }
 
     class _FrontdoorDispatcher:
-        def __init__(self) -> None:
+        def __init__(self, capability_service) -> None:
+            self.capability_service = capability_service
             self.submitted = []
             self.lifecycle = SimpleNamespace(
                 get_task=lambda task_id: next(
@@ -2684,6 +2685,10 @@ def test_runtime_center_chat_run_e2e_routes_builtin_tool_calls_through_capabilit
                 error=None,
                 decision_request_id=None,
             )
+
+        async def execute_task(self, task_id):
+            task = next(task for task in self.submitted if task.id == task_id)
+            return await self.capability_service.execute_task(task)
 
         def complete_task(self, task_id, **kwargs) -> None:
             _ = (task_id, kwargs)
@@ -2741,7 +2746,7 @@ def test_runtime_center_chat_run_e2e_routes_builtin_tool_calls_through_capabilit
     )
 
     capability_service = _FrontdoorCapabilityService()
-    kernel_dispatcher = _FrontdoorDispatcher()
+    kernel_dispatcher = _FrontdoorDispatcher(capability_service)
     session_backend = _FrontdoorSessionBackend()
     query_execution_service = KernelQueryExecutionService(
         session_backend=session_backend,
@@ -2802,6 +2807,7 @@ def test_runtime_center_chat_run_e2e_routes_builtin_tool_calls_through_capabilit
     submitted = capability_service.tasks[0]
     assert submitted.capability_ref == "tool:get_current_time"
     assert submitted.owner_agent_id == "ops-agent"
+    assert submitted.parent_task_id is not None
     assert submitted.id.startswith(
         "query:session:console:ops-user:industry-chat:industry-v1-ops:execution-core:",
     )

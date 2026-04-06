@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from copaw.app.routers.learning import router as learning_router
 from copaw.app.routers.runtime_center import router as runtime_center_router
@@ -655,6 +656,32 @@ def test_learning_api_acquisition_run_and_detail_routes(tmp_path, monkeypatch) -
         item["key"] == "trial-run:browser-local" and item["status"] == "pass"
         for item in onboarding_payload["checks"]
     )
+
+
+def test_learning_acquisition_run_requires_kernel_dispatcher_without_legacy_fallback(
+    tmp_path,
+) -> None:
+    app = _build_learning_app(tmp_path)
+    app.state.learning_service.set_industry_service(_FakeIndustryService())
+    app.state.learning_service.set_capability_service(_FakeCapabilityService())
+    app.state.learning_service.set_agent_profile_service(
+        SimpleNamespace(
+            get_capability_surface=lambda agent_id: {
+                "effective_capabilities": [],
+            },
+        ),
+    )
+    app.state.learning_service.set_kernel_dispatcher(None)
+
+    with pytest.raises(RuntimeError, match="kernel dispatcher"):
+        asyncio.run(
+            app.state.learning_service.run_industry_acquisition_cycle(
+                industry_instance_id="industry-v1-demo",
+            ),
+        )
+
+    assert app.state.task_repository.list_tasks(limit=None) == []
+    assert app.state.decision_request_repository.list_decision_requests(limit=None) == []
 
 
 def test_learning_api_acquisition_review_gate_approves_and_materializes(

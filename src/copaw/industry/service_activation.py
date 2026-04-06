@@ -594,24 +594,6 @@ class _IndustryActivationMixin:
                     "Industry bootstrap automatically started the learning stage."
                 ),
             )
-            started_goal_ids = list((kickoff_result or {}).get("started_goal_ids") or [])
-            goal_dispatches = list((kickoff_result or {}).get("goal_dispatches") or [])
-            dispatch_by_goal_id = {
-                goal_id: dispatch
-                for goal_id, dispatch in zip(started_goal_ids, goal_dispatches)
-            }
-            if dispatch_by_goal_id:
-                goal_results = [
-                    item.model_copy(
-                        update={
-                            "dispatch": dispatch_by_goal_id.get(
-                                _string(item.goal.get("id")) if isinstance(item.goal, dict) else None,
-                                item.dispatch,
-                            ),
-                        },
-                    )
-                    for item in goal_results
-                ]
             refreshed_record = self.reconcile_instance_status(team_id)
             if refreshed_record is not None:
                 final_record = refreshed_record

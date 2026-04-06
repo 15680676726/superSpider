@@ -735,19 +735,13 @@ class _QueryExecutionPromptMixin:
         if not isinstance(industry_kickoff_summary, dict):
             return []
         lines: list[str] = []
-        started_goal_titles = _string_list(
-            industry_kickoff_summary.get("started_goal_titles"),
+        started_assignment_titles = _string_list(
+            industry_kickoff_summary.get("started_assignment_titles"),
         )
-        resumed_schedule_titles = _string_list(
-            industry_kickoff_summary.get("resumed_schedule_titles"),
-        )
-        if started_goal_titles:
-            lines.append("- Initial execution has been confirmed from chat and the default goal chain is now live.")
-            for title in started_goal_titles[:3]:
-                lines.append(f"- Started default goal: {title}")
-        if resumed_schedule_titles:
-            for title in resumed_schedule_titles[:3]:
-                lines.append(f"- Resumed recurring loop: {title}")
+        if started_assignment_titles:
+            lines.append("- Initial execution has been confirmed from chat and the assignment chain is now live.")
+            for title in started_assignment_titles[:3]:
+                lines.append(f"- Activated assignment: {title}")
         return lines
 
     def _resolve_industry_goal_focus(

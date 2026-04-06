@@ -3227,88 +3227,25 @@ class _IndustryStrategyMixin:
 
             return True
 
-        goal_ids = {
-            goal_id
-            for goal_id in self._resolve_instance_goal_ids(record)
-            if isinstance(goal_id, str) and goal_id
-        }
+        if self._list_assignment_records(record.instance_id, status="planned", limit=1):
 
-        task_repository = getattr(self._goal_service, "_task_repository", None)
+            return True
 
-        task_runtime_repository = getattr(self._goal_service, "_task_runtime_repository", None)
+        if self._list_assignment_records(record.instance_id, status="queued", limit=1):
 
-        decision_request_repository = getattr(
+            return True
 
-            self._goal_service,
+        if self._list_assignment_records(record.instance_id, status="running", limit=1):
 
-            "_decision_request_repository",
+            return True
 
-            None,
+        if self._list_assignment_records(
+            record.instance_id,
+            status="waiting-report",
+            limit=1,
+        ):
 
-        )
-
-
-
-        task_ids: list[str] = []
-
-        if task_repository is not None and goal_ids:
-
-            for goal_id in goal_ids:
-
-                for task in task_repository.list_tasks(goal_id=goal_id):
-
-                    task_ids.append(task.id)
-
-                    if task.status in {"created", "queued", "running", "needs-confirm"}:
-
-                        return True
-
-                    if task_runtime_repository is None:
-
-                        continue
-
-                    runtime = task_runtime_repository.get_runtime(task.id)
-
-                    if runtime is None:
-
-                        continue
-
-                    if runtime.current_phase in {"compiled", "risk-check", "executing", "waiting-confirm"}:
-
-                        return True
-
-                    if runtime.runtime_status in {"cold", "hydrating", "active", "waiting-confirm"}:
-
-                        return True
-
-
-
-        if decision_request_repository is not None and task_ids:
-
-            decisions = decision_request_repository.list_decision_requests(
-
-                task_ids=task_ids,
-
-            )
-
-            if any(getattr(decision, "status", None) in {"open", "reviewing"} for decision in decisions):
-
-                return True
-
-
-
-        if self._schedule_repository is not None:
-
-            schedule_ids = list(record.schedule_ids or []) or self._list_schedule_ids_for_instance(
-                record.instance_id,
-            )
-            for schedule_id in schedule_ids:
-
-                schedule = self._schedule_repository.get_schedule(schedule_id)
-
-                if schedule is not None and schedule.enabled:
-
-                    return True
+            return True
 
         return False
 

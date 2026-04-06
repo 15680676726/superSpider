@@ -6,7 +6,7 @@ from hashlib import sha1
 from ..evidence import EvidenceRecord
 from ..industry.models import IndustryBootstrapInstallItem
 from ..kernel import KernelResult, KernelTask
-from ..state import DecisionRequestRecord, TaskRecord
+from ..state import DecisionRequestRecord
 from .models import (
     CapabilityAcquisitionProposal,
     GrowthEvent,
@@ -16,8 +16,6 @@ from .models import (
 from .runtime_support import (
     LearningRuntimeDelegate,
     _MAIN_BRAIN_ACTOR,
-    _acquisition_acceptance_criteria,
-    _acquisition_constraints_summary,
     _list_like,
     _maybe_await,
     _mcp_trial_tool_entries,
@@ -1093,20 +1091,21 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
         ]
         if open_requests:
             return open_requests[0]
-        _task, decision = self._ensure_kernel_backed_acquisition_task(
+        task, decision = self._ensure_kernel_backed_acquisition_task(
             proposal,
             requested_by=requested_by,
         )
         if decision is not None:
             return decision
-        decision = DecisionRequestRecord(
-            task_id=proposal.id,
-            decision_type="acquisition-approval",
-            risk_level=proposal.risk_level,  # type: ignore[arg-type]
-            summary=f"批准后才会继续执行“{proposal.title}”的安装/绑定链路。",
+        task_store = self._kernel_task_store()
+        if task_store is None:
+            raise RuntimeError(
+                "Learning acquisition requires a kernel task store for decision requests.",
+            )
+        return task_store.ensure_decision_request(
+            task,
             requested_by=requested_by,
         )
-        return self._decision_repo.upsert_decision_request(decision)
 
     def _resolve_acquisition_decision(
         self,
@@ -1150,17 +1149,35 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
         for decision in existing:
             if decision.status == status:
                 return decision
-        decision = DecisionRequestRecord(
-            task_id=proposal.id,
-            decision_type="acquisition-approval",
-            risk_level=proposal.risk_level,  # type: ignore[arg-type]
-            summary=f"acquisition-{status}：{proposal.title}",
-            status=status,  # type: ignore[arg-type]
+        task, _decision = self._ensure_kernel_backed_acquisition_task(
+            proposal,
             requested_by=requested_by,
-            resolution=resolution,
-            resolved_at=_utc_now(),
         )
-        return self._decision_repo.upsert_decision_request(decision)
+        task_store = self._kernel_task_store()
+        if task_store is None:
+            raise RuntimeError(
+                "Learning acquisition requires a kernel task store for decision resolution.",
+            )
+        pending = next(
+            (
+                decision
+                for decision in existing
+                if decision.status in {"open", "reviewing"}
+            ),
+            None,
+        )
+        if pending is None:
+            pending = task_store.ensure_decision_request(
+                task,
+                requested_by=requested_by,
+            )
+        if pending is None:
+            return None
+        return task_store.resolve_decision_request(
+            pending.id,
+            status=status,
+            resolution=resolution,
+        )
 
     def _task_status_for_acquisition(
         self,
@@ -1236,15 +1253,21 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
         proposal: CapabilityAcquisitionProposal,
         *,
         requested_by: str | None = None,
-    ) -> tuple[KernelTask | None, DecisionRequestRecord | None]:
+    ) -> tuple[KernelTask, DecisionRequestRecord | None]:
         dispatcher = getattr(self, "_kernel_dispatcher", None)
         task_store = self._kernel_task_store()
         if dispatcher is None or task_store is None:
-            return None, None
+            raise RuntimeError(
+                "Learning acquisition requires a kernel dispatcher-backed task store.",
+            )
         existing = task_store.get(proposal.id)
         if existing is None:
             admitted = dispatcher.submit(self._build_acquisition_kernel_task(proposal))
             existing = task_store.get(proposal.id)
+            if existing is None:
+                raise RuntimeError(
+                    f"Kernel admission did not persist acquisition task '{proposal.id}'.",
+                )
             decision = (
                 task_store.get_decision_request(admitted.decision_request_id)
                 if admitted.decision_request_id is not None
@@ -1321,61 +1344,7 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
         self,
         proposal: CapabilityAcquisitionProposal,
     ) -> None:
-        kernel_task, _decision = self._ensure_kernel_backed_acquisition_task(proposal)
-        if kernel_task is not None:
-            return
-        if self._task_repo is None:
-            return
-        existing = self._task_repo.get_task(proposal.id)
-        status = self._task_status_for_acquisition(proposal)
-        if existing is None:
-            self._task_repo.upsert_task(
-                TaskRecord(
-                    id=proposal.id,
-                    goal_id=None,
-                    title=proposal.title,
-                    summary=proposal.summary or proposal.title,
-                    task_type="learning-acquisition",
-                    status=status,  # type: ignore[arg-type]
-                    priority=0,
-                    owner_agent_id=proposal.target_agent_id or _MAIN_BRAIN_ACTOR,
-                    seed_source=f"learning:{proposal.acquisition_kind}",
-                    constraints_summary=_acquisition_constraints_summary(
-                        proposal.title,
-                        risk_level=proposal.risk_level,
-                        acquisition_kind=proposal.acquisition_kind,
-                    ),
-                    acceptance_criteria=_acquisition_acceptance_criteria(
-                        proposal.title,
-                        acquisition_kind=proposal.acquisition_kind,
-                    ),
-                    current_risk_level=proposal.risk_level,  # type: ignore[arg-type]
-                    created_at=proposal.created_at,
-                    updated_at=_utc_now(),
-                ),
-            )
-            return
-        updated = existing.model_copy(
-            update={
-                "title": proposal.title,
-                "summary": proposal.summary or proposal.title,
-                "status": status,
-                "owner_agent_id": proposal.target_agent_id or existing.owner_agent_id,
-                "seed_source": existing.seed_source or f"learning:{proposal.acquisition_kind}",
-                "constraints_summary": _acquisition_constraints_summary(
-                    proposal.title,
-                    risk_level=proposal.risk_level,
-                    acquisition_kind=proposal.acquisition_kind,
-                ),
-                "acceptance_criteria": _acquisition_acceptance_criteria(
-                    proposal.title,
-                    acquisition_kind=proposal.acquisition_kind,
-                ),
-                "current_risk_level": proposal.risk_level,
-                "updated_at": _utc_now(),
-            },
-        )
-        self._task_repo.upsert_task(updated)
+        self._ensure_kernel_backed_acquisition_task(proposal)
 
     async def _materialize_and_onboard_acquisition_proposal(
         self,

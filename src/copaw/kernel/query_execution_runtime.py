@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Collection
+from uuid import uuid4
 
 from ..capabilities.tool_execution_contracts import get_tool_execution_contract
 from ..constant import MEMORY_COMPACT_KEEP_RECENT
@@ -1763,9 +1764,10 @@ class _QueryExecutionRuntimeMixin(
         kernel_task_id: str | None,
         execution_context: Mapping[str, Any] | None,
     ):
-        service = self._capability_service
-        execute_task = getattr(service, "execute_task", None)
-        if not callable(execute_task):
+        dispatcher = self._kernel_dispatcher
+        submit = getattr(dispatcher, "submit", None)
+        execute_task = getattr(dispatcher, "execute_task", None)
+        if not callable(submit) or not callable(execute_task):
             return None
         if owner_agent_id is None or kernel_task_id is None:
             return None
@@ -1788,8 +1790,10 @@ class _QueryExecutionRuntimeMixin(
                     **dict(_mapping_value(task_payload.get("metadata"))),
                     **capability_trial_attribution,
                 }
+            capability_key = capability_id.replace(":", "-")
             task = KernelTask(
-                id=kernel_task_id,
+                id=f"{kernel_task_id}:tool:{capability_key}:{uuid4().hex[:8]}",
+                parent_task_id=kernel_task_id,
                 title=f"Query tool execution: {capability_id}",
                 capability_ref=capability_id,
                 owner_agent_id=owner_agent_id,
@@ -1798,7 +1802,29 @@ class _QueryExecutionRuntimeMixin(
                 risk_level=risk_level,
                 payload=task_payload,
             )
-            return await execute_task(task)
+            admitted = submit(task)
+            admitted_payload = (
+                admitted.model_dump(mode="json")
+                if hasattr(admitted, "model_dump")
+                else dict(admitted)
+                if isinstance(admitted, dict)
+                else None
+            )
+            if getattr(admitted, "phase", None) != "executing":
+                return admitted_payload or {
+                    "success": False,
+                    "phase": getattr(admitted, "phase", None),
+                    "summary": getattr(admitted, "summary", None) or "Tool admission did not execute.",
+                    "decision_request_id": getattr(admitted, "decision_request_id", None),
+                }
+            result = await execute_task(task.id)
+            return (
+                result.model_dump(mode="json")
+                if hasattr(result, "model_dump")
+                else result
+                if isinstance(result, dict)
+                else {"success": False, "summary": "Unexpected query tool execution result."}
+            )
 
         return _delegate
 

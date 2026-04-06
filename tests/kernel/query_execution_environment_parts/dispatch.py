@@ -206,6 +206,36 @@ def test_query_execution_service_query_turn_binds_builtin_tool_delegate_into_run
                 "summary": "delegated-runtime-frontdoor",
             }
 
+    class _FrontdoorDispatcher:
+        def __init__(self, capability_service, parent_task: KernelTask) -> None:
+            self.capability_service = capability_service
+            self.parent_task = parent_task
+            self.submitted: list[KernelTask] = []
+            self.lifecycle = SimpleNamespace(
+                get_task=lambda task_id: (
+                    self.parent_task
+                    if task_id == self.parent_task.id
+                    else next(
+                        (task for task in self.submitted if task.id == task_id),
+                        None,
+                    )
+                ),
+            )
+
+        def submit(self, task: KernelTask):
+            self.submitted.append(task)
+            return SimpleNamespace(
+                task_id=task.id,
+                phase="executing",
+                summary="admitted",
+                error=None,
+                decision_request_id=None,
+            )
+
+        async def execute_task(self, task_id: str):
+            task = next(task for task in self.submitted if task.id == task_id)
+            return await self.capability_service.execute_task(task)
+
     class _FrontdoorAgent(_FakeAgent):
         def __init__(self, **kwargs) -> None:
             super().__init__(**kwargs)
@@ -260,11 +290,7 @@ def test_query_execution_service_query_turn_binds_builtin_tool_delegate_into_run
         session_backend=_FakeSessionBackend(),
         capability_service=capability_service,
         agent_profile_service=_FakeAgentProfileService(),
-        kernel_dispatcher=SimpleNamespace(
-            lifecycle=SimpleNamespace(
-                get_task=lambda task_id: kernel_task if task_id == kernel_task.id else None,
-            ),
-        ),
+        kernel_dispatcher=_FrontdoorDispatcher(capability_service, kernel_task),
     )
 
     async def _run():
@@ -288,7 +314,8 @@ def test_query_execution_service_query_turn_binds_builtin_tool_delegate_into_run
     agent = _FakeAgent.created[0]
     assert agent.tool_response.content[0]["text"] == "delegated-runtime-frontdoor"
     [submitted] = capability_service.tasks
-    assert submitted.id == "task-query-frontdoor"
+    assert submitted.parent_task_id == "task-query-frontdoor"
+    assert submitted.id.startswith("task-query-frontdoor:tool:tool-get_current_time:")
     assert submitted.capability_ref == "tool:get_current_time"
     assert submitted.owner_agent_id == "ops-agent"
     assert submitted.work_context_id == "work-context-frontdoor"
@@ -317,6 +344,36 @@ def test_query_execution_service_query_turn_falls_back_to_builtin_when_delegate_
         async def execute_task(self, task: KernelTask) -> dict[str, object]:
             self.tasks.append(task)
             raise RuntimeError("delegate-offline")
+
+    class _FailingFrontdoorDispatcher:
+        def __init__(self, capability_service, parent_task: KernelTask) -> None:
+            self.capability_service = capability_service
+            self.parent_task = parent_task
+            self.submitted: list[KernelTask] = []
+            self.lifecycle = SimpleNamespace(
+                get_task=lambda task_id: (
+                    self.parent_task
+                    if task_id == self.parent_task.id
+                    else next(
+                        (task for task in self.submitted if task.id == task_id),
+                        None,
+                    )
+                ),
+            )
+
+        def submit(self, task: KernelTask):
+            self.submitted.append(task)
+            return SimpleNamespace(
+                task_id=task.id,
+                phase="executing",
+                summary="admitted",
+                error=None,
+                decision_request_id=None,
+            )
+
+        async def execute_task(self, task_id: str):
+            task = next(task for task in self.submitted if task.id == task_id)
+            return await self.capability_service.execute_task(task)
 
     class _FrontdoorAgent(_FakeAgent):
         def __init__(self, **kwargs) -> None:
@@ -364,11 +421,7 @@ def test_query_execution_service_query_turn_falls_back_to_builtin_when_delegate_
         session_backend=_FakeSessionBackend(),
         capability_service=capability_service,
         agent_profile_service=_FakeAgentProfileService(),
-        kernel_dispatcher=SimpleNamespace(
-            lifecycle=SimpleNamespace(
-                get_task=lambda task_id: kernel_task if task_id == kernel_task.id else None,
-            ),
-        ),
+        kernel_dispatcher=_FailingFrontdoorDispatcher(capability_service, kernel_task),
     )
 
     async def _run():
@@ -392,8 +445,8 @@ def test_query_execution_service_query_turn_falls_back_to_builtin_when_delegate_
     agent = _FakeAgent.created[0]
     assert capability_service.tasks
     assert agent.tool_response.content
-    assert "builtin-fallback-sentinel" in agent.tool_response.content[0]["text"]
-    assert "delegate-offline" not in agent.tool_response.content[0]["text"]
+    assert "builtin-fallback-sentinel" not in agent.tool_response.content[0]["text"]
+    assert "delegate-offline" in agent.tool_response.content[0]["text"]
 
 
 def test_query_execution_service_delegation_first_guard_blocks_direct_work_until_claim() -> None:

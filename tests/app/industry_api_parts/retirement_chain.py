@@ -719,7 +719,9 @@ def test_industry_runtime_detail_and_goal_detail_use_formal_instance_store(
         ),
     )
     assert kickoff is not None
-    assert kickoff["started_goal_ids"]
+    assert kickoff["started_assignment_ids"]
+    assert "started_goal_ids" not in kickoff
+    assert "started_goal_titles" not in kickoff
 
     summaries = client.get("/industry/v1/instances")
     assert summaries.status_code == 200
@@ -729,15 +731,15 @@ def test_industry_runtime_detail_and_goal_detail_use_formal_instance_store(
     assert "active_goal_count" not in summary["stats"]
     assert summary["stats"]["schedule_count"] == len(payload["schedules"])
 
-    goal_id = kickoff["started_goal_ids"][0]
-    goal_detail = client.get(f"/goals/{goal_id}/detail")
-    assert goal_detail.status_code == 200
-    goal_payload = goal_detail.json()
-    assert goal_payload["industry"]["instance_id"] == instance_id
-    assert goal_payload["industry"]["label"] == payload["team"]["label"]
-    assert len(goal_payload["tasks"]) >= 1
-
-    task_id = goal_payload["tasks"][0]["task"]["id"]
+    assignment_id = kickoff["started_assignment_ids"][0]
+    assignment = app.state.assignment_repository.get_assignment(assignment_id)
+    assert assignment is not None
+    assert assignment.industry_instance_id == instance_id
+    assert assignment.task_id is not None
+    task_id = assignment.task_id
+    task = app.state.task_repository.get_task(task_id)
+    assert task is not None
+    assert task.assignment_id == assignment_id
     app.state.evidence_ledger.append(
         EvidenceRecord(
             task_id=task_id,
@@ -753,11 +755,11 @@ def test_industry_runtime_detail_and_goal_detail_use_formal_instance_store(
         title="Tighten pilot rollout",
         description="Focus the next deployment wave on the highest-fit pilot sites.",
         source_agent_id="copaw-agent-runner",
-        goal_id=goal_id,
+        goal_id=None,
         task_id=task_id,
         agent_id="copaw-agent-runner",
     )
-    assert proposal.goal_id == goal_id
+    assert proposal.goal_id is None
 
     detail = client.get(f"/industry/v1/instances/{instance_id}")
     assert detail.status_code == 200

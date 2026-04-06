@@ -1386,6 +1386,10 @@ def test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_go
     assert kickoff["started_assignment_ids"]
     assert kickoff["assignment_dispatches"]
     assert kickoff["goal_dispatches"] == []
+    assert "started_goal_ids" not in kickoff
+    assert "started_goal_titles" not in kickoff
+    assert "resumed_schedule_ids" not in kickoff
+    assert "resumed_schedule_titles" not in kickoff
 
     started_assignment_ids = set(kickoff["started_assignment_ids"])
     created_tasks = [

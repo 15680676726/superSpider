@@ -812,8 +812,7 @@ class _KickoffIndustryService(_FakeIndustryService):
         self.calls.append((industry_instance_id, message_text, owner_agent_id))
         return {
             "activated": True,
-            "started_goal_titles": ["默认首轮验证"],
-            "resumed_schedule_titles": ["默认巡检计划"],
+            "started_assignment_titles": ["default kickoff assignment"],
         }
 
 
@@ -880,8 +879,7 @@ class _KickoffAwareIndustryService(_FakeIndustryService):
         )
         return {
             "activated": True,
-            "started_goal_titles": ["default kickoff goal"],
-            "resumed_schedule_titles": ["default recurring loop"],
+            "started_assignment_titles": ["default kickoff assignment"],
         }
 
 

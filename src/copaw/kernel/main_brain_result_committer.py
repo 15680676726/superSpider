@@ -73,8 +73,6 @@ def _resolve_downstream_record_id(result: Any) -> str | None:
         "created_goal_ids",
         "created_schedule_ids",
         "started_assignment_ids",
-        "started_goal_ids",
-        "resumed_schedule_ids",
     ):
         values = payload.get(key)
         if isinstance(values, list):

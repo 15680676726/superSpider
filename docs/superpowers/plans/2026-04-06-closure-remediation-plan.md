@@ -145,3 +145,21 @@
 - [ ] Run focused frontend tests touched by Task 5.
 - [ ] Run `npm --prefix console run build`.
 - [ ] Update `46问题文档.md` with final resolved/unresolved status.
+
+### `2026-04-06` Follow-up Closure Update
+
+- `Task 2` ???????
+  - kickoff / auto-resume ??? assignment-native truth?legacy `goal/schedule` ?????? execution-stage admission / result contract
+  - ????? `goal_ids / schedule_ids / active_goal_ids` ??????????? `Task 2` ??? `partial`?? earlier note ??? kickoff seam ???????????
+- `Task 4` ????? `complete`?
+  - acquisition producer ??? kernel dispatcher-backed task store???? `DecisionRequestRecord / TaskRecord` producer fallback
+  - review-gate / runtime-center / producer ???? kernel task identity ?????
+- `Task 5` capability front-door ???
+  - query-time builtin tool delegate ??? child kernel task ??
+  - `react_agent` builtin fallback ??? fail-closed
+  - `system_dispatch` ??????? kernel admission???? turn failure ????
+  - frontend/local runtime truth derivation ??????? `Task 5` ?????????????? `partial`
+- focused verification additions:
+  - `python -m pytest tests/app/test_learning_api.py tests/app/test_runtime_center_api.py -q` -> `122 passed`
+  - `python -m pytest tests/agents/test_react_agent_tool_compat.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/query_execution_environment_parts/lifecycle.py -q` -> `58 passed`
+  - `python -m pytest tests/app/test_capabilities_execution.py -k "system_dispatch_query or external_runtime or runtime_center" -q` -> `3 passed, 48 deselected`

@@ -69,6 +69,56 @@
   - 至少 1 个真实 Python service donor（`HKUDS/OpenSpace`）已完成 `search -> install -> ready -> stop`
   - 当前边界仍是“符合 Python/GitHub/isolated-venv/runtime-contract 合同的项目”，不等于任何语言、任何构建系统的任意仓库都已自动适配
 
+## 1.2.3 `2026-04-06` donor install async job front-door 补充
+
+- `/capability-market/projects/install` 已从“长阻塞 HTTP 安装请求”收口为“正式异步 install job 创建前门”。
+- 当前正式前门合同改为：
+  - `POST /capability-market/projects/install`
+    - 立即返回 `202 Accepted`
+    - 返回 `task_id / status / phase / routes`
+  - `GET /capability-market/projects/install-jobs/{task_id}`
+    - 返回 install job 当前 `status / stage / progress_summary / error / result`
+  - `GET /capability-market/projects/install-jobs/{task_id}/result`
+    - 仅在 job `completed` 后返回最终 donor install 结果
+- 这轮没有新造一套内存 install-job 真相：
+  - install job 状态复用现有 `KernelTaskStore -> TaskRecord / TaskRuntimeRecord`
+  - job 进度与最终结果挂在同一条 kernel task payload/runtime truth 上
+  - `Runtime Center` 已可通过既有 kernel task detail/review 路由读取同一任务，不需要第二套 task 系统
+- 这样重 donor（例如此前会把前端长请求顶超时的 service donor）不再依赖单个 HTTP 请求硬撑到安装完成。
+- install job 现在不再只暴露一个粗粒度 `installing`：
+  - `_install_external_project_capability(...)` 已正式回写细粒度阶段
+  - 当前已落位的阶段包括：
+    - `resolve_ref`
+    - `bootstrap_env`
+    - `download_transport`
+    - `pip_install`
+    - `inspect_distribution`
+    - `compile_contract`
+    - `persist_mount`
+  - `GET /capability-market/projects/install-jobs/{task_id}` 会把这些阶段直接投影到 `stage / progress_summary`
+- 失败收口也已补齐：
+  - install job 失败时，`/install-jobs/{task_id}` 会返回 terminal `failed`
+  - `/install-jobs/{task_id}/result` 会对 failed job 返回 `409` + 真实错误摘要，而不是继续伪装成“还在跑”
+- 当前 fresh regression：
+  - `python -m pytest tests/app/test_capability_market_api.py tests/app/test_runtime_center_donor_api.py tests/capabilities/test_project_donor_contracts.py -q`
+  - 结果：`54 passed`
+- `2026-04-06` fresh verification 补充：
+  - 直接 donor install 内核 smoke：
+    - 真实仓库：`https://github.com/psf/black`
+    - 结果：在独立临时 `COPAW_WORKING_DIR` 下完成 `resolve_ref -> bootstrap_env -> download_transport -> pip_install -> inspect_distribution -> compile_contract -> persist_mount`
+    - 终态：成功落成 `project:black`
+  - 真实 HTTP front-door smoke：
+    - 启动本地 HTTP server 后，真实调用：
+      - `POST /capability-market/projects/install`
+      - `GET /capability-market/projects/install-jobs/{task_id}`
+      - `GET /capability-market/projects/install-jobs/{task_id}/result`
+    - 真实仓库：`https://github.com/psf/black`
+    - 结果：job 从 `pip_install` 进入 `completed`，最终可读到 `project:black` 安装结果
+- 当前诚实边界：
+  - 这轮已证明“正式异步 install job 前门 + 细粒度阶段可见 + terminal result 可取”成立
+  - 但真实大型 donor 的单阶段耗时仍可能主要集中在 `pip_install`
+  - 因此这轮解决的是“别再假卡死、别再靠长 HTTP 顶住、别再没有 terminal truth”，不是“所有 donor 安装都会很快”
+
 ## 1.2.1 `2026-04-06` donor adapter common-base assimilation 补充
 
 - 已新增并落地的公共吸纳主链：
@@ -1072,3 +1122,25 @@
 - media / memory 闭环
 
 如果答不出来，就不要下手改代码。
+
+### 3.3.1 `2026-04-06` ????????????? partial ???
+
+- industry kickoff / auto-resume ? legacy seam ????????
+  - `kickoff_execution_from_chat(...)` ???? `started_goal_ids / started_goal_titles / resumed_schedule_ids / resumed_schedule_titles`
+  - `_should_auto_resume_execution_stage(...)` ? `_reconcile_kickoff_autonomy_status(...)` ??? legacy `goal/schedule` ?? execution-stage admission truth
+  - `service_activation.py` ??? bootstrap auto-learning ? kickoff legacy goal dispatch ?????
+- acquisition producer / kernel identity ????????
+  - `learning/acquisition_runtime.py` ???? free-form `DecisionRequestRecord / TaskRecord` ?? producer fallback
+  - acquisition proposal ???? kernel dispatcher-backed task store??? dispatcher ????????????? legacy compatibility path
+- capability execution ??????????????
+  - query-time builtin tool delegate ???? child kernel task `submit -> execute_task` ??????
+  - `react_agent` builtin tool delegate ??????????????? raw builtin ??
+  - `system_dispatch` ???? `skip_kernel_admission=True`???? turn executor ? failure status ????? kernel
+- ???? focused / file-level verification?
+  - `python -m pytest tests/app/test_learning_api.py tests/app/test_runtime_center_api.py -q` -> `122 passed`
+  - `python -m pytest tests/agents/test_react_agent_tool_compat.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/query_execution_environment_parts/lifecycle.py -q` -> `58 passed`
+  - `python -m pytest tests/app/test_capabilities_execution.py -k "system_dispatch_query or external_runtime or runtime_center" -q` -> `3 passed, 48 deselected`
+  - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py::test_public_bootstrap_auto_activate_keeps_instance_active_without_legacy_goal_dispatch tests/app/industry_api_parts/bootstrap_lifecycle.py::test_chat_writeback_schedule_creation_does_not_expand_instance_schedule_truth tests/app/industry_api_parts/retirement_chain.py::test_industry_runtime_main_chain_exposes_live_assignment_chain_after_auto_activate -q` -> `3 passed`
+- ????????????????
+  - `goal_ids / schedule_ids / active_goal_ids` ??????????????????????? kickoff / auto-resume / acquisition / capability front-door ?????????? legacy ??
+  - ???????????????????????focused harness??????live smoke???????
