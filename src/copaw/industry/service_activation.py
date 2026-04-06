@@ -298,6 +298,44 @@ class _IndustryActivationMixin:
             if self._backlog_service is not None
             else []
         )
+        planning_activation_result = self._resolve_planning_activation_result(
+            record=placeholder,
+            open_backlog=backlog_items,
+            pending_reports=[],
+        )
+        planning_task_subgraph = self._resolve_planning_task_subgraph(
+            record=placeholder,
+            open_backlog=backlog_items,
+            pending_reports=[],
+            activation_result=planning_activation_result,
+        )
+        bootstrap_strategy_constraints = self._apply_activation_to_strategy_constraints(
+            constraints=self._compile_strategy_constraints(record=placeholder),
+            activation_result=planning_activation_result,
+        )
+        strategy_constraints_payload = self._strategy_constraints_sidecar_payload(
+            record=placeholder,
+            strategy_constraints=bootstrap_strategy_constraints,
+        )
+        bootstrap_cycle_decision_payload = {
+            "reason": "bootstrap-seeded-cycle",
+            "cycle_kind": "daily",
+            "should_start": True,
+            "summary": "Bootstrap operating cycle.",
+            "selected_lane_ids": [lane.id for lane in lanes],
+            "selected_backlog_item_ids": [
+                item.id for item in backlog_items if item.goal_id is not None
+            ],
+            "metadata": {
+                "bootstrap_kind": "industry-v1",
+                "source_ref": "industry-bootstrap",
+            },
+        }
+        bootstrap_cycle_planning_metadata = {
+            "strategy_constraints": strategy_constraints_payload,
+            "cycle_decision": bootstrap_cycle_decision_payload,
+            "report_replan": {},
+        }
         current_cycle = (
             self._operating_cycle_service.start_cycle(
                 industry_instance_id=team_id,
@@ -317,12 +355,18 @@ class _IndustryActivationMixin:
                 goal_ids=goal_ids,
                 source_ref="industry-bootstrap",
                 summary="Bootstrap operating cycle.",
+                metadata={"formal_planning": bootstrap_cycle_planning_metadata},
             )
             if self._operating_cycle_service is not None
             else None
         )
         assignment_specs: list[dict[str, object]] = []
         if current_cycle is not None:
+            backlog_item_by_goal_id = {
+                item.goal_id: item
+                for item in backlog_items
+                if item.goal_id is not None
+            }
             for goal, _override, seed in goal_seed_links:
                 lane = self._resolve_goal_lane(
                     instance_id=team_id,
@@ -337,12 +381,59 @@ class _IndustryActivationMixin:
                     cycle_id=current_cycle.id,
                     goal_class="bootstrap-goal",
                 )
+                backlog_item = backlog_item_by_goal_id.get(goal.id)
+                assignment_plan = (
+                    self._assignment_planner.plan(
+                        assignment_id=self._stable_assignment_id(
+                            cycle_id=current_cycle.id,
+                            goal_id=goal.id,
+                            backlog_item_id=backlog_item.id if backlog_item is not None else None,
+                            title=goal.title,
+                        ),
+                        cycle_id=current_cycle.id,
+                        backlog_item=backlog_item,
+                        lane=lane,
+                        strategy_constraints=bootstrap_strategy_constraints,
+                        task_subgraph=planning_task_subgraph,
+                    )
+                    if backlog_item is not None
+                    else None
+                )
+                assignment_plan_payload = self._planner_sidecar_payload(assignment_plan)
+                assignment_metadata = {
+                    "bootstrap_kind": "industry-v1",
+                    "kickoff_stage": _string(
+                        seed.compiler_context.get("kickoff_stage"),
+                    )
+                    or "execution",
+                    "goal_kind": seed.kind,
+                    "industry_role_id": seed.role.role_id,
+                    "owner_agent_id": seed.owner_agent_id,
+                    "source_ref": f"goal:{goal.id}",
+                    "source_kind": "bootstrap-goal",
+                }
+                if assignment_plan is not None:
+                    assignment_metadata.update(dict(assignment_plan.metadata or {}))
+                    assignment_metadata["formal_planning"] = {
+                        "strategy_constraints": dict(strategy_constraints_payload),
+                        "cycle_decision": dict(bootstrap_cycle_decision_payload),
+                        "report_replan": {},
+                        "assignment_plan": assignment_plan_payload,
+                    }
                 assignment_specs.append(
                     {
                         "goal_id": goal.id,
                         "lane_id": lane.id if lane is not None else None,
-                        "owner_agent_id": seed.owner_agent_id,
-                        "owner_role_id": seed.role.role_id,
+                        "owner_agent_id": (
+                            assignment_plan.owner_agent_id
+                            if assignment_plan is not None
+                            else seed.owner_agent_id
+                        ),
+                        "owner_role_id": (
+                            assignment_plan.owner_role_id
+                            if assignment_plan is not None
+                            else seed.role.role_id
+                        ),
                         "title": goal.title,
                         "summary": goal.summary,
                         "goal_status": goal.status,
@@ -354,7 +445,12 @@ class _IndustryActivationMixin:
                             ),
                             None,
                         ),
-                        "report_back_mode": "summary",
+                        "report_back_mode": (
+                            assignment_plan.report_back_mode
+                            if assignment_plan is not None
+                            else "summary"
+                        ),
+                        "metadata": assignment_metadata,
                     },
                 )
         assignments = (

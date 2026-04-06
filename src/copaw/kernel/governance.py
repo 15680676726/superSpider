@@ -167,6 +167,7 @@ def _canonical_host_twin_summary(
     from ..app.runtime_center.execution_runtime_projection import (
         build_host_twin_summary,
         derive_host_twin_continuity_state,
+        host_twin_summary_ready,
     )
 
     existing_summary = _mapping_value(detail_payload.get("host_twin_summary"))
@@ -178,10 +179,22 @@ def _canonical_host_twin_summary(
         return existing_summary
     if not existing_summary:
         return derived_summary
-    merged_summary = dict(derived_summary)
-    merged_summary.update(existing_summary)
+    existing_ready = host_twin_summary_ready(existing_summary)
+    derived_ready = host_twin_summary_ready(derived_summary)
+    if derived_ready and not existing_ready:
+        preferred_summary = dict(derived_summary)
+        fallback_summary = dict(existing_summary)
+    elif existing_ready and not derived_ready:
+        preferred_summary = dict(existing_summary)
+        fallback_summary = dict(derived_summary)
+    else:
+        preferred_summary = dict(existing_summary)
+        fallback_summary = dict(derived_summary)
+    merged_summary = dict(fallback_summary)
+    merged_summary.update(preferred_summary)
     merged_summary["continuity_state"] = _first_non_empty(
-        existing_summary.get("continuity_state"),
+        preferred_summary.get("continuity_state"),
+        fallback_summary.get("continuity_state"),
         derive_host_twin_continuity_state(merged_summary),
     )
     return merged_summary

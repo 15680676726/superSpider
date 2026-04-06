@@ -143,6 +143,41 @@ class _FakeCanonicalReadyEnvironmentService:
         }
 
 
+class _FakeStaleTopLevelSummaryEnvironmentService:
+    def list_sessions(self, **kwargs):
+        _ = kwargs
+        return [SimpleNamespace(id="session:web:stale-top-level")]
+
+    def get_session_detail(self, session_mount_id: str, *, limit: int = 20):
+        _ = limit
+        if session_mount_id != "session:web:stale-top-level":
+            return None
+        return {
+            "session_mount_id": session_mount_id,
+            "host_twin_summary": {
+                "recommended_scheduler_action": "handoff",
+                "blocked_surface_count": 1,
+                "legal_recovery_mode": "handoff",
+                "continuity_state": "blocked",
+            },
+            "host_twin": {
+                "continuity": {
+                    "status": "attached",
+                    "valid": True,
+                    "requires_human_return": False,
+                },
+                "coordination": {
+                    "recommended_scheduler_action": "proceed",
+                },
+                "legal_recovery": {
+                    "path": "resume-environment",
+                    "resume_kind": "resume-environment",
+                },
+                "blocked_surfaces": [],
+            },
+        }
+
+
 class _FakeHumanAssistTaskService:
     def list_tasks(self, **kwargs):
         chat_thread_id = kwargs.get("chat_thread_id")
@@ -367,6 +402,33 @@ def test_governance_admission_prefers_canonical_ready_host_twin_summary(
         environment_ref="session:web:canonical",
         payload={
             "chat_thread_id": "thread-canonical",
+        },
+    )
+
+    reason = service.admission_block_reason(task)
+
+    assert reason is None
+
+
+def test_governance_admission_prefers_derived_live_host_twin_over_stale_top_level_summary(
+    tmp_path,
+) -> None:
+    repository = SqliteGovernanceControlRepository(
+        SQLiteStateStore(tmp_path / "governance.sqlite3"),
+    )
+    service = GovernanceService(
+        control_repository=repository,
+        environment_service=_FakeStaleTopLevelSummaryEnvironmentService(),
+        human_assist_task_service=_FakeHumanAssistTaskService(),
+        industry_service=_FakeIndustryService(),
+    )
+
+    task = KernelTask(
+        title="Dispatch browser work after clean reentry",
+        capability_ref="system:dispatch_query",
+        environment_ref="session:web:stale-top-level",
+        payload={
+            "chat_thread_id": "thread-stale-top-level",
         },
     )
 

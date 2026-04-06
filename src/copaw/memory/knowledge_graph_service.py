@@ -16,6 +16,13 @@ def _string(value: object | None) -> str | None:
     return text or None
 
 
+def _int(value: object | None) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _mapping(value: object | None) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
@@ -49,8 +56,17 @@ def _node_titles(subgraph: TaskSubgraph, *, node_type: str) -> list[str]:
     )
 
 
-def _path_summaries(paths: list[KnowledgeGraphPath] | None) -> list[str]:
-    return _unique_strings([getattr(path, "summary", None) for path in list(paths or [])])
+def _path_summaries(paths: object | None) -> list[str]:
+    summaries: list[object] = []
+    for path in list(paths or []) if isinstance(paths, list) else []:
+        if isinstance(path, KnowledgeGraphPath):
+            summaries.append(getattr(path, "summary", None))
+            continue
+        if isinstance(path, dict):
+            summaries.append(path.get("summary"))
+            continue
+        summaries.append(path)
+    return _unique_strings(summaries)
 
 
 class KnowledgeGraphService:
@@ -126,6 +142,9 @@ class KnowledgeGraphService:
         )
 
     def summarize_task_subgraph(self, task_subgraph: object | None) -> dict[str, Any]:
+        compact_summary = self._coerce_compact_task_subgraph_summary(task_subgraph)
+        if compact_summary is not None:
+            return compact_summary
         subgraph = self._coerce_task_subgraph(task_subgraph)
         if subgraph is None:
             return {}
@@ -219,6 +238,28 @@ class KnowledgeGraphService:
     ) -> dict[str, Any] | None:
         subgraph = self.extract_task_subgraph_from_kernel_metadata(kernel_metadata)
         summary = self.summarize_task_subgraph(subgraph)
+        if summary:
+            return summary
+        payload = _mapping(kernel_metadata)
+        candidates = [
+            _mapping(_mapping(_mapping(payload.get("payload")).get("task_seed")).get("assignment_sidecar_plan")).get(
+                "knowledge_subgraph",
+            ),
+            _mapping(_mapping(payload.get("payload")).get("assignment_sidecar_plan")).get(
+                "knowledge_subgraph",
+            ),
+            _mapping(_mapping(_mapping(payload.get("payload")).get("compiler")).get("assignment_sidecar_plan")).get(
+                "knowledge_subgraph",
+            ),
+            _mapping(_mapping(payload.get("task_seed")).get("assignment_sidecar_plan")).get(
+                "knowledge_subgraph",
+            ),
+            _mapping(payload.get("task_subgraph")) or payload.get("task_subgraph"),
+        ]
+        for candidate in candidates:
+            summary = self._coerce_compact_task_subgraph_summary(candidate)
+            if summary is not None:
+                return summary
         return summary or None
 
     def build_human_boundary_writeback(self, **kwargs) -> object:
@@ -253,6 +294,55 @@ class KnowledgeGraphService:
             return TaskSubgraph.model_validate(value)
         except Exception:
             return None
+
+    @staticmethod
+    def _coerce_compact_task_subgraph_summary(
+        value: object | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        scope_type = _string(value.get("scope_type"))
+        scope_id = _string(value.get("scope_id"))
+        if scope_type is None or scope_id is None:
+            return None
+        if not any(
+            key in value
+            for key in (
+                "dependency_paths",
+                "blocker_paths",
+                "recovery_paths",
+                "top_relations",
+                "top_entities",
+                "capability_labels",
+                "environment_labels",
+            )
+        ):
+            return None
+        return {
+            "source": _string(value.get("source")) or "task-subgraph",
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "seed_refs": _unique_strings(value.get("seed_refs")),
+            "focus_node_ids": _unique_strings(value.get("focus_node_ids")),
+            "constraint_refs": _unique_strings(value.get("constraint_refs")),
+            "evidence_refs": _unique_strings(value.get("evidence_refs")),
+            "node_count": _int(value.get("node_count")),
+            "relation_count": _int(value.get("relation_count")),
+            "node_types": _unique_strings(value.get("node_types")),
+            "top_entities": _unique_strings(value.get("top_entities")),
+            "top_opinions": _unique_strings(value.get("top_opinions")),
+            "top_relations": _unique_strings(value.get("top_relations")),
+            "top_relation_kinds": _unique_strings(value.get("top_relation_kinds")),
+            "capability_labels": _unique_strings(value.get("capability_labels")),
+            "environment_labels": _unique_strings(value.get("environment_labels")),
+            "failure_patterns": _unique_strings(value.get("failure_patterns")),
+            "recovery_patterns": _unique_strings(value.get("recovery_patterns")),
+            "support_paths": _path_summaries(value.get("support_paths")),
+            "contradiction_paths": _path_summaries(value.get("contradiction_paths")),
+            "dependency_paths": _path_summaries(value.get("dependency_paths")),
+            "blocker_paths": _path_summaries(value.get("blocker_paths")),
+            "recovery_paths": _path_summaries(value.get("recovery_paths")),
+        }
 
 
 __all__ = ["KnowledgeGraphService"]

@@ -11,6 +11,7 @@ from copaw.industry import IndustryBootstrapInstallItem, IndustryCapabilityRecom
 from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.kernel.persistence import decode_kernel_task_metadata
 from copaw.memory.activation_models import ActivationResult
+from copaw.memory import KnowledgeGraphService
 from copaw.memory.knowledge_graph_models import (
     KnowledgeGraphPath,
     KnowledgeGraphNode,
@@ -1341,6 +1342,61 @@ def test_public_bootstrap_auto_activate_keeps_instance_active_without_legacy_goa
     assert strategies[0].active_goal_ids == []
 
 
+def test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": False,
+            "auto_dispatch": False,
+            "execute": False,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    kickoff = asyncio.run(
+        app.state.industry_service.kickoff_execution_from_chat(
+            industry_instance_id=instance_id,
+            message_text="Start the first execution cycle for today.",
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry:{instance_id}",
+            channel="console",
+        ),
+    )
+
+    assert kickoff is not None
+    assert kickoff["started_assignment_ids"]
+    assert kickoff["assignment_dispatches"]
+    assert kickoff["goal_dispatches"] == []
+
+    started_assignment_ids = set(kickoff["started_assignment_ids"])
+    created_tasks = [
+        task
+        for task in app.state.task_repository.list_tasks()
+        if task.assignment_id in started_assignment_ids
+    ]
+    assert created_tasks
+    assert all(task.assignment_id in started_assignment_ids for task in created_tasks)
+
+
 def test_chat_writeback_schedule_creation_does_not_expand_instance_schedule_truth(
     tmp_path,
 ) -> None:
@@ -1866,6 +1922,13 @@ def test_run_operating_cycle_passes_task_subgraph_into_cycle_and_assignment_plan
     subgraph_service = _FakePlanningSubgraphActivationService()
     app.state.industry_service._memory_activation_service = activation_service
     app.state.industry_service._subgraph_activation_service = subgraph_service
+    app.state.state_query_service._memory_activation_service = activation_service
+    app.state.state_query_service.set_knowledge_graph_service(
+        KnowledgeGraphService(
+            memory_activation_service=activation_service,
+            subgraph_activation_service=subgraph_service,
+        ),
+    )
 
     detail = app.state.industry_service.get_instance_detail(instance_id)
     assert detail is not None
@@ -1954,6 +2017,67 @@ def test_run_operating_cycle_passes_task_subgraph_into_cycle_and_assignment_plan
     )
     assert knowledge_subgraph["recovery_paths"][0]["summary"] == (
         "If blocked, rerun the governed approval refresh and verify the cache state."
+    )
+
+
+def test_bootstrap_initial_assignments_persist_formal_planning_sidecar(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    app.state.industry_service._memory_activation_service = _EmptyPlanningActivationService()
+    subgraph_service = _FakePlanningSubgraphActivationService()
+    app.state.industry_service._subgraph_activation_service = subgraph_service
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+            "auto_dispatch": False,
+            "execute": False,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    assert detail.current_cycle is not None
+    cycle = app.state.operating_cycle_repository.get_cycle(detail.current_cycle["cycle_id"])
+    assert cycle is not None
+
+    cycle_formal_planning = dict((cycle.metadata or {}).get("formal_planning") or {})
+    assert cycle_formal_planning["cycle_decision"]["reason"] == "bootstrap-seeded-cycle"
+
+    assignments = app.state.assignment_repository.list_assignments(
+        industry_instance_id=instance_id,
+        cycle_id=cycle.id,
+        limit=None,
+    )
+    assert assignments
+
+    assignment = assignments[0]
+    assignment_formal_planning = dict((assignment.metadata or {}).get("formal_planning") or {})
+    assignment_plan = dict(assignment_formal_planning.get("assignment_plan") or {})
+
+    assert assignment_plan["assignment_id"] == assignment.id
+    assert subgraph_service.calls
+    assert (
+        assignment_plan["sidecar_plan"]["knowledge_subgraph"]["dependency_paths"][0]["summary"]
+        == "Refresh approval evidence before drafting the partner update."
     )
 
 
@@ -3484,6 +3608,13 @@ def test_run_operating_cycle_auto_dispatch_keeps_assignment_formal_planning_in_c
     subgraph_service = _FakePlanningSubgraphActivationService()
     app.state.industry_service._memory_activation_service = activation_service
     app.state.industry_service._subgraph_activation_service = subgraph_service
+    app.state.state_query_service._memory_activation_service = activation_service
+    app.state.state_query_service.set_knowledge_graph_service(
+        KnowledgeGraphService(
+            memory_activation_service=activation_service,
+            subgraph_activation_service=subgraph_service,
+        ),
+    )
 
     detail = app.state.industry_service.get_instance_detail(instance_id)
     assert detail is not None
@@ -3559,6 +3690,28 @@ def test_run_operating_cycle_auto_dispatch_keeps_assignment_formal_planning_in_c
         and "Execution path guidance for this assignment:" in compiler_meta["prompt_text"]
     )
     assert "Refresh approval evidence before drafting the partner update." in compiler_meta["prompt_text"]
+
+    runtime_task_detail = client.get(f"/runtime-center/tasks/{task.id}")
+    assert runtime_task_detail.status_code == 200
+    runtime_task_payload = runtime_task_detail.json()
+    assert runtime_task_payload["task_subgraph"]["dependency_paths"] == [
+        "Refresh approval evidence before drafting the partner update.",
+    ]
+    assert runtime_task_payload["task_subgraph"]["blocker_paths"] == [
+        "Do not publish until the approval contradiction is resolved.",
+    ]
+    assert runtime_task_payload["task_subgraph"]["recovery_paths"] == [
+        "If blocked, rerun the governed approval refresh and verify the cache state.",
+    ]
+
+    runtime_tasks = client.get("/runtime-center/tasks")
+    assert runtime_tasks.status_code == 200
+    runtime_task_entry = next(
+        item for item in runtime_tasks.json() if item["id"] == task.id
+    )
+    assert runtime_task_entry["task_subgraph"]["dependency_paths"] == [
+        "Refresh approval evidence before drafting the partner update.",
+    ]
 
 
 def test_runtime_detail_exposes_first_class_main_brain_cognitive_surface_with_continuity_refs(

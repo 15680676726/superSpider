@@ -11,7 +11,8 @@ from copaw.agents.react_agent import (
     bind_tool_execution_delegate,
     bind_tool_preflight,
 )
-from copaw.agents.tools import get_current_time, read_file
+from copaw.agents.tools import execute_shell_command, get_current_time, read_file
+from agentscope.tool import Toolkit
 
 
 def test_wrap_tool_function_for_toolkit_coerces_async_dict_result() -> None:
@@ -119,3 +120,23 @@ def test_wrap_tool_function_for_toolkit_runs_preflight_before_delegate() -> None
 
     assert response.content[0]["text"] == "blocked:read_file"
     assert delegate_calls == []
+
+
+def test_shell_tool_schema_does_not_expose_path_format() -> None:
+    toolkit = Toolkit()
+    toolkit.register_tool_function(
+        _wrap_tool_function_for_toolkit(execute_shell_command),
+    )
+
+    schema = toolkit.get_json_schemas()[0]["function"]["parameters"]["properties"]["cwd"]
+    variants = list(schema.get("anyOf") or [])
+
+    assert variants
+    assert all(
+        not (
+            isinstance(item, dict)
+            and item.get("type") == "string"
+            and item.get("format") == "path"
+        )
+        for item in variants
+    )

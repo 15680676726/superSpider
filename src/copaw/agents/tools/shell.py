@@ -128,7 +128,7 @@ def _execute_subprocess_sync(
 async def execute_shell_command(
     command: str,
     timeout: int = 60,
-    cwd: Optional[Path] = None,
+    cwd: Optional[str] = None,
 ) -> ToolResponse:
     """Execute given command and return the return code, standard output and
     error within <returncode></returncode>, <stdout></stdout> and
@@ -140,7 +140,7 @@ async def execute_shell_command(
         timeout (`int`, defaults to `10`):
             The maximum time (in seconds) allowed for the command to run.
             Default is 60 seconds.
-        cwd (`Optional[Path]`, defaults to `None`):
+        cwd (`Optional[str]`, defaults to `None`):
             The working directory for the command execution.
             If None, defaults to WORKING_DIR.
 
@@ -154,7 +154,12 @@ async def execute_shell_command(
     cmd = (command or "").strip()
 
     # Set working directory
-    working_dir = cwd if cwd is not None else WORKING_DIR
+    if cwd is None:
+        working_dir = WORKING_DIR
+    elif isinstance(cwd, Path):
+        working_dir = cwd
+    else:
+        working_dir = Path(str(cwd))
     started_at = _utc_now()
     decision = validate_shell_command(cmd)
 
