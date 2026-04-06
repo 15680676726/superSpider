@@ -153,21 +153,35 @@ def _patch_loaders(
     )
 
 
+def _first_enabled_skill_mount(app: FastAPI) -> CapabilityMount:
+    mounts = app.state.capability_service.list_public_capabilities(
+        kind="skill-bundle",
+        enabled_only=True,
+    )
+    if not mounts:
+        raise AssertionError("expected at least one enabled skill capability in catalog")
+    return mounts[0]
+
+
 def test_toggle_skill_capability(monkeypatch, tmp_path) -> None:
     """PATCH /capabilities/{id}/toggle dispatches through the canonical skill service."""
-    _patch_loaders(monkeypatch)
-    client = TestClient(build_app(tmp_path))
+    _patch_loaders(monkeypatch, use_real_skill_mounts=True)
+    app = build_app(tmp_path)
+    client = TestClient(app)
+    skill_mount = _first_enabled_skill_mount(app)
+    skill_id = skill_mount.id
+    skill_name = skill_id.removeprefix("skill:")
 
     with patch("copaw.capabilities.skill_service.default_skill_service.disable_skill") as mock_disable:
-        response = client.patch("/capabilities/skill:research/toggle")
+        response = client.patch(f"/capabilities/{skill_id}/toggle")
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
         assert data["phase"] == "completed"
         assert data["toggled"] is True
-        assert data["id"] == "skill:research"
+        assert data["id"] == skill_id
         assert data["enabled"] is False
-        mock_disable.assert_called_once_with("research")
+        mock_disable.assert_called_once_with(skill_name)
 
 
 def test_toggle_mcp_capability(monkeypatch, tmp_path) -> None:
@@ -226,11 +240,15 @@ def test_toggle_tool_capability_unsupported(monkeypatch, tmp_path) -> None:
 
 def test_delete_skill_capability(monkeypatch, tmp_path) -> None:
     """DELETE /capabilities/{id} now auto-adjudicates through the main-brain governance chain."""
-    _patch_loaders(monkeypatch)
-    client = TestClient(build_app(tmp_path))
+    _patch_loaders(monkeypatch, use_real_skill_mounts=True)
+    app = build_app(tmp_path)
+    client = TestClient(app)
+    skill_mount = _first_enabled_skill_mount(app)
+    skill_id = skill_mount.id
+    skill_name = skill_id.removeprefix("skill:")
 
     with patch("copaw.capabilities.skill_service.default_skill_service.delete_skill", return_value=True) as mock_delete:
-        admitted = client.delete("/capabilities/skill:research")
+        admitted = client.delete(f"/capabilities/{skill_id}")
         assert admitted.status_code == 200
         admitted_payload = admitted.json()
         assert admitted_payload["success"] is True
@@ -244,7 +262,7 @@ def test_delete_skill_capability(monkeypatch, tmp_path) -> None:
         assert detail_payload["status"] == "approved"
         assert detail_payload["requested_by"] == "copaw-main-brain"
         assert detail_payload["requires_human_confirmation"] is False
-        mock_delete.assert_called_once_with("research")
+        mock_delete.assert_called_once_with(skill_name)
 
 
 def test_delete_mcp_capability(monkeypatch, tmp_path) -> None:
@@ -586,17 +604,21 @@ def test_capability_market_toggle_route_uses_kernel_governance(
     tmp_path,
 ) -> None:
     """PATCH /capability-market/capabilities/{id}/toggle reuses the canonical governed write path."""
-    _patch_loaders(monkeypatch)
-    client = TestClient(build_app(tmp_path))
+    _patch_loaders(monkeypatch, use_real_skill_mounts=True)
+    app = build_app(tmp_path)
+    client = TestClient(app)
+    skill_mount = _first_enabled_skill_mount(app)
+    skill_id = skill_mount.id
+    skill_name = skill_id.removeprefix("skill:")
 
     with patch("copaw.capabilities.skill_service.default_skill_service.disable_skill") as mock_disable:
-        response = client.patch("/capability-market/capabilities/skill:research/toggle")
+        response = client.patch(f"/capability-market/capabilities/{skill_id}/toggle")
         assert response.status_code == 200
         payload = response.json()
         assert payload["success"] is True
         assert payload["toggled"] is True
         assert payload["enabled"] is False
-        mock_disable.assert_called_once_with("research")
+        mock_disable.assert_called_once_with(skill_name)
 
 
 def test_capability_market_delete_route_requires_confirmation(
@@ -604,11 +626,15 @@ def test_capability_market_delete_route_requires_confirmation(
     tmp_path,
 ) -> None:
     """DELETE /capability-market/capabilities/{id} preserves the main-brain audit trail."""
-    _patch_loaders(monkeypatch)
-    client = TestClient(build_app(tmp_path))
+    _patch_loaders(monkeypatch, use_real_skill_mounts=True)
+    app = build_app(tmp_path)
+    client = TestClient(app)
+    skill_mount = _first_enabled_skill_mount(app)
+    skill_id = skill_mount.id
+    skill_name = skill_id.removeprefix("skill:")
 
     with patch("copaw.capabilities.skill_service.default_skill_service.delete_skill", return_value=True) as mock_delete:
-        admitted = client.delete("/capability-market/capabilities/skill:research")
+        admitted = client.delete(f"/capability-market/capabilities/{skill_id}")
         assert admitted.status_code == 200
         admitted_payload = admitted.json()
         assert admitted_payload["success"] is True
@@ -622,4 +648,4 @@ def test_capability_market_delete_route_requires_confirmation(
         assert detail_payload["status"] == "approved"
         assert detail_payload["requested_by"] == "copaw-main-brain"
         assert detail_payload["requires_human_confirmation"] is False
-        mock_delete.assert_called_once_with("research")
+        mock_delete.assert_called_once_with(skill_name)

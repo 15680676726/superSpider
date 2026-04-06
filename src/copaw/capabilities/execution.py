@@ -217,6 +217,7 @@ class CapabilityExecutionFacade:
                 payload: dict[str, object] | None = None,
                 **kwargs,
             ):
+                kwargs.pop("capability_id", None)
                 return await self._execute_system(
                     capability_id,
                     payload=payload,
