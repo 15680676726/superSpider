@@ -15,6 +15,12 @@ from .query_execution_shared import (
     _resolve_chat_writeback_model_decision,
 )
 
+_WRITEBACK_ACTION_TO_CLASSIFICATION = {
+    "writeback_strategy": "strategy",
+    "writeback_backlog": "backlog",
+    "writeback_schedule": "schedule",
+}
+
 
 @dataclass(slots=True)
 class MainBrainIntakeContract:
@@ -288,9 +294,43 @@ async def resolve_request_main_brain_intake_contract(
     request: Any,
     msgs: list[Any],
 ) -> MainBrainIntakeContract | None:
-    del msgs
     attached = read_attached_main_brain_intake_contract(request=request)
-    return attached
+    if attached is not None:
+        return attached
+    requested_actions = _normalize_requested_actions(getattr(request, "requested_actions", None))
+    message_text = extract_main_brain_intake_text(msgs)
+    if message_text is None:
+        message_text = _first_non_empty(
+            getattr(request, "text", None),
+            getattr(request, "query", None),
+            getattr(request, "message", None),
+        )
+    writeback_classifications = [
+        classification
+        for classification in (
+            _WRITEBACK_ACTION_TO_CLASSIFICATION.get(action)
+            for action in requested_actions
+        )
+        if classification is not None
+    ]
+    writeback_plan = build_chat_writeback_plan_from_payload(
+        message_text,
+        approved_classifications=writeback_classifications or None,
+    )
+    writeback_requested = bool(writeback_plan is not None and writeback_plan.active)
+    should_kickoff = "kickoff_execution" in requested_actions
+    if message_text is None and not should_kickoff:
+        return None
+    if not writeback_requested and not should_kickoff:
+        return None
+    return MainBrainIntakeContract(
+        message_text=message_text or "",
+        decision=None,
+        intent_kind="execute-task" if should_kickoff else "chat",
+        writeback_requested=writeback_requested,
+        writeback_plan=writeback_plan,
+        should_kickoff=should_kickoff,
+    )
 
 
 def resolve_execution_core_industry_instance_id(
@@ -365,6 +405,23 @@ def _string_list(value: Any) -> list[str]:
         seen.add(text)
         items.append(text)
     return items
+
+
+def _normalize_requested_actions(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    actions: list[str] = []
+    seen: set[str] = set()
+    for raw in value:
+        text = _first_non_empty(raw)
+        if text is None:
+            continue
+        normalized = text.strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        actions.append(normalized)
+    return actions
 
 
 def _normalize_knowledge_graph_payload(value: Any) -> dict[str, Any]:

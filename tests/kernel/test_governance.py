@@ -437,6 +437,37 @@ def test_governance_admission_prefers_derived_live_host_twin_over_stale_top_leve
     assert reason is None
 
 
+def test_governance_admission_allows_writeback_only_query_through_handoff_gate(
+    tmp_path,
+) -> None:
+    repository = SqliteGovernanceControlRepository(
+        SQLiteStateStore(tmp_path / "governance.sqlite3"),
+    )
+    service = GovernanceService(
+        control_repository=repository,
+        environment_service=_FakeEnvironmentService(),
+        human_assist_task_service=_FakeHumanAssistTaskService(),
+        industry_service=_FakeIndustryService(),
+    )
+
+    task = KernelTask(
+        title="Write back backlog only",
+        capability_ref="system:dispatch_query",
+        environment_ref="session:web:main",
+        payload={
+            "chat_thread_id": "thread-writeback-only",
+            "industry_instance_id": "industry-1",
+            "request": {
+                "requested_actions": ["writeback_backlog"],
+            },
+        },
+    )
+
+    reason = service.admission_block_reason(task)
+
+    assert reason is None
+
+
 def test_governance_status_prefers_canonical_ready_host_twin_summary(
     tmp_path,
 ) -> None:

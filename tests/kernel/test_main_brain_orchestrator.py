@@ -138,3 +138,39 @@ def test_main_brain_orchestrator_allows_query_execution_service_rebinding():
     orchestrator.set_query_execution_service(replacement)
 
     assert orchestrator._query_execution_service is replacement  # pylint: disable=protected-access
+
+
+@pytest.mark.asyncio
+async def test_main_brain_orchestrator_passes_request_into_intake_resolver():
+    query_execution_service = _FakeQueryExecutionService()
+    captured: dict[str, object] = {}
+
+    async def _fake_resolver(**kwargs):
+        captured.update(kwargs)
+        return None
+
+    orchestrator = MainBrainOrchestrator(
+        query_execution_service=query_execution_service,
+        intake_contract_resolver=_fake_resolver,
+    )
+    request = AgentRequest(
+        id="req-orchestrator-request-aware",
+        session_id="sess-orchestrator-request-aware",
+        user_id="user-orchestrator-request-aware",
+        channel="console",
+        input=[],
+    )
+    msgs = [Msg(name="user", role="user", content="把这条需求写回 backlog。")]
+
+    streamed = [
+        item
+        async for item in orchestrator.execute_stream(
+            msgs=msgs,
+            request=request,
+            kernel_task_id="kernel-task-request-aware",
+        )
+    ]
+
+    assert len(streamed) == 1
+    assert captured["request"] is request
+    assert captured["msgs"] == msgs

@@ -548,8 +548,11 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
     monkeypatch.setattr(
         runtime_bootstrap_domains_module,
         "MainBrainOrchestrator",
-        lambda **kwargs: SimpleNamespace(),
+        lambda **kwargs: captured.setdefault("main_brain_orchestrator_kwargs", kwargs)
+        or SimpleNamespace(),
     )
+
+    kernel_dispatcher = object()
 
     runtime_bootstrap_domains_module.build_runtime_domain_services(
         session_backend=object(),
@@ -577,7 +580,7 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
         capability_portfolio_service=object(),
         skill_trial_service=object(),
         skill_lifecycle_decision_service=object(),
-        kernel_dispatcher=object(),
+        kernel_dispatcher=kernel_dispatcher,
         kernel_tool_bridge=object(),
         actor_mailbox_service=object(),
         actor_supervisor=object(),
@@ -595,3 +598,5 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
     assert captured["industry_runtime_bindings_kwargs"]["assignment_planner"] is not None
     assert "report_replan_engine" in captured["industry_runtime_bindings_kwargs"]
     assert captured["industry_runtime_bindings_kwargs"]["report_replan_engine"] is not None
+    assert captured["learning_bindings"].kernel_dispatcher is kernel_dispatcher
+    assert callable(captured["main_brain_orchestrator_kwargs"]["intake_contract_resolver"])

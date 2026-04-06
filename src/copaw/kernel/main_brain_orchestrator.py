@@ -16,7 +16,7 @@ from .main_brain_execution_planner import MainBrainExecutionPlanner
 from .main_brain_intake import (
     MainBrainIntakeContract,
     read_attached_main_brain_intake_contract,
-    resolve_main_brain_intake_contract,
+    resolve_request_main_brain_intake_contract,
 )
 from .main_brain_recovery_coordinator import MainBrainRecoveryCoordinator
 from .main_brain_result_committer import MainBrainResultCommitter
@@ -262,7 +262,7 @@ class MainBrainOrchestrator:
         self._query_execution_service = query_execution_service
         self._session_backend = session_backend
         self._environment_service = environment_service
-        self._intake_contract_resolver = intake_contract_resolver or resolve_main_brain_intake_contract
+        self._intake_contract_resolver = intake_contract_resolver or resolve_request_main_brain_intake_contract
         self._execution_planner = execution_planner or MainBrainExecutionPlanner()
         self._environment_coordinator = environment_coordinator or MainBrainEnvironmentCoordinator(
             environment_service=environment_service,
@@ -290,7 +290,7 @@ class MainBrainOrchestrator:
         self,
         resolver: Callable[..., Awaitable[MainBrainIntakeContract | None]] | None,
     ) -> None:
-        self._intake_contract_resolver = resolver or resolve_main_brain_intake_contract
+        self._intake_contract_resolver = resolver or resolve_request_main_brain_intake_contract
 
     def resolve_cognitive_surface(
         self,
@@ -411,6 +411,8 @@ class MainBrainOrchestrator:
         if resolver is None:
             return None
         try:
+            contract = await resolver(request=request, msgs=msgs)
+        except TypeError:
             contract = await resolver(msgs=msgs)
         except Exception:
             logger.debug("Main-brain intake resolution failed during orchestration", exc_info=True)

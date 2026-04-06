@@ -462,6 +462,7 @@ class SemanticCompiler:
             "memory_documents": _string_context_list(
                 unit.context.get("memory_documents"),
             ),
+            **_runtime_continuity_payload(unit.context),
             "task_segment": task_segment.model_dump(mode="json"),
             "resume_point": resume_point.model_dump(mode="json"),
         }
@@ -502,6 +503,7 @@ class SemanticCompiler:
                 "trigger_reason": trigger_reason,
                 "dispatch_requested_at": dispatch_requested_at,
                 "request_context": dict(request_context),
+                **_runtime_continuity_payload(unit.context),
             },
             "compiler": compiler_meta,
             "request_context": dict(request_context),
@@ -616,6 +618,7 @@ class SemanticCompiler:
             "actor_owner_id": owner_agent_id,
             "routine_id": routine_id,
             "request_context": dict(request_context),
+            **_runtime_continuity_payload(unit.context),
             "task_segment": task_segment.model_dump(mode="json"),
             "resume_point": resume_point.model_dump(mode="json"),
         }
@@ -730,6 +733,7 @@ class SemanticCompiler:
             "fixed_sop_binding_id": binding_id,
             "workflow_run_id": workflow_run_id,
             "request_context": dict(request_context),
+            **_runtime_continuity_payload(unit.context),
             "task_segment": task_segment.model_dump(mode="json"),
             "resume_point": resume_point.model_dump(mode="json"),
         }
@@ -1145,6 +1149,16 @@ def _request_context_payload(
     owner_agent_id: str,
 ) -> dict[str, object]:
     payload: dict[str, object] = {"agent_id": owner_agent_id}
+    session_id = _string_context_value(context.get("session_id"))
+    control_thread_id = _string_context_value(
+        context.get("control_thread_id"),
+        session_id,
+    )
+    thread_id = _string_context_value(
+        context.get("thread_id"),
+        control_thread_id,
+        session_id,
+    )
     for key in (
         "owner_scope",
         "industry_instance_id",
@@ -1157,16 +1171,47 @@ def _request_context_payload(
         "report_back_mode",
         "session_kind",
         "task_mode",
+        "session_id",
+        "environment_ref",
     ):
         value = _string_context_value(context.get(key))
         if value is not None:
             payload[key] = value
+    if control_thread_id is not None:
+        payload["control_thread_id"] = control_thread_id
+    if thread_id is not None:
+        payload["thread_id"] = thread_id
     role_name = _string_context_value(
         context.get("industry_role_name"),
         context.get("role_name"),
     )
     if role_name is not None:
         payload["industry_role_name"] = role_name
+    return payload
+
+
+def _runtime_continuity_payload(context: dict[str, object]) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    session_id = _string_context_value(context.get("session_id"))
+    control_thread_id = _string_context_value(
+        context.get("control_thread_id"),
+        session_id,
+    )
+    thread_id = _string_context_value(
+        context.get("thread_id"),
+        control_thread_id,
+        session_id,
+    )
+    for key in ("work_context_id", "environment_ref"):
+        value = _string_context_value(context.get(key))
+        if value is not None:
+            payload[key] = value
+    if session_id is not None:
+        payload["session_id"] = session_id
+    if control_thread_id is not None:
+        payload["control_thread_id"] = control_thread_id
+    if thread_id is not None:
+        payload["thread_id"] = thread_id
     return payload
 
 

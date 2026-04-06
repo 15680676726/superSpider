@@ -13,6 +13,7 @@ from copaw.kernel import KernelTurnExecutor
 from copaw.kernel.main_brain_chat_service import MainBrainChatService
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.main_brain_orchestrator import MainBrainOrchestrator
+from copaw.kernel.persistence import decode_kernel_task_metadata
 from copaw.sop_kernel import FixedSopBindingCreateRequest
 from copaw.state import AgentReportRecord
 

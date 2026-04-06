@@ -33,6 +33,13 @@ _RUNTIME_GOVERNANCE_BLOCKED_CAPABILITIES = frozenset(
         "system:dispatch_command",
     }
 )
+_WRITEBACK_ONLY_REQUESTED_ACTIONS = frozenset(
+    {
+        "writeback_strategy",
+        "writeback_backlog",
+        "writeback_schedule",
+    }
+)
 
 
 def _utc_now() -> datetime:
@@ -405,6 +412,8 @@ class GovernanceService:
             return f"Emergency stop blocked capability '{capability_ref}'. {reason}"
         if capability_ref not in _RUNTIME_GOVERNANCE_BLOCKED_CAPABILITIES:
             return None
+        if self._is_writeback_only_query_task(task):
+            return None
         return self._runtime_governance_block_reason(task)
 
     def _runtime_governance_block_reason(self, task: Any) -> str | None:
@@ -418,6 +427,20 @@ class GovernanceService:
         if staffing_reason is not None:
             return staffing_reason
         return None
+
+    @staticmethod
+    def _is_writeback_only_query_task(task: Any) -> bool:
+        capability_ref = str(getattr(task, "capability_ref", "") or "").strip()
+        if capability_ref != "system:dispatch_query":
+            return False
+        payload = _mapping_value(getattr(task, "payload", None))
+        request_payload = _mapping_value(payload.get("request"))
+        requested_actions = _string_list(
+            request_payload.get("requested_actions"),
+        )
+        if not requested_actions:
+            return False
+        return all(action in _WRITEBACK_ONLY_REQUESTED_ACTIONS for action in requested_actions)
 
     def _environment_handoff_block_reason(self, task: Any) -> str | None:
         service = self._environment_service
