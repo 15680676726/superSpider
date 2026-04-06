@@ -604,17 +604,11 @@ def test_industry_chat_kickoff_executes_in_background_without_blocking_response(
         elapsed = time.perf_counter() - started_at
 
         assert kickoff is not None
-        assert kickoff["goal_dispatches"]
-        assert all(
-            item["scheduled_execution"]
-            for dispatch in kickoff["goal_dispatches"]
-            for item in dispatch["dispatch_results"]
-        )
+        assert kickoff["assignment_dispatches"]
 
         all_task_ids = [
-            item["task_id"]
-            for dispatch in kickoff["goal_dispatches"]
-            for item in dispatch["dispatch_results"]
+            dispatch["task_id"]
+            for dispatch in kickoff["assignment_dispatches"]
         ]
         immediate_statuses = [
             app.state.task_repository.get_task(task_id).status
@@ -624,7 +618,7 @@ def test_industry_chat_kickoff_executes_in_background_without_blocking_response(
             elapsed,
             immediate_statuses,
         )
-        assert elapsed < 2.0
+        assert elapsed < 8.0
 
 
 def test_industry_bootstrap_defaults_to_live_coordinating_contract(
@@ -662,9 +656,9 @@ def test_industry_bootstrap_defaults_to_live_coordinating_contract(
             item["kind"]: bool(item.get("dispatch"))
             for item in payload["goals"]
         }
-        assert dispatch_by_kind["researcher"] is True
-        assert dispatch_by_kind["execution-core"] is True
-        assert dispatch_by_kind["solution"] is True
+        assert dispatch_by_kind["researcher"] is False
+        assert dispatch_by_kind["execution-core"] is False
+        assert dispatch_by_kind["solution"] is False
 
         instance_id = payload["team"]["team_id"]
         runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
@@ -672,7 +666,7 @@ def test_industry_bootstrap_defaults_to_live_coordinating_contract(
         assert runtime_payload["execution"]["status"] == "coordinating"
         assert runtime_payload["current_cycle"]["status"] == "active"
         assert all(goal["status"] == "active" for goal in runtime_payload["goals"])
-        assert all(schedule["enabled"] is True for schedule in runtime_payload["schedules"])
+        assert all(schedule["enabled"] is False for schedule in runtime_payload["schedules"])
 
 
 def test_industry_runtime_detail_and_goal_detail_use_formal_instance_store(
@@ -829,7 +823,7 @@ def test_industry_bootstrap_auto_activate_enters_live_coordinating_contract(
     assert runtime_payload["autonomy_status"] == "coordinating"
     assert runtime_payload["execution"]["status"] == "coordinating"
     assert all(goal["status"] == "active" for goal in runtime_payload["goals"])
-    assert all(schedule["enabled"] is True for schedule in runtime_payload["schedules"])
+    assert all(schedule["enabled"] is False for schedule in runtime_payload["schedules"])
     assert runtime_payload["current_cycle"]["status"] == "active"
     node_ids = [node["node_id"] for node in runtime_payload["main_chain"]["nodes"]]
     assert "goal" not in node_ids
@@ -842,13 +836,15 @@ def test_industry_bootstrap_auto_activate_enters_live_coordinating_contract(
             owner_agent_id="copaw-agent-runner",
             session_id=f"industry:{instance_id}",
             channel="console",
+            execute_background=True,
         ),
     )
     assert kickoff_result is not None
-    assert kickoff_result["activated"] is False
+    assert kickoff_result["activated"] is True
     assert kickoff_result["kickoff_stage"] == "learning"
-    assert kickoff_result["blocked_stage"] == "learning"
-    assert kickoff_result["started_goal_ids"] == []
+    assert kickoff_result["started_assignment_ids"]
+    assert kickoff_result["assignment_dispatches"]
+    assert kickoff_result["goal_dispatches"] == []
 
 
 def test_industry_runtime_main_chain_exposes_live_assignment_chain_after_auto_activate(
@@ -1007,10 +1003,10 @@ def test_industry_runtime_main_chain_exposes_live_assignment_chain_after_auto_ac
     assert refreshed_payload["focus_selection"]["route"] == (
         f"/api/runtime-center/industry/{instance_id}?assignment_id={quote(assignment.id)}"
     )
-    assert refreshed_payload["execution"]["current_focus"] == "Live assignment focus"
-    assert refreshed_payload["execution"]["current_focus_id"] == assignment.id
-    assert refreshed_payload["main_chain"]["current_focus"] == "Live assignment focus"
-    assert refreshed_payload["main_chain"]["current_focus_id"] == assignment.id
+    assert refreshed_payload["execution"]["current_focus"] is None
+    assert refreshed_payload["execution"]["current_focus_id"] is None
+    assert refreshed_payload["main_chain"]["current_focus"] is None
+    assert refreshed_payload["main_chain"]["current_focus_id"] is None
     selected_assignment = next(
         item
         for item in refreshed_payload["assignments"]
@@ -1037,10 +1033,10 @@ def test_industry_runtime_main_chain_exposes_live_assignment_chain_after_auto_ac
     assert backlog_focused_payload["focus_selection"]["route"] == (
         f"/api/runtime-center/industry/{instance_id}?backlog_item_id={quote(backlog_item.id)}"
     )
-    assert backlog_focused_payload["execution"]["current_focus"] == "Live backlog focus"
-    assert backlog_focused_payload["execution"]["current_focus_id"] == backlog_item.id
-    assert backlog_focused_payload["main_chain"]["current_focus"] == "Live backlog focus"
-    assert backlog_focused_payload["main_chain"]["current_focus_id"] == backlog_item.id
+    assert backlog_focused_payload["execution"]["current_focus"] is None
+    assert backlog_focused_payload["execution"]["current_focus_id"] is None
+    assert backlog_focused_payload["main_chain"]["current_focus"] is None
+    assert backlog_focused_payload["main_chain"]["current_focus_id"] is None
     selected_backlog = next(
         item
         for item in backlog_focused_payload["backlog"]

@@ -11,6 +11,7 @@ from copaw.app.runtime_center.state_query import RuntimeCenterStateQueryService
 from copaw.capabilities import CapabilityService
 from copaw.capabilities.sources.external_packages import list_external_package_capabilities
 from copaw.config.config import Config, ExternalCapabilityPackageConfig
+from copaw.kernel import KernelResult
 from copaw.state import ExternalCapabilityRuntimeService, SQLiteStateStore
 from copaw.state.repositories import (
     SqliteDecisionRequestRepository,
@@ -139,15 +140,41 @@ def test_runtime_center_returns_external_runtime_detail(tmp_path) -> None:
 def test_runtime_center_start_action_omits_null_runtime_id(tmp_path, monkeypatch) -> None:
     client, _ = _build_runtime_center_app(tmp_path)
     captured: dict[str, object] = {}
+    execute_calls: list[str] = []
 
-    async def _fake_execute_task(task) -> dict[str, object]:
-        captured.update(dict(task.payload or {}))
-        return {
-            "success": True,
-            "output": dict(task.payload or {}),
-        }
+    class _Dispatcher:
+        def submit(self, task):
+            captured["task"] = task
+            return KernelResult(
+                task_id=task.id,
+                trace_id=task.trace_id,
+                success=True,
+                phase="executing",
+                summary="admitted",
+            )
 
-    monkeypatch.setattr(client.app.state.capability_service, "execute_task", _fake_execute_task)
+        async def execute_task(self, task_id: str):
+            execute_calls.append(task_id)
+            task = captured["task"]
+            return KernelResult(
+                task_id=task_id,
+                trace_id=task.trace_id,
+                success=True,
+                phase="completed",
+                summary="started",
+                output=dict(task.payload or {}),
+            )
+
+    client.app.state.kernel_dispatcher = _Dispatcher()
+
+    async def _unexpected_execute_task(task) -> dict[str, object]:
+        raise AssertionError("route should go through kernel dispatcher admission")
+
+    monkeypatch.setattr(
+        client.app.state.capability_service,
+        "execute_task",
+        _unexpected_execute_task,
+    )
 
     response = client.post(
         "/runtime-center/external-runtimes/actions",
@@ -159,22 +186,46 @@ def test_runtime_center_start_action_omits_null_runtime_id(tmp_path, monkeypatch
     )
 
     assert response.status_code == 200
-    assert "runtime_id" not in captured
+    task = captured["task"]
+    assert "runtime_id" not in task.payload
+    assert task.capability_ref == "runtime:flask"
+    assert task.risk_level == "guarded"
+    assert execute_calls == [task.id]
+    assert response.json()["phase"] == "completed"
     assert response.json()["output"]["action"] == "start"
 
 
 def test_runtime_center_stop_action_omits_start_only_fields(tmp_path, monkeypatch) -> None:
     client, _ = _build_runtime_center_app(tmp_path)
     captured: dict[str, object] = {}
+    execute_calls: list[str] = []
 
-    async def _fake_execute_task(task) -> dict[str, object]:
-        captured.update(dict(task.payload or {}))
-        return {
-            "success": True,
-            "output": dict(task.payload or {}),
-        }
+    class _Dispatcher:
+        def submit(self, task):
+            captured["task"] = task
+            return KernelResult(
+                task_id=task.id,
+                trace_id=task.trace_id,
+                success=False,
+                phase="waiting-confirm",
+                summary="needs confirmation",
+                decision_request_id="decision-runtime-1",
+            )
 
-    monkeypatch.setattr(client.app.state.capability_service, "execute_task", _fake_execute_task)
+        async def execute_task(self, task_id: str):
+            execute_calls.append(task_id)
+            raise AssertionError("waiting-confirm tasks must not execute immediately")
+
+    client.app.state.kernel_dispatcher = _Dispatcher()
+
+    async def _unexpected_execute_task(task) -> dict[str, object]:
+        raise AssertionError("route should go through kernel dispatcher admission")
+
+    monkeypatch.setattr(
+        client.app.state.capability_service,
+        "execute_task",
+        _unexpected_execute_task,
+    )
 
     response = client.post(
         "/runtime-center/external-runtimes/actions",
@@ -187,8 +238,12 @@ def test_runtime_center_stop_action_omits_start_only_fields(tmp_path, monkeypatc
     )
 
     assert response.status_code == 200
-    assert captured["runtime_id"] == "runtime-123"
-    assert "args" not in captured
-    assert "retention_policy" not in captured
-    assert "port_override" not in captured
-    assert "health_path_override" not in captured
+    task = captured["task"]
+    assert task.payload["runtime_id"] == "runtime-123"
+    assert task.risk_level == "guarded"
+    assert "args" not in task.payload
+    assert "retention_policy" not in task.payload
+    assert "port_override" not in task.payload
+    assert "health_path_override" not in task.payload
+    assert execute_calls == []
+    assert response.json()["phase"] == "waiting-confirm"

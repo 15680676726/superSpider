@@ -715,9 +715,13 @@ def test_reconcile_instance_status_for_goal_uses_targeted_goal_lookup(
     industry_service.reconcile_instance_status_for_goal("goal-demo")
 
 
-def test_kickoff_execution_from_chat_records_trigger_message_context(tmp_path) -> None:
+def test_kickoff_execution_from_chat_records_trigger_message_context_in_assignment_dispatch(
+    tmp_path,
+) -> None:
     state_store = SQLiteStateStore(tmp_path / "state.db")
     goal_service = _DispatchGoalService()
+    goal_service.list_goals = lambda owner_scope=None: []
+    goal_service.get_goal = lambda goal_id: None
     industry_instance_repository = SqliteIndustryInstanceRepository(state_store)
     industry_service = IndustryService(
         goal_service=goal_service,
@@ -735,34 +739,48 @@ def test_kickoff_execution_from_chat_records_trigger_message_context(tmp_path) -
             status="active",
         ),
     )
-    goal = GoalRecord(
-        id="goal-demo",
+    assignment = SimpleNamespace(
+        id="assignment-demo",
+        goal_id="goal-demo",
         title="Launch execution",
         summary="Kick off the execution stage.",
-        status="active",
-        priority=3,
-        owner_scope="industry-demo",
     )
 
-    industry_service._list_pending_chat_kickoff_goals = lambda record, team=None: [
-        (goal, None)
-    ]
+    industry_service._list_pending_kickoff_assignments = lambda record: [assignment]
+    industry_service._list_live_kickoff_assignments = lambda record, stage: []
     industry_service._list_pending_chat_kickoff_schedule_ids = (
         lambda instance_id, schedule_ids: []
     )
-    industry_service._resolve_goal_kickoff_stage = (
-        lambda goal, override, record, team=None: "execution"
-    )
-    industry_service._resolve_goal_runtime_context = (
-        lambda goal, override, record, team=None: {}
+    industry_service._resolve_assignment_kickoff_stage = (
+        lambda assignment, backlog_item=None: "execution"
     )
     industry_service._current_operating_cycle_record = lambda instance_id: None
     industry_service._list_assignment_records = lambda *args, **kwargs: []
+    industry_service._sync_role_runtime_surfaces_for_record = lambda record: None
+    industry_service._sync_strategy_memory_for_instance = lambda record: None
 
     async def _resume_schedules(**kwargs):
         return []
 
     industry_service._resume_instance_schedules = _resume_schedules
+
+    captured: dict[str, object] = {}
+
+    async def _dispatch_assignments(**kwargs):
+        captured.update(kwargs)
+        return {
+            "created_task_ids": ["task-demo"],
+            "assignment_dispatches": [
+                {
+                    "assignment_id": "assignment-demo",
+                    "task_id": "task-demo",
+                    "phase": "queued",
+                    "summary": "Queued for execution.",
+                }
+            ],
+        }
+
+    industry_service._dispatch_operating_cycle_assignments = _dispatch_assignments
 
     result = asyncio.run(
         industry_service.kickoff_execution_from_chat(
@@ -775,9 +793,13 @@ def test_kickoff_execution_from_chat_records_trigger_message_context(tmp_path) -
     )
 
     assert result is not None
-    assert goal_service.dispatched[0]["context"]["trigger_message_text"] == "继续推进这个目标"
-    assert goal_service.dispatched[0]["context"]["trigger_session_id"] == "session-1"
-    assert goal_service.dispatched[0]["context"]["trigger_channel"] == "copaw-chat"
+    assert captured["instance_id"] == "industry-demo"
+    assert captured["assignment_ids"] == ["assignment-demo"]
+    assert captured["actor"] == "operator-1"
+    assert result["started_assignment_ids"] == ["assignment-demo"]
+    assert result["assignment_dispatches"][0]["task_id"] == "task-demo"
+    assert result["goal_dispatches"] == []
+    assert goal_service.dispatched == []
 
 
 @pytest.mark.asyncio

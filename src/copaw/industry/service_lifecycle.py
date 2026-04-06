@@ -1852,6 +1852,139 @@ class _IndustryLifecycleMixin:
             return kickoff_stage
         role_id = normalize_industry_role_id(_string(meta_mapping.get("industry_role_id")))
         return "learning" if role_id == "researcher" else "execution"
+    def _kickoff_assignment_backlog_item(
+        self,
+        assignment: AssignmentRecord,
+    ) -> BacklogItemRecord | None:
+        if self._backlog_service is None or assignment.backlog_item_id is None:
+            return None
+        return self._backlog_service.get_item(assignment.backlog_item_id)
+    def _resolve_assignment_kickoff_stage(
+        self,
+        assignment: AssignmentRecord,
+        *,
+        backlog_item: BacklogItemRecord | None = None,
+    ) -> str:
+        assignment_metadata = dict(assignment.metadata or {})
+        kickoff_stage = _string(assignment_metadata.get("kickoff_stage"))
+        if kickoff_stage in {"learning", "execution"}:
+            return kickoff_stage
+        resolved_backlog_item = backlog_item or self._kickoff_assignment_backlog_item(
+            assignment,
+        )
+        if resolved_backlog_item is not None:
+            backlog_metadata = dict(resolved_backlog_item.metadata or {})
+            kickoff_stage = _string(backlog_metadata.get("kickoff_stage"))
+            if kickoff_stage in {"learning", "execution"}:
+                return kickoff_stage
+        goal_id = _string(assignment.goal_id)
+        if goal_id is not None:
+            goal = self._goal_service.get_goal(goal_id)
+            if goal is not None:
+                override = self._goal_override_repository.get_override(goal.id)
+                return self._resolve_goal_kickoff_stage(
+                    goal,
+                    override=override,
+                )
+        role_id = normalize_industry_role_id(
+            _string(assignment_metadata.get("industry_role_id"))
+            or _string(assignment.owner_role_id),
+        )
+        return "learning" if role_id == "researcher" else "execution"
+    def _assignment_has_live_task(
+        self,
+        assignment: AssignmentRecord,
+    ) -> bool:
+        task_repository = getattr(self._goal_service, "_task_repository", None)
+        if task_repository is None:
+            return False
+        task_runtime_repository = getattr(
+            self._goal_service,
+            "_task_runtime_repository",
+            None,
+        )
+        seen_task_ids: set[str] = set()
+        tasks: list[TaskRecord] = []
+        if assignment.id:
+            for task in task_repository.list_tasks(
+                assignment_ids=[assignment.id],
+                limit=None,
+            ):
+                if task.id in seen_task_ids:
+                    continue
+                seen_task_ids.add(task.id)
+                tasks.append(task)
+        goal_id = _string(assignment.goal_id)
+        if goal_id is not None and not tasks:
+            for task in task_repository.list_tasks(goal_id=goal_id):
+                if task.id in seen_task_ids:
+                    continue
+                seen_task_ids.add(task.id)
+                tasks.append(task)
+        for task in tasks:
+            if task.status in {
+                "created",
+                "queued",
+                "running",
+                "needs-confirm",
+                "waiting",
+                "blocked",
+            }:
+                return True
+            if task_runtime_repository is None:
+                continue
+            runtime = task_runtime_repository.get_runtime(task.id)
+            if runtime is None:
+                continue
+            if runtime.current_phase in {
+                "compiled",
+                "risk-check",
+                "executing",
+                "waiting-confirm",
+            }:
+                return True
+            if runtime.runtime_status in {
+                "cold",
+                "hydrating",
+                "active",
+                "waiting-confirm",
+            }:
+                return True
+        return False
+    def _list_pending_kickoff_assignments(
+        self,
+        record: IndustryInstanceRecord,
+    ) -> list[AssignmentRecord]:
+        current_cycle = self._current_operating_cycle_record(record.instance_id)
+        pending: list[AssignmentRecord] = []
+        for assignment in self._list_assignment_records(
+            record.instance_id,
+            cycle_id=current_cycle.id if current_cycle is not None else None,
+        ):
+            if assignment.status in {"completed", "waiting-report", "failed", "cancelled"}:
+                continue
+            if self._assignment_has_live_task(assignment):
+                continue
+            pending.append(assignment)
+        return pending
+    def _list_live_kickoff_assignments(
+        self,
+        record: IndustryInstanceRecord,
+        *,
+        stage: str,
+    ) -> list[AssignmentRecord]:
+        current_cycle = self._current_operating_cycle_record(record.instance_id)
+        live_assignments: list[AssignmentRecord] = []
+        for assignment in self._list_assignment_records(
+            record.instance_id,
+            cycle_id=current_cycle.id if current_cycle is not None else None,
+        ):
+            if self._resolve_assignment_kickoff_stage(assignment) != stage:
+                continue
+            if not self._assignment_has_live_task(assignment):
+                continue
+            live_assignments.append(assignment)
+        return live_assignments
     def _list_live_kickoff_goals(
         self,
         record: IndustryInstanceRecord,
@@ -1884,26 +2017,18 @@ class _IndustryLifecycleMixin:
     ) -> IndustryInstanceRecord:
         if _string(record.lifecycle_status) == "retired":
             return record
-        pending_goals = self._list_pending_chat_kickoff_goals(record)
+        pending_assignments = self._list_pending_kickoff_assignments(record)
         pending_schedule_ids = self._list_pending_chat_kickoff_schedule_ids(
             instance_id=record.instance_id,
             schedule_ids=self._list_schedule_ids_for_instance(record.instance_id),
         )
         pending_learning = any(
-            self._resolve_goal_kickoff_stage(
-                goal,
-                override=override,
-                record=record,
-            ) == "learning"
-            for goal, override in pending_goals
+            self._resolve_assignment_kickoff_stage(assignment) == "learning"
+            for assignment in pending_assignments
         )
         pending_execution = any(
-            self._resolve_goal_kickoff_stage(
-                goal,
-                override=override,
-                record=record,
-            ) == "execution"
-            for goal, override in pending_goals
+            self._resolve_assignment_kickoff_stage(assignment) == "execution"
+            for assignment in pending_assignments
         )
         if self._schedule_repository is not None:
             for schedule_id in pending_schedule_ids:
@@ -1915,7 +2040,7 @@ class _IndustryLifecycleMixin:
                     pending_execution = True
         current_autonomy_status = _string(record.autonomy_status) or "waiting-confirm"
         next_autonomy_status = current_autonomy_status
-        if self._list_live_kickoff_goals(record, stage="learning"):
+        if self._list_live_kickoff_assignments(record, stage="learning"):
             next_autonomy_status = "learning"
         elif pending_learning:
             next_autonomy_status = (
@@ -2080,7 +2205,6 @@ class _IndustryLifecycleMixin:
         record = self._industry_instance_repository.get_instance(industry_instance_id)
         if record is None:
             return None
-        team = self._materialize_team_blueprint(record)
         acquisition_runner = getattr(
             self._learning_service,
             "run_industry_acquisition_cycle",
@@ -2108,23 +2232,21 @@ class _IndustryLifecycleMixin:
                     "onboarding_runs": [],
                     "warnings": ["acquisition-cycle-exception"],
                 }
-        pending_goals = self._list_pending_chat_kickoff_goals(record, team=team)
+        pending_assignments = self._list_pending_kickoff_assignments(record)
         pending_schedule_ids = self._list_pending_chat_kickoff_schedule_ids(
             instance_id=record.instance_id,
             schedule_ids=self._list_schedule_ids_for_instance(record.instance_id),
         )
-        pending_goal_entries = [
+        pending_assignment_entries = [
             (
-                goal,
-                override,
-                self._resolve_goal_kickoff_stage(
-                    goal,
-                    override=override,
-                    record=record,
-                    team=team,
+                assignment,
+                self._kickoff_assignment_backlog_item(assignment),
+                self._resolve_assignment_kickoff_stage(
+                    assignment,
+                    backlog_item=self._kickoff_assignment_backlog_item(assignment),
                 ),
             )
-            for goal, override in pending_goals
+            for assignment in pending_assignments
         ]
         pending_schedule_entries: list[tuple[str, str]] = []
         if self._schedule_repository is not None:
@@ -2133,13 +2255,16 @@ class _IndustryLifecycleMixin:
                 pending_schedule_entries.append(
                     (schedule_id, self._resolve_schedule_kickoff_stage(schedule)),
                 )
-        if not pending_goal_entries and not pending_schedule_entries:
-            if self._list_live_kickoff_goals(record, stage="learning"):
+        if not pending_assignment_entries and not pending_schedule_entries:
+            if self._list_live_kickoff_assignments(record, stage="learning"):
                 return {
                     "activated": False,
                     "kickoff_stage": "learning",
                     "blocked_stage": "learning",
                     "blocked_reason": "Industry learning stage is still in progress.",
+                    "started_assignment_ids": [],
+                    "started_assignment_titles": [],
+                    "assignment_dispatches": [],
                     "started_goal_ids": [],
                     "started_goal_titles": [],
                     "goal_dispatches": [],
@@ -2150,16 +2275,20 @@ class _IndustryLifecycleMixin:
                 }
             return None
         has_pending_learning = any(
-            stage == "learning" for _goal, _override, stage in pending_goal_entries
+            stage == "learning"
+            for _assignment, _backlog_item, stage in pending_assignment_entries
         ) or any(stage == "learning" for _schedule_id, stage in pending_schedule_entries)
         if has_pending_learning:
             kickoff_stage = "learning"
-        elif self._list_live_kickoff_goals(record, stage="learning"):
+        elif self._list_live_kickoff_assignments(record, stage="learning"):
             return {
                 "activated": False,
                 "kickoff_stage": "learning",
                 "blocked_stage": "learning",
                 "blocked_reason": "Industry learning stage is still in progress.",
+                "started_assignment_ids": [],
+                "started_assignment_titles": [],
+                "assignment_dispatches": [],
                 "started_goal_ids": [],
                 "started_goal_titles": [],
                 "goal_dispatches": [],
@@ -2170,9 +2299,9 @@ class _IndustryLifecycleMixin:
             }
         else:
             kickoff_stage = "execution"
-        selected_goal_entries = [
-            (goal, override)
-            for goal, override, stage in pending_goal_entries
+        selected_assignment_entries = [
+            (assignment, backlog_item)
+            for assignment, backlog_item, stage in pending_assignment_entries
             if stage == kickoff_stage
         ]
         selected_schedule_ids = [
@@ -2180,20 +2309,9 @@ class _IndustryLifecycleMixin:
             for schedule_id, stage in pending_schedule_entries
             if stage == kickoff_stage
         ]
-        if not selected_goal_entries and not selected_schedule_ids:
+        if not selected_assignment_entries and not selected_schedule_ids:
             return None
-        dispatches: list[dict[str, Any]] = []
-        started_goal_ids: list[str] = []
-        started_goal_titles: list[str] = []
         current_cycle = self._current_operating_cycle_record(record.instance_id)
-        assignment_by_goal_id = {
-            assignment.goal_id: assignment
-            for assignment in self._list_assignment_records(
-                record.instance_id,
-                cycle_id=current_cycle.id if current_cycle is not None else None,
-            )
-            if assignment.goal_id
-        }
         trigger_reason = (
             "Industry learning stage started from the execution-core control thread."
             if kickoff_stage == "learning"
@@ -2204,60 +2322,49 @@ class _IndustryLifecycleMixin:
             trigger_reason = trigger_reason_override
         elif trigger_message_text is not None:
             trigger_reason = f"{trigger_reason} Operator message: {trigger_message_text}"
-        for goal, override in selected_goal_entries:
-            goal_context = self._resolve_goal_runtime_context(
-                goal,
-                override=override,
-                record=record,
-                team=team,
+        assignment_dispatch_result = None
+        if selected_assignment_entries:
+            assignment_dispatch_result = await self._dispatch_operating_cycle_assignments(
+                instance_id=record.instance_id,
+                assignment_ids=[
+                    assignment.id for assignment, _backlog_item in selected_assignment_entries
+                ],
+                actor=owner_agent_id or EXECUTION_CORE_AGENT_ID,
+                allow_waiting_confirm=True,
+                include_execution_core=True,
+                execute_background=execute_background,
             )
-            goal_owner_agent_id = _string(goal_context.get("owner_agent_id"))
-            assignment = assignment_by_goal_id.get(goal.id)
-            dispatch_context = {
-                "channel": "industry-chat",
-                "bootstrap_kind": _string(goal_context.get("bootstrap_kind")) or "industry-v1",
-                "owner_scope": record.owner_scope,
-                "industry_instance_id": record.instance_id,
-                "lane_id": _string(goal_context.get("lane_id")) or goal.lane_id,
-                "cycle_id": (
-                    _string(goal_context.get("cycle_id"))
-                    or goal.cycle_id
-                    or (current_cycle.id if current_cycle is not None else None)
-                ),
-                "assignment_id": (
-                    assignment.id
-                    if assignment is not None
-                    else _string(goal_context.get("assignment_id"))
-                ),
-                "report_back_mode": _string(goal_context.get("report_back_mode")) or "summary",
-                "source": "industry-chat-kickoff",
-                "trigger_source": trigger_source or "chat:industry-control-thread",
-                "trigger_actor": owner_agent_id or EXECUTION_CORE_AGENT_ID,
-                "trigger_reason": trigger_reason,
-                "trigger_message_text": trigger_message_text,
-                "trigger_session_id": _string(session_id),
-                "trigger_channel": _string(channel),
-                "kickoff_stage": kickoff_stage,
-            }
-            dispatches.append(
-                await (
-                    self._goal_service.dispatch_goal_deferred_background(
-                        goal.id,
-                        context=dispatch_context,
-                        owner_agent_id=goal_owner_agent_id,
-                        activate=True,
-                    )
-                    if execute_background
-                    else self._goal_service.dispatch_goal_execute_now(
-                        goal.id,
-                        context=dispatch_context,
-                        owner_agent_id=goal_owner_agent_id,
-                        activate=True,
-                    )
-                ),
+        assignment_dispatches = list(
+            (assignment_dispatch_result or {}).get("assignment_dispatches") or [],
+        )
+        selected_assignment_by_id = {
+            assignment.id: assignment
+            for assignment, _backlog_item in selected_assignment_entries
+        }
+        started_assignment_ids = [
+            assignment_id
+            for assignment_id in (
+                _string(item.get("assignment_id")) for item in assignment_dispatches
             )
-            started_goal_ids.append(goal.id)
-            started_goal_titles.append(goal.title)
+            if assignment_id is not None and assignment_id in selected_assignment_by_id
+        ]
+        started_assignment_titles = [
+            selected_assignment_by_id[assignment_id].title
+            for assignment_id in started_assignment_ids
+        ]
+        started_goal_ids = _unique_strings(
+            [
+                selected_assignment_by_id[assignment_id].goal_id
+                for assignment_id in started_assignment_ids
+                if selected_assignment_by_id[assignment_id].goal_id is not None
+            ],
+        )
+        started_goal_titles: list[str] = []
+        get_goal = getattr(self._goal_service, "get_goal", None)
+        for goal_id in started_goal_ids:
+            goal = get_goal(goal_id) if callable(get_goal) else None
+            if goal is not None:
+                started_goal_titles.append(goal.title)
         resumed_schedule_ids = await self._resume_instance_schedules(
             instance_id=record.instance_id,
             schedule_ids=selected_schedule_ids,
@@ -2269,34 +2376,12 @@ class _IndustryLifecycleMixin:
                 if schedule is not None:
                     resumed_schedule_titles.append(schedule.title)
         pending_execution_transition = kickoff_stage == "learning" and (
-            any(stage == "execution" for _goal, _override, stage in pending_goal_entries)
+            any(
+                stage == "execution"
+                for _assignment, _backlog_item, stage in pending_assignment_entries
+            )
             or any(stage == "execution" for _schedule_id, stage in pending_schedule_entries)
         )
-        goal_links = self._list_active_goal_links_for_instance(record, team=team)
-        for agent in team.agents:
-            goal_link = goal_links.get(agent.agent_id)
-            status = (
-                "running"
-                if goal_link is not None
-                else "coordinating"
-                if pending_execution_transition
-                else "idle"
-            )
-            self._upsert_agent_profile(
-                agent,
-                instance_id=record.instance_id,
-                goal_id=goal_link[0] if goal_link is not None else None,
-                goal_title=goal_link[1] if goal_link is not None else None,
-                status=status,
-            )
-            self._sync_actor_runtime_surface(
-                agent=agent,
-                instance_id=record.instance_id,
-                owner_scope=record.owner_scope,
-                goal_id=goal_link[0] if goal_link is not None else None,
-                goal_title=goal_link[1] if goal_link is not None else None,
-                status=status,
-            )
         updated_record = self._industry_instance_repository.upsert_instance(
             record.model_copy(
                 update={
@@ -2318,7 +2403,10 @@ class _IndustryLifecycleMixin:
                 ],
                 assignment_statuses=[
                     assignment.status
-                    for assignment in assignment_by_goal_id.values()
+                    for assignment in self._list_assignment_records(
+                        updated_record.instance_id,
+                        cycle_id=current_cycle.id,
+                    )
                 ],
                 report_ids=[
                     report.id
@@ -2332,15 +2420,26 @@ class _IndustryLifecycleMixin:
                     _string(updated_record.autonomy_status) in {"learning", "coordinating"}
                 ),
             )
+        if execute_background:
+            self._sync_role_runtime_surfaces_for_record(record=updated_record)
+        else:
+            updated_record = (
+                self.reconcile_instance_status(updated_record.instance_id) or updated_record
+            )
+            self._sync_role_runtime_surfaces_for_record(record=updated_record)
+            self._sync_strategy_memory_for_instance(updated_record)
         acquisition_cycle: dict[str, Any] | None = None
         if kickoff_stage == "learning":
             acquisition_cycle = await _maybe_run_learning_acquisition_cycle()
         return {
-            "activated": bool(started_goal_ids or resumed_schedule_ids),
+            "activated": bool(started_assignment_ids or resumed_schedule_ids),
             "kickoff_stage": kickoff_stage,
+            "started_assignment_ids": started_assignment_ids,
+            "started_assignment_titles": started_assignment_titles,
+            "assignment_dispatches": assignment_dispatches,
             "started_goal_ids": started_goal_ids,
             "started_goal_titles": started_goal_titles,
-            "goal_dispatches": dispatches,
+            "goal_dispatches": [],
             "resumed_schedule_ids": resumed_schedule_ids,
             "resumed_schedule_titles": resumed_schedule_titles,
             "pending_execution_remaining": pending_execution_transition,
@@ -2354,30 +2453,20 @@ class _IndustryLifecycleMixin:
             return False
         if _string(record.autonomy_status) not in {"learning", "coordinating"}:
             return False
-        if self._list_live_kickoff_goals(record, stage="learning"):
+        if self._list_live_kickoff_assignments(record, stage="learning"):
             return False
-        pending_goals = self._list_pending_chat_kickoff_goals(record)
+        pending_assignments = self._list_pending_kickoff_assignments(record)
         pending_schedule_ids = self._list_pending_chat_kickoff_schedule_ids(
             instance_id=record.instance_id,
             schedule_ids=self._list_schedule_ids_for_instance(record.instance_id),
         )
         has_pending_learning = any(
-            self._resolve_goal_kickoff_stage(
-                goal,
-                override=override,
-                record=record,
-            )
-            == "learning"
-            for goal, override in pending_goals
+            self._resolve_assignment_kickoff_stage(assignment) == "learning"
+            for assignment in pending_assignments
         )
         has_pending_execution = any(
-            self._resolve_goal_kickoff_stage(
-                goal,
-                override=override,
-                record=record,
-            )
-            == "execution"
-            for goal, override in pending_goals
+            self._resolve_assignment_kickoff_stage(assignment) == "execution"
+            for assignment in pending_assignments
         )
         if self._schedule_repository is not None:
             for schedule_id in pending_schedule_ids:
@@ -3500,8 +3589,8 @@ class _IndustryLifecycleMixin:
                 result["goal_dispatches"] = []
                 if auto_resume is not None:
                     result["auto_resumed_execution"] = True
-                    result["auto_resumed_goal_ids"] = list(
-                        auto_resume.get("started_goal_ids") or [],
+                    result["auto_resumed_assignment_ids"] = list(
+                        auto_resume.get("started_assignment_ids") or [],
                     )
                 processed_instances.append(result)
             if limit is not None and len(processed_instances) >= limit:
@@ -3516,6 +3605,9 @@ class _IndustryLifecycleMixin:
         instance_id: str,
         assignment_ids: list[str] | None,
         actor: str,
+        allow_waiting_confirm: bool = False,
+        include_execution_core: bool = False,
+        execute_background: bool = False,
     ) -> dict[str, Any] | None:
         normalized_assignment_ids = _unique_strings(assignment_ids)
         if not normalized_assignment_ids:
@@ -3528,7 +3620,7 @@ class _IndustryLifecycleMixin:
         record = self.reconcile_instance_status(instance_id)
         if record is None:
             return None
-        if _string(record.autonomy_status) == "waiting-confirm":
+        if _string(record.autonomy_status) == "waiting-confirm" and not allow_waiting_confirm:
             return None
         current_cycle = self._current_operating_cycle_record(record.instance_id)
         cycle_id = current_cycle.id if current_cycle is not None else None
@@ -3558,7 +3650,9 @@ class _IndustryLifecycleMixin:
         dispatches: list[dict[str, Any]] = []
         for assignment in assignments:
             owner_agent_id = _string(assignment.owner_agent_id)
-            if owner_agent_id is None or is_execution_core_agent_id(owner_agent_id):
+            if owner_agent_id is None:
+                continue
+            if not include_execution_core and is_execution_core_agent_id(owner_agent_id):
                 continue
             assignment_tasks = list(tasks_by_assignment_id.get(assignment.id, []))
             if assignment.task_id is not None or any(
@@ -3626,7 +3720,7 @@ class _IndustryLifecycleMixin:
                             reason=admitted.summary or f"Task is in phase '{admitted.phase}'",
                             task_id=task.id,
                         )
-                elif admitted.phase == "executing":
+                elif admitted.phase == "executing" and not execute_background:
                     execution_result = await dispatcher.execute_task(task.id)
                 created_task_ids.append(task.id)
                 primary_task_id = primary_task_id or task.id
@@ -4260,6 +4354,7 @@ class _IndustryLifecycleMixin:
             "owner_agent_id": owner_agent_id or (lane.owner_agent_id if lane is not None else None),
             "actor_owner_id": owner_agent_id or (lane.owner_agent_id if lane is not None else None),
             "goal_kind": _string(metadata.get("goal_kind")) or (lane.lane_key if lane is not None else None),
+            "goal_id": assignment.goal_id,
             "task_mode": _string(metadata.get("task_mode")) or "autonomy-cycle",
             "lane_id": item.lane_id,
             "cycle_id": cycle.id,

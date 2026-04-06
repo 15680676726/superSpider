@@ -25,6 +25,9 @@ from starlette.background import BackgroundTask
 
 from ...kernel import KernelTask
 from ...kernel.main_brain_turn_result import MainBrainCommitState
+from .runtime_center_dependencies import _get_kernel_dispatcher
+from .runtime_center_mutation_helpers import _raise_dispatcher_error
+from .runtime_center_payloads import _model_dump_or_dict
 
 _HUMAN_ASSIST_RESUME_MAX_ATTEMPTS = 2
 _HUMAN_ASSIST_RESUME_RETRY_DELAY_SECONDS = 0.15
@@ -1033,7 +1036,14 @@ async def act_on_runtime_center_external_runtime(
     capability_service = getattr(request.app.state, "capability_service", None)
     if capability_service is None:
         raise HTTPException(503, detail="Capability service is not available.")
+    dispatcher = _get_kernel_dispatcher(request)
     resolved_action = str(payload.action or "").strip().lower() or "describe"
+    mount = capability_service.get_capability(payload.capability_id)
+    if mount is None:
+        raise HTTPException(
+            404,
+            detail=f"Capability '{payload.capability_id}' was not found.",
+        )
     task_payload: dict[str, object] = {
         "action": resolved_action,
         "session_mount_id": payload.session_mount_id,
@@ -1057,9 +1067,51 @@ async def act_on_runtime_center_external_runtime(
         owner_agent_id=payload.owner_agent_id or "runtime-center",
         environment_ref=payload.environment_ref,
         work_context_id=payload.work_context_id,
+        risk_level=(
+            mount.risk_level
+            if str(getattr(mount, "risk_level", "") or "").strip()
+            in {"auto", "guarded", "confirm"}
+            else "guarded"
+        ),
         payload=task_payload,
     )
-    return await capability_service.execute_task(task)
+    try:
+        admitted = await _call_runtime_query_method(
+            dispatcher,
+            "submit",
+            not_available_detail="Kernel dispatcher is not available.",
+            task=task,
+        )
+    except Exception as exc:  # pragma: no cover - translated below
+        _raise_dispatcher_error(exc)
+
+    admitted_payload = _model_dump_or_dict(admitted)
+    if admitted_payload is None:
+        raise HTTPException(
+            500,
+            detail="Kernel dispatcher admission result is not serializable.",
+        )
+    if str(admitted_payload.get("phase") or "").strip().lower() != "executing":
+        return admitted_payload
+
+    resolved_task_id = str(admitted_payload.get("task_id") or task.id).strip() or task.id
+    try:
+        result = await _call_runtime_query_method(
+            dispatcher,
+            "execute_task",
+            not_available_detail="Kernel dispatcher is not available.",
+            task_id=resolved_task_id,
+        )
+    except Exception as exc:  # pragma: no cover - translated below
+        _raise_dispatcher_error(exc)
+
+    result_payload = _model_dump_or_dict(result)
+    if result_payload is None:
+        raise HTTPException(
+            500,
+            detail="Kernel dispatcher execution result is not serializable.",
+        )
+    return result_payload
 
 
 @router.get(

@@ -17,13 +17,13 @@
 - `Task 3`: complete
   - runtime focus writeback 已收成 assignment focus；read-side 不再因为 selected assignment/backlog 伪造 `execution.current_focus_*`。
 - `Task 4`: partial
-  - acquisition approve/reject route regressions 已修，dispatcher-first + finalized decision payload 已落地；但 producer/kernel-task 一体化仍未完成，因此 fallback 仍存在。
+  - acquisition approve/reject route regressions 已修；runtime-center 与 learning review-gate 现在都已 dispatcher-first，runtime-center actor route fallback 已删除；但 producer/kernel-task 一体化仍未完成，learning runtime 内部 compatibility fallback 仍存在。
 - `Task 5`: partial
-  - backend query boundary 已收成只接受 canonical `assignment/backlog` focus；前端本轮补齐了 Runtime Center surface-only contract 的陈旧测试，但更大范围的本地 truth derivation 清理尚未完成。
+  - backend query boundary 已收成只接受 canonical `assignment/backlog` focus；前端本轮补齐了 Runtime Center surface-only contract 的陈旧测试；另外 `/runtime-center/external-runtimes/actions` 已切回 `kernel dispatcher submit -> execute_task` 并继承 mount risk，但更大范围的本地 truth derivation 与 capability front-door 绕路清理尚未完成。
 - `Task 6`: complete for this remediation round
   - `46问题文档.md`、`TASK_STATUS.md`、本计划文档已按本轮真实验证结果纠偏；更大范围的历史文档真实性治理仍需后续持续处理。
 - `Final Verification`: complete for the current remediation scope
-  - backend 回归矩阵已重新执行，`bootstrap_lifecycle.py` 本轮全量 `38 passed`；前端 targeted Vitest `19 passed`，`console build` 通过。
+  - backend 回归矩阵已重新执行，`bootstrap_lifecycle.py` 本轮全量 `38 passed`，industry kickoff focused slice `7 passed`，external runtime route focused regression `4 passed`；前端 targeted Vitest `19 passed`，`console build` 通过。
 
 ---
 

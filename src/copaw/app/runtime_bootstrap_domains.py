@@ -28,6 +28,7 @@ from ..kernel import (
     TaskDelegationService,
 )
 from ..kernel.main_brain_execution_planner import MainBrainExecutionPlanner
+from ..kernel.main_brain_intake import resolve_main_brain_intake_contract
 from ..learning import LearningService
 from ..learning.runtime_bindings import LearningRuntimeBindings
 from ..media import MediaService
@@ -328,6 +329,7 @@ def build_runtime_domain_services(
         LearningRuntimeBindings(
             industry_service=industry_service,
             capability_service=capability_service,
+            kernel_dispatcher=kernel_dispatcher,
             fixed_sop_service=fixed_sop_service,
             agent_profile_service=agent_profile_service,
             experience_memory_service=agent_experience_service,
@@ -413,6 +415,7 @@ def build_runtime_domain_services(
         query_execution_service=query_execution_service,
         session_backend=session_backend,
         environment_service=environment_service,
+        intake_contract_resolver=resolve_main_brain_intake_contract,
         execution_planner=MainBrainExecutionPlanner(
             knowledge_graph_service=knowledge_graph_service,
         ),

@@ -53,6 +53,7 @@ class LearningService:
     def configure_bindings(self, bindings: LearningRuntimeBindings) -> None:
         self._core.set_industry_service(bindings.industry_service)
         self._core.set_capability_service(bindings.capability_service)
+        self._core.set_kernel_dispatcher(bindings.kernel_dispatcher)
         self._core.set_fixed_sop_service(bindings.fixed_sop_service)
         self._core.set_agent_profile_service(bindings.agent_profile_service)
         self._core.set_experience_memory_service(bindings.experience_memory_service)
@@ -62,6 +63,9 @@ class LearningService:
 
     def set_capability_service(self, capability_service: object | None) -> None:
         self._core.set_capability_service(capability_service)
+
+    def set_kernel_dispatcher(self, kernel_dispatcher: object | None) -> None:
+        self._core.set_kernel_dispatcher(kernel_dispatcher)
 
     def set_fixed_sop_service(self, fixed_sop_service: object | None) -> None:
         self._core.set_fixed_sop_service(fixed_sop_service)

@@ -561,7 +561,17 @@
 - acquisition decision 路由回归本轮已修：
   - `Runtime Center` approve/reject acquisition decision 现在优先走 canonical dispatcher
   - dispatcher 为 sync/async 都可兼容
-  - 当前 fallback 只是在 acquisition proposal 尚未成为真实 kernel task 时兜底，producer-side 单一化仍未完成
+  - runtime-center actor route 的 acquisition 专属 fallback 已删除；当 kernel task 缺失时会显式返回 `404`
+  - learning review-gate approve/reject 现在也已接到 canonical dispatcher；但 producer-side 单一化仍未完成
+- capability execution 前门本轮新增一条真实收口：
+  - `POST /runtime-center/external-runtimes/actions` 现在已改成 `kernel dispatcher submit -> execute_task`
+  - 该路由会继承 capability mount 的正式 `risk_level`，`waiting-confirm` 不再偷跑执行
+  - focused verification：
+    - `python -m pytest tests/app/test_runtime_center_external_runtime_api.py -q` -> `4 passed`
+    - `python -m pytest tests/app/test_capabilities_execution.py -k "external_runtime or runtime_center" -q` -> `1 passed, 49 deselected`
+  - 当前诚实边界：
+    - 这只代表 external runtime action 这条前门已收住
+    - query-time delegate / react-agent builtin fallback / system dispatch 仍是下一轮 capability front-door 收口重点
 - 本轮重新执行并确认通过的正式验证：
   - `PYTHONPATH=src python -m pytest tests/state/test_human_assist_task_service.py -q` -> `15 passed`
   - `PYTHONPATH=src python -m pytest tests/app/test_runtime_human_assist_tasks_api.py -q` -> `14 passed`
@@ -573,6 +583,7 @@
   - `PYTHONPATH=src python -m pytest tests/app/test_operator_runtime_e2e.py -q` -> `9 passed`
   - `PYTHONPATH=src python -m pytest tests/app/test_runtime_canonical_flow_e2e.py -q` -> `4 passed`
   - `PYTHONPATH=src python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py -q` -> `38 passed`
+  - `python -m pytest tests/app/test_industry_service_wiring.py::test_kickoff_execution_from_chat_records_trigger_message_context_in_assignment_dispatch tests/app/industry_api_parts/bootstrap_lifecycle.py::test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch tests/app/industry_api_parts/kickoff_fixed_sop.py::test_industry_chat_kickoff_executes_in_background_without_blocking_response tests/app/industry_api_parts/kickoff_fixed_sop.py::test_industry_chat_kickoff_background_reuses_team_projection_instead_of_rematerializing_it_per_goal tests/app/industry_api_parts/retirement_chain.py::test_industry_chat_kickoff_executes_in_background_without_blocking_response tests/app/industry_api_parts/retirement_chain.py::test_industry_bootstrap_auto_activate_enters_live_coordinating_contract tests/app/industry_api_parts/retirement_chain.py::test_industry_runtime_main_chain_exposes_live_assignment_chain_after_auto_activate -q` -> `7 passed`
   - `npm --prefix console run test -- src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/routes/resolveSelectedKey.test.ts src/layouts/Sidebar.test.tsx src/pages/Settings/System/index.test.tsx` -> `19 passed`
   - `npm --prefix console run build` -> `通过`
 - 本轮验证边界说明：

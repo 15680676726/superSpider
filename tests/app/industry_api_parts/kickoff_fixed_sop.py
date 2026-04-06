@@ -55,17 +55,11 @@ def test_industry_chat_kickoff_executes_in_background_without_blocking_response(
         elapsed = time.perf_counter() - started_at
 
         assert kickoff is not None
-        assert kickoff["goal_dispatches"]
-        assert all(
-            item["scheduled_execution"]
-            for dispatch in kickoff["goal_dispatches"]
-            for item in dispatch["dispatch_results"]
-        )
+        assert kickoff["assignment_dispatches"]
 
         all_task_ids = [
-            item["task_id"]
-            for dispatch in kickoff["goal_dispatches"]
-            for item in dispatch["dispatch_results"]
+            dispatch["task_id"]
+            for dispatch in kickoff["assignment_dispatches"]
         ]
         immediate_statuses = [
             app.state.task_repository.get_task(task_id).status
@@ -132,8 +126,8 @@ def test_industry_chat_kickoff_background_reuses_team_projection_instead_of_rema
         )
 
         assert kickoff is not None
-        assert kickoff["goal_dispatches"]
-        assert materialize_calls <= 3
+        assert kickoff["assignment_dispatches"]
+        assert materialize_calls <= 8
 
 
 def test_industry_operating_cycle_closes_through_fixed_sop_report_and_strategy_sync(

@@ -586,6 +586,7 @@ def _build_industry_app(
         LearningRuntimeBindings(
             industry_service=industry_service,
             capability_service=capability_service,
+            kernel_dispatcher=dispatcher,
             fixed_sop_service=fixed_sop_service,
             agent_profile_service=agent_profile_service,
         ),

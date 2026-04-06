@@ -72,6 +72,17 @@ def _get_learning_service(request: Request) -> LearningService:
 LearningServiceDep = Annotated[LearningService, Depends(_get_learning_service)]
 
 
+def _model_dump_or_dict(value: object | None) -> dict[str, object] | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if hasattr(value, "model_dump"):
+        payload = value.model_dump(mode="json")
+        return payload if isinstance(payload, dict) else None
+    return None
+
+
 @router.get("/proposals", response_model=list[dict[str, object]])
 async def list_proposals(
     service: LearningServiceDep,
@@ -162,10 +173,32 @@ async def approve_acquisition_proposal(
     payload: PatchActionRequest,
 ) -> dict[str, object]:
     try:
-        result = await service.approve_acquisition_proposal(
-            proposal_id,
-            approved_by=payload.actor,
-        )
+        proposal = service.get_acquisition_proposal(proposal_id)
+        dispatcher = getattr(service, "_kernel_dispatcher", None)
+        kernel_result_payload: dict[str, object] | None = None
+        if (
+            dispatcher is not None
+            and proposal.status == "open"
+            and proposal.decision_request_id is not None
+        ):
+            kernel_result = await dispatcher.approve_decision(
+                proposal.decision_request_id,
+                resolution=f"Approved by {payload.actor}.",
+            )
+            result = await service.finalize_resolved_decision(
+                proposal.decision_request_id,
+                status="approved",
+                actor=payload.actor,
+            )
+            kernel_result_payload = (
+                _model_dump_or_dict(result.get("kernel_result"))
+                or kernel_result.model_dump(mode="json")
+            )
+        else:
+            result = await service.approve_acquisition_proposal(
+                proposal_id,
+                approved_by=payload.actor,
+            )
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -187,6 +220,7 @@ async def approve_acquisition_proposal(
             if result.get("decision_request") is not None
             else None
         ),
+        "kernel_result": kernel_result_payload,
     }
 
 
@@ -197,10 +231,32 @@ async def reject_acquisition_proposal(
     payload: PatchActionRequest,
 ) -> dict[str, object]:
     try:
-        result = service.reject_acquisition_proposal(
-            proposal_id,
-            rejected_by=payload.actor,
-        )
+        proposal = service.get_acquisition_proposal(proposal_id)
+        dispatcher = getattr(service, "_kernel_dispatcher", None)
+        kernel_result_payload: dict[str, object] | None = None
+        if (
+            dispatcher is not None
+            and proposal.status == "open"
+            and proposal.decision_request_id is not None
+        ):
+            kernel_result = dispatcher.reject_decision(
+                proposal.decision_request_id,
+                resolution=f"Rejected by {payload.actor}.",
+            )
+            result = await service.finalize_resolved_decision(
+                proposal.decision_request_id,
+                status="rejected",
+                actor=payload.actor,
+            )
+            kernel_result_payload = (
+                _model_dump_or_dict(result.get("kernel_result"))
+                or kernel_result.model_dump(mode="json")
+            )
+        else:
+            result = service.reject_acquisition_proposal(
+                proposal_id,
+                rejected_by=payload.actor,
+            )
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -212,6 +268,7 @@ async def reject_acquisition_proposal(
             if result.get("decision_request") is not None
             else None
         ),
+        "kernel_result": kernel_result_payload,
     }
 
 

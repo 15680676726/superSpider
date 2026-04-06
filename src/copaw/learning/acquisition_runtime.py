@@ -5,6 +5,7 @@ from hashlib import sha1
 
 from ..evidence import EvidenceRecord
 from ..industry.models import IndustryBootstrapInstallItem
+from ..kernel import KernelResult, KernelTask
 from ..state import DecisionRequestRecord, TaskRecord
 from .models import (
     CapabilityAcquisitionProposal,
@@ -211,10 +212,22 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
                 f"DecisionRequest '{decision_id}' does not reference an acquisition proposal",
             )
         if status == "approved":
-            return await self.approve_acquisition_proposal(
+            result = await self.approve_acquisition_proposal(
                 proposal_id,
                 approved_by=actor,
             )
+            proposal = result.get("proposal")
+            plan = result.get("plan")
+            run = result.get("onboarding_run")
+            if isinstance(proposal, CapabilityAcquisitionProposal):
+                kernel_result = self._close_kernel_task_after_acquisition_approval(
+                    proposal=proposal,
+                    plan=plan if isinstance(plan, InstallBindingPlan) else None,
+                    run=run if isinstance(run, OnboardingRun) else None,
+                )
+                if kernel_result is not None:
+                    result["kernel_result"] = kernel_result
+            return result
         if status == "rejected":
             return self.reject_acquisition_proposal(
                 proposal_id,
@@ -1080,6 +1093,12 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
         ]
         if open_requests:
             return open_requests[0]
+        _task, decision = self._ensure_kernel_backed_acquisition_task(
+            proposal,
+            requested_by=requested_by,
+        )
+        if decision is not None:
+            return decision
         decision = DecisionRequestRecord(
             task_id=proposal.id,
             decision_type="acquisition-approval",
@@ -1159,10 +1178,152 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
             return "running"
         return "queued"
 
+    def _kernel_task_store(self) -> object | None:
+        dispatcher = getattr(self, "_kernel_dispatcher", None)
+        if dispatcher is None:
+            return None
+        return getattr(dispatcher, "task_store", None)
+
+    def _build_acquisition_kernel_task(
+        self,
+        proposal: CapabilityAcquisitionProposal,
+        *,
+        existing: KernelTask | None = None,
+    ) -> KernelTask:
+        payload = dict(existing.payload) if existing is not None else {}
+        payload.update(
+            {
+                "proposal_id": proposal.id,
+                "industry_instance_id": proposal.industry_instance_id,
+                "acquisition_kind": proposal.acquisition_kind,
+                "decision_type": "acquisition-approval",
+                "decision_summary": (
+                    f"Approve acquisition proposal '{proposal.title}' before materializing it."
+                ),
+            },
+        )
+        task_segment = (
+            dict(existing.task_segment)
+            if existing is not None
+            else {
+                "kind": "learning-acquisition",
+                "proposal_id": proposal.id,
+                "acquisition_kind": proposal.acquisition_kind,
+            }
+        )
+        return KernelTask(
+            id=proposal.id,
+            trace_id=existing.trace_id if existing is not None else f"trace:{proposal.id}",
+            goal_id=existing.goal_id if existing is not None else None,
+            parent_task_id=existing.parent_task_id if existing is not None else None,
+            work_context_id=existing.work_context_id if existing is not None else None,
+            title=proposal.title,
+            capability_ref=existing.capability_ref if existing is not None else None,
+            environment_ref=existing.environment_ref if existing is not None else None,
+            owner_agent_id=proposal.target_agent_id or _MAIN_BRAIN_ACTOR,
+            actor_owner_id=existing.actor_owner_id if existing is not None else None,
+            phase=existing.phase if existing is not None else "pending",
+            risk_level=proposal.risk_level,  # type: ignore[arg-type]
+            task_segment=task_segment,
+            resume_point=dict(existing.resume_point) if existing is not None else {},
+            payload=payload,
+            created_at=existing.created_at if existing is not None else proposal.created_at,
+            updated_at=_utc_now(),
+        )
+
+    def _ensure_kernel_backed_acquisition_task(
+        self,
+        proposal: CapabilityAcquisitionProposal,
+        *,
+        requested_by: str | None = None,
+    ) -> tuple[KernelTask | None, DecisionRequestRecord | None]:
+        dispatcher = getattr(self, "_kernel_dispatcher", None)
+        task_store = self._kernel_task_store()
+        if dispatcher is None or task_store is None:
+            return None, None
+        existing = task_store.get(proposal.id)
+        if existing is None:
+            admitted = dispatcher.submit(self._build_acquisition_kernel_task(proposal))
+            existing = task_store.get(proposal.id)
+            decision = (
+                task_store.get_decision_request(admitted.decision_request_id)
+                if admitted.decision_request_id is not None
+                else self._get_acquisition_decision(proposal.id)
+            )
+            return existing, decision
+        task_store.upsert(
+            self._build_acquisition_kernel_task(
+                proposal,
+                existing=existing,
+            ),
+        )
+        refreshed = task_store.get(proposal.id)
+        decision = self._get_acquisition_decision(proposal.id)
+        if (
+            decision is None
+            and refreshed is not None
+            and refreshed.phase == "waiting-confirm"
+            and self._proposal_requires_manual_approval(proposal)
+        ):
+            decision = task_store.ensure_decision_request(
+                refreshed,
+                requested_by=requested_by,
+            )
+        return refreshed, decision
+
+    def _close_kernel_task_after_acquisition_approval(
+        self,
+        *,
+        proposal: CapabilityAcquisitionProposal,
+        plan: InstallBindingPlan | None,
+        run: OnboardingRun | None,
+    ) -> KernelResult | None:
+        dispatcher = getattr(self, "_kernel_dispatcher", None)
+        task_store = self._kernel_task_store()
+        if dispatcher is None or task_store is None:
+            return None
+        task = task_store.get(proposal.id)
+        if task is None:
+            return None
+        if task.phase in {"completed", "failed", "cancelled"}:
+            return KernelResult(
+                task_id=task.id,
+                trace_id=task.trace_id,
+                success=task.phase == "completed",
+                phase=task.phase,
+                summary=(
+                    (run.summary if run is not None else None)
+                    or (plan.blocked_reason if plan is not None else None)
+                    or proposal.title
+                ),
+                decision_request_id=proposal.decision_request_id,
+            )
+        if proposal.status == "applied":
+            return dispatcher.complete_task(
+                proposal.id,
+                summary=(
+                    (run.summary if run is not None else None)
+                    or f"Acquisition proposal '{proposal.title}' completed."
+                ),
+            )
+        if proposal.status == "blocked":
+            return dispatcher.fail_task(
+                proposal.id,
+                error=(
+                    (run.summary if run is not None else None)
+                    or (plan.blocked_reason if plan is not None else None)
+                    or f"Acquisition proposal '{proposal.title}' failed."
+                ),
+            )
+        return None
+
     def _ensure_acquisition_task(
         self,
         proposal: CapabilityAcquisitionProposal,
     ) -> None:
+        kernel_task, _decision = self._ensure_kernel_backed_acquisition_task(proposal)
+        if kernel_task is not None:
+            return
         if self._task_repo is None:
             return
         existing = self._task_repo.get_task(proposal.id)

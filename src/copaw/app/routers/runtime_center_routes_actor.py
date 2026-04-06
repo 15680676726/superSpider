@@ -624,15 +624,7 @@ async def approve_decision(
             execute=payload.execute if payload is not None else None,
         )
     except KeyError as exc:
-        if not (
-            is_acquisition_decision
-            and "not found in kernel" in str(exc).lower()
-        ):
-            _raise_dispatcher_error(exc)
-        response_payload = {
-            "decision_request_id": decision_id,
-            "summary": str(exc),
-        }
+        _raise_dispatcher_error(exc)
     except Exception as exc:  # pragma: no cover - mapped explicitly below
         _raise_dispatcher_error(exc)
     else:
@@ -671,7 +663,9 @@ async def approve_decision(
             "proposal": _model_dump_or_dict(finalized.get("proposal")),
             "plan": _model_dump_or_dict(finalized.get("plan")),
             "onboarding_run": _model_dump_or_dict(finalized.get("onboarding_run")),
-            "kernel_result": response_payload,
+            "kernel_result": (
+                _model_dump_or_dict(finalized.get("kernel_result")) or response_payload
+            ),
         }
     if _schedule_query_tool_confirmation_resume(
         request,
@@ -713,15 +707,7 @@ async def reject_decision(
             resolution=payload.resolution if payload is not None else None,
         )
     except KeyError as exc:
-        if not (
-            is_acquisition_decision
-            and "not found in kernel" in str(exc).lower()
-        ):
-            _raise_dispatcher_error(exc)
-        response_payload = {
-            "decision_request_id": decision_id,
-            "summary": str(exc),
-        }
+        _raise_dispatcher_error(exc)
     except Exception as exc:  # pragma: no cover - mapped explicitly below
         _raise_dispatcher_error(exc)
     else:
@@ -758,7 +744,9 @@ async def reject_decision(
             "decision_request_id": resolved_decision_id,
             "decision": decision_payload,
             "proposal": _model_dump_or_dict(finalized.get("proposal")),
-            "kernel_result": response_payload,
+            "kernel_result": (
+                _model_dump_or_dict(finalized.get("kernel_result")) or response_payload
+            ),
         }
     return response_payload
 

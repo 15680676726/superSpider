@@ -62,6 +62,7 @@ class LearningRuntimeCore:
         self._runtime_event_bus = runtime_event_bus
         self._industry_service: object | None = None
         self._capability_service: object | None = None
+        self._kernel_dispatcher: object | None = None
         self._fixed_sop_service: object | None = None
         self._agent_profile_service: object | None = None
         self._experience_memory_service: object | None = None
@@ -78,6 +79,9 @@ class LearningRuntimeCore:
 
     def set_capability_service(self, capability_service: object | None) -> None:
         self._capability_service = capability_service
+
+    def set_kernel_dispatcher(self, kernel_dispatcher: object | None) -> None:
+        self._kernel_dispatcher = kernel_dispatcher
 
     def set_fixed_sop_service(self, fixed_sop_service: object | None) -> None:
         self._fixed_sop_service = fixed_sop_service

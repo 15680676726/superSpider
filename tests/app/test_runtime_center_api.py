@@ -197,6 +197,76 @@ def test_runtime_center_decision_reject_prefers_canonical_dispatcher_for_acquisi
     assert payload["proposal"]["status"] == "rejected"
 
 
+def test_runtime_center_decision_approve_surfaces_kernel_missing_task_for_acquisition() -> None:
+    class _DecisionRepository:
+        def get_decision_request(self, decision_id: str):
+            assert decision_id == "decision-acq-missing-approve"
+            return DecisionRequestRecord(
+                id=decision_id,
+                task_id="proposal-missing",
+                decision_type="acquisition-approval",
+                risk_level="confirm",
+                summary="Approve acquisition proposal",
+                requested_by="learning-service",
+            )
+
+    class _Dispatcher:
+        async def approve_decision(self, decision_id: str, **kwargs):
+            raise KeyError("Task 'proposal-missing' not found in kernel")
+
+    class _LearningService:
+        async def finalize_resolved_decision(self, *args, **kwargs):
+            raise AssertionError("route should not fall back to learning finalization")
+
+    app = FastAPI()
+    app.include_router(runtime_center_router)
+    app.state.kernel_dispatcher = _Dispatcher()
+    app.state.learning_service = _LearningService()
+    app.state.decision_request_repository = _DecisionRepository()
+
+    client = TestClient(app)
+
+    response = client.post("/runtime-center/decisions/decision-acq-missing-approve/approve")
+
+    assert response.status_code == 404
+    assert "not found in kernel" in response.json()["detail"]
+
+
+def test_runtime_center_decision_reject_surfaces_kernel_missing_task_for_acquisition() -> None:
+    class _DecisionRepository:
+        def get_decision_request(self, decision_id: str):
+            assert decision_id == "decision-acq-missing-reject"
+            return DecisionRequestRecord(
+                id=decision_id,
+                task_id="proposal-missing",
+                decision_type="acquisition-approval",
+                risk_level="confirm",
+                summary="Reject acquisition proposal",
+                requested_by="learning-service",
+            )
+
+    class _Dispatcher:
+        def reject_decision(self, decision_id: str, **kwargs):
+            raise KeyError("Task 'proposal-missing' not found in kernel")
+
+    class _LearningService:
+        def finalize_resolved_decision(self, *args, **kwargs):
+            raise AssertionError("route should not fall back to learning finalization")
+
+    app = FastAPI()
+    app.include_router(runtime_center_router)
+    app.state.kernel_dispatcher = _Dispatcher()
+    app.state.learning_service = _LearningService()
+    app.state.decision_request_repository = _DecisionRepository()
+
+    client = TestClient(app)
+
+    response = client.post("/runtime-center/decisions/decision-acq-missing-reject/reject")
+
+    assert response.status_code == 404
+    assert "not found in kernel" in response.json()["detail"]
+
+
 def test_task_review_projects_acceptance_closeout_visibility() -> None:
     now = datetime(2026, 3, 27, 10, 0, tzinfo=timezone.utc)
     payload = build_task_review_payload(

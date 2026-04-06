@@ -68,6 +68,7 @@ def _build_learning_app(tmp_path) -> FastAPI:
         ),
         capability_service=capability_service,
     )
+    learning_service.set_kernel_dispatcher(kernel_dispatcher)
     app.state.learning_service = learning_service
     app.state.learning_engine = learning_service.engine
     app.state.capability_service = capability_service
@@ -273,6 +274,7 @@ def test_learning_service_configure_bindings_sets_runtime_collaborators(tmp_path
     service = app.state.learning_service
     industry_service = object()
     capability_service = object()
+    kernel_dispatcher = object()
     fixed_sop_service = object()
     agent_profile_service = object()
     experience_memory_service = object()
@@ -281,6 +283,7 @@ def test_learning_service_configure_bindings_sets_runtime_collaborators(tmp_path
         LearningRuntimeBindings(
             industry_service=industry_service,
             capability_service=capability_service,
+            kernel_dispatcher=kernel_dispatcher,
             fixed_sop_service=fixed_sop_service,
             agent_profile_service=agent_profile_service,
             experience_memory_service=experience_memory_service,
@@ -289,6 +292,7 @@ def test_learning_service_configure_bindings_sets_runtime_collaborators(tmp_path
 
     assert service._industry_service is industry_service
     assert service._capability_service is capability_service
+    assert service._kernel_dispatcher is kernel_dispatcher
     assert service._fixed_sop_service is fixed_sop_service
     assert service._agent_profile_service is agent_profile_service
     assert service._experience_memory_service is experience_memory_service
@@ -727,6 +731,56 @@ def test_learning_api_acquisition_review_gate_approves_and_materializes(
     assert approve_payload["plan"]["status"] == "applied"
     assert approve_payload["onboarding_run"]["status"] == "passed"
     assert approve_payload["decision_request"]["status"] == "approved"
+    assert approve_payload["kernel_result"]["phase"] == "completed"
+    assert app.state.kernel_dispatcher.task_store.get(proposal_id).phase == "completed"
+
+
+def test_learning_api_acquisition_review_gate_rejects_through_kernel(
+    tmp_path,
+) -> None:
+    class _ReviewDiscoveryService(_FakeDiscoveryService):
+        async def discover(self, payload: dict[str, object]) -> dict[str, object]:
+            result = await super().discover(payload)
+            recommendation = dict(result["recommendations"][0])
+            recommendation["review_required"] = True
+            recommendation["risk_level"] = "confirm"
+            result["recommendations"] = [recommendation]
+            return result
+
+    class _ReviewCapabilityService(_FakeCapabilityService):
+        def __init__(self) -> None:
+            self._discovery_service = _ReviewDiscoveryService()
+
+    app = _build_learning_app(tmp_path)
+    app.state.learning_service.set_industry_service(_FakeIndustryService())
+    app.state.learning_service.set_capability_service(_ReviewCapabilityService())
+    app.state.learning_service.set_agent_profile_service(
+        SimpleNamespace(
+            get_capability_surface=lambda agent_id: {
+                "effective_capabilities": [],
+            },
+        ),
+    )
+    client = TestClient(app)
+
+    run_response = client.post(
+        "/learning/acquisition/run",
+        json={"industry_instance_id": "industry-v1-demo"},
+    )
+    assert run_response.status_code == 200
+    payload = run_response.json()
+    proposal_id = payload["proposals"][0]["id"]
+
+    reject_response = client.post(
+        f"/learning/acquisition/proposals/{proposal_id}/reject",
+        json={"actor": "reviewer"},
+    )
+    assert reject_response.status_code == 200
+    reject_payload = reject_response.json()
+    assert reject_payload["proposal"]["status"] == "rejected"
+    assert reject_payload["decision_request"]["status"] == "rejected"
+    assert reject_payload["kernel_result"]["phase"] == "cancelled"
+    assert app.state.kernel_dispatcher.task_store.get(proposal_id).phase == "cancelled"
 
 
 def test_runtime_center_decision_routes_handle_acquisition_rejection(tmp_path) -> None:
@@ -776,6 +830,56 @@ def test_runtime_center_decision_routes_handle_acquisition_rejection(tmp_path) -
     proposal_detail = client.get(f"/learning/acquisition/proposals/{proposal_id}")
     assert proposal_detail.status_code == 200
     assert proposal_detail.json()["status"] == "rejected"
+
+
+def test_learning_acquisition_run_admits_confirm_proposal_into_kernel_waiting_confirm(
+    tmp_path,
+) -> None:
+    class _ReviewDiscoveryService(_FakeDiscoveryService):
+        async def discover(self, payload: dict[str, object]) -> dict[str, object]:
+            result = await super().discover(payload)
+            recommendation = dict(result["recommendations"][0])
+            recommendation["review_required"] = True
+            recommendation["risk_level"] = "confirm"
+            result["recommendations"] = [recommendation]
+            return result
+
+    class _ReviewCapabilityService(_FakeCapabilityService):
+        def __init__(self) -> None:
+            self._discovery_service = _ReviewDiscoveryService()
+
+    app = _build_learning_app(tmp_path)
+    app.state.learning_service.set_industry_service(_FakeIndustryService())
+    app.state.learning_service.set_capability_service(_ReviewCapabilityService())
+    app.state.learning_service.set_agent_profile_service(
+        SimpleNamespace(
+            get_capability_surface=lambda agent_id: {
+                "effective_capabilities": [],
+            },
+        ),
+    )
+    client = TestClient(app)
+
+    run_response = client.post(
+        "/learning/acquisition/run",
+        json={"industry_instance_id": "industry-v1-demo"},
+    )
+    assert run_response.status_code == 200
+    payload = run_response.json()
+    proposal = payload["proposals"][0]
+    proposal_id = proposal["id"]
+    decision_id = payload["decision_requests"][0]["id"]
+
+    kernel_task = app.state.kernel_dispatcher.task_store.get(proposal_id)
+    assert kernel_task is not None
+    assert kernel_task.id == proposal_id
+    assert kernel_task.title == proposal["title"]
+    assert kernel_task.phase == "waiting-confirm"
+    assert kernel_task.risk_level == "confirm"
+    assert (
+        app.state.decision_request_repository.get_decision_request(decision_id).task_id
+        == proposal_id
+    )
 
 
 def test_runtime_center_decision_routes_approve_acquisition_without_legacy_proposal_special_case(
@@ -852,6 +956,7 @@ def test_runtime_center_decision_routes_approve_acquisition_without_legacy_propo
     assert approve_payload["proposal"]["id"] == proposal_id
     assert approve_payload["plan"]["status"] == "applied"
     assert approve_payload["onboarding_run"]["status"] == "passed"
+    assert approve_payload["kernel_result"]["phase"] == "completed"
 
 
 def test_runtime_center_decision_routes_reject_acquisition_without_legacy_proposal_special_case(
@@ -912,3 +1017,4 @@ def test_runtime_center_decision_routes_reject_acquisition_without_legacy_propos
     assert reject_payload["decision"]["status"] == "rejected"
     assert reject_payload["proposal"]["status"] == "rejected"
     assert reject_payload["proposal"]["id"] == proposal_id
+    assert reject_payload["kernel_result"]["phase"] == "cancelled"

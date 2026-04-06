@@ -10,6 +10,7 @@ class LearningRuntimeBindings:
 
     industry_service: object | None = None
     capability_service: object | None = None
+    kernel_dispatcher: object | None = None
     fixed_sop_service: object | None = None
     agent_profile_service: object | None = None
     experience_memory_service: object | None = None
