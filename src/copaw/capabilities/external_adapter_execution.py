@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
 import importlib
+import inspect
 import json
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from ..app.mcp.manager import MCPClientManager
+from ..config.config import MCPClientConfig
 from .execution_support import (
     _tool_response_payload,
     _tool_response_success,
@@ -47,7 +51,23 @@ def _mcp_client_key(call_surface_ref: str | None) -> str | None:
         return None
     if surface.startswith("mcp:"):
         return surface.split(":", 1)[1].strip() or None
-    return surface
+    return None
+
+
+def _resolve_script_command_path(script_name: str, *, scripts_dir: str) -> str | None:
+    normalized = _string(script_name)
+    base_dir = _string(scripts_dir)
+    if normalized is None or base_dir is None:
+        return None
+    normalized_base = base_dir.rstrip("/\\")
+    for suffix in (".exe", "-script.py", ".cmd", ".bat", ""):
+        candidate = f"{normalized_base}\\{normalized}{suffix}"
+        try:
+            with open(candidate, "rb"):
+                return candidate
+        except OSError:
+            continue
+    return None
 
 
 def _http_request(
@@ -91,13 +111,39 @@ def _resolve_sdk_callable(
     normalized = ref
     if normalized.startswith("module:"):
         normalized = normalized[len("module:") :]
-    if ":" not in normalized:
+    surface_ref = _string(call_surface_ref)
+    if ":" in normalized:
+        module_name, callable_name = normalized.split(":", 1)
+    elif surface_ref is not None and surface_ref.startswith("module:"):
+        module_name = surface_ref[len("module:") :]
+        callable_name = normalized
+    else:
         raise ValueError("SDK callable ref must look like module.path:callable_name")
-    module_name, callable_name = normalized.rsplit(":", 1)
     module = importlib.import_module(module_name)
-    target = getattr(module, callable_name, None)
-    if target is None:
-        raise ValueError(f"SDK callable '{callable_name}' not found in '{module_name}'")
+    segments = [segment for segment in callable_name.split(".") if segment]
+    target: object = module
+    for index, segment in enumerate(segments):
+        target = getattr(target, segment, None)
+        if target is None:
+            raise ValueError(
+                f"SDK callable '{callable_name}' not found in '{module_name}'"
+            )
+        if inspect.isclass(target) and index < len(segments) - 1:
+            signature = inspect.signature(target)
+            required = [
+                parameter
+                for parameter in signature.parameters.values()
+                if parameter.kind
+                not in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD)
+                and parameter.default is inspect._empty
+            ]
+            if required:
+                raise ValueError(
+                    f"SDK class '{target.__name__}' requires constructor arguments."
+                )
+            target = target()
+    if not callable(target):
+        raise ValueError(f"SDK callable '{callable_name}' is not callable.")
     return target
 
 
@@ -140,6 +186,7 @@ class ExternalAdapterExecution:
         transport_action_ref = _string(action.get("transport_action_ref")) or action_id
         if transport_kind == "mcp":
             return await self._execute_mcp_action(
+                mount=mount,
                 contract=contract,
                 action_id=action_id,
                 transport_action_ref=transport_action_ref,
@@ -165,50 +212,87 @@ class ExternalAdapterExecution:
     async def _execute_mcp_action(
         self,
         *,
+        mount: CapabilityMount,
         contract: dict[str, Any],
         action_id: str,
         transport_action_ref: str,
         payload: dict[str, Any],
     ) -> dict[str, object]:
-        if self._mcp_manager is None:
+        call_surface_ref = _string(contract.get("call_surface_ref"))
+        client_key = _mcp_client_key(call_surface_ref)
+        temp_manager: MCPClientManager | None = None
+        try:
+            if client_key is not None:
+                if self._mcp_manager is None:
+                    return {
+                        "success": False,
+                        "summary": "MCP manager is not available.",
+                        "error": "MCP manager is not available.",
+                    }
+                client = await self._mcp_manager.get_client(client_key)
+            else:
+                scripts_dir = _string((mount.metadata or {}).get("scripts_dir")) or ""
+                python_path = _string((mount.metadata or {}).get("python_path"))
+                environment_root = _string((mount.metadata or {}).get("environment_root")) or ""
+                command: str | None = None
+                args: list[str] = []
+                if call_surface_ref is not None and call_surface_ref.startswith("script:"):
+                    command = _resolve_script_command_path(
+                        call_surface_ref.split(":", 1)[1],
+                        scripts_dir=scripts_dir,
+                    )
+                elif call_surface_ref is not None and call_surface_ref.startswith("module:"):
+                    module_name = call_surface_ref.split(":", 1)[1].strip()
+                    if python_path is not None and module_name:
+                        command = python_path
+                        args = ["-m", module_name]
+                if command is None:
+                    return {
+                        "success": False,
+                        "summary": "Adapter MCP transport is missing a resolvable stdio command.",
+                        "error": "Adapter MCP transport is missing a resolvable stdio command.",
+                    }
+                temp_manager = MCPClientManager()
+                client_key = "adapter-stdio-probe"
+                await temp_manager.replace_client(
+                    client_key,
+                    MCPClientConfig(
+                        name=mount.name or mount.id,
+                        command=command,
+                        args=args,
+                        cwd=environment_root,
+                    ),
+                    timeout=30.0,
+                )
+                client = await temp_manager.get_client(client_key)
+            if client is None:
+                return {
+                    "success": False,
+                    "summary": f"MCP client '{client_key}' not found or not connected.",
+                    "error": f"MCP client '{client_key}' not found or not connected.",
+                }
+            callable_fn = await client.get_callable_function(
+                transport_action_ref,
+                wrap_tool_result=True,
+                execution_timeout=None,
+            )
+            response = await callable_fn(**payload)
+            summary = _tool_response_summary(response)
+            success = _tool_response_success(response)
+            response_payload = _tool_response_payload(response)
             return {
-                "success": False,
-                "summary": "MCP manager is not available.",
-                "error": "MCP manager is not available.",
+                "success": success,
+                "summary": summary,
+                "adapter_action": action_id,
+                "transport_kind": "mcp",
+                "client_key": client_key,
+                "tool_name": transport_action_ref,
+                "output": response_payload,
+                "error": None if success else summary,
             }
-        client_key = _mcp_client_key(_string(contract.get("call_surface_ref")))
-        if client_key is None:
-            return {
-                "success": False,
-                "summary": "Adapter MCP client key is missing.",
-                "error": "Adapter MCP client key is missing.",
-            }
-        client = await self._mcp_manager.get_client(client_key)
-        if client is None:
-            return {
-                "success": False,
-                "summary": f"MCP client '{client_key}' not found or not connected.",
-                "error": f"MCP client '{client_key}' not found or not connected.",
-            }
-        callable_fn = await client.get_callable_function(
-            transport_action_ref,
-            wrap_tool_result=True,
-            execution_timeout=None,
-        )
-        response = await callable_fn(**payload)
-        summary = _tool_response_summary(response)
-        success = _tool_response_success(response)
-        response_payload = _tool_response_payload(response)
-        return {
-            "success": success,
-            "summary": summary,
-            "adapter_action": action_id,
-            "transport_kind": "mcp",
-            "client_key": client_key,
-            "tool_name": transport_action_ref,
-            "output": response_payload,
-            "error": None if success else summary,
-        }
+        finally:
+            if temp_manager is not None:
+                await temp_manager.close_all()
 
     async def _execute_http_action(
         self,
@@ -225,7 +309,7 @@ class ExternalAdapterExecution:
                 "summary": "HTTP adapter base URL is missing.",
                 "error": "HTTP adapter base URL is missing.",
             }
-        success, summary, output = await __import__("asyncio").to_thread(
+        success, summary, output = await asyncio.to_thread(
             _http_request,
             base_url=base_url,
             transport_action_ref=transport_action_ref,

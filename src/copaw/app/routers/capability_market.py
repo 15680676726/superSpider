@@ -59,6 +59,7 @@ from ...capabilities.external_adapter_contracts import (
 )
 from ...capabilities.project_donor_contracts import (
     build_github_python_project_transport_chain,
+    discover_installed_python_callable_actions,
     parse_pip_install_report_requested_distribution,
     resolve_installed_python_project_contract,
 )
@@ -1152,6 +1153,12 @@ async def _install_external_project_capability(
             "execute_command": resolved_execute_command,
             "healthcheck_command": resolved_healthcheck_command,
         }
+        if capability_kind == "adapter":
+            surface_metadata = discover_installed_python_callable_actions(
+                metadata=surface_metadata,
+                python_path=final_environment["python_path"],
+                scripts_dir=final_environment["scripts_dir"],
+            )
         protocol_surface = classify_external_protocol_surface(metadata=surface_metadata)
         compiled_adapter_contract = compile_external_adapter_contract(
             capability_id=capability_id,

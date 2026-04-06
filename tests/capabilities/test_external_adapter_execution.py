@@ -32,6 +32,24 @@ class _FakeMCPManager:
         return None
 
 
+class _FakeEphemeralMCPManager:
+    def __init__(self) -> None:
+        self._client = _FakeMCPClient()
+        self.replace_calls: list[tuple[str, object, float]] = []
+        self.closed = False
+
+    async def replace_client(self, key: str, client_config, timeout: float = 60.0) -> None:
+        self.replace_calls.append((key, client_config, timeout))
+
+    async def get_client(self, client_key: str):
+        if client_key == "adapter-stdio-probe":
+            return self._client
+        return None
+
+    async def close_all(self) -> None:
+        self.closed = True
+
+
 def _build_mount() -> CapabilityMount:
     return CapabilityMount(
         id="adapter:openspace",
@@ -76,3 +94,63 @@ def test_compiled_mcp_adapter_action_calls_bound_transport() -> None:
     assert result["adapter_action"] == "execute_task"
     assert result["transport_kind"] == "mcp"
     assert result["summary"] == "Ran execute_task with {'task': 'hello'}"
+
+
+def test_compiled_script_mcp_adapter_action_uses_ephemeral_stdio_client(
+    monkeypatch,
+) -> None:
+    execution = ExternalAdapterExecution(
+        mcp_manager=None,
+        environment_service=None,
+    )
+    temp_manager = _FakeEphemeralMCPManager()
+    monkeypatch.setattr(
+        "copaw.capabilities.external_adapter_execution.MCPClientManager",
+        lambda: temp_manager,
+    )
+    monkeypatch.setattr(
+        "copaw.capabilities.external_adapter_execution._resolve_script_command_path",
+        lambda script_name, *, scripts_dir: f"{scripts_dir}/{script_name}.exe",
+    )
+    mount = CapabilityMount(
+        id="adapter:openspace",
+        name="openspace",
+        summary="Governed external adapter compiled into formal CoPaw business actions.",
+        kind="adapter",
+        source_kind="adapter",
+        risk_level="guarded",
+        metadata={
+            "scripts_dir": "D:/fake/.venv/Scripts",
+            "adapter_contract": {
+                "compiled_adapter_id": "adapter:openspace",
+                "transport_kind": "mcp",
+                "call_surface_ref": "script:openspace-mcp",
+                "actions": [
+                    {
+                        "action_id": "execute_task",
+                        "transport_action_ref": "execute_task",
+                        "input_schema": {"type": "object"},
+                        "output_schema": {},
+                    },
+                ],
+            },
+        },
+    )
+
+    result = asyncio.run(
+        execution.execute_action(
+            mount=mount,
+            action_id="execute_task",
+            payload={"task": "hello"},
+        ),
+    )
+
+    assert result["success"] is True
+    assert result["transport_kind"] == "mcp"
+    assert result["tool_name"] == "execute_task"
+    assert result["summary"] == "Ran execute_task with {'task': 'hello'}"
+    assert temp_manager.closed is True
+    assert len(temp_manager.replace_calls) == 1
+    _, client_config, timeout = temp_manager.replace_calls[0]
+    assert timeout == 30.0
+    assert client_config.command.endswith("openspace-mcp.exe")

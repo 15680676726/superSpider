@@ -51,6 +51,194 @@ class InstalledPythonProjectContract:
     metadata: dict[str, Any]
 
 
+_DISCOVERY_JSON_BEGIN = "__COPAW_DISCOVERY_JSON_BEGIN__"
+_DISCOVERY_JSON_END = "__COPAW_DISCOVERY_JSON_END__"
+
+_MCP_ACTION_DISCOVERY_SCRIPT = """
+import asyncio
+import json
+import sys
+
+from copaw.app.mcp.manager import MCPClientManager
+from copaw.config.config import MCPClientConfig
+
+BEGIN = "__COPAW_DISCOVERY_JSON_BEGIN__"
+END = "__COPAW_DISCOVERY_JSON_END__"
+
+
+def _tool_entries(payload):
+    if isinstance(payload, list):
+        return list(payload)
+    if isinstance(payload, dict):
+        return list(payload.get("tools") or [])
+    return list(getattr(payload, "tools", []) or [])
+
+
+def _schema(value):
+    return value if isinstance(value, dict) else {}
+
+
+async def main():
+    command = sys.argv[1]
+    args = json.loads(sys.argv[2])
+    cwd = sys.argv[3]
+    manager = MCPClientManager()
+    actions = []
+    try:
+        client_config = MCPClientConfig(
+            name="donor-mcp-discovery",
+            command=command,
+            args=list(args or []),
+            cwd=cwd or "",
+        )
+        await manager.replace_client("donor-mcp-discovery", client_config, timeout=30.0)
+        client = await manager.get_client("donor-mcp-discovery")
+        if client is not None and callable(getattr(client, "list_tools", None)):
+            response = await client.list_tools()
+            for item in _tool_entries(response):
+                if isinstance(item, dict):
+                    name = str(item.get("name") or item.get("tool_name") or "").strip()
+                    description = str(item.get("description") or "").strip()
+                    input_schema = item.get("inputSchema") or item.get("input_schema") or item.get("parameters")
+                    output_schema = item.get("outputSchema") or item.get("output_schema")
+                else:
+                    name = str(getattr(item, "name", "") or getattr(item, "tool_name", "") or "").strip()
+                    description = str(getattr(item, "description", "") or "").strip()
+                    input_schema = (
+                        getattr(item, "inputSchema", None)
+                        or getattr(item, "input_schema", None)
+                        or getattr(item, "parameters", None)
+                    )
+                    output_schema = (
+                        getattr(item, "outputSchema", None)
+                        or getattr(item, "output_schema", None)
+                    )
+                if not name:
+                    continue
+                actions.append(
+                    {
+                        "action_id": name,
+                        "tool_name": name,
+                        "summary": description,
+                        "input_schema": _schema(input_schema),
+                        "output_schema": _schema(output_schema),
+                    }
+                )
+    except Exception:
+        actions = []
+    finally:
+        try:
+            await manager.close_all()
+        except Exception:
+            pass
+    print(BEGIN)
+    print(json.dumps({"actions": actions}, ensure_ascii=False))
+    print(END)
+
+
+asyncio.run(main())
+"""
+
+_SDK_ACTION_DISCOVERY_SCRIPT = """
+import importlib
+import inspect
+import json
+import sys
+
+BEGIN = "__COPAW_DISCOVERY_JSON_BEGIN__"
+END = "__COPAW_DISCOVERY_JSON_END__"
+
+
+def _optional_constructor(cls):
+    try:
+        signature = inspect.signature(cls)
+    except Exception:
+        return False
+    for parameter in signature.parameters.values():
+        if parameter.kind in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD):
+            continue
+        if parameter.default is inspect._empty:
+            return False
+    return True
+
+
+def _schema_type(annotation):
+    text = str(annotation or "").lower()
+    if "int" in text:
+        return "integer"
+    if "float" in text:
+        return "number"
+    if "bool" in text:
+        return "boolean"
+    if "dict" in text:
+        return "object"
+    if "list" in text or "tuple" in text or "set" in text:
+        return "array"
+    return "string"
+
+
+def _signature_schema(signature, *, drop_first=False):
+    properties = {}
+    required = []
+    parameters = list(signature.parameters.values())
+    if drop_first and parameters:
+        parameters = parameters[1:]
+    for parameter in parameters:
+        if parameter.kind in (parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD):
+            continue
+        properties[parameter.name] = {"type": _schema_type(parameter.annotation)}
+        if parameter.default is inspect._empty:
+            required.append(parameter.name)
+    payload = {"type": "object", "properties": properties}
+    if required:
+        payload["required"] = required
+    return payload
+
+
+def _summary(obj):
+    doc = inspect.getdoc(obj) or ""
+    return doc.splitlines()[0].strip() if doc else ""
+
+
+def _action(action_id, callable_ref, obj, *, drop_first=False):
+    return {
+        "action_id": action_id,
+        "callable_name": action_id,
+        "callable_ref": callable_ref,
+        "summary": _summary(obj),
+        "input_schema": _signature_schema(inspect.signature(obj), drop_first=drop_first),
+        "output_schema": {},
+    }
+
+
+module_ref = sys.argv[1]
+module_name = module_ref[len("module:") :] if module_ref.startswith("module:") else module_ref
+module = importlib.import_module(module_name)
+actions = []
+
+for name, value in inspect.getmembers(module, inspect.isfunction):
+    if name.startswith("_") or getattr(value, "__module__", "") != module.__name__:
+        continue
+    actions.append(_action(name, f"module:{module_name}:{name}", value))
+
+for class_name, cls in inspect.getmembers(module, inspect.isclass):
+    if class_name.startswith("_") or getattr(cls, "__module__", "") != module.__name__:
+        continue
+    if not _optional_constructor(cls):
+        continue
+    for method_name, method in inspect.getmembers(cls, inspect.isfunction):
+        if method_name.startswith("_"):
+            continue
+        action_id = f"{class_name}.{method_name}"
+        callable_ref = f"module:{module_name}:{class_name}.{method_name}"
+        actions.append(_action(action_id, callable_ref, method, drop_first=True))
+
+print(BEGIN)
+print(json.dumps({"actions": actions}, ensure_ascii=False))
+print(END)
+"""
+
+
 def _github_owner_repo(source_url: str) -> tuple[str, str]:
     parsed = urlparse(str(source_url or "").strip())
     parts = [part for part in parsed.path.split("/") if part]
@@ -251,6 +439,172 @@ def _callable_surface_hints(
     if capability_kind == "adapter" and resolved_entry_module:
         hints.setdefault("sdk_entry_ref", f"module:{resolved_entry_module}")
     return hints
+
+
+def _repo_src_path() -> str:
+    return str(Path(__file__).resolve().parents[2])
+
+
+def _discovery_subprocess_env() -> dict[str, str]:
+    env = dict(os.environ)
+    src_path = _repo_src_path()
+    existing = str(env.get("PYTHONPATH") or "").strip()
+    env["PYTHONPATH"] = (
+        src_path if not existing else os.pathsep.join((src_path, existing))
+    )
+    return env
+
+
+def _extract_marked_json_payload(stdout: str) -> object | None:
+    text = str(stdout or "")
+    start = text.rfind(_DISCOVERY_JSON_BEGIN)
+    end = text.rfind(_DISCOVERY_JSON_END)
+    if start < 0 or end < 0 or end <= start:
+        return None
+    payload = text[start + len(_DISCOVERY_JSON_BEGIN) : end].strip()
+    if not payload:
+        return None
+    return json.loads(payload)
+
+
+def _run_json_probe(
+    command: list[str],
+    *,
+    timeout: int,
+    env: dict[str, str] | None = None,
+) -> object | None:
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        check=False,
+        env=env,
+    )
+    payload = _extract_marked_json_payload(completed.stdout or "")
+    if payload is not None:
+        return payload
+    if completed.returncode != 0:
+        return None
+    return None
+
+
+def _action_list(payload: object | None) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    actions = payload.get("actions")
+    if not isinstance(actions, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for item in actions:
+        if isinstance(item, dict):
+            normalized.append(dict(item))
+    return normalized
+
+
+def _resolve_stdio_probe_command(
+    *,
+    call_surface_ref: str,
+    scripts_dir: str,
+    python_path: str,
+) -> tuple[str, list[str], str] | None:
+    normalized = str(call_surface_ref or "").strip()
+    if not normalized:
+        return None
+    cwd = str(Path(scripts_dir).parent) if str(scripts_dir or "").strip() else ""
+    if normalized.startswith("script:"):
+        script_name = normalized.split(":", 1)[1].strip()
+        script_path = _resolve_console_script_path(script_name, scripts_dir=scripts_dir)
+        if script_path is None:
+            return None
+        return script_path, [], cwd
+    if normalized.startswith("module:"):
+        module_name = normalized.split(":", 1)[1].strip()
+        if not module_name or not str(python_path or "").strip():
+            return None
+        return python_path, ["-m", module_name], cwd
+    return None
+
+
+def _discover_mcp_tool_actions(
+    *,
+    call_surface_ref: str,
+    python_path: str,
+    scripts_dir: str,
+    timeout: int = 45,
+) -> list[dict[str, Any]]:
+    probe = _resolve_stdio_probe_command(
+        call_surface_ref=call_surface_ref,
+        scripts_dir=scripts_dir,
+        python_path=python_path,
+    )
+    if probe is None:
+        return []
+    command, args, cwd = probe
+    payload = _run_json_probe(
+        [
+            sys.executable,
+            "-c",
+            _MCP_ACTION_DISCOVERY_SCRIPT,
+            command,
+            json.dumps(args, ensure_ascii=False),
+            cwd,
+        ],
+        timeout=timeout,
+        env=_discovery_subprocess_env(),
+    )
+    return _action_list(payload)
+
+
+def _discover_sdk_actions(
+    *,
+    sdk_entry_ref: str,
+    python_path: str,
+    timeout: int = 45,
+) -> list[dict[str, Any]]:
+    if not str(sdk_entry_ref or "").strip() or not str(python_path or "").strip():
+        return []
+    payload = _run_json_probe(
+        [
+            python_path,
+            "-c",
+            _SDK_ACTION_DISCOVERY_SCRIPT,
+            sdk_entry_ref,
+        ],
+        timeout=timeout,
+    )
+    return _action_list(payload)
+
+
+def discover_installed_python_callable_actions(
+    *,
+    metadata: dict[str, Any] | None,
+    python_path: str,
+    scripts_dir: str,
+) -> dict[str, Any]:
+    payload = dict(metadata or {})
+    mcp_server_ref = str(payload.get("mcp_server_ref") or "").strip()
+    existing_mcp_tools = _action_list({"actions": payload.get("mcp_tools")})
+    if mcp_server_ref and not existing_mcp_tools:
+        discovered_mcp_tools = _discover_mcp_tool_actions(
+            call_surface_ref=mcp_server_ref,
+            python_path=python_path,
+            scripts_dir=scripts_dir,
+        )
+        if discovered_mcp_tools:
+            payload["mcp_tools"] = discovered_mcp_tools
+    sdk_entry_ref = str(payload.get("sdk_entry_ref") or "").strip()
+    existing_sdk_actions = _action_list({"actions": payload.get("sdk_actions")})
+    if sdk_entry_ref and not existing_sdk_actions:
+        discovered_sdk_actions = _discover_sdk_actions(
+            sdk_entry_ref=sdk_entry_ref,
+            python_path=python_path,
+        )
+        if discovered_sdk_actions:
+            payload["sdk_actions"] = discovered_sdk_actions
+    return payload
 
 
 def _predict_service_probe(

@@ -80,61 +80,106 @@ class CompiledAdapterContract(BaseModel):
     promotion_blockers: list[str] = Field(default_factory=list)
 
 
+def _action_entries(value: object | None) -> list[dict[str, Any]]:
+    items: Sequence[object]
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, Sequence) and not isinstance(
+        value,
+        (str, bytes, bytearray, Mapping),
+    ):
+        items = value
+    else:
+        items = []
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, Mapping):
+            normalized.append(dict(item))
+    return normalized
+
+
+def _mcp_surface_candidate(
+    payload: Mapping[str, Any],
+) -> ExternalProtocolSurface | None:
+    mcp_server_ref = _string(payload.get("mcp_server_ref"))
+    if mcp_server_ref is None:
+        return None
+    mcp_tools = _action_entries(payload.get("mcp_tools"))
+    eligible = bool(mcp_tools)
+    blockers: list[str] = []
+    if not eligible:
+        blockers.append("no-typed-action-surface")
+    return ExternalProtocolSurface(
+        protocol_surface_kind="native_mcp",
+        transport_kind="mcp",
+        call_surface_ref=mcp_server_ref,
+        formal_adapter_eligible=eligible,
+        blockers=blockers,
+        hints={"actions": mcp_tools},
+    )
+
+
+def _api_surface_candidate(
+    payload: Mapping[str, Any],
+) -> ExternalProtocolSurface | None:
+    api_base_url = _string(payload.get("api_base_url")) or _string(
+        payload.get("openapi_url"),
+    )
+    if api_base_url is None:
+        return None
+    api_actions = _action_entries(payload.get("api_actions") or payload.get("openapi_actions"))
+    blockers: list[str] = []
+    eligible = bool(api_actions)
+    if not eligible:
+        blockers.append("no-typed-action-surface")
+    return ExternalProtocolSurface(
+        protocol_surface_kind="api",
+        transport_kind="http",
+        call_surface_ref=api_base_url,
+        schema_ref=_string(payload.get("openapi_url")),
+        formal_adapter_eligible=eligible,
+        blockers=blockers,
+        hints={"actions": api_actions},
+    )
+
+
+def _sdk_surface_candidate(
+    payload: Mapping[str, Any],
+) -> ExternalProtocolSurface | None:
+    sdk_entry_ref = _string(payload.get("sdk_entry_ref"))
+    if sdk_entry_ref is None:
+        return None
+    sdk_actions = _action_entries(payload.get("sdk_actions"))
+    blockers: list[str] = []
+    eligible = bool(sdk_actions)
+    if not eligible:
+        blockers.append("no-typed-action-surface")
+    return ExternalProtocolSurface(
+        protocol_surface_kind="sdk",
+        transport_kind="sdk",
+        call_surface_ref=sdk_entry_ref,
+        formal_adapter_eligible=eligible,
+        blockers=blockers,
+        hints={"actions": sdk_actions},
+    )
+
+
 def classify_external_protocol_surface(
     *,
     metadata: Mapping[str, Any] | None,
 ) -> ExternalProtocolSurface:
     payload = dict(metadata or {})
-    mcp_server_ref = _string(payload.get("mcp_server_ref"))
-    mcp_tools = payload.get("mcp_tools")
-    if mcp_server_ref is not None:
-        eligible = isinstance(mcp_tools, list) and bool(mcp_tools)
-        blockers: list[str] = []
-        if not eligible:
-            blockers.append("no-typed-action-surface")
-        return ExternalProtocolSurface(
-            protocol_surface_kind="native_mcp",
-            transport_kind="mcp",
-            call_surface_ref=mcp_server_ref,
-            formal_adapter_eligible=eligible,
-            blockers=blockers,
-            hints={"actions": list(mcp_tools)},
-        )
-
-    api_base_url = _string(payload.get("api_base_url")) or _string(
-        payload.get("openapi_url"),
-    )
-    api_actions = payload.get("api_actions") or payload.get("openapi_actions")
-    if api_base_url is not None:
-        blockers: list[str] = []
-        eligible = isinstance(api_actions, list) and bool(api_actions)
-        if not eligible:
-            blockers.append("no-typed-action-surface")
-        return ExternalProtocolSurface(
-            protocol_surface_kind="api",
-            transport_kind="http",
-            call_surface_ref=api_base_url,
-            schema_ref=_string(payload.get("openapi_url")),
-            formal_adapter_eligible=eligible,
-            blockers=blockers,
-            hints={"actions": list(api_actions or [])},
-        )
-
-    sdk_entry_ref = _string(payload.get("sdk_entry_ref"))
-    sdk_actions = payload.get("sdk_actions")
-    if sdk_entry_ref is not None:
-        blockers = []
-        eligible = isinstance(sdk_actions, list) and bool(sdk_actions)
-        if not eligible:
-            blockers.append("no-typed-action-surface")
-        return ExternalProtocolSurface(
-            protocol_surface_kind="sdk",
-            transport_kind="sdk",
-            call_surface_ref=sdk_entry_ref,
-            formal_adapter_eligible=eligible,
-            blockers=blockers,
-            hints={"actions": list(sdk_actions or [])},
-        )
+    candidates = [
+        _mcp_surface_candidate(payload),
+        _api_surface_candidate(payload),
+        _sdk_surface_candidate(payload),
+    ]
+    for candidate in candidates:
+        if candidate is not None and candidate.formal_adapter_eligible:
+            return candidate
+    for candidate in candidates:
+        if candidate is not None:
+            return candidate
 
     if _string(payload.get("execute_command")) is not None:
         return ExternalProtocolSurface(

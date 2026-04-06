@@ -589,3 +589,140 @@ async def test_install_external_project_persists_adapter_contract_when_surface_i
     assert package.call_surface_ref == "mcp:openspace"
     assert package.adapter_contract["transport_kind"] == "mcp"
     assert package.adapter_contract["actions"][0]["action_id"] == "execute_task"
+
+
+@pytest.mark.asyncio
+async def test_install_external_project_discovers_typed_actions_from_callable_surfaces(
+    monkeypatch,
+) -> None:
+    from copaw.app.routers import capability_market as capability_market_module
+    from copaw.config.config import Config
+
+    saved: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        capability_market_module,
+        "load_config",
+        lambda: Config(),
+    )
+    monkeypatch.setattr(
+        capability_market_module,
+        "save_config",
+        lambda config: saved.setdefault("config", config),
+    )
+    monkeypatch.setattr(
+        capability_market_module,
+        "_resolve_github_default_ref",
+        lambda source_url: "main",
+    )
+    monkeypatch.setattr(
+        capability_market_module,
+        "_prepare_external_project_environment",
+        lambda **kwargs: {
+            "environment_root": "D:/fake/external/adapter-openspace",
+            "python_path": "D:/fake/external/adapter-openspace/.venv/Scripts/python.exe",
+            "scripts_dir": "D:/fake/external/adapter-openspace/.venv/Scripts",
+        },
+    )
+
+    async def _fake_install_attempt(*, command_parts, timeout, report_path):
+        _ = (command_parts, timeout)
+        return {
+            "success": True,
+            "summary": "installed via archive",
+            "stdout": "",
+            "stderr": "",
+            "returncode": 0,
+            "report_path": report_path,
+        }
+
+    monkeypatch.setattr(
+        capability_market_module,
+        "_run_external_project_install_attempt",
+        _fake_install_attempt,
+    )
+    monkeypatch.setattr(
+        capability_market_module,
+        "_load_pip_install_report",
+        lambda report_path: {
+            "install": [
+                {
+                    "requested": True,
+                    "metadata": {"name": "openspace", "version": "0.1.0"},
+                    "download_info": {
+                        "url": "https://github.com/HKUDS/OpenSpace/archive/refs/heads/main.zip",
+                    },
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        capability_market_module,
+        "resolve_installed_python_project_contract",
+        lambda **kwargs: SimpleNamespace(
+            install_name="openspace",
+            distribution_name="openspace",
+            package_version="0.1.0",
+            entry_module="openspace",
+            console_script="openspace",
+            execute_command='"D:/fake/external/adapter-openspace/.venv/Scripts/openspace.exe"',
+            healthcheck_command='"D:/fake/external/adapter-openspace/.venv/Scripts/openspace.exe" --help',
+            runtime_kind="cli",
+            supported_actions=["describe", "run"],
+            scope_policy="seat",
+            ready_probe_kind="none",
+            ready_probe_config={},
+            stop_strategy="terminate",
+            startup_entry_ref="script:openspace",
+            environment_requirements=["workspace", "process", "desktop-session"],
+            evidence_contract=["shell-command", "runtime-event", "environment-session"],
+            predicted_default_port=None,
+            predicted_health_path=None,
+            metadata={
+                "mcp_server_ref": "script:openspace-mcp",
+                "sdk_entry_ref": "module:openspace",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        capability_market_module,
+        "discover_installed_python_callable_actions",
+        lambda **kwargs: {
+            **dict(kwargs["metadata"]),
+            "mcp_tools": [
+                {
+                    "action_id": "execute_task",
+                    "tool_name": "execute_task",
+                    "input_schema": {"type": "object"},
+                },
+            ],
+            "sdk_actions": [
+                {
+                    "action_id": "OpenSpace.execute",
+                    "callable_ref": "module:openspace:OpenSpace.execute",
+                    "input_schema": {"type": "object"},
+                },
+            ],
+        },
+    )
+
+    result = await capability_market_module._install_external_project_capability(
+        source_url="https://github.com/HKUDS/OpenSpace",
+        version="",
+        capability_kind="adapter",
+        entry_module=None,
+        execute_command=None,
+        healthcheck_command=None,
+        enable=True,
+        overwrite=True,
+    )
+
+    package = saved["config"].external_capability_packages["adapter:openspace"]
+    assert result["installed"] is True
+    assert result["installed_capability_ids"] == ["adapter:openspace"]
+    assert result["protocol_surface_kind"] == "native_mcp"
+    assert result["compiled_action_ids"] == ["execute_task"]
+    assert package.intake_protocol_kind == "native_mcp"
+    assert package.call_surface_ref == "script:openspace-mcp"
+    assert package.adapter_contract["transport_kind"] == "mcp"
+    assert package.adapter_contract["actions"][0]["action_id"] == "execute_task"
