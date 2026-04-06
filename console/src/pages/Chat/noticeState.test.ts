@@ -13,6 +13,17 @@ describe("resolveChatNoticeVariant", () => {
     ).toBe("loading");
   });
 
+  it("does not keep showing loading once the chat UI can already render", () => {
+    expect(
+      resolveChatNoticeVariant({
+        threadBootstrapPending: true,
+        requestedThreadLooksBound: true,
+        autoBindingPending: false,
+        shouldRenderChatUi: true,
+      }),
+    ).toBeNull();
+  });
+
   it("shows binding notice while a bound thread is still resolving", () => {
     expect(
       resolveChatNoticeVariant({

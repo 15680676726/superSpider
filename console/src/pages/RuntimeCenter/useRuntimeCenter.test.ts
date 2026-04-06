@@ -143,38 +143,41 @@ describe("useRuntimeCenter", () => {
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledWith();
     expect(requestRuntimeBusinessAgentsMock).not.toHaveBeenCalled();
 
-    resolveSurface(
-      mockSurface({
-        cards: [
-          createAgentsCard(
-            {
-              id: "copaw-agent-runner",
-              title: "Spider Mesh",
-              kind: "agent",
-              status: "active",
-              owner: "Execution Core",
-              summary: "System seat",
-              actions: {},
-              meta: {},
-            },
-            {
-              id: "agent-ops-1",
-              title: "Closer Nine",
-              kind: "agent",
-              status: "active",
-              owner: "Closer",
-              summary: "Closing backlog",
-              actions: {},
-              meta: {
-                current_focus_kind: "assignment",
-                current_focus_id: "assignment-1",
-                current_focus: "Close pipeline backlog",
+    await act(async () => {
+      resolveSurface(
+        mockSurface({
+          cards: [
+            createAgentsCard(
+              {
+                id: "copaw-agent-runner",
+                title: "Spider Mesh",
+                kind: "agent",
+                status: "active",
+                owner: "Execution Core",
+                summary: "System seat",
+                actions: {},
+                meta: {},
               },
-            },
-          ),
-        ],
-      }),
-    );
+              {
+                id: "agent-ops-1",
+                title: "Closer Nine",
+                kind: "agent",
+                status: "active",
+                owner: "Closer",
+                summary: "Closing backlog",
+                actions: {},
+                meta: {
+                  current_focus_kind: "assignment",
+                  current_focus_id: "assignment-1",
+                  current_focus: "Close pipeline backlog",
+                },
+              },
+            ),
+          ],
+        }),
+      );
+      await Promise.resolve();
+    });
 
     await waitFor(() => !result.current.loading);
 
@@ -221,11 +224,11 @@ describe("useRuntimeCenter", () => {
         cards: [
           {
             key: "goals",
-            title: "Goals",
-            source: "goal-service",
+            title: "Retired Work Items",
+            source: "retired-work-item-service",
             status: "state-service",
             count: 1,
-            summary: "legacy goals",
+            summary: "retired work items",
             entries: [],
             meta: {},
           },

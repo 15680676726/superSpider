@@ -5,6 +5,7 @@ import {
   MAIN_BRAIN_COCKPIT_TEXT,
   RUNTIME_CENTER_TEXT,
   formatMainBrainSignalLabel,
+  localizeRuntimeText,
   formatRouteTitle,
   formatRuntimeSectionLabel,
   formatRuntimeStatus,
@@ -33,9 +34,16 @@ describe("RuntimeCenter text", () => {
     expect(formatRuntimeStatus("scheduled")).toBe("已排程");
   });
 
-  it("maps leaf goal detail routes to the goal detail title", () => {
-    expect(formatRouteTitle("/goals/goal-1/detail")).toBe("目标详情");
-    expect(formatRouteTitle("/api/goals/goal-1/detail")).toBe("目标详情");
+  it("maps leaf goal detail routes to the neutral work detail title", () => {
+    expect(formatRouteTitle("/goals/goal-1/detail")).toBe("事项详情");
+    expect(formatRouteTitle("/api/goals/goal-1/detail")).toBe("事项详情");
+  });
+
+  it("localizes retired goal service copy to neutral work wording", () => {
+    expect(localizeRuntimeText("Goals")).toBe("事项");
+    expect(
+      localizeRuntimeText("Top-level intent and plan objects from GoalService."),
+    ).toBe("来自阶段事项服务的周期事项与执行计划对象。");
   });
   it("does not map retired runtime-center goal aliases to goal detail titles", () => {
     expect(formatRouteTitle("/runtime-center/goals/goal-1")).toBe(

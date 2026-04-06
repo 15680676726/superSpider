@@ -48,10 +48,11 @@ export function resolveChatUiVisibility({
 } {
   const hasDirectBoundThreadContext =
     requestedThreadLooksBound && !threadBootstrapError;
+  const hasVerifiedBoundThreadContext = hasBoundAgentContext;
   const canRenderBoundChatUi =
     Boolean(requestedThreadId || activeWindowThreadId) &&
-    (hasBoundAgentContext || hasDirectBoundThreadContext) &&
-    !effectiveThreadPending;
+    (hasVerifiedBoundThreadContext || hasDirectBoundThreadContext) &&
+    (!effectiveThreadPending || hasVerifiedBoundThreadContext);
   const shouldRenderChatComposer = canRenderBoundChatUi && !disableComposer;
   return {
     hasDirectBoundThreadContext,

@@ -13,7 +13,7 @@ export function resolveChatNoticeVariant({
   autoBindingPending,
   shouldRenderChatUi,
 }: ResolveChatNoticeVariantArgs): ChatNoticeVariant {
-  if (threadBootstrapPending) {
+  if (threadBootstrapPending && !shouldRenderChatUi) {
     return "loading";
   }
   if ((requestedThreadLooksBound || autoBindingPending) && !shouldRenderChatUi) {

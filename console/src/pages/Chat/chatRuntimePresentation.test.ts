@@ -52,14 +52,14 @@ describe("chatRuntimePresentation", () => {
     ).toBe("industry:industry-1:execution-core");
   });
 
-  it("keeps chat hidden while pending and visible when bound context is ready", () => {
+  it("keeps chat hidden while a directly bound thread is still pending without verified context", () => {
     expect(
       resolveChatUiVisibility({
         requestedThreadId: "thread-1",
         activeWindowThreadId: "thread-1",
         requestedThreadLooksBound: true,
         threadBootstrapError: null,
-        hasBoundAgentContext: true,
+        hasBoundAgentContext: false,
         effectiveThreadPending: true,
         allowUnboundBuddyShell: false,
         disableComposer: false,
@@ -78,6 +78,37 @@ describe("chatRuntimePresentation", () => {
         disableComposer: false,
       }).shouldRenderChatUi,
     ).toBe(true);
+  });
+
+  it("keeps chat hidden while pending if there is no direct bound thread and no verified context", () => {
+    expect(
+      resolveChatUiVisibility({
+        requestedThreadId: "thread-1",
+        activeWindowThreadId: "thread-1",
+        requestedThreadLooksBound: false,
+        threadBootstrapError: null,
+        hasBoundAgentContext: false,
+        effectiveThreadPending: true,
+        allowUnboundBuddyShell: false,
+        disableComposer: false,
+      }).shouldRenderChatUi,
+    ).toBe(false);
+  });
+
+  it("keeps chat visible while bootstrap refresh runs if verified bound context already exists", () => {
+    const visibility = resolveChatUiVisibility({
+      requestedThreadId: "industry-chat:industry-1:execution-core",
+      activeWindowThreadId: "industry-chat:industry-1:execution-core",
+      requestedThreadLooksBound: true,
+      threadBootstrapError: null,
+      hasBoundAgentContext: true,
+      effectiveThreadPending: true,
+      allowUnboundBuddyShell: false,
+      disableComposer: false,
+    });
+
+    expect(visibility.shouldRenderChatUi).toBe(true);
+    expect(visibility.shouldRenderChatComposer).toBe(true);
   });
 
   it("keeps the buddy naming shell visible without unlocking the live composer", () => {

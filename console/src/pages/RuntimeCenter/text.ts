@@ -56,7 +56,7 @@ const STATUS_LABEL_OVERRIDES: Record<string, string> = {
 
 const ENTRY_KIND_LABELS: Record<string, string> = {
   task: "任务",
-  goal: "目标",
+  goal: "事项",
   schedule: "计划",
   agent: "智能体",
   capability: "能力",
@@ -233,7 +233,7 @@ const SECTION_LABELS: Record<string, string> = {
   host_twin: "宿主孪生",
   host_event_summary: "主机事件摘要",
   host_events: "主机事件",
-  goal: "目标",
+  goal: "事项",
   decision: "决策",
   patch: "补丁",
   event: "事件",
@@ -268,7 +268,7 @@ const SECTION_LABELS: Record<string, string> = {
 };
 
 const CARD_TITLE_LABELS: Record<string, string> = {
-  goals: "目标",
+  goals: "事项",
   tasks: "任务",
   routines: "例行",
   schedules: "计划",
@@ -292,8 +292,8 @@ const ROUTE_TITLE_LABELS: Array<[string, string]> = [
   ["/routines/", "例行详情"],
   ["/runtime-center/tasks/", "任务详情"],
   ["/runtime-center/schedules/", "计划详情"],
-  ["/api/goals/", "目标详情"],
-  ["/goals/", "目标详情"],
+  ["/api/goals/", "事项详情"],
+  ["/goals/", "事项详情"],
   ["/runtime-center/decisions/", "决策详情"],
   ["/runtime-center/learning/patches/", "补丁详情"],
   ["/runtime-center/learning/growth/", "成长详情"],
@@ -355,7 +355,7 @@ const IDENTIFIER_LABELS: Record<string, string> = {
 
 const EXACT_RUNTIME_TEXT_MAP: Record<string, string> = {
   Tasks: "任务",
-  Goals: "目标",
+  Goals: "事项",
   Schedules: "计划",
   Agents: "智能体",
   "Industry Teams": "身份",
@@ -370,7 +370,7 @@ const EXACT_RUNTIME_TEXT_MAP: Record<string, string> = {
   "Tracked runtime tasks from the unified state store.":
     "来自统一状态存储的运行任务。",
   "Top-level intent and plan objects from GoalService.":
-    "来自目标服务的顶层意图与计划对象。",
+    "来自阶段事项服务的周期事项与执行计划对象。",
   "Scheduled jobs and automation state from ScheduleRecord.":
     "来自计划记录的定时任务与自动化状态。",
   "Visible agent profiles merged from defaults, overrides, and runtime state.":

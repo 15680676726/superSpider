@@ -46,6 +46,7 @@ export const queueHumanAssistSubmissionForNextMessage =
 export function resetRuntimeTransportForTests(): void {
   resetRuntimeTransportForTestsHelper();
   resetActiveModelsCacheForTests();
+  pendingActiveModelsRefresh = null;
 }
 export const buildRuntimeChatRequest = buildRuntimeChatRequestBody;
 
@@ -125,6 +126,27 @@ const RUNTIME_BIZ_PARAM_ALLOWLIST = new Set<string>([
   "channel",
   "buddy_profile_id",
 ]);
+
+let pendingActiveModelsRefresh: Promise<ActiveModelsInfo | null> | null = null;
+
+function refreshActiveModelsCacheInBackground(): Promise<ActiveModelsInfo | null> {
+  if (!pendingActiveModelsRefresh) {
+    pendingActiveModelsRefresh = providerApi
+      .getActiveModels()
+      .then((activeModels) => {
+        setCachedActiveModels(activeModels);
+        return activeModels;
+      })
+      .catch((error) => {
+        invalidateActiveModelsCache();
+        throw error;
+      })
+      .finally(() => {
+        pendingActiveModelsRefresh = null;
+      });
+  }
+  return pendingActiveModelsRefresh;
+}
 
 function sanitizeRuntimeBizParams(
   value: unknown,
@@ -784,18 +806,9 @@ export function createRuntimeTransport({
 
     try {
       let activeModels: ActiveModelsInfo | null = null;
-      try {
-        const cached = getCachedActiveModels();
-        if (cached) {
-          activeModels = cached;
-        } else {
-          activeModels = await raceWithAbort(
-            providerApi.getActiveModels(),
-            localAbortController.signal,
-          );
-          setCachedActiveModels(activeModels);
-        }
-
+      const cached = getCachedActiveModels();
+      if (cached) {
+        activeModels = cached;
         const resolvedSlot = activeModels?.resolved_llm || activeModels?.active_llm;
         if (!resolvedSlot?.provider_id || !resolvedSlot?.model) {
           return handleModelError(
@@ -804,24 +817,20 @@ export function createRuntimeTransport({
             setShowModelPrompt,
           );
         }
-
         setRuntimeLifecycleState?.(null);
         beginRuntimeWait(activeModels, setRuntimeHealthNotice, setRuntimeWaitState);
-      } catch (error) {
-        if (isAbortRuntimeError(error)) {
-          setRuntimeWaitState(null);
-          setRuntimeLifecycleState?.(null);
-          setRuntimeHealthNotice(null);
-          throw error;
-        }
-
-        invalidateActiveModelsCache();
-        console.error("Failed to check model configuration:", error);
-        return handleModelError(
-          setRuntimeWaitState,
-          setRuntimeLifecycleState,
-          setShowModelPrompt,
-        );
+      } else {
+        setRuntimeLifecycleState?.(null);
+        beginRuntimeWait(null, setRuntimeHealthNotice, setRuntimeWaitState);
+        void raceWithAbort(
+          refreshActiveModelsCacheInBackground(),
+          localAbortController.signal,
+        ).catch((error) => {
+          if (isAbortRuntimeError(error)) {
+            return;
+          }
+          console.error("Failed to refresh model configuration:", error);
+        });
       }
 
       const requestBody = trimRuntimeRequestBody(

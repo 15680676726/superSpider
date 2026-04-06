@@ -423,16 +423,16 @@ describe("runtimeTransport", () => {
     expect(requestBody.requested_actions).toBeUndefined();
   });
 
-  it("checks active models before sending a runtime chat request", async () => {
+  it("does not block a runtime chat request on active model refresh", async () => {
     vi.stubGlobal("BASE_URL", "http://testserver");
+    let resolveActiveModels!: (value: unknown) => void;
     const getActiveModelsSpy = vi
       .spyOn(providerApi, "getActiveModels")
-      .mockResolvedValue({
-        resolved_llm: {
-          provider_id: "test-provider",
-          model: "test-model",
-        },
-      } as never);
+      .mockReturnValue(
+        new Promise((resolve) => {
+          resolveActiveModels = resolve;
+        }) as never,
+      );
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
@@ -470,6 +470,114 @@ describe("runtimeTransport", () => {
       setRuntimeWaitState,
     });
 
+    const responsePromise = transport.fetch({
+      input: [
+        {
+          session: {
+            session_id: "session-thread",
+            user_id: "session-user",
+            channel: "session-channel",
+          },
+        },
+      ],
+    });
+
+    await Promise.resolve();
+
+    expect(getActiveModelsSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(setRuntimeWaitState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeLabel: "未知智能体",
+      }),
+    );
+
+    resolveActiveModels({
+      resolved_llm: {
+        provider_id: "test-provider",
+        model: "test-model",
+      },
+    });
+
+    await responsePromise;
+  });
+
+  it("uses the cached active model label when it is already warm", async () => {
+    vi.stubGlobal("BASE_URL", "http://testserver");
+    vi.spyOn(providerApi, "getActiveModels").mockResolvedValue({
+      resolved_llm: {
+        provider_id: "test-provider",
+        model: "test-model",
+      },
+    } as never);
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            object: "response",
+            status: "completed",
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      );
+
+    const firstTransport = createRuntimeTransport({
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      optionsBaseUrl: undefined,
+      getThreadMeta: () => ({
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      }),
+      getPendingMediaSources: () => [],
+      clearPendingMediaDrafts: vi.fn(),
+      refreshThreadMediaAnalyses: vi.fn(),
+      getSelectedMediaAnalysisIds: () => [],
+      setRuntimeHealthNotice: vi.fn(),
+      setRuntimeWaitState: vi.fn(),
+    });
+
+    await firstTransport.fetch({
+      input: [
+        {
+          session: {
+            session_id: "session-thread",
+            user_id: "session-user",
+            channel: "session-channel",
+          },
+        },
+      ],
+    });
+
+    const setRuntimeWaitState = vi.fn();
+    const transport = createRuntimeTransport({
+      runtimeWindow: {
+        currentThreadId: "industry-chat:industry-1:execution-core",
+        currentUserId: "window-user",
+        currentChannel: "console",
+      },
+      requestedThreadId: "requested-thread",
+      optionsBaseUrl: undefined,
+      getThreadMeta: () => ({
+        control_thread_id: "industry-chat:industry-1:execution-core",
+      }),
+      getPendingMediaSources: () => [],
+      clearPendingMediaDrafts: vi.fn(),
+      refreshThreadMediaAnalyses: vi.fn(),
+      getSelectedMediaAnalysisIds: () => [],
+      setRuntimeHealthNotice: vi.fn(),
+      setRuntimeWaitState,
+    });
+
     await transport.fetch({
       input: [
         {
@@ -482,8 +590,7 @@ describe("runtimeTransport", () => {
       ],
     });
 
-    expect(getActiveModelsSpy).toHaveBeenCalledTimes(1);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(setRuntimeWaitState).toHaveBeenCalledWith(
       expect.objectContaining({
         activeLabel: "test-provider/test-model",
