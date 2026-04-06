@@ -7,6 +7,7 @@ import contextlib
 import json
 import inspect
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import platform
 import re
@@ -90,6 +91,7 @@ from ...config.config import ExternalCapabilityPackageConfig
 from ...constant import WORKING_DIR
 from ...discovery.models import DiscoveryHit, NormalizedDiscoveryHit
 from ...discovery.provider_search import search_github_repository_donors
+from ...kernel import KernelTask
 from ...state import SQLiteStateStore
 from ...state.skill_candidate_service import CapabilityCandidateService
 from ...state.skill_lifecycle_decision_service import SkillLifecycleDecisionService
@@ -106,6 +108,7 @@ from .capability_contracts import (
 from .governed_mutations import (
     dispatch_governed_mutation,
     get_capability_service as _shared_get_capability_service,
+    get_kernel_dispatcher as _shared_get_kernel_dispatcher,
 )
 
 router = APIRouter(prefix="/capability-market", tags=["capability-market"])
@@ -211,6 +214,38 @@ class CapabilityMarketProjectInstallResponse(BaseModel):
     probe_result: dict[str, Any] | None = None
 
 
+class CapabilityMarketProjectInstallAcceptedResponse(BaseModel):
+    accepted: bool = True
+    task_id: str
+    status: str = "queued"
+    phase: str = "executing"
+    title: str
+    source_url: str
+    capability_kind: str = "project-package"
+    candidate_id: str | None = None
+    progress_summary: str = ""
+    routes: dict[str, str] = Field(default_factory=dict)
+
+
+class CapabilityMarketProjectInstallJobStatusResponse(BaseModel):
+    task_id: str
+    status: str = "queued"
+    phase: str = "pending"
+    stage: str = "queued"
+    title: str
+    source_url: str
+    capability_kind: str = "project-package"
+    candidate_id: str | None = None
+    target_agent_id: str | None = None
+    progress_summary: str = ""
+    error: str | None = None
+    installed_capability_ids: list[str] = Field(default_factory=list)
+    result: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    routes: dict[str, str] = Field(default_factory=dict)
+
+
 class CapabilityMarketProjectCandidate(BaseModel):
     display_name: str
     summary: str = ""
@@ -305,6 +340,35 @@ class CapabilityMarketCapabilityAssignmentResult(BaseModel):
 CapabilityMarketCuratedInstallResponse.model_rebuild()
 CapabilityMarketHubInstallResponse.model_rebuild()
 CapabilityMarketMCPRegistryInstallResponse.model_rebuild()
+
+
+_PROJECT_INSTALL_BACKGROUND_TASKS: dict[str, asyncio.Task[Any]] = {}
+_PROJECT_INSTALL_BACKGROUND_TASKS_LOCK = asyncio.Lock()
+
+
+def _get_kernel_dispatcher(request: Request):
+    return _shared_get_kernel_dispatcher(request)
+
+
+async def _register_project_install_background_task(
+    task_id: str,
+    task: asyncio.Task[Any],
+) -> None:
+    async with _PROJECT_INSTALL_BACKGROUND_TASKS_LOCK:
+        _PROJECT_INSTALL_BACKGROUND_TASKS[task_id] = task
+
+
+async def _pop_project_install_background_task(
+    task_id: str,
+) -> asyncio.Task[Any] | None:
+    async with _PROJECT_INSTALL_BACKGROUND_TASKS_LOCK:
+        return _PROJECT_INSTALL_BACKGROUND_TASKS.pop(task_id, None)
+
+
+def _utc_isoformat(value: object) -> str | None:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat()
+    return None
 
 
 class CapabilityMarketMCPTemplateInstallRequest(BaseModel):
@@ -1218,8 +1282,21 @@ async def _install_external_project_capability(
     enable: bool,
     overwrite: bool,
     runtime_provider: object | None = None,
+    progress_callback: object | None = None,
 ) -> dict[str, object]:
+    async def _emit_progress(stage: str, summary: str) -> None:
+        if progress_callback is None:
+            return
+        callback = progress_callback
+        result = callback(stage, summary)
+        if inspect.isawaitable(result):
+            await result
+
     normalized_source_url = _normalize_github_project_source_url(source_url)
+    await _emit_progress(
+        "resolve_ref",
+        "Resolving donor source and requested ref.",
+    )
     config = load_config()
     packages = dict(getattr(config, "external_capability_packages", {}) or {})
     existing_source_matches = [
@@ -1243,6 +1320,10 @@ async def _install_external_project_capability(
     report_payload: dict[str, Any] = {}
     selected_transport = None
     transport_errors: list[str] = []
+    await _emit_progress(
+        "bootstrap_env",
+        "Bootstrapping isolated donor environment.",
+    )
     staged_environment = _prepare_external_project_environment(
         source_url=normalized_source_url,
         capability_kind=capability_kind,
@@ -1259,6 +1340,10 @@ async def _install_external_project_capability(
             ),
         )
         for transport in transports:
+            await _emit_progress(
+                "download_transport",
+                f"Preparing donor transport: {transport.kind}.",
+            )
             with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=".json",
@@ -1276,6 +1361,10 @@ async def _install_external_project_capability(
             if overwrite:
                 install_command_parts.extend(["--upgrade", "--force-reinstall"])
             install_command_parts.append(transport.package_ref)
+            await _emit_progress(
+                "pip_install",
+                f"Installing donor package via {transport.kind}.",
+            )
             attempt = await _run_external_project_install_attempt(
                 command_parts=install_command_parts,
                 timeout=_external_project_install_timeout_seconds(transport.kind),
@@ -1285,6 +1374,10 @@ async def _install_external_project_capability(
             if bool(attempt.get("success")):
                 selected_transport = transport
                 report_payload = _load_pip_install_report(report_path)
+                await _emit_progress(
+                    "inspect_distribution",
+                    "Inspecting installed donor distribution metadata.",
+                )
                 break
             transport_errors.append(f"{transport.kind}: {install_summary}")
         if selected_transport is None:
@@ -1314,6 +1407,10 @@ async def _install_external_project_capability(
             distribution_name=requested_distribution.distribution_name,
             capability_kind=capability_kind,
             entry_module=str(entry_module or "").strip() or None,
+        )
+        await _emit_progress(
+            "compile_contract",
+            "Compiling donor runtime and adapter contract.",
         )
         install_name = _normalize_project_install_name(
             source_url=normalized_source_url,
@@ -1391,6 +1488,10 @@ async def _install_external_project_capability(
         compiled_adapter_contract = compile_external_adapter_contract(
             capability_id=capability_id,
             surface=protocol_surface,
+        )
+        await _emit_progress(
+            "persist_mount",
+            "Persisting donor capability mount and package config.",
         )
         staged_environment = {}
         for key, package in existing_source_matches:
@@ -1825,6 +1926,461 @@ def _sync_project_trial_truth(
     register_candidate_source = getattr(donor_service, "register_candidate_source", None)
     if updated_candidate is not None and callable(register_candidate_source):
         register_candidate_source(updated_candidate)
+
+
+def _project_install_job_routes(task_id: str) -> dict[str, str]:
+    return {
+        "status": f"/api/capability-market/projects/install-jobs/{task_id}",
+        "result": f"/api/capability-market/projects/install-jobs/{task_id}/result",
+        "runtime_task": f"/api/runtime-center/kernel/tasks/{task_id}",
+        "runtime_task_review": f"/api/runtime-center/kernel/tasks/{task_id}/review",
+    }
+
+
+def _build_project_install_job_payload(
+    *,
+    candidate_id: str | None,
+    source_url: str,
+    version: str,
+    capability_kind: str,
+    entry_module: str | None,
+    execute_command: str | None,
+    healthcheck_command: str | None,
+    enable: bool,
+    overwrite: bool,
+    actor: str,
+    target_agent_id: str | None,
+    selected_seat_ref: str | None,
+    target_role_id: str | None,
+    capability_assignment_mode: str,
+    replacement_capability_ids: list[str],
+    replacement_target_ids: list[str],
+    trial_scope: str,
+) -> dict[str, object]:
+    return {
+        "candidate_id": candidate_id,
+        "source_url": source_url,
+        "version": version,
+        "capability_kind": capability_kind,
+        "entry_module": entry_module,
+        "execute_command": execute_command,
+        "healthcheck_command": healthcheck_command,
+        "enable": enable,
+        "overwrite": overwrite,
+        "actor": actor,
+        "target_agent_id": target_agent_id,
+        "selected_seat_ref": selected_seat_ref,
+        "target_role_id": target_role_id,
+        "capability_assignment_mode": capability_assignment_mode,
+        "replacement_capability_ids": replacement_capability_ids,
+        "replacement_target_ids": replacement_target_ids,
+        "trial_scope": trial_scope,
+        "project_install_job": {
+            "status": "queued",
+            "stage": "queued",
+            "progress_summary": "Project donor install job accepted.",
+            "source_url": source_url,
+            "capability_kind": capability_kind,
+            "candidate_id": candidate_id,
+            "target_agent_id": target_agent_id,
+        },
+    }
+
+
+def _project_install_response_payload(
+    *,
+    result: dict[str, object],
+    candidate_id: str | None,
+    capability_kind: str,
+    source_url: str,
+    enable: bool,
+    target_agent_id: str | None,
+) -> dict[str, object]:
+    return {
+        "installed": bool(result.get("installed", True)),
+        "candidate_id": candidate_id,
+        "name": str(result.get("name") or ""),
+        "enabled": bool(result.get("enabled", enable)),
+        "source_url": str(result.get("source_url") or source_url),
+        "capability_kind": str(result.get("capability_kind") or capability_kind),
+        "installed_capability_ids": [
+            str(item).strip()
+            for item in list(result.get("installed_capability_ids") or [])
+            if str(item).strip()
+        ],
+        "runtime_contract": (
+            dict(result.get("runtime_contract"))
+            if isinstance(result.get("runtime_contract"), dict)
+            else {}
+        ),
+        "adapter_contract": (
+            dict(result.get("adapter_contract"))
+            if isinstance(result.get("adapter_contract"), dict)
+            else {}
+        ),
+        "verified_stage": str(result.get("verified_stage") or "unverified"),
+        "provider_resolution_status": str(
+            result.get("provider_resolution_status") or "pending",
+        ),
+        "compatibility_status": str(result.get("compatibility_status") or "unknown"),
+        "target_agent_id": target_agent_id,
+        "trial_attachment": (
+            dict(result.get("trial_attachment"))
+            if isinstance(result.get("trial_attachment"), dict)
+            else None
+        ),
+        "probe_result": (
+            dict(result.get("probe_result"))
+            if isinstance(result.get("probe_result"), dict)
+            else None
+        ),
+    }
+
+
+def _project_install_job_status_from_phase(phase: str) -> str:
+    normalized = str(phase or "").strip().lower()
+    if normalized == "completed":
+        return "completed"
+    if normalized == "failed":
+        return "failed"
+    if normalized == "cancelled":
+        return "cancelled"
+    if normalized == "executing":
+        return "running"
+    if normalized == "waiting-confirm":
+        return "waiting-confirm"
+    return "queued"
+
+
+def _project_install_job_stage_from_phase(phase: str) -> str:
+    normalized = str(phase or "").strip().lower()
+    if normalized in {"completed", "failed", "cancelled"}:
+        return normalized
+    if normalized == "waiting-confirm":
+        return "waiting-confirm"
+    if normalized == "executing":
+        return "installing"
+    return "queued"
+
+
+def _store_project_install_job_state(
+    dispatcher: object,
+    *,
+    task_id: str,
+    status: str | None = None,
+    stage: str | None = None,
+    progress_summary: str | None = None,
+    error: str | None = None,
+    result: dict[str, object] | None = None,
+) -> dict[str, object] | None:
+    lifecycle = getattr(dispatcher, "lifecycle", None)
+    task_store = getattr(dispatcher, "task_store", None)
+    getter = getattr(lifecycle, "get_task", None)
+    if not callable(getter) or task_store is None:
+        return None
+    task = getter(task_id)
+    if task is None:
+        return None
+    payload = dict(task.payload or {})
+    job_payload = dict(payload.get("project_install_job") or {})
+    if status is not None:
+        job_payload["status"] = status
+    if stage is not None:
+        job_payload["stage"] = stage
+    if progress_summary is not None:
+        job_payload["progress_summary"] = progress_summary
+    if error is not None:
+        job_payload["error"] = error
+    if result is not None:
+        job_payload["result"] = result
+        job_payload["installed_capability_ids"] = list(
+            result.get("installed_capability_ids") or [],
+        )
+    payload["project_install_job"] = job_payload
+    updated_task = task.model_copy(
+        update={
+            "payload": payload,
+            "updated_at": datetime.now(timezone.utc),
+        },
+    )
+    task_map = dict(getattr(lifecycle, "_tasks", {}) or {})
+    task_map[task_id] = updated_task
+    setattr(lifecycle, "_tasks", task_map)
+    task_store.upsert(
+        updated_task,
+        last_result_summary=progress_summary if error is None else None,
+        last_error_summary=error,
+    )
+    return job_payload
+
+
+def _serialize_project_install_job(
+    dispatcher: object,
+    *,
+    task_id: str,
+) -> CapabilityMarketProjectInstallJobStatusResponse | None:
+    lifecycle = getattr(dispatcher, "lifecycle", None)
+    task_store = getattr(dispatcher, "task_store", None)
+    getter = getattr(lifecycle, "get_task", None)
+    if not callable(getter) or task_store is None:
+        return None
+    task = getter(task_id)
+    if task is None:
+        return None
+    runtime = task_store.get_runtime_record(task_id)
+    payload = dict(task.payload or {})
+    job_payload = dict(payload.get("project_install_job") or {})
+    result = job_payload.get("result")
+    installed_capability_ids = []
+    if isinstance(result, dict):
+        installed_capability_ids = [
+            str(item).strip()
+            for item in list(result.get("installed_capability_ids") or [])
+            if str(item).strip()
+        ]
+    elif isinstance(job_payload.get("installed_capability_ids"), list):
+        installed_capability_ids = [
+            str(item).strip()
+            for item in list(job_payload.get("installed_capability_ids") or [])
+            if str(item).strip()
+        ]
+    progress_summary = str(
+        job_payload.get("progress_summary")
+        or getattr(runtime, "last_result_summary", None)
+        or "",
+    )
+    error = str(
+        job_payload.get("error")
+        or getattr(runtime, "last_error_summary", None)
+        or "",
+    ).strip() or None
+    return CapabilityMarketProjectInstallJobStatusResponse(
+        task_id=task.id,
+        status=str(
+            job_payload.get("status") or _project_install_job_status_from_phase(task.phase),
+        ),
+        phase=task.phase,
+        stage=str(
+            job_payload.get("stage") or _project_install_job_stage_from_phase(task.phase),
+        ),
+        title=task.title,
+        source_url=str(payload.get("source_url") or ""),
+        capability_kind=str(payload.get("capability_kind") or "project-package"),
+        candidate_id=str(payload.get("candidate_id") or "").strip() or None,
+        target_agent_id=str(payload.get("target_agent_id") or "").strip() or None,
+        progress_summary=progress_summary,
+        error=error,
+        installed_capability_ids=installed_capability_ids,
+        result=dict(result) if isinstance(result, dict) else None,
+        created_at=_utc_isoformat(task.created_at),
+        updated_at=_utc_isoformat(task.updated_at),
+        routes=_project_install_job_routes(task.id),
+    )
+
+
+async def _run_project_install_job(
+    request: Request,
+    *,
+    task_id: str,
+) -> None:
+    dispatcher = _get_kernel_dispatcher(request)
+    lifecycle = getattr(dispatcher, "lifecycle", None)
+    getter = getattr(lifecycle, "get_task", None)
+    task = getter(task_id) if callable(getter) else None
+    if task is None:
+        await _pop_project_install_background_task(task_id)
+        return
+    payload = dict(task.payload or {})
+    source_url = str(payload.get("source_url") or "").strip()
+    capability_kind = str(payload.get("capability_kind") or "project-package").strip()
+    candidate_id = str(payload.get("candidate_id") or "").strip() or None
+    target_agent_id = str(payload.get("target_agent_id") or "").strip() or None
+    selected_seat_ref = str(payload.get("selected_seat_ref") or "").strip() or None
+    target_role_id = str(payload.get("target_role_id") or "").strip() or None
+    async def _progress_update(stage: str, summary: str) -> None:
+        _store_project_install_job_state(
+            dispatcher,
+            task_id=task_id,
+            status="running",
+            stage=stage,
+            progress_summary=summary,
+        )
+    try:
+        _store_project_install_job_state(
+            dispatcher,
+            task_id=task_id,
+            status="running",
+            stage="installing",
+            progress_summary="Starting external project donor install job.",
+        )
+        install_result = _install_external_project_capability(
+            source_url=source_url,
+            version=str(payload.get("version") or "").strip(),
+            capability_kind=capability_kind,
+            entry_module=str(payload.get("entry_module") or "").strip() or None,
+            execute_command=str(payload.get("execute_command") or "").strip() or None,
+            healthcheck_command=str(payload.get("healthcheck_command") or "").strip() or None,
+            enable=bool(payload.get("enable", True)),
+            overwrite=bool(payload.get("overwrite", False)),
+            runtime_provider=getattr(request.app.state, "runtime_provider", None),
+            progress_callback=_progress_update,
+        )
+        if inspect.isawaitable(install_result):
+            install_result = await install_result
+        result = dict(install_result)
+        installed_capability_ids = _normalize_capability_ids(
+            list(result.get("installed_capability_ids") or []),
+        )
+        trial_attachment: dict[str, Any] | None = None
+        if target_agent_id is not None:
+            _store_project_install_job_state(
+                dispatcher,
+                task_id=task_id,
+                status="running",
+                stage="attaching",
+                progress_summary="Attaching donor trial to the selected target.",
+            )
+            lifecycle_result = await _dispatch_market_mutation(
+                request,
+                capability_ref="system:apply_capability_lifecycle",
+                title=(
+                    f"Attach project donor {source_url}"
+                    + (f" for {target_agent_id}" if target_agent_id else "")
+                ),
+                payload={
+                    "decision_kind": "continue_trial",
+                    "candidate_id": candidate_id,
+                    "target_agent_id": target_agent_id,
+                    "selected_seat_ref": selected_seat_ref,
+                    "selected_scope": _project_target_scope(
+                        trial_scope=str(payload.get("trial_scope") or "single-seat"),
+                        selected_seat_ref=selected_seat_ref,
+                        target_role_id=target_role_id,
+                    ),
+                    "scope_ref": selected_seat_ref or target_agent_id,
+                    "target_role_id": target_role_id,
+                    "capability_ids": installed_capability_ids,
+                    "replacement_capability_ids": _normalize_capability_ids(
+                        list(payload.get("replacement_capability_ids") or []),
+                    ),
+                    "replacement_target_ids": _normalize_capability_ids(
+                        list(payload.get("replacement_target_ids") or []),
+                    ),
+                    "capability_assignment_mode": str(
+                        payload.get("capability_assignment_mode") or "merge",
+                    ),
+                    "actor": str(payload.get("actor") or "copaw-operator"),
+                },
+                fallback_risk="guarded",
+            )
+            lifecycle_result = _unwrap_market_mutation_result(lifecycle_result)
+            if not lifecycle_result.get("success"):
+                detail = str(
+                    lifecycle_result.get("error")
+                    or lifecycle_result.get("summary")
+                    or "Project donor trial attach failed"
+                )
+                raise RuntimeError(detail)
+            if isinstance(lifecycle_result.get("trial_attachment"), dict):
+                trial_attachment = dict(lifecycle_result.get("trial_attachment"))
+            else:
+                selected_scope = _project_target_scope(
+                    trial_scope=str(payload.get("trial_scope") or "single-seat"),
+                    selected_seat_ref=selected_seat_ref,
+                    target_role_id=target_role_id,
+                )
+                trial_attachment = {
+                    "success": True,
+                    "selected_scope": selected_scope,
+                    "scope_type": selected_scope,
+                    "scope_ref": selected_seat_ref or target_agent_id,
+                }
+        result["trial_attachment"] = trial_attachment
+        if bool(result.get("installed", True)):
+            _store_project_install_job_state(
+                dispatcher,
+                task_id=task_id,
+                status="running",
+                stage="probing",
+                progress_summary="Running formal donor probe.",
+            )
+            probe_result = await _probe_project_install_result(
+                request,
+                result=result,
+                target_agent_id=target_agent_id,
+                selected_seat_ref=selected_seat_ref,
+            )
+            if isinstance(probe_result, dict):
+                result["probe_result"] = probe_result
+                for key in (
+                    "verified_stage",
+                    "provider_resolution_status",
+                    "compatibility_status",
+                    "selected_adapter_action_id",
+                ):
+                    resolved = str(probe_result.get(key) or "").strip()
+                    if resolved:
+                        result[key] = resolved
+        _sync_project_trial_truth(
+            request,
+            candidate_id=candidate_id,
+            target_agent_id=target_agent_id,
+            result=result,
+        )
+        response_payload = _project_install_response_payload(
+            result=result,
+            candidate_id=candidate_id,
+            capability_kind=capability_kind,
+            source_url=source_url,
+            enable=bool(payload.get("enable", True)),
+            target_agent_id=target_agent_id,
+        )
+        _store_project_install_job_state(
+            dispatcher,
+            task_id=task_id,
+            status="completed",
+            stage="completed",
+            progress_summary="Project donor install job completed.",
+            result=response_payload,
+        )
+        dispatcher.complete_task(
+            task_id,
+            summary=(
+                f"Project donor install completed for {source_url}"
+                if source_url
+                else "Project donor install completed."
+            ),
+            metadata={
+                "trace_stage": "capability-market.project-install.completed",
+                "trace_component": "capability-market",
+                "project_install_result": response_payload,
+            },
+        )
+    except asyncio.CancelledError as exc:
+        resolution = str(exc).strip() or "Project donor install job cancelled"
+        _store_project_install_job_state(
+            dispatcher,
+            task_id=task_id,
+            status="cancelled",
+            stage="cancelled",
+            progress_summary=resolution,
+            error=resolution,
+        )
+        dispatcher.cancel_task(task_id, resolution=resolution)
+        raise
+    except Exception as exc:
+        error = str(exc).strip() or "Project donor install failed"
+        _store_project_install_job_state(
+            dispatcher,
+            task_id=task_id,
+            status="failed",
+            stage="failed",
+            progress_summary=error,
+            error=error,
+        )
+        dispatcher.fail_task(task_id, error=error)
+    finally:
+        await _pop_project_install_background_task(task_id)
 
 
 def _response_workflow_resume(
@@ -3036,12 +3592,13 @@ async def install_market_curated_skill(
 
 @router.post(
     "/projects/install",
-    response_model=CapabilityMarketProjectInstallResponse,
+    response_model=CapabilityMarketProjectInstallAcceptedResponse,
+    status_code=202,
 )
 async def install_market_project_donor(
     request: Request,
     payload: CapabilityMarketProjectInstallRequest,
-) -> CapabilityMarketProjectInstallResponse:
+) -> CapabilityMarketProjectInstallAcceptedResponse:
     capability_kind = _normalize_external_capability_kind(payload.capability_kind)
     candidate, source_url, version = _resolve_project_candidate(
         request,
@@ -3064,148 +3621,92 @@ async def install_market_project_donor(
     resolved_candidate_id = str(
         getattr(candidate, "candidate_id", "") or payload.candidate_id or "",
     ).strip() or None
-    install_result = _install_external_project_capability(
-        source_url=source_url,
-        version=version,
-        capability_kind=capability_kind,
-        entry_module=payload.entry_module,
-        execute_command=payload.execute_command,
-        healthcheck_command=payload.healthcheck_command,
-        enable=payload.enable,
-        overwrite=payload.overwrite,
-        runtime_provider=getattr(request.app.state, "runtime_provider", None),
-    )
-    if inspect.isawaitable(install_result):
-        install_result = await install_result
-    result = dict(install_result)
-    installed_capability_ids = _normalize_capability_ids(
-        list(result.get("installed_capability_ids") or []),
-    )
-    trial_attachment: dict[str, Any] | None = None
-    if target_agent_id is not None:
-        lifecycle_result = await _dispatch_market_mutation(
-            request,
-            capability_ref="system:apply_capability_lifecycle",
-            title=(
-                f"Attach project donor {source_url}"
-                + (f" for {target_agent_id}" if target_agent_id else "")
-            ),
-            payload={
-                "decision_kind": "continue_trial",
-                "candidate_id": resolved_candidate_id,
-                "target_agent_id": target_agent_id,
-                "selected_seat_ref": str(payload.selected_seat_ref or "").strip() or None,
-                "selected_scope": _project_target_scope(
-                    trial_scope=payload.trial_scope,
-                    selected_seat_ref=str(payload.selected_seat_ref or "").strip() or None,
-                    target_role_id=str(payload.target_role_id or "").strip() or None,
-                ),
-                "scope_ref": (
-                    str(payload.selected_seat_ref or "").strip()
-                    or target_agent_id
-                ),
-                "target_role_id": str(payload.target_role_id or "").strip() or None,
-                "capability_ids": installed_capability_ids,
-                "replacement_capability_ids": _normalize_capability_ids(
-                    payload.replacement_capability_ids,
-                ),
-                "replacement_target_ids": _normalize_capability_ids(
-                    payload.replacement_target_ids,
-                ),
-                "capability_assignment_mode": payload.capability_assignment_mode,
-                "actor": payload.actor,
-            },
-            fallback_risk="guarded",
-        )
-        lifecycle_result = _unwrap_market_mutation_result(lifecycle_result)
-        if not lifecycle_result.get("success"):
-            detail = str(
-                lifecycle_result.get("error")
-                or lifecycle_result.get("summary")
-                or "Project donor trial attach failed"
-            )
-            raise HTTPException(_market_error_status(detail), detail=detail)
-        if isinstance(lifecycle_result.get("trial_attachment"), dict):
-            trial_attachment = dict(lifecycle_result.get("trial_attachment"))
-        else:
-            trial_attachment = {
-                "success": True,
-                "selected_scope": _project_target_scope(
-                    trial_scope=payload.trial_scope,
-                    selected_seat_ref=str(payload.selected_seat_ref or "").strip() or None,
-                    target_role_id=str(payload.target_role_id or "").strip() or None,
-                ),
-                "scope_type": _project_target_scope(
-                    trial_scope=payload.trial_scope,
-                    selected_seat_ref=str(payload.selected_seat_ref or "").strip() or None,
-                    target_role_id=str(payload.target_role_id or "").strip() or None,
-                ),
-                "scope_ref": str(payload.selected_seat_ref or "").strip() or target_agent_id,
-            }
-    result["trial_attachment"] = trial_attachment
-    if bool(result.get("installed", True)):
-        probe_result = await _probe_project_install_result(
-            request,
-            result=result,
+    dispatcher = _get_kernel_dispatcher(request)
+    task = KernelTask(
+        title=f"Install project donor {source_url}",
+        capability_ref="system:install_external_project_donor",
+        owner_agent_id="capability-market",
+        risk_level="guarded",
+        payload=_build_project_install_job_payload(
+            candidate_id=resolved_candidate_id,
+            source_url=source_url,
+            version=version,
+            capability_kind=capability_kind,
+            entry_module=payload.entry_module,
+            execute_command=payload.execute_command,
+            healthcheck_command=payload.healthcheck_command,
+            enable=payload.enable,
+            overwrite=payload.overwrite,
+            actor=payload.actor,
             target_agent_id=target_agent_id,
             selected_seat_ref=str(payload.selected_seat_ref or "").strip() or None,
+            target_role_id=str(payload.target_role_id or "").strip() or None,
+            capability_assignment_mode=payload.capability_assignment_mode,
+            replacement_capability_ids=_normalize_capability_ids(
+                payload.replacement_capability_ids,
+            ),
+            replacement_target_ids=_normalize_capability_ids(
+                payload.replacement_target_ids,
+            ),
+            trial_scope=payload.trial_scope,
+        ),
+    )
+    admission = dispatcher.submit(task)
+    if str(admission.phase or "").strip().lower() == "executing":
+        background_task = asyncio.create_task(
+            _run_project_install_job(request, task_id=admission.task_id),
+            name=f"project-install-{admission.task_id}",
         )
-        if isinstance(probe_result, dict):
-            result["probe_result"] = probe_result
-            for key in (
-                "verified_stage",
-                "provider_resolution_status",
-                "compatibility_status",
-                "selected_adapter_action_id",
-            ):
-                resolved = str(probe_result.get(key) or "").strip()
-                if resolved:
-                    result[key] = resolved
-    _sync_project_trial_truth(
-        request,
+        await _register_project_install_background_task(admission.task_id, background_task)
+    return CapabilityMarketProjectInstallAcceptedResponse(
+        accepted=True,
+        task_id=admission.task_id,
+        status="queued" if admission.phase == "executing" else str(admission.phase),
+        phase=str(admission.phase),
+        title=task.title,
+        source_url=source_url,
+        capability_kind=capability_kind,
         candidate_id=resolved_candidate_id,
-        target_agent_id=target_agent_id,
-        result=result,
+        progress_summary=str(admission.summary or "Project donor install job accepted."),
+        routes=_project_install_job_routes(admission.task_id),
     )
-    return CapabilityMarketProjectInstallResponse(
-        installed=bool(result.get("installed", True)),
-        candidate_id=resolved_candidate_id,
-        name=str(result.get("name") or ""),
-        enabled=bool(result.get("enabled", payload.enable)),
-        source_url=str(result.get("source_url") or source_url),
-        capability_kind=str(result.get("capability_kind") or capability_kind),
-        installed_capability_ids=[
-            str(item).strip()
-            for item in list(result.get("installed_capability_ids") or [])
-            if str(item).strip()
-        ],
-        runtime_contract=(
-            dict(result.get("runtime_contract"))
-            if isinstance(result.get("runtime_contract"), dict)
-            else {}
-        ),
-        adapter_contract=(
-            dict(result.get("adapter_contract"))
-            if isinstance(result.get("adapter_contract"), dict)
-            else {}
-        ),
-        verified_stage=str(result.get("verified_stage") or "unverified"),
-        provider_resolution_status=str(
-            result.get("provider_resolution_status") or "pending",
-        ),
-        compatibility_status=str(result.get("compatibility_status") or "unknown"),
-        target_agent_id=target_agent_id,
-        trial_attachment=(
-            dict(result.get("trial_attachment"))
-            if isinstance(result.get("trial_attachment"), dict)
-            else None
-        ),
-        probe_result=(
-            dict(result.get("probe_result"))
-            if isinstance(result.get("probe_result"), dict)
-            else None
-        ),
-    )
+
+
+@router.get(
+    "/projects/install-jobs/{task_id}",
+    response_model=CapabilityMarketProjectInstallJobStatusResponse,
+)
+async def get_market_project_install_job(
+    task_id: str,
+    request: Request,
+) -> CapabilityMarketProjectInstallJobStatusResponse:
+    dispatcher = _get_kernel_dispatcher(request)
+    payload = _serialize_project_install_job(dispatcher, task_id=task_id)
+    if payload is None:
+        raise HTTPException(404, detail=f"Project install job '{task_id}' was not found")
+    return payload
+
+
+@router.get(
+    "/projects/install-jobs/{task_id}/result",
+    response_model=CapabilityMarketProjectInstallResponse,
+)
+async def get_market_project_install_job_result(
+    task_id: str,
+    request: Request,
+) -> CapabilityMarketProjectInstallResponse:
+    dispatcher = _get_kernel_dispatcher(request)
+    payload = _serialize_project_install_job(dispatcher, task_id=task_id)
+    if payload is None:
+        raise HTTPException(404, detail=f"Project install job '{task_id}' was not found")
+    if payload.status == "failed":
+        raise HTTPException(409, detail=payload.error or "Project install job failed")
+    if payload.status != "completed" or not isinstance(payload.result, dict):
+        raise HTTPException(
+            409,
+            detail="Project install job has not completed yet",
+        )
+    return CapabilityMarketProjectInstallResponse.model_validate(payload.result)
 
 
 @router.post("/mcp", response_model=MCPClientInfo, status_code=201)

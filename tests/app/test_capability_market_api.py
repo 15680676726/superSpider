@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -12,6 +14,9 @@ from copaw.app.runtime_center.overview_cards import _RuntimeCenterOverviewCardsS
 from copaw.app.runtime_center.state_query import RuntimeCenterStateQueryService
 from copaw.app.routers.capability_market import (
     CapabilityMarketCapabilityAssignmentResult,
+    _build_project_install_job_payload,
+    _run_project_install_job,
+    _serialize_project_install_job,
     _assign_capabilities_to_agents,
     router as capability_market_router,
 )
@@ -47,6 +52,7 @@ from copaw.environments import (
 from copaw.app.runtime_events import RuntimeEventBus
 from copaw.industry import IndustryProfile, IndustryRoleBlueprint
 from copaw.kernel.agent_profile import AgentProfile
+from copaw.kernel import KernelTask
 from .industry_api_parts.shared import _build_industry_app
 from copaw.kernel import KernelDispatcher, KernelTaskStore
 from copaw.state import (
@@ -546,6 +552,36 @@ def build_runtime_app(tmp_path) -> FastAPI:
     app.state.runtime_event_bus = runtime_event_bus
     app.state.mcp_registry_catalog = FakeMcpRegistryCatalog()
     return app
+
+
+def _submit_project_install_and_wait(
+    client: TestClient,
+    payload: dict[str, object],
+    *,
+    max_attempts: int = 30,
+    delay_seconds: float = 0.02,
+) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+    accepted = client.post("/capability-market/projects/install", json=payload)
+    assert accepted.status_code == 202
+    accepted_payload = accepted.json()
+    task_id = accepted_payload["task_id"]
+    status_payload = None
+    result_payload = None
+    for _ in range(max_attempts):
+        time.sleep(delay_seconds)
+        status_response = client.get(f"/capability-market/projects/install-jobs/{task_id}")
+        assert status_response.status_code == 200
+        status_payload = status_response.json()
+        if status_payload["status"] == "completed":
+            result_response = client.get(
+                f"/capability-market/projects/install-jobs/{task_id}/result"
+            )
+            assert result_response.status_code == 200
+            result_payload = result_response.json()
+            break
+    assert status_payload is not None
+    assert result_payload is not None
+    return accepted_payload, status_payload, result_payload
 
 
 def test_capability_market_assignment_uses_lifecycle_contract_for_replace_mode() -> None:
@@ -1454,9 +1490,9 @@ def test_capability_market_project_install_trials_github_candidate_and_records_t
         _fake_dispatch,
     )
 
-    response = client.post(
-        "/capability-market/projects/install",
-        json={
+    accepted_payload, _status_payload, payload = _submit_project_install_and_wait(
+        client,
+        {
             "candidate_id": candidate.candidate_id,
             "target_agent_id": "copaw-agent-runner",
             "selected_seat_ref": "seat-browser-primary",
@@ -1464,9 +1500,7 @@ def test_capability_market_project_install_trials_github_candidate_and_records_t
             "trial_scope": "single-seat",
         },
     )
-
-    assert response.status_code == 200
-    payload = response.json()
+    assert accepted_payload["candidate_id"] == candidate.candidate_id
     assert payload["installed"] is True
     assert payload["candidate_id"] == candidate.candidate_id
     assert payload["name"] == "browser-pilot"
@@ -1573,9 +1607,9 @@ def test_capability_market_project_install_unwraps_kernel_output_payload(
 
     monkeypatch.setattr("copaw.app.routers.capability_market._dispatch_market_mutation", _fake_dispatch)
 
-    response = client.post(
-        "/capability-market/projects/install",
-        json={
+    _accepted_payload, _status_payload, payload = _submit_project_install_and_wait(
+        client,
+        {
             "source_url": "https://github.com/psf/black",
             "capability_kind": "project-package",
             "entry_module": "black",
@@ -1584,9 +1618,6 @@ def test_capability_market_project_install_unwraps_kernel_output_payload(
             "overwrite": True,
         },
     )
-
-    assert response.status_code == 200
-    payload = response.json()
     assert payload["installed"] is True
     assert payload["name"] == "black"
     assert payload["source_url"] == "https://github.com/psf/black"
@@ -1595,6 +1626,299 @@ def test_capability_market_project_install_unwraps_kernel_output_payload(
     assert payload["runtime_contract"]["runtime_kind"] == "cli"
     assert payload["runtime_contract"]["supported_actions"] == ["describe", "run"]
     assert "port" not in payload["runtime_contract"]
+
+
+def test_capability_market_project_install_returns_async_job_acceptance(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+
+    async def _fake_install(**kwargs):
+        _ = kwargs
+        await asyncio.sleep(0.01)
+        return {
+            "installed": True,
+            "name": "black",
+            "enabled": True,
+            "source_url": "https://github.com/psf/black",
+            "installed_capability_ids": ["project:black"],
+            "capability_kind": "project-package",
+            "runtime_contract": {
+                "runtime_kind": "cli",
+                "supported_actions": ["describe", "run"],
+            },
+        }
+
+    monkeypatch.setattr(
+        "copaw.app.routers.capability_market._install_external_project_capability",
+        _fake_install,
+    )
+
+    response = client.post(
+        "/capability-market/projects/install",
+        json={
+            "source_url": "https://github.com/psf/black",
+            "capability_kind": "project-package",
+            "entry_module": "black",
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["status"] == "queued"
+    assert payload["task_id"].startswith("ktask:")
+    assert payload["routes"]["status"].endswith(payload["task_id"])
+    assert payload["routes"]["result"].endswith(f"{payload['task_id']}/result")
+
+
+def test_capability_market_project_install_job_status_exposes_terminal_result(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+
+    async def _fake_install(**kwargs):
+        _ = kwargs
+        await asyncio.sleep(0.01)
+        return {
+            "installed": True,
+            "name": "black",
+            "enabled": True,
+            "source_url": "https://github.com/psf/black",
+            "installed_capability_ids": ["project:black"],
+            "capability_kind": "project-package",
+            "runtime_contract": {
+                "runtime_kind": "cli",
+                "supported_actions": ["describe", "run"],
+            },
+            "verified_stage": "installed",
+            "provider_resolution_status": "pending",
+            "compatibility_status": "compatible_native",
+        }
+
+    monkeypatch.setattr(
+        "copaw.app.routers.capability_market._install_external_project_capability",
+        _fake_install,
+    )
+
+    accepted = client.post(
+        "/capability-market/projects/install",
+        json={
+            "source_url": "https://github.com/psf/black",
+            "capability_kind": "project-package",
+            "entry_module": "black",
+        },
+    )
+
+    assert accepted.status_code == 202
+    task_id = accepted.json()["task_id"]
+
+    status_payload = None
+    result_payload = None
+    for _ in range(30):
+        time.sleep(0.02)
+        status_response = client.get(f"/capability-market/projects/install-jobs/{task_id}")
+        assert status_response.status_code == 200
+        status_payload = status_response.json()
+        if status_payload["status"] == "completed":
+            result_response = client.get(
+                f"/capability-market/projects/install-jobs/{task_id}/result"
+            )
+            assert result_response.status_code == 200
+            result_payload = result_response.json()
+            break
+
+    assert status_payload is not None
+    assert status_payload["status"] == "completed"
+    assert status_payload["result"]["installed_capability_ids"] == ["project:black"]
+    assert result_payload is not None
+    assert result_payload["installed"] is True
+    assert result_payload["installed_capability_ids"] == ["project:black"]
+    assert result_payload["runtime_contract"]["runtime_kind"] == "cli"
+
+
+def test_capability_market_project_install_job_exposes_intermediate_progress_stages(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    gate = threading.Event()
+
+    async def _fake_install(**kwargs):
+        progress_callback = kwargs.get("progress_callback")
+        assert callable(progress_callback)
+        await progress_callback("bootstrap_env", "Bootstrapping isolated donor environment.")
+        await progress_callback("pip_install", "Installing donor package via github-archive-zip.")
+        while not gate.is_set():
+            await asyncio.sleep(0.01)
+        return {
+            "installed": True,
+            "name": "black",
+            "enabled": True,
+            "source_url": "https://github.com/psf/black",
+            "installed_capability_ids": ["project:black"],
+            "capability_kind": "project-package",
+            "runtime_contract": {
+                "runtime_kind": "cli",
+                "supported_actions": ["describe", "run"],
+            },
+        }
+
+    monkeypatch.setattr(
+        "copaw.app.routers.capability_market._install_external_project_capability",
+        _fake_install,
+    )
+    dispatcher = app.state.kernel_dispatcher
+    admission = dispatcher.submit(
+        KernelTask(
+            title="Install project donor https://github.com/psf/black",
+            capability_ref="system:install_external_project_donor",
+            owner_agent_id="capability-market",
+            risk_level="guarded",
+            payload=_build_project_install_job_payload(
+                candidate_id=None,
+                source_url="https://github.com/psf/black",
+                version="",
+                capability_kind="project-package",
+                entry_module="black",
+                execute_command=None,
+                healthcheck_command=None,
+                enable=True,
+                overwrite=True,
+                actor="copaw-operator",
+                target_agent_id=None,
+                selected_seat_ref=None,
+                target_role_id=None,
+                capability_assignment_mode="merge",
+                replacement_capability_ids=[],
+                replacement_target_ids=[],
+                trial_scope="single-seat",
+            ),
+        ),
+    )
+    task_id = admission.task_id
+
+    async def _exercise() -> None:
+        worker = asyncio.create_task(
+            _run_project_install_job(SimpleNamespace(app=app), task_id=task_id),
+        )
+        try:
+            seen_stages: list[str] = []
+            for _ in range(40):
+                await asyncio.sleep(0.02)
+                status_payload = _serialize_project_install_job(dispatcher, task_id=task_id)
+                assert status_payload is not None
+                seen_stages.append(status_payload.stage)
+                if status_payload.stage == "pip_install":
+                    assert "Installing donor package" in status_payload.progress_summary
+                    break
+            else:
+                raise AssertionError(f"expected pip_install stage, saw {seen_stages}")
+            gate.set()
+            await worker
+            final_payload = _serialize_project_install_job(dispatcher, task_id=task_id)
+            assert final_payload is not None
+            assert final_payload.status == "completed"
+        finally:
+            gate.set()
+
+    asyncio.run(_exercise())
+
+
+def test_capability_market_project_install_job_result_rejects_failed_job(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+
+    async def _fake_install(**kwargs):
+        progress_callback = kwargs.get("progress_callback")
+        assert callable(progress_callback)
+        await progress_callback("pip_install", "Installing donor package via github-archive-zip.")
+        raise RuntimeError("pip install failed hard")
+
+    monkeypatch.setattr(
+        "copaw.app.routers.capability_market._install_external_project_capability",
+        _fake_install,
+    )
+
+    accepted = client.post(
+        "/capability-market/projects/install",
+        json={
+            "source_url": "https://github.com/psf/black",
+            "capability_kind": "project-package",
+            "entry_module": "black",
+        },
+    )
+
+    assert accepted.status_code == 202
+    task_id = accepted.json()["task_id"]
+
+    failed_payload = None
+    for _ in range(40):
+        time.sleep(0.02)
+        status_response = client.get(f"/capability-market/projects/install-jobs/{task_id}")
+        assert status_response.status_code == 200
+        failed_payload = status_response.json()
+        if failed_payload["status"] == "failed":
+            break
+    assert failed_payload is not None
+    assert failed_payload["status"] == "failed"
+    assert failed_payload["stage"] == "failed"
+    assert "pip install failed hard" in failed_payload["error"]
+
+    result_response = client.get(f"/capability-market/projects/install-jobs/{task_id}/result")
+    assert result_response.status_code == 409
+    assert "pip install failed hard" in result_response.json()["detail"]
+
+
+def test_capability_market_project_install_job_marks_cancelled_terminal_state(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+
+    async def _fake_install(**kwargs):
+        progress_callback = kwargs.get("progress_callback")
+        assert callable(progress_callback)
+        await progress_callback("pip_install", "Installing donor package via github-archive-zip.")
+        raise asyncio.CancelledError("install cancelled upstream")
+
+    monkeypatch.setattr(
+        "copaw.app.routers.capability_market._install_external_project_capability",
+        _fake_install,
+    )
+
+    accepted = client.post(
+        "/capability-market/projects/install",
+        json={
+            "source_url": "https://github.com/psf/black",
+            "capability_kind": "project-package",
+            "entry_module": "black",
+        },
+    )
+
+    assert accepted.status_code == 202
+    task_id = accepted.json()["task_id"]
+
+    cancelled_payload = None
+    for _ in range(40):
+        time.sleep(0.02)
+        status_response = client.get(f"/capability-market/projects/install-jobs/{task_id}")
+        assert status_response.status_code == 200
+        cancelled_payload = status_response.json()
+        if cancelled_payload["status"] == "cancelled":
+            break
+    assert cancelled_payload is not None
+    assert cancelled_payload["status"] == "cancelled"
+    assert cancelled_payload["stage"] == "cancelled"
+    assert "install cancelled upstream" in cancelled_payload["error"]
 
 
 def test_capability_market_project_search_returns_empty_list_for_blank_query(
@@ -1679,9 +2003,9 @@ def test_capability_market_project_install_from_source_url_materializes_candidat
         _fake_dispatch,
     )
 
-    response = client.post(
-        "/capability-market/projects/install",
-        json={
+    _accepted_payload, _status_payload, payload = _submit_project_install_and_wait(
+        client,
+        {
             "source_url": "https://github.com/psf/black",
             "capability_kind": "project-package",
             "entry_module": "black",
@@ -1691,9 +2015,6 @@ def test_capability_market_project_install_from_source_url_materializes_candidat
             "overwrite": True,
         },
     )
-
-    assert response.status_code == 200
-    payload = response.json()
     assert payload["candidate_id"]
     assert payload["installed_capability_ids"] == ["project:black"]
 
@@ -1804,9 +2125,9 @@ def test_capability_market_project_install_syncs_adapter_attribution_to_candidat
         _no_probe,
     )
 
-    response = client.post(
-        "/capability-market/projects/install",
-        json={
+    _accepted_payload, _status_payload, payload = _submit_project_install_and_wait(
+        client,
+        {
             "source_url": "https://github.com/example/openspace-donor",
             "capability_kind": "adapter",
             "entry_module": "openspace",
@@ -1816,9 +2137,6 @@ def test_capability_market_project_install_syncs_adapter_attribution_to_candidat
             "overwrite": True,
         },
     )
-
-    assert response.status_code == 200
-    payload = response.json()
     candidate = candidate_service.get_candidate(payload["candidate_id"])
     assert candidate is not None
     assert candidate.metadata["protocol_surface_kind"] == "native_mcp"
@@ -1934,10 +2252,17 @@ def test_capability_market_project_install_refreshes_donor_package_truth_from_in
         "copaw.app.routers.capability_market._dispatch_market_mutation",
         _fake_dispatch,
     )
+    async def _no_probe(*args, **kwargs):
+        return None
 
-    response = client.post(
-        "/capability-market/projects/install",
-        json={
+    monkeypatch.setattr(
+        "copaw.app.routers.capability_market._probe_project_install_result",
+        _no_probe,
+    )
+
+    _accepted_payload, _status_payload, payload = _submit_project_install_and_wait(
+        client,
+        {
             "source_url": "https://github.com/example/openspace-donor",
             "capability_kind": "adapter",
             "entry_module": "openspace",
@@ -1947,9 +2272,7 @@ def test_capability_market_project_install_refreshes_donor_package_truth_from_in
             "overwrite": True,
         },
     )
-
-    assert response.status_code == 200
-    candidate = candidate_service.get_candidate(response.json()["candidate_id"])
+    candidate = candidate_service.get_candidate(payload["candidate_id"])
     assert candidate is not None
     package = donor_service.get_package(candidate.package_id)
     assert package is not None
@@ -2074,9 +2397,9 @@ def test_capability_market_project_install_promotes_probe_verified_stage_into_ca
         _fake_probe,
     )
 
-    response = client.post(
-        "/capability-market/projects/install",
-        json={
+    _accepted_payload, _status_payload, payload = _submit_project_install_and_wait(
+        client,
+        {
             "source_url": "https://github.com/example/openspace-donor",
             "capability_kind": "adapter",
             "entry_module": "openspace",
@@ -2086,9 +2409,6 @@ def test_capability_market_project_install_promotes_probe_verified_stage_into_ca
             "overwrite": True,
         },
     )
-
-    assert response.status_code == 200
-    payload = response.json()
     assert payload["verified_stage"] == "primary_action_verified"
     assert payload["provider_resolution_status"] == "resolved"
     assert payload["compatibility_status"] == "compatible_native"
@@ -2178,9 +2498,9 @@ def test_capability_market_project_install_accepts_candidate_source_url(
         _fake_dispatch,
     )
 
-    response = client.post(
-        "/capability-market/projects/install",
-        json={
+    _accepted_payload, _status_payload, payload = _submit_project_install_and_wait(
+        client,
+        {
             "candidate_id": candidate.candidate_id,
             "capability_kind": "project-package",
             "target_agent_id": "copaw-agent-runner",
@@ -2188,9 +2508,6 @@ def test_capability_market_project_install_accepts_candidate_source_url(
             "overwrite": True,
         },
     )
-
-    assert response.status_code == 200
-    payload = response.json()
     assert payload["source_url"] == "https://github.com/psf/black"
     assert payload["installed_capability_ids"] == ["project:black"]
 

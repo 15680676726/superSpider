@@ -99,9 +99,10 @@
 - 失败收口也已补齐：
   - install job 失败时，`/install-jobs/{task_id}` 会返回 terminal `failed`
   - `/install-jobs/{task_id}/result` 会对 failed job 返回 `409` + 真实错误摘要，而不是继续伪装成“还在跑”
+  - install job 若被 runtime cancel / shutdown 打断，也会正式收口到 terminal `cancelled`，不再遗留 `running`
 - 当前 fresh regression：
   - `python -m pytest tests/app/test_capability_market_api.py tests/app/test_runtime_center_donor_api.py tests/capabilities/test_project_donor_contracts.py -q`
-  - 结果：`54 passed`
+  - 结果：`55 passed`
 - `2026-04-06` fresh verification 补充：
   - 直接 donor install 内核 smoke：
     - 真实仓库：`https://github.com/psf/black`
