@@ -997,6 +997,8 @@ class _IndustryLifecycleMixin:
         *,
         cycle_id: str | None = None,
         goal_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
     ) -> list[AssignmentRecord]:
         if self._assignment_service is None:
             return []
@@ -1004,7 +1006,8 @@ class _IndustryLifecycleMixin:
             industry_instance_id=instance_id,
             cycle_id=cycle_id,
             goal_id=goal_id,
-            limit=None,
+            status=status,
+            limit=limit,
         )
     def _list_agent_report_records(
         self,
@@ -2083,9 +2086,29 @@ class _IndustryLifecycleMixin:
         normalized_goal_id = _string(goal_id)
         if not normalized_goal_id:
             return
-        for record in self._industry_instance_repository.list_instances_for_goal(
-            normalized_goal_id,
-        ):
+        goal = self._goal_service.get_goal(normalized_goal_id)
+        if goal is None:
+            return
+        override = self._goal_override_repository.get_override(goal.id)
+        candidate_records: list[IndustryInstanceRecord] = []
+        if goal.industry_instance_id:
+            record = self._industry_instance_repository.get_instance(goal.industry_instance_id)
+            if record is not None:
+                candidate_records.append(record)
+        elif goal.owner_scope:
+            candidate_records.extend(
+                self._industry_instance_repository.list_instances(
+                    owner_scope=goal.owner_scope,
+                    limit=None,
+                ),
+            )
+        for record in candidate_records:
+            if not self._goal_belongs_to_instance(
+                goal,
+                record=record,
+                override=override,
+            ):
+                continue
             current_cycle = self._current_operating_cycle_record(record.instance_id)
             cycle_id = current_cycle.id if current_cycle is not None else None
             self._ensure_terminal_agent_reports(
@@ -3902,9 +3925,7 @@ class _IndustryLifecycleMixin:
         if self._schedule_repository is None:
             return []
         records: list[ScheduleRecord] = []
-        schedule_ids = list(record.schedule_ids or []) or self._list_schedule_ids_for_instance(
-            record.instance_id,
-        )
+        schedule_ids = self._list_schedule_ids_for_instance(record.instance_id)
         for schedule_id in schedule_ids:
             schedule = self._schedule_repository.get_schedule(schedule_id)
             if schedule is None or not schedule.enabled or schedule.status == "deleted":
@@ -4172,14 +4193,33 @@ class _IndustryLifecycleMixin:
             if self._operating_lane_service is not None and item.lane_id is not None
             else None
         )
-        plan_steps = _unique_strings(
-            metadata.get("plan_steps"),
-            [
-                "Confirm the backlog goal and the expected delivery boundary.",
-                "Execute the goal, collect evidence, and update the current status.",
-                "Return the completion summary together with the next recommendation.",
-            ],
+        assignment_formal_planning = (
+            dict((assignment.metadata or {}).get("formal_planning") or {})
+            if isinstance(assignment.metadata, Mapping)
+            else {}
         )
+        assignment_plan = (
+            dict(assignment_formal_planning.get("assignment_plan") or {})
+            if isinstance(assignment_formal_planning.get("assignment_plan"), Mapping)
+            else {}
+        )
+        assignment_sidecar_plan = (
+            dict(assignment_plan.get("sidecar_plan") or {})
+            if isinstance(assignment_plan.get("sidecar_plan"), Mapping)
+            else {}
+        )
+        checklist_steps = _unique_strings(assignment_sidecar_plan.get("checklist"))
+        if checklist_steps:
+            plan_steps = list(checklist_steps)
+        else:
+            plan_steps = _unique_strings(
+                metadata.get("plan_steps"),
+                [
+                    "Confirm the backlog goal and the expected delivery boundary.",
+                    "Execute the goal, collect evidence, and update the current status.",
+                    "Return the completion summary together with the next recommendation.",
+                ],
+            )
         control_thread_id = self._chat_writeback_control_thread_id(
             instance_id=record.instance_id,
             session_id=(
@@ -4318,9 +4358,7 @@ class _IndustryLifecycleMixin:
             goal_ids=goal_ids,
             agent_ids=agent_ids,
         )
-        schedule_ids = list(record.schedule_ids or []) or self._list_schedule_ids_for_instance(
-            record.instance_id,
-        )
+        schedule_ids = self._list_schedule_ids_for_instance(record.instance_id)
         base_evidence_ids = self._collect_instance_evidence_ids(task_ids=task_ids)
         learning_deletion_plan = self._plan_instance_learning_deletion(
             instance_id=record.instance_id,

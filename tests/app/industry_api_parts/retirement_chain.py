@@ -897,23 +897,8 @@ def test_industry_runtime_main_chain_exposes_live_assignment_chain_after_auto_ac
     lane = app.state.operating_lane_service.get_lane(goal_record.lane_id)
     assert lane is not None
     assert lane.owner_agent_id == target_owner_agent_id
-    original_goal_ids = list(record.goal_ids or [])
-    app.state.industry_instance_repository.upsert_instance(
-        record.model_copy(
-            update={
-                "goal_ids": [
-                    goal_id for goal_id in original_goal_ids if goal_id != target_goal_id
-                ],
-            },
-        ),
-    )
-    trimmed_record = app.state.industry_instance_repository.get_instance(instance_id)
-    assert trimmed_record is not None
     assert target_goal_id in app.state.industry_service._resolve_instance_goal_ids(
-        trimmed_record,
-    )
-    app.state.industry_instance_repository.upsert_instance(
-        trimmed_record.model_copy(update={"goal_ids": original_goal_ids}),
+        record,
     )
     target_override = app.state.goal_override_repository.get_override(target_goal_id)
     assert target_override is not None

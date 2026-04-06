@@ -68,7 +68,7 @@ class _PredictionServiceContextMixin:
     def _report(self, *, scope_type: str, scope_id: str | None, days: int) -> dict[str, Any]:
         getter = getattr(self._reporting_service, "get_report", None)
         if not callable(getter):
-            return {"highlights": [], "goal_ids": [], "routes": {}}
+            return {"highlights": [], "routes": {}}
         result = getter(window=_window_from_days(days), scope_type=scope_type, scope_id=scope_id)
         if hasattr(result, "model_dump"):
             return result.model_dump(mode="json")
@@ -85,11 +85,17 @@ class _PredictionServiceContextMixin:
         if case.industry_instance_id and self._industry_instance_repository is not None:
             instance = self._industry_instance_repository.get_instance(case.industry_instance_id)
             if instance is not None:
-                return [
-                    goal
-                    for goal_id in instance.goal_ids
-                    if (goal := self._goal_repository.get_goal(goal_id)) is not None
-                ]
+                goals = self._goal_repository.list_goals(
+                    industry_instance_id=case.industry_instance_id,
+                )
+                if case.owner_scope is not None:
+                    goals = [
+                        goal
+                        for goal in goals
+                        if goal.owner_scope == case.owner_scope
+                    ]
+                if goals:
+                    return goals
         report_goal_ids = _safe_list(report.get("goal_ids"))
         if report_goal_ids:
             return [
@@ -653,8 +659,44 @@ class _PredictionServiceContextMixin:
                     metadata.get("candidate_source_lineage"),
                 ),
             }
-            if not self._trial_improved(new_stats=new_stats, old_stats=old_stats):
-                if self._trial_underperformed(new_stats=new_stats, old_stats=old_stats):
+            trial_underperformed = self._trial_underperformed(
+                new_stats=new_stats,
+                old_stats=old_stats,
+            )
+            trial_improved = self._trial_improved(
+                new_stats=new_stats,
+                old_stats=old_stats,
+            )
+            drift_summary = self._skill_gap_detector.build_reentry_summary(
+                trial_summary={
+                    "aggregate_verdict": (
+                        "rollback_recommended"
+                        if trial_underperformed
+                        else "mixed"
+                    ),
+                    "operator_intervention_count": int(
+                        new_stats.get("manual_intervention_rate", 0.0) > 0.0
+                    ),
+                    "history": [
+                        {
+                            "entry_kind": "decision",
+                            "decision_kind": (
+                                "rollback"
+                                if trial_underperformed
+                                else "continue_trial"
+                            ),
+                            "replacement_target_ids": [old_capability_id],
+                        },
+                    ],
+                },
+                latest_decision_kind=(
+                    "rollback"
+                    if trial_underperformed
+                    else "continue_trial"
+                ),
+            )
+            if not trial_improved:
+                if trial_underperformed:
                     findings.append(
                         {
                             "gap_kind": "capability_rollback",
@@ -670,6 +712,34 @@ class _PredictionServiceContextMixin:
                             "selected_seat_ref": selected_seat_ref,
                             "trial_scope": trial_scope,
                             "rollback_target_ids": [old_capability_id],
+                            "reentry_kind": drift_summary.get("reentry_kind"),
+                            "drift_summary": drift_summary,
+                            "stats": {
+                                "new_stats": new_stats,
+                                "old_stats": old_stats,
+                            },
+                            **donor_metadata,
+                        },
+                    )
+                elif str(drift_summary.get("status") or "").strip().lower() == "pressure":
+                    findings.append(
+                        {
+                            "gap_kind": "capability_revision",
+                            "optimization_stage": "revision",
+                            "lifecycle_stage": "trial",
+                            "candidate_lifecycle_stage": "trial",
+                            "replacement_target_stage": "active",
+                            "old_capability_id": old_capability_id,
+                            "new_capability_id": new_capability_id,
+                            "target_agent_id": target_agent_id,
+                            "candidate_id": candidate_id,
+                            "source_recommendation_id": record.recommendation_id,
+                            "selected_seat_ref": selected_seat_ref,
+                            "trial_scope": trial_scope,
+                            "replacement_target_ids": [old_capability_id],
+                            "rollback_target_ids": [old_capability_id],
+                            "reentry_kind": drift_summary.get("reentry_kind"),
+                            "drift_summary": drift_summary,
                             "stats": {
                                 "new_stats": new_stats,
                                 "old_stats": old_stats,
@@ -699,6 +769,13 @@ class _PredictionServiceContextMixin:
                         )
                     ]
             if rollout_agent_ids:
+                rollout_drift_summary = {
+                    **drift_summary,
+                    "reentry_kind": "replacement",
+                    "replacement_pressure": True,
+                    "revision_pressure": False,
+                    "retirement_pressure": False,
+                }
                 for rollout_agent_id in rollout_agent_ids[:2]:
                     dedupe_key = (rollout_agent_id, old_capability_id, new_capability_id)
                     if dedupe_key in seen_rollouts:
@@ -719,6 +796,8 @@ class _PredictionServiceContextMixin:
                             "selected_seat_ref": selected_seat_ref,
                             "trial_scope": trial_scope,
                             "replacement_target_ids": [old_capability_id],
+                            "reentry_kind": rollout_drift_summary.get("reentry_kind"),
+                            "drift_summary": rollout_drift_summary,
                             "stats": {
                                 "trial_agent_id": target_agent_id,
                                 "new_stats": new_stats,
@@ -729,6 +808,13 @@ class _PredictionServiceContextMixin:
                     )
                 continue
             if self._capability_exists(old_capability_id):
+                retirement_drift_summary = {
+                    **drift_summary,
+                    "reentry_kind": "retirement",
+                    "replacement_pressure": False,
+                    "revision_pressure": False,
+                    "retirement_pressure": True,
+                }
                 findings.append(
                     {
                         "gap_kind": "capability_retirement",
@@ -744,6 +830,8 @@ class _PredictionServiceContextMixin:
                         "selected_seat_ref": selected_seat_ref,
                         "trial_scope": trial_scope,
                         "replacement_target_ids": [old_capability_id],
+                        "reentry_kind": retirement_drift_summary.get("reentry_kind"),
+                        "drift_summary": retirement_drift_summary,
                         "stats": {
                             "new_stats": new_stats,
                             "old_stats": old_stats,

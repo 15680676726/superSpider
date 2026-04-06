@@ -292,9 +292,6 @@ class _WorkflowServiceRunMixin:
             }
         )
         self._workflow_run_repository.upsert_run(run)
-        goal_ids: list[str] = []
-        schedule_ids: list[str] = []
-
         for step in preview.steps:
             step_payload = dict(step.payload_preview or {})
             if step.kind == "goal":
@@ -305,7 +302,6 @@ class _WorkflowServiceRunMixin:
                     priority=3,
                     owner_scope=preview.owner_scope,
                 )
-                goal_ids.append(goal.id)
                 step_seed = step_seed_by_id.get(step.step_id)
                 if isinstance(step_seed, dict):
                     linked_goal_ids = list(step_seed.get("linked_goal_ids") or [])
@@ -350,7 +346,6 @@ class _WorkflowServiceRunMixin:
                         )
             elif step.kind == "schedule":
                 schedule_id = str(step_payload.get("id") or f"{run.run_id}:{step.step_id}")
-                schedule_ids.append(schedule_id)
                 step_seed = step_seed_by_id.get(step.step_id)
                 if isinstance(step_seed, dict):
                     linked_schedule_ids = list(step_seed.get("linked_schedule_ids") or [])
@@ -391,8 +386,6 @@ class _WorkflowServiceRunMixin:
 
         persisted = run.model_copy(
             update={
-                "goal_ids": goal_ids,
-                "schedule_ids": schedule_ids,
                 "metadata": {
                     **dict(run.metadata or {}),
                     "step_execution_seed": step_execution_seed,
@@ -416,7 +409,7 @@ class _WorkflowServiceRunMixin:
         if run.status == "cancelled":
             return self.get_run_detail(run_id)
 
-        for goal_id in run.goal_ids:
+        for goal_id in _workflow_linked_resource_ids(run, key="linked_goal_ids"):
             goal = self._goal_service.get_goal(goal_id)
             if goal is None:
                 continue
@@ -424,7 +417,7 @@ class _WorkflowServiceRunMixin:
                 continue
             self._goal_service.update_goal(goal_id, status="archived")
 
-        for schedule_id in run.schedule_ids:
+        for schedule_id in _workflow_linked_resource_ids(run, key="linked_schedule_ids"):
             await self._pause_schedule(schedule_id)
 
         cancelled = run.model_copy(
@@ -471,8 +464,6 @@ class _WorkflowServiceRunMixin:
             for item in step_seed_items
             if isinstance(item, dict) and str(item.get("step_id") or "").strip()
         }
-        goal_ids = list(run.goal_ids or [])
-        schedule_ids = list(run.schedule_ids or [])
         for step in detail.preview.steps:
             step_payload = dict(step.payload_preview or {})
             step_seed = step_seed_by_id.get(step.step_id)
@@ -490,7 +481,6 @@ class _WorkflowServiceRunMixin:
                         priority=3,
                         owner_scope=detail.preview.owner_scope,
                     )
-                    goal_ids.append(goal.id)
                     linked_goal_ids = [goal.id]
                     if isinstance(step_seed, dict):
                         step_seed["linked_goal_ids"] = linked_goal_ids
@@ -544,8 +534,6 @@ class _WorkflowServiceRunMixin:
                 )
                 if not linked_schedule_ids:
                     schedule_id = str(step_payload.get("id") or f"{run.run_id}:{step.step_id}")
-                    if schedule_id not in schedule_ids:
-                        schedule_ids.append(schedule_id)
                     if isinstance(step_seed, dict):
                         step_seed["linked_schedule_ids"] = [schedule_id]
                     schedule_meta = self._build_schedule_host_meta(
@@ -646,8 +634,6 @@ class _WorkflowServiceRunMixin:
         )
         persisted = run.model_copy(
             update={
-                "goal_ids": goal_ids,
-                "schedule_ids": schedule_ids,
                 "status": "running" if execute_flag else run.status,
                 "metadata": {
                     **metadata,

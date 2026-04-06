@@ -515,7 +515,6 @@ class OperatingCycleService:
         backlog_item_ids: Sequence[str],
         source_ref: str,
         summary: str | None = None,
-        goal_ids: Sequence[str] | None = None,
         assignment_ids: Sequence[str] | None = None,
         metadata: Mapping[str, object] | None = None,
         now: datetime | None = None,
@@ -533,7 +532,6 @@ class OperatingCycleService:
             due_at=_due_at_for_cycle(cycle_kind=cycle_kind, now=started_at),
             focus_lane_ids=list(dict.fromkeys(focus_lane_ids)),
             backlog_item_ids=list(dict.fromkeys(backlog_item_ids)),
-            goal_ids=list(dict.fromkeys(goal_ids or [])),
             assignment_ids=list(dict.fromkeys(assignment_ids or [])),
             report_ids=[],
             metadata=dict(metadata or {}),
@@ -585,15 +583,12 @@ class OperatingCycleService:
         self,
         cycle: OperatingCycleRecord,
         *,
-        goal_ids: Sequence[str] | None = None,
         assignment_ids: Sequence[str] | None = None,
         report_ids: Sequence[str] | None = None,
         backlog_item_ids: Sequence[str] | None = None,
         focus_lane_ids: Sequence[str] | None = None,
     ) -> OperatingCycleRecord:
         update: dict[str, Any] = {"updated_at": _utc_now()}
-        if goal_ids is not None:
-            update["goal_ids"] = list(dict.fromkeys(goal_ids))
         if assignment_ids is not None:
             update["assignment_ids"] = list(dict.fromkeys(assignment_ids))
         if report_ids is not None:

@@ -1273,9 +1273,7 @@ class _IndustryStrategyMixin:
 
                 "metadata",
 
-                "active_goal_ids",
-
-                "active_goal_titles",
+                "current_focuses",
 
             )
 
@@ -1292,10 +1290,6 @@ class _IndustryStrategyMixin:
         *,
 
         existing: IndustryInstanceRecord | None,
-
-        goal_ids: list[str],
-
-        schedule_ids: list[str],
 
         status: str,
 
@@ -1351,11 +1345,7 @@ class _IndustryStrategyMixin:
 
             execution_core_identity_payload=execution_core_identity.model_dump(mode="json"),
 
-            goal_ids=list(goal_ids),
-
             agent_ids=[agent.agent_id for agent in plan.draft.team.agents],
-
-            schedule_ids=list(schedule_ids),
 
             lifecycle_status=(
 
@@ -1869,9 +1859,9 @@ class _IndustryStrategyMixin:
 
         existing = existing_strategy or self._peek_strategy_memory(record)
 
-        active_goal_ids: list[str] = []
-
-        goal_titles: list[str] = []
+        goal_titles = self._list_strategy_goal_titles(
+            self._resolve_instance_goal_ids(record),
+        )
 
         priority_order = _unique_strings(
 
@@ -2102,10 +2092,6 @@ class _IndustryStrategyMixin:
 
             evidence_requirements=list(resolved_identity.evidence_expectations),
 
-            active_goal_ids=active_goal_ids,
-
-            active_goal_titles=goal_titles,
-
             teammate_contracts=self._build_strategy_teammate_contracts(resolved_team),
 
             lane_weights=lane_weights,
@@ -2119,6 +2105,8 @@ class _IndustryStrategyMixin:
             current_focuses=_unique_strings(
 
                 current_focuses,
+
+                goal_titles,
 
                 [report.headline for report in pending_reports],
 
@@ -3180,28 +3168,6 @@ class _IndustryStrategyMixin:
             statuses.append(_string(goal.status))
 
         return statuses
-
-
-
-    def _active_strategy_goal_ids(self, goal_ids: list[str]) -> list[str]:
-
-        active_goal_ids: list[str] = []
-
-        for goal_id in goal_ids:
-
-            goal = self._goal_service.get_goal(goal_id)
-
-            if goal is None:
-
-                continue
-
-            if _string(goal.status) in {"completed", "archived"}:
-
-                continue
-
-            active_goal_ids.append(goal.id)
-
-        return active_goal_ids
 
 
 

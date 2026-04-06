@@ -48,8 +48,7 @@ def test_strategy_memory_service_persists_and_reads_active_strategy(tmp_path) ->
             ],
             execution_constraints=["高风险动作必须确认"],
             evidence_requirements=["所有外部动作留证据"],
-            active_goal_ids=["goal-1"],
-            active_goal_titles=["完成周报主线"],
+            current_focuses=["??????"],
             teammate_contracts=[
                 {
                     "agent_id": "worker-1",
@@ -132,7 +131,7 @@ def test_strategy_memory_service_compacts_large_payloads(tmp_path) -> None:
             direct_execution_policy=[f"DIRECT-{index:02d}" for index in range(12)],
             execution_constraints=[f"CONSTRAINT-{index:02d}" for index in range(16)],
             evidence_requirements=[f"EVIDENCE-{index:02d}" for index in range(16)],
-            active_goal_titles=[f"GOAL-{index:02d}" for index in range(16)],
+            current_focuses=[f"FOCUS-{index:02d}" for index in range(16)],
             teammate_contracts=[
                 {
                     "agent_id": f"agent-{index}",
@@ -183,7 +182,7 @@ def test_strategy_memory_service_compacts_large_payloads(tmp_path) -> None:
     assert len(active.direct_execution_policy) == 8
     assert len(active.execution_constraints) == 12
     assert len(active.evidence_requirements) == 12
-    assert len(active.active_goal_titles) == 12
+    assert len(active.current_focuses) == 12
     assert len(active.teammate_contracts) == 8
     assert len(active.teammate_contracts[0]["capabilities"]) == 12
     assert len(active.teammate_contracts[0]["evidence_expectations"]) == 6
@@ -197,6 +196,7 @@ def test_strategy_memory_service_compacts_large_payloads(tmp_path) -> None:
     assert active.metadata["chat_writeback_history"][-1]["instruction"].endswith("...")
     assert len(active.metadata["chat_writeback_history"][-1]["classification"]) == 6
     assert len(payload["priority_order"]) == 12
+    assert len(payload["current_focuses"]) == 12
     assert len(payload["metadata"]["chat_writeback_history"]) == 10
 
 

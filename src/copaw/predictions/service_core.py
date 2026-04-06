@@ -5,6 +5,7 @@ from collections.abc import Mapping
 
 from ..compiler.planning import ReportReplanEngine
 from ..capabilities.skill_evolution_service import SkillEvolutionService
+from ..kernel.governed_mutation_dispatch import dispatch_governed_mutation_runtime
 from ..learning.skill_gap_detector import SkillGapDetector
 from .service_shared import *  # noqa: F401,F403
 
@@ -618,44 +619,68 @@ class _PredictionServiceCoreMixin:
             raise ValueError("Recommendation is review-only and cannot be executed")
         if self._kernel_dispatcher is None:
             raise RuntimeError("Kernel dispatcher is not available")
-        task = KernelTask(
-            title=record.title,
-            capability_ref=record.action_kind,
-            owner_agent_id=actor or record.target_agent_id or "copaw-operator",
-            risk_level=record.risk_level,
-            payload=dict(record.action_payload or {}),
-        )
-        admitted = self._kernel_dispatcher.submit(task)
-        execution = admitted.model_dump(mode="json")
+        action_payload = dict(record.action_payload or {})
+        execution_task_id: str | None = None
+        if str(record.action_kind or "").strip() == "system:apply_capability_lifecycle":
+            if self._capability_service is None:
+                raise RuntimeError("Capability service is not available")
+            governed_payload = dict(action_payload)
+            governed_payload["governed_mutation"] = True
+            execution = await dispatch_governed_mutation_runtime(
+                capability_service=self._capability_service,
+                kernel_dispatcher=self._kernel_dispatcher,
+                capability_ref=record.action_kind,
+                title=record.title,
+                payload=governed_payload,
+                environment_ref=(
+                    _string(governed_payload.get("selected_seat_ref"))
+                    or _string(governed_payload.get("environment_ref"))
+                    or "config:runtime"
+                ),
+                fallback_risk=record.risk_level,
+            )
+            execution_task_id = _string(execution.get("task_id"))
+        else:
+            task = KernelTask(
+                title=record.title,
+                capability_ref=record.action_kind,
+                owner_agent_id=actor or record.target_agent_id or "copaw-operator",
+                risk_level=record.risk_level,
+                payload=action_payload,
+            )
+            admitted = self._kernel_dispatcher.submit(task)
+            execution = admitted.model_dump(mode="json")
+            execution_task_id = task.id
+            if admitted.phase == "executing":
+                execution = (await self._kernel_dispatcher.execute_task(task.id)).model_dump(
+                    mode="json",
+                )
         updated = record.model_copy(
             update={
-                "execution_task_id": task.id,
-                "decision_request_id": admitted.decision_request_id or record.decision_request_id,
+                "execution_task_id": execution_task_id,
+                "decision_request_id": (
+                    _string(execution.get("decision_request_id")) or record.decision_request_id
+                ),
                 "status": self._status_from_phase(execution.get("phase"), fallback=record.status),
                 "outcome_summary": str(execution.get("summary") or record.outcome_summary or ""),
                 "auto_executed": record.auto_executed or actor.startswith("copaw-auto"),
                 "updated_at": _utc_now(),
             },
         )
-        self._recommendation_repository.upsert_recommendation(updated)
-        if admitted.phase == "executing":
-            executed = await self._kernel_dispatcher.execute_task(task.id)
-            execution = executed.model_dump(mode="json")
+        if updated.status == "executed":
             execution_metadata = self._recommendation_execution_metadata(
                 updated,
                 execution=execution,
             )
             updated = updated.model_copy(
                 update={
-                    "decision_request_id": executed.decision_request_id or updated.decision_request_id,
-                    "execution_evidence_id": executed.evidence_id,
-                    "status": self._status_from_phase(execution.get("phase"), fallback=updated.status),
-                    "outcome_summary": str(execution.get("summary") or updated.outcome_summary or ""),
+                    "execution_evidence_id": _string(execution.get("evidence_id")),
                     "metadata": execution_metadata,
                     "updated_at": _utc_now(),
                 },
             )
-            self._recommendation_repository.upsert_recommendation(updated)
+        self._recommendation_repository.upsert_recommendation(updated)
+        if updated.status == "executed":
             self._record_executed_lifecycle_decision(
                 record=updated,
                 execution=execution,

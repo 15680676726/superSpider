@@ -162,4 +162,20 @@
 - focused verification additions:
   - `python -m pytest tests/app/test_learning_api.py tests/app/test_runtime_center_api.py -q` -> `122 passed`
   - `python -m pytest tests/agents/test_react_agent_tool_compat.py tests/kernel/test_query_execution_runtime.py tests/kernel/query_execution_environment_parts/dispatch.py tests/kernel/query_execution_environment_parts/lifecycle.py -q` -> `58 passed`
-  - `python -m pytest tests/app/test_capabilities_execution.py -k "system_dispatch_query or external_runtime or runtime_center" -q` -> `3 passed, 48 deselected`
+- `python -m pytest tests/app/test_capabilities_execution.py -k "system_dispatch_query or external_runtime or runtime_center" -q` -> `3 passed, 48 deselected`
+
+### `2026-04-06` Final Closure Update
+
+- `Task 2`: complete
+  - kickoff / auto-resume 已切到 assignment/backlog/cycle-native truth。
+  - `IndustryInstanceRecord.goal_ids / schedule_ids`、`StrategyMemoryRecord.active_goal_ids / active_goal_titles`、`OperatingCycleRecord.goal_ids`、`WorkflowRunRecord.goal_ids / schedule_ids` 已从正式 state contract 删除。
+- `Task 4`: complete
+  - acquisition producer / review-gate / prediction recommendation execution 已统一走 kernel-backed identity 与 governed mutation front-door。
+- `Task 5`: complete for this closure scope
+  - query-time builtin delegate、`react_agent` builtin fallback、capability-market install-template assignment、prediction capability retirement recommendation 已统一接回 capability front-door。
+- `Task 6`: complete
+  - 问题文档、状态板与本计划文档已按最终代码基线和验证结果同步纠偏。
+- final focused verification:
+  - `python -m pytest tests/app/test_predictions_api.py tests/app/test_workflow_templates_api.py tests/kernel/query_execution_environment_parts/lifecycle.py tests/app/runtime_center_api_parts/overview_governance.py tests/industry/test_runtime_views_split.py tests/state/test_strategy_memory_service.py tests/state/test_sqlite_repositories.py tests/app/test_industry_service_wiring.py tests/state/test_main_brain_hard_cut.py tests/app/test_goals_api.py tests/app/test_runtime_chat_media.py tests/app/test_startup_recovery.py tests/app/industry_api_parts/bootstrap_lifecycle.py::test_public_bootstrap_auto_activate_keeps_instance_active_without_legacy_goal_dispatch tests/app/industry_api_parts/bootstrap_lifecycle.py::test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch tests/app/industry_api_parts/bootstrap_lifecycle.py::test_chat_writeback_schedule_creation_does_not_expand_instance_schedule_truth tests/app/industry_api_parts/runtime_updates.py::test_industry_list_instances_hides_empty_placeholder_records tests/app/industry_api_parts/runtime_updates.py::test_industry_list_instances_uses_lightweight_summary_without_detail_build tests/app/industry_api_parts/runtime_updates.py::test_industry_instance_status_reconciles_from_goal_states tests/app/industry_api_parts/runtime_updates.py::test_industry_instance_status_completes_with_static_team_membership_only tests/app/industry_api_parts/runtime_updates.py::test_industry_detail_backfills_execution_core_identity_with_delegation_first_defaults -q` -> `242 passed`
+- residual note:
+  - 仍可搜索到的旧字段字面量只剩 migration reset fixture 和无关 governance 控制字段，不再属于运行时平行真相源。

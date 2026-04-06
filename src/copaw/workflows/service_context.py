@@ -151,8 +151,8 @@ class _WorkflowServiceContextMixin:
             "execution_constraints_text": "",
             "evidence_requirements": [],
             "evidence_requirements_text": "",
-            "active_goal_titles": [],
-            "active_goal_titles_text": "",
+            "current_focuses": [],
+            "current_focuses_text": "",
         }
         if not industry_instance_id or self._industry_instance_repository is None:
             return context
@@ -183,8 +183,19 @@ class _WorkflowServiceContextMixin:
             industry_instance_id=record.instance_id,
             owner_agent_id=execution_core_agent_id,
         )
+        profile_goals = _unique_strings(
+            (record.profile_payload or {}).get("goals")
+            if isinstance(record.profile_payload, dict)
+            else None,
+        )
+        current_focuses = _unique_strings(
+            strategy_payload.get("current_focuses") if strategy_payload else None,
+            profile_goals,
+        )
         priority_order = _unique_strings(
             strategy_payload.get("priority_order") if strategy_payload else None,
+            current_focuses,
+            profile_goals,
         )
         thinking_axes = _unique_strings(
             strategy_payload.get("thinking_axes") if strategy_payload else None,
@@ -201,9 +212,10 @@ class _WorkflowServiceContextMixin:
         evidence_requirements = _unique_strings(
             strategy_payload.get("evidence_requirements") if strategy_payload else None,
         )
-        active_goal_titles = _unique_strings(
-            strategy_payload.get("active_goal_titles") if strategy_payload else None,
-        )
+        strategy_memory = dict(strategy_payload) if strategy_payload else None
+        if strategy_memory is not None:
+            strategy_memory["priority_order"] = list(priority_order)
+            strategy_memory["current_focuses"] = list(current_focuses)
         return {
             "industry_label": _string(record.label) or "Workflow",
             "industry_summary": _string(record.summary) or "",
@@ -212,12 +224,12 @@ class _WorkflowServiceContextMixin:
             "role_agent_map": role_agent_map,
             "agent_role_map": agent_role_map,
             "business_role_ids": business_role_ids,
-            "strategy_memory": strategy_payload,
-            "strategy_id": _string(strategy_payload.get("strategy_id")) if strategy_payload else None,
-            "strategy_title": _string(strategy_payload.get("title")) if strategy_payload else "",
-            "strategy_summary": _string(strategy_payload.get("summary")) if strategy_payload else "",
-            "strategy_mission": _string(strategy_payload.get("mission")) if strategy_payload else "",
-            "north_star": _string(strategy_payload.get("north_star")) if strategy_payload else "",
+            "strategy_memory": strategy_memory,
+            "strategy_id": _string(strategy_memory.get("strategy_id")) if strategy_memory else None,
+            "strategy_title": _string(strategy_memory.get("title")) if strategy_memory else "",
+            "strategy_summary": _string(strategy_memory.get("summary")) if strategy_memory else "",
+            "strategy_mission": _string(strategy_memory.get("mission")) if strategy_memory else "",
+            "north_star": _string(strategy_memory.get("north_star")) if strategy_memory else "",
             "priority_order": priority_order,
             "priority_order_text": " / ".join(priority_order),
             "thinking_axes": thinking_axes,
@@ -230,8 +242,8 @@ class _WorkflowServiceContextMixin:
             "execution_constraints_text": " / ".join(execution_constraints),
             "evidence_requirements": evidence_requirements,
             "evidence_requirements_text": " / ".join(evidence_requirements),
-            "active_goal_titles": active_goal_titles,
-            "active_goal_titles_text": " / ".join(active_goal_titles),
+            "current_focuses": current_focuses,
+            "current_focuses_text": " / ".join(current_focuses),
         }
 
     def _resolve_strategy_memory_payload(

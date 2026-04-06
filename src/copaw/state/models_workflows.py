@@ -56,8 +56,6 @@ class WorkflowRunRecord(UpdatedRecord):
     industry_instance_id: str | None = None
     parameter_payload: dict[str, Any] = Field(default_factory=dict)
     preview_payload: dict[str, Any] = Field(default_factory=dict)
-    goal_ids: list[str] = Field(default_factory=list)
-    schedule_ids: list[str] = Field(default_factory=list)
     task_ids: list[str] = Field(default_factory=list)
     decision_ids: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)

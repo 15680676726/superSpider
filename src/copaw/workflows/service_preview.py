@@ -161,7 +161,8 @@ class _WorkflowServicePreviewMixin:
         decisions: list[dict[str, Any]] = []
         evidence: list[dict[str, Any]] = []
         goal_detail_by_id: dict[str, dict[str, Any]] = {}
-        for goal_id in run.goal_ids:
+        goal_ids = _workflow_linked_resource_ids(run, key="linked_goal_ids")
+        for goal_id in goal_ids:
             detail = self._goal_service.get_goal_detail(goal_id)
             if detail is None:
                 continue
@@ -172,8 +173,9 @@ class _WorkflowServicePreviewMixin:
             evidence.extend(list(detail.get("evidence") or []))
         schedules: list[dict[str, Any]] = []
         schedule_by_id: dict[str, dict[str, Any]] = {}
+        schedule_ids = _workflow_linked_resource_ids(run, key="linked_schedule_ids")
         if self._schedule_repository is not None:
-            for schedule_id in run.schedule_ids:
+            for schedule_id in schedule_ids:
                 schedule = self._schedule_repository.get_schedule(schedule_id)
                 if schedule is not None:
                     payload = schedule.model_dump(mode="json")
@@ -224,11 +226,11 @@ class _WorkflowServicePreviewMixin:
             routes={
                 "goals": [
                     f"/api/goals/{goal_id}/detail"
-                    for goal_id in run.goal_ids
+                    for goal_id in goal_ids
                 ],
                 "schedules": [
                     f"/api/runtime-center/schedules/{schedule_id}"
-                    for schedule_id in run.schedule_ids
+                    for schedule_id in schedule_ids
                 ],
             },
         )

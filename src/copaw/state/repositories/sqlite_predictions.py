@@ -752,8 +752,6 @@ def _workflow_run_from_row(row: sqlite3.Row | None) -> WorkflowRunRecord | None:
     payload = dict(row)
     payload["parameter_payload"] = _decode_json(payload.pop("parameter_payload_json", "{}"))
     payload["preview_payload"] = _decode_json(payload.pop("preview_payload_json", "{}"))
-    payload["goal_ids"] = _decode_json_list(payload.pop("goal_ids_json", "[]")) or []
-    payload["schedule_ids"] = _decode_json_list(payload.pop("schedule_ids_json", "[]")) or []
     payload["task_ids"] = _decode_json_list(payload.pop("task_ids_json", "[]")) or []
     payload["decision_ids"] = _decode_json_list(payload.pop("decision_ids_json", "[]")) or []
     payload["evidence_ids"] = _decode_json_list(payload.pop("evidence_ids_json", "[]")) or []

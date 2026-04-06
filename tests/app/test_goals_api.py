@@ -1397,9 +1397,7 @@ def test_goal_detail_exposes_execution_core_identity_from_industry_instance(tmp_
                 "allowed_capabilities": ["system:dispatch_query"],
                 "evidence_expectations": ["operating brief"],
             },
-            goal_ids=[],
             agent_ids=["copaw-agent-runner"],
-            schedule_ids=[],
         ),
     )
 
@@ -1473,9 +1471,7 @@ def test_compile_goal_injects_strategy_memory_context(tmp_path) -> None:
                 "allowed_capabilities": ["system:dispatch_query"],
                 "evidence_expectations": ["operating brief"],
             },
-            goal_ids=[],
             agent_ids=["copaw-agent-runner"],
-            schedule_ids=[],
         ),
     )
     app.state.strategy_memory_service.upsert_strategy(
@@ -1498,7 +1494,7 @@ def test_compile_goal_injects_strategy_memory_context(tmp_path) -> None:
             ],
             execution_constraints=["高风险动作必须确认"],
             evidence_requirements=["每次外部动作保留证据"],
-            active_goal_titles=["Operate Acme account"],
+            current_focuses=["Operate Acme account"],
             teammate_contracts=[],
             strategic_uncertainties=[
                 {
@@ -1587,9 +1583,7 @@ def test_goal_detail_exposes_strategy_memory_from_industry_instance(tmp_path) ->
                 "industry_label": "Acme Operations Cell",
                 "role_name": "白泽执行中枢",
             },
-            goal_ids=[],
             agent_ids=["copaw-agent-runner"],
-            schedule_ids=[],
         ),
     )
     app.state.strategy_memory_service.upsert_strategy(

@@ -235,6 +235,7 @@ class _PredictionServiceRecommendationMixin:
             return
         gap_kind = _string(metadata.get("gap_kind"))
         mapping = {
+            "capability_revision": ("continue_trial", "trial", "trial"),
             "capability_rollout": ("promote_to_role", "trial", "active"),
             "capability_rollback": ("rollback", "trial", "blocked"),
             "capability_retirement": ("retire", "active", "retired"),
@@ -316,6 +317,7 @@ class _PredictionServiceRecommendationMixin:
         replacement_target_ids: list[str] | None = None,
         rollback_target_ids: list[str] | None = None,
         capability_assignment_mode: str = "replace",
+        improvement_mode: str | None = None,
         selected_seat_ref: str | None = None,
         trial_scope: str | None = None,
         target_role_id: str | None = None,
@@ -335,6 +337,7 @@ class _PredictionServiceRecommendationMixin:
             "replacement_target_ids": _string_list(replacement_target_ids),
             "rollback_target_ids": _string_list(rollback_target_ids),
             "capability_assignment_mode": capability_assignment_mode,
+            "improvement_mode": _string(improvement_mode),
             "reason": _string(reason)
             or f"prediction:{case_id}:capability-lifecycle:{decision_kind}",
         }
@@ -866,11 +869,8 @@ class _PredictionServiceRecommendationMixin:
                 return ""
             return " " + "；".join(notes) + "。"
 
-        active_goal_ids = {
-            goal_id for goal_id in _string_list(strategy.get("active_goal_ids")) if goal_id
-        }
         strategic_goal_titles = _string_list(
-            strategy.get("active_goal_titles"),
+            strategy.get("current_focuses"),
             strategy.get("priority_order"),
         )
         trigger_rule_ids = _string_list(
@@ -919,8 +919,6 @@ class _PredictionServiceRecommendationMixin:
 
         def goal_alignment_score(goal: GoalRecord) -> int:
             score = 0
-            if goal.id in active_goal_ids:
-                score += 100
             haystack = f"{goal.title} {goal.summary}".lower()
             for index, item in enumerate(strategic_goal_titles):
                 normalized = item.lower()
@@ -1355,6 +1353,87 @@ class _PredictionServiceRecommendationMixin:
             new_capability_id = _string(finding.get("new_capability_id"))
             if old_capability_id is None or new_capability_id is None:
                 continue
+            if gap_kind == "capability_revision" and target_agent_id:
+                append_recommendation(
+                    recommendation_type="capability_recommendation",
+                    title=f"继续以“{new_capability_id}”做受治理修订试投放",
+                    summary=(
+                        f"候选“{new_capability_id}”尚未证明优于“{old_capability_id}”，"
+                        "但当前 drift 更像局部修订压力。建议保持 seat/session 试投放并进入正式 revision 回流。"
+                    ),
+                    priority=84,
+                    confidence=min(0.93, confidence_baseline + 0.1),
+                    risk_level="guarded",
+                    action_kind="system:apply_capability_lifecycle",
+                    executable=True,
+                    auto_eligible=False,
+                    status="proposed",
+                    target_agent_id=target_agent_id,
+                    target_capability_ids=[old_capability_id, new_capability_id],
+                    action_payload={
+                        **self._build_lifecycle_action_payload(
+                            case_id=case.case_id,
+                            decision_kind="continue_trial",
+                            target_agent_id=target_agent_id,
+                            target_capability_ids=[new_capability_id],
+                            replacement_target_ids=_string_list(
+                                finding.get("replacement_target_ids"),
+                                [old_capability_id],
+                            ),
+                            rollback_target_ids=_string_list(
+                                finding.get("rollback_target_ids"),
+                                [old_capability_id],
+                            ),
+                            capability_assignment_mode="replace",
+                            improvement_mode=_string(finding.get("reentry_kind")) or "revision",
+                            selected_seat_ref=_string(finding.get("selected_seat_ref")),
+                            trial_scope=_string(finding.get("trial_scope")) or "single-agent",
+                            candidate_id=_string(finding.get("candidate_id")),
+                            reason=f"prediction:{case.case_id}:continue-trial-revision",
+                        ),
+                        "donor_id": _string(finding.get("donor_id")),
+                        "package_id": _string(finding.get("package_id")),
+                        "source_profile_id": _string(finding.get("source_profile_id")),
+                    },
+                    metadata={
+                        "gap_kind": gap_kind,
+                        "optimization_stage": str(finding.get("optimization_stage") or "revision"),
+                        "reentry_kind": _string(finding.get("reentry_kind")) or "revision",
+                        "drift_summary": self._json_safe(finding.get("drift_summary") or {}),
+                        "candidate_id": _string(finding.get("candidate_id")),
+                        "donor_id": _string(finding.get("donor_id")),
+                        "package_id": _string(finding.get("package_id")),
+                        "source_profile_id": _string(finding.get("source_profile_id")),
+                        "candidate_source_kind": _string(finding.get("candidate_source_kind")),
+                        "candidate_source_ref": _string(finding.get("candidate_source_ref")),
+                        "candidate_source_lineage": _string(
+                            finding.get("candidate_source_lineage"),
+                        ),
+                        "industry_instance_id": case.industry_instance_id,
+                        "old_capability_id": old_capability_id,
+                        "new_capability_id": new_capability_id,
+                        "source_recommendation_id": _string(finding.get("source_recommendation_id")),
+                        "lifecycle_stage": _string(finding.get("lifecycle_stage")) or "trial",
+                        "candidate_lifecycle_stage": (
+                            _string(finding.get("candidate_lifecycle_stage")) or "trial"
+                        ),
+                        "replacement_target_stage": (
+                            _string(finding.get("replacement_target_stage")) or "active"
+                        ),
+                        "replacement_target_ids": _string_list(
+                            finding.get("replacement_target_ids"),
+                            [old_capability_id],
+                        ),
+                        "rollback_target_ids": _string_list(
+                            finding.get("rollback_target_ids"),
+                            [old_capability_id],
+                        ),
+                        "trial_scope": _string(finding.get("trial_scope")) or "single-agent",
+                        "source_trial_seat_ref": _string(finding.get("selected_seat_ref")),
+                        "stats": self._json_safe(finding.get("stats")),
+                    },
+                )
+                continue
             if gap_kind == "capability_rollout" and target_agent_id:
                 append_recommendation(
                     recommendation_type="capability_recommendation",
@@ -1387,6 +1466,7 @@ class _PredictionServiceRecommendationMixin:
                                 [old_capability_id],
                             ),
                             capability_assignment_mode="replace",
+                            improvement_mode=_string(finding.get("reentry_kind")) or "replacement",
                             selected_seat_ref=None,
                             trial_scope=_string(finding.get("trial_scope")) or "single-agent",
                             candidate_id=_string(finding.get("candidate_id")),
@@ -1399,6 +1479,8 @@ class _PredictionServiceRecommendationMixin:
                     metadata={
                         "gap_kind": gap_kind,
                         "optimization_stage": str(finding.get("optimization_stage") or "rollout"),
+                        "reentry_kind": _string(finding.get("reentry_kind")) or "replacement",
+                        "drift_summary": self._json_safe(finding.get("drift_summary") or {}),
                         "candidate_id": _string(finding.get("candidate_id")),
                         "donor_id": _string(finding.get("donor_id")),
                         "package_id": _string(finding.get("package_id")),
@@ -1461,6 +1543,7 @@ class _PredictionServiceRecommendationMixin:
                                 [old_capability_id],
                             ),
                             capability_assignment_mode="replace",
+                            improvement_mode=_string(finding.get("reentry_kind")) or "replacement",
                             selected_seat_ref=_string(finding.get("selected_seat_ref")),
                             trial_scope=_string(finding.get("trial_scope")) or "single-agent",
                             candidate_id=_string(finding.get("candidate_id")),
@@ -1473,6 +1556,8 @@ class _PredictionServiceRecommendationMixin:
                     metadata={
                         "gap_kind": gap_kind,
                         "optimization_stage": str(finding.get("optimization_stage") or "rollback"),
+                        "reentry_kind": _string(finding.get("reentry_kind")) or "replacement",
+                        "drift_summary": self._json_safe(finding.get("drift_summary") or {}),
                         "candidate_id": _string(finding.get("candidate_id")),
                         "donor_id": _string(finding.get("donor_id")),
                         "package_id": _string(finding.get("package_id")),
@@ -1535,6 +1620,7 @@ class _PredictionServiceRecommendationMixin:
                                 [old_capability_id],
                             ),
                             capability_assignment_mode="replace",
+                            improvement_mode=_string(finding.get("reentry_kind")) or "retirement",
                             selected_seat_ref=_string(finding.get("selected_seat_ref")),
                             trial_scope=_string(finding.get("trial_scope")) or "single-agent",
                             candidate_id=_string(finding.get("candidate_id")),
@@ -1547,6 +1633,8 @@ class _PredictionServiceRecommendationMixin:
                     metadata={
                         "gap_kind": gap_kind,
                         "optimization_stage": str(finding.get("optimization_stage") or "retire"),
+                        "reentry_kind": _string(finding.get("reentry_kind")) or "retirement",
+                        "drift_summary": self._json_safe(finding.get("drift_summary") or {}),
                         "candidate_id": _string(finding.get("candidate_id")),
                         "donor_id": _string(finding.get("donor_id")),
                         "package_id": _string(finding.get("package_id")),

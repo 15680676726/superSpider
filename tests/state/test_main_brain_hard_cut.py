@@ -42,7 +42,9 @@ def test_apply_execution_chat_writeback_keeps_matched_work_in_backlog_until_cycl
 
     record_before = app.state.industry_instance_repository.get_instance(instance_id)
     assert record_before is not None
-    initial_goal_count = len(record_before.goal_ids or [])
+    initial_goal_count = len(
+        app.state.goal_service.list_goals(industry_instance_id=instance_id),
+    )
 
     result = asyncio.run(
         app.state.industry_service.apply_execution_chat_writeback(
@@ -66,7 +68,9 @@ def test_apply_execution_chat_writeback_keeps_matched_work_in_backlog_until_cycl
 
     record_after = app.state.industry_instance_repository.get_instance(instance_id)
     assert record_after is not None
-    assert len(record_after.goal_ids or []) == initial_goal_count
+    assert len(app.state.goal_service.list_goals(industry_instance_id=instance_id)) == (
+        initial_goal_count
+    )
 
     backlog_item = app.state.backlog_item_repository.get_item(result["created_backlog_ids"][0])
     assert backlog_item is not None

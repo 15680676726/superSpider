@@ -144,4 +144,5 @@ def build_capability_lifecycle_assignment_payload(
         "target_role_id": context.target_role_id,
         "reason": reason,
         "actor": actor,
+        "governed_mutation": True,
     }

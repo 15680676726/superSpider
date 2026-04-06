@@ -468,7 +468,7 @@ def _build_strategy_memory_items(payload: dict[str, object]) -> list[str]:
         ("Direct execution rule", "direct_execution_policy"),
         ("Execution constraint", "execution_constraints"),
         ("Evidence requirement", "evidence_requirements"),
-        ("Active goal", "active_goal_titles"),
+        ("Current focus", "current_focuses"),
     ):
         values = _string_list(payload.get(key))
         items.extend(f"{label}: {value}" for value in values[:4])

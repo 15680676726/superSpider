@@ -580,7 +580,7 @@ class _QueryExecutionPromptMixin:
         execution_constraints = _string_list(
             strategy_memory.get("execution_constraints"),
         )
-        active_goals = _string_list(strategy_memory.get("active_goal_titles"))
+        active_goals = _string_list(strategy_memory.get("current_focuses")) or priorities
         metadata = _mapping_value(strategy_memory.get("metadata"))
         planning_mode = _first_non_empty(metadata.get("experience_mode"))
         experience_notes = _first_non_empty(metadata.get("experience_notes"))
@@ -951,7 +951,7 @@ class _QueryExecutionPromptMixin:
         *,
         delegation_guard: _DelegationFirstGuard | None,
     ) -> list[str]:
-        if delegation_guard is None or not delegation_guard.active:
+        if delegation_guard is None or not delegation_guard.locked:
             return []
         lines = [
             "- Delegation-first policy is active for this turn because specialist teammates are available.",

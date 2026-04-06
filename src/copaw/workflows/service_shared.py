@@ -85,6 +85,31 @@ def _unique_strings(*values: object) -> list[str]:
     return items
 
 
+def _workflow_step_execution_seed(run: WorkflowRunRecord) -> list[dict[str, Any]]:
+    return [
+        dict(item)
+        for item in list(dict(run.metadata or {}).get("step_execution_seed") or [])
+        if isinstance(item, dict)
+    ]
+
+
+def _workflow_linked_resource_ids(
+    run: WorkflowRunRecord,
+    *,
+    key: str,
+) -> list[str]:
+    return _unique_strings(
+        *[
+            [
+                str(item)
+                for item in list(seed.get(key) or [])
+                if str(item).strip()
+            ]
+            for seed in _workflow_step_execution_seed(run)
+        ],
+    )
+
+
 def _render_text(template: object | None, context: dict[str, Any]) -> str:
     if template is None:
         return ""

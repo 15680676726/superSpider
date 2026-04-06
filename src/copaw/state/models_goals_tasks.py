@@ -250,7 +250,6 @@ class OperatingCycleRecord(UpdatedRecord):
     completed_at: datetime | None = None
     focus_lane_ids: list[str] = Field(default_factory=list)
     backlog_item_ids: list[str] = Field(default_factory=list)
-    goal_ids: list[str] = Field(default_factory=list)
     assignment_ids: list[str] = Field(default_factory=list)
     report_ids: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -258,7 +257,6 @@ class OperatingCycleRecord(UpdatedRecord):
     @field_validator(
         "focus_lane_ids",
         "backlog_item_ids",
-        "goal_ids",
         "assignment_ids",
         "report_ids",
         mode="before",

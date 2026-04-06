@@ -1321,7 +1321,7 @@ def test_query_execution_service_limits_strategy_memory_surface_in_prompt(
                 "EVIDENCE-06",
                 "EVIDENCE-07",
             ],
-            "active_goal_titles": ["GOAL-01", "GOAL-02", "GOAL-03", "GOAL-04", "GOAL-05"],
+            "current_focuses": ["GOAL-01", "GOAL-02", "GOAL-03", "GOAL-04", "GOAL-05"],
             "metadata": {
                 "experience_mode": "operator-guided",
                 "experience_notes": "PLAYBOOK-01",

@@ -52,27 +52,6 @@ class SqliteIndustryInstanceRepository(BaseIndustryInstanceRepository):
             if instance is not None
         ]
 
-    def list_instances_for_goal(self, goal_id: str) -> list[IndustryInstanceRecord]:
-        normalized_goal_id = str(goal_id or "").strip()
-        if not normalized_goal_id:
-            return []
-        with self._store.connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT DISTINCT industry_instances.*
-                FROM industry_instances
-                JOIN json_each(industry_instances.goal_ids_json) AS goal_refs
-                  ON goal_refs.value = ?
-                ORDER BY industry_instances.updated_at DESC
-                """,
-                (normalized_goal_id,),
-            ).fetchall()
-        return [
-            instance
-            for instance in (_industry_instance_from_row(row) for row in rows)
-            if instance is not None
-        ]
-
     def upsert_instance(
         self,
         instance: IndustryInstanceRecord,
@@ -83,18 +62,8 @@ class SqliteIndustryInstanceRepository(BaseIndustryInstanceRepository):
         payload["execution_core_identity_payload_json"] = _encode_json(
             instance.execution_core_identity_payload,
         )
-        payload["goal_ids_json"] = json.dumps(
-            instance.goal_ids,
-            ensure_ascii=False,
-            sort_keys=True,
-        )
         payload["agent_ids_json"] = json.dumps(
             instance.agent_ids,
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-        payload["schedule_ids_json"] = json.dumps(
-            instance.schedule_ids,
             ensure_ascii=False,
             sort_keys=True,
         )
@@ -111,9 +80,7 @@ class SqliteIndustryInstanceRepository(BaseIndustryInstanceRepository):
                     profile_payload_json,
                     team_payload_json,
                     execution_core_identity_payload_json,
-                    goal_ids_json,
                     agent_ids_json,
-                    schedule_ids_json,
                     lifecycle_status,
                     autonomy_status,
                     current_cycle_id,
@@ -131,9 +98,7 @@ class SqliteIndustryInstanceRepository(BaseIndustryInstanceRepository):
                     :profile_payload_json,
                     :team_payload_json,
                     :execution_core_identity_payload_json,
-                    :goal_ids_json,
                     :agent_ids_json,
-                    :schedule_ids_json,
                     :lifecycle_status,
                     :autonomy_status,
                     :current_cycle_id,
@@ -151,9 +116,7 @@ class SqliteIndustryInstanceRepository(BaseIndustryInstanceRepository):
                     profile_payload_json = excluded.profile_payload_json,
                     team_payload_json = excluded.team_payload_json,
                     execution_core_identity_payload_json = excluded.execution_core_identity_payload_json,
-                    goal_ids_json = excluded.goal_ids_json,
                     agent_ids_json = excluded.agent_ids_json,
-                    schedule_ids_json = excluded.schedule_ids_json,
                     lifecycle_status = excluded.lifecycle_status,
                     autonomy_status = excluded.autonomy_status,
                     current_cycle_id = excluded.current_cycle_id,
@@ -470,7 +433,6 @@ class SqliteOperatingCycleRepository(BaseOperatingCycleRepository):
             cycle.backlog_item_ids,
             sort_keys=True,
         )
-        payload["goal_ids_json"] = json.dumps(cycle.goal_ids, sort_keys=True)
         payload["assignment_ids_json"] = json.dumps(
             cycle.assignment_ids,
             sort_keys=True,
@@ -493,7 +455,6 @@ class SqliteOperatingCycleRepository(BaseOperatingCycleRepository):
                     completed_at,
                     focus_lane_ids_json,
                     backlog_item_ids_json,
-                    goal_ids_json,
                     assignment_ids_json,
                     report_ids_json,
                     metadata_json,
@@ -512,7 +473,6 @@ class SqliteOperatingCycleRepository(BaseOperatingCycleRepository):
                     :completed_at,
                     :focus_lane_ids_json,
                     :backlog_item_ids_json,
-                    :goal_ids_json,
                     :assignment_ids_json,
                     :report_ids_json,
                     :metadata_json,
@@ -531,7 +491,6 @@ class SqliteOperatingCycleRepository(BaseOperatingCycleRepository):
                     completed_at = excluded.completed_at,
                     focus_lane_ids_json = excluded.focus_lane_ids_json,
                     backlog_item_ids_json = excluded.backlog_item_ids_json,
-                    goal_ids_json = excluded.goal_ids_json,
                     assignment_ids_json = excluded.assignment_ids_json,
                     report_ids_json = excluded.report_ids_json,
                     metadata_json = excluded.metadata_json,
@@ -907,7 +866,6 @@ def _operating_cycle_from_row(
     payload["backlog_item_ids"] = _decode_json_list(
         payload.pop("backlog_item_ids_json", None),
     ) or []
-    payload["goal_ids"] = _decode_json_list(payload.pop("goal_ids_json", None)) or []
     payload["assignment_ids"] = _decode_json_list(
         payload.pop("assignment_ids_json", None),
     ) or []
@@ -1020,9 +978,5 @@ def _industry_instance_from_row(
     payload["execution_core_identity_payload"] = _decode_json_mapping(
         payload.pop("execution_core_identity_payload_json", None),
     )
-    payload["goal_ids"] = _decode_json_list(payload.pop("goal_ids_json", None)) or []
     payload["agent_ids"] = _decode_json_list(payload.pop("agent_ids_json", None)) or []
-    payload["schedule_ids"] = _decode_json_list(
-        payload.pop("schedule_ids_json", None),
-    ) or []
     return IndustryInstanceRecord.model_validate(payload)

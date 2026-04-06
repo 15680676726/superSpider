@@ -441,8 +441,6 @@ class SqliteWorkflowRunRepository(BaseWorkflowRunRepository):
         payload = _payload(run)
         payload["parameter_payload_json"] = _encode_json(run.parameter_payload)
         payload["preview_payload_json"] = _encode_json(run.preview_payload)
-        payload["goal_ids_json"] = json.dumps(run.goal_ids or [])
-        payload["schedule_ids_json"] = json.dumps(run.schedule_ids or [])
         payload["task_ids_json"] = json.dumps(run.task_ids or [])
         payload["decision_ids_json"] = json.dumps(run.decision_ids or [])
         payload["evidence_ids_json"] = json.dumps(run.evidence_ids or [])
@@ -461,8 +459,6 @@ class SqliteWorkflowRunRepository(BaseWorkflowRunRepository):
                     industry_instance_id,
                     parameter_payload_json,
                     preview_payload_json,
-                    goal_ids_json,
-                    schedule_ids_json,
                     task_ids_json,
                     decision_ids_json,
                     evidence_ids_json,
@@ -480,8 +476,6 @@ class SqliteWorkflowRunRepository(BaseWorkflowRunRepository):
                     :industry_instance_id,
                     :parameter_payload_json,
                     :preview_payload_json,
-                    :goal_ids_json,
-                    :schedule_ids_json,
                     :task_ids_json,
                     :decision_ids_json,
                     :evidence_ids_json,
@@ -499,8 +493,6 @@ class SqliteWorkflowRunRepository(BaseWorkflowRunRepository):
                     industry_instance_id = excluded.industry_instance_id,
                     parameter_payload_json = excluded.parameter_payload_json,
                     preview_payload_json = excluded.preview_payload_json,
-                    goal_ids_json = excluded.goal_ids_json,
-                    schedule_ids_json = excluded.schedule_ids_json,
                     task_ids_json = excluded.task_ids_json,
                     decision_ids_json = excluded.decision_ids_json,
                     evidence_ids_json = excluded.evidence_ids_json,

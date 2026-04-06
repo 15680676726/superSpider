@@ -406,7 +406,6 @@ class StateReportingService:
             next_steps=next_steps,
             evidence_ids=[record.id for record in dataset.evidence],
             task_ids=sorted(dataset.window_task_ids),
-            goal_ids=sorted(dataset.window_goal_ids),
             agent_ids=list(dataset.agent_ids),
             routes=routes,
         )
@@ -1545,11 +1544,28 @@ class StateReportingService:
         instance = self._industry_instance_repository.get_instance(scope_id)
         if instance is None:
             raise KeyError(f"Industry instance '{scope_id}' not found")
+        goal_ids: set[str] = set()
+        if self._goal_repository is not None:
+            goal_ids.update(
+                goal.id
+                for goal in self._goal_repository.list_goals(
+                    industry_instance_id=scope_id,
+                )
+                if goal.id
+            )
+            if instance.owner_scope:
+                goal_ids.update(
+                    goal.id
+                    for goal in self._goal_repository.list_goals(
+                        owner_scope=instance.owner_scope,
+                    )
+                    if goal.id
+                )
         return _ReportingScope(
             scope_type=scope_type,
             scope_id=scope_id,
             label=instance.label,
-            goal_ids=set(instance.goal_ids or []),
+            goal_ids=goal_ids,
             agent_ids=set(instance.agent_ids or []),
         )
 

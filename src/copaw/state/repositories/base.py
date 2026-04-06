@@ -572,10 +572,6 @@ class BaseIndustryInstanceRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def list_instances_for_goal(self, goal_id: str) -> list[IndustryInstanceRecord]:
-        raise NotImplementedError
-
-    @abstractmethod
     def upsert_instance(
         self,
         instance: IndustryInstanceRecord,

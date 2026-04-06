@@ -300,7 +300,6 @@ def test_startup_recovery_requeues_legacy_execution_core_chat_writeback_gap(
             label="测试行业",
             summary="测试恢复旧误路由任务",
             owner_scope="owner-1",
-            goal_ids=["goal-legacy-gap"],
             current_cycle_id="cycle-legacy-gap",
         ),
     )
@@ -327,7 +326,6 @@ def test_startup_recovery_requeues_legacy_execution_core_chat_writeback_gap(
             status="active",
             source_ref="industry-chat-writeback",
             backlog_item_ids=["backlog-legacy-gap"],
-            goal_ids=["goal-legacy-gap"],
             assignment_ids=["assignment-legacy-gap"],
         ),
     )
@@ -489,7 +487,6 @@ def test_startup_recovery_requeues_legacy_gap_from_capability_environment_metada
             label="测试行业",
             summary="测试恢复 capability/environment 误路由任务",
             owner_scope="owner-1",
-            goal_ids=["goal-legacy-meta-gap"],
             current_cycle_id="cycle-legacy-meta-gap",
         ),
     )
@@ -516,7 +513,6 @@ def test_startup_recovery_requeues_legacy_gap_from_capability_environment_metada
             status="active",
             source_ref="industry-chat-writeback",
             backlog_item_ids=["backlog-legacy-meta-gap"],
-            goal_ids=["goal-legacy-meta-gap"],
             assignment_ids=["assignment-legacy-meta-gap"],
         ),
     )

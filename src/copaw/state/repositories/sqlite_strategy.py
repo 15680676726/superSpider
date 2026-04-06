@@ -97,14 +97,6 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
             record.evidence_requirements,
             sort_keys=True,
         )
-        payload["active_goal_ids_json"] = json.dumps(
-            record.active_goal_ids,
-            sort_keys=True,
-        )
-        payload["active_goal_titles_json"] = json.dumps(
-            record.active_goal_titles,
-            sort_keys=True,
-        )
         payload["teammate_contracts_json"] = json.dumps(
             record.teammate_contracts,
             sort_keys=True,
@@ -162,8 +154,6 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
                     direct_execution_policy_json,
                     execution_constraints_json,
                     evidence_requirements_json,
-                    active_goal_ids_json,
-                    active_goal_titles_json,
                     teammate_contracts_json,
                     lane_weights_json,
                     strategic_uncertainties_json,
@@ -195,8 +185,6 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
                     :direct_execution_policy_json,
                     :execution_constraints_json,
                     :evidence_requirements_json,
-                    :active_goal_ids_json,
-                    :active_goal_titles_json,
                     :teammate_contracts_json,
                     :lane_weights_json,
                     :strategic_uncertainties_json,
@@ -228,8 +216,6 @@ class SqliteStrategyMemoryRepository(BaseStrategyMemoryRepository):
                     direct_execution_policy_json = excluded.direct_execution_policy_json,
                     execution_constraints_json = excluded.execution_constraints_json,
                     evidence_requirements_json = excluded.evidence_requirements_json,
-                    active_goal_ids_json = excluded.active_goal_ids_json,
-                    active_goal_titles_json = excluded.active_goal_titles_json,
                     teammate_contracts_json = excluded.teammate_contracts_json,
                     lane_weights_json = excluded.lane_weights_json,
                     strategic_uncertainties_json = excluded.strategic_uncertainties_json,
@@ -277,12 +263,6 @@ def _strategy_memory_from_row(
     ) or []
     payload["evidence_requirements"] = _decode_json_list(
         payload.pop("evidence_requirements_json", None),
-    ) or []
-    payload["active_goal_ids"] = _decode_json_list(
-        payload.pop("active_goal_ids_json", None),
-    ) or []
-    payload["active_goal_titles"] = _decode_json_list(
-        payload.pop("active_goal_titles_json", None),
     ) or []
     payload["teammate_contracts"] = _decode_any_json(
         payload.pop("teammate_contracts_json", None),

@@ -117,8 +117,6 @@ class StrategyMemoryRecord(UpdatedRecord):
     direct_execution_policy: list[str] = Field(default_factory=list)
     execution_constraints: list[str] = Field(default_factory=list)
     evidence_requirements: list[str] = Field(default_factory=list)
-    active_goal_ids: list[str] = Field(default_factory=list)
-    active_goal_titles: list[str] = Field(default_factory=list)
     teammate_contracts: list[dict[str, Any]] = Field(default_factory=list)
     lane_weights: dict[str, float] = Field(default_factory=dict)
     planning_policy: list[str] = Field(default_factory=list)
@@ -139,8 +137,6 @@ class StrategyMemoryRecord(UpdatedRecord):
         "direct_execution_policy",
         "execution_constraints",
         "evidence_requirements",
-        "active_goal_ids",
-        "active_goal_titles",
         "planning_policy",
         "current_focuses",
         "paused_lane_ids",
@@ -304,7 +300,6 @@ class ReportRecord(CreatedRecord):
     next_steps: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
     task_ids: list[str] = Field(default_factory=list)
-    goal_ids: list[str] = Field(default_factory=list)
     agent_ids: list[str] = Field(default_factory=list)
     routes: dict[str, Any] = Field(default_factory=dict)
 

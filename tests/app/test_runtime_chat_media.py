@@ -122,9 +122,7 @@ def _build_media_runtime(tmp_path: Path) -> SimpleNamespace:
             owner_scope="industry-v1-media",
             status="active",
             execution_core_identity_payload={"agent_id": "copaw-agent-runner"},
-            goal_ids=[],
             agent_ids=["copaw-agent-runner"],
-            schedule_ids=[],
         ),
     )
     lane_repository.upsert_lane(

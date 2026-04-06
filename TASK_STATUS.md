@@ -1146,3 +1146,16 @@
 - ????????????????
   - `goal_ids / schedule_ids / active_goal_ids` ??????????????????????? kickoff / auto-resume / acquisition / capability front-door ?????????? legacy ??
   - ???????????????????????focused harness??????live smoke???????
+
+### 3.3.2 `2026-04-06` authoritative closure update
+
+- 上面 `3.3.1` 的同日 `partial` 记录已过时；当前权威状态以后续本节为准。
+- industry kickoff / auto-resume 主链已切离 legacy `goal/schedule` 依赖；assignment/backlog/cycle 已成为正式前门真相。
+- acquisition producer / decision / review-gate 已统一到 kernel-backed identity；prediction 与 runtime-center 的 lifecycle mutation 现在都通过 governed mutation / kernel admission 执行。
+- capability execution 前门已继续硬切：query-time builtin tool delegate、`react_agent` builtin fallback、capability-market install-template assignment、prediction capability retirement recommendation 已全部接入统一治理前门。
+- 兼容字段物理删除已完成：`IndustryInstanceRecord.goal_ids / schedule_ids`、`StrategyMemoryRecord.active_goal_ids / active_goal_titles`、`OperatingCycleRecord.goal_ids`、`WorkflowRunRecord.goal_ids / schedule_ids`、`ReportRecord.goal_ids` 已从 state model / schema / sqlite repository / runtime consumer 删除。
+- 当前仍能搜索到的相关字面量只剩：
+  - `tests/state/test_state_store_migration.py` 的旧 schema reset fixture；
+  - `paused_schedule_ids` 这类与本轮删旧无关的 governance 控制字段。
+- 本轮权威验证矩阵：
+  - `python -m pytest tests/app/test_predictions_api.py tests/app/test_workflow_templates_api.py tests/kernel/query_execution_environment_parts/lifecycle.py tests/app/runtime_center_api_parts/overview_governance.py tests/industry/test_runtime_views_split.py tests/state/test_strategy_memory_service.py tests/state/test_sqlite_repositories.py tests/app/test_industry_service_wiring.py tests/state/test_main_brain_hard_cut.py tests/app/test_goals_api.py tests/app/test_runtime_chat_media.py tests/app/test_startup_recovery.py tests/app/industry_api_parts/bootstrap_lifecycle.py::test_public_bootstrap_auto_activate_keeps_instance_active_without_legacy_goal_dispatch tests/app/industry_api_parts/bootstrap_lifecycle.py::test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch tests/app/industry_api_parts/bootstrap_lifecycle.py::test_chat_writeback_schedule_creation_does_not_expand_instance_schedule_truth tests/app/industry_api_parts/runtime_updates.py::test_industry_list_instances_hides_empty_placeholder_records tests/app/industry_api_parts/runtime_updates.py::test_industry_list_instances_uses_lightweight_summary_without_detail_build tests/app/industry_api_parts/runtime_updates.py::test_industry_instance_status_reconciles_from_goal_states tests/app/industry_api_parts/runtime_updates.py::test_industry_instance_status_completes_with_static_team_membership_only tests/app/industry_api_parts/runtime_updates.py::test_industry_detail_backfills_execution_core_identity_with_delegation_first_defaults -q` -> `242 passed`

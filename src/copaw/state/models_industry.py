@@ -22,9 +22,7 @@ class IndustryInstanceRecord(UpdatedRecord):
     profile_payload: dict[str, Any] = Field(default_factory=dict)
     team_payload: dict[str, Any] = Field(default_factory=dict)
     execution_core_identity_payload: dict[str, Any] = Field(default_factory=dict)
-    goal_ids: list[str] = Field(default_factory=list)
     agent_ids: list[str] = Field(default_factory=list)
-    schedule_ids: list[str] = Field(default_factory=list)
     lifecycle_status: str = "running"
     autonomy_status: str = "waiting-confirm"
     current_cycle_id: str | None = None

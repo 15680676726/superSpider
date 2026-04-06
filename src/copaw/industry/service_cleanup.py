@@ -217,6 +217,12 @@ class _IndustryCleanupMixin:
         )
         resolved_record = record
         if (
+            industry_instance_id is None
+            and resolved_record is not None
+            and _string(goal.owner_scope) == _string(resolved_record.owner_scope)
+        ):
+            industry_instance_id = _string(resolved_record.instance_id)
+        if (
             resolved_record is None
             and industry_instance_id is not None
             and self._industry_instance_repository is not None
@@ -579,7 +585,7 @@ class _IndustryCleanupMixin:
         self._archive_instance_goals(goal_ids=resolved_goal_ids)
         await self._pause_instance_schedules(
             instance_id=record.instance_id,
-            schedule_ids=list(record.schedule_ids or []),
+            schedule_ids=self._list_schedule_ids_for_instance(record.instance_id),
         )
         self._retire_stale_actors(instance_id=record.instance_id, active_agent_ids=set())
         self._retire_instance_overrides(instance_id=record.instance_id)
@@ -603,15 +609,17 @@ class _IndustryCleanupMixin:
             )
 
     def _resolve_instance_goal_ids(self, record: IndustryInstanceRecord) -> list[str]:
-        goal_ids = {
-            goal_id.strip()
-            for goal_id in (record.goal_ids or [])
-            if isinstance(goal_id, str) and goal_id.strip()
-        }
+        goal_ids: set[str] = set()
+        candidate_goals: dict[str, GoalRecord] = {}
         owner_scope = _string(record.owner_scope)
-        if owner_scope is None:
-            return sorted(goal_ids)
-        for goal in self._goal_service.list_goals(owner_scope=owner_scope):
+        for goal in self._goal_service.list_goals(
+            industry_instance_id=record.instance_id,
+        ):
+            candidate_goals[goal.id] = goal
+        if owner_scope is not None:
+            for goal in self._goal_service.list_goals(owner_scope=owner_scope):
+                candidate_goals[goal.id] = goal
+        for goal in candidate_goals.values():
             override = self._goal_override_repository.get_override(goal.id)
             if not self._goal_belongs_to_instance(
                 goal,
@@ -1375,8 +1383,7 @@ class _IndustryCleanupMixin:
             strategy.model_copy(
                 update={
                     "status": "retired",
-                    "active_goal_ids": [],
-                    "active_goal_titles": [],
+                    "current_focuses": [],
                     "updated_at": _utc_now(),
                 },
             ),

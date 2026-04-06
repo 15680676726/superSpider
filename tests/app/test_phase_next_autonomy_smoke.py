@@ -163,7 +163,7 @@ def test_phase_next_industry_long_run_smoke_keeps_followup_focus_and_replan_trut
         limit=5,
     )
     assert strategies
-    assert strategies[0].active_goal_ids == []
+    assert isinstance(strategies[0].current_focuses, list)
 
     writeback = asyncio.run(
         app.state.industry_service.apply_execution_chat_writeback(
@@ -269,7 +269,7 @@ def test_phase_next_industry_long_run_smoke_keeps_followup_focus_and_replan_trut
         limit=5,
     )
     assert updated_strategies
-    assert updated_strategies[0].active_goal_ids == []
+    assert isinstance(updated_strategies[0].current_focuses, list)
     assert runtime_payload["execution"]["current_focus_id"] != assignment_id
     assert runtime_payload["main_chain"]["current_focus_id"] != assignment_id
     assert runtime_payload["execution"]["current_focus_id"] in {

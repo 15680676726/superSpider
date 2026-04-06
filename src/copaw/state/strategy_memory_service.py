@@ -20,7 +20,7 @@ _MAX_THINKING_AXIS_ITEMS = 10
 _MAX_POLICY_ITEMS = 8
 _MAX_CONSTRAINT_ITEMS = 12
 _MAX_EVIDENCE_REQUIREMENT_ITEMS = 12
-_MAX_ACTIVE_GOAL_ITEMS = 12
+_MAX_CURRENT_FOCUS_ITEMS = 12
 _MAX_TEAMMATE_CONTRACTS = 8
 _MAX_TEAMMATE_CAPABILITIES = 12
 _MAX_TEAMMATE_EVIDENCE_EXPECTATIONS = 6
@@ -258,14 +258,9 @@ def compact_strategy_payload(payload: dict[str, Any]) -> dict[str, Any]:
             payload.get("evidence_requirements"),
             max_items=_MAX_EVIDENCE_REQUIREMENT_ITEMS,
         ),
-        "active_goal_ids": _compact_text_list(
-            payload.get("active_goal_ids"),
-            max_items=_MAX_ACTIVE_GOAL_ITEMS,
-            max_length=96,
-        ),
-        "active_goal_titles": _compact_text_list(
-            payload.get("active_goal_titles"),
-            max_items=_MAX_ACTIVE_GOAL_ITEMS,
+        "current_focuses": _compact_text_list(
+            payload.get("current_focuses"),
+            max_items=_MAX_CURRENT_FOCUS_ITEMS,
         ),
         "teammate_contracts": _compact_teammate_contracts(
             payload.get("teammate_contracts"),

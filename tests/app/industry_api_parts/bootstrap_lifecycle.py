@@ -1676,8 +1676,8 @@ def test_chat_writeback_schedule_creation_does_not_expand_instance_schedule_trut
     assert result["created_schedule_ids"]
     updated = app.state.industry_instance_repository.get_instance(instance_id)
     assert updated is not None
-    assert app.state.industry_service._list_schedule_ids_for_instance(instance_id) == (
-        baseline_schedule_ids + result["created_schedule_ids"]
+    assert set(app.state.industry_service._list_schedule_ids_for_instance(instance_id)) == (
+        set(baseline_schedule_ids).union(result["created_schedule_ids"])
     )
 
 

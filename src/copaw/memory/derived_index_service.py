@@ -775,8 +775,7 @@ class DerivedMemoryIndexService:
             strategy.scope_id,
             strategy.owner_agent_id,
             strategy.industry_instance_id,
-            *(strategy.active_goal_ids or []),
-            *(strategy.active_goal_titles or []),
+            *(strategy.current_focuses or []),
             *(strategy.paused_lane_ids or []),
         ]
         entity_keys, entity_labels = extract_entity_candidates(
@@ -1115,7 +1114,6 @@ class DerivedMemoryIndexService:
         ).strip()
         explicit_entities = [
             scope_id,
-            *(report.goal_ids or []),
             *(report.task_ids or []),
             *(report.agent_ids or []),
         ]

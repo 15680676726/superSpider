@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 33
+STATE_SCHEMA_VERSION = 34
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS human_profiles (
@@ -428,8 +428,6 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
     industry_instance_id TEXT,
     parameter_payload_json TEXT NOT NULL DEFAULT '{}',
     preview_payload_json TEXT NOT NULL DEFAULT '{}',
-    goal_ids_json TEXT NOT NULL DEFAULT '[]',
-    schedule_ids_json TEXT NOT NULL DEFAULT '[]',
     task_ids_json TEXT NOT NULL DEFAULT '[]',
     decision_ids_json TEXT NOT NULL DEFAULT '[]',
     evidence_ids_json TEXT NOT NULL DEFAULT '[]',
@@ -984,9 +982,7 @@ CREATE TABLE IF NOT EXISTS industry_instances (
     profile_payload_json TEXT NOT NULL DEFAULT '{}',
     team_payload_json TEXT NOT NULL DEFAULT '{}',
     execution_core_identity_payload_json TEXT NOT NULL DEFAULT '{}',
-    goal_ids_json TEXT NOT NULL DEFAULT '[]',
     agent_ids_json TEXT NOT NULL DEFAULT '[]',
-    schedule_ids_json TEXT NOT NULL DEFAULT '[]',
     lifecycle_status TEXT NOT NULL DEFAULT 'running',
     autonomy_status TEXT NOT NULL DEFAULT 'waiting-confirm',
     current_cycle_id TEXT,
@@ -1120,7 +1116,6 @@ CREATE TABLE IF NOT EXISTS operating_cycles (
     completed_at TEXT,
     focus_lane_ids_json TEXT NOT NULL DEFAULT '[]',
     backlog_item_ids_json TEXT NOT NULL DEFAULT '[]',
-    goal_ids_json TEXT NOT NULL DEFAULT '[]',
     assignment_ids_json TEXT NOT NULL DEFAULT '[]',
     report_ids_json TEXT NOT NULL DEFAULT '[]',
     metadata_json TEXT NOT NULL DEFAULT '{}',
@@ -1235,8 +1230,6 @@ CREATE TABLE IF NOT EXISTS strategy_memories (
     direct_execution_policy_json TEXT NOT NULL DEFAULT '[]',
     execution_constraints_json TEXT NOT NULL DEFAULT '[]',
     evidence_requirements_json TEXT NOT NULL DEFAULT '[]',
-    active_goal_ids_json TEXT NOT NULL DEFAULT '[]',
-    active_goal_titles_json TEXT NOT NULL DEFAULT '[]',
     teammate_contracts_json TEXT NOT NULL DEFAULT '[]',
     lane_weights_json TEXT NOT NULL DEFAULT '{}',
     strategic_uncertainties_json TEXT NOT NULL DEFAULT '[]',
@@ -1981,8 +1974,6 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
             ("direct_execution_policy_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("execution_constraints_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("evidence_requirements_json", "TEXT NOT NULL DEFAULT '[]'"),
-            ("active_goal_ids_json", "TEXT NOT NULL DEFAULT '[]'"),
-            ("active_goal_titles_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("teammate_contracts_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("lane_weights_json", "TEXT NOT NULL DEFAULT '{}'"),
             ("strategic_uncertainties_json", "TEXT NOT NULL DEFAULT '[]'"),
@@ -2033,7 +2024,13 @@ class SQLiteStateStore:
     def initialize(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as conn:
+            current_version = int(
+                conn.execute("PRAGMA user_version").fetchone()[0],
+            )
             existing_tables = _list_table_names(conn)
+            if existing_tables and current_version not in {0, STATE_SCHEMA_VERSION}:
+                _drop_user_tables(conn, table_names=existing_tables)
+                existing_tables = set()
             if existing_tables:
                 _ensure_additive_schema_columns(
                     conn,
@@ -2083,6 +2080,11 @@ def _list_table_names(conn: sqlite3.Connection) -> set[str]:
         "SELECT name FROM sqlite_master WHERE type = 'table'",
     ).fetchall()
     return {str(row["name"]) for row in rows if row["name"]}
+
+
+def _drop_user_tables(conn: sqlite3.Connection, *, table_names: set[str]) -> None:
+    for table_name in sorted(name for name in table_names if not name.startswith("sqlite_")):
+        conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
 
 
 def _ensure_additive_schema_columns(

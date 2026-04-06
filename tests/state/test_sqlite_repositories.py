@@ -1433,14 +1433,11 @@ def test_sqlite_override_repositories_crud_round_trip(tmp_path) -> None:
         status="active",
         profile_payload={"industry": "Operations"},
         team_payload={"team_id": "industry-v1-ops", "agents": []},
-        goal_ids=["goal-1"],
         agent_ids=["ops-agent"],
-        schedule_ids=["job-1"],
     )
     industry_repo.upsert_instance(industry_instance)
     stored_instance = industry_repo.get_instance("industry-v1-ops")
     assert stored_instance is not None
-    assert stored_instance.goal_ids == ["goal-1"]
     assert stored_instance.agent_ids == ["ops-agent"]
     assert [item.instance_id for item in industry_repo.list_instances()] == [
         "industry-v1-ops",

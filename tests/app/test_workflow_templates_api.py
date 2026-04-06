@@ -1160,16 +1160,6 @@ def test_workflow_run_step_detail_stays_read_only_and_service_resume_rehydrates_
     client.app.state.workflow_run_repository.upsert_run(
         run_record.model_copy(
             update={
-                "goal_ids": [
-                    item
-                    for item in list(run_record.goal_ids or [])
-                    if item not in set(goal_step["linked_goal_ids"])
-                ],
-                "schedule_ids": [
-                    item
-                    for item in list(run_record.schedule_ids or [])
-                    if item not in set(schedule_step["linked_schedule_ids"])
-                ],
                 "metadata": {
                     **metadata,
                     "step_execution_seed": step_seed,

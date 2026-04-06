@@ -2064,7 +2064,7 @@ def test_runtime_center_strategy_memory_lists_execution_core_strategy() -> None:
     assert payload[0]["title"] == "白泽执行中枢行业战略"
     assert payload[0]["scope_type"] == "industry"
     assert payload[0]["industry_instance_id"] == "industry-v1-ops"
-    assert payload[0]["active_goal_titles"] == ["Launch runtime center"]
+    assert payload[0]["current_focuses"] == ["Launch runtime center"]
     assert all("亲自执行" not in item for item in payload[0]["direct_execution_policy"])
     assert any(
         "补位" in item or "改派" in item or "确认" in item
@@ -2244,6 +2244,48 @@ def test_runtime_center_governance_status_surfaces_structured_portfolio_actions(
     assert portfolio["governance_actions"][0]["action"] == "compact_over_budget_scope"
     assert portfolio["governance_actions"][0]["scope_key"] == "seat:researcher:seat-1"
     assert portfolio["governance_actions"][0]["budget_limit"] == 3
+
+
+def test_runtime_center_governance_status_surfaces_formal_drift_pressure_breakdown() -> None:
+    app = build_runtime_center_app()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.prediction_service = FakePredictionService()
+
+    class _PortfolioService:
+        def get_runtime_portfolio_summary(self) -> dict[str, object]:
+            return {
+                "donor_count": 4,
+                "active_donor_count": 2,
+                "candidate_donor_count": 2,
+                "trial_donor_count": 1,
+                "trusted_source_count": 1,
+                "watchlist_source_count": 1,
+                "degraded_donor_count": 2,
+                "replace_pressure_count": 1,
+                "retire_pressure_count": 1,
+                "revision_pressure_count": 2,
+                "over_budget_scope_count": 1,
+                "governance_actions": [],
+                "planning_actions": [],
+            }
+
+    app.state.capability_portfolio_service = _PortfolioService()
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/governance/status")
+
+    assert response.status_code == 200
+    payload = response.json()["capability_governance"]
+    assert payload["portfolio"]["replace_pressure_count"] == 1
+    assert payload["portfolio"]["retire_pressure_count"] == 1
+    assert payload["portfolio"]["revision_pressure_count"] == 2
+    components = {
+        item["component"]: item["summary"] for item in payload["degraded_components"]
+    }
+    assert "donor-trust" in components
+    assert "replacement-pressure" in components
+    assert "retirement-pressure" in components
 
 
 def test_runtime_center_governance_status_projects_full_capability_delta_diagnostics() -> None:
@@ -2811,7 +2853,8 @@ def test_runtime_center_chat_run_e2e_routes_builtin_tool_calls_through_capabilit
     assert submitted.id.startswith(
         "query:session:console:ops-user:industry-chat:industry-v1-ops:execution-core:",
     )
-    assert submitted.payload == {}
+    assert isinstance(submitted.payload, dict)
+    assert submitted.payload.get("request_context")
 
 
 class _CommitAwareTurnExecutor:
@@ -2879,6 +2922,21 @@ def test_encode_sse_event_keeps_json_object_shape_for_pydantic_events() -> None:
     assert decoded["object"] == "message"
     assert decoded["status"] == "completed"
     assert isinstance(decoded["payload"], str)
+
+
+class _BrokenModelDumpFallbackEvent:
+    def model_dump_json(self) -> str:
+        raise TypeError("model_dump_json broken")
+
+    def model_dump(self, mode: str = "json", fallback=None):
+        raise TypeError("model_dump broken too")
+
+
+def test_encode_sse_event_falls_back_to_string_when_model_dump_also_raises() -> None:
+    payload = _encode_sse_event(_BrokenModelDumpFallbackEvent())
+    decoded = json.loads(payload.removeprefix("data: ").strip())
+    assert isinstance(decoded, str)
+    assert "BrokenModelDumpFallbackEvent" in decoded
 
 
 class _SnapshotSessionBackend:

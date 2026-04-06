@@ -348,7 +348,8 @@ def _build_predictions_app(
             summary="Reduce runtime friction before the next outbound push.",
             status="active",
             priority=3,
-            owner_scope="global",
+            owner_scope="industry-demo-scope",
+            industry_instance_id="industry-demo",
         ),
     )
     industry_instance_repository.upsert_instance(
@@ -358,7 +359,6 @@ def _build_predictions_app(
             summary="Demo strategy-aware operating scope.",
             owner_scope="industry-demo-scope",
             status="active",
-            goal_ids=["goal-prediction"],
             agent_ids=["copaw-agent-runner", "industry-solution-lead-demo"],
             execution_core_identity_payload={"agent_id": "copaw-agent-runner"},
             team_payload={
@@ -387,8 +387,7 @@ def _build_predictions_app(
             north_star="Keep the operating loop stable and unblock execution first",
             priority_order=["稳定执行", "清理阻塞", "再做扩张"],
             execution_constraints=["Do not expand scope before core blockers are resolved"],
-            active_goal_ids=["goal-prediction"],
-            active_goal_titles=["Stabilize outbound execution"],
+            current_focuses=["Stabilize outbound execution"],
             status="active",
         ),
     )
@@ -406,8 +405,7 @@ def _build_predictions_app(
             priority_order=["桌面外呼就绪", "能力缺口清理", "行业执行放量"],
             delegation_policy=["执行中枢负责统筹，叶子动作下放给行业岗位"],
             execution_constraints=["不要在能力缺口未补齐前扩大投放节奏"],
-            active_goal_ids=["goal-prediction"],
-            active_goal_titles=["Stabilize outbound execution"],
+            current_focuses=["Stabilize outbound execution"],
             status="active",
         ),
     )
@@ -617,8 +615,7 @@ def test_predictions_consume_strategy_trigger_rules_into_signals_and_recommendat
                     "source": "strategy-memory",
                 }
             ],
-            active_goal_ids=["goal-prediction"],
-            active_goal_titles=["Stabilize outbound execution"],
+            current_focuses=["Stabilize outbound execution"],
             status="active",
         ),
     )
