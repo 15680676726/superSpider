@@ -516,6 +516,43 @@
 
 ---
 
+### 3.3 `2026-04-06` 闭环真实性回归补充
+
+- `HumanAssistTask` 验收合同已完成本轮正式修复：
+  - `verify_task()` 现在会先物化真实 `submitted` 快照，再进入 `verifying`
+  - `evidence_verified` 现在必须有正式 `verification_evidence_refs`
+  - `state_change_verified` 现在必须满足配置的状态合同路径
+  - evidence ledger 写入失败不再静默接受；现在会回退到验证前状态并返回 `verification_record_failed`
+- `Runtime Center` 行业详情 focus query 已收紧到 canonical 边界：
+  - `/runtime-center/industry/{instance_id}` 现在只接受 `assignment/backlog` focus
+  - `report/lane/cycle` 与其他非 canonical focus 不再由 route 层注入伪 truth
+  - `industry/service_runtime_views.py` 允许展示选中的 assignment/backlog detail，但不再借此伪造 `execution.current_focus_*`
+- industry lifecycle 的 legacy seam 本轮只完成了部分收口：
+  - public bootstrap 不再把 `auto_activate` 自动膨胀成 legacy goal dispatch
+  - chat writeback 创建 schedule 不再扩张 `IndustryInstanceRecord.schedule_ids` 真相
+  - `run_operating_cycle(...)` 已把 task subgraph 传入 cycle/assignment planners
+  - 但 kickoff / auto-resume 以及 `goal_ids / schedule_ids / active_goal_ids` 持续存在，仍不能写成“legacy goal/schedule 已完全退役”
+- acquisition decision 路由回归本轮已修：
+  - `Runtime Center` approve/reject acquisition decision 现在优先走 canonical dispatcher
+  - dispatcher 为 sync/async 都可兼容
+  - 当前 fallback 只是在 acquisition proposal 尚未成为真实 kernel task 时兜底，producer-side 单一化仍未完成
+- 本轮重新执行并确认通过的正式验证：
+  - `PYTHONPATH=src python -m pytest tests/state/test_human_assist_task_service.py -q` -> `15 passed`
+  - `PYTHONPATH=src python -m pytest tests/app/test_runtime_human_assist_tasks_api.py -q` -> `14 passed`
+  - `PYTHONPATH=src python -m pytest tests/app/test_learning_api.py -q` -> `12 passed`
+  - `PYTHONPATH=src python -m pytest tests/app/test_runtime_center_api.py -q` -> `105 passed`
+  - `PYTHONPATH=src python -m pytest tests/app/runtime_center_api_parts/overview_governance.py -q` -> `83 passed`
+  - `PYTHONPATH=src python -m pytest tests/industry/test_runtime_views_split.py -q` -> `12 passed`
+  - `PYTHONPATH=src python -m pytest tests/app/test_phase_next_autonomy_smoke.py -q` -> `11 passed`
+  - `PYTHONPATH=src python -m pytest tests/app/test_operator_runtime_e2e.py -q` -> `9 passed`
+  - `PYTHONPATH=src python -m pytest tests/app/test_runtime_canonical_flow_e2e.py -q` -> `4 passed`
+  - `PYTHONPATH=src python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py -q` -> `38 passed`
+  - `npm --prefix console run test -- src/pages/RuntimeCenter/useRuntimeCenter.test.ts src/routes/resolveSelectedKey.test.ts src/layouts/Sidebar.test.tsx src/pages/Settings/System/index.test.tsx` -> `19 passed`
+  - `npm --prefix console run build` -> `通过`
+- 本轮验证边界说明：
+  - `tests/app/test_phase_next_autonomy_smoke.py` 与 `tests/app/test_runtime_canonical_flow_e2e.py` 并行执行时在 `124s` 超时；串行重跑后通过，因此不能把并行超时误写成流程断裂
+  - 上述结果证明“当前代码基线 + 正式回归命令”已通过，不自动等于默认外部 live e2e；除非单独标注 live/opt-in，否则都按仓库内回归理解
+
 ## 4. 当前收口判断
 
 截至 `2026-04-01`，本仓库应按“核心闭环是否已经完成、哪些只是仓库门槛、哪些仍是真未完成项”来判断状态，不应再把所有 guardrail / 接线 / 展示加厚都写成开放式长期任务。
@@ -803,6 +840,12 @@
 
 ### 6.1 四项终态硬清单（`2026-03-30`）
 
+`2026-04-06` 真实性校正：
+
+- 本节“当前已闭环”只表示“当前代码基线 + 指定回归已通过”，不自动等于默认真实外部 live e2e。
+- 除非测试明确标注为 live/opt-in 并单独核实，否则应按仓库内 default/focused regression 理解。
+- 具体回归命令和最新通过结果以 `3.3 2026-04-06 闭环真实性回归补充` 为准。
+
 1. `Full Host Digital Twin`
    - 当前已闭环：`Seat Runtime / Workspace Graph / Host Event Bus / host_twin` 已成为正式运行边界；`runtime query / workflow preview-run-resume / cron / fixed-SOP / Runtime Center` 已统一优先消费 canonical `host_twin_summary`；`host_twin` 也已正式派生 multi-seat `candidate_seats / selected_seat_ref / selected_session_mount_id`，并在同 scope alternate ready seat 可用时切换 canonical host truth。`browser / desktop / document` 三类执行位现都已进入同一条 host-aware 消费链，workflow run detail 与 fixed-SOP run detail 也会显式带出 `host_requirement`。
    - 终态标准：所有执行入口都只认一套 canonical `host_twin` 真相；`workflow / cron / fixed-SOP / Runtime Center / industry runtime` 对 `selected_seat_ref / selected_session_mount_id / host_requirement / legal_recovery` 使用同一宿主口径；多 seat / 多 agent 并发时系统能稳定判定 writer ownership、handoff、recovery、resume 与 host switch；browser / desktop / document / app-family twins 都纳入同一宿主真相；并有长时间 live smoke 证明切换、重入、回放和证据连续性不会断。
@@ -810,10 +853,10 @@
    - 当前已闭环：`strategy -> lane -> backlog -> cycle -> assignment -> report -> synthesis/replan` 已成正式主链；failed-report follow-up 已能继承 `source_report_ids / supervisor continuity / control_thread / session / environment / recommended_scheduler_action`，并在 focused runtime 中优先回到当前执行焦点，`replan` 也不会在 cycle rollover 后静默丢失。治理层创建的 host-handoff `HumanAssistTask` 现在也会继承同一条 `work_context / environment / recovery / requested_surfaces` continuity，上游宿主回执与下游 resume 会继续沿着同一控制线程和同一恢复上下文闭环，而不再掉出原行业主链。
    - 终态标准：单个行业实例能稳定连续跑多个周期；`staffing + handoff + human assist + report + synthesis + replan` 能形成长期闭环；supervisor / manager / researcher / operator 的职责切换和协作关系在长跑里不掉线；browser / desktop / document 执行位能接入同一行业闭环；报告、证据、决策和重规划都能回流到同一主链，并有真实世界长跑 smoke 证明其稳定性。
 3. 主脑 cockpit / `Unified Runtime Chain`
-   - 当前已闭环：`/runtime-center/main-brain` 已成为 dedicated main-brain cockpit contract，`Runtime Center` main-brain panel 现在会把 `carrier / strategy / lanes / backlog / cycle / assignment / report / environment / governance / recovery / automation / evidence / decision / patch` 放进同一驾驶舱，并形成 `Execution Envelope / Operator Closure / Trace Closure` 三段闭环；`/runtime-center/industry/{instance_id}` 已支持 `focus_kind + focus_id` drill-down，`/runtime-center/reports` 也已支持按 `industry / assignment / lane / cycle / needs_followup / processed` 过滤。
+   - 当前已闭环：`/runtime-center/main-brain` 已成为 dedicated main-brain cockpit contract，`Runtime Center` main-brain panel 现在会把 `carrier / strategy / lanes / backlog / cycle / assignment / report / environment / governance / recovery / automation / evidence / decision / patch` 放进同一驾驶舱，并形成 `Execution Envelope / Operator Closure / Trace Closure` 三段闭环；`/runtime-center/industry/{instance_id}` 当前只支持 `assignment/backlog` canonical focus drill-down，`/runtime-center/reports` 也已支持按 `industry / assignment / lane / cycle / needs_followup / processed` 过滤。
    - 终态标准：前台不是 detail 堆叠页，而是统一运行中心；上述核心对象都能在一个驾驶舱里被看见、被关联、被追踪；驾驶舱不只展示结果，还能承载治理、调度、恢复、证据追踪与 patch/decision 闭环；主脑对象、执行对象、证据对象之间的关系前台可直接看清；重要运行真相不再藏在日志、内部状态或零散 detail 里，也不再出现第二套平行执行器。
 4. 宽回归与 `live smoke`
-   - 当前已闭环：关键 `industry / runtime / workflow / fixed-SOP / host-aware` 主链已进入聚合回归；`tests/app/test_phase_next_autonomy_smoke.py::test_phase_next_long_run_live_smoke_closes_unified_runtime_chain_and_multi_surface_continuity` 已把 `multi-cycle industry`、`handoff -> human-assist -> resume`、`schedule pause-resume`、`host switch + reentry + replay continuity`、以及 `browser / desktop / document + cockpit contract + evidence / decision / patch continuity` 锁进同一条长跑 smoke，`tests/app/test_runtime_human_assist_tasks_api.py`、`tests/app/runtime_center_api_parts/overview_governance.py` 与 `tests/app/runtime_center_api_parts/detail_environment.py` 也继续作为正式聚合回归护栏；同时仓库已新增单入口 gate `python scripts/run_p0_runtime_terminal_gate.py` 作为正式门槛入口。
+   - 当前已闭环：关键 `industry / runtime / workflow / fixed-SOP / host-aware` 主链已进入聚合回归；`tests/app/test_phase_next_autonomy_smoke.py`、`tests/app/test_runtime_human_assist_tasks_api.py`、`tests/app/runtime_center_api_parts/overview_governance.py` 与 `tests/app/runtime_center_api_parts/detail_environment.py` 继续作为正式聚合回归护栏，`python scripts/run_p0_runtime_terminal_gate.py` 也已成为单入口 gate。这里的“已闭环”应理解为当前仓库内回归矩阵已通过，不应直接写成外部真实世界 live smoke 全量完成。
    - 终态标准：关键主链都有稳定宽回归，而不是只靠局部单测；存在长时间连续 smoke，覆盖恢复点、重入、宿主切换、handoff、调度恢复、证据回放；多 agent / 多 cycle / 多 host / 多执行位组合场景能稳定通过；回归能锁住关键合同漂移；smoke 本身成为成熟度门槛，而不是开发时顺手跑一遍的附属检查。
 
 ### 6.2 其他已收口 / 持续工程项

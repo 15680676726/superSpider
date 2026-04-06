@@ -8,6 +8,23 @@
 
 **Tech Stack:** Python, FastAPI, Pydantic, SQLite state repositories, Vitest, pytest
 
+## `2026-04-06` Status Snapshot
+
+- `Task 1`: complete
+  - `HumanAssistTask` 验收模式、`verification_evidence_refs` 持久化、以及 evidence-ledger 失败回退已落地并重新通过状态/API 回归。
+- `Task 2`: partial
+  - public bootstrap 不再把 `auto_activate` 扩成 legacy goal dispatch，chat writeback 也不再扩张 `schedule_ids` truth；但 kickoff / auto-resume 与 `goal_ids / schedule_ids / active_goal_ids` 长期收口仍未完成。
+- `Task 3`: complete
+  - runtime focus writeback 已收成 assignment focus；read-side 不再因为 selected assignment/backlog 伪造 `execution.current_focus_*`。
+- `Task 4`: partial
+  - acquisition approve/reject route regressions 已修，dispatcher-first + finalized decision payload 已落地；但 producer/kernel-task 一体化仍未完成，因此 fallback 仍存在。
+- `Task 5`: partial
+  - backend query boundary 已收成只接受 canonical `assignment/backlog` focus；前端本轮补齐了 Runtime Center surface-only contract 的陈旧测试，但更大范围的本地 truth derivation 清理尚未完成。
+- `Task 6`: complete for this remediation round
+  - `46问题文档.md`、`TASK_STATUS.md`、本计划文档已按本轮真实验证结果纠偏；更大范围的历史文档真实性治理仍需后续持续处理。
+- `Final Verification`: complete for the current remediation scope
+  - backend 回归矩阵已重新执行，`bootstrap_lifecycle.py` 本轮全量 `38 passed`；前端 targeted Vitest `19 passed`，`console build` 通过。
+
 ---
 
 ### Task 1: Harden HumanAssist Verification Semantics
