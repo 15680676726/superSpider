@@ -1050,6 +1050,8 @@ class MainBrainChatService:
                 pending_text: str | None = None
                 pending_thinking: str | None = None
                 pending_usage: object | None = None
+                pending_already_streamed = False
+                streamed_any_chunk = False
                 async for chunk in response:  # type: ignore[misc]
                     chunk_text, chunk_thinking = _response_to_text_and_thinking(chunk)
                     merged_text = _merge_stream_text(accumulated_text, chunk_text)
@@ -1058,29 +1060,37 @@ class MainBrainChatService:
                         chunk_thinking,
                     )
                     chunk_usage = getattr(chunk, "usage", None)
-                    if (
-                        (pending_text is not None or pending_thinking is not None)
-                        and (
-                            merged_text != accumulated_text
-                            or merged_thinking != accumulated_thinking
-                        )
-                    ):
-                        yield (
-                            _build_assistant_message(
-                                text=pending_text,
-                                thinking=pending_thinking,
-                                message_id=assistant_message_id,
-                                usage=pending_usage,
-                            ),
-                            False,
-                        )
                     if merged_text != accumulated_text or merged_thinking != accumulated_thinking:
                         if first_output_at is None:
                             first_output_at = time.perf_counter()
+                        if pending_text is not None and pending_already_streamed is False:
+                            yield (
+                                _build_assistant_message(
+                                    text=pending_text,
+                                    thinking=pending_thinking,
+                                    message_id=assistant_message_id,
+                                    usage=pending_usage,
+                                ),
+                                False,
+                            )
                         accumulated_text = merged_text
                         accumulated_thinking = merged_thinking
                         pending_text = accumulated_text
                         pending_thinking = accumulated_thinking
+                        pending_usage = chunk_usage
+                        pending_already_streamed = False
+                        if not streamed_any_chunk:
+                            yield (
+                                _build_assistant_message(
+                                    text=pending_text,
+                                    thinking=pending_thinking,
+                                    message_id=assistant_message_id,
+                                    usage=pending_usage,
+                                ),
+                                False,
+                            )
+                            pending_already_streamed = True
+                            streamed_any_chunk = True
                     if chunk_usage is not None:
                         pending_usage = chunk_usage
                 if pending_text is not None or pending_thinking is not None:

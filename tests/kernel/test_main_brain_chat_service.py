@@ -171,6 +171,22 @@ class _StreamingResponseModel:
         return _stream()
 
 
+class _BlockingStreamingResponseModel:
+    def __init__(self) -> None:
+        self.stream = True
+        self.release_second_chunk = asyncio.Event()
+
+    async def __call__(self, *, messages, **kwargs):
+        _ = (messages, kwargs)
+
+        async def _stream():
+            yield SimpleNamespace(content="hello")
+            await self.release_second_chunk.wait()
+            yield SimpleNamespace(content="hello world")
+
+        return _stream()
+
+
 class _StreamingThinkingResponseModel:
     def __init__(self) -> None:
         self.stream = True
@@ -617,6 +633,37 @@ async def test_main_brain_chat_service_streams_incremental_chunks_before_complet
     )
     texts = await _snapshot_texts(service, snapshot)
     assert texts[-1] == "hello world"
+
+
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_yields_first_stream_chunk_without_waiting_for_second_chunk():
+    backend = _FakeSessionBackend()
+    model = _BlockingStreamingResponseModel()
+    service = MainBrainChatService(
+        session_backend=backend,
+        model_factory=lambda: model,
+    )
+    request = SimpleNamespace(
+        session_id="sess-streaming-first-chunk",
+        user_id="user-streaming-first-chunk",
+        industry_instance_id=None,
+        work_context_id=None,
+        agent_id=None,
+    )
+    msgs = [Msg(name="user", role="user", content="stream to me now")]
+
+    stream = service.execute_stream(msgs=msgs, request=request)
+    first_message, first_done = await asyncio.wait_for(stream.__anext__(), timeout=0.1)
+
+    assert first_done is False
+    assert first_message.get_text_content() == "hello"
+
+    model.release_second_chunk.set()
+    remainder = [item async for item in stream]
+
+    assert len(remainder) == 1
+    assert remainder[0][1] is True
+    assert remainder[0][0].get_text_content() == "hello world"
 
 
 @pytest.mark.asyncio
