@@ -1182,6 +1182,15 @@
   - workflow schedule step 必须依赖持久化 `linked_schedule_ids` 才能恢复。
   - workflow resume 会无条件回填 legacy `linked_goal_ids`。
 
+### 3.3.5 `2026-04-07` public-surface / prediction fallback follow-up
+
+- prediction task collection 在已有 `industry_instance_id` task truth 时，已不再继续退回 `goal_ids` task query；`goal` 现在只保留为缺少 primary task anchor 时的次级兜底语义。
+- workflow run / step 的公开序列化面已隐藏 `linked_goal_ids / linked_schedule_ids`；历史 link 仍保留在内部模型里供 step drill-down / compatibility 使用，但不再作为前台默认读面词汇。
+- 本次追加 focused verification：
+  - `python -m pytest tests/app/test_predictions_api.py::test_prediction_service_does_not_fallback_to_goal_id_queries_when_industry_tasks_exist -q` -> `1 passed`
+  - `python -m pytest tests/app/test_workflow_templates_api.py::test_workflow_run_public_surface_hides_historical_goal_schedule_id_fields -q` -> `1 passed`
+  - `python -m pytest tests/app/test_workflow_templates_api.py -k "run_step_detail_stays_read_only_and_service_resume_rehydrates_missing_links or step_detail_prefers_persisted_task_links_over_legacy_goal_links or resume_uses_persisted_runtime_context_without_rehydrating_legacy_links" -q` -> `3 passed, 26 deselected`
+
 ### 3.3.4 `2026-04-07` Buddy carrier direction-truth fix
 
 - Buddy onboarding 的正式方向边界已补正：`BuddyOnboardingService._ensure_growth_scaffold(...)` 不再把 `HumanProfile` 当前资料直接写进 `IndustryInstanceRecord.profile_payload`。

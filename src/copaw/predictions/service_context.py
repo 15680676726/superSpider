@@ -179,7 +179,7 @@ class _PredictionServiceContextMixin:
                 limit=50,
             ):
                 task_map[task.id] = task
-        if goal_ids:
+        if not task_map and goal_ids:
             for task in repository.list_tasks(
                 goal_ids=goal_ids,
                 activity_since=since,

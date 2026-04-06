@@ -179,8 +179,8 @@ class WorkflowStepExecutionRecord(BaseModel):
     owner_role_id: str | None = None
     owner_role_candidates: list[str] = Field(default_factory=list)
     owner_agent_id: str | None = None
-    linked_goal_ids: list[str] = Field(default_factory=list)
-    linked_schedule_ids: list[str] = Field(default_factory=list)
+    linked_goal_ids: list[str] = Field(default_factory=list, exclude=True)
+    linked_schedule_ids: list[str] = Field(default_factory=list, exclude=True)
     linked_task_ids: list[str] = Field(default_factory=list)
     linked_decision_ids: list[str] = Field(default_factory=list)
     linked_evidence_ids: list[str] = Field(default_factory=list)

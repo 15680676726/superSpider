@@ -1132,15 +1132,17 @@ def test_workflow_run_step_detail_stays_read_only_and_service_resume_rehydrates_
     assert detail.status_code == 200
     detail_payload = detail.json()
     assert "resume" not in (detail_payload.get("routes") or {})
+    assert all("linked_goal_ids" not in item for item in detail_payload["step_execution"])
+    assert all("linked_schedule_ids" not in item for item in detail_payload["step_execution"])
     goal_step = next(
         item
         for item in detail_payload["step_execution"]
-        if item["kind"] == "goal" and item["linked_goal_ids"]
+        if item["kind"] == "goal"
     )
     schedule_step = next(
         item
         for item in detail_payload["step_execution"]
-        if item["kind"] == "schedule" and item["linked_schedule_ids"]
+        if item["kind"] == "schedule"
     )
 
     step_detail = client.get(f"/workflow-runs/{run_id}/steps/{goal_step['step_id']}")
@@ -1236,7 +1238,9 @@ def test_workflow_step_detail_prefers_persisted_task_links_over_legacy_goal_link
         for item in detail_payload["step_execution"]
         if item["kind"] == "goal"
     )
-    goal_id = goal_step["linked_goal_ids"][0]
+    step_detail = client.get(f"/workflow-runs/{run_id}/steps/{goal_step['step_id']}")
+    assert step_detail.status_code == 200
+    goal_id = step_detail.json()["linked_goals"][0]["id"]
     service = client.app.state.workflow_template_service
     service._task_repository.upsert_task(
         TaskRecord(
@@ -1317,7 +1321,7 @@ def test_workflow_step_detail_prefers_persisted_task_links_over_legacy_goal_link
         if item["step_id"] == goal_step["step_id"]
     )
 
-    assert refreshed_goal_step["linked_goal_ids"] == []
+    assert "linked_goal_ids" not in refreshed_goal_step
     assert refreshed_goal_step["linked_task_ids"] == goal_step["linked_task_ids"]
     assert refreshed_goal_step["status"] != "planned"
 
@@ -1354,14 +1358,16 @@ def test_workflow_resume_uses_persisted_runtime_context_without_rehydrating_lega
     goal_step = next(
         item
         for item in detail_payload["step_execution"]
-        if item["kind"] == "goal" and item["linked_goal_ids"]
+        if item["kind"] == "goal"
     )
     schedule_step = next(
         item
         for item in detail_payload["step_execution"]
         if item["kind"] == "schedule"
     )
-    goal_id = goal_step["linked_goal_ids"][0]
+    step_detail = client.get(f"/workflow-runs/{run_id}/steps/{goal_step['step_id']}")
+    assert step_detail.status_code == 200
+    goal_id = step_detail.json()["linked_goals"][0]["id"]
 
     service = client.app.state.workflow_template_service
     service._task_repository.upsert_task(
@@ -1456,7 +1462,7 @@ def test_workflow_resume_uses_persisted_runtime_context_without_rehydrating_lega
 
     assert resumed_goal_step.linked_goal_ids == []
     assert resumed_goal_step.linked_task_ids == goal_step["linked_task_ids"]
-    assert resumed_schedule_step.linked_schedule_ids == schedule_step["linked_schedule_ids"]
+    assert resumed_schedule_step.linked_schedule_ids
 
     persisted_run = client.app.state.workflow_run_repository.get_run(run_id)
     assert persisted_run is not None
@@ -1472,7 +1478,36 @@ def test_workflow_resume_uses_persisted_runtime_context_without_rehydrating_lega
         f"/workflow-runs/{run_id}/steps/{schedule_step['step_id']}",
     )
     assert resumed_schedule_detail.status_code == 200
-    assert resumed_schedule_detail.json()["linked_schedules"]
+    resumed_schedule_payload = resumed_schedule_detail.json()
+    assert "linked_schedule_ids" not in resumed_schedule_payload["step"]
+    assert resumed_schedule_payload["linked_schedules"]
+
+
+def test_workflow_run_public_surface_hides_historical_goal_schedule_id_fields(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    instance_id = _bootstrap_industry(client)
+
+    launched = _launch_workflow_via_service(
+        client,
+        template_id="industry-weekly-research-synthesis",
+        industry_instance_id=instance_id,
+        parameters={
+            "focus_area": "channel conversion",
+            "weekly_review_cron": "0 12 * * 2",
+            "timezone": "UTC",
+        },
+    )
+    run_id = launched.run["run_id"]
+
+    detail = client.get(f"/workflow-runs/{run_id}")
+    assert detail.status_code == 200
+    payload = detail.json()
+
+    assert payload["step_execution"]
+    assert all("linked_goal_ids" not in item for item in payload["step_execution"])
+    assert all("linked_schedule_ids" not in item for item in payload["step_execution"])
 
 
 def test_workflow_preview_declares_host_requirements_and_phase6_coordination_blocker(

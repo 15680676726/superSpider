@@ -36,6 +36,9 @@ from copaw.state import (
     TaskRuntimeRecord,
     WorkflowRunRecord,
 )
+from copaw.state.capability_donor_service import CapabilityDonorService
+from copaw.state.capability_portfolio_service import CapabilityPortfolioService
+from copaw.state.donor_trust_service import DonorTrustService
 from copaw.state.skill_candidate_service import CapabilityCandidateService
 from copaw.state.skill_lifecycle_decision_service import (
     SkillLifecycleDecisionService,
@@ -300,14 +303,29 @@ def _build_predictions_app(
         runtime_bindings=industry_runtime_bindings,
     )
     capability_service.set_industry_service(industry_service)
+    capability_donor_service = CapabilityDonorService(
+        state_store=state_store,
+    )
     capability_candidate_service = CapabilityCandidateService(
         state_store=state_store,
+        donor_service=capability_donor_service,
     )
     skill_trial_service = SkillTrialService(
         state_store=state_store,
     )
     skill_lifecycle_decision_service = SkillLifecycleDecisionService(
         state_store=state_store,
+    )
+    donor_trust_service = DonorTrustService(
+        donor_service=capability_donor_service,
+        skill_trial_service=skill_trial_service,
+        skill_lifecycle_decision_service=skill_lifecycle_decision_service,
+    )
+    capability_portfolio_service = CapabilityPortfolioService(
+        donor_service=capability_donor_service,
+        candidate_service=capability_candidate_service,
+        skill_trial_service=skill_trial_service,
+        skill_lifecycle_decision_service=skill_lifecycle_decision_service,
     )
     capability_candidate_service.import_active_baseline_artifacts(
         mounts=capability_service.list_public_capabilities(enabled_only=True),
@@ -333,6 +351,8 @@ def _build_predictions_app(
         strategy_memory_service=strategy_memory_service,
         capability_service=capability_service,
         capability_candidate_service=capability_candidate_service,
+        capability_donor_service=capability_donor_service,
+        capability_portfolio_service=capability_portfolio_service,
         skill_trial_service=skill_trial_service,
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         agent_profile_service=agent_profile_service,
@@ -458,6 +478,9 @@ def _build_predictions_app(
     app.state.prediction_service = prediction_service
     app.state.capability_service = capability_service
     app.state.capability_candidate_service = capability_candidate_service
+    app.state.capability_donor_service = capability_donor_service
+    app.state.donor_trust_service = donor_trust_service
+    app.state.capability_portfolio_service = capability_portfolio_service
     app.state.skill_trial_service = skill_trial_service
     app.state.skill_lifecycle_decision_service = skill_lifecycle_decision_service
     app.state.kernel_dispatcher = dispatcher
@@ -730,6 +753,49 @@ def test_prediction_service_collects_industry_tasks_without_goal_anchor(tmp_path
     assert any(task.id == "task-industry-unowned" for task in facts.tasks)
     assert "goal_ids" not in created["case"]["input_payload"]
     assert "task-industry-unowned" in created["case"]["input_payload"]["task_ids"]
+
+
+def test_prediction_service_does_not_fallback_to_goal_id_queries_when_industry_tasks_exist(
+    tmp_path,
+) -> None:
+    app = _build_predictions_app(tmp_path)
+    app.state.task_repository.upsert_task(
+        TaskRecord(
+            id="task-industry-anchor",
+            title="Industry runtime blocker",
+            summary="Canonical industry task should be enough to build prediction task scope.",
+            task_type="analysis",
+            status="failed",
+            industry_instance_id="industry-demo",
+            owner_agent_id=None,
+        ),
+    )
+    app.state.task_runtime_repository.upsert_runtime(
+        TaskRuntimeRecord(
+            task_id="task-industry-anchor",
+            runtime_status="terminated",
+            current_phase="failed",
+            last_error_summary="Industry runtime blocker remains unresolved.",
+        ),
+    )
+    client = TestClient(app)
+    created = _create_prediction_case(client)
+    case = PredictionCaseRecord.model_validate(created["case"])
+
+    original_list_tasks = app.state.task_repository.list_tasks
+
+    def _guarded_list_tasks(*args, **kwargs):
+        if kwargs.get("goal_ids"):
+            raise AssertionError("prediction task collection should not fallback to goal_ids when industry task truth exists")
+        return original_list_tasks(*args, **kwargs)
+
+    app.state.task_repository.list_tasks = _guarded_list_tasks
+
+    facts = app.state.prediction_service._collect_facts(case)
+
+    assert facts.tasks
+    assert any(task.id == "task-industry-anchor" for task in facts.tasks)
+    assert "goal_ids" not in created["case"]["input_payload"]
 
 
 def test_prediction_cycle_case_deduplicates_same_operating_fingerprint(tmp_path) -> None:
@@ -1630,12 +1696,29 @@ def test_prediction_remote_skill_trial_and_retirement_loop(
     detail = client.get(f"/predictions/{case_id}")
     assert detail.status_code == 200
     detail_payload = detail.json()
+    optimization_case = detail_payload["optimization_cases"][0]
     refreshed = next(
         item
         for item in detail_payload["recommendations"]
         if item["recommendation"]["recommendation_id"] == recommendation_id
     )
     assert refreshed["recommendation"]["status"] == "executed"
+    assert optimization_case["discovery_case_id"] == case_id
+    assert optimization_case["gap_kind"] == "underperforming_capability"
+    assert optimization_case["challenger"]["candidate_id"] == candidate_id
+    assert optimization_case["challenger"]["donor_id"]
+    assert optimization_case["trial_scope"]["scope_kind"] == "seat"
+    assert optimization_case["trial_scope"]["scope_ref"] == "env-browser-primary"
+    assert optimization_case["owner"]["agent_id"] == "industry-solution-lead-demo"
+    assert optimization_case["evaluator_verdict"]["aggregate_verdict"] == "passed"
+    assert optimization_case["planning_impact"]["future_review_pressure"] is False
+    assert optimization_case["writeback_targets"] == [
+        "planning_constraints",
+        "donor_trust",
+        "capability_portfolio_pressure",
+        "future_discovery_pressure",
+        "strategy_or_lane_reopen",
+    ]
     trial_records = app.state.skill_trial_service.list_trials(candidate_id=candidate_id)
     assert len(trial_records) == 1
     assert trial_records[0].scope_ref == "env-browser-primary"
@@ -1709,6 +1792,22 @@ def test_prediction_remote_skill_trial_and_retirement_loop(
         recommendation_id=retirement["recommendation"]["recommendation_id"],
     )
     assert retirement_execution["execution"]["phase"] == "completed"
+    retirement_projection = next(
+        item
+        for item in retirement_execution["detail"]["optimization_cases"]
+        if item["gap_kind"] == "capability_retirement"
+    )
+    assert retirement_projection["discovery_case_id"] == second_payload["case"]["case_id"]
+    assert retirement_projection["gap_kind"] == "capability_retirement"
+    assert retirement_projection["baseline"]["capability_ids"] == [
+        "skill:legacy_outreach",
+    ]
+    assert retirement_projection["challenger"]["candidate_id"] == candidate_id
+    assert retirement_projection["evaluator_verdict"]["aggregate_verdict"] == "passed"
+    assert retirement_projection["lifecycle_decision"]["decision_kind"] == "retire"
+    assert retirement_projection["planning_impact"]["retirement_pressure"] is True
+    assert retirement_projection["donor_trust_impact"]["retirement_count"] >= 1
+    assert retirement_projection["rollback_route"]
     decision_records = app.state.skill_lifecycle_decision_service.list_decisions(
         candidate_id=candidate_id,
     )
