@@ -1597,6 +1597,21 @@ def test_capability_market_project_install_unwraps_kernel_output_payload(
     assert "port" not in payload["runtime_contract"]
 
 
+def test_capability_market_project_search_returns_empty_list_for_blank_query(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+
+    response = client.get(
+        "/capability-market/projects/search",
+        params={"q": "   ", "limit": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
 def test_capability_market_project_install_from_source_url_materializes_candidate_truth(
     tmp_path,
     monkeypatch,
@@ -1780,6 +1795,13 @@ def test_capability_market_project_install_syncs_adapter_attribution_to_candidat
     monkeypatch.setattr(
         "copaw.app.routers.capability_market._dispatch_market_mutation",
         _fake_dispatch,
+    )
+    async def _no_probe(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "copaw.app.routers.capability_market._probe_project_install_result",
+        _no_probe,
     )
 
     response = client.post(

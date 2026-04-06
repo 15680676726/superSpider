@@ -3469,6 +3469,8 @@ async def search_market_project_donors(
     q: str = Query(default=""),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> list[CapabilityMarketProjectCandidate]:
+    if not str(q or "").strip():
+        return []
     hits = await asyncio.to_thread(
         search_github_repository_donors,
         q,

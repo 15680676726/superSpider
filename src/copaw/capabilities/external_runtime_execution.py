@@ -139,6 +139,18 @@ def _process_exists(pid: int | None) -> bool:
     return True
 
 
+def _stop_runtime_summary(
+    *,
+    runtime_id: str,
+    success: bool,
+    raw_summary: str | None,
+) -> str:
+    if success:
+        return f"Stopped runtime '{runtime_id}'."
+    summary = str(raw_summary or "").strip()
+    return summary or f"Failed to stop runtime '{runtime_id}'."
+
+
 def _float_config(
     value: object,
     default: float,
@@ -630,13 +642,18 @@ class ExternalRuntimeExecution:
             status="stopped" if success else "failed",
             last_error=None if success else summary,
         )
+        rendered_summary = _stop_runtime_summary(
+            runtime_id=stopped.runtime_id,
+            success=success,
+            raw_summary=summary,
+        )
         return {
             "success": success,
-            "summary": summary or f"Stopped runtime '{stopped.runtime_id}'.",
+            "summary": rendered_summary,
             "status": stopped.status,
             "runtime_id": stopped.runtime_id,
             "output": stopped.model_dump(mode="json"),
-            "error": None if success else summary,
+            "error": None if success else rendered_summary,
             "evidence_metadata": {
                 "runtime_id": stopped.runtime_id,
                 "runtime_status": stopped.status,

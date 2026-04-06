@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-from copaw.capabilities.external_runtime_actions import HealthcheckExternalRuntimePayload
+from copaw.capabilities.external_runtime_actions import (
+    HealthcheckExternalRuntimePayload,
+    StopExternalRuntimePayload,
+)
 from copaw.capabilities.external_runtime_execution import ExternalRuntimeExecution
 from copaw.capabilities.models import CapabilityMount
 from copaw.state.models_external_runtime import ExternalCapabilityRuntimeInstanceRecord
@@ -97,3 +100,45 @@ def test_healthcheck_service_returns_degraded_without_name_error() -> None:
     assert result["success"] is False
     assert result["status"] == "degraded"
     assert result["summary"] == "still booting"
+
+
+def test_stop_service_returns_stable_summary_on_windows_success(
+    monkeypatch,
+) -> None:
+    service = _FakeRuntimeService()
+    service.runtime = service.runtime.model_copy(
+        update={
+            "process_id": 12345,
+            "status": "ready",
+        },
+    )
+    execution = ExternalRuntimeExecution(runtime_service=service)
+    mount = CapabilityMount(
+        id="runtime:openspace",
+        name="openspace",
+        summary="runtime",
+        kind="runtime-component",
+        source_kind="runtime",
+        risk_level="guarded",
+        metadata={},
+    )
+
+    monkeypatch.setattr(
+        "copaw.capabilities.external_runtime_execution._terminate_process",
+        lambda pid: (True, "成功: 已终止 PID 12345"),
+    )
+
+    result = asyncio.run(
+        execution.stop_service(
+            mount,
+            StopExternalRuntimePayload(
+                action="stop",
+                runtime_id="runtime:openspace",
+                session_mount_id="session:test",
+            ),
+        ),
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "stopped"
+    assert result["summary"] == "Stopped runtime 'runtime:openspace'."
