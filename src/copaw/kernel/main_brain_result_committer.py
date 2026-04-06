@@ -250,6 +250,11 @@ class MainBrainResultCommitter:
             "resume_environment_session_id": recovery_state.resume_environment_session_id,
             "recovery_continuity_token": recovery_state.continuity_token,
             "kernel_task_id": kernel_task_id,
+            "knowledge_graph": (
+                dict(execution_plan.knowledge_graph)
+                if isinstance(execution_plan.knowledge_graph, dict)
+                else execution_plan.knowledge_graph
+            ),
             **build_durable_runtime_coordination(
                 entrypoint="main-brain-execute",
                 coordinator_id=kernel_task_id

@@ -155,6 +155,7 @@ def _build_bootstrap() -> RuntimeBootstrap:
         memory_reflection_service=object(),
         memory_retain_service=object(),
         memory_activation_service=object(),
+        knowledge_graph_service=object(),
         agent_experience_service=object(),
         reporting_service=object(),
         delegation_service=object(),
@@ -574,6 +575,21 @@ def test_attach_runtime_state_binds_memory_activation_service() -> None:
     assert app.state.memory_activation_service is bootstrap.memory_activation_service
 
 
+def test_attach_runtime_state_binds_knowledge_graph_service() -> None:
+    app = FastAPI()
+    bootstrap = _build_bootstrap()
+
+    attach_runtime_state(
+        app,
+        runtime_host=object(),
+        bootstrap=bootstrap,
+        manager_stack=RuntimeManagerStack(),
+        startup_recovery_summary={"reason": "startup"},
+    )
+
+    assert app.state.knowledge_graph_service is bootstrap.knowledge_graph_service
+
+
 def test_build_runtime_state_bindings_materializes_single_state_payload() -> None:
     bootstrap = _build_bootstrap()
     runtime_host = object()
@@ -630,6 +646,7 @@ def test_build_runtime_state_bindings_materializes_single_state_payload() -> Non
         is bootstrap.repositories.media_analysis_repository
     )
     assert bindings["memory_activation_service"] is bootstrap.memory_activation_service
+    assert bindings["knowledge_graph_service"] is bootstrap.knowledge_graph_service
     assert (
         bindings["memory_relation_view_repository"]
         is bootstrap.repositories.memory_relation_view_repository
@@ -855,6 +872,7 @@ def test_build_kernel_runtime_threads_state_store_into_capability_service(
         experience_memory_service=None,
         state_store=state_store,
         work_context_service=object(),
+        runtime_provider=object(),
     )
 
     capability_service_kwargs = captured["capability_service_kwargs"]
@@ -924,6 +942,7 @@ def test_build_kernel_runtime_threads_external_runtime_service_into_capability_s
         experience_memory_service=None,
         state_store=state_store,
         work_context_service=object(),
+        runtime_provider=object(),
         external_runtime_service=external_runtime_service,
     )
 

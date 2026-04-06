@@ -5,10 +5,20 @@ from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
+from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.app.runtime_center.state_query import RuntimeCenterStateQueryService
 from copaw.app.runtime_center.task_review_projection import build_task_review_payload
 from copaw.evidence import EvidenceRecord, ReplayPointer
+from copaw.kernel.models import KernelTask
+from copaw.kernel.persistence import encode_kernel_task_metadata
 from copaw.memory import ActivationResult, KnowledgeNeuron
+from copaw.memory.knowledge_graph_models import (
+    KnowledgeGraphNode,
+    KnowledgeGraphPath,
+    KnowledgeGraphScope,
+    TaskSubgraph,
+)
+from copaw.kernel import KernelResult
 from copaw.state import SQLiteStateStore, TaskRecord, TaskRuntimeRecord, WorkContextRecord
 from copaw.state.repositories import (
     SqliteDecisionRequestRepository,
@@ -22,6 +32,169 @@ from copaw.utils.runtime_routes import task_route
 from .runtime_center_api_parts.overview_governance import *  # noqa: F401,F403
 from .runtime_center_api_parts.detail_environment import *  # noqa: F401,F403
 from .runtime_center_api_parts.shared import build_runtime_center_app
+
+
+def test_runtime_center_decision_approve_prefers_canonical_dispatcher_for_acquisition() -> None:
+    class _DecisionRepository:
+        def get_decision_request(self, decision_id: str):
+            assert decision_id == "decision-acq-1"
+            return DecisionRequestRecord(
+                id=decision_id,
+                task_id="proposal-1",
+                decision_type="acquisition-approval",
+                risk_level="confirm",
+                summary="Approve acquisition proposal",
+                requested_by="learning-service",
+            )
+
+    class _Dispatcher:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str | None, bool | None]] = []
+
+        async def approve_decision(
+            self,
+            decision_id: str,
+            *,
+            resolution: str | None = None,
+            execute: bool | None = None,
+        ) -> KernelResult:
+            self.calls.append((decision_id, resolution, execute))
+            return KernelResult(
+                task_id="proposal-1",
+                trace_id="trace-acq-1",
+                success=True,
+                phase="executing",
+                summary="Decision approved canonically",
+                decision_request_id=decision_id,
+            )
+
+    class _LearningService:
+        def __init__(self) -> None:
+            self.finalize_calls: list[tuple[str, str, str | None]] = []
+
+        async def finalize_resolved_decision(
+            self,
+            decision_id: str,
+            *,
+            status: str,
+            actor: str,
+            resolution: str | None = None,
+        ) -> dict[str, object]:
+            assert actor == "runtime-center"
+            self.finalize_calls.append((decision_id, status, resolution))
+            return {
+                "decision": {"id": decision_id, "status": "approved"},
+                "proposal": {"id": "proposal-1", "status": "applied"},
+                "plan": {"id": "plan-1", "status": "applied"},
+                "onboarding_run": {"id": "run-1", "status": "passed"},
+            }
+
+        async def approve_acquisition_proposal(self, *args, **kwargs):
+            raise AssertionError("legacy acquisition approve special case should not run")
+
+    app = FastAPI()
+    app.include_router(runtime_center_router)
+    dispatcher = _Dispatcher()
+    learning_service = _LearningService()
+    app.state.kernel_dispatcher = dispatcher
+    app.state.learning_service = learning_service
+    app.state.decision_request_repository = _DecisionRepository()
+
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/decisions/decision-acq-1/approve",
+        json={"resolution": "ship it"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert dispatcher.calls == [("decision-acq-1", "ship it", None)]
+    assert learning_service.finalize_calls == [("decision-acq-1", "approved", "ship it")]
+    assert payload["decision_request_id"] == "decision-acq-1"
+    assert payload["decision"]["status"] == "approved"
+    assert payload["proposal"]["status"] == "applied"
+    assert payload["plan"]["status"] == "applied"
+    assert payload["onboarding_run"]["status"] == "passed"
+
+
+def test_runtime_center_decision_reject_prefers_canonical_dispatcher_for_acquisition() -> None:
+    class _DecisionRepository:
+        def get_decision_request(self, decision_id: str):
+            assert decision_id == "decision-acq-2"
+            return DecisionRequestRecord(
+                id=decision_id,
+                task_id="proposal-2",
+                decision_type="acquisition-approval",
+                risk_level="confirm",
+                summary="Reject acquisition proposal",
+                requested_by="learning-service",
+            )
+
+    class _Dispatcher:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str | None]] = []
+
+        def reject_decision(
+            self,
+            decision_id: str,
+            *,
+            resolution: str | None = None,
+        ) -> KernelResult:
+            self.calls.append((decision_id, resolution))
+            return KernelResult(
+                task_id="proposal-2",
+                trace_id="trace-acq-2",
+                success=False,
+                phase="cancelled",
+                summary="Decision rejected canonically",
+                decision_request_id=decision_id,
+            )
+
+    class _LearningService:
+        def __init__(self) -> None:
+            self.finalize_calls: list[tuple[str, str, str | None]] = []
+
+        def finalize_resolved_decision(
+            self,
+            decision_id: str,
+            *,
+            status: str,
+            actor: str,
+            resolution: str | None = None,
+        ) -> dict[str, object]:
+            assert actor == "runtime-center"
+            self.finalize_calls.append((decision_id, status, resolution))
+            return {
+                "decision": {"id": decision_id, "status": "rejected"},
+                "proposal": {"id": "proposal-2", "status": "rejected"},
+            }
+
+        def reject_acquisition_proposal(self, *args, **kwargs):
+            raise AssertionError("legacy acquisition reject special case should not run")
+
+    app = FastAPI()
+    app.include_router(runtime_center_router)
+    dispatcher = _Dispatcher()
+    learning_service = _LearningService()
+    app.state.kernel_dispatcher = dispatcher
+    app.state.learning_service = learning_service
+    app.state.decision_request_repository = _DecisionRepository()
+
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/decisions/decision-acq-2/reject",
+        json={"resolution": "not now"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert dispatcher.calls == [("decision-acq-2", "not now")]
+    assert learning_service.finalize_calls == [("decision-acq-2", "rejected", "not now")]
+    assert payload["decision_request_id"] == "decision-acq-2"
+    assert payload["decision"]["status"] == "rejected"
+    assert payload["proposal"]["status"] == "rejected"
 
 
 def test_task_review_projects_acceptance_closeout_visibility() -> None:
@@ -618,6 +791,11 @@ def _build_runtime_center_activation_client(tmp_path):
     schedule_repository = SqliteScheduleRepository(state_store)
     decision_request_repository = SqliteDecisionRequestRepository(state_store)
 
+    scope = KnowledgeGraphScope(
+        scope_type="work_context",
+        scope_id="ctx-1",
+        owner_agent_id="ops-agent",
+    )
     task_repository.upsert_task(
         TaskRecord(
             id="task-activation-1",
@@ -627,6 +805,74 @@ def _build_runtime_center_activation_client(tmp_path):
             status="running",
             owner_agent_id="ops-agent",
             work_context_id="ctx-1",
+            acceptance_criteria=encode_kernel_task_metadata(
+                KernelTask(
+                    id="ktask-runtime-center-activation-1",
+                    title="Clear outbound approval blocker",
+                    owner_agent_id="ops-agent",
+                    work_context_id="ctx-1",
+                    payload={
+                        "task_seed": {
+                            "assignment_sidecar_plan": {
+                                "knowledge_subgraph": TaskSubgraph(
+                                    scope=scope,
+                                    query_text="clear outbound approval blocker",
+                                    seed_refs=["task:task-activation-1"],
+                                    nodes=[
+                                        KnowledgeGraphNode(
+                                            node_id="entity:outbound-approval",
+                                            node_type="entity",
+                                            scope=scope,
+                                            title="Outbound approval",
+                                            entity_keys=["outbound-approval"],
+                                        ),
+                                        KnowledgeGraphNode(
+                                            node_id="capability:browser",
+                                            node_type="capability",
+                                            scope=scope,
+                                            title="Browser session",
+                                        ),
+                                        KnowledgeGraphNode(
+                                            node_id="environment:desktop",
+                                            node_type="environment",
+                                            scope=scope,
+                                            title="Desktop session",
+                                        ),
+                                    ],
+                                    dependency_paths=[
+                                        KnowledgeGraphPath(
+                                            path_type="dependency",
+                                            summary="Resolve finance sign-off before resuming outbound approval.",
+                                            relation_kinds=["depends_on"],
+                                        ),
+                                    ],
+                                    blocker_paths=[
+                                        KnowledgeGraphPath(
+                                            path_type="blocker",
+                                            summary="Do not proceed while approval proof is missing.",
+                                            relation_kinds=["depends_on"],
+                                        ),
+                                    ],
+                                    recovery_paths=[
+                                        KnowledgeGraphPath(
+                                            path_type="recovery",
+                                            summary="Refresh approval proof and rerun verification.",
+                                            relation_kinds=["depends_on"],
+                                        ),
+                                    ],
+                                    metadata={
+                                        "top_entities": ["outbound-approval"],
+                                        "top_relations": [
+                                            "Outbound approval depends on finance sign-off",
+                                        ],
+                                        "top_relation_kinds": ["depends_on"],
+                                    },
+                                ).model_dump(mode="json"),
+                            },
+                        },
+                    },
+                ),
+            ),
         ),
     )
     task_runtime_repository.upsert_runtime(
@@ -737,6 +983,20 @@ def test_runtime_center_task_detail_includes_activation_summary_when_available(t
     assert "activated_neurons" not in payload["activation"]
     assert activation_service.calls[0]["task_id"] == "task-activation-1"
     assert activation_service.calls[0]["work_context_id"] == "ctx-1"
+    assert payload["task_subgraph"]["scope_id"] == "ctx-1"
+    assert payload["task_subgraph"]["node_count"] == 3
+    assert payload["task_subgraph"]["top_entities"] == ["outbound-approval"]
+    assert payload["task_subgraph"]["capability_labels"] == ["Browser session"]
+    assert payload["task_subgraph"]["environment_labels"] == ["Desktop session"]
+    assert payload["task_subgraph"]["dependency_paths"] == [
+        "Resolve finance sign-off before resuming outbound approval.",
+    ]
+    assert payload["task_subgraph"]["blocker_paths"] == [
+        "Do not proceed while approval proof is missing.",
+    ]
+    assert payload["task_subgraph"]["recovery_paths"] == [
+        "Refresh approval proof and rerun verification.",
+    ]
 
 
 def test_runtime_center_tasks_overview_includes_activation_hint_for_current_focus(tmp_path) -> None:
@@ -756,6 +1016,12 @@ def test_runtime_center_tasks_overview_includes_activation_hint_for_current_focu
         "finance-queue",
     ]
     assert payload[0]["activation"]["activated_count"] == 2
+    assert payload[0]["task_subgraph"]["top_relations"] == [
+        "Outbound approval depends on finance sign-off",
+    ]
+    assert payload[0]["task_subgraph"]["dependency_paths"] == [
+        "Resolve finance sign-off before resuming outbound approval.",
+    ]
 
 
 def test_runtime_center_work_contexts_list_reads_projector_backed_state(tmp_path) -> None:

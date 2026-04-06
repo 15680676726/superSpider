@@ -27,11 +27,13 @@ from ..kernel import (
     MainBrainOrchestrator,
     TaskDelegationService,
 )
+from ..kernel.main_brain_execution_planner import MainBrainExecutionPlanner
 from ..learning import LearningService
 from ..learning.runtime_bindings import LearningRuntimeBindings
 from ..media import MediaService
 from ..memory import (
     DerivedMemoryIndexService,
+    KnowledgeGraphService,
     MemoryActivationService,
     MemoryRecallService,
     MemoryReflectionService,
@@ -118,6 +120,7 @@ def build_runtime_domain_services(
     memory_recall_service: MemoryRecallService,
     memory_retain_service: MemoryRetainService,
     memory_activation_service: MemoryActivationService | None = None,
+    knowledge_graph_service: KnowledgeGraphService | None = None,
     agent_experience_service: AgentExperienceMemoryService | None = None,
     work_context_service: WorkContextService | None = None,
     learning_service: LearningService | None = None,
@@ -410,6 +413,9 @@ def build_runtime_domain_services(
         query_execution_service=query_execution_service,
         session_backend=session_backend,
         environment_service=environment_service,
+        execution_planner=MainBrainExecutionPlanner(
+            knowledge_graph_service=knowledge_graph_service,
+        ),
     )
 
     return RuntimeDomainServices(

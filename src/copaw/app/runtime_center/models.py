@@ -284,6 +284,34 @@ class RuntimeKnowledgeWritebackSummary(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+class RuntimeTaskSubgraphSummary(BaseModel):
+    """Compact task-subgraph projection for Runtime Center task reads."""
+
+    source: str = "task-subgraph"
+    scope_type: str
+    scope_id: str
+    seed_refs: list[str] = Field(default_factory=list)
+    focus_node_ids: list[str] = Field(default_factory=list)
+    constraint_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    node_count: int = 0
+    relation_count: int = 0
+    node_types: list[str] = Field(default_factory=list)
+    top_entities: list[str] = Field(default_factory=list)
+    top_opinions: list[str] = Field(default_factory=list)
+    top_relations: list[str] = Field(default_factory=list)
+    top_relation_kinds: list[str] = Field(default_factory=list)
+    capability_labels: list[str] = Field(default_factory=list)
+    environment_labels: list[str] = Field(default_factory=list)
+    failure_patterns: list[str] = Field(default_factory=list)
+    recovery_patterns: list[str] = Field(default_factory=list)
+    support_paths: list[str] = Field(default_factory=list)
+    contradiction_paths: list[str] = Field(default_factory=list)
+    dependency_paths: list[str] = Field(default_factory=list)
+    blocker_paths: list[str] = Field(default_factory=list)
+    recovery_paths: list[str] = Field(default_factory=list)
+
+
 class RuntimeOverviewEntry(BaseModel):
     """One overview row rendered inside a runtime-center card."""
 

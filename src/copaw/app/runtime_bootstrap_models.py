@@ -200,6 +200,7 @@ class RuntimeBootstrap:
     memory_reflection_service: MemoryReflectionService
     memory_retain_service: MemoryRetainService
     memory_activation_service: Any | None
+    knowledge_graph_service: Any | None
     agent_experience_service: AgentExperienceMemoryService
     reporting_service: StateReportingService
     operating_lane_service: OperatingLaneService

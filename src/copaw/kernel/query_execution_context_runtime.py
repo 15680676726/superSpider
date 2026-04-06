@@ -19,7 +19,7 @@ class _QueryExecutionContextRuntimeMixin:
             work_context_id = _first_non_empty(normalized.get("work_context_id"))
             if work_context_id is not None:
                 merged["work_context_id"] = work_context_id
-            for section in ("intent", "environment", "recovery"):
+            for section in ("intent", "environment", "recovery", "knowledge_graph"):
                 payload = _mapping_value(normalized.get(section))
                 if not payload:
                     continue

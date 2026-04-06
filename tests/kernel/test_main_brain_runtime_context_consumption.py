@@ -35,6 +35,24 @@ def _sample_main_brain_runtime_context() -> dict[str, object]:
         "resume_environment_session_id": "session:console:desktop-session-1",
         "recovery_continuity_token": "continuity:desktop-session-1",
         "kernel_task_id": "kernel-main-brain-1",
+        "knowledge_graph": {
+            "scope_type": "work_context",
+            "scope_id": "ctx-approval",
+            "node_count": 4,
+            "relation_count": 2,
+            "top_entities": ["outbound-approval", "finance-queue"],
+            "top_relations": ["Outbound approval depends on finance sign-off"],
+            "environment_labels": ["Desktop session"],
+            "dependency_paths": [
+                "Resolve the finance sign-off dependency before continuing.",
+            ],
+            "blocker_paths": [
+                "Do not continue if approval proof is still missing.",
+            ],
+            "recovery_paths": [
+                "Refresh approval proof and rerun verification.",
+            ],
+        },
     }
 
 
@@ -147,6 +165,9 @@ def test_query_execution_service_formally_consumes_main_brain_runtime_context_in
     assert "Execution route: execute-task -> orchestrate (environment-bound)" in prompt_appendix
     assert "Environment binding: desktop:session-1" in prompt_appendix
     assert "Recovery contract: resume-environment / session-lease" in prompt_appendix
+    assert "Knowledge graph focus: outbound-approval; finance-queue" in prompt_appendix
+    assert "Knowledge graph dependencies:" in prompt_appendix
+    assert "Resolve the finance sign-off dependency before continuing." in prompt_appendix
 
     checkpoints = checkpoint_repository.list_checkpoints(agent_id="ops-agent", limit=None)
     assert checkpoints
@@ -168,8 +189,12 @@ def test_query_execution_service_formally_consumes_main_brain_runtime_context_in
         "session:console:desktop-session-1"
     )
     assert restored_context["main_brain_runtime"]["recovery"]["reason"] == "session-lease"
+    assert restored_context["main_brain_runtime"]["knowledge_graph"]["scope_id"] == "ctx-approval"
 
     runtime = runtime_repository.get_runtime("ops-agent")
     assert runtime is not None
     assert runtime.metadata["main_brain_runtime"]["intent"]["mode"] == "environment-bound"
     assert runtime.metadata["main_brain_runtime"]["environment"]["ref"] == "desktop:session-1"
+    assert runtime.metadata["main_brain_runtime"]["knowledge_graph"]["top_relations"] == [
+        "Outbound approval depends on finance sign-off",
+    ]

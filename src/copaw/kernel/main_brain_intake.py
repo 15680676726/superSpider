@@ -53,10 +53,14 @@ def normalize_main_brain_runtime_context(
 ) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    if any(isinstance(value.get(key), dict) for key in ("intent", "environment", "recovery")):
+    if any(
+        isinstance(value.get(key), dict)
+        for key in ("intent", "environment", "recovery", "knowledge_graph")
+    ):
         intent_payload = value.get("intent")
         environment_payload = value.get("environment")
         recovery_payload = value.get("recovery")
+        knowledge_graph_payload = value.get("knowledge_graph")
         normalized = _compact_mapping(
             {
                 "work_context_id": _first_non_empty(value.get("work_context_id")),
@@ -65,16 +69,19 @@ def normalize_main_brain_runtime_context(
                         intent_payload.get("source_kind")
                         if isinstance(intent_payload, dict)
                         else None,
+                        value.get("source_intent_kind"),
                     ),
                     "kind": _first_non_empty(
                         intent_payload.get("kind")
                         if isinstance(intent_payload, dict)
                         else None,
+                        value.get("execution_intent"),
                     ),
                     "mode": _first_non_empty(
                         intent_payload.get("mode")
                         if isinstance(intent_payload, dict)
                         else None,
+                        value.get("execution_mode"),
                     ),
                 },
                 "environment": {
@@ -82,36 +89,42 @@ def normalize_main_brain_runtime_context(
                         environment_payload.get("ref")
                         if isinstance(environment_payload, dict)
                         else None,
+                        value.get("environment_ref"),
                     ),
                     "binding_kind": _first_non_empty(
                         environment_payload.get("binding_kind")
                         if isinstance(environment_payload, dict)
                         else None,
+                        value.get("environment_binding_kind"),
                     ),
                     "kind": _first_non_empty(
                         environment_payload.get("kind")
                         if isinstance(environment_payload, dict)
                         else None,
+                        value.get("environment_kind"),
                     ),
                     "session_id": _first_non_empty(
                         environment_payload.get("session_id")
                         if isinstance(environment_payload, dict)
                         else None,
+                        value.get("environment_session_id"),
                     ),
                     "continuity_token": _first_non_empty(
                         environment_payload.get("continuity_token")
                         if isinstance(environment_payload, dict)
                         else None,
+                        value.get("environment_continuity_token"),
                     ),
                     "continuity_source": _first_non_empty(
                         environment_payload.get("continuity_source")
                         if isinstance(environment_payload, dict)
                         else None,
+                        value.get("environment_continuity_source"),
                     ),
                     "resume_ready": bool(
                         environment_payload.get("resume_ready")
                         if isinstance(environment_payload, dict)
-                        else False
+                        else value.get("environment_resume_ready", False)
                     ),
                 },
                 "recovery": {
@@ -119,28 +132,36 @@ def normalize_main_brain_runtime_context(
                         recovery_payload.get("mode")
                         if isinstance(recovery_payload, dict)
                         else None,
+                        value.get("recovery_mode"),
                     ),
                     "reason": _first_non_empty(
                         recovery_payload.get("reason")
                         if isinstance(recovery_payload, dict)
                         else None,
+                        value.get("recovery_reason"),
                     ),
                     "checkpoint_id": _first_non_empty(
                         recovery_payload.get("checkpoint_id")
                         if isinstance(recovery_payload, dict)
                         else None,
+                        value.get("resume_checkpoint_id"),
                     ),
                     "mailbox_id": _first_non_empty(
                         recovery_payload.get("mailbox_id")
                         if isinstance(recovery_payload, dict)
                         else None,
+                        value.get("resume_mailbox_id"),
                     ),
                     "kernel_task_id": _first_non_empty(
                         recovery_payload.get("kernel_task_id")
                         if isinstance(recovery_payload, dict)
                         else None,
+                        value.get("resume_kernel_task_id"),
                     ),
                 },
+                "knowledge_graph": _normalize_knowledge_graph_payload(
+                    knowledge_graph_payload,
+                ),
             },
         )
         return normalized or None
@@ -168,6 +189,9 @@ def normalize_main_brain_runtime_context(
                 "mailbox_id": _first_non_empty(value.get("resume_mailbox_id")),
                 "kernel_task_id": _first_non_empty(value.get("resume_kernel_task_id")),
             },
+            "knowledge_graph": _normalize_knowledge_graph_payload(
+                value.get("knowledge_graph"),
+            ),
         },
     )
     return normalized or None
@@ -327,6 +351,55 @@ def _compact_mapping(value: dict[str, Any]) -> dict[str, Any]:
         if item not in (None, ""):
             compacted[key] = item
     return compacted
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    seen: set[str] = set()
+    for raw in value:
+        text = _first_non_empty(raw)
+        if text is None or text in seen:
+            continue
+        seen.add(text)
+        items.append(text)
+    return items
+
+
+def _normalize_knowledge_graph_payload(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    normalized = _compact_mapping(
+        {
+            "source": _first_non_empty(value.get("source")),
+            "scope_type": _first_non_empty(value.get("scope_type")),
+            "scope_id": _first_non_empty(value.get("scope_id")),
+            "seed_refs": _string_list(value.get("seed_refs")),
+            "focus_node_ids": _string_list(value.get("focus_node_ids")),
+            "constraint_refs": _string_list(value.get("constraint_refs")),
+            "evidence_refs": _string_list(value.get("evidence_refs")),
+            "node_types": _string_list(value.get("node_types")),
+            "top_entities": _string_list(value.get("top_entities")),
+            "top_opinions": _string_list(value.get("top_opinions")),
+            "top_relations": _string_list(value.get("top_relations")),
+            "top_relation_kinds": _string_list(value.get("top_relation_kinds")),
+            "capability_labels": _string_list(value.get("capability_labels")),
+            "environment_labels": _string_list(value.get("environment_labels")),
+            "failure_patterns": _string_list(value.get("failure_patterns")),
+            "recovery_patterns": _string_list(value.get("recovery_patterns")),
+            "support_paths": _string_list(value.get("support_paths")),
+            "contradiction_paths": _string_list(value.get("contradiction_paths")),
+            "dependency_paths": _string_list(value.get("dependency_paths")),
+            "blocker_paths": _string_list(value.get("blocker_paths")),
+            "recovery_paths": _string_list(value.get("recovery_paths")),
+        },
+    )
+    for key in ("node_count", "relation_count"):
+        raw = value.get(key)
+        if isinstance(raw, int):
+            normalized[key] = raw
+    return normalized
 
 
 __all__ = [

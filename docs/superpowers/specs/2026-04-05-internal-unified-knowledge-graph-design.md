@@ -1,5 +1,22 @@
 # CoPaw 内部统一知识图谱设计
 
+## 2026-04-06 Implementation Supplement
+
+The following seams are now implemented on the live code path:
+
+- `src/copaw/memory/knowledge_graph_service.py` is the thin internal knowledge-graph facade.
+  It owns request subgraph activation, kernel-metadata subgraph extraction, compact task-subgraph summary shaping, and writeback entry delegation without introducing a second truth source.
+- `src/copaw/kernel/main_brain_execution_planner.py` now activates the current task subgraph during orchestrate intake and attaches the compact `knowledge_graph` summary to the canonical main-brain runtime context.
+- `src/copaw/kernel/main_brain_intake.py`, `src/copaw/kernel/query_execution_context_runtime.py`, and `src/copaw/kernel/query_execution_prompt.py` now preserve and consume that `knowledge_graph` runtime section through resume/checkpoint/prompt paths.
+- `src/copaw/app/runtime_center/state_query.py`, `src/copaw/app/runtime_center/task_detail_projection.py`, and `src/copaw/app/runtime_center/task_list_projection.py` now project `task_subgraph` summaries from canonical kernel metadata into Runtime Center task detail/list reads.
+- `src/copaw/app/runtime_service_graph.py`, `src/copaw/app/runtime_bootstrap_domains.py`, `src/copaw/app/runtime_bootstrap_models.py`, and `src/copaw/app/runtime_state_bindings.py` now bootstrap and publish `knowledge_graph_service` as part of the shared runtime state instead of keeping the facade as an ad-hoc local helper.
+
+This closes the previously identified three real gaps:
+
+1. unified `knowledge_graph_service` facade
+2. main-brain planner/runtime-context integration
+3. Runtime Center task-subgraph read surface
+
 ## 0. 目标
 
 本设计用于把 CoPaw 当前已经存在的：

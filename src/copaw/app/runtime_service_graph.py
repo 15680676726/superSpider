@@ -33,6 +33,7 @@ from ..learning import LearningService, PatchExecutor
 from ..media import MediaService
 from ..memory import (
     DerivedMemoryIndexService,
+    KnowledgeGraphService,
     MemoryRecallService,
     MemoryReflectionService,
     MemoryRetainService,
@@ -379,6 +380,7 @@ def _build_kernel_runtime(
     experience_memory_service: AgentExperienceMemoryService | None,
     state_store: SQLiteStateStore,
     work_context_service: WorkContextService,
+    runtime_provider: object | None,
     external_runtime_service: object | None = None,
 ) -> tuple[
     LearningService,
@@ -402,6 +404,7 @@ def _build_kernel_runtime(
         experience_memory_service=experience_memory_service,
         state_store=state_store,
         work_context_service=work_context_service,
+        runtime_provider=runtime_provider,
         external_runtime_service=external_runtime_service,
         patch_executor_cls=PatchExecutor,
         learning_service_cls=LearningService,
@@ -556,6 +559,19 @@ def build_runtime_bootstrap(
         environment_service=environment_service,
         external_runtime_service=external_runtime_service,
     )
+    knowledge_graph_service = KnowledgeGraphService(
+        knowledge_service=knowledge_service,
+        derived_index_service=derived_memory_index_service,
+        strategy_memory_service=strategy_memory_service,
+        memory_activation_service=memory_activation_service,
+    )
+    set_knowledge_graph_service = getattr(
+        state_query_service,
+        "set_knowledge_graph_service",
+        None,
+    )
+    if callable(set_knowledge_graph_service):
+        set_knowledge_graph_service(knowledge_graph_service)
     work_context_service = WorkContextService(
         repository=repositories.work_context_repository,
     )
@@ -580,6 +596,7 @@ def build_runtime_bootstrap(
         experience_memory_service=agent_experience_service,
         state_store=state_store,
         work_context_service=work_context_service,
+        runtime_provider=runtime_provider,
         external_runtime_service=external_runtime_service,
     )
 
@@ -601,6 +618,7 @@ def build_runtime_bootstrap(
         memory_recall_service=memory_recall_service,
         memory_retain_service=memory_retain_service,
         memory_activation_service=memory_activation_service,
+        knowledge_graph_service=knowledge_graph_service,
         agent_experience_service=agent_experience_service,
         work_context_service=work_context_service,
         learning_service=learning_service,
@@ -738,6 +756,7 @@ def build_runtime_bootstrap(
         memory_reflection_service=memory_reflection_service,
         memory_retain_service=memory_retain_service,
         memory_activation_service=memory_activation_service,
+        knowledge_graph_service=knowledge_graph_service,
         agent_experience_service=agent_experience_service,
         reporting_service=reporting_service,
         operating_lane_service=operating_lane_service,

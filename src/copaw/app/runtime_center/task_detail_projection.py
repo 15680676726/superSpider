@@ -16,7 +16,7 @@ from ...state.repositories import (
 from ...utils.runtime_routes import task_route
 from .environment_feedback_projection import RuntimeCenterEnvironmentFeedbackProjector
 from .goal_decision_projection import RuntimeCenterGoalDecisionProjector
-from .models import RuntimeActivationSummary
+from .models import RuntimeActivationSummary, RuntimeTaskSubgraphSummary
 from .execution_runtime_projection import summarize_execution_knowledge_writeback
 from .projection_utils import first_non_empty, string_list_from_values
 from .task_review_projection import (
@@ -48,6 +48,7 @@ class RuntimeCenterTaskDetailProjector:
         related_growth_loader: Callable[..., list[dict[str, object]]],
         related_agents_loader: Callable[[set[str]], list[dict[str, object]]],
         memory_activation_service: object | None = None,
+        knowledge_graph_service: object | None = None,
         task_route_builder: Callable[[str], str] = task_route,
     ) -> None:
         self._task_repository = task_repository
@@ -62,10 +63,14 @@ class RuntimeCenterTaskDetailProjector:
         self._related_growth_loader = related_growth_loader
         self._related_agents_loader = related_agents_loader
         self._memory_activation_service = memory_activation_service
+        self._knowledge_graph_service = knowledge_graph_service
         self._task_route_builder = task_route_builder
 
     def set_memory_activation_service(self, service: object | None) -> None:
         self._memory_activation_service = service
+
+    def set_knowledge_graph_service(self, service: object | None) -> None:
+        self._knowledge_graph_service = service
 
     def get_task_detail(self, task_id: str) -> dict[str, object] | None:
         task = self._task_repository.get_task(task_id)
@@ -174,12 +179,15 @@ class RuntimeCenterTaskDetailProjector:
             runtime=runtime,
             kernel_metadata=kernel_metadata,
         )
+        task_subgraph = self.build_task_subgraph_summary(
+            kernel_metadata=kernel_metadata,
+        )
         knowledge_writeback = summarize_execution_knowledge_writeback(
             related_agents_by_id.get(str(owner_agent_id or "").strip(), {}).get("latest_knowledge_writeback")
             if isinstance(related_agents_by_id.get(str(owner_agent_id or "").strip()), dict)
             else None,
         )
-        return {
+        payload = {
             "trace_id": trace_id_from_kernel_meta(task_id, kernel_metadata),
             "task": task.model_dump(mode="json"),
             "runtime": runtime.model_dump(mode="json") if runtime is not None else None,
@@ -234,6 +242,9 @@ class RuntimeCenterTaskDetailProjector:
             },
             "route": self._task_route_builder(task_id),
         }
+        if task_subgraph is not None:
+            payload["task_subgraph"] = task_subgraph
+        return payload
 
     def get_task_review(self, task_id: str) -> dict[str, object] | None:
         detail = self.get_task_detail(task_id)
@@ -340,6 +351,20 @@ class RuntimeCenterTaskDetailProjector:
         ):
             return None
         return summary.model_dump(mode="json")
+
+    def build_task_subgraph_summary(
+        self,
+        *,
+        kernel_metadata: dict[str, object] | None,
+    ) -> dict[str, object] | None:
+        service = self._knowledge_graph_service
+        summarize = getattr(service, "summarize_kernel_task_subgraph", None)
+        if not callable(summarize):
+            return None
+        summary = summarize(kernel_metadata)
+        if not isinstance(summary, dict) or not summary:
+            return None
+        return RuntimeTaskSubgraphSummary(**summary).model_dump(mode="json")
 
 
 __all__ = ["RuntimeCenterTaskDetailProjector"]

@@ -8,8 +8,15 @@ from agentscope.message import Msg
 from agentscope_runtime.engine.schemas.agent_schemas import AgentRequest
 
 from copaw.environments.models import SessionMount
+from copaw.kernel.main_brain_execution_planner import MainBrainExecutionPlanner
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.main_brain_orchestrator import MainBrainOrchestrator
+from copaw.memory.knowledge_graph_models import (
+    KnowledgeGraphNode,
+    KnowledgeGraphPath,
+    KnowledgeGraphScope,
+    TaskSubgraph,
+)
 
 
 class _FakeQueryExecutionService:
@@ -27,6 +34,63 @@ class _FakeEnvironmentService:
 
     def get_session(self, session_mount_id: str) -> SessionMount | None:
         return self._sessions.get(session_mount_id)
+
+
+class _FakeKnowledgeGraphService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def activate_request_task_subgraph(self, **kwargs) -> TaskSubgraph:
+        self.calls.append(kwargs)
+        scope = KnowledgeGraphScope(scope_type="work_context", scope_id="ctx-main-brain")
+        return TaskSubgraph(
+            scope=scope,
+            query_text="continue outbound approval work",
+            seed_refs=["task:ktask-main-brain-1"],
+            nodes=[
+                KnowledgeGraphNode(
+                    node_id="entity:outbound-approval",
+                    node_type="entity",
+                    scope=scope,
+                    title="Outbound approval",
+                    entity_keys=["outbound-approval"],
+                ),
+                KnowledgeGraphNode(
+                    node_id="environment:desktop",
+                    node_type="environment",
+                    scope=scope,
+                    title="Desktop session",
+                    source_refs=["desktop:session-1"],
+                ),
+            ],
+            dependency_paths=[
+                KnowledgeGraphPath(
+                    path_type="dependency",
+                    summary="Resolve the finance approval dependency before resuming execution.",
+                    relation_kinds=["depends_on"],
+                ),
+            ],
+            metadata={
+                "top_entities": ["outbound-approval"],
+                "top_relations": ["Outbound approval still depends on finance sign-off"],
+                "top_relation_kinds": ["depends_on"],
+            },
+        )
+
+    def summarize_task_subgraph(self, task_subgraph: TaskSubgraph) -> dict[str, object]:
+        return {
+            "scope_type": task_subgraph.scope.scope_type,
+            "scope_id": task_subgraph.scope.scope_id,
+            "node_count": len(task_subgraph.nodes),
+            "relation_count": len(task_subgraph.relations),
+            "top_entities": ["outbound-approval"],
+            "top_relations": ["Outbound approval still depends on finance sign-off"],
+            "top_relation_kinds": ["depends_on"],
+            "environment_labels": ["Desktop session"],
+            "dependency_paths": [
+                "Resolve the finance approval dependency before resuming execution.",
+            ],
+        }
 
 
 @pytest.mark.asyncio
@@ -97,6 +161,54 @@ async def test_orchestrator_ingest_operator_turn_classifies_environment_bound_ex
     assert runtime_context["coordinator_contract"] == "durable-runtime-coordinator/v1"
     assert runtime_context["coordinator_entrypoint"] == "main-brain-execute"
     assert runtime_context["coordinator_id"] == "kernel-task-env"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_attaches_task_subgraph_summary_to_runtime_context():
+    intake_contract = MainBrainIntakeContract(
+        message_text="Continue the outbound approval task.",
+        decision=SimpleNamespace(intent_kind="execute-task", kickoff_allowed=True),
+        intent_kind="execute-task",
+        writeback_requested=False,
+        writeback_plan=None,
+        should_kickoff=True,
+    )
+
+    async def _fake_resolver(**_kwargs):
+        return intake_contract
+
+    knowledge_graph_service = _FakeKnowledgeGraphService()
+    orchestrator = MainBrainOrchestrator(
+        query_execution_service=_FakeQueryExecutionService(),
+        intake_contract_resolver=_fake_resolver,
+        execution_planner=MainBrainExecutionPlanner(
+            knowledge_graph_service=knowledge_graph_service,
+        ),
+    )
+    request = AgentRequest(
+        id="req-main-brain-graph",
+        session_id="sess-main-brain-graph",
+        user_id="user-main-brain-graph",
+        channel="console",
+        input=[],
+    )
+    request.work_context_id = "ctx-main-brain"
+    request.agent_id = "ops-agent"
+
+    await orchestrator.ingest_operator_turn(
+        msgs=[Msg(name="user", role="user", content="Continue the outbound approval task.")],
+        request=request,
+        kernel_task_id="ktask-main-brain-1",
+    )
+
+    runtime_context = getattr(request, "_copaw_main_brain_runtime_context")
+    assert runtime_context["knowledge_graph"]["scope_id"] == "ctx-main-brain"
+    assert runtime_context["knowledge_graph"]["top_entities"] == ["outbound-approval"]
+    assert runtime_context["knowledge_graph"]["environment_labels"] == ["Desktop session"]
+    assert runtime_context["knowledge_graph"]["dependency_paths"] == [
+        "Resolve the finance approval dependency before resuming execution.",
+    ]
+    assert knowledge_graph_service.calls[0]["request"] is request
 
 
 @pytest.mark.asyncio

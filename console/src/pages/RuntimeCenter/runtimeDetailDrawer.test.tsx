@@ -98,6 +98,52 @@ const baseDetail = {
 } as IndustryInstanceDetail;
 
 describe("runtimeDetailDrawer", () => {
+  it("renders task subgraph as an explicit runtime detail section", () => {
+    render(
+      renderRuntimeDetailDrawer(
+        {
+          route: "/api/runtime-center/tasks/task-graph-1",
+          title: "Task detail",
+          payload: {
+            task: {
+              id: "task-graph-1",
+              title: "Clear outbound approval blocker",
+            },
+            runtime: {
+              current_phase: "executing",
+            },
+            task_subgraph: {
+              source: "task-subgraph",
+              scope_type: "work_context",
+              scope_id: "ctx-approval",
+              top_entities: ["outbound-approval", "finance-queue"],
+              top_relations: ["Outbound approval depends on finance sign-off"],
+              dependency_paths: [
+                "Resolve finance sign-off before resuming outbound approval.",
+              ],
+              blocker_paths: [
+                "Do not proceed while approval proof is missing.",
+              ],
+            },
+          },
+        },
+        false,
+        null,
+        vi.fn(),
+        vi.fn(),
+      ) as React.ReactElement,
+    );
+
+    expect(screen.getByText("任务子图")).toBeTruthy();
+    expect(screen.getByText("ctx-approval")).toBeTruthy();
+    expect(
+      screen.getByText("Outbound approval depends on finance sign-off"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Resolve finance sign-off before resuming outbound approval."),
+    ).toBeTruthy();
+  });
+
   it("renders industry focus and main chain through specialized sections without jsdom pseudo-element warnings", () => {
     render(
       renderRuntimeDetailDrawer(

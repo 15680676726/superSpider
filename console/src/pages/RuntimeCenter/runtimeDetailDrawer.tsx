@@ -209,6 +209,15 @@ export function renderDetailSection(
     return renderTaskReviewSection(sectionKey, sectionValue, openRoute);
   }
 
+  if (sectionKey === "task_subgraph" && isRecord(sectionValue)) {
+    return (
+      <section key={sectionKey} className={styles.detailSection}>
+        <div className={styles.detailSectionTitle}>任务子图</div>
+        {renderRecordCard(sectionKey, sectionValue, openRoute)}
+      </section>
+    );
+  }
+
   if (sectionKey === "host_twin" && isRecord(sectionValue)) {
     return renderHostTwinSection(sectionKey, sectionValue);
   }

@@ -8,6 +8,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "ActivationInput": (".activation_models", "ActivationInput"),
     "ActivationResult": (".activation_models", "ActivationResult"),
     "KnowledgeNeuron": (".activation_models", "KnowledgeNeuron"),
+    "KnowledgeGraphService": (".knowledge_graph_service", "KnowledgeGraphService"),
     "MemoryActivationService": (".activation_service", "MemoryActivationService"),
     "DerivedMemoryIndexService": (".derived_index_service", "DerivedMemoryIndexService"),
     "build_scope_candidates": (".derived_index_service", "build_scope_candidates"),

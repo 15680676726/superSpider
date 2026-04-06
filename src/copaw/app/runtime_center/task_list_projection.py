@@ -14,6 +14,7 @@ from .task_review_projection import trace_id_from_kernel_meta
 WorkContextLoader = Callable[[str | None], dict[str, object] | None]
 TaskRouteBuilder = Callable[[str], str]
 ActivationSummaryBuilder = Callable[..., dict[str, object] | None]
+TaskSubgraphSummaryBuilder = Callable[..., dict[str, object] | None]
 
 
 def _work_context_context_key(work_context: dict[str, object] | None) -> str | None:
@@ -32,12 +33,14 @@ class RuntimeCenterTaskListProjector:
         task_runtime_repository: Any,
         work_context_loader: WorkContextLoader,
         activation_summary_builder: ActivationSummaryBuilder,
+        task_subgraph_summary_builder: TaskSubgraphSummaryBuilder | None = None,
         task_route_builder: TaskRouteBuilder = task_route,
     ) -> None:
         self._task_repository = task_repository
         self._task_runtime_repository = task_runtime_repository
         self._work_context_loader = work_context_loader
         self._activation_summary_builder = activation_summary_builder
+        self._task_subgraph_summary_builder = task_subgraph_summary_builder
         self._task_route_builder = task_route_builder
 
     def list_tasks(self, limit: int | None = 5) -> list[dict[str, object]]:
@@ -70,12 +73,17 @@ class RuntimeCenterTaskListProjector:
             runtime=runtime,
             kernel_metadata=kernel_meta,
         )
+        task_subgraph = None
+        if self._task_subgraph_summary_builder is not None:
+            task_subgraph = self._task_subgraph_summary_builder(
+                kernel_metadata=kernel_meta,
+            )
         visible_status = resolve_visible_execution_phase(
             runtime_phase=getattr(runtime, "current_phase", None) if runtime is not None else None,
             runtime_status=getattr(runtime, "runtime_status", None) if runtime is not None else None,
             task_status=getattr(task, "status", None),
         ) or task.status
-        return {
+        payload = {
             "id": task.id,
             "trace_id": trace_id_from_kernel_meta(task.id, kernel_meta),
             "title": task.title,
@@ -105,3 +113,6 @@ class RuntimeCenterTaskListProjector:
             "route": self._task_route_builder(task.id),
             "activation": activation,
         }
+        if task_subgraph is not None:
+            payload["task_subgraph"] = task_subgraph
+        return payload

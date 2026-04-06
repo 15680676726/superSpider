@@ -8,6 +8,25 @@
 
 **Tech Stack:** Python, Pydantic, existing `state/ memory/ compiler/ kernel/ industry/ app` services, pytest
 
+## 2026-04-06 Closure Note
+
+This implementation plan now has the following additional completion facts on the real code path:
+
+- `KnowledgeGraphService` has been landed as the shared internal facade and is wired through runtime bootstrap/app state.
+- `MainBrainExecutionPlanner` now materializes a compact `knowledge_graph` runtime section for orchestrated turns.
+- Runtime checkpoint/resume/prompt paths now preserve and consume that `knowledge_graph` section.
+- Runtime Center task detail/list payloads now expose `task_subgraph` summaries derived from canonical kernel metadata.
+
+Fresh verification after these changes:
+
+```bash
+python -m pytest tests/memory/test_knowledge_graph_service.py tests/kernel/test_main_brain_orchestrator_roles.py tests/kernel/test_main_brain_runtime_context_consumption.py tests/kernel/test_query_execution_runtime.py tests/app/test_runtime_center_api.py tests/app/test_runtime_query_services.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_bootstrap_split.py -q
+```
+
+Result:
+
+- `192 passed`
+
 ---
 
 ## File Map

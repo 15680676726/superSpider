@@ -7,6 +7,9 @@ from .query_execution_shared import *  # noqa: F401,F403
 
 
 def _path_guidance_summary(value: Any) -> str | None:
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
     if isinstance(value, dict):
         return _first_non_empty(value.get("summary"), value.get("label"))
     return _first_non_empty(getattr(value, "summary", None), getattr(value, "label", None))
@@ -420,6 +423,7 @@ class _QueryExecutionPromptMixin:
         intent = _mapping_value(main_brain_runtime.get("intent"))
         environment = _mapping_value(main_brain_runtime.get("environment"))
         recovery = _mapping_value(main_brain_runtime.get("recovery"))
+        knowledge_graph = _mapping_value(main_brain_runtime.get("knowledge_graph"))
         lines: list[str] = []
         source_kind = _first_non_empty(intent.get("source_kind"))
         intent_kind = _first_non_empty(intent.get("kind"))
@@ -469,6 +473,24 @@ class _QueryExecutionPromptMixin:
             lines.append(f"- Recovery mailbox: {recovery.get('mailbox_id')}")
         if recovery.get("kernel_task_id"):
             lines.append(f"- Recovery kernel task: {recovery.get('kernel_task_id')}")
+        top_entities = _string_list(knowledge_graph.get("top_entities"))
+        if top_entities:
+            lines.append(f"- Knowledge graph focus: {'; '.join(top_entities[:4])}")
+        top_relations = _string_list(knowledge_graph.get("top_relations"))
+        if top_relations:
+            lines.append(f"- Knowledge graph relations: {'; '.join(top_relations[:3])}")
+        dependency_paths = _path_guidance_lines(knowledge_graph.get("dependency_paths"))
+        if dependency_paths:
+            lines.append("- Knowledge graph dependencies:")
+            lines.extend(f"  - {item}" for item in dependency_paths[:3])
+        blocker_paths = _path_guidance_lines(knowledge_graph.get("blocker_paths"))
+        if blocker_paths:
+            lines.append("- Knowledge graph blockers:")
+            lines.extend(f"  - {item}" for item in blocker_paths[:3])
+        recovery_paths = _path_guidance_lines(knowledge_graph.get("recovery_paths"))
+        if recovery_paths:
+            lines.append("- Knowledge graph recovery:")
+            lines.extend(f"  - {item}" for item in recovery_paths[:3])
         return lines
 
     def _resolve_execution_core_identity_payload(

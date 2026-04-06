@@ -194,6 +194,15 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
         "_resolve_runtime_provider_facade",
         lambda provider_manager: "provider-runtime-facade",
     )
+    def _fake_knowledge_graph_service(**kwargs):
+        calls["knowledge_graph_service_kwargs"] = kwargs
+        return "knowledge-graph-service"
+
+    monkeypatch.setattr(
+        runtime_service_graph_module,
+        "KnowledgeGraphService",
+        _fake_knowledge_graph_service,
+    )
     monkeypatch.setattr(
         runtime_service_graph_module,
         "build_provider_admin_service",
@@ -219,6 +228,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     assert calls["domain_builder_kwargs"]["work_context_service"] == "work-context-service"
     assert calls["domain_builder_kwargs"]["capability_service"] is capability_service
     assert calls["domain_builder_kwargs"]["runtime_provider"] == "provider-runtime-facade"
+    assert calls["domain_builder_kwargs"]["knowledge_graph_service"] == "knowledge-graph-service"
     assert calls["governance_environment_service"] == "environment-service"
     assert calls["governance_industry_service"] == "industry-service"
     assert (
@@ -234,6 +244,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     )
     assert bootstrap.goal_service == "goal-service"
     assert bootstrap.memory_activation_service == "memory-activation-service"
+    assert bootstrap.knowledge_graph_service == "knowledge-graph-service"
     assert bootstrap.main_brain_orchestrator == "main-brain-orchestrator"
     assert bootstrap.runtime_provider == "provider-runtime-facade"
     assert bootstrap.provider_admin_service == "provider-admin-service"

@@ -16,6 +16,7 @@ export const DETAIL_SECTION_ORDER = [
   "work_context",
   "task",
   "runtime",
+  "task_subgraph",
   "host_contract",
   "seat_runtime",
   "host_companion_session",

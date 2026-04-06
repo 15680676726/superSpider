@@ -70,6 +70,7 @@ class RuntimeCenterStateQueryService:
         environment_service: object | None = None,
         external_runtime_service: object | None = None,
         memory_activation_service: object | None = None,
+        knowledge_graph_service: object | None = None,
     ) -> None:
         self._task_repository = task_repository
         self._task_runtime_repository = task_runtime_repository
@@ -95,6 +96,7 @@ class RuntimeCenterStateQueryService:
         self._environment_service = environment_service
         self._external_runtime_service = external_runtime_service
         self._memory_activation_service = memory_activation_service
+        self._knowledge_graph_service = knowledge_graph_service
         self._skill_gap_detector = SkillGapDetector()
         self._environment_feedback_projector = RuntimeCenterEnvironmentFeedbackProjector(
             task_repository=self._task_repository,
@@ -119,6 +121,7 @@ class RuntimeCenterStateQueryService:
             task_runtime_repository=self._task_runtime_repository,
             work_context_loader=self._work_context_projector.serialize_work_context,
             activation_summary_builder=self._build_task_activation_summary,
+            task_subgraph_summary_builder=self._build_task_subgraph_summary,
         )
         self._task_detail_projector = RuntimeCenterTaskDetailProjector(
             task_repository=self._task_repository,
@@ -133,6 +136,7 @@ class RuntimeCenterStateQueryService:
             related_growth_loader=self._collect_related_growth,
             related_agents_loader=self._collect_related_agents,
             memory_activation_service=self._memory_activation_service,
+            knowledge_graph_service=self._resolve_knowledge_graph_service(),
         )
 
     def list_tasks(self, limit: int | None = 5) -> list[dict[str, object]]:
@@ -150,6 +154,9 @@ class RuntimeCenterStateQueryService:
         self._task_detail_projector.set_memory_activation_service(
             self._memory_activation_service,
         )
+        self._task_detail_projector.set_knowledge_graph_service(
+            self._resolve_knowledge_graph_service(),
+        )
         return self._task_detail_projector.get_task_detail(task_id)
 
     def _build_task_activation_summary(
@@ -165,6 +172,18 @@ class RuntimeCenterStateQueryService:
         return self._task_detail_projector.build_task_activation_summary(
             task=task,
             runtime=runtime,
+            kernel_metadata=kernel_metadata,
+        )
+
+    def _build_task_subgraph_summary(
+        self,
+        *,
+        kernel_metadata: dict[str, object] | None,
+    ) -> dict[str, object] | None:
+        self._task_detail_projector.set_knowledge_graph_service(
+            self._resolve_knowledge_graph_service(),
+        )
+        return self._task_detail_projector.build_task_subgraph_summary(
             kernel_metadata=kernel_metadata,
         )
 
@@ -248,7 +267,27 @@ class RuntimeCenterStateQueryService:
         self._task_detail_projector.set_memory_activation_service(
             self._memory_activation_service,
         )
+        self._task_detail_projector.set_knowledge_graph_service(
+            self._resolve_knowledge_graph_service(),
+        )
         return self._task_detail_projector.get_task_review(task_id)
+
+    def set_knowledge_graph_service(self, service: object | None) -> None:
+        self._knowledge_graph_service = service
+
+    def _resolve_knowledge_graph_service(self) -> object | None:
+        if self._knowledge_graph_service is not None:
+            return self._knowledge_graph_service
+        if self._memory_activation_service is None:
+            return None
+        try:
+            from ...memory import KnowledgeGraphService
+
+            return KnowledgeGraphService(
+                memory_activation_service=self._memory_activation_service,
+            )
+        except Exception:
+            return None
 
     def list_capability_candidates(
         self,
