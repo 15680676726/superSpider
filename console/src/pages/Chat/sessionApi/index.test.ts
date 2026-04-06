@@ -57,7 +57,7 @@ describe("sessionApi.openBoundThread", () => {
 
   it("throws a clean guidance message when no bound thread exists", async () => {
     await expect(sessionApi.createSession({})).rejects.toThrow(
-      "运行聊天必须先进入主脑聊天入口或行业主脑控制线程。",
+      "运行聊天必须先进入主脑协作入口或伙伴主场。",
     );
   });
 

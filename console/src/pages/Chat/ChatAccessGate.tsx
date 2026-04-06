@@ -19,6 +19,30 @@ type ChatAccessGateProps = {
   onReload: () => void;
 };
 
+function resolveBindingMessage(params: {
+  autoBindingPending: boolean;
+  requestedThreadId: string | null;
+  threadBootstrapError: string | null;
+}): { title: string; description: string } {
+  const { autoBindingPending, requestedThreadId, threadBootstrapError } = params;
+  if (threadBootstrapError) {
+    return {
+      title: "当前对话还没准备好",
+      description: threadBootstrapError,
+    };
+  }
+  if (autoBindingPending && !requestedThreadId) {
+    return {
+      title: "正在接入伙伴主场",
+      description: "正在把当前对话接入伙伴的正式协作通道。",
+    };
+  }
+  return {
+    title: "正在准备当前对话",
+    description: "正在校准当前对话对应的协作上下文。",
+  };
+}
+
 export function ChatAccessGate({
   chatNoticeVariant,
   threadBootstrapError,
@@ -33,6 +57,12 @@ export function ChatAccessGate({
   onOpenIdentityCenter,
   onReload,
 }: ChatAccessGateProps) {
+  const bindingCopy = resolveBindingMessage({
+    autoBindingPending,
+    requestedThreadId,
+    threadBootstrapError,
+  });
+
   return (
     <>
       {chatNoticeVariant ? (
@@ -40,26 +70,17 @@ export function ChatAccessGate({
           {chatNoticeVariant === "loading" ? (
             <div className={styles.centerSpinner}>
               <Spin size="large" />
-              <div>正在加载对话线程...</div>
+              <div>正在进入伙伴对话...</div>
             </div>
           ) : chatNoticeVariant === "binding" ? (
             <Alert
               type={threadBootstrapError ? "warning" : "info"}
               showIcon
               className={styles.noticeAlert}
-              message={
-                autoBindingPending && !requestedThreadId
-                  ? "正在绑定主脑控制线程"
-                  : "正在解析聊天线程"
-              }
+              message={bindingCopy.title}
               description={
                 <Space size={4} wrap>
-                  <span>
-                    {threadBootstrapError ||
-                      (autoBindingPending && !requestedThreadId
-                        ? "正在把对话绑定到可用的主脑控制线程。"
-                        : "正在解析当前线程对应的运行主体和上下文。")}
-                  </span>
+                  <span>{bindingCopy.description}</span>
                   <Button size="small" type="link" onClick={onOpenIdentityCenter}>
                     打开身份中心
                   </Button>
@@ -79,27 +100,19 @@ export function ChatAccessGate({
                         : "403"
                 }
                 title={
-                  effectiveThreadPending
-                    ? autoBindingPending && !requestedThreadId
-                      ? "正在绑定主脑控制线程"
-                      : "正在解析聊天线程"
-                    : requestedThreadId
-                      ? "正在绑定主脑控制线程"
+                  effectiveThreadPending || requestedThreadId
+                    ? bindingCopy.title
                     : industryTeamsError
                       ? "身份列表加载失败"
                       : "请先完成伙伴建档"
                 }
                 subTitle={
-                  effectiveThreadPending
-                    ? autoBindingPending && !requestedThreadId
-                      ? "正在把对话绑定到可用的主脑控制线程。"
-                      : "正在解析当前聊天线程对应的运行主体和上下文。"
-                    : requestedThreadId
-                      ? threadBootstrapError || "正在把对话绑定到可用的主脑控制线程。"
+                  effectiveThreadPending || requestedThreadId
+                    ? bindingCopy.description
                     : industryTeamsError
                       ? `身份列表或主脑投影不可用。${industryTeamsError}`
                       : hasSuggestedTeams
-                        ? "请先从伙伴建档进入聊天，这样线程才会绑定到当前伙伴主体。"
+                        ? "请先从伙伴建档进入聊天，这样当前对话才会绑定到你的伙伴主场。"
                         : "当前还没有可用的伙伴主体。请先完成伙伴建档，再进入聊天。"
                 }
                 extra={

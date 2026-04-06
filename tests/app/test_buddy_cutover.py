@@ -86,6 +86,10 @@ def test_buddy_surface_and_runtime_center_surface_share_same_projection(tmp_path
     ).json()
     summary = runtime_surface["main_brain"]["buddy_summary"]
 
+    assert surface["execution_carrier"]["instance_id"] == f"buddy:{surface['profile']['profile_id']}"
+    assert surface["execution_carrier"]["thread_id"] == (
+        f"industry-chat:buddy:{surface['profile']['profile_id']}:execution-core"
+    )
     assert surface["presentation"]["buddy_name"] == "Mochi"
     assert summary["buddy_name"] == "Mochi"
     assert summary["current_task_summary"] == "Finish today's current task"

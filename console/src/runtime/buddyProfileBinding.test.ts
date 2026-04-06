@@ -4,12 +4,15 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   normalizeBuddyProfileId,
+  readBuddyProfileId,
+  resetBuddyProfileBindingForTests,
   resolveCanonicalBuddyProfileId,
+  writeBuddyProfileId,
 } from "./buddyProfileBinding";
 
 describe("buddyProfileBinding", () => {
   afterEach(() => {
-    window.localStorage.clear();
+    resetBuddyProfileBindingForTests();
   });
 
   it("normalizes buddy profile ids without relying on browser storage", () => {
@@ -23,5 +26,21 @@ describe("buddyProfileBinding", () => {
       "profile-2",
     );
     expect(resolveCanonicalBuddyProfileId(null, "")).toBeNull();
+  });
+
+  it("reads and writes the canonical buddy profile id through local storage", () => {
+    writeBuddyProfileId("  profile-9  ");
+    expect(readBuddyProfileId()).toBe("profile-9");
+
+    writeBuddyProfileId("   ");
+    expect(readBuddyProfileId()).toBeNull();
+  });
+
+  it("resets the stored buddy profile id for tests", () => {
+    writeBuddyProfileId("profile-12");
+    expect(readBuddyProfileId()).toBe("profile-12");
+
+    resetBuddyProfileBindingForTests();
+    expect(readBuddyProfileId()).toBeNull();
   });
 });

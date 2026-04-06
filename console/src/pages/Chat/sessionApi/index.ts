@@ -606,7 +606,7 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       return threadId;
     }
     throw new Error(
-      "运行聊天必须先进入主脑聊天入口或行业主脑控制线程。",
+      "运行聊天必须先进入主脑协作入口或伙伴主场。",
     );
   }
 

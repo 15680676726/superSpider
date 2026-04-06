@@ -65,8 +65,9 @@ function normalizeWritebackTarget(raw: string): ChatWritebackTarget | null {
   if (!normalized) return null;
   if (normalized === "strategy") return "strategy";
   if (normalized === "lane") return "lane";
-  if (normalized === "backlog" || normalized === "backlog-item")
+  if (normalized === "backlog" || normalized === "backlog-item") {
     return "backlog";
+  }
   if (
     normalized === "immediate-goal" ||
     normalized === "immediate_goal" ||
@@ -83,8 +84,8 @@ function normalizeWritebackTargetList(value: unknown): ChatWritebackTarget[] {
   const out: ChatWritebackTarget[] = [];
   for (const item of value) {
     if (typeof item !== "string") continue;
-    const t = normalizeWritebackTarget(item);
-    if (t && !out.includes(t)) out.push(t);
+    const target = normalizeWritebackTarget(item);
+    if (target && !out.includes(target)) out.push(target);
   }
   return out;
 }
@@ -104,12 +105,12 @@ export function normalizeWritebackTargetsFromThreadMeta(
       : null;
 
   const merged: ChatWritebackTarget[] = [];
-  for (const t of [
+  for (const target of [
     ...fromTargets,
     ...fromClasses,
     ...(fromSingle ? [fromSingle] : []),
   ]) {
-    if (!merged.includes(t)) merged.push(t);
+    if (!merged.includes(target)) merged.push(target);
   }
   if (merged.length > 0 && !merged.includes("strategy")) {
     merged.unshift("strategy");
@@ -143,8 +144,8 @@ export function inferWritebackTargetsFromFocus({
 
 export function presentSessionKindLabel(sessionKind: string): string {
   const normalized = sessionKind.trim().toLowerCase();
-  if (normalized === "industry-control-thread") return "control-thread";
-  if (normalized === "industry-agent-chat") return "execution-thread";
-  if (normalized === "agent-chat") return "agent-thread";
+  if (normalized === "industry-control-thread") return "主脑协作";
+  if (normalized === "industry-agent-chat") return "执行协作";
+  if (normalized === "agent-chat") return "智能体协作";
   return sessionKind;
 }

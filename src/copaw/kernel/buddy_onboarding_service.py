@@ -8,6 +8,10 @@ import unicodedata
 
 from pydantic import BaseModel, Field
 
+from .buddy_execution_carrier import (
+    EXECUTION_CORE_ROLE_ID,
+    build_buddy_execution_carrier_handoff,
+)
 from ..state import CompanionRelationship, GrowthTarget, HumanProfile
 from ..state.main_brain_service import (
     AssignmentService,
@@ -338,7 +342,7 @@ def _derive_why_it_matters(*, profile: HumanProfile) -> str:
 class BuddyOnboardingService:
     MAX_QUESTIONS = 9
     TIGHTEN_AFTER = 5
-    EXECUTION_CORE_ROLE_ID = "execution-core"
+    EXECUTION_CORE_ROLE_ID = EXECUTION_CORE_ROLE_ID
 
     def __init__(
         self,
@@ -776,31 +780,13 @@ class BuddyOnboardingService:
         current_cycle_id: str,
         team_generated: bool,
     ) -> dict[str, object]:
-        control_thread_id = f"industry-chat:{instance_id}:{self.EXECUTION_CORE_ROLE_ID}"
-        return {
-            "instance_id": instance_id,
-            "label": label,
-            "owner_scope": profile.profile_id,
-            "current_cycle_id": current_cycle_id,
-            "team_generated": team_generated,
-            "thread_id": control_thread_id,
-            "control_thread_id": control_thread_id,
-            "chat_binding": {
-                "thread_id": control_thread_id,
-                "control_thread_id": control_thread_id,
-                "user_id": f"buddy:{profile.profile_id}",
-                "channel": "console",
-                "context_key": f"control-thread:{control_thread_id}",
-                "binding_kind": "buddy-execution-carrier",
-                "metadata": {
-                    "industry_instance_id": instance_id,
-                    "industry_role_id": self.EXECUTION_CORE_ROLE_ID,
-                    "industry_role_name": "execution-core",
-                    "owner_scope": profile.profile_id,
-                    "team_generated": team_generated,
-                },
-            },
-        }
+        return build_buddy_execution_carrier_handoff(
+            profile=profile,
+            instance_id=instance_id,
+            label=label,
+            current_cycle_id=current_cycle_id,
+            team_generated=team_generated,
+        )
 
     def _build_lane_roles(
         self,

@@ -110,6 +110,7 @@ export interface BuddySurfaceResponse {
     buddy_name: string;
     encouragement_style: string;
   } | null;
+  execution_carrier?: BuddyExecutionCarrier | null;
   presentation: {
     profile_id: string;
     buddy_name: string;

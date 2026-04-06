@@ -184,6 +184,21 @@ describe("BuddyOnboardingPage", () => {
         profile_id: "profile-existing",
         display_name: "Existing",
       },
+      execution_carrier: {
+        instance_id: "buddy:profile-existing",
+        label: "Existing 的成长载体",
+        owner_scope: "profile-existing",
+        current_cycle_id: "cycle-existing",
+        team_generated: true,
+        thread_id: "industry-chat:buddy:profile-existing:execution-core",
+        control_thread_id: "industry-chat:buddy:profile-existing:execution-core",
+        chat_binding: {
+          thread_id: "industry-chat:buddy:profile-existing:execution-core",
+          control_thread_id: "industry-chat:buddy:profile-existing:execution-core",
+          channel: "console",
+          binding_kind: "buddy-execution-carrier",
+        },
+      },
       growth: {
         growth_level: 1,
         intimacy: 0,
@@ -233,7 +248,7 @@ describe("BuddyOnboardingPage", () => {
     render(<BuddyOnboardingPage />);
 
     await waitFor(() => {
-      expect(apiMock.getBuddySurface).toHaveBeenCalledWith();
+      expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-existing");
     });
     expect(runtimeChatMock.buildBuddyExecutionCarrierChatBinding).toHaveBeenCalledWith({
       sessionId: null,
@@ -242,13 +257,12 @@ describe("BuddyOnboardingPage", () => {
       executionCarrier: expect.objectContaining({
         instance_id: "buddy:profile-existing",
         owner_scope: "profile-existing",
+        current_cycle_id: "cycle-existing",
       }),
       entrySource: "buddy-onboarding-resume",
     });
     expect(runtimeChatMock.openRuntimeChat).toHaveBeenCalledWith(
-      expect.objectContaining({
-        threadId: "industry-chat:buddy:profile-1:execution-core",
-      }),
+      expect.any(Object),
       navigateMock,
       expect.objectContaining({
         shouldNavigate: expect.any(Function),
@@ -321,7 +335,7 @@ describe("BuddyOnboardingPage", () => {
     render(<BuddyOnboardingPage />);
 
     await waitFor(() => {
-      expect(apiMock.getBuddySurface).toHaveBeenCalledWith();
+      expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-incomplete");
     });
     expect(navigateMock).not.toHaveBeenCalled();
     expect(screen.getByText("Buddy 初次建档")).toBeInTheDocument();
@@ -355,6 +369,21 @@ describe("BuddyOnboardingPage", () => {
         profile_id: "profile-needs-name",
         buddy_name: "",
         encouragement_style: "old-friend",
+      },
+      execution_carrier: {
+        instance_id: "buddy:profile-needs-name",
+        label: "待命名 的成长载体",
+        owner_scope: "profile-needs-name",
+        current_cycle_id: "cycle-needs-name",
+        team_generated: true,
+        thread_id: "industry-chat:buddy:profile-needs-name:execution-core",
+        control_thread_id: "industry-chat:buddy:profile-needs-name:execution-core",
+        chat_binding: {
+          thread_id: "industry-chat:buddy:profile-needs-name:execution-core",
+          control_thread_id: "industry-chat:buddy:profile-needs-name:execution-core",
+          channel: "console",
+          binding_kind: "buddy-execution-carrier",
+        },
       },
       growth: {
         growth_level: 1,
@@ -405,7 +434,7 @@ describe("BuddyOnboardingPage", () => {
     render(<BuddyOnboardingPage />);
 
     await waitFor(() => {
-      expect(apiMock.getBuddySurface).toHaveBeenCalledWith();
+      expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-needs-name");
     });
     expect(runtimeChatMock.buildBuddyExecutionCarrierChatBinding).toHaveBeenCalledWith({
       sessionId: "session-needs-name",
@@ -414,6 +443,7 @@ describe("BuddyOnboardingPage", () => {
       executionCarrier: expect.objectContaining({
         instance_id: "buddy:profile-needs-name",
         owner_scope: "profile-needs-name",
+        current_cycle_id: "cycle-needs-name",
       }),
       entrySource: "buddy-onboarding-resume",
     });

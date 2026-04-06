@@ -18,9 +18,12 @@ import type {
   BuddyClarificationResponse,
   BuddyConfirmDirectionResponse,
   BuddyIdentityResponse,
-  BuddyExecutionCarrier,
 } from "../../api/modules/buddy";
 import { resolveBuddyEntryDecision } from "../../runtime/buddyFlow";
+import {
+  readBuddyProfileId,
+  writeBuddyProfileId,
+} from "../../runtime/buddyProfileBinding";
 import {
   buildBuddyExecutionCarrierChatBinding,
   openRuntimeChat,
@@ -46,21 +49,6 @@ function parseLines(value?: string | null): string[] {
     .filter(Boolean);
 }
 
-function createResumeExecutionCarrier(
-  profileId: string,
-  displayName?: string | null,
-): BuddyExecutionCarrier {
-  const normalizedProfileId = profileId.trim();
-  const normalizedDisplayName = displayName?.trim() || "Buddy";
-  return {
-    instance_id: `buddy:${normalizedProfileId}`,
-    label: `${normalizedDisplayName} 的成长载体`,
-    owner_scope: normalizedProfileId,
-    current_cycle_id: "",
-    team_generated: true,
-  };
-}
-
 export default function BuddyOnboardingPage() {
   const navigate = useNavigate();
   const [form] = Form.useForm<IdentityFormValues>();
@@ -79,18 +67,22 @@ export default function BuddyOnboardingPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const surface = await api.getBuddySurface();
+        const surface = await api.getBuddySurface(readBuddyProfileId());
         if (cancelled) return;
+        if (surface?.profile?.profile_id) {
+          writeBuddyProfileId(surface.profile.profile_id);
+        }
         const decision = resolveBuddyEntryDecision(surface);
         if (decision.mode === "chat-ready" && surface?.profile?.profile_id) {
+          if (!surface.execution_carrier) {
+            setError("伙伴主场尚未准备完成，请刷新后重试。");
+            return;
+          }
           const binding = buildBuddyExecutionCarrierChatBinding({
             sessionId: null,
             profileId: surface.profile.profile_id,
             profileDisplayName: surface.profile.display_name,
-            executionCarrier: createResumeExecutionCarrier(
-              surface.profile.profile_id,
-              surface.profile.display_name,
-            ),
+            executionCarrier: surface.execution_carrier,
             entrySource: "buddy-onboarding-resume",
           });
           await openRuntimeChat(binding, navigate, {
@@ -102,14 +94,15 @@ export default function BuddyOnboardingPage() {
           decision.mode === "chat-needs-naming" &&
           surface?.profile?.profile_id
         ) {
+          if (!surface.execution_carrier) {
+            setError("伙伴主场尚未准备完成，请刷新后重试。");
+            return;
+          }
           const binding = buildBuddyExecutionCarrierChatBinding({
             sessionId: decision.sessionId,
             profileId: surface.profile.profile_id,
             profileDisplayName: surface.profile.display_name,
-            executionCarrier: createResumeExecutionCarrier(
-              surface.profile.profile_id,
-              surface.profile.display_name,
-            ),
+            executionCarrier: surface.execution_carrier,
             entrySource: "buddy-onboarding-resume",
           });
           await openRuntimeChat(binding, navigate, {
@@ -175,6 +168,7 @@ export default function BuddyOnboardingPage() {
         constraints: parseLines(values.constraints),
         goal_intention: values.goal_intention,
       });
+      writeBuddyProfileId(result.profile.profile_id);
       setIdentity(result);
       setClarification(null);
       setSelectedDirection("");
@@ -216,6 +210,7 @@ export default function BuddyOnboardingPage() {
         session_id: identity.session_id,
         selected_direction: selectedDirection,
       });
+      writeBuddyProfileId(result.session.profile_id);
       setConfirmPayload(result);
     } catch (rawError) {
       setError(rawError instanceof Error ? rawError.message : "主方向确认失败");
@@ -227,25 +222,23 @@ export default function BuddyOnboardingPage() {
   const handleEnterChat = async () => {
     if (!identity || !confirmPayload?.session?.session_id) return;
     const executionCarrier = confirmPayload.execution_carrier;
-    if (executionCarrier) {
-      try {
-        const binding = buildBuddyExecutionCarrierChatBinding({
-          sessionId: confirmPayload.session.session_id,
-          profileId: identity.profile.profile_id,
-          profileDisplayName: identity.profile.display_name,
-          executionCarrier,
-        });
-        await openRuntimeChat(binding, navigate);
-        return;
-      } catch (rawError) {
-        setError(rawError instanceof Error ? rawError.message : "进入聊天失败");
-        return;
-      }
+    if (!executionCarrier) {
+      setError("伙伴主场尚未准备完成，请刷新后重试。");
+      return;
     }
-    navigate(
-      `/chat?buddy_session=${encodeURIComponent(confirmPayload.session.session_id)}&buddy_profile=${encodeURIComponent(identity.profile.profile_id)}`,
-      { replace: true },
-    );
+    try {
+      const binding = buildBuddyExecutionCarrierChatBinding({
+        sessionId: confirmPayload.session.session_id,
+        profileId: identity.profile.profile_id,
+        profileDisplayName: identity.profile.display_name,
+        executionCarrier,
+      });
+      await openRuntimeChat(binding, navigate);
+      return;
+    } catch (rawError) {
+      setError(rawError instanceof Error ? rawError.message : "进入聊天失败");
+      return;
+    }
   };
 
   const stepIndex = confirmPayload ? 2 : clarification?.finished ? 2 : identity ? 1 : 0;

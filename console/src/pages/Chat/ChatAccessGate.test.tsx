@@ -11,7 +11,7 @@ describe("ChatAccessGate", () => {
     cleanup();
   });
 
-  it("renders the binding notice and only exposes identity-first shortcuts", async () => {
+  it("renders the binding notice with buddy-first wording and only exposes identity-first shortcuts", async () => {
     const onOpenIdentityCenter = vi.fn();
     const onReload = vi.fn();
 
@@ -32,7 +32,9 @@ describe("ChatAccessGate", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "打开身份中心" })).toBeTruthy();
+    expect(screen.getByText("正在接入伙伴主场")).toBeInTheDocument();
+    expect(screen.getByText("打开身份中心")).toBeTruthy();
+    expect(screen.queryByText(/线程/)).toBeNull();
     expect(screen.queryByRole("button", { name: "智能体工作台" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "打开身份中心" }));
@@ -60,7 +62,7 @@ describe("ChatAccessGate", () => {
     );
 
     expect(container.querySelector(".ant-spin")).not.toBeNull();
-    expect(screen.getByText("正在加载对话线程...")).toBeInTheDocument();
+    expect(screen.getByText("正在进入伙伴对话...")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

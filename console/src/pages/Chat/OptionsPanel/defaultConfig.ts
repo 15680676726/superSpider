@@ -11,21 +11,21 @@ const defaultConfig = {
   sender: {
     attachments: false,
     maxLength: 10000,
-    disclaimer: "Spider Mesh · 主脑运行对话前台",
+    disclaimer: "Spider Mesh 主脑协作对话前台",
   },
   welcome: {
-    greeting: "这里是 Spider Mesh 主脑对话前台。",
+    greeting: "这里是 Spider Mesh 主脑协作前台。",
     description:
-      "你当前进入的是运行线程入口。我会围绕当前绑定的主脑控制线程、焦点事项、写回目标和治理状态来协作推进任务。",
+      "你当前进入的是主脑协作入口。我会围绕当前绑定的伙伴主场、焦点事项、写回目标和治理状态来协作推进任务。",
     avatar: `${import.meta.env.BASE_URL}spider-mesh-symbol.svg`,
     prompts: [
       {
         icon: `${import.meta.env.BASE_URL}spider-mesh-symbol.svg`,
-        value: "帮我梳理当前线程的最终目标和这一步要做什么",
+        value: "帮我梳理当前协作的最终目标，以及这一步最该做什么。",
       },
       {
         icon: `${import.meta.env.BASE_URL}spider-mesh-symbol.svg`,
-        value: "告诉我这条线程现在会写回到哪里，以及还缺什么证据",
+        value: "告诉我这次协作会写回到哪里，还缺什么证据。",
       },
     ],
   },

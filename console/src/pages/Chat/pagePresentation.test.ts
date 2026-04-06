@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolveThreadRuntimePresentation } from "./pagePresentation";
 
 describe("pagePresentation", () => {
-  it("derives thread, focus, and writeback labels/hints for runtime header chips", () => {
+  it("derives focus, collaboration, and writeback labels for runtime header chips", () => {
     expect(
       resolveThreadRuntimePresentation({
         currentFocus: "Ship phase split",
@@ -22,8 +22,9 @@ describe("pagePresentation", () => {
       focusLabel: "焦点：Ship phase split",
       threadKindHint:
         "session_kind=industry-control-thread | thread_binding_kind=control | owner_scope=industry",
-      threadKindLabel: "线程：控制线程",
-      writebackHint: "inferred=strategy,backlog | role=execution-core | match_signals=2",
+      threadKindLabel: "协作：主脑协作",
+      writebackHint:
+        "inferred=strategy,backlog | role=execution-core | match_signals=2",
       writebackLabel: "写回：战略/待办",
     });
   });

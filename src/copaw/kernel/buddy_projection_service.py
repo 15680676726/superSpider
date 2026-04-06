@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
+from .buddy_execution_carrier import build_buddy_execution_carrier_handoff
 from ..state import BuddyGrowthProjection, BuddyPresentation, CompanionRelationship, GrowthTarget, HumanProfile
 from ..state.repositories_buddy import (
     SqliteBuddyOnboardingSessionRepository,
@@ -20,6 +21,7 @@ class BuddySurfacePayload(BaseModel):
     profile: HumanProfile
     growth_target: GrowthTarget | None = None
     relationship: CompanionRelationship | None = None
+    execution_carrier: dict[str, object] | None = None
     onboarding: "BuddyOnboardingProjection"
     presentation: BuddyPresentation
     growth: BuddyGrowthProjection
@@ -67,6 +69,10 @@ class BuddyProjectionService:
         target = self._growth_target_repository.get_active_target(profile.profile_id)
         relationship = self._relationship_repository.get_relationship(profile.profile_id)
         session = self._onboarding_session_repository.get_latest_session_for_profile(profile.profile_id)
+        execution_carrier = self._build_execution_carrier(
+            profile=profile,
+            growth_target=target,
+        )
         onboarding = self._build_onboarding_projection(
             session=session,
             target=target,
@@ -178,6 +184,7 @@ class BuddyProjectionService:
             profile=profile,
             growth_target=target,
             relationship=relationship,
+            execution_carrier=execution_carrier,
             onboarding=onboarding,
             presentation=presentation,
             growth=growth,
@@ -252,6 +259,22 @@ class BuddyProjectionService:
             requires_direction_confirmation=requires_direction_confirmation,
             requires_naming=requires_naming,
             completed=completed,
+        )
+
+    def _build_execution_carrier(
+        self,
+        *,
+        profile: HumanProfile,
+        growth_target: GrowthTarget | None,
+    ) -> dict[str, object] | None:
+        if growth_target is None:
+            return None
+        return build_buddy_execution_carrier_handoff(
+            profile=profile,
+            instance_id=f"buddy:{profile.profile_id}",
+            label=profile.display_name,
+            current_cycle_id=growth_target.current_cycle_label or "Cycle 1",
+            team_generated=False,
         )
 
     def _fallback_current_task_summary(self, profile_id: str) -> str:

@@ -112,13 +112,9 @@ describe("chatRuntimePresentation", () => {
     expect(visibility.shouldRenderChatComposer).toBe(false);
   });
 
-  it("presents canonical session kind labels", () => {
-    expect(presentSessionKindLabel("industry-control-thread")).toBe(
-      "control-thread",
-    );
-    expect(presentSessionKindLabel("industry-agent-chat")).toBe(
-      "execution-thread",
-    );
-    expect(presentSessionKindLabel("agent-chat")).toBe("agent-thread");
+  it("presents human-facing session kind labels instead of thread jargon", () => {
+    expect(presentSessionKindLabel("industry-control-thread")).toBe("主脑协作");
+    expect(presentSessionKindLabel("industry-agent-chat")).toBe("执行协作");
+    expect(presentSessionKindLabel("agent-chat")).toBe("智能体协作");
   });
 });

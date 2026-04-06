@@ -22,11 +22,7 @@ function presentThreadKindChipLabel(sessionKind: string): string | null {
   if (!normalizedSessionKind) {
     return null;
   }
-  const threadKindLabel = presentSessionKindLabel(normalizedSessionKind);
-  if (threadKindLabel === "control-thread") return "线程：控制线程";
-  if (threadKindLabel === "execution-thread") return "线程：执行线程";
-  if (threadKindLabel === "agent-thread") return "线程：智能体线程";
-  return `线程：${threadKindLabel}`;
+  return `协作：${presentSessionKindLabel(normalizedSessionKind)}`;
 }
 
 function presentWritebackTarget(target: ChatWritebackTarget): string {
