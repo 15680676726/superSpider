@@ -412,10 +412,15 @@ def test_query_execution_runtime_exposes_bounded_donor_trial_carry_forward_contr
             "source_profile_id",
             "candidate_source_kind",
             "resolution_kind",
+            "verified_stage",
+            "provider_resolution_status",
+            "compatibility_status",
             "protocol_surface_kind",
             "transport_kind",
             "compiled_adapter_id",
             "selected_adapter_action_id",
+            "probe_outcome",
+            "probe_error_type",
         ],
         "accepted_list_fields": [
             "replacement_target_ids",
@@ -423,6 +428,7 @@ def test_query_execution_runtime_exposes_bounded_donor_trial_carry_forward_contr
             "capability_ids",
             "compiled_action_ids",
             "adapter_blockers",
+            "probe_evidence_refs",
         ],
         "max_list_items": 3,
         "acceptance": "bounded-runtime-metadata",
@@ -866,11 +872,16 @@ def test_query_execution_runtime_carries_adapter_attribution_into_evidence_metad
             "skill_trial_id": "trial-openspace-seat-1",
             "skill_lifecycle_stage": "trial",
             "selected_scope": "seat",
+            "verified_stage": "primary_action_verified",
+            "provider_resolution_status": "resolved",
+            "compatibility_status": "compatible_native",
             "protocol_surface_kind": "native_mcp",
             "transport_kind": "mcp",
             "compiled_adapter_id": "adapter:openspace",
             "compiled_action_ids": ["execute_task"],
             "selected_adapter_action_id": "execute_task",
+            "probe_outcome": "succeeded",
+            "probe_evidence_refs": ["ev-probe-1"],
         },
     )
     assert shell_sink is not None
@@ -895,6 +906,11 @@ def test_query_execution_runtime_carries_adapter_attribution_into_evidence_metad
     assert metadata["compiled_adapter_id"] == "adapter:openspace"
     assert metadata["compiled_action_ids"] == ["execute_task"]
     assert metadata["selected_adapter_action_id"] == "execute_task"
+    assert metadata["verified_stage"] == "primary_action_verified"
+    assert metadata["provider_resolution_status"] == "resolved"
+    assert metadata["compatibility_status"] == "compatible_native"
+    assert metadata["probe_outcome"] == "succeeded"
+    assert metadata["probe_evidence_refs"] == ["ev-probe-1"]
 
 
 @pytest.mark.asyncio

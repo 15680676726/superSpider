@@ -117,9 +117,35 @@
   - donor 可以有不同 transport / packaging / startup 方式
   - 但 provider 注入、执行超时/取消/心跳、host 兼容归一不能项目各搞一套
   - `installed`、`runtime_operable`、`adapter_probe_passed`、`primary_action_verified` 必须被区分，不得把“装上了”夸成“完全可用”
-- 当前诚实状态：
-  - 这份文档是设计收口，不是实现完成
-  - 下一步应先压成 implementation plan，再进入代码施工
+- `2026-04-06` 当前实现状态补正：
+  - `src/copaw/capabilities/donor_probe_service.py` 已补齐最小 probe 正式服务：
+    - `runtime-component` 走 `start -> readiness -> stop`，成功后提升到 `runtime_operable`
+    - `adapter` 走最小 action probe，成功后提升到 `adapter_probe_passed`
+    - 单 action adapter 可提升到 `primary_action_verified`
+    - 无 formal probe 路径的 donor 保持在 `installed`，不会被夸大
+  - `/capability-market/projects/install` 已在 install + trial attach 后接入 probe，并把 probe truth 回写到：
+    - candidate `verified_stage / provider_resolution_status / compatibility_status`
+    - scoped trial `verdict / summary / evidence_refs / probe_result`
+    - lifecycle decision `reason / evidence_refs / probe_result`
+  - Runtime Center donor 读面已把 `metadata.probe_result` 显式投影成 top-level：
+    - `selected_adapter_action_id`
+    - `probe_outcome`
+    - `probe_error_type`
+    - `probe_evidence_refs`
+  - `query_execution_runtime` 已把 donor probe attribution 正式带入 evidence metadata：
+    - `verified_stage`
+    - `provider_resolution_status`
+    - `compatibility_status`
+    - `probe_outcome`
+    - `probe_error_type`
+    - `probe_evidence_refs`
+  - 当前 fresh donor verification：
+    - `python -m pytest tests/capabilities/test_donor_provider_injection.py tests/capabilities/test_donor_execution_envelope.py tests/capabilities/test_donor_host_compatibility.py tests/capabilities/test_donor_probe_service.py tests/capabilities/test_external_adapter_execution.py tests/capabilities/test_external_runtime_execution.py tests/capabilities/test_project_donor_contracts.py tests/app/test_capability_market_api.py tests/app/test_runtime_center_donor_api.py tests/kernel/test_query_execution_runtime.py tests/predictions/test_skill_candidate_service.py tests/predictions/test_skill_trial_service.py -q`
+    - 结果：`113 passed`
+- 当前诚实边界：
+  - 这轮完成的是 universal donor execution contract 的 Task 5/6 落地和读面/evidence 收口
+  - 不等于“任意 donor 都能自动发现 typed business action 并完整业务可用”
+  - `project-package / runtime-component / adapter` 的 formal execution/probe/promotion 主链已接通，但更强的 donor action discovery 与更大范围 live donor 适配仍是后续增强项
 
 ---
 

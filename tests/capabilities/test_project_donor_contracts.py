@@ -471,7 +471,21 @@ async def test_install_github_python_project_retries_transport_chain_before_savi
             evidence_contract=["shell-command", "runtime-event"],
             predicted_default_port=7788,
             predicted_health_path="/health",
-            metadata={"entry_source": "console-script", "script_path": "D:/fake/external/runtime-openspace/.venv/Scripts/openspace.exe"},
+            metadata={
+                "entry_source": "console-script",
+                "script_path": "D:/fake/external/runtime-openspace/.venv/Scripts/openspace.exe",
+                "provider_injection_mode": "environment",
+                "execution_envelope": {
+                    "action_timeout_sec": 45,
+                    "probe_timeout_sec": 12,
+                },
+                "host_compatibility_requirements": {
+                    "required_provider_contract_kind": "cooperative_provider_runtime",
+                    "required_runtimes": ["python"],
+                    "required_surfaces": ["process", "network"],
+                    "workspace_policy": "isolated-runtime-root",
+                },
+            },
             ),
         )
     monkeypatch.setattr(
@@ -490,6 +504,12 @@ async def test_install_github_python_project_retries_transport_chain_before_savi
         healthcheck_command=None,
         enable=True,
         overwrite=True,
+        runtime_provider=SimpleNamespace(
+            resolve_runtime_provider_contract=lambda: {
+                "provider_id": "openai",
+                "model": "gpt-5.4",
+            },
+        ),
     )
 
     assert attempts == [
@@ -502,6 +522,9 @@ async def test_install_github_python_project_retries_transport_chain_before_savi
     assert result["name"] == "openspace"
     assert result["capability_kind"] == "runtime-component"
     assert result["installed_capability_ids"] == ["runtime:openspace"]
+    assert result["verified_stage"] == "installed"
+    assert result["provider_resolution_status"] == "pending"
+    assert result["compatibility_status"] == "compatible_native"
     assert result["runtime_contract"]["runtime_kind"] == "service"
     assert result["runtime_contract"]["predicted_default_port"] == 7788
     assert "port" not in result["runtime_contract"]
@@ -628,6 +651,17 @@ async def test_install_external_project_persists_adapter_contract_when_surface_i
                         "input_schema": {"type": "object"},
                     },
                 ],
+                "provider_injection_mode": "environment",
+                "execution_envelope": {
+                    "action_timeout_sec": 45,
+                    "probe_timeout_sec": 12,
+                },
+                "host_compatibility_requirements": {
+                    "required_provider_contract_kind": "cooperative_provider_runtime",
+                    "required_runtimes": ["python"],
+                    "required_surfaces": ["workspace", "process", "desktop-session"],
+                    "workspace_policy": "package-environment-root",
+                },
             },
         ),
     )
@@ -641,11 +675,20 @@ async def test_install_external_project_persists_adapter_contract_when_surface_i
         healthcheck_command=None,
         enable=True,
         overwrite=True,
+        runtime_provider=SimpleNamespace(
+            resolve_runtime_provider_contract=lambda: {
+                "provider_id": "openai",
+                "model": "gpt-5.4",
+            },
+        ),
     )
 
     package = saved["config"].external_capability_packages["adapter:openspace"]
     assert result["installed"] is True
     assert result["installed_capability_ids"] == ["adapter:openspace"]
+    assert result["verified_stage"] == "installed"
+    assert result["provider_resolution_status"] == "pending"
+    assert result["compatibility_status"] == "compatible_native"
     assert package.intake_protocol_kind == "native_mcp"
     assert package.call_surface_ref == "mcp:openspace"
     assert package.adapter_contract["transport_kind"] == "mcp"

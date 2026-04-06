@@ -91,10 +91,15 @@ _QUERY_TRIAL_ATTRIBUTION_SCALAR_FIELDS = (
     "source_profile_id",
     "candidate_source_kind",
     "resolution_kind",
+    "verified_stage",
+    "provider_resolution_status",
+    "compatibility_status",
     "protocol_surface_kind",
     "transport_kind",
     "compiled_adapter_id",
     "selected_adapter_action_id",
+    "probe_outcome",
+    "probe_error_type",
 )
 _QUERY_TRIAL_ATTRIBUTION_LIST_FIELDS = (
     "replacement_target_ids",
@@ -102,6 +107,7 @@ _QUERY_TRIAL_ATTRIBUTION_LIST_FIELDS = (
     "capability_ids",
     "compiled_action_ids",
     "adapter_blockers",
+    "probe_evidence_refs",
 )
 _QUERY_TRIAL_ATTRIBUTION_FIELD_SET = frozenset(
     _QUERY_TRIAL_ATTRIBUTION_SCALAR_FIELDS + _QUERY_TRIAL_ATTRIBUTION_LIST_FIELDS,
@@ -347,10 +353,15 @@ def _normalize_capability_trial_attribution(
         "source_profile_id",
         "candidate_source_kind",
         "resolution_kind",
+        "verified_stage",
+        "provider_resolution_status",
+        "compatibility_status",
         "protocol_surface_kind",
         "transport_kind",
         "compiled_adapter_id",
         "selected_adapter_action_id",
+        "probe_outcome",
+        "probe_error_type",
     ):
         resolved = _first_non_empty(raw_payload.get(key))
         if resolved is not None:

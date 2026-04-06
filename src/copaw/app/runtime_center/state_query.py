@@ -322,7 +322,7 @@ class RuntimeCenterStateQueryService:
             model_dump = getattr(item, "model_dump", None)
             serialized = model_dump(mode="json") if callable(model_dump) else None
             if isinstance(serialized, dict):
-                payload.append(serialized)
+                payload.append(self._project_probe_projection(serialized))
         return payload
 
     def list_external_runtimes(
@@ -486,7 +486,7 @@ class RuntimeCenterStateQueryService:
             model_dump = getattr(item, "model_dump", None)
             serialized = model_dump(mode="json") if callable(model_dump) else None
             if isinstance(serialized, dict):
-                payload.append(serialized)
+                payload.append(self._project_probe_projection(serialized))
         return payload
 
     def _serialize_capability_candidate(self, item: object) -> dict[str, object] | None:
@@ -990,6 +990,41 @@ class RuntimeCenterStateQueryService:
         if isinstance(namespace, Mapping):
             return dict(namespace)
         return {}
+
+    def _project_probe_projection(
+        self,
+        payload: Mapping[str, object] | None,
+    ) -> dict[str, object]:
+        serialized = dict(payload or {})
+        metadata = self._mapping_payload(serialized.get("metadata"))
+        probe_result = self._mapping_payload(metadata.get("probe_result"))
+        selected_adapter_action_id = first_non_empty(
+            serialized.get("selected_adapter_action_id"),
+            metadata.get("selected_adapter_action_id"),
+            probe_result.get("selected_adapter_action_id"),
+        )
+        if selected_adapter_action_id is not None:
+            serialized["selected_adapter_action_id"] = selected_adapter_action_id
+        probe_outcome = first_non_empty(
+            serialized.get("probe_outcome"),
+            probe_result.get("probe_outcome"),
+        )
+        if probe_outcome is not None:
+            serialized["probe_outcome"] = probe_outcome
+        probe_error_type = first_non_empty(
+            serialized.get("probe_error_type"),
+            probe_result.get("probe_error_type"),
+        )
+        if probe_error_type is not None:
+            serialized["probe_error_type"] = probe_error_type
+        probe_evidence_refs = string_list_from_values(
+            serialized.get("probe_evidence_refs"),
+            probe_result.get("probe_evidence_refs"),
+            metadata.get("probe_evidence_refs"),
+        )
+        if probe_evidence_refs:
+            serialized["probe_evidence_refs"] = probe_evidence_refs
+        return serialized
 
 Phase1StateQueryService = RuntimeCenterStateQueryService
 RuntimeStateQueryService = RuntimeCenterStateQueryService

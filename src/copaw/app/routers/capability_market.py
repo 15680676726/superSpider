@@ -6,7 +6,9 @@ import asyncio
 import contextlib
 import json
 import inspect
+import os
 from pathlib import Path
+import platform
 import re
 import shutil
 import subprocess
@@ -53,9 +55,18 @@ from ...capabilities.external_adapter_compiler import (
     compile_external_adapter_contract,
 )
 from ...capabilities.external_adapter_contracts import (
+    donor_execution_envelope_from_metadata,
     merge_adapter_attribution_metadata,
     classify_external_protocol_surface,
+    host_compatibility_requirements_from_metadata,
+    normalize_provider_injection_mode,
     protocol_surface_metadata,
+)
+from ...capabilities.donor_probe_service import DonorProbeService
+from ...capabilities.donor_host_compatibility import (
+    HostCompatibilityBridgeCatalog,
+    HostCompatibilityContext,
+    evaluate_donor_host_compatibility,
 )
 from ...capabilities.project_donor_contracts import (
     build_github_python_project_transport_chain,
@@ -81,6 +92,7 @@ from ...discovery.models import DiscoveryHit, NormalizedDiscoveryHit
 from ...discovery.provider_search import search_github_repository_donors
 from ...state import SQLiteStateStore
 from ...state.skill_candidate_service import CapabilityCandidateService
+from ...state.skill_lifecycle_decision_service import SkillLifecycleDecisionService
 from ...state.skill_trial_service import SkillTrialService
 from .capabilities import CapabilityMutationRequest
 from .capability_contracts import (
@@ -191,8 +203,12 @@ class CapabilityMarketProjectInstallResponse(BaseModel):
     installed_capability_ids: list[str] = Field(default_factory=list)
     runtime_contract: dict[str, Any] = Field(default_factory=dict)
     adapter_contract: dict[str, Any] = Field(default_factory=dict)
+    verified_stage: str = "unverified"
+    provider_resolution_status: str = "pending"
+    compatibility_status: str = "unknown"
     target_agent_id: str | None = None
     trial_attachment: dict[str, Any] | None = None
+    probe_result: dict[str, Any] | None = None
 
 
 class CapabilityMarketProjectCandidate(BaseModel):
@@ -399,6 +415,20 @@ def _get_skill_trial_service(request: Request) -> SkillTrialService | None:
         return None
     service = SkillTrialService(state_store=state_store)
     request.app.state.skill_trial_service = service
+    return service
+
+
+def _get_skill_lifecycle_decision_service(
+    request: Request,
+) -> SkillLifecycleDecisionService | None:
+    service = getattr(request.app.state, "skill_lifecycle_decision_service", None)
+    if isinstance(service, SkillLifecycleDecisionService):
+        return service
+    state_store = getattr(request.app.state, "state_store", None)
+    if not isinstance(state_store, SQLiteStateStore):
+        return None
+    service = SkillLifecycleDecisionService(state_store=state_store)
+    request.app.state.skill_lifecycle_decision_service = service
     return service
 
 
@@ -802,6 +832,181 @@ def _serialize_installed_runtime_contract(
     }
 
 
+def _host_os_name() -> str:
+    if sys.platform.startswith("win"):
+        return "windows"
+    if sys.platform == "darwin":
+        return "darwin"
+    if sys.platform.startswith("linux"):
+        return "linux"
+    return str(sys.platform or "unknown").strip().lower() or "unknown"
+
+
+def _host_architecture() -> str:
+    machine = str(platform.machine() or "").strip().lower()
+    if machine == "aarch64":
+        return "arm64"
+    return machine or "unknown"
+
+
+def _host_available_runtimes(*, python_path: str | None) -> list[str]:
+    runtimes: set[str] = set()
+    if str(python_path or "").strip() or shutil.which("python"):
+        runtimes.add("python")
+    if shutil.which("node"):
+        runtimes.add("node")
+    if shutil.which("java"):
+        runtimes.add("java")
+    return sorted(runtimes)
+
+
+def _host_available_surfaces(*, environment_root: str | None) -> list[str]:
+    surfaces = {"process", "network"}
+    if str(environment_root or "").strip():
+        surfaces.add("workspace")
+    if _host_os_name() in {"windows", "darwin", "linux"}:
+        surfaces.add("desktop-session")
+    return sorted(surfaces)
+
+
+def _runtime_provider_contract_kind(runtime_provider: object | None) -> str | None:
+    if callable(getattr(runtime_provider, "resolve_runtime_provider_contract", None)):
+        return "cooperative_provider_runtime"
+    return None
+
+
+def _project_install_provider_resolution_status(
+    *,
+    metadata: dict[str, Any],
+) -> str:
+    provider_injection_mode = normalize_provider_injection_mode(
+        metadata.get("provider_injection_mode"),
+    )
+    compatibility = host_compatibility_requirements_from_metadata(metadata)
+    required_provider_contract_kind = str(
+        getattr(compatibility, "required_provider_contract_kind", None) or "",
+    ).strip()
+    if provider_injection_mode in {None, "none"} or not required_provider_contract_kind:
+        return "not_required"
+    return "pending"
+
+
+def _build_external_project_host_compatibility_context(
+    *,
+    requirements: object,
+    environment_root: str | None,
+    python_path: str | None,
+    runtime_provider: object | None,
+) -> HostCompatibilityContext:
+    required_surfaces = list(getattr(requirements, "required_surfaces", []) or [])
+    provider_contract_kind = _runtime_provider_contract_kind(runtime_provider)
+    env_keys = list(os.environ.keys())
+    if provider_contract_kind is not None:
+        env_keys.append("COPAW_PROVIDER_API_KEY")
+    return HostCompatibilityContext(
+        os_name=_host_os_name(),
+        architecture=_host_architecture(),
+        available_runtimes=_host_available_runtimes(python_path=python_path),
+        provider_contract_kind=provider_contract_kind,
+        available_surfaces=_host_available_surfaces(
+            environment_root=environment_root,
+        ),
+        env_keys=env_keys,
+        config_locations=(
+            ["copaw://providers/default"] if provider_contract_kind is not None else []
+        ),
+        workspace_policy=(
+            "package-environment-root"
+            if "workspace" in required_surfaces and str(environment_root or "").strip()
+            else "isolated-runtime-root"
+        ),
+    )
+
+
+def _serialize_host_compatibility_context(
+    context: HostCompatibilityContext,
+) -> dict[str, object]:
+    return {
+        "os_name": context.os_name,
+        "architecture": context.architecture,
+        "available_runtimes": list(context.available_runtimes),
+        "provider_contract_kind": context.provider_contract_kind,
+        "available_surfaces": list(context.available_surfaces),
+        "env_keys": list(context.env_keys),
+        "config_locations": list(context.config_locations),
+        "workspace_policy": context.workspace_policy,
+    }
+
+
+def _evaluate_external_project_host_compatibility(
+    *,
+    metadata: dict[str, Any],
+    environment_root: str | None,
+    python_path: str | None,
+    runtime_provider: object | None,
+) -> tuple[str, list[str], list[str], dict[str, object]]:
+    requirements = host_compatibility_requirements_from_metadata(metadata)
+    if requirements is None:
+        return "unknown", [], [], {}
+    context = _build_external_project_host_compatibility_context(
+        requirements=requirements,
+        environment_root=environment_root,
+        python_path=python_path,
+        runtime_provider=runtime_provider,
+    )
+    result = evaluate_donor_host_compatibility(
+        requirements=requirements,
+        context=context,
+        bridges=HostCompatibilityBridgeCatalog(
+            env_key_aliases={"OPENAI_API_KEY": ["COPAW_PROVIDER_API_KEY"]},
+            config_location_aliases={
+                "~/.config/openai/config.json": ["copaw://providers/default"],
+            },
+        ),
+    )
+    return (
+        result.status,
+        list(result.blockers),
+        list(result.bridge_reasons),
+        _serialize_host_compatibility_context(context),
+    )
+
+
+def _project_install_contract_metadata(result: dict[str, object]) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    provider_injection_mode = normalize_provider_injection_mode(
+        result.get("provider_injection_mode"),
+    )
+    if provider_injection_mode is not None:
+        metadata["provider_injection_mode"] = provider_injection_mode
+    execution_envelope = dict(result.get("execution_envelope") or {})
+    if execution_envelope:
+        metadata["execution_envelope"] = execution_envelope
+    host_compatibility_requirements = dict(
+        result.get("host_compatibility_requirements") or {},
+    )
+    if host_compatibility_requirements:
+        metadata["host_compatibility_requirements"] = host_compatibility_requirements
+    host_compatibility_context = dict(result.get("host_compatibility_context") or {})
+    if host_compatibility_context:
+        metadata["host_compatibility_context"] = host_compatibility_context
+    compatibility_blockers = [
+        str(item).strip()
+        for item in list(result.get("compatibility_blockers") or [])
+        if str(item).strip()
+    ]
+    if compatibility_blockers:
+        metadata["compatibility_blockers"] = compatibility_blockers
+    compatibility_bridge_reasons = [
+        str(item).strip()
+        for item in list(result.get("compatibility_bridge_reasons") or [])
+        if str(item).strip()
+    ]
+    if compatibility_bridge_reasons:
+        metadata["compatibility_bridge_reasons"] = compatibility_bridge_reasons
+    return metadata
+
+
 def _external_project_environments_dir() -> Path:
     return WORKING_DIR / "external_capability_packages"
 
@@ -1012,6 +1217,7 @@ async def _install_external_project_capability(
     healthcheck_command: str | None,
     enable: bool,
     overwrite: bool,
+    runtime_provider: object | None = None,
 ) -> dict[str, object]:
     normalized_source_url = _normalize_github_project_source_url(source_url)
     config = load_config()
@@ -1159,6 +1365,28 @@ async def _install_external_project_capability(
                 python_path=final_environment["python_path"],
                 scripts_dir=final_environment["scripts_dir"],
             )
+        compatibility_status = "unknown"
+        compatibility_blockers: list[str] = []
+        compatibility_bridge_reasons: list[str] = []
+        host_compatibility_context: dict[str, object] = {}
+        compatibility_status, compatibility_blockers, compatibility_bridge_reasons, host_compatibility_context = (
+            _evaluate_external_project_host_compatibility(
+                metadata=surface_metadata,
+                environment_root=str(final_environment.get("environment_root") or ""),
+                python_path=str(final_environment.get("python_path") or ""),
+                runtime_provider=runtime_provider,
+            )
+        )
+        provider_resolution_status = _project_install_provider_resolution_status(
+            metadata=surface_metadata,
+        )
+        provider_injection_mode = normalize_provider_injection_mode(
+            surface_metadata.get("provider_injection_mode"),
+        )
+        execution_envelope = donor_execution_envelope_from_metadata(surface_metadata)
+        host_compatibility_requirements = host_compatibility_requirements_from_metadata(
+            surface_metadata,
+        )
         protocol_surface = classify_external_protocol_surface(metadata=surface_metadata)
         compiled_adapter_contract = compile_external_adapter_contract(
             capability_id=capability_id,
@@ -1250,6 +1478,23 @@ async def _install_external_project_capability(
                 if compiled_adapter_contract is not None
                 else {}
             ),
+            "verified_stage": "installed",
+            "provider_resolution_status": provider_resolution_status,
+            "compatibility_status": compatibility_status,
+            "provider_injection_mode": provider_injection_mode,
+            "execution_envelope": (
+                execution_envelope.model_dump(mode="json")
+                if execution_envelope is not None
+                else {}
+            ),
+            "host_compatibility_requirements": (
+                host_compatibility_requirements.model_dump(mode="json")
+                if host_compatibility_requirements is not None
+                else {}
+            ),
+            "host_compatibility_context": host_compatibility_context,
+            "compatibility_blockers": compatibility_blockers,
+            "compatibility_bridge_reasons": compatibility_bridge_reasons,
             "protocol_surface_kind": protocol_surface.protocol_surface_kind,
             "transport_kind": protocol_surface.transport_kind,
             "adapter_blockers": list(protocol_surface.blockers),
@@ -1490,19 +1735,32 @@ def _sync_project_trial_truth(
             "adapter_blockers": list(adapter_contract.get("promotion_blockers") or []),
         },
     )
-    candidate_service.update_candidate_status(
+    project_install_metadata = _project_install_contract_metadata(result)
+    project_probe_metadata = _project_probe_metadata(result)
+    verdict, summary, probe_evidence_refs = _project_trial_verdict_and_summary(result)
+    verified_stage = str(result.get("verified_stage") or "").strip() or None
+    provider_resolution_status = (
+        str(result.get("provider_resolution_status") or "").strip() or None
+    )
+    compatibility_status = str(result.get("compatibility_status") or "").strip() or None
+    updated_candidate = candidate_service.update_candidate_status(
         normalized_candidate_id,
         status="trial",
         lifecycle_stage="trial",
+        verified_stage=verified_stage,
+        provider_resolution_status=provider_resolution_status,
+        compatibility_status=compatibility_status,
         metadata_updates={
             "resolution_kind": "adopt_external_donor",
             "selected_scope": selected_scope,
             "installed_capability_ids": installed_capability_ids,
             "target_agent_id": str(target_agent_id or "").strip() or None,
             **adapter_metadata,
+            **project_install_metadata,
+            **project_probe_metadata,
         },
     )
-    trial_service.create_or_update_trial(
+    trial_record = trial_service.create_or_update_trial(
         candidate_id=normalized_candidate_id,
         donor_id=candidate.donor_id,
         package_id=candidate.package_id,
@@ -1515,15 +1773,58 @@ def _sync_project_trial_truth(
         replacement_relation=candidate.replacement_relation,
         scope_type=scope_type,
         scope_ref=scope_ref,
-        verdict="pending",
-        summary="Project donor attached to scoped trial and awaiting runtime evidence.",
+        verdict=verdict,
+        summary=summary,
+        evidence_refs=probe_evidence_refs,
+        verified_stage=verified_stage,
+        provider_resolution_status=provider_resolution_status,
+        compatibility_status=compatibility_status,
         metadata={
             "target_agent_id": str(target_agent_id or "").strip() or None,
             "selected_scope": selected_scope,
             "installed_capability_ids": installed_capability_ids,
             **adapter_metadata,
+            **project_install_metadata,
+            **project_probe_metadata,
         },
     )
+    decision_service = _get_skill_lifecycle_decision_service(request)
+    if decision_service is not None:
+        decision_service.create_decision(
+            candidate_id=normalized_candidate_id,
+            donor_id=candidate.donor_id,
+            package_id=candidate.package_id,
+            source_profile_id=candidate.source_profile_id,
+            canonical_package_id=candidate.canonical_package_id,
+            candidate_source_lineage=candidate.candidate_source_lineage,
+            source_aliases=list(candidate.source_aliases),
+            equivalence_class=candidate.equivalence_class,
+            capability_overlap_score=candidate.capability_overlap_score,
+            replacement_relation=candidate.replacement_relation,
+            decision_kind="continue_trial",
+            from_stage=candidate.lifecycle_stage,
+            to_stage="trial",
+            reason=summary,
+            applied_by=str(target_agent_id or "").strip() or "capability-market",
+            evidence_refs=probe_evidence_refs,
+            verified_stage=verified_stage,
+            provider_resolution_status=provider_resolution_status,
+            compatibility_status=compatibility_status,
+            metadata={
+                "target_agent_id": str(target_agent_id or "").strip() or None,
+                "selected_scope": selected_scope,
+                "installed_capability_ids": installed_capability_ids,
+                "scope_type": scope_type,
+                "scope_ref": scope_ref,
+                **adapter_metadata,
+                **project_install_metadata,
+                **project_probe_metadata,
+            },
+        )
+    donor_service = getattr(request.app.state, "capability_donor_service", None)
+    register_candidate_source = getattr(donor_service, "register_candidate_source", None)
+    if updated_candidate is not None and callable(register_candidate_source):
+        register_candidate_source(updated_candidate)
 
 
 def _response_workflow_resume(
@@ -1538,6 +1839,109 @@ def _response_workflow_resume(
             f"?tab=automation&template={workflow_resume.template_id}"
         ),
     )
+
+
+def _project_probe_metadata(result: dict[str, object]) -> dict[str, object]:
+    probe_result = result.get("probe_result")
+    if not isinstance(probe_result, dict):
+        return {}
+    metadata: dict[str, object] = {"probe_result": dict(probe_result)}
+    selected_adapter_action_id = str(
+        result.get("selected_adapter_action_id")
+        or probe_result.get("selected_adapter_action_id")
+        or "",
+    ).strip()
+    if selected_adapter_action_id:
+        metadata["selected_adapter_action_id"] = selected_adapter_action_id
+    probe_evidence_refs = [
+        str(item).strip()
+        for item in list(probe_result.get("probe_evidence_refs") or [])
+        if str(item).strip()
+    ]
+    if probe_evidence_refs:
+        metadata["probe_evidence_refs"] = probe_evidence_refs
+    return metadata
+
+
+def _project_trial_verdict_and_summary(
+    result: dict[str, object],
+) -> tuple[str, str, list[str]]:
+    probe_result = result.get("probe_result")
+    if not isinstance(probe_result, dict):
+        return (
+            "pending",
+            "Project donor attached to scoped trial and awaiting runtime evidence.",
+            [],
+        )
+    evidence_refs = [
+        str(item).strip()
+        for item in list(probe_result.get("probe_evidence_refs") or [])
+        if str(item).strip()
+    ]
+    summary = str(probe_result.get("summary") or "").strip()
+    attempted = bool(probe_result.get("attempted"))
+    success = bool(probe_result.get("success"))
+    if attempted and success:
+        return (
+            "passed",
+            summary or "Project donor probe succeeded through the formal execution contract.",
+            evidence_refs,
+        )
+    if attempted:
+        return (
+            "failed",
+            summary or "Project donor probe failed through the formal execution contract.",
+            evidence_refs,
+        )
+    return (
+        "pending",
+        summary or "Project donor attached to scoped trial and awaiting runtime evidence.",
+        evidence_refs,
+    )
+
+
+def _resolve_project_probe_capability_id(result: dict[str, object]) -> str | None:
+    capability_kind = _normalize_external_capability_kind(result.get("capability_kind"))
+    compiled_adapter_id = str(result.get("compiled_adapter_id") or "").strip()
+    installed_capability_ids = _normalize_capability_ids(
+        list(result.get("installed_capability_ids") or []),
+    )
+    candidates: list[str] = []
+    if capability_kind == "adapter" and compiled_adapter_id:
+        candidates.append(compiled_adapter_id)
+    candidates.extend(installed_capability_ids)
+    for capability_id in candidates:
+        normalized = str(capability_id).strip()
+        if normalized:
+            return normalized
+    return None
+
+
+async def _probe_project_install_result(
+    request: Request,
+    *,
+    result: dict[str, object],
+    target_agent_id: str | None,
+    selected_seat_ref: str | None,
+) -> dict[str, object] | None:
+    capability_id = _resolve_project_probe_capability_id(result)
+    if capability_id is None:
+        return None
+    probe_service = DonorProbeService(capability_service=_get_capability_service(request))
+    probe_result = await probe_service.probe_capability(
+        capability_id=capability_id,
+        owner_agent_id=str(target_agent_id or "").strip() or "copaw-agent-runner",
+        session_mount_id=str(selected_seat_ref or "").strip() or None,
+        environment_ref=str(selected_seat_ref or "").strip() or None,
+        verified_stage=str(result.get("verified_stage") or "").strip() or None,
+        provider_resolution_status=str(
+            result.get("provider_resolution_status") or "",
+        ).strip()
+        or None,
+        compatibility_status=str(result.get("compatibility_status") or "").strip()
+        or None,
+    )
+    return dict(probe_result) if isinstance(probe_result, dict) else None
 
 
 def _ensure_target_agents_exist(
@@ -2669,6 +3073,7 @@ async def install_market_project_donor(
         healthcheck_command=payload.healthcheck_command,
         enable=payload.enable,
         overwrite=payload.overwrite,
+        runtime_provider=getattr(request.app.state, "runtime_provider", None),
     )
     if inspect.isawaitable(install_result):
         install_result = await install_result
@@ -2738,6 +3143,24 @@ async def install_market_project_donor(
                 "scope_ref": str(payload.selected_seat_ref or "").strip() or target_agent_id,
             }
     result["trial_attachment"] = trial_attachment
+    if bool(result.get("installed", True)):
+        probe_result = await _probe_project_install_result(
+            request,
+            result=result,
+            target_agent_id=target_agent_id,
+            selected_seat_ref=str(payload.selected_seat_ref or "").strip() or None,
+        )
+        if isinstance(probe_result, dict):
+            result["probe_result"] = probe_result
+            for key in (
+                "verified_stage",
+                "provider_resolution_status",
+                "compatibility_status",
+                "selected_adapter_action_id",
+            ):
+                resolved = str(probe_result.get(key) or "").strip()
+                if resolved:
+                    result[key] = resolved
     _sync_project_trial_truth(
         request,
         candidate_id=resolved_candidate_id,
@@ -2766,10 +3189,20 @@ async def install_market_project_donor(
             if isinstance(result.get("adapter_contract"), dict)
             else {}
         ),
+        verified_stage=str(result.get("verified_stage") or "unverified"),
+        provider_resolution_status=str(
+            result.get("provider_resolution_status") or "pending",
+        ),
+        compatibility_status=str(result.get("compatibility_status") or "unknown"),
         target_agent_id=target_agent_id,
         trial_attachment=(
             dict(result.get("trial_attachment"))
             if isinstance(result.get("trial_attachment"), dict)
+            else None
+        ),
+        probe_result=(
+            dict(result.get("probe_result"))
+            if isinstance(result.get("probe_result"), dict)
             else None
         ),
     )
