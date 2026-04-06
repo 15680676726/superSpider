@@ -1168,3 +1168,29 @@
   - `python -m pytest tests/state/test_reporting_service.py -q` -> `8 passed`
   - `python -m pytest tests/app/test_predictions_api.py -k "create_list_and_detail or consume_strategy_trigger_rules_into_signals_and_recommendations or recommend_schedule_copy_points_to_fixed_sop_instead_of_workflow_templates or collects_industry_tasks_without_goal_anchor or reporting_surface_prediction_metrics" -q` -> `5 passed, 13 deselected`
   - `cmd /c npm --prefix console run test -- src/pages/Insights/presentation.test.ts` -> `1 passed`
+
+### 3.3.4 `2026-04-07` residual-audit clarification
+
+- 仍然成立的残留判断：
+  - `industry` 域仍未完全纯化；残留主要在 bootstrap seed、统计视图、cleanup/archive、历史桥接，不在 runtime kickoff / auto-resume 前门。
+  - reporting / prediction 已经是 task-first / industry-first / focus-first，但仍保留从 task 派生 goal 语义的次级分析链。
+  - workflow 仍保留 `linked_goal_ids / linked_schedule_ids` 作为历史关联语言；它们不是当前 live main-chain truth。
+  - `runtime_service_graph.py` + `runtime_bootstrap_models.py` 的手工 wiring graph 仍然偏重。
+- 已经过时、不应继续复述的判断：
+  - `README.md` 仍在强调 `goal-first execution`。
+  - `service_activation.py` 仍通过 legacy goal dispatch 驱动 bootstrap `auto_dispatch`。
+  - workflow schedule step 必须依赖持久化 `linked_schedule_ids` 才能恢复。
+  - workflow resume 会无条件回填 legacy `linked_goal_ids`。
+
+### 3.3.4 `2026-04-07` Buddy carrier direction-truth fix
+
+- Buddy onboarding 的正式方向边界已补正：`BuddyOnboardingService._ensure_growth_scaffold(...)` 不再把 `HumanProfile` 当前资料直接写进 `IndustryInstanceRecord.profile_payload`。
+- 当前权威口径收敛为：
+  - `HumanProfile` 负责人的当前真实情况
+  - `GrowthTarget` 负责已确认的主方向与最终目标
+  - `IndustryProfile` 只负责 Buddy execution carrier 的正式执行方向
+- 当前实现已新增 `_build_buddy_industry_profile(...)`，并把 Buddy carrier 的 `profile_payload` 改为合法 `IndustryProfile`：`industry <- primary_direction`、`goals <- [final_goal]`、`constraints <- human constraints`、`notes <- bootstrap context`。
+- 前端 `/industry` 当前载体调整页也已同步收口心智：表单文案从“行业”改为“正式方向”，并明确说明这里填写的是主脑当前执行方向，不是用户当前职业。
+- 本轮 focused verification：
+  - `PYTHONPATH=src python -m pytest tests/kernel/test_buddy_onboarding_service.py tests/app/test_buddy_cutover.py -q` -> `14 passed`
+  - `cmd /c npm --prefix console run test -- src/pages/Industry/pageHelpers.test.ts` -> `6 passed`

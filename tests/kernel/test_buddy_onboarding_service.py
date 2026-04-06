@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from copaw.industry.models import IndustryProfile
 from copaw.kernel.buddy_onboarding_service import (
     BuddyOnboardingService,
     _CREATOR_DIRECTION,
@@ -270,6 +271,40 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
 
     assignments = assignment_repository.list_assignments(industry_instance_id=instance.instance_id)
     assert any(assignment.industry_instance_id == instance.instance_id for assignment in assignments)
+
+
+def test_confirm_primary_direction_writes_direction_first_industry_profile(tmp_path) -> None:
+    service, store = _build_service_with_planning(tmp_path)
+    identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing", "content"],
+        strengths=["storytelling"],
+        constraints=["time", "money"],
+        goal_intention="I want a real creator direction that can change my life.",
+    )
+    clarification = service.answer_clarification_turn(
+        session_id=identity.session_id,
+        answer="I want a long-term creator path with proof of work and income autonomy.",
+        existing_question_count=9,
+    )
+
+    result = service.confirm_primary_direction(
+        session_id=identity.session_id,
+        selected_direction=clarification.recommended_direction,
+    )
+
+    industry_repository = SqliteIndustryInstanceRepository(store)
+    instance = industry_repository.get_instance(f"buddy:{result.growth_target.profile_id}")
+
+    assert instance is not None
+    profile = IndustryProfile.model_validate(instance.profile_payload)
+    assert profile.industry == result.growth_target.primary_direction
+    assert result.growth_target.final_goal in profile.goals
+    assert set(profile.constraints) >= {"time", "money"}
+    assert "profession" not in instance.profile_payload
+    assert "current_stage" not in instance.profile_payload
 
 
 def test_record_chat_interaction_increments_strong_pull_for_stuck_or_avoidance_messages(

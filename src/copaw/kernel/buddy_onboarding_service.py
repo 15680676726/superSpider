@@ -12,6 +12,7 @@ from .buddy_execution_carrier import (
     EXECUTION_CORE_ROLE_ID,
     build_buddy_execution_carrier_handoff,
 )
+from ..industry.models import IndustryProfile
 from ..state import CompanionRelationship, GrowthTarget, HumanProfile
 from ..state.main_brain_service import (
     AssignmentService,
@@ -336,6 +337,27 @@ def _derive_why_it_matters(*, profile: HumanProfile) -> str:
     return (
         f"因为{profile.display_name}需要一个足够稳定的主方向，"
         "让每一次当下努力都能慢慢积累成真正想要的人生。"
+    )
+
+
+def _build_buddy_industry_profile(
+    *,
+    profile: HumanProfile,
+    growth_target: GrowthTarget,
+) -> IndustryProfile:
+    context_bits = _unique(
+        [
+            f"human_display_name={profile.display_name}",
+            f"current_profession={profile.profession}",
+            f"current_stage={profile.current_stage}",
+            f"goal_intention={profile.goal_intention}",
+        ]
+    )
+    return IndustryProfile(
+        industry=growth_target.primary_direction,
+        goals=[growth_target.final_goal],
+        constraints=list(profile.constraints),
+        notes=" | ".join(context_bits),
     )
 
 
@@ -672,16 +694,10 @@ class BuddyOnboardingService:
             summary=growth_target.final_goal,
             owner_scope=profile.profile_id,
             status="active",
-            profile_payload={
-                "profile_id": profile.profile_id,
-                "display_name": profile.display_name,
-                "profession": profile.profession,
-                "current_stage": profile.current_stage,
-                "goal_intention": profile.goal_intention,
-                "interests": list(profile.interests),
-                "strengths": list(profile.strengths),
-                "constraints": list(profile.constraints),
-            },
+            profile_payload=_build_buddy_industry_profile(
+                profile=profile,
+                growth_target=growth_target,
+            ).model_dump(mode="json"),
             execution_core_identity_payload={
                 "profile_id": profile.profile_id,
                 "primary_direction": growth_target.primary_direction,

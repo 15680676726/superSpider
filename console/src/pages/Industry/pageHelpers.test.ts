@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { presentRuntimeStatusLabel } from "../../runtime/executionPresentation";
 import { runtimeStatusColor as sharedRuntimeStatusColor } from "../../runtime/tagSemantics";
 import {
+  INDUSTRY_EXPERIENCE_TEXT,
   INDUSTRY_TEXT,
   formatIndustryDetailStats,
   formatIndustryDisplayToken,
@@ -62,5 +63,12 @@ describe("industry page helpers", () => {
     expect(runtimeStatusColor("idle-loop")).toBe(
       sharedRuntimeStatusColor("idle-loop"),
     );
+  });
+
+  it("frames carrier adjustment around formal direction instead of the human's current profession", () => {
+    expect(INDUSTRY_TEXT.formIndustry).toBe("正式方向");
+    expect(INDUSTRY_TEXT.formIndustryRequired).toBe("请输入正式方向");
+    expect(INDUSTRY_EXPERIENCE_TEXT.prepareBriefHint).toContain("主脑当前执行方向");
+    expect(INDUSTRY_EXPERIENCE_TEXT.prepareBriefHint).toContain("不是用户当前职业");
   });
 });

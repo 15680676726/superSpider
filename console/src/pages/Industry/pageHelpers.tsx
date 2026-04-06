@@ -29,9 +29,9 @@ const { TextArea } = Input;
 const INDUSTRY_TEXT = {
   pageTitle: "执行载体中心",
   prepareBrief: "填写载体调整简报",
-  formIndustry: "行业",
-  formIndustryRequired: "请输入行业",
-  formIndustryPlaceholder: "例如：工业自动化 / 电商运营 / 本地生活",
+  formIndustry: "正式方向",
+  formIndustryRequired: "请输入正式方向",
+  formIndustryPlaceholder: "例如：独立创作 / 设计系统 / 策略运营",
   formCompany: "公司/品牌",
   formCompanyPlaceholder: "输入公司、品牌或客户名称",
   formProduct: "产品/服务",
@@ -134,7 +134,8 @@ const INDUSTRY_TEXT = {
 
 const INDUSTRY_EXPERIENCE_TEXT = {
   pageDescription: "这里负责查看、校准和调整当前执行载体，不再承担首次建档。",
-  prepareBriefHint: "尽量把当前行业、客户、目标和限制写清楚，主脑会据此重新生成执行载体调整草案。",
+  prepareBriefHint:
+    "尽量把当前要承接的正式方向、客户、目标和限制写清楚。这里填的是主脑当前执行方向，不是用户当前职业。",
   formExperienceMode: "协作模式",
   formExperienceModeSystemLed: "系统主导",
   formExperienceModeOperatorGuided: "人工引导",
