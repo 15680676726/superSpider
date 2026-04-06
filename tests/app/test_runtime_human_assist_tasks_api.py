@@ -248,6 +248,7 @@ def test_runtime_center_chat_run_intercepts_human_assist_submission_when_explici
             "user_id": "host-user",
             "channel": "console",
             "requested_actions": ["submit_human_assist"],
+            "media_analysis_ids": ["proof:receipt-upload"],
             "input": [
                 {
                     "role": "user",
@@ -326,7 +327,7 @@ def test_runtime_center_chat_run_preserves_requested_actions_in_submission_paylo
     assert recording_service.get_current_task(chat_thread_id=task.chat_thread_id) is None
 
 
-def test_runtime_center_chat_run_accepts_human_assist_submission_from_plain_text_anchor_match(
+def test_runtime_center_chat_run_requires_formal_evidence_for_evidence_verified_human_assist_submission(
     tmp_path,
 ) -> None:
     app, service, turn_executor, query_execution_service = _build_human_assist_app(
@@ -361,9 +362,63 @@ def test_runtime_center_chat_run_accepts_human_assist_submission_from_plain_text
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert len(turn_executor.stream_calls) == 0
-    assert query_execution_service.calls == [issued.id]
-    assert service.get_task(issued.id).status == "closed"
-    assert '"outcome":"accepted"' in response.text
+    assert query_execution_service.calls == []
+    assert service.get_task(issued.id).status == "need_more_evidence"
+    assert '"outcome":"need_more_evidence"' in response.text
+
+
+def test_runtime_center_chat_run_requires_state_contract_for_state_change_verified_human_assist_submission(
+    tmp_path,
+) -> None:
+    app, service, turn_executor, query_execution_service = _build_human_assist_app(
+        tmp_path,
+    )
+    issued = service.issue_task(
+        _make_human_assist_task(task_id="task-state-change").model_copy(
+            update={
+                "acceptance_mode": "state_change_verified",
+                "acceptance_spec": {
+                    "version": "v1",
+                    "hard_anchors": ["receipt"],
+                    "result_anchors": ["uploaded"],
+                    "required_state_paths": ["state_change.receipt_status"],
+                    "failure_hint": "Provide a structured state-change proof before acceptance.",
+                },
+            },
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/runtime-center/chat/run",
+        json={
+            "id": "req-human-assist-state-change",
+            "session_id": issued.chat_thread_id,
+            "thread_id": issued.chat_thread_id,
+            "user_id": "host-user",
+            "channel": "console",
+            "media_analysis_ids": ["proof:state-1"],
+            "input": [
+                {
+                    "role": "user",
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "I finished it. I uploaded the receipt proof.",
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert len(turn_executor.stream_calls) == 0
+    assert query_execution_service.calls == []
+    assert service.get_task(issued.id).status == "need_more_evidence"
+    assert '"outcome":"need_more_evidence"' in response.text
 
 
 def test_runtime_center_chat_run_falls_back_to_normal_chat_when_no_current_human_assist_task(
@@ -548,6 +603,7 @@ def test_runtime_center_chat_run_marks_handoff_blocked_when_resume_cannot_start(
             "user_id": "host-user",
             "channel": "console",
             "requested_actions": ["submit_human_assist"],
+            "media_analysis_ids": ["proof:receipt-upload"],
             "input": [
                 {
                     "role": "user",
@@ -595,6 +651,7 @@ def test_runtime_center_chat_run_retries_human_assist_resume_before_blocking(
             "user_id": "host-user",
             "channel": "console",
             "requested_actions": ["submit_human_assist"],
+            "media_analysis_ids": ["proof:receipt-upload"],
             "input": [
                 {
                     "role": "user",
@@ -635,6 +692,7 @@ def test_runtime_center_chat_run_marks_resume_queued_before_async_resume_closes(
             "user_id": "host-user",
             "channel": "console",
             "requested_actions": ["submit_human_assist"],
+            "media_analysis_ids": ["proof:receipt-upload"],
             "input": [
                 {
                     "role": "user",

@@ -17,7 +17,7 @@ export interface RuntimeChatBinding {
 }
 
 interface BuddyCarrierChatBindingParams {
-  sessionId: string;
+  sessionId?: string | null;
   profileId: string;
   profileDisplayName?: string | null;
   executionCarrier: BuddyExecutionCarrier;
@@ -116,6 +116,10 @@ export function buildBuddyExecutionCarrierChatBinding(
   if (!profileId) {
     throw new Error("Buddy profile id is required to open runtime chat.");
   }
+  const sessionId =
+    typeof params.sessionId === "string" && params.sessionId.trim()
+      ? params.sessionId.trim()
+      : null;
   const { threadId, controlThreadId, contextKey } = resolveBuddyCarrierThreadId(
     params.executionCarrier,
   );
@@ -145,7 +149,7 @@ export function buildBuddyExecutionCarrierChatBinding(
       session_kind: "industry-control-thread",
       entry_source: params.entrySource || "buddy-onboarding",
       buddy_profile_id: profileId,
-      buddy_session_id: params.sessionId,
+      buddy_session_id: sessionId || undefined,
       industry_instance_id: params.executionCarrier.instance_id || undefined,
       owner_scope: params.executionCarrier.owner_scope || profileId,
       control_thread_id: controlThreadId || undefined,

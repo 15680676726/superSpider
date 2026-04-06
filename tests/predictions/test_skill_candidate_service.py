@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from copaw.capabilities.models import CapabilityMount
@@ -509,6 +510,212 @@ def test_capability_candidate_service_persists_candidate_attribution_fields(
     assert reloaded.equivalence_class == "pkg:research-pack"
     assert reloaded.capability_overlap_score == 0.88
     assert reloaded.replacement_relation == "replace_requested"
+
+
+def test_capability_evolution_records_carry_formal_donor_execution_contract_statuses() -> None:
+    from copaw.state.models_capability_evolution import (
+        CapabilityCandidateRecord,
+        SkillLifecycleDecisionRecord,
+        SkillTrialRecord,
+    )
+
+    candidate = CapabilityCandidateRecord(
+        candidate_kind="adapter",
+        target_scope="seat",
+        verified_stage="runtime_operable",
+        provider_resolution_status="resolved",
+        compatibility_status="compatible_native",
+    )
+    trial = SkillTrialRecord(
+        candidate_id=candidate.candidate_id,
+        scope_ref="seat-1",
+        verified_stage="adapter_probe_passed",
+        provider_resolution_status="resolved",
+        compatibility_status="compatible_via_bridge",
+    )
+    decision = SkillLifecycleDecisionRecord(
+        candidate_id=candidate.candidate_id,
+        decision_kind="promote",
+        verified_stage="primary_action_verified",
+        provider_resolution_status="resolved",
+        compatibility_status="compatible_native",
+    )
+
+    assert candidate.verified_stage == "runtime_operable"
+    assert candidate.provider_resolution_status == "resolved"
+    assert candidate.compatibility_status == "compatible_native"
+    assert trial.verified_stage == "adapter_probe_passed"
+    assert trial.provider_resolution_status == "resolved"
+    assert trial.compatibility_status == "compatible_via_bridge"
+    assert decision.verified_stage == "primary_action_verified"
+    assert decision.provider_resolution_status == "resolved"
+    assert decision.compatibility_status == "compatible_native"
+
+
+def test_capability_candidate_service_persists_formal_donor_execution_contract_statuses(
+    tmp_path: Path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    candidate_service = CapabilityCandidateService(state_store=state_store)
+
+    created = candidate_service.normalize_candidate_source(
+        candidate_kind="adapter",
+        target_scope="seat",
+        target_role_id="researcher",
+        target_seat_ref="seat-primary",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://example.com/adapters/research-bridge.zip",
+        candidate_source_version="2.0.0",
+        ingestion_mode="prediction-recommendation",
+        proposed_skill_name="research_bridge",
+        summary="Research bridge donor candidate.",
+        verified_stage="runtime_operable",
+        provider_resolution_status="resolved",
+        compatibility_status="compatible_native",
+    )
+
+    with state_store.connection() as conn:
+        row = conn.execute(
+            """
+            SELECT verified_stage, provider_resolution_status, compatibility_status
+            FROM capability_candidates
+            WHERE candidate_id = ?
+            """,
+            (created.candidate_id,),
+        ).fetchone()
+
+    reloaded_service = CapabilityCandidateService(
+        state_store=SQLiteStateStore(tmp_path / "state.sqlite3"),
+    )
+    reloaded = reloaded_service.get_candidate(created.candidate_id)
+
+    assert row is not None
+    assert row["verified_stage"] == "runtime_operable"
+    assert row["provider_resolution_status"] == "resolved"
+    assert row["compatibility_status"] == "compatible_native"
+    assert reloaded is not None
+    assert reloaded.verified_stage == "runtime_operable"
+    assert reloaded.provider_resolution_status == "resolved"
+    assert reloaded.compatibility_status == "compatible_native"
+
+
+def test_capability_candidate_service_updates_formal_donor_execution_contract_statuses(
+    tmp_path: Path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    candidate_service = CapabilityCandidateService(state_store=state_store)
+
+    created = candidate_service.normalize_candidate_source(
+        candidate_kind="adapter",
+        target_scope="seat",
+        target_role_id="researcher",
+        target_seat_ref="seat-primary",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://example.com/adapters/research-bridge.zip",
+        candidate_source_version="2.0.0",
+        ingestion_mode="prediction-recommendation",
+        proposed_skill_name="research_bridge",
+        summary="Research bridge donor candidate.",
+    )
+    updated = candidate_service.update_candidate_status(
+        created.candidate_id,
+        verified_stage="adapter_probe_passed",
+        provider_resolution_status="resolved",
+        compatibility_status="compatible_via_bridge",
+    )
+
+    reloaded = CapabilityCandidateService(
+        state_store=SQLiteStateStore(tmp_path / "state.sqlite3"),
+    ).get_candidate(created.candidate_id)
+
+    assert updated is not None
+    assert updated.verified_stage == "adapter_probe_passed"
+    assert updated.provider_resolution_status == "resolved"
+    assert updated.compatibility_status == "compatible_via_bridge"
+    assert reloaded is not None
+    assert reloaded.verified_stage == "adapter_probe_passed"
+    assert reloaded.provider_resolution_status == "resolved"
+    assert reloaded.compatibility_status == "compatible_via_bridge"
+
+
+def test_capability_evolution_schema_migrates_formal_donor_execution_contract_columns(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "legacy.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE capability_candidates (
+                candidate_id TEXT PRIMARY KEY,
+                donor_id TEXT,
+                package_id TEXT,
+                source_profile_id TEXT,
+                canonical_package_id TEXT,
+                candidate_source_kind TEXT,
+                candidate_source_ref TEXT,
+                candidate_source_version TEXT,
+                target_scope TEXT,
+                target_role_id TEXT,
+                target_seat_ref TEXT,
+                equivalence_class TEXT,
+                updated_at TEXT
+            );
+            CREATE TABLE skill_trials (
+                trial_id TEXT PRIMARY KEY,
+                candidate_id TEXT,
+                donor_id TEXT,
+                package_id TEXT,
+                source_profile_id TEXT,
+                scope_type TEXT,
+                scope_ref TEXT,
+                updated_at TEXT
+            );
+            CREATE TABLE skill_lifecycle_decisions (
+                decision_id TEXT PRIMARY KEY,
+                candidate_id TEXT,
+                donor_id TEXT,
+                package_id TEXT,
+                source_profile_id TEXT,
+                decision_kind TEXT,
+                updated_at TEXT
+            );
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    store = SQLiteStateStore(db_path)
+    store.initialize()
+
+    with store.connection() as conn:
+        candidate_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(capability_candidates)")
+        }
+        trial_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(skill_trials)")
+        }
+        decision_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(skill_lifecycle_decisions)")
+        }
+
+    assert {
+        "verified_stage",
+        "provider_resolution_status",
+        "compatibility_status",
+    }.issubset(candidate_columns)
+    assert {
+        "verified_stage",
+        "provider_resolution_status",
+        "compatibility_status",
+    }.issubset(trial_columns)
+    assert {
+        "verified_stage",
+        "provider_resolution_status",
+        "compatibility_status",
+    }.issubset(decision_columns)
 
 
 def test_import_normalized_discovery_hits_preserves_protocol_surface_metadata(

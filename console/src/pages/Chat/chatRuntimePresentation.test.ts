@@ -61,6 +61,8 @@ describe("chatRuntimePresentation", () => {
         threadBootstrapError: null,
         hasBoundAgentContext: true,
         effectiveThreadPending: true,
+        allowUnboundBuddyShell: false,
+        disableComposer: false,
       }).shouldRenderChatUi,
     ).toBe(false);
 
@@ -72,8 +74,42 @@ describe("chatRuntimePresentation", () => {
         threadBootstrapError: null,
         hasBoundAgentContext: true,
         effectiveThreadPending: false,
+        allowUnboundBuddyShell: false,
+        disableComposer: false,
       }).shouldRenderChatUi,
     ).toBe(true);
+  });
+
+  it("keeps the buddy naming shell visible without unlocking the live composer", () => {
+    const visibility = resolveChatUiVisibility({
+      requestedThreadId: null,
+      activeWindowThreadId: null,
+      requestedThreadLooksBound: false,
+      threadBootstrapError: null,
+      hasBoundAgentContext: false,
+      effectiveThreadPending: false,
+      allowUnboundBuddyShell: true,
+      disableComposer: false,
+    });
+
+    expect(visibility.shouldRenderChatUi).toBe(true);
+    expect(visibility.shouldRenderChatComposer).toBe(false);
+  });
+
+  it("keeps the naming gate visible on a bound thread while the live composer stays locked", () => {
+    const visibility = resolveChatUiVisibility({
+      requestedThreadId: "industry-chat:buddy:profile-1:execution-core",
+      activeWindowThreadId: "industry-chat:buddy:profile-1:execution-core",
+      requestedThreadLooksBound: true,
+      threadBootstrapError: null,
+      hasBoundAgentContext: true,
+      effectiveThreadPending: false,
+      allowUnboundBuddyShell: true,
+      disableComposer: true,
+    });
+
+    expect(visibility.shouldRenderChatUi).toBe(true);
+    expect(visibility.shouldRenderChatComposer).toBe(false);
   });
 
   it("presents canonical session kind labels", () => {

@@ -1309,11 +1309,13 @@ class _IndustryLifecycleMixin:
           post-bootstrap state.
         """
         auto_activate = bool(request.auto_activate)
+        auto_dispatch = auto_activate and bool(request.auto_dispatch)
+        execute = auto_dispatch and bool(request.execute)
         return (
             {
                 "auto_activate": auto_activate,
-                "auto_dispatch": auto_activate,
-                "execute": auto_activate,
+                "auto_dispatch": auto_dispatch,
+                "execute": execute,
             },
             False,
         )
@@ -1488,7 +1490,7 @@ class _IndustryLifecycleMixin:
         if normalized_agent_id is None or normalized_role_id is None:
             return False
         live_goal_statuses = {"draft", "active", "paused", "blocked"}
-        for goal_id in record.goal_ids or []:
+        for goal_id in self._resolve_instance_goal_ids(record):
             goal = self._goal_service.get_goal(goal_id)
             if goal is None:
                 continue
@@ -1504,7 +1506,7 @@ class _IndustryLifecycleMixin:
                 return True
         for schedule in self._list_instance_schedules(
             record.instance_id,
-            schedule_ids=list(record.schedule_ids or []),
+            schedule_ids=self._list_schedule_ids_for_instance(record.instance_id),
         ):
             if (
                 _string(schedule.get("owner_agent_id")) == normalized_agent_id
@@ -1857,7 +1859,7 @@ class _IndustryLifecycleMixin:
         stage: str,
     ) -> list[GoalRecord]:
         live_goals: list[GoalRecord] = []
-        for goal_id in list(record.goal_ids or []):
+        for goal_id in self._resolve_instance_goal_ids(record):
             goal = self._goal_service.get_goal(goal_id)
             if goal is None or goal.status not in {"active", "blocked"}:
                 continue
@@ -1885,7 +1887,7 @@ class _IndustryLifecycleMixin:
         pending_goals = self._list_pending_chat_kickoff_goals(record)
         pending_schedule_ids = self._list_pending_chat_kickoff_schedule_ids(
             instance_id=record.instance_id,
-            schedule_ids=list(record.schedule_ids or []),
+            schedule_ids=self._list_schedule_ids_for_instance(record.instance_id),
         )
         pending_learning = any(
             self._resolve_goal_kickoff_stage(
@@ -2037,7 +2039,7 @@ class _IndustryLifecycleMixin:
                     current_cycle,
                     goal_statuses=[
                         goal.status
-                        for owned_goal_id in record.goal_ids
+                        for owned_goal_id in self._resolve_instance_goal_ids(record)
                         if (goal := self._goal_service.get_goal(owned_goal_id)) is not None
                     ],
                     assignment_statuses=[
@@ -2109,7 +2111,7 @@ class _IndustryLifecycleMixin:
         pending_goals = self._list_pending_chat_kickoff_goals(record, team=team)
         pending_schedule_ids = self._list_pending_chat_kickoff_schedule_ids(
             instance_id=record.instance_id,
-            schedule_ids=list(record.schedule_ids or []),
+            schedule_ids=self._list_schedule_ids_for_instance(record.instance_id),
         )
         pending_goal_entries = [
             (
@@ -2357,7 +2359,7 @@ class _IndustryLifecycleMixin:
         pending_goals = self._list_pending_chat_kickoff_goals(record)
         pending_schedule_ids = self._list_pending_chat_kickoff_schedule_ids(
             instance_id=record.instance_id,
-            schedule_ids=list(record.schedule_ids or []),
+            schedule_ids=self._list_schedule_ids_for_instance(record.instance_id),
         )
         has_pending_learning = any(
             self._resolve_goal_kickoff_stage(
@@ -2856,29 +2858,14 @@ class _IndustryLifecycleMixin:
                 )
                 created_schedule_ids.append(schedule_seed.schedule_id)
                 created_schedule_titles.append(schedule_seed.title)
-        updated_goal_ids = _unique_strings(
-            list(record.goal_ids or []),
-            created_goal_ids,
-        )
-        updated_schedule_ids = _unique_strings(
-            list(record.schedule_ids or []),
-            created_schedule_ids,
-            reused_schedule_ids,
-        )
         goal_dispatches: list[dict[str, Any]] = []
         profile_payload = updated_profile.model_dump(mode="json")
         active_record = record
         profile_changed = profile_payload != dict(record.profile_payload or {})
-        if (
-            profile_changed
-            or updated_goal_ids != list(record.goal_ids or [])
-            or updated_schedule_ids != list(record.schedule_ids or [])
-        ):
+        if profile_changed:
             active_record = record.model_copy(
                 update={
                     "profile_payload": profile_payload,
-                    "goal_ids": updated_goal_ids,
-                    "schedule_ids": updated_schedule_ids,
                     "updated_at": _utc_now(),
                 },
             )
@@ -3313,7 +3300,7 @@ class _IndustryLifecycleMixin:
                 report_replan_sidecar=report_replan_payload,
             )
         goal_statuses: dict[str, str] = {}
-        for goal_id in list(record.goal_ids or []):
+        for goal_id in self._resolve_instance_goal_ids(record):
             goal = self._goal_service.get_goal(goal_id)
             if goal is None:
                 continue
@@ -3770,7 +3757,7 @@ class _IndustryLifecycleMixin:
         )
         goals_by_id = {
             goal_id: goal
-            for goal_id in record.goal_ids
+            for goal_id in self._resolve_instance_goal_ids(record)
             if (goal := self._goal_service.get_goal(goal_id)) is not None
         }
         assignments = self._list_assignment_records(
@@ -3952,7 +3939,10 @@ class _IndustryLifecycleMixin:
         if self._schedule_repository is None:
             return []
         records: list[ScheduleRecord] = []
-        for schedule_id in list(record.schedule_ids or []):
+        schedule_ids = list(record.schedule_ids or []) or self._list_schedule_ids_for_instance(
+            record.instance_id,
+        )
+        for schedule_id in schedule_ids:
             schedule = self._schedule_repository.get_schedule(schedule_id)
             if schedule is None or not schedule.enabled or schedule.status == "deleted":
                 continue

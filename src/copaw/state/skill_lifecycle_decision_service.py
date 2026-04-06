@@ -55,6 +55,26 @@ def _float_value(value: object | None) -> float | None:
         return None
 
 
+def _verified_stage(value: object | None, default: str) -> str:
+    from ..capabilities.external_adapter_contracts import normalize_verified_stage
+
+    return normalize_verified_stage(value) or default
+
+
+def _provider_resolution_status(value: object | None, default: str) -> str:
+    from ..capabilities.external_adapter_contracts import (
+        normalize_provider_resolution_status,
+    )
+
+    return normalize_provider_resolution_status(value) or default
+
+
+def _compatibility_status(value: object | None, default: str) -> str:
+    from ..capabilities.external_adapter_contracts import normalize_compatibility_status
+
+    return normalize_compatibility_status(value) or default
+
+
 def _merge_adapter_metadata(*payloads: object) -> dict[str, Any]:
     from ..capabilities.external_adapter_contracts import (
         merge_adapter_attribution_metadata,
@@ -92,6 +112,9 @@ class SkillLifecycleDecisionService:
         replacement_target_ids: list[str] | None = None,
         protection_lifted: bool = False,
         applied_by: str | None = None,
+        verified_stage: str | None = None,
+        provider_resolution_status: str | None = None,
+        compatibility_status: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> SkillLifecycleDecisionRecord:
         metadata_payload = _merge_adapter_metadata(metadata or {})
@@ -117,6 +140,24 @@ class SkillLifecycleDecisionService:
             replacement_target_ids=list(replacement_target_ids or []),
             protection_lifted=bool(protection_lifted),
             applied_by=_string(applied_by),
+            verified_stage=_verified_stage(
+                verified_stage
+                if verified_stage is not None
+                else metadata_payload.get("verified_stage"),
+                "unverified",
+            ),
+            provider_resolution_status=_provider_resolution_status(
+                provider_resolution_status
+                if provider_resolution_status is not None
+                else metadata_payload.get("provider_resolution_status"),
+                "pending",
+            ),
+            compatibility_status=_compatibility_status(
+                compatibility_status
+                if compatibility_status is not None
+                else metadata_payload.get("compatibility_status"),
+                "unknown",
+            ),
             metadata=metadata_payload,
         )
         self._upsert_record(record)
@@ -174,6 +215,9 @@ class SkillLifecycleDecisionService:
                     replacement_target_ids_json,
                     protection_lifted,
                     applied_by,
+                    verified_stage,
+                    provider_resolution_status,
+                    compatibility_status,
                     metadata_json,
                     created_at,
                     updated_at
@@ -200,6 +244,9 @@ class SkillLifecycleDecisionService:
                     :replacement_target_ids_json,
                     :protection_lifted,
                     :applied_by,
+                    :verified_stage,
+                    :provider_resolution_status,
+                    :compatibility_status,
                     :metadata_json,
                     :created_at,
                     :updated_at
@@ -225,6 +272,9 @@ class SkillLifecycleDecisionService:
                     replacement_target_ids_json = excluded.replacement_target_ids_json,
                     protection_lifted = excluded.protection_lifted,
                     applied_by = excluded.applied_by,
+                    verified_stage = excluded.verified_stage,
+                    provider_resolution_status = excluded.provider_resolution_status,
+                    compatibility_status = excluded.compatibility_status,
                     metadata_json = excluded.metadata_json,
                     updated_at = excluded.updated_at
                 """,
@@ -253,6 +303,9 @@ class SkillLifecycleDecisionService:
                     "replacement_target_ids_json": _json_dumps(record.replacement_target_ids),
                     "protection_lifted": 1 if record.protection_lifted else 0,
                     "applied_by": record.applied_by,
+                    "verified_stage": record.verified_stage,
+                    "provider_resolution_status": record.provider_resolution_status,
+                    "compatibility_status": record.compatibility_status,
                     "metadata_json": _json_dumps(record.metadata),
                     "created_at": record.created_at.isoformat(),
                     "updated_at": record.updated_at.isoformat(),
@@ -283,6 +336,9 @@ class SkillLifecycleDecisionService:
             replacement_target_ids=_json_load_list(row["replacement_target_ids_json"]),
             protection_lifted=bool(row["protection_lifted"]),
             applied_by=row["applied_by"],
+            verified_stage=row["verified_stage"],
+            provider_resolution_status=row["provider_resolution_status"],
+            compatibility_status=row["compatibility_status"],
             metadata=_json_load_dict(row["metadata_json"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],

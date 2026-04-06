@@ -463,7 +463,7 @@ class _IndustryCleanupMixin:
     ) -> list[tuple[Any, GoalOverrideRecord | None]]:
         pending: list[tuple[Any, GoalOverrideRecord | None]] = []
         seen_goal_ids: set[str] = set()
-        for goal_id in record.goal_ids or []:
+        for goal_id in self._resolve_instance_goal_ids(record):
             normalized_goal_id = _string(goal_id)
             if normalized_goal_id is None or normalized_goal_id in seen_goal_ids:
                 continue
@@ -490,7 +490,7 @@ class _IndustryCleanupMixin:
     ) -> dict[str, tuple[str, str]]:
         goal_links: dict[str, tuple[str, str]] = {}
         seen_goal_ids: set[str] = set()
-        for goal_id in record.goal_ids or []:
+        for goal_id in self._resolve_instance_goal_ids(record):
             normalized_goal_id = _string(goal_id)
             if normalized_goal_id is None or normalized_goal_id in seen_goal_ids:
                 continue
@@ -1781,9 +1781,9 @@ class _IndustryCleanupMixin:
             "mission": agent.mission,
             "status": status,
             "risk_level": agent.risk_level,
-            "current_focus_kind": "goal" if goal_id or goal_title else None,
-            "current_focus_id": goal_id,
-            "current_focus": goal_title,
+            "current_focus_kind": None,
+            "current_focus_id": None,
+            "current_focus": None,
             "industry_instance_id": instance_id,
             "industry_role_id": agent.role_id,
             "environment_summary": "; ".join(agent.environment_constraints),

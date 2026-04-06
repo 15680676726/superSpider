@@ -151,7 +151,9 @@ class _IndustryActivationMixin:
         install_plan: list[IndustryBootstrapInstallItem],
         auto_start_learning: bool = False,
     ) -> IndustryBootstrapResponse:
-        pending_chat_kickoff = auto_activate and not auto_dispatch and not execute
+        pending_chat_kickoff = (
+            auto_start_learning and auto_activate and not auto_dispatch and not execute
+        )
         initial_agent_status = (
             "waiting-confirm"
             if pending_chat_kickoff
@@ -439,16 +441,16 @@ class _IndustryActivationMixin:
                 self._upsert_agent_profile(
                     agent,
                     instance_id=team_id,
-                    goal_id=goal_link[0],
-                    goal_title=goal_link[1],
+                    goal_id=None,
+                    goal_title=None,
                     status=initial_agent_status,
                 )
             self._sync_actor_runtime_surface(
                 agent=agent,
                 instance_id=team_id,
                 owner_scope=plan.owner_scope,
-                goal_id=goal_link[0] if goal_link is not None else None,
-                goal_title=goal_link[1] if goal_link is not None else None,
+                goal_id=None,
+                goal_title=None,
                 status=initial_agent_status,
             )
         await self._finalize_install_assignments(
@@ -468,8 +470,8 @@ class _IndustryActivationMixin:
         final_record = self._build_instance_record(
             plan,
             existing=existing,
-            goal_ids=goal_ids,
-            schedule_ids=schedule_ids,
+            goal_ids=[],
+            schedule_ids=[],
             status="active" if auto_activate else "draft",
             lifecycle_status="running" if auto_activate else "draft",
             autonomy_status="waiting-confirm" if pending_chat_kickoff else "coordinating" if auto_activate else "draft",

@@ -11,6 +11,13 @@ from urllib.request import Request, urlopen
 
 from ..app.mcp.manager import MCPClientManager
 from ..config.config import MCPClientConfig
+from .donor_execution_envelope import run_donor_execution_envelope
+from .donor_provider_injection import (
+    _CONFIG_WRAPPER_ENV_KEY,
+    build_donor_injection_payload,
+    resolve_donor_provider_contract,
+)
+from .external_adapter_contracts import donor_execution_envelope_from_metadata
 from .execution_support import (
     _tool_response_payload,
     _tool_response_success,
@@ -153,15 +160,23 @@ class ExternalAdapterExecution:
         *,
         mcp_manager: object | None,
         environment_service: object | None,
+        provider_runtime_facade: object | None = None,
     ) -> None:
         self._mcp_manager = mcp_manager
         self._environment_service = environment_service
+        self._provider_runtime_facade = provider_runtime_facade
 
     def set_mcp_manager(self, mcp_manager: object | None) -> None:
         self._mcp_manager = mcp_manager
 
     def set_environment_service(self, environment_service: object | None) -> None:
         self._environment_service = environment_service
+
+    def set_provider_runtime_facade(
+        self,
+        provider_runtime_facade: object | None,
+    ) -> None:
+        self._provider_runtime_facade = provider_runtime_facade
 
     async def execute_action(
         self,
@@ -183,6 +198,29 @@ class ExternalAdapterExecution:
                 "error": message,
             }
         resolved_payload = dict(payload or {})
+        execution_envelope = donor_execution_envelope_from_metadata(mount.metadata or {})
+        provider_contract = resolve_donor_provider_contract(
+            mount=mount,
+            provider_runtime_facade=self._provider_runtime_facade,
+        )
+        provider_injection = build_donor_injection_payload(
+            provider_contract=provider_contract,
+        )
+        if provider_injection.get("provider_resolution_status") == "failed":
+            message = str(
+                provider_injection.get("error")
+                or "Failed to resolve donor provider contract.",
+            )
+            return {
+                "success": False,
+                "summary": message,
+                "error": message,
+                "error_type": provider_injection.get("error_type"),
+                "provider_resolution_status": provider_injection.get(
+                    "provider_resolution_status",
+                ),
+                "provider_injection": provider_injection.get("operator_payload"),
+            }
         transport_action_ref = _string(action.get("transport_action_ref")) or action_id
         if transport_kind == "mcp":
             return await self._execute_mcp_action(
@@ -191,6 +229,8 @@ class ExternalAdapterExecution:
                 action_id=action_id,
                 transport_action_ref=transport_action_ref,
                 payload=resolved_payload,
+                provider_injection=provider_injection,
+                execution_envelope=execution_envelope,
             )
         if transport_kind == "http":
             return await self._execute_http_action(
@@ -198,6 +238,8 @@ class ExternalAdapterExecution:
                 action_id=action_id,
                 transport_action_ref=transport_action_ref,
                 payload=resolved_payload,
+                provider_injection=provider_injection,
+                execution_envelope=execution_envelope,
             )
         if transport_kind == "sdk":
             return await self._execute_sdk_action(
@@ -205,9 +247,16 @@ class ExternalAdapterExecution:
                 action_id=action_id,
                 transport_action_ref=transport_action_ref,
                 payload=resolved_payload,
+                provider_injection=provider_injection,
+                execution_envelope=execution_envelope,
             )
         message = f"Unsupported adapter transport '{transport_kind}'."
-        return {"success": False, "summary": message, "error": message}
+        return {
+            "success": False,
+            "summary": message,
+            "error": message,
+            "provider_injection": provider_injection.get("operator_payload"),
+        }
 
     async def _execute_mcp_action(
         self,
@@ -217,6 +266,8 @@ class ExternalAdapterExecution:
         action_id: str,
         transport_action_ref: str,
         payload: dict[str, Any],
+        provider_injection: dict[str, Any],
+        execution_envelope: object | None,
     ) -> dict[str, object]:
         call_surface_ref = _string(contract.get("call_surface_ref"))
         client_key = _mcp_client_key(call_surface_ref)
@@ -251,15 +302,43 @@ class ExternalAdapterExecution:
                         "success": False,
                         "summary": "Adapter MCP transport is missing a resolvable stdio command.",
                         "error": "Adapter MCP transport is missing a resolvable stdio command.",
+                        "provider_injection": provider_injection.get("operator_payload"),
                     }
                 temp_manager = MCPClientManager()
                 client_key = "adapter-stdio-probe"
+                launch_args = list(args)
+                launch_env: dict[str, str] = {}
+                injection_mode = _string(provider_injection.get("mode"))
+                if injection_mode == "environment":
+                    launch_env.update(
+                        {
+                            str(key): str(value)
+                            for key, value in dict(provider_injection.get("env") or {}).items()
+                            if str(key).strip() and str(value).strip()
+                        },
+                    )
+                elif injection_mode == "argument":
+                    launch_args.extend(
+                        [
+                            str(item)
+                            for item in list(provider_injection.get("args") or [])
+                            if str(item).strip()
+                        ],
+                    )
+                elif injection_mode == "config_wrapper":
+                    wrapper = dict(provider_injection.get("config_wrapper") or {})
+                    if wrapper:
+                        launch_env[_CONFIG_WRAPPER_ENV_KEY] = json.dumps(
+                            wrapper,
+                            ensure_ascii=False,
+                        )
                 await temp_manager.replace_client(
                     client_key,
                     MCPClientConfig(
                         name=mount.name or mount.id,
                         command=command,
-                        args=args,
+                        args=launch_args,
+                        env=launch_env,
                         cwd=environment_root,
                     ),
                     timeout=30.0,
@@ -270,13 +349,57 @@ class ExternalAdapterExecution:
                     "success": False,
                     "summary": f"MCP client '{client_key}' not found or not connected.",
                     "error": f"MCP client '{client_key}' not found or not connected.",
+                    "provider_injection": provider_injection.get("operator_payload"),
                 }
             callable_fn = await client.get_callable_function(
                 transport_action_ref,
                 wrap_tool_result=True,
-                execution_timeout=None,
+                execution_timeout=(
+                    float(getattr(execution_envelope, "action_timeout_sec"))
+                    if execution_envelope is not None
+                    else None
+                ),
             )
-            response = await callable_fn(**payload)
+            envelope_result = await run_donor_execution_envelope(
+                label=f"adapter:{mount.id}:{action_id}",
+                awaitable_factory=lambda: callable_fn(**payload),
+                action_timeout_sec=(
+                    float(getattr(execution_envelope, "action_timeout_sec"))
+                    if execution_envelope is not None
+                    else None
+                ),
+                heartbeat_interval_sec=(
+                    float(getattr(execution_envelope, "heartbeat_interval_sec"))
+                    if execution_envelope is not None
+                    else None
+                ),
+                heartbeat_snapshot_factory=lambda: {
+                    "transport_kind": "mcp",
+                    "adapter_action": action_id,
+                },
+                cancel_grace_sec=(
+                    float(getattr(execution_envelope, "cancel_grace_sec"))
+                    if execution_envelope is not None
+                    else None
+                ),
+            )
+            if not envelope_result.get("success"):
+                return {
+                    "success": False,
+                    "summary": str(envelope_result.get("summary") or ""),
+                    "adapter_action": action_id,
+                    "transport_kind": "mcp",
+                    "client_key": client_key,
+                    "tool_name": transport_action_ref,
+                    "output": envelope_result.get("output"),
+                    "error": envelope_result.get("error"),
+                    "error_type": envelope_result.get("error_type"),
+                    "outcome": envelope_result.get("outcome"),
+                    "heartbeat_count": envelope_result.get("heartbeat_count", 0),
+                    "heartbeat_snapshots": envelope_result.get("heartbeat_snapshots") or [],
+                    "provider_injection": provider_injection.get("operator_payload"),
+                }
+            response = envelope_result.get("output")
             summary = _tool_response_summary(response)
             success = _tool_response_success(response)
             response_payload = _tool_response_payload(response)
@@ -289,6 +412,10 @@ class ExternalAdapterExecution:
                 "tool_name": transport_action_ref,
                 "output": response_payload,
                 "error": None if success else summary,
+                "outcome": "succeeded" if success else "failed",
+                "heartbeat_count": envelope_result.get("heartbeat_count", 0),
+                "heartbeat_snapshots": envelope_result.get("heartbeat_snapshots") or [],
+                "provider_injection": provider_injection.get("operator_payload"),
             }
         finally:
             if temp_manager is not None:
@@ -301,6 +428,8 @@ class ExternalAdapterExecution:
         action_id: str,
         transport_action_ref: str,
         payload: dict[str, Any],
+        provider_injection: dict[str, Any],
+        execution_envelope: object | None,
     ) -> dict[str, object]:
         base_url = _string(contract.get("call_surface_ref"))
         if base_url is None:
@@ -308,13 +437,46 @@ class ExternalAdapterExecution:
                 "success": False,
                 "summary": "HTTP adapter base URL is missing.",
                 "error": "HTTP adapter base URL is missing.",
+                "provider_injection": provider_injection.get("operator_payload"),
             }
-        success, summary, output = await asyncio.to_thread(
-            _http_request,
-            base_url=base_url,
-            transport_action_ref=transport_action_ref,
-            payload=payload,
+        envelope_result = await run_donor_execution_envelope(
+            label=f"http-adapter:{action_id}",
+            awaitable_factory=lambda: asyncio.to_thread(
+                _http_request,
+                base_url=base_url,
+                transport_action_ref=transport_action_ref,
+                payload=payload,
+            ),
+            action_timeout_sec=(
+                float(getattr(execution_envelope, "action_timeout_sec"))
+                if execution_envelope is not None
+                else None
+            ),
+            heartbeat_interval_sec=(
+                float(getattr(execution_envelope, "heartbeat_interval_sec"))
+                if execution_envelope is not None
+                else None
+            ),
+            heartbeat_snapshot_factory=lambda: {
+                "transport_kind": "http",
+                "adapter_action": action_id,
+            },
         )
+        if not envelope_result.get("success"):
+            return {
+                "success": False,
+                "summary": str(envelope_result.get("summary") or ""),
+                "adapter_action": action_id,
+                "transport_kind": "http",
+                "output": envelope_result.get("output"),
+                "error": envelope_result.get("error"),
+                "error_type": envelope_result.get("error_type"),
+                "outcome": envelope_result.get("outcome"),
+                "heartbeat_count": envelope_result.get("heartbeat_count", 0),
+                "heartbeat_snapshots": envelope_result.get("heartbeat_snapshots") or [],
+                "provider_injection": provider_injection.get("operator_payload"),
+            }
+        success, summary, output = envelope_result.get("output") or (False, "", None)
         return {
             "success": success,
             "summary": summary,
@@ -322,6 +484,10 @@ class ExternalAdapterExecution:
             "transport_kind": "http",
             "output": output,
             "error": None if success else summary,
+            "outcome": "succeeded" if success else "failed",
+            "heartbeat_count": envelope_result.get("heartbeat_count", 0),
+            "heartbeat_snapshots": envelope_result.get("heartbeat_snapshots") or [],
+            "provider_injection": provider_injection.get("operator_payload"),
         }
 
     async def _execute_sdk_action(
@@ -331,22 +497,63 @@ class ExternalAdapterExecution:
         action_id: str,
         transport_action_ref: str,
         payload: dict[str, Any],
+        provider_injection: dict[str, Any],
+        execution_envelope: object | None,
     ) -> dict[str, object]:
         try:
             callable_fn = _resolve_sdk_callable(
                 _string(contract.get("call_surface_ref")),
                 transport_action_ref,
             )
-            result = callable_fn(**payload)
-            if hasattr(result, "__await__"):
-                result = await result
+            async def _invoke_sdk() -> object:
+                result = callable_fn(**payload)
+                if hasattr(result, "__await__"):
+                    return await result
+                return result
+
+            envelope_result = await run_donor_execution_envelope(
+                label=f"sdk-adapter:{action_id}",
+                awaitable_factory=_invoke_sdk,
+                action_timeout_sec=(
+                    float(getattr(execution_envelope, "action_timeout_sec"))
+                    if execution_envelope is not None
+                    else None
+                ),
+                heartbeat_interval_sec=(
+                    float(getattr(execution_envelope, "heartbeat_interval_sec"))
+                    if execution_envelope is not None
+                    else None
+                ),
+                heartbeat_snapshot_factory=lambda: {
+                    "transport_kind": "sdk",
+                    "adapter_action": action_id,
+                },
+            )
+            if not envelope_result.get("success"):
+                return {
+                    "success": False,
+                    "summary": str(envelope_result.get("summary") or ""),
+                    "adapter_action": action_id,
+                    "transport_kind": "sdk",
+                    "output": envelope_result.get("output"),
+                    "error": envelope_result.get("error"),
+                    "error_type": envelope_result.get("error_type"),
+                    "outcome": envelope_result.get("outcome"),
+                    "heartbeat_count": envelope_result.get("heartbeat_count", 0),
+                    "heartbeat_snapshots": envelope_result.get("heartbeat_snapshots") or [],
+                    "provider_injection": provider_injection.get("operator_payload"),
+                }
             return {
                 "success": True,
                 "summary": f"Executed SDK adapter action '{action_id}'.",
                 "adapter_action": action_id,
                 "transport_kind": "sdk",
-                "output": result,
+                "output": envelope_result.get("output"),
                 "error": None,
+                "outcome": "succeeded",
+                "heartbeat_count": envelope_result.get("heartbeat_count", 0),
+                "heartbeat_snapshots": envelope_result.get("heartbeat_snapshots") or [],
+                "provider_injection": provider_injection.get("operator_payload"),
             }
         except Exception as exc:  # pragma: no cover - defensive boundary
             return {
@@ -355,6 +562,7 @@ class ExternalAdapterExecution:
                 "adapter_action": action_id,
                 "transport_kind": "sdk",
                 "error": str(exc),
+                "provider_injection": provider_injection.get("operator_payload"),
             }
 
 

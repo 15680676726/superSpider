@@ -188,6 +188,40 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
             "decision_request": self._get_acquisition_decision(proposal.id),
         }
 
+    async def finalize_resolved_decision(
+        self,
+        decision_id: str,
+        *,
+        status: str,
+        actor: str = "system",
+        resolution: str | None = None,
+    ) -> dict[str, object]:
+        if self._decision_repo is None:
+            raise KeyError(f"DecisionRequest '{decision_id}' not found")
+        decision = self._decision_repo.get_decision_request(decision_id)
+        if decision is None:
+            raise KeyError(f"DecisionRequest '{decision_id}' not found")
+        if _normalize_optional_str(getattr(decision, "decision_type", None)) != "acquisition-approval":
+            raise ValueError(
+                f"DecisionRequest '{decision_id}' is not an acquisition approval decision",
+            )
+        proposal_id = _normalize_optional_str(getattr(decision, "task_id", None))
+        if proposal_id is None:
+            raise ValueError(
+                f"DecisionRequest '{decision_id}' does not reference an acquisition proposal",
+            )
+        if status == "approved":
+            return await self.approve_acquisition_proposal(
+                proposal_id,
+                approved_by=actor,
+            )
+        if status == "rejected":
+            return self.reject_acquisition_proposal(
+                proposal_id,
+                rejected_by=actor,
+            )
+        raise ValueError(f"Unsupported acquisition decision status '{status}'")
+
     def list_install_binding_plans(
         self,
         *,

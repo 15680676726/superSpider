@@ -13,6 +13,24 @@ export type BuddyNamingState = {
   sessionId: string | null;
 };
 
+function normalizeSessionId(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function resolveCanonicalSessionId(...values: unknown[]): string | null {
+  for (const value of values) {
+    const normalized = normalizeSessionId(value);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
 function hasProfile(surface: BuddySurfaceResponse | null | undefined): boolean {
   return Boolean(surface?.profile?.profile_id);
 }
@@ -39,11 +57,14 @@ export function resolveBuddyEntryDecision(
 
 export function resolveBuddyNamingState(
   surface: BuddySurfaceResponse | null | undefined,
-  querySessionId: string | null | undefined,
+  ...fallbackSessionIds: Array<string | null | undefined>
 ): BuddyNamingState {
   const onboarding = surface?.onboarding;
   return {
     needsNaming: Boolean(onboarding?.requires_naming),
-    sessionId: onboarding?.session_id ?? querySessionId ?? null,
+    sessionId: resolveCanonicalSessionId(
+      onboarding?.session_id,
+      ...fallbackSessionIds,
+    ),
   };
 }

@@ -20,6 +20,11 @@ def _build_service(tmp_path) -> HumanAssistTaskService:
     )
 
 
+class _FailingEvidenceLedger:
+    def append(self, _record) -> None:
+        raise RuntimeError("evidence ledger unavailable")
+
+
 def _make_record(*, task_id: str = "task-1") -> HumanAssistTaskRecord:
     issued_at = datetime(2026, 3, 28, 11, 0, tzinfo=timezone.utc)
     return HumanAssistTaskRecord(
@@ -127,6 +132,134 @@ def test_human_assist_task_service_returns_current_active_task_for_thread(tmp_pa
 
     assert current is not None
     assert current.id == second.id
+
+
+def test_human_assist_task_service_evidence_verified_requires_formal_evidence_refs(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+    issued = service.issue_task(_make_record(task_id="task-evidence-contract"))
+
+    result = service.submit_and_verify(
+        issued.id,
+        submission_text="I uploaded the receipt proof.",
+        submission_evidence_refs=[],
+    )
+
+    assert result.outcome == "need_more_evidence"
+    assert result.task.status == "need_more_evidence"
+    assert result.task.verification_evidence_refs == []
+
+
+def test_human_assist_task_service_state_change_verified_requires_structured_state_contract(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+    issued = service.issue_task(
+        _make_record(task_id="task-state-contract").model_copy(
+            update={
+                "acceptance_mode": "state_change_verified",
+                "acceptance_spec": {
+                    "version": "v1",
+                    "hard_anchors": ["receipt"],
+                    "result_anchors": ["uploaded"],
+                    "required_state_paths": ["state_change.receipt_status"],
+                    "failure_hint": "Provide a structured state-change proof before acceptance.",
+                },
+            },
+        ),
+    )
+
+    first = service.submit_and_verify(
+        issued.id,
+        submission_text="I uploaded the receipt proof.",
+        submission_evidence_refs=["proof:state-1"],
+    )
+    second = service.verify_task(
+        issued.id,
+        observed_text="receipt uploaded",
+        observed_evidence_refs=["proof:state-1"],
+        observed_payload={
+            "state_change": {
+                "receipt_status": "uploaded",
+            },
+        },
+    )
+
+    assert first.outcome == "need_more_evidence"
+    assert first.task.status == "need_more_evidence"
+    assert second.outcome == "accepted"
+    assert second.task.status == "accepted"
+
+
+def test_human_assist_task_service_persists_verification_evidence_refs_on_accept(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+    issued = service.issue_task(_make_record(task_id="task-verification-refs"))
+
+    result = service.verify_task(
+        issued.id,
+        observed_text="receipt uploaded",
+        observed_evidence_refs=["proof:1", "proof:1", "proof:2"],
+        observed_payload={
+            "anchors": ["receipt", "uploaded"],
+        },
+    )
+
+    assert result.outcome == "accepted"
+    assert result.task.verification_evidence_refs == ["proof:1", "proof:2"]
+
+
+def test_human_assist_task_service_persists_verification_evidence_refs_on_need_more_evidence(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+    issued = service.issue_task(
+        _make_record(task_id="task-verification-refs-need-more").model_copy(
+            update={
+                "acceptance_mode": "state_change_verified",
+                "acceptance_spec": {
+                    "version": "v1",
+                    "hard_anchors": ["receipt"],
+                    "result_anchors": ["uploaded"],
+                    "required_state_paths": ["state_change.receipt_status"],
+                    "failure_hint": "Provide a structured state-change proof before acceptance.",
+                },
+            },
+        ),
+    )
+
+    result = service.verify_task(
+        issued.id,
+        observed_text="receipt uploaded",
+        observed_evidence_refs=["proof:state-1"],
+    )
+
+    assert result.outcome == "need_more_evidence"
+    assert result.task.verification_evidence_refs == ["proof:state-1"]
+
+
+def test_human_assist_task_service_records_verification_failure_when_evidence_write_fails(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+    issued = service.issue_task(_make_record(task_id="task-ledger-failure"))
+    service._evidence_ledger = _FailingEvidenceLedger()
+
+    result = service.verify_task(
+        issued.id,
+        observed_text="receipt uploaded",
+        observed_evidence_refs=["proof:1"],
+        observed_payload={"anchors": ["receipt", "uploaded"]},
+    )
+
+    current = service.get_task(issued.id)
+    assert result.outcome == "verification_record_failed"
+    assert current is not None
+    assert current.status == "submitted"
+    assert current.verification_payload["outcome"] == "verification_record_failed"
+    assert current.verification_payload["pending_outcome"] == "accepted"
 
 
 def test_human_assist_task_service_excludes_resume_queued_from_current_task(tmp_path) -> None:

@@ -10,6 +10,13 @@ import sys
 from typing import Any
 from urllib.parse import urlparse
 
+from .external_adapter_contracts import (
+    donor_execution_contract_metadata,
+    donor_execution_envelope_metadata,
+    host_compatibility_requirements_metadata,
+    normalize_provider_injection_mode,
+)
+
 
 def _normalize_name(value: object | None) -> str:
     return str(value or "").strip().replace("-", "_").lower()
@@ -48,6 +55,9 @@ class InstalledPythonProjectContract:
     evidence_contract: list[str]
     predicted_default_port: int | None
     predicted_health_path: str | None
+    provider_injection_mode: str
+    execution_envelope: dict[str, Any]
+    host_compatibility_requirements: dict[str, Any]
     metadata: dict[str, Any]
 
 
@@ -416,6 +426,71 @@ def _default_evidence_contract(capability_kind: str) -> list[str]:
     return ["shell-command", "call-record"]
 
 
+def _default_provider_injection_mode() -> str:
+    return normalize_provider_injection_mode("environment") or "environment"
+
+
+def _default_execution_envelope(
+    *,
+    runtime_kind: str,
+    ready_probe_kind: str,
+) -> dict[str, Any]:
+    return donor_execution_envelope_metadata(
+        {
+            "startup_timeout_sec": 90 if runtime_kind == "service" else 30,
+            "action_timeout_sec": 180 if runtime_kind == "service" else 120,
+            "idle_timeout_sec": 45 if runtime_kind == "service" else 30,
+            "heartbeat_interval_sec": 15 if runtime_kind == "service" else 10,
+            "cancel_grace_sec": 10 if runtime_kind == "service" else 5,
+            "kill_grace_sec": 3,
+            "max_retries": 1 if runtime_kind == "service" else 0,
+            "retry_backoff_policy": "exponential"
+            if runtime_kind == "service"
+            else "none",
+            "output_size_limit": 65_536,
+            "probe_kind": ready_probe_kind or "none",
+            "probe_timeout_sec": 15 if ready_probe_kind == "http" else 10,
+        },
+    )
+
+
+def _default_host_compatibility_requirements(
+    *,
+    environment_requirements: list[str],
+    ready_probe_kind: str,
+) -> dict[str, Any]:
+    required_surfaces = sorted(
+        {
+            str(item).strip()
+            for item in environment_requirements
+            if str(item).strip()
+        },
+    )
+    if ready_probe_kind == "http":
+        required_surfaces = sorted({*required_surfaces, "network"})
+    return host_compatibility_requirements_metadata(
+        {
+            "supported_os": ["windows", "linux", "darwin"],
+            "supported_architectures": ["x86_64", "amd64", "arm64"],
+            "required_runtimes": ["python"],
+            "package_manager": "pip",
+            "required_provider_contract_kind": "cooperative_provider_runtime",
+            "required_surfaces": required_surfaces,
+            "required_env_keys": [],
+            "config_location_expectations": [],
+            "workspace_policy": (
+                "package-environment-root"
+                if "workspace" in required_surfaces
+                else "isolated-runtime-root"
+            ),
+            "startup_expectations": [
+                "startup_entry_ref",
+                f"readiness_probe:{ready_probe_kind or 'none'}",
+            ],
+        },
+    )
+
+
 def _callable_surface_hints(
     *,
     capability_kind: str,
@@ -439,6 +514,23 @@ def _callable_surface_hints(
     if capability_kind == "adapter" and resolved_entry_module:
         hints.setdefault("sdk_entry_ref", f"module:{resolved_entry_module}")
     return hints
+
+
+def project_installed_python_project_package_metadata(
+    contract: InstalledPythonProjectContract,
+) -> dict[str, Any]:
+    return {
+        **dict(contract.metadata or {}),
+        **donor_execution_contract_metadata(
+            {
+                "provider_injection_mode": contract.provider_injection_mode,
+                "execution_envelope": contract.execution_envelope,
+                "host_compatibility_requirements": (
+                    contract.host_compatibility_requirements
+                ),
+            },
+        ),
+    }
 
 
 def _repo_src_path() -> str:
@@ -788,6 +880,15 @@ def resolve_installed_python_project_contract(
         if preferred_console_script
         else f"module:{resolved_entry_module}"
     )
+    provider_injection_mode = _default_provider_injection_mode()
+    execution_envelope = _default_execution_envelope(
+        runtime_kind=runtime_kind,
+        ready_probe_kind=ready_probe_kind,
+    )
+    host_compatibility_requirements = _default_host_compatibility_requirements(
+        environment_requirements=_default_environment_requirements(capability_kind),
+        ready_probe_kind=ready_probe_kind,
+    )
     install_name = (
         normalized_distribution
         or _normalize_name(resolved_entry_module)
@@ -813,6 +914,9 @@ def resolve_installed_python_project_contract(
         evidence_contract=_default_evidence_contract(capability_kind),
         predicted_default_port=predicted_default_port,
         predicted_health_path=predicted_health_path,
+        provider_injection_mode=provider_injection_mode,
+        execution_envelope=execution_envelope,
+        host_compatibility_requirements=host_compatibility_requirements,
         metadata={
             "entry_source": "console-script" if preferred_console_script else "module",
             "console_script": preferred_console_script,
@@ -821,6 +925,15 @@ def resolve_installed_python_project_contract(
                 capability_kind=capability_kind,
                 console_entry_points=console_entry_points,
                 resolved_entry_module=resolved_entry_module,
+            ),
+            **donor_execution_contract_metadata(
+                {
+                    "provider_injection_mode": provider_injection_mode,
+                    "execution_envelope": execution_envelope,
+                    "host_compatibility_requirements": (
+                        host_compatibility_requirements
+                    ),
+                },
             ),
         },
     )

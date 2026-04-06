@@ -5,6 +5,18 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const navigateMock = vi.fn();
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom",
+  );
+  return {
+    ...actual,
+    useNavigate: () => navigateMock,
+  };
+});
+
 vi.mock("../api", () => ({
   default: {
     listIndustryInstances: vi.fn(),
@@ -22,6 +34,7 @@ import Sidebar from "./Sidebar";
 describe("Sidebar", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    navigateMock.mockReset();
   });
 
   it("renders runtime-center-first navigation labels", async () => {
@@ -59,5 +72,17 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Runtime Center")).not.toBeInTheDocument();
     expect(screen.queryByText("Settings")).not.toBeInTheDocument();
     expect(screen.queryByText("系统与健康")).toBeNull();
+  });
+
+  it("opens the buddy-first chat entry instead of auto-binding an industry execution core", () => {
+    render(
+      <MemoryRouter>
+        <Sidebar selectedKey="chat" />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByText("聊天前台"));
+
+    expect(navigateMock).toHaveBeenCalledWith("/chat");
   });
 });

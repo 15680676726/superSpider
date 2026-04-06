@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from agentscope.model import ChatModelBase
 
@@ -41,6 +41,8 @@ class ProviderRuntimeSurface(Protocol):
     def get_preferred_chat_model_class(self) -> type[ChatModelBase]: ...
 
     def get_active_chat_model(self) -> ChatModelBase: ...
+
+    def resolve_runtime_provider_contract(self) -> dict[str, Any]: ...
 
 
 class ProviderRuntimeFacade:
@@ -90,6 +92,37 @@ class ProviderRuntimeFacade:
         if factory is not None and hasattr(factory, "get_active_chat_model"):
             return factory.get_active_chat_model()
         return build_active_chat_model(self._provider_manager)
+
+    def resolve_runtime_provider_contract(self) -> dict[str, Any]:
+        slot, fallback_applied, resolution_reason, unavailable = (
+            self.resolve_model_slot()
+        )
+        provider = self.get_provider(slot.provider_id)
+        if provider is None:
+            raise ValueError(f"Provider '{slot.provider_id}' not found.")
+        auth_mode = (
+            "api_key"
+            if bool(getattr(provider, "require_api_key", False))
+            and not bool(getattr(provider, "is_local", False))
+            else "none"
+        )
+        api_key = str(getattr(provider, "api_key", "") or "")
+        if auth_mode == "api_key" and not api_key.strip():
+            raise ValueError(f"Provider '{slot.provider_id}' is missing an API key.")
+        return {
+            "provider_id": slot.provider_id,
+            "provider_name": str(getattr(provider, "name", slot.provider_id) or slot.provider_id),
+            "model": slot.model,
+            "base_url": str(getattr(provider, "base_url", "") or ""),
+            "api_key": api_key,
+            "auth_mode": auth_mode,
+            "extra_headers": {},
+            "provenance": {
+                "resolution_reason": resolution_reason,
+                "fallback_applied": fallback_applied,
+                "unavailable_candidates": list(unavailable),
+            },
+        }
 
 
 def get_runtime_provider_facade(

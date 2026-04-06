@@ -6,7 +6,6 @@ import type { NavigateFunction } from "react-router-dom";
 import api from "../../api";
 import {
   resolveCanonicalBuddyProfileId,
-  writeBuddyProfileId,
 } from "../../runtime/buddyProfileBinding";
 import type {
   IndustryBootstrapResponse,
@@ -24,7 +23,6 @@ import type {
 import { buildIndustryRoleChatBinding, openRuntimeChat, resolveIndustryExecutionCoreRole } from "../../utils/runtimeChat";
 import { normalizeSpiderMeshBrand } from "../../utils/brand";
 import {
-  INDUSTRY_EXPERIENCE_TEXT,
   INDUSTRY_TEXT,
   buildFallbackRecommendationSections,
   createBlankInstallPlanItem,
@@ -83,46 +81,6 @@ type IndustryDetailLoadOptions = {
   assignmentId?: string | null;
   backlogItemId?: string | null;
 };
-
-type CarrierAdjustmentChatContext = Pick<
-  IndustryInstanceSummary,
-  "instance_id" | "label" | "owner_scope" | "team"
->;
-
-function resolveCarrierAdjustmentChatContext(
-  payload: IndustryBootstrapResponse,
-): CarrierAdjustmentChatContext | null {
-  const rawSummary = payload.routes?.instance_summary;
-  if (rawSummary && typeof rawSummary === "object" && !Array.isArray(rawSummary)) {
-    const summary = rawSummary as Partial<CarrierAdjustmentChatContext>;
-    const instanceId =
-      typeof summary.instance_id === "string" ? summary.instance_id.trim() : "";
-    if (instanceId) {
-      return {
-        instance_id: instanceId,
-        label:
-          typeof summary.label === "string" && summary.label.trim()
-            ? summary.label
-            : payload.team.label || instanceId,
-        owner_scope: typeof summary.owner_scope === "string" ? summary.owner_scope : "",
-        team:
-          summary.team && typeof summary.team === "object"
-            ? summary.team
-            : payload.team,
-      };
-    }
-  }
-  const instanceId = String(payload.team.team_id || "").trim();
-  if (!instanceId) {
-    return null;
-  }
-  return {
-    instance_id: instanceId,
-    label: payload.team.label || instanceId,
-    owner_scope: "",
-    team: payload.team,
-  };
-}
 
 export function useIndustryPageState({
   briefForm,
@@ -195,9 +153,6 @@ export function useIndustryPageState({
         const resolvedBuddyProfileId = resolveCanonicalBuddyProfileId(
           buddySurface?.profile?.profile_id,
         );
-        if (resolvedBuddyProfileId) {
-          writeBuddyProfileId(resolvedBuddyProfileId);
-        }
         setCurrentBuddyProfileId(resolvedBuddyProfileId || null);
         const nextInstances = Array.isArray(activePayload) ? activePayload : [];
         const nextRetiredInstances = Array.isArray(retiredPayload)
@@ -390,8 +345,10 @@ export function useIndustryPageState({
       const payload = await api.previewIndustry(
         toPreviewPayload(values, briefMediaItems),
       );
+      const nextDraftSourceInstanceId =
+        draftSourceInstanceId || detail?.instance_id || null;
       setPreview(payload);
-      setDraftSourceInstanceId(null);
+      setDraftSourceInstanceId(nextDraftSourceInstanceId);
       setInstallPlan(
         (payload.recommendation_pack?.items || [])
           .filter((item) => item.selected)
@@ -414,18 +371,24 @@ export function useIndustryPageState({
     } finally {
       setPreviewLoading(false);
     }
-  }, [briefMediaItems, draftForm]);
+  }, [briefMediaItems, detail?.instance_id, draftForm, draftSourceInstanceId]);
 
   const handleApplyCarrierAdjustment = useCallback(async () => {
     if (!preview) {
       message.warning(INDUSTRY_TEXT.previewBeforeActivate);
       return;
     }
+    const boundCarrierInstanceId = draftSourceInstanceId?.trim() || "";
+    if (!boundCarrierInstanceId) {
+      const nextError = "当前没有可调整的执行载体，请先完成伙伴建档。";
+      setError(nextError);
+      message.error(nextError);
+      return;
+    }
     setApplyCarrierLoading(true);
     try {
       setError(null);
       const draft = normalizeDraftPlan(draftForm.getFieldsValue(true));
-      const isEditingExistingTeam = Boolean(draftSourceInstanceId);
       const requestPayload = {
         profile: preview.profile,
         draft,
@@ -435,15 +398,11 @@ export function useIndustryPageState({
         execute: false,
         media_analysis_ids: (preview.media_analyses || []).map((item) => item.analysis_id),
       };
-      const payload: IndustryBootstrapResponse = isEditingExistingTeam
-        ? await api.updateIndustryTeam(draftSourceInstanceId || "", requestPayload)
-        : await api.bootstrapIndustry(requestPayload);
+      const payload: IndustryBootstrapResponse = await api.updateIndustryTeam(
+        boundCarrierInstanceId,
+        requestPayload,
+      );
       const instanceId = payload.team.team_id;
-      const carrierAdjustmentChatContext = resolveCarrierAdjustmentChatContext(payload);
-      const executionCoreRole =
-        !isEditingExistingTeam && carrierAdjustmentChatContext
-          ? resolveIndustryExecutionCoreRole(carrierAdjustmentChatContext)
-          : null;
       setSelectedInstanceId(instanceId);
       setPreview(null);
       setDraftSourceInstanceId(null);
@@ -451,29 +410,9 @@ export function useIndustryPageState({
       setBriefMediaItems([]);
       setBriefMediaLink("");
       draftForm.resetFields();
-      message.success(
-        isEditingExistingTeam
-          ? INDUSTRY_TEXT.updateSuccess
-          : INDUSTRY_EXPERIENCE_TEXT.activateSuccess,
-      );
-      if (!isEditingExistingTeam && carrierAdjustmentChatContext && executionCoreRole) {
-        setApplyCarrierLoading(false);
-        try {
-          await openRuntimeChat(
-            buildIndustryRoleChatBinding(carrierAdjustmentChatContext, executionCoreRole),
-            navigate,
-          );
-          return;
-        } catch (openError) {
-          message.warning(
-            openError instanceof Error ? openError.message : String(openError),
-          );
-        }
-      }
+      message.success(INDUSTRY_TEXT.updateSuccess);
       await loadInstances(instanceId);
-      if (isEditingExistingTeam) {
-        await loadDetail(instanceId);
-      }
+      await loadDetail(instanceId);
     } catch (bootstrapError) {
       const nextError =
         bootstrapError instanceof Error
@@ -484,7 +423,7 @@ export function useIndustryPageState({
     } finally {
       setApplyCarrierLoading(false);
     }
-  }, [draftForm, draftSourceInstanceId, installPlan, loadDetail, loadInstances, navigate, preview]);
+  }, [draftForm, draftSourceInstanceId, installPlan, loadDetail, loadInstances, preview]);
 
   const handleDeleteInstance = useCallback(
     async (instanceId: string) => {

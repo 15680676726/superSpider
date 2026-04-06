@@ -8,7 +8,13 @@ from copaw.industry.models import (
     IndustryTeamBlueprint,
 )
 from copaw.industry.service_runtime_views import _IndustryRuntimeViewsMixin
-from copaw.state import AgentRuntimeRecord, IndustryInstanceRecord, StrategyMemoryRecord
+from copaw.state import (
+    AgentRuntimeRecord,
+    AssignmentRecord,
+    BacklogItemRecord,
+    IndustryInstanceRecord,
+    StrategyMemoryRecord,
+)
 from copaw.state import SQLiteStateStore
 from copaw.state.repositories import SqliteAgentRuntimeRepository
 
@@ -222,6 +228,9 @@ class _CapabilityGovernanceRuntimeViewsHarness(_RuntimeViewsHarness):
         _ = (instance_id, schedule_ids)
         return []
 
+    def _resolve_instance_goal_ids(self, record: IndustryInstanceRecord) -> list[str]:
+        return list(record.goal_ids or [])
+
     def _list_instance_agents(self, agent_ids: set[str]) -> list[dict[str, object]]:
         assert agent_ids == {"agent-seat"}
         return [
@@ -274,6 +283,34 @@ class _CapabilityGovernanceRuntimeViewsHarness(_RuntimeViewsHarness):
     def _build_instance_main_chain(self, **kwargs):
         _ = kwargs
         return None
+
+
+class _FocusSelectionDetailRuntimeViewsHarness(_CapabilityGovernanceRuntimeViewsHarness):
+    def __init__(
+        self,
+        strategy: StrategyMemoryRecord,
+        runtime_repository,
+        *,
+        assignments: list[AssignmentRecord],
+        backlog_items: list[BacklogItemRecord],
+        execution: IndustryExecutionSummary,
+    ) -> None:
+        super().__init__(strategy, runtime_repository)
+        self._assignment_records = assignments
+        self._backlog_records = backlog_items
+        self._execution = execution
+
+    def _list_assignment_records(self, instance_id: str):
+        _ = instance_id
+        return list(self._assignment_records)
+
+    def _list_backlog_items(self, instance_id: str, limit=None):
+        _ = (instance_id, limit)
+        return list(self._backlog_records)
+
+    def _build_instance_execution_summary(self, **kwargs) -> IndustryExecutionSummary:
+        _ = kwargs
+        return self._execution
 
 
 def test_runtime_views_mixin_owns_instance_detail_builder() -> None:
@@ -869,6 +906,76 @@ def test_live_focus_payload_keeps_focus_selection_without_overriding_runtime_foc
     assert payload["current_backlog_id"] == "backlog-1"
     assert payload["current_focus_id"] is None
     assert payload["current_focus_title"] is None
+
+
+def test_instance_detail_keeps_selected_assignment_without_fabricating_execution_focus(
+    tmp_path: Path,
+) -> None:
+    strategy = StrategyMemoryRecord(
+        strategy_id="strategy-industry-1",
+        scope_type="industry",
+        scope_id="industry-1",
+        title="Planning truth",
+    )
+    state_store = SQLiteStateStore(tmp_path / "runtime-views-focus.db")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    runtime_views = _FocusSelectionDetailRuntimeViewsHarness(
+        strategy,
+        runtime_repository,
+        assignments=[
+            AssignmentRecord(
+                id="assignment-1",
+                industry_instance_id="industry-1",
+                backlog_item_id="backlog-1",
+                owner_agent_id="agent-seat",
+                owner_role_id="support-seat",
+                title="Assignment title",
+                summary="Assignment summary",
+                status="queued",
+            )
+        ],
+        backlog_items=[
+            BacklogItemRecord(
+                id="backlog-1",
+                industry_instance_id="industry-1",
+                assignment_id="assignment-1",
+                title="Backlog title",
+                summary="Backlog summary",
+                status="open",
+                source_kind="operator",
+                source_ref="chat-writeback:test",
+            )
+        ],
+        execution=IndustryExecutionSummary(
+            status="executing",
+            current_focus_id=None,
+            current_focus=None,
+            current_owner_agent_id="agent-seat",
+            current_owner="Support Specialist",
+            current_risk="guarded",
+            evidence_count=0,
+        ),
+    )
+    record = IndustryInstanceRecord(
+        instance_id="industry-1",
+        label="Northwind Robotics",
+        summary="Governed industry runtime.",
+        owner_scope="industry:northwind",
+        profile_payload={"industry": "robotics", "company_name": "Northwind Robotics"},
+        agent_ids=["agent-seat"],
+        lifecycle_status="running",
+        autonomy_status="active",
+    )
+
+    detail = runtime_views._build_instance_detail(
+        record,
+        assignment_id="assignment-1",
+    ).model_dump(mode="json")
+
+    assert detail["focus_selection"]["selection_kind"] == "assignment"
+    assert detail["focus_selection"]["assignment_id"] == "assignment-1"
+    assert detail["execution"]["current_focus_id"] is None
+    assert detail["execution"]["current_focus"] is None
 
 
 def test_industry_runtime_routes_point_to_runtime_center_surface(tmp_path: Path) -> None:

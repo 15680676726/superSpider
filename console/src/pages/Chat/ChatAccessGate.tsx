@@ -1,7 +1,6 @@
 import { ExclamationCircleOutlined, SettingOutlined } from "@ant-design/icons";
 import { Alert, Button, Modal, Result, Space, Spin } from "antd";
 
-import type { IndustryInstanceSummary } from "../../api/modules/industry";
 import type { ChatNoticeVariant } from "./noticeState";
 import styles from "./index.module.less";
 
@@ -12,15 +11,12 @@ type ChatAccessGateProps = {
   requestedThreadId: string | null;
   industryTeamsError: string | null;
   hasSuggestedTeams: boolean;
-  executionCoreSuggestions: IndustryInstanceSummary[];
   effectiveThreadPending: boolean;
   showModelPrompt: boolean;
   onCloseModelPrompt: () => void;
   onOpenModelSettings: () => void;
   onOpenIdentityCenter: () => void;
-  onOpenWorkbench: () => void;
   onReload: () => void;
-  onOpenSuggestedIndustryChat: (instance: IndustryInstanceSummary) => Promise<boolean>;
 };
 
 export function ChatAccessGate({
@@ -30,14 +26,12 @@ export function ChatAccessGate({
   requestedThreadId,
   industryTeamsError,
   hasSuggestedTeams,
-  executionCoreSuggestions,
   effectiveThreadPending,
   showModelPrompt,
   onCloseModelPrompt,
   onOpenModelSettings,
   onOpenIdentityCenter,
   onReload,
-  onOpenSuggestedIndustryChat,
 }: ChatAccessGateProps) {
   return (
     <>
@@ -45,7 +39,8 @@ export function ChatAccessGate({
         <div className={styles.noticeWrap}>
           {chatNoticeVariant === "loading" ? (
             <div className={styles.centerSpinner}>
-              <Spin size="large" tip="正在加载对话线程…" />
+              <Spin size="large" />
+              <div>正在加载对话线程...</div>
             </div>
           ) : chatNoticeVariant === "binding" ? (
             <Alert
@@ -62,8 +57,8 @@ export function ChatAccessGate({
                   <span>
                     {threadBootstrapError ||
                       (autoBindingPending && !requestedThreadId
-                        ? "正在将对话绑定至可用的主脑控制线程。"
-                        : "正在解析当前线程的运行主体和绑定上下文。")}
+                        ? "正在把对话绑定到可用的主脑控制线程。"
+                        : "正在解析当前线程对应的运行主体和上下文。")}
                   </span>
                   <Button size="small" type="link" onClick={onOpenIdentityCenter}>
                     打开身份中心
@@ -81,9 +76,7 @@ export function ChatAccessGate({
                       ? "info"
                       : industryTeamsError
                         ? "warning"
-                        : hasSuggestedTeams
-                          ? "warning"
-                          : "403"
+                        : "403"
                 }
                 title={
                   effectiveThreadPending
@@ -94,22 +87,20 @@ export function ChatAccessGate({
                       ? "正在绑定主脑控制线程"
                     : industryTeamsError
                       ? "身份列表加载失败"
-                      : hasSuggestedTeams
-                        ? "请先绑定主脑线程"
-                        : "请先完成伙伴建档"
+                      : "请先完成伙伴建档"
                 }
                 subTitle={
                   effectiveThreadPending
                     ? autoBindingPending && !requestedThreadId
-                      ? "正在将对话绑定至可用的主脑控制线程。"
-                      : "正在解析当前聊天线程的运行主体和绑定上下文。"
+                      ? "正在把对话绑定到可用的主脑控制线程。"
+                      : "正在解析当前聊天线程对应的运行主体和上下文。"
                     : requestedThreadId
-                      ? threadBootstrapError || "正在将对话绑定至可用的主脑控制线程。"
+                      ? threadBootstrapError || "正在把对话绑定到可用的主脑控制线程。"
                     : industryTeamsError
                       ? `身份列表或主脑投影不可用。${industryTeamsError}`
-                      : executionCoreSuggestions.length > 0
-                        ? "请先从身份中心进入聊天，这样线程才会绑定到真实的执行主体。"
-                        : "暂无可用的伙伴身份主体。请先完成伙伴建档，再进入聊天。"
+                      : hasSuggestedTeams
+                        ? "请先从伙伴建档进入聊天，这样线程才会绑定到当前伙伴主体。"
+                        : "当前还没有可用的伙伴主体。请先完成伙伴建档，再进入聊天。"
                 }
                 extra={
                   <Space wrap>
@@ -117,14 +108,6 @@ export function ChatAccessGate({
                       打开身份中心
                     </Button>
                     {industryTeamsError ? <Button onClick={onReload}>刷新页面</Button> : null}
-                    {executionCoreSuggestions.map((instance) => (
-                      <Button
-                        key={instance.instance_id}
-                        onClick={() => void onOpenSuggestedIndustryChat(instance)}
-                      >
-                        {`打开 ${instance.label} 主脑`}
-                      </Button>
-                    ))}
                   </Space>
                 }
               />

@@ -18,10 +18,8 @@ import type {
   BuddyClarificationResponse,
   BuddyConfirmDirectionResponse,
   BuddyIdentityResponse,
+  BuddyExecutionCarrier,
 } from "../../api/modules/buddy";
-import {
-  writeBuddyProfileId,
-} from "../../runtime/buddyProfileBinding";
 import { resolveBuddyEntryDecision } from "../../runtime/buddyFlow";
 import {
   buildBuddyExecutionCarrierChatBinding,
@@ -48,6 +46,21 @@ function parseLines(value?: string | null): string[] {
     .filter(Boolean);
 }
 
+function createResumeExecutionCarrier(
+  profileId: string,
+  displayName?: string | null,
+): BuddyExecutionCarrier {
+  const normalizedProfileId = profileId.trim();
+  const normalizedDisplayName = displayName?.trim() || "Buddy";
+  return {
+    instance_id: `buddy:${normalizedProfileId}`,
+    label: `${normalizedDisplayName} 的成长载体`,
+    owner_scope: normalizedProfileId,
+    current_cycle_id: "",
+    team_generated: true,
+  };
+}
+
 export default function BuddyOnboardingPage() {
   const navigate = useNavigate();
   const [form] = Form.useForm<IdentityFormValues>();
@@ -69,25 +82,39 @@ export default function BuddyOnboardingPage() {
         const surface = await api.getBuddySurface();
         if (cancelled) return;
         const decision = resolveBuddyEntryDecision(surface);
-        if (surface?.profile?.profile_id) {
-          writeBuddyProfileId(surface.profile.profile_id);
-        }
         if (decision.mode === "chat-ready" && surface?.profile?.profile_id) {
-          navigate(
-            `/chat?buddy_profile=${encodeURIComponent(surface.profile.profile_id)}`,
-            { replace: true },
-          );
+          const binding = buildBuddyExecutionCarrierChatBinding({
+            sessionId: null,
+            profileId: surface.profile.profile_id,
+            profileDisplayName: surface.profile.display_name,
+            executionCarrier: createResumeExecutionCarrier(
+              surface.profile.profile_id,
+              surface.profile.display_name,
+            ),
+            entrySource: "buddy-onboarding-resume",
+          });
+          await openRuntimeChat(binding, navigate, {
+            shouldNavigate: () => !cancelled,
+          });
           return;
         }
         if (
           decision.mode === "chat-needs-naming" &&
-          surface?.profile?.profile_id &&
-          decision.sessionId
+          surface?.profile?.profile_id
         ) {
-          navigate(
-            `/chat?buddy_session=${encodeURIComponent(decision.sessionId)}&buddy_profile=${encodeURIComponent(surface.profile.profile_id)}`,
-            { replace: true },
-          );
+          const binding = buildBuddyExecutionCarrierChatBinding({
+            sessionId: decision.sessionId,
+            profileId: surface.profile.profile_id,
+            profileDisplayName: surface.profile.display_name,
+            executionCarrier: createResumeExecutionCarrier(
+              surface.profile.profile_id,
+              surface.profile.display_name,
+            ),
+            entrySource: "buddy-onboarding-resume",
+          });
+          await openRuntimeChat(binding, navigate, {
+            shouldNavigate: () => !cancelled,
+          });
           return;
         }
         if (
@@ -148,7 +175,6 @@ export default function BuddyOnboardingPage() {
         constraints: parseLines(values.constraints),
         goal_intention: values.goal_intention,
       });
-      writeBuddyProfileId(result.profile.profile_id);
       setIdentity(result);
       setClarification(null);
       setSelectedDirection("");
@@ -212,7 +238,7 @@ export default function BuddyOnboardingPage() {
         await openRuntimeChat(binding, navigate);
         return;
       } catch (rawError) {
-        setError(rawError instanceof Error ? rawError.message : "杩涘叆鑱婂ぉ澶辫触");
+        setError(rawError instanceof Error ? rawError.message : "进入聊天失败");
         return;
       }
     }
@@ -240,8 +266,8 @@ export default function BuddyOnboardingPage() {
             Buddy 初次建档
           </Title>
           <Paragraph style={{ margin: 0 }}>
-            先让我认真了解你，再一起收口一个足够大的长期方向。默认不会把整棵计划树压给你，
-            只会先帮你看清最终目标和眼前这一小步。
+            先让我认真了解你，再一起把长期方向收口成一个足够大的主方向。
+            默认不会把整棵计划树都压给你，只会先让你看清最终目标和当前这一步。
           </Paragraph>
           <Steps
             current={stepIndex}
@@ -286,7 +312,7 @@ export default function BuddyOnboardingPage() {
               <TextArea rows={2} placeholder="可用逗号、顿号或换行分隔" />
             </Form.Item>
             <Form.Item label="特长" name="strengths">
-              <TextArea rows={2} placeholder="你做得比大多数人更稳的东西" />
+              <TextArea rows={2} placeholder="你做得比大多数人更稳的事情" />
             </Form.Item>
             <Form.Item label="限制 / 困境" name="constraints">
               <TextArea rows={2} placeholder="时间、金钱、精力、环境约束等" />

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { BuddyPanel } from "./BuddyPanel";
 
 describe("BuddyPanel", () => {
-  it("renders relationship, growth, and donor-style avatar metadata from buddy surface", () => {
+  it("renders relationship, growth, and buddy goal/task summaries from the buddy surface", () => {
     render(
       <BuddyPanel
         open
@@ -26,7 +26,7 @@ describe("BuddyPanel", () => {
               mood_state: "warm",
               rarity: "common",
               current_goal_summary: "建立可持续的创作事业与独立成长轨道",
-              current_task_summary: "写出第一篇真正能代表自己的案例文章",
+              current_task_summary: "写出第一篇真正代表自己的案例文章",
               why_now_summary: "这是把长期方向拉进现实的第一份证据。",
               single_next_action_summary: "现在先打开文档，写下案例标题和三条核心观点。",
               companion_strategy_summary:
@@ -53,7 +53,7 @@ describe("BuddyPanel", () => {
     expect(screen.getByText("Nova 的伙伴面板")).toBeInTheDocument();
     expect(screen.getByText(/当前陪伴状态：/)).toBeInTheDocument();
     expect(screen.getByText("建立可持续的创作事业与独立成长轨道")).toBeInTheDocument();
-    expect(screen.getByText("写出第一篇真正能代表自己的案例文章")).toBeInTheDocument();
+    expect(screen.getByText("写出第一篇真正代表自己的案例文章")).toBeInTheDocument();
     expect(screen.getByText("现在先打开文档，写下案例标题和三条核心观点。")).toBeInTheDocument();
     expect(screen.getByText("先接住情绪，再把任务缩成一个最小动作；避免高压催促。")).toBeInTheDocument();
     expect(screen.getByTestId("buddy-panel-avatar-species")).toBeInTheDocument();

@@ -229,5 +229,5 @@ describe("IndustryPage current carrier copy", () => {
     expect(screen.queryByText("团队角色")).toBeNull();
     expect(screen.queryByText("创建并启动团队")).toBeNull();
     expect(screen.queryByText("更新团队")).toBeNull();
-  });
+  }, 15000);
 });

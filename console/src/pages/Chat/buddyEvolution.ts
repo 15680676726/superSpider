@@ -20,6 +20,19 @@ const EVOLUTION_THRESHOLDS: Array<{
   { minimumExperience: 0, stage: "seed" },
 ];
 
+function normalizeKnownStage(raw?: string | null): BuddyEvolutionStage | null {
+  switch ((raw || "").trim()) {
+    case "seed":
+    case "bonded":
+    case "capable":
+    case "seasoned":
+    case "signature":
+      return (raw || "").trim() as BuddyEvolutionStage;
+    default:
+      return null;
+  }
+}
+
 export function resolveBuddyEvolutionStage(
   input: BuddyEvolutionInput,
 ): BuddyEvolutionStage {
@@ -50,8 +63,15 @@ export function presentBuddyRarityLabel(rarity?: string | null): string {
 export function resolveBuddyEvolutionView(input: {
   evolutionStage?: string | null;
   rarity?: string | null;
+  currentForm?: string | null;
+  companionExperience?: number | null;
 }) {
-  const stage = (input.evolutionStage || "seed").trim() as BuddyEvolutionStage;
+  const stage =
+    normalizeKnownStage(input.evolutionStage) ||
+    normalizeKnownStage(input.currentForm) ||
+    resolveBuddyEvolutionStage({
+      companionExperience: input.companionExperience,
+    });
   const accentTone =
     stage === "signature"
       ? "gold"

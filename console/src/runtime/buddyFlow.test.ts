@@ -114,6 +114,29 @@ describe("buddyFlow", () => {
     expect(naming.sessionId).toBe("session-1");
   });
 
+  it("falls back to the bound thread session id when naming still needs to continue", () => {
+    const surface = makeSurface({
+      onboarding: {
+        session_id: null,
+        status: "confirmed",
+        question_count: 9,
+        tightened: true,
+        next_question: "",
+        candidate_directions: ["建立稳定、自主、长期向上的人生成长主方向"],
+        recommended_direction: "建立稳定、自主、长期向上的人生成长主方向",
+        selected_direction: "建立稳定、自主、长期向上的人生成长主方向",
+        requires_direction_confirmation: false,
+        requires_naming: true,
+        completed: false,
+      },
+    });
+
+    const naming = resolveBuddyNamingState(surface, null, "session-from-thread");
+
+    expect(naming.needsNaming).toBe(true);
+    expect(naming.sessionId).toBe("session-from-thread");
+  });
+
   it("lets completed buddies enter chat without naming gate", () => {
     const surface = makeSurface({
       growth_target: {

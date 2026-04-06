@@ -16,7 +16,6 @@ type ResolveChatBindingRecoveryActionArgs = {
   threadBootstrapPending: boolean;
   autoBindingPending: boolean;
   hasBoundAgentContext: boolean;
-  defaultAutoBindAttempted: boolean;
   recoveryAttempts: ReadonlySet<string>;
   executionCoreSuggestions: readonly IndustryInstanceSummary[];
 };
@@ -66,24 +65,9 @@ export function resolveChatBindingRecoveryAction({
   threadBootstrapPending,
   autoBindingPending,
   hasBoundAgentContext,
-  defaultAutoBindAttempted,
   recoveryAttempts,
   executionCoreSuggestions,
 }: ResolveChatBindingRecoveryActionArgs): ChatBindingRecoveryAction {
-  if (
-    !requestedThreadId &&
-    !hasBoundAgentContext &&
-    executionCoreSuggestions.length === 1 &&
-    !defaultAutoBindAttempted
-  ) {
-    return {
-      type: "bind-instance",
-      instance: executionCoreSuggestions[0],
-      recoveryToken: null,
-      markDefaultAttempt: true,
-    };
-  }
-
   const matchedInstance = resolveMatchedExecutionCoreInstance(
     requestedThreadId,
     executionCoreSuggestions,
@@ -137,9 +121,8 @@ export function resolveChatBindingRecoveryAction({
 
 type UseChatBindingRecoveryArgs = Omit<
   ResolveChatBindingRecoveryActionArgs,
-  "defaultAutoBindAttempted" | "recoveryAttempts"
+  "recoveryAttempts"
 > & {
-  defaultAutoBindAttemptedRef: MutableRefObject<boolean>;
   recoveryAttemptsRef: MutableRefObject<Set<string>>;
   navigate: NavigateFunction;
   openSuggestedIndustryChat: (
@@ -155,7 +138,6 @@ export function useChatBindingRecovery({
   threadBootstrapPending,
   autoBindingPending,
   hasBoundAgentContext,
-  defaultAutoBindAttemptedRef,
   recoveryAttemptsRef,
   executionCoreSuggestions,
   navigate,
@@ -170,7 +152,6 @@ export function useChatBindingRecovery({
       threadBootstrapPending,
       autoBindingPending,
       hasBoundAgentContext,
-      defaultAutoBindAttempted: defaultAutoBindAttemptedRef.current,
       recoveryAttempts: recoveryAttemptsRef.current,
       executionCoreSuggestions,
     });
@@ -179,9 +160,6 @@ export function useChatBindingRecovery({
       return;
     }
 
-    if (action.type === "bind-instance" && action.markDefaultAttempt) {
-      defaultAutoBindAttemptedRef.current = true;
-    }
     if (action.recoveryToken) {
       recoveryAttemptsRef.current.add(action.recoveryToken);
     }
@@ -195,7 +173,6 @@ export function useChatBindingRecovery({
     navigate("/chat", { replace: true });
   }, [
     autoBindingPending,
-    defaultAutoBindAttemptedRef,
     executionCoreSuggestions,
     hasBoundAgentContext,
     navigate,

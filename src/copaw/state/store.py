@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 32
+STATE_SCHEMA_VERSION = 33
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS human_profiles (
@@ -1500,6 +1500,9 @@ CREATE TABLE IF NOT EXISTS capability_candidates (
     rollback_criteria_json TEXT NOT NULL DEFAULT '[]',
     source_task_ids_json TEXT NOT NULL DEFAULT '[]',
     evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    verified_stage TEXT NOT NULL DEFAULT 'unverified',
+    provider_resolution_status TEXT NOT NULL DEFAULT 'pending',
+    compatibility_status TEXT NOT NULL DEFAULT 'unknown',
     version TEXT NOT NULL DEFAULT 'v1',
     lineage_root_id TEXT,
     supersedes_json TEXT NOT NULL DEFAULT '[]',
@@ -1641,6 +1644,9 @@ CREATE TABLE IF NOT EXISTS skill_trials (
     handoff_count INTEGER NOT NULL DEFAULT 0,
     operator_intervention_count INTEGER NOT NULL DEFAULT 0,
     latency_summary_json TEXT NOT NULL DEFAULT '{}',
+    verified_stage TEXT NOT NULL DEFAULT 'unverified',
+    provider_resolution_status TEXT NOT NULL DEFAULT 'pending',
+    compatibility_status TEXT NOT NULL DEFAULT 'unknown',
     metadata_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -1677,6 +1683,9 @@ CREATE TABLE IF NOT EXISTS skill_lifecycle_decisions (
     replacement_target_ids_json TEXT NOT NULL DEFAULT '[]',
     protection_lifted INTEGER NOT NULL DEFAULT 0,
     applied_by TEXT,
+    verified_stage TEXT NOT NULL DEFAULT 'unverified',
+    provider_resolution_status TEXT NOT NULL DEFAULT 'pending',
+    compatibility_status TEXT NOT NULL DEFAULT 'unknown',
     metadata_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -1887,6 +1896,9 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
             ("equivalence_class", "TEXT"),
             ("capability_overlap_score", "REAL"),
             ("replacement_relation", "TEXT"),
+            ("verified_stage", "TEXT NOT NULL DEFAULT 'unverified'"),
+            ("provider_resolution_status", "TEXT NOT NULL DEFAULT 'pending'"),
+            ("compatibility_status", "TEXT NOT NULL DEFAULT 'unknown'"),
         ),
     ),
     (
@@ -1935,6 +1947,9 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
             ("equivalence_class", "TEXT"),
             ("capability_overlap_score", "REAL"),
             ("replacement_relation", "TEXT"),
+            ("verified_stage", "TEXT NOT NULL DEFAULT 'unverified'"),
+            ("provider_resolution_status", "TEXT NOT NULL DEFAULT 'pending'"),
+            ("compatibility_status", "TEXT NOT NULL DEFAULT 'unknown'"),
         ),
     ),
     (
@@ -1952,6 +1967,9 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
             ("retirement_reason", "TEXT"),
             ("retirement_scope", "TEXT"),
             ("retirement_evidence_refs_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("verified_stage", "TEXT NOT NULL DEFAULT 'unverified'"),
+            ("provider_resolution_status", "TEXT NOT NULL DEFAULT 'pending'"),
+            ("compatibility_status", "TEXT NOT NULL DEFAULT 'unknown'"),
         ),
     ),
     (

@@ -607,47 +607,72 @@ async def approve_decision(
         if decision_repository is not None
         else None
     )
-    if (
+    is_acquisition_decision = (
         decision is not None
         and str(getattr(decision, "decision_type", "") or "").strip() == "acquisition-approval"
-    ):
+    )
+    dispatcher = _get_kernel_dispatcher(request)
+    response_payload: dict[str, object]
+    resolved_decision_id = decision_id
+    try:
+        result = await _call_runtime_query_method(
+            dispatcher,
+            "approve_decision",
+            not_available_detail="Kernel dispatcher is not available",
+            decision_id=decision_id,
+            resolution=payload.resolution if payload is not None else None,
+            execute=payload.execute if payload is not None else None,
+        )
+    except KeyError as exc:
+        if not (
+            is_acquisition_decision
+            and "not found in kernel" in str(exc).lower()
+        ):
+            _raise_dispatcher_error(exc)
+        response_payload = {
+            "decision_request_id": decision_id,
+            "summary": str(exc),
+        }
+    except Exception as exc:  # pragma: no cover - mapped explicitly below
+        _raise_dispatcher_error(exc)
+    else:
+        response_payload = result.model_dump(mode="json")
+        resolved_decision_id = (
+            str(getattr(result, "decision_request_id", "") or "").strip() or decision_id
+        )
+    if is_acquisition_decision:
         service = _get_learning_service(request)
         try:
-            result = await service.approve_acquisition_proposal(
-                decision.task_id,
-                approved_by="runtime-center",
+            finalized = await _call_runtime_query_method(
+                service,
+                "finalize_resolved_decision",
+                not_available_detail="Learning service is not available",
+                decision_id=resolved_decision_id,
+                status="approved",
+                actor="runtime-center",
+                resolution=payload.resolution if payload is not None else None,
             )
         except KeyError as exc:
             raise HTTPException(404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(400, detail=str(exc)) from exc
         decision_payload = (
-            decision_repository.get_decision_request(decision_id)
-            if decision_repository is not None
-            else None
+            _model_dump_or_dict(finalized.get("decision"))
+            or _model_dump_or_dict(finalized.get("decision_request"))
+            or (
+                _model_dump_or_dict(decision_repository.get_decision_request(resolved_decision_id))
+                if decision_repository is not None
+                else None
+            )
         )
         return {
-            "decision_request_id": decision_id,
-            "decision": (
-                _model_dump_or_dict(decision_payload) if decision_payload is not None else None
-            ),
-            "proposal": _model_dump_or_dict(result.get("proposal")),
-            "plan": _model_dump_or_dict(result.get("plan")),
-            "onboarding_run": _model_dump_or_dict(result.get("onboarding_run")),
+            "decision_request_id": resolved_decision_id,
+            "decision": decision_payload,
+            "proposal": _model_dump_or_dict(finalized.get("proposal")),
+            "plan": _model_dump_or_dict(finalized.get("plan")),
+            "onboarding_run": _model_dump_or_dict(finalized.get("onboarding_run")),
+            "kernel_result": response_payload,
         }
-    dispatcher = _get_kernel_dispatcher(request)
-    try:
-        result = await dispatcher.approve_decision(
-            decision_id,
-            resolution=payload.resolution if payload is not None else None,
-            execute=payload.execute if payload is not None else None,
-        )
-    except Exception as exc:  # pragma: no cover - mapped explicitly below
-        _raise_dispatcher_error(exc)
-    response_payload = result.model_dump(mode="json")
-    resolved_decision_id = (
-        str(getattr(result, "decision_request_id", "") or "").strip() or decision_id
-    )
     if _schedule_query_tool_confirmation_resume(
         request,
         decision_id=resolved_decision_id,
@@ -672,41 +697,70 @@ async def reject_decision(
         if decision_repository is not None
         else None
     )
-    if (
+    is_acquisition_decision = (
         decision is not None
         and str(getattr(decision, "decision_type", "") or "").strip() == "acquisition-approval"
-    ):
+    )
+    dispatcher = _get_kernel_dispatcher(request)
+    response_payload: dict[str, object]
+    resolved_decision_id = decision_id
+    try:
+        result = await _call_runtime_query_method(
+            dispatcher,
+            "reject_decision",
+            not_available_detail="Kernel dispatcher is not available",
+            decision_id=decision_id,
+            resolution=payload.resolution if payload is not None else None,
+        )
+    except KeyError as exc:
+        if not (
+            is_acquisition_decision
+            and "not found in kernel" in str(exc).lower()
+        ):
+            _raise_dispatcher_error(exc)
+        response_payload = {
+            "decision_request_id": decision_id,
+            "summary": str(exc),
+        }
+    except Exception as exc:  # pragma: no cover - mapped explicitly below
+        _raise_dispatcher_error(exc)
+    else:
+        response_payload = result.model_dump(mode="json")
+        resolved_decision_id = (
+            str(getattr(result, "decision_request_id", "") or "").strip() or decision_id
+        )
+    if is_acquisition_decision:
         service = _get_learning_service(request)
         try:
-            result = service.reject_acquisition_proposal(
-                decision.task_id,
-                rejected_by="runtime-center",
+            finalized = await _call_runtime_query_method(
+                service,
+                "finalize_resolved_decision",
+                not_available_detail="Learning service is not available",
+                decision_id=resolved_decision_id,
+                status="rejected",
+                actor="runtime-center",
+                resolution=payload.resolution if payload is not None else None,
             )
         except KeyError as exc:
             raise HTTPException(404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(400, detail=str(exc)) from exc
         decision_payload = (
-            decision_repository.get_decision_request(decision_id)
-            if decision_repository is not None
-            else None
+            _model_dump_or_dict(finalized.get("decision"))
+            or _model_dump_or_dict(finalized.get("decision_request"))
+            or (
+                _model_dump_or_dict(decision_repository.get_decision_request(resolved_decision_id))
+                if decision_repository is not None
+                else None
+            )
         )
         return {
-            "decision_request_id": decision_id,
-            "decision": (
-                _model_dump_or_dict(decision_payload) if decision_payload is not None else None
-            ),
-            "proposal": _model_dump_or_dict(result.get("proposal")),
+            "decision_request_id": resolved_decision_id,
+            "decision": decision_payload,
+            "proposal": _model_dump_or_dict(finalized.get("proposal")),
+            "kernel_result": response_payload,
         }
-    dispatcher = _get_kernel_dispatcher(request)
-    try:
-        result = dispatcher.reject_decision(
-            decision_id,
-            resolution=payload.resolution if payload is not None else None,
-        )
-    except Exception as exc:  # pragma: no cover - mapped explicitly below
-        _raise_dispatcher_error(exc)
-    return result.model_dump(mode="json")
+    return response_payload
 
 
 @router.get("/kernel/tasks", response_model=list[dict[str, object]])

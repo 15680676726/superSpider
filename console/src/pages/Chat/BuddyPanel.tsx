@@ -8,12 +8,7 @@ import {
   renderBuddyFace,
 } from "./buddyAvatar";
 import { resolveBuddyEvolutionView } from "./buddyEvolution";
-import {
-  presentBuddyEncouragementStyleLabel,
-  presentBuddyMoodLabel,
-  presentBuddyPresenceLabel,
-  presentBuddyStageLabel,
-} from "./buddyPresentation";
+import { resolveBuddyDisplaySnapshot } from "./buddyPresentation";
 import styles from "./index.module.less";
 
 const { Paragraph, Text } = Typography;
@@ -37,9 +32,12 @@ export function BuddyPanel({
     return () => window.clearInterval(timer);
   }, [open]);
 
+  const snapshot = surface ? resolveBuddyDisplaySnapshot(surface) : null;
   const evolution = surface
     ? resolveBuddyEvolutionView({
         evolutionStage: surface.growth.evolution_stage,
+        currentForm: surface.presentation.current_form,
+        companionExperience: surface.growth.companion_experience,
         rarity: surface.presentation.rarity,
       })
     : null;
@@ -47,20 +45,20 @@ export function BuddyPanel({
 
   return (
     <Drawer
-      title={surface ? `${surface.presentation.buddy_name} 的伙伴面板` : "伙伴面板"}
+      title={snapshot ? `${snapshot.buddyName} 的伙伴面板` : "伙伴面板"}
       placement="right"
       width={420}
       open={open}
       onClose={onClose}
     >
-      {!surface || !avatar ? null : (
+      {!surface || !avatar || !snapshot ? null : (
         <Row gutter={[12, 12]}>
           <Col span={24}>
             <Card size="small" title="身份">
               <div className={styles.buddyPanelAvatar}>
                 <div
                   className={styles.buddyPanelAvatarSprite}
-                  data-stage={surface.growth.evolution_stage}
+                  data-stage={evolution?.stage ?? snapshot.stage}
                   data-presence={surface.presentation.presence_state}
                   data-frame={avatar.frameIndex}
                 >
@@ -90,16 +88,15 @@ export function BuddyPanel({
                 {" 的伙伴显化"}
               </Paragraph>
               <Paragraph style={{ marginBottom: 0 }}>
-                当前形态：
-                {presentBuddyStageLabel(evolution?.stage ?? surface.growth.evolution_stage)}
+                当前形态：{snapshot.stageLabel}
                 {" / "}
                 {evolution?.rarityLabel ?? surface.presentation.rarity}
               </Paragraph>
               <Paragraph style={{ marginBottom: 0 }}>
-                当前心情：{presentBuddyMoodLabel(surface.presentation.mood_state)}
+                当前心情：{snapshot.moodLabel}
               </Paragraph>
               <Paragraph style={{ marginBottom: 0 }}>
-                当前陪伴状态：{presentBuddyPresenceLabel(surface.presentation.presence_state)}
+                当前陪伴状态：{snapshot.presenceLabel}
               </Paragraph>
             </Card>
           </Col>
@@ -114,15 +111,12 @@ export function BuddyPanel({
                 </Col>
               </Row>
               <Paragraph style={{ marginTop: 12, marginBottom: 0 }}>
-                鼓励风格：
-                {presentBuddyEncouragementStyleLabel(
-                  surface.relationship?.encouragement_style,
-                )}
+                鼓励风格：{snapshot.encouragementStyleLabel}
               </Paragraph>
-              {surface.presentation.companion_strategy_summary ? (
+              {snapshot.companionStrategySummary ? (
                 <Paragraph style={{ marginBottom: 0 }}>
                   <Text strong>陪伴策略：</Text>
-                  {surface.presentation.companion_strategy_summary}
+                  {snapshot.companionStrategySummary}
                 </Paragraph>
               ) : null}
             </Card>
@@ -159,26 +153,26 @@ export function BuddyPanel({
             <Card size="small" title="当前关系上下文">
               <Paragraph>
                 <Text strong>最终目标：</Text>
-                {surface.presentation.current_goal_summary}
+                {snapshot.finalGoalSummary}
               </Paragraph>
               <Paragraph>
                 <Text strong>当前任务：</Text>
-                {surface.presentation.current_task_summary}
+                {snapshot.currentTaskSummary}
               </Paragraph>
               <Paragraph>
                 <Text strong>为什么现在做：</Text>
-                {surface.presentation.why_now_summary}
+                {snapshot.whyNowSummary}
               </Paragraph>
               <Paragraph style={{ marginBottom: 0 }}>
                 <Text strong>唯一下一步：</Text>
-                {surface.presentation.single_next_action_summary || "先把任务缩成一个最小动作。"}
+                {snapshot.singleNextActionSummary}
               </Paragraph>
             </Card>
           </Col>
           <Col span={24}>
             <Tag color={evolution?.accentTone ?? "default"}>{`物种 ${avatar.speciesLabel}`}</Tag>
             <Tag>{`帽子 ${avatar.hatLabel}`}</Tag>
-            <Tag>{`陪伴状态 ${presentBuddyPresenceLabel(surface.presentation.presence_state)}`}</Tag>
+            <Tag>{`陪伴状态 ${snapshot.presenceLabel}`}</Tag>
             <Tag color={evolution?.accentTone ?? "purple"}>
               {`陪跑完成 ${surface.growth.completed_support_runs}`}
             </Tag>

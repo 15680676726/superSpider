@@ -3,26 +3,25 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  readBuddyProfileId,
-  resetBuddyProfileBindingForTests,
-  writeBuddyProfileId,
+  normalizeBuddyProfileId,
+  resolveCanonicalBuddyProfileId,
 } from "./buddyProfileBinding";
 
 describe("buddyProfileBinding", () => {
   afterEach(() => {
-    resetBuddyProfileBindingForTests();
+    window.localStorage.clear();
   });
 
-  it("stores and reads trimmed buddy profile ids", () => {
-    writeBuddyProfileId("  profile-1  ");
-
-    expect(readBuddyProfileId()).toBe("profile-1");
+  it("normalizes buddy profile ids without relying on browser storage", () => {
+    expect(normalizeBuddyProfileId("  profile-1  ")).toBe("profile-1");
+    expect(normalizeBuddyProfileId("   ")).toBeNull();
+    expect(normalizeBuddyProfileId(null)).toBeNull();
   });
 
-  it("clears the binding when an empty id is written", () => {
-    writeBuddyProfileId("profile-1");
-    writeBuddyProfileId("   ");
-
-    expect(readBuddyProfileId()).toBeNull();
+  it("resolves the first canonical buddy profile id from provided inputs", () => {
+    expect(resolveCanonicalBuddyProfileId(null, "  ", "profile-2", "profile-3")).toBe(
+      "profile-2",
+    );
+    expect(resolveCanonicalBuddyProfileId(null, "")).toBeNull();
   });
 });

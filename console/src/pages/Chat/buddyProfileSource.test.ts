@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  mergeBuddyProfileIntoThreadMeta,
   resolveBuddyProfileIdFromBuddySurface,
   resolveRequestedBuddyProfileId,
+  resolveBuddySurfaceProfileRequest,
+  resolveThreadBuddyProfileId,
 } from "./buddyProfileSource";
 
 describe("buddyProfileSource", () => {
@@ -31,5 +34,44 @@ describe("buddyProfileSource", () => {
         surfaceProfileId: null,
       }),
     ).toBeNull();
+  });
+
+  it("prefers the canonical thread buddy profile over the query when requesting buddy surface", () => {
+    expect(
+      resolveBuddySurfaceProfileRequest({
+        threadMeta: { buddy_profile_id: "profile-thread" },
+        requestedProfileId: "profile-query",
+      }),
+    ).toBe("profile-thread");
+    expect(
+      resolveBuddySurfaceProfileRequest({
+        threadMeta: {},
+        requestedProfileId: "profile-query",
+      }),
+    ).toBe("profile-query");
+  });
+
+  it("does not overwrite a canonical thread buddy profile id with a query fallback", () => {
+    expect(resolveThreadBuddyProfileId({ buddy_profile_id: "profile-thread" })).toBe(
+      "profile-thread",
+    );
+    expect(
+      mergeBuddyProfileIntoThreadMeta({
+        threadMeta: { buddy_profile_id: "profile-thread", owner_scope: "profile-thread" },
+        requestedProfileId: "profile-query",
+      }),
+    ).toEqual({
+      buddy_profile_id: "profile-thread",
+      owner_scope: "profile-thread",
+    });
+    expect(
+      mergeBuddyProfileIntoThreadMeta({
+        threadMeta: { owner_scope: "profile-query" },
+        requestedProfileId: "profile-query",
+      }),
+    ).toEqual({
+      owner_scope: "profile-query",
+      buddy_profile_id: "profile-query",
+    });
   });
 });

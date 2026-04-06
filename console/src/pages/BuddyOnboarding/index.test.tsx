@@ -77,10 +77,10 @@ describe("BuddyOnboardingPage", () => {
         status: "confirmed",
         question_count: 9,
         candidate_directions: [
-          "寤虹珛鐙珛鍒涗綔涓庡唴瀹逛簨涓氱殑闀挎湡鎴愰暱璺緞",
+          "建立独立创作与内容事业的长期成长路径",
         ],
-        recommended_direction: "寤虹珛鐙珛鍒涗綔涓庡唴瀹逛簨涓氱殑闀挎湡鎴愰暱璺緞",
-        selected_direction: "寤虹珛鐙珛鍒涗綔涓庡唴瀹逛簨涓氱殑闀挎湡鎴愰暱璺緞",
+        recommended_direction: "建立独立创作与内容事业的长期成长路径",
+        selected_direction: "建立独立创作与内容事业的长期成长路径",
       },
       growth_target: {
         primary_direction: "建立独立创作与内容事业的长期成长路径",
@@ -235,7 +235,26 @@ describe("BuddyOnboardingPage", () => {
     await waitFor(() => {
       expect(apiMock.getBuddySurface).toHaveBeenCalledWith();
     });
-    expect(navigateMock).toHaveBeenCalledWith(
+    expect(runtimeChatMock.buildBuddyExecutionCarrierChatBinding).toHaveBeenCalledWith({
+      sessionId: null,
+      profileId: "profile-existing",
+      profileDisplayName: "Existing",
+      executionCarrier: expect.objectContaining({
+        instance_id: "buddy:profile-existing",
+        owner_scope: "profile-existing",
+      }),
+      entrySource: "buddy-onboarding-resume",
+    });
+    expect(runtimeChatMock.openRuntimeChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "industry-chat:buddy:profile-1:execution-core",
+      }),
+      navigateMock,
+      expect.objectContaining({
+        shouldNavigate: expect.any(Function),
+      }),
+    );
+    expect(navigateMock).not.toHaveBeenCalledWith(
       "/chat?buddy_profile=profile-existing",
       { replace: true },
     );
@@ -388,9 +407,81 @@ describe("BuddyOnboardingPage", () => {
     await waitFor(() => {
       expect(apiMock.getBuddySurface).toHaveBeenCalledWith();
     });
-    expect(navigateMock).toHaveBeenCalledWith(
+    expect(runtimeChatMock.buildBuddyExecutionCarrierChatBinding).toHaveBeenCalledWith({
+      sessionId: "session-needs-name",
+      profileId: "profile-needs-name",
+      profileDisplayName: "待命名",
+      executionCarrier: expect.objectContaining({
+        instance_id: "buddy:profile-needs-name",
+        owner_scope: "profile-needs-name",
+      }),
+      entrySource: "buddy-onboarding-resume",
+    });
+    expect(runtimeChatMock.openRuntimeChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "industry-chat:buddy:profile-1:execution-core",
+      }),
+      navigateMock,
+      expect.objectContaining({
+        shouldNavigate: expect.any(Function),
+      }),
+    );
+    expect(navigateMock).not.toHaveBeenCalledWith(
       "/chat?buddy_session=session-needs-name&buddy_profile=profile-needs-name",
       { replace: true },
     );
+  });
+
+  it("shows a clean fallback error when entering chat from the execution carrier fails", async () => {
+    runtimeChatMock.openRuntimeChat.mockRejectedValue(new Error("runtime unavailable"));
+
+    render(<BuddyOnboardingPage />);
+
+    await waitFor(() => {
+      expect(apiMock.getBuddySurface).toHaveBeenCalled();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("你希望我怎么称呼你？"), {
+      target: { value: "Alex" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("你现在主要在做什么？"), {
+      target: { value: "设计师" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("例如：探索期、转型期、重建期、稳定增长期"), {
+      target: { value: "转型期" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("先说你隐约想改变什么，模糊也没有关系。"), {
+      target: { value: "我想建立真正长期的方向。" },
+    });
+    fireEvent.submit(screen.getByTestId("buddy-identity-form"));
+
+    await waitFor(() => {
+      expect(apiMock.submitBuddyIdentity).toHaveBeenCalled();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("用最真实的话回答我，不用写得很工整。"), {
+      target: { value: "我想拥有杠杆和独立性。" },
+    });
+    fireEvent.click(screen.getByTestId("buddy-clarification-submit"));
+
+    await waitFor(() => {
+      expect(apiMock.answerBuddyClarification).toHaveBeenCalled();
+    });
+
+    fireEvent.click(
+      screen.getByLabelText(/建立独立创作与内容事业的长期成长路径/),
+    );
+    fireEvent.click(screen.getByTestId("buddy-direction-confirm"));
+
+    await waitFor(() => {
+      expect(apiMock.confirmBuddyDirection).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByTestId("buddy-direction-enter-chat"));
+
+    await waitFor(() => {
+      expect(runtimeChatMock.openRuntimeChat).toHaveBeenCalled();
+    });
+    expect(screen.getByText("runtime unavailable")).toBeInTheDocument();
   });
 });

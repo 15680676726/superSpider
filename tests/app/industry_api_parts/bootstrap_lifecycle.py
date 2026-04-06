@@ -8,6 +8,7 @@ from ..test_capability_market_api import FakeMcpRegistryCatalog
 from copaw.app.console_push_store import take_all
 from copaw.capabilities.system_team_handlers import SystemTeamCapabilityFacade
 from copaw.industry import IndustryBootstrapInstallItem, IndustryCapabilityRecommendation
+from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.kernel.persistence import decode_kernel_task_metadata
 from copaw.memory.activation_models import ActivationResult
 from copaw.memory.knowledge_graph_models import (
@@ -1293,6 +1294,108 @@ def test_industry_bootstrap_retire_previous_active_instance_globally(tmp_path) -
     assert retired_strategies[0].active_goal_ids == []
 
 
+def test_public_bootstrap_auto_activate_keeps_instance_active_without_legacy_goal_dispatch(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    instance_id = payload["team"]["team_id"]
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+    assert record.status == "active"
+    assert record.autonomy_status == "coordinating"
+    assert all(item["dispatch"] is None for item in payload["goals"])
+    assert app.state.task_repository.list_tasks(
+        industry_instance_id=instance_id,
+        limit=None,
+    ) == []
+
+    strategies = app.state.strategy_memory_service.list_strategies(
+        industry_instance_id=instance_id,
+        limit=5,
+    )
+    assert strategies
+    assert strategies[0].active_goal_ids == []
+
+
+def test_chat_writeback_schedule_creation_does_not_expand_instance_schedule_truth(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+    baseline = app.state.industry_instance_repository.get_instance(instance_id)
+    assert baseline is not None
+    baseline_schedule_ids = list(baseline.schedule_ids or [])
+
+    result = asyncio.run(
+        app.state.industry_service.apply_execution_chat_writeback(
+            industry_instance_id=instance_id,
+            message_text="Create a weekly researcher follow-up cadence for this team.",
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry-chat:{instance_id}:execution-core",
+            channel="console",
+            writeback_plan=build_chat_writeback_plan(
+                "Create a weekly researcher follow-up cadence for this team.",
+                approved_classifications=["schedule"],
+                schedule_title="Researcher Weekly Follow-Up",
+                schedule_summary="Run the weekly researcher follow-up cadence.",
+                schedule_cron="0 9 * * 1",
+                schedule_prompt="Review the latest signals and publish the next operator-ready follow-up.",
+            ),
+        ),
+    )
+
+    assert result is not None
+    assert result["created_schedule_ids"]
+    updated = app.state.industry_instance_repository.get_instance(instance_id)
+    assert updated is not None
+    assert updated.schedule_ids == baseline_schedule_ids
+
 
 
 def _build_team_capability_facade(app: FastAPI) -> SystemTeamCapabilityFacade:
@@ -1588,14 +1691,17 @@ def test_run_operating_cycle_dispatches_materialized_execution_assignment(tmp_pa
     assert runtime.metadata["current_assignment_id"] == assignment_id
     assert runtime.metadata["current_assignment_status"] == "queued"
     assert runtime.metadata["current_assignment_title"] == "Prepare the support execution brief"
+    assert runtime.metadata["current_focus_kind"] == "assignment"
+    assert runtime.metadata["current_focus_id"] == assignment_id
+    assert runtime.metadata["current_focus"] == "Prepare the support execution brief"
+    assert "goal_id" not in runtime.metadata
+    assert "goal_title" not in runtime.metadata
 
     override = app.state.agent_profile_override_repository.get_override(
         support_role.agent_id,
     )
     assert override is not None
     assert override.status in {"waiting", "assigned", "queued", "claimed", "executing"}
-    assert override.current_focus_kind == "goal"
-    assert override.current_focus
 
 
 def test_run_operating_cycle_persists_graph_focus_into_formal_planning_sidecar(tmp_path) -> None:
@@ -2866,6 +2972,110 @@ def test_failed_assignment_report_completes_original_backlog_after_followup_is_r
     assert focused_backlog_payload["main_chain"]["current_focus_id"] is None
     assert focused_backlog_payload["execution"]["current_focus"] is None
     assert focused_backlog_payload["main_chain"]["current_focus"] is None
+
+
+def test_runtime_center_industry_detail_only_accepts_canonical_focus_queries(tmp_path) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    assert detail.lanes
+    assert detail.current_cycle is not None
+
+    backlog_item = app.state.industry_service._backlog_service.record_chat_writeback(
+        industry_instance_id=instance_id,
+        lane_id=str(detail.lanes[0]["lane_id"]),
+        title="Prepare runtime-center follow-up packet",
+        summary="Keep the follow-up work on the canonical backlog surface only.",
+        priority=3,
+        source_ref="test:runtime-center-canonical-focus",
+        metadata={"source": "chat-writeback"},
+    )
+
+    supported_response = client.get(
+        (
+            f"/runtime-center/industry/{instance_id}"
+            f"?focus_kind=backlog&focus_id={quote(backlog_item.id)}"
+        )
+    )
+    assert supported_response.status_code == 200
+    supported_payload = supported_response.json()
+    assert supported_payload["focus_selection"]["selection_kind"] == "backlog"
+    assert supported_payload["focus_selection"]["backlog_item_id"] == backlog_item.id
+    assert supported_payload["focus_selection"]["route"] == (
+        f"/api/runtime-center/industry/{instance_id}?backlog_item_id={quote(backlog_item.id)}"
+    )
+    missing_focus_response = client.get(
+        (
+            f"/runtime-center/industry/{instance_id}"
+            "?focus_kind=backlog&focus_id=backlog-not-real"
+        )
+    )
+    assert missing_focus_response.status_code == 200
+    assert missing_focus_response.json()["focus_selection"] is None
+
+    unsupported_routes = [
+        f"/runtime-center/industry/{instance_id}?report_id=report-unsupported",
+        f"/runtime-center/industry/{instance_id}?lane_id={quote(str(detail.lanes[0]['lane_id']))}",
+        f"/runtime-center/industry/{instance_id}?cycle_id={quote(str(detail.current_cycle['cycle_id']))}",
+        f"/runtime-center/industry/{instance_id}?focus_kind=agent_report&focus_id=report-unsupported",
+        f"/runtime-center/industry/{instance_id}?focus_kind=invalid&focus_id=non-canonical",
+        (
+            f"/runtime-center/industry/{instance_id}"
+            f"?focus_kind=lane&focus_id={quote(str(detail.lanes[0]['lane_id']))}"
+        ),
+        (
+            f"/runtime-center/industry/{instance_id}"
+            f"?focus_kind=cycle&focus_id={quote(str(detail.current_cycle['cycle_id']))}"
+        ),
+    ]
+    for route in unsupported_routes:
+        response = client.get(route)
+        assert response.status_code == 400
+        assert response.json() == {
+            "detail": (
+                "Unsupported runtime-center industry focus; "
+                "only assignment/backlog focus is supported."
+            )
+        }
+
+    focus_id_only = client.get(
+        f"/runtime-center/industry/{instance_id}?focus_id={quote(backlog_item.id)}"
+    )
+    assert focus_id_only.status_code == 400
+    assert focus_id_only.json() == {
+        "detail": "focus_kind is required when focus_id is provided."
+    }
+
+    focus_kind_only = client.get(
+        f"/runtime-center/industry/{instance_id}?focus_kind=backlog"
+    )
+    assert focus_kind_only.status_code == 400
+    assert focus_kind_only.json() == {
+        "detail": "focus_id is required when focus_kind is provided."
+    }
 
 
 def test_failed_report_followup_carries_control_thread_and_surface_pressure_without_backlog_assignment(

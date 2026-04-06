@@ -68,6 +68,7 @@ def build_runtime_execution_stack(
     experience_memory_service: AgentExperienceMemoryService | None,
     state_store: SQLiteStateStore,
     work_context_service: WorkContextService,
+    runtime_provider: object | None,
     external_runtime_service: object | None = None,
     patch_executor_cls: type[PatchExecutor] = PatchExecutor,
     learning_service_cls: type[LearningService] = LearningService,
@@ -123,6 +124,7 @@ def build_runtime_execution_stack(
         state_store=state_store,
         external_runtime_service=external_runtime_service,
         environment_service=environment_service,
+        runtime_provider=runtime_provider,
     )
     kernel_dispatcher = kernel_dispatcher_cls(
         task_store=kernel_task_store,

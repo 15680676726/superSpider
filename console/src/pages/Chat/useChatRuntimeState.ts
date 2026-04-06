@@ -48,10 +48,8 @@ type UseChatRuntimeStateArgs = {
   activeIndustryId: string | null;
   activeIndustryRoleId: string | null;
   autoBindingPending: boolean;
-  defaultAutoBindAttemptedRef: MutableRefObject<boolean>;
   navigate: NavigateFunction;
   optionsConfig: DefaultConfig;
-  requestedIndustryThread: { instanceId: string; roleId?: string | null } | null;
   requestedThreadId: string | null;
   requestedThreadLooksBound: boolean;
   recoveryAttemptsRef: MutableRefObject<Set<string>>;
@@ -97,6 +95,81 @@ type UseChatRuntimeStateResult = {
   sessionKind: string;
 };
 
+export function resolveVerifiedRuntimeBindingState({
+  threadMeta,
+  activeAgentId,
+  activeIndustryId,
+  activeIndustryRoleId,
+  runtimeWindowUserId,
+}: {
+  threadMeta: Record<string, unknown>;
+  activeAgentId: string | null;
+  activeIndustryId: string | null;
+  activeIndustryRoleId: string | null;
+  runtimeWindowUserId: string | null | undefined;
+}) {
+  const verifiedIndustryId =
+    typeof threadMeta.industry_instance_id === "string" &&
+    threadMeta.industry_instance_id.trim()
+      ? threadMeta.industry_instance_id.trim()
+      : null;
+  const verifiedAgentId =
+    typeof threadMeta.agent_id === "string" && threadMeta.agent_id.trim()
+      ? threadMeta.agent_id.trim()
+      : null;
+  const sessionKind =
+    typeof threadMeta.session_kind === "string" ? threadMeta.session_kind : "";
+  const industryLabel =
+    typeof threadMeta.industry_label === "string"
+      ? normalizeSpiderMeshBrand(threadMeta.industry_label)
+      : verifiedIndustryId
+        ? activeIndustryId || verifiedIndustryId
+        : "";
+  const roleLabel =
+    typeof threadMeta.industry_role_name === "string"
+      ? normalizeSpiderMeshBrand(threadMeta.industry_role_name)
+      : verifiedIndustryId
+        ? activeIndustryRoleId || ""
+        : "";
+  const agentLabel =
+    typeof threadMeta.agent_name === "string"
+      ? normalizeSpiderMeshBrand(threadMeta.agent_name)
+      : verifiedAgentId
+        ? activeAgentId || runtimeWindowUserId || verifiedAgentId
+        : "";
+  const currentFocus =
+    typeof threadMeta.current_focus === "string"
+      ? threadMeta.current_focus
+      : "";
+  const hasIndustryContext = Boolean(verifiedIndustryId);
+  const hasAgentBinding =
+    Boolean(verifiedAgentId) ||
+    sessionKind === "industry-agent-chat" ||
+    sessionKind === "industry-control-thread";
+  const hasBoundAgentContext = hasIndustryContext || hasAgentBinding;
+  const bindingLabel =
+    industryLabel && roleLabel
+      ? `${industryLabel} / ${roleLabel}`
+      : firstNonEmptyString(
+          industryLabel,
+          agentLabel,
+          hasIndustryContext ? activeIndustryId : null,
+          hasAgentBinding ? activeAgentId : null,
+        );
+
+  return {
+    agentLabel,
+    bindingLabel,
+    currentFocus,
+    hasAgentBinding,
+    hasBoundAgentContext,
+    hasIndustryContext,
+    industryLabel,
+    roleLabel,
+    sessionKind,
+  };
+}
+
 declare global {
   interface WindowEventMap {
     "copaw:governance-status-dirty": CustomEvent<void>;
@@ -109,10 +182,8 @@ export function useChatRuntimeState({
   activeIndustryId,
   activeIndustryRoleId,
   autoBindingPending,
-  defaultAutoBindAttemptedRef,
   navigate,
   optionsConfig,
-  requestedIndustryThread,
   requestedThreadId,
   requestedThreadLooksBound,
   recoveryAttemptsRef,
@@ -260,40 +331,24 @@ export function useChatRuntimeState({
     setRuntimeWaitState,
   ]);
 
-  const industryLabel =
-    typeof threadMeta.industry_label === "string"
-      ? normalizeSpiderMeshBrand(threadMeta.industry_label)
-      : activeIndustryId || "";
-  const roleLabel =
-    typeof threadMeta.industry_role_name === "string"
-      ? normalizeSpiderMeshBrand(threadMeta.industry_role_name)
-      : activeIndustryRoleId || "";
-  const sessionKind =
-    typeof threadMeta.session_kind === "string"
-      ? threadMeta.session_kind
-      : requestedIndustryThread
-      ? "industry-control-thread"
-      : "";
-  const agentLabel =
-    typeof threadMeta.agent_name === "string"
-      ? normalizeSpiderMeshBrand(threadMeta.agent_name)
-      : activeAgentId || runtimeWindow.currentUserId || "";
-  const currentFocus =
-    typeof threadMeta.current_focus === "string"
-      ? threadMeta.current_focus
-      : "";
-  const hasIndustryContext = Boolean(activeIndustryId);
-  const hasAgentBinding =
-    (typeof threadMeta.agent_id === "string" &&
-      threadMeta.agent_id.trim().length > 0) ||
-    sessionKind === "industry-agent-chat" ||
-    sessionKind === "industry-control-thread";
-  const hasBoundAgentContext = hasIndustryContext || hasAgentBinding;
+  const {
+    industryLabel,
+    roleLabel,
+    sessionKind,
+    agentLabel,
+    currentFocus,
+    hasIndustryContext,
+    hasAgentBinding,
+    hasBoundAgentContext,
+    bindingLabel,
+  } = resolveVerifiedRuntimeBindingState({
+    threadMeta,
+    activeAgentId,
+    activeIndustryId,
+    activeIndustryRoleId,
+    runtimeWindowUserId: runtimeWindow.currentUserId,
+  });
   const hasSuggestedTeams = suggestedTeams.length > 0;
-  const bindingLabel =
-    industryLabel && roleLabel
-      ? `${industryLabel} / ${roleLabel}`
-      : firstNonEmptyString(industryLabel, agentLabel, activeAgentId);
   const executionCoreSuggestions = useMemo(
     () =>
       suggestedTeams.filter((instance) =>
@@ -486,7 +541,6 @@ export function useChatRuntimeState({
     threadBootstrapPending,
     autoBindingPending,
     hasBoundAgentContext,
-    defaultAutoBindAttemptedRef,
     recoveryAttemptsRef,
     executionCoreSuggestions,
     navigate,

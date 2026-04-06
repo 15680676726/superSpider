@@ -158,6 +158,12 @@ def test_phase_next_industry_long_run_smoke_keeps_followup_focus_and_replan_trut
     )
     assert response.status_code == 200
     instance_id = response.json()["team"]["team_id"]
+    strategies = app.state.strategy_memory_service.list_strategies(
+        industry_instance_id=instance_id,
+        limit=5,
+    )
+    assert strategies
+    assert strategies[0].active_goal_ids == []
 
     writeback = asyncio.run(
         app.state.industry_service.apply_execution_chat_writeback(
@@ -258,6 +264,12 @@ def test_phase_next_industry_long_run_smoke_keeps_followup_focus_and_replan_trut
     resumed_assignment_id = resumed_assignment_ids[0] if resumed_assignment_ids else None
 
     runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
+    updated_strategies = app.state.strategy_memory_service.list_strategies(
+        industry_instance_id=instance_id,
+        limit=5,
+    )
+    assert updated_strategies
+    assert updated_strategies[0].active_goal_ids == []
     assert runtime_payload["execution"]["current_focus_id"] != assignment_id
     assert runtime_payload["main_chain"]["current_focus_id"] != assignment_id
     assert runtime_payload["execution"]["current_focus_id"] in {

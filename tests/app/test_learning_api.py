@@ -776,3 +776,139 @@ def test_runtime_center_decision_routes_handle_acquisition_rejection(tmp_path) -
     proposal_detail = client.get(f"/learning/acquisition/proposals/{proposal_id}")
     assert proposal_detail.status_code == 200
     assert proposal_detail.json()["status"] == "rejected"
+
+
+def test_runtime_center_decision_routes_approve_acquisition_without_legacy_proposal_special_case(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    async def _fake_example_run(*args, **kwargs):
+        return InstallTemplateExampleRunRecord(
+            template_id="browser-local",
+            status="success",
+            started_at="2026-03-22T00:00:00Z",
+            finished_at="2026-03-22T00:00:01Z",
+            summary="Browser runtime smoke completed",
+            operations=["start", "stop"],
+        )
+
+    class _ReviewDiscoveryService(_FakeDiscoveryService):
+        async def discover(self, payload: dict[str, object]) -> dict[str, object]:
+            result = await super().discover(payload)
+            recommendation = dict(result["recommendations"][0])
+            recommendation["review_required"] = True
+            recommendation["risk_level"] = "confirm"
+            result["recommendations"] = [recommendation]
+            return result
+
+    class _ReviewCapabilityService(_FakeCapabilityService):
+        def __init__(self) -> None:
+            self._discovery_service = _ReviewDiscoveryService()
+
+    async def _unexpected_legacy_approve(*args, **kwargs):
+        raise AssertionError(
+            "runtime-center decision approve should not call approve_acquisition_proposal directly",
+        )
+
+    monkeypatch.setattr(
+        "copaw.capabilities.install_templates.run_install_template_example",
+        _fake_example_run,
+    )
+    app = _build_learning_app(tmp_path)
+    app.state.learning_service.set_industry_service(_FakeIndustryService())
+    app.state.learning_service.set_capability_service(_ReviewCapabilityService())
+    app.state.learning_service.set_agent_profile_service(
+        SimpleNamespace(
+            get_capability_surface=lambda agent_id: {
+                "effective_capabilities": [],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        app.state.learning_service,
+        "approve_acquisition_proposal",
+        _unexpected_legacy_approve,
+    )
+    client = TestClient(app)
+
+    run_response = client.post(
+        "/learning/acquisition/run",
+        json={"industry_instance_id": "industry-v1-demo"},
+    )
+    assert run_response.status_code == 200
+    payload = run_response.json()
+    decision_id = payload["decision_requests"][0]["id"]
+    proposal_id = payload["proposals"][0]["id"]
+
+    approve_response = client.post(
+        f"/runtime-center/decisions/{decision_id}/approve",
+        json={"resolution": "ship it"},
+    )
+    assert approve_response.status_code == 200
+    approve_payload = approve_response.json()
+    assert approve_payload["decision_request_id"] == decision_id
+    assert approve_payload["decision"]["status"] == "approved"
+    assert approve_payload["proposal"]["status"] == "applied"
+    assert approve_payload["proposal"]["id"] == proposal_id
+    assert approve_payload["plan"]["status"] == "applied"
+    assert approve_payload["onboarding_run"]["status"] == "passed"
+
+
+def test_runtime_center_decision_routes_reject_acquisition_without_legacy_proposal_special_case(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    class _ReviewDiscoveryService(_FakeDiscoveryService):
+        async def discover(self, payload: dict[str, object]) -> dict[str, object]:
+            result = await super().discover(payload)
+            recommendation = dict(result["recommendations"][0])
+            recommendation["review_required"] = True
+            recommendation["risk_level"] = "confirm"
+            result["recommendations"] = [recommendation]
+            return result
+
+    class _ReviewCapabilityService(_FakeCapabilityService):
+        def __init__(self) -> None:
+            self._discovery_service = _ReviewDiscoveryService()
+
+    def _unexpected_legacy_reject(*args, **kwargs):
+        raise AssertionError(
+            "runtime-center decision reject should not call reject_acquisition_proposal directly",
+        )
+
+    app = _build_learning_app(tmp_path)
+    app.state.learning_service.set_industry_service(_FakeIndustryService())
+    app.state.learning_service.set_capability_service(_ReviewCapabilityService())
+    app.state.learning_service.set_agent_profile_service(
+        SimpleNamespace(
+            get_capability_surface=lambda agent_id: {
+                "effective_capabilities": [],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        app.state.learning_service,
+        "reject_acquisition_proposal",
+        _unexpected_legacy_reject,
+    )
+    client = TestClient(app)
+
+    run_response = client.post(
+        "/learning/acquisition/run",
+        json={"industry_instance_id": "industry-v1-demo"},
+    )
+    assert run_response.status_code == 200
+    payload = run_response.json()
+    decision_id = payload["decision_requests"][0]["id"]
+    proposal_id = payload["proposals"][0]["id"]
+
+    reject_response = client.post(
+        f"/runtime-center/decisions/{decision_id}/reject",
+        json={"resolution": "not now"},
+    )
+    assert reject_response.status_code == 200
+    reject_payload = reject_response.json()
+    assert reject_payload["decision_request_id"] == decision_id
+    assert reject_payload["decision"]["status"] == "rejected"
+    assert reject_payload["proposal"]["status"] == "rejected"
+    assert reject_payload["proposal"]["id"] == proposal_id

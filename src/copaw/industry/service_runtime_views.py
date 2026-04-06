@@ -2771,7 +2771,7 @@ class _IndustryRuntimeViewsMixin:
 
 
 
-        for goal_id in record.goal_ids:
+        for goal_id in self._resolve_instance_goal_ids(record):
 
             goal = self._goal_service.get_goal(goal_id)
 
@@ -3082,7 +3082,7 @@ class _IndustryRuntimeViewsMixin:
 
         proposals = self._list_instance_proposals(
 
-            goal_ids=set(record.goal_ids),
+            goal_ids=set(self._resolve_instance_goal_ids(record)),
 
             task_ids=task_ids,
 
@@ -3231,25 +3231,6 @@ class _IndustryRuntimeViewsMixin:
                     and selected_assignment_ref
                     == _string(baseline_live_focus.get("current_assignment_id"))
                 )
-        if execution is not None and focus_selection is not None and selection_matches_live_focus:
-            current_focus_id = _string(execution.current_focus_id)
-            current_focus = _string(execution.current_focus)
-            if current_focus_id is None and current_focus is None:
-                fallback_focus_id = (
-                    _string(focus_selection.get("assignment_id"))
-                    if focus_selection.get("selection_kind") == "assignment"
-                    else _string(focus_selection.get("backlog_item_id"))
-                )
-                fallback_focus = _string(focus_selection.get("title")) or _string(
-                    focus_selection.get("summary"),
-                )
-                execution = execution.model_copy(
-                    update={
-                        "current_focus_id": fallback_focus_id,
-                        "current_focus": fallback_focus,
-                    },
-                )
-
         main_chain = self._build_instance_main_chain(
 
             record=record,

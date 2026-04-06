@@ -202,7 +202,7 @@ export function ProviderConfigModal({
           onClose();
           if (isActiveLlmProvider) {
             message.success(
-              `${provider.name} ææå·²æ¤éï¼å¯¹è¯æ¨¡åå·²æ¸é¤`,
+              `${provider.name} 授权已撤销，对话模型已清除`,
             );
           } else {
             message.success(

@@ -16,6 +16,9 @@ vi.mock("../../api", async () => {
       listIndustryInstances: vi.fn(),
       getRuntimeIndustryDetail: vi.fn(),
       getBuddySurface: vi.fn(),
+      previewIndustry: vi.fn(),
+      bootstrapIndustry: vi.fn(),
+      updateIndustryTeam: vi.fn(),
     },
   };
 });
@@ -41,6 +44,9 @@ import {
 const mockedListIndustryInstances = vi.mocked(api.listIndustryInstances);
 const mockedGetRuntimeIndustryDetail = vi.mocked(api.getRuntimeIndustryDetail);
 const mockedGetBuddySurface = vi.mocked(api.getBuddySurface);
+const mockedPreviewIndustry = vi.mocked(api.previewIndustry);
+const mockedBootstrapIndustry = vi.mocked(api.bootstrapIndustry);
+const mockedUpdateIndustryTeam = vi.mocked(api.updateIndustryTeam);
 const mockedBuildIndustryRoleChatBinding = vi.mocked(buildIndustryRoleChatBinding);
 const mockedOpenRuntimeChat = vi.mocked(openRuntimeChat);
 
@@ -50,6 +56,9 @@ describe("useIndustryPageState", () => {
     mockedListIndustryInstances.mockReset();
     mockedGetRuntimeIndustryDetail.mockReset();
     mockedGetBuddySurface.mockReset();
+    mockedPreviewIndustry.mockReset();
+    mockedBootstrapIndustry.mockReset();
+    mockedUpdateIndustryTeam.mockReset();
     mockedBuildIndustryRoleChatBinding.mockReset();
     mockedOpenRuntimeChat.mockReset();
   });
@@ -250,6 +259,226 @@ describe("useIndustryPageState", () => {
       "industry-other",
       undefined,
     );
+  });
+
+  it("keeps the current carrier in update mode after regenerating a draft preview", async () => {
+    mockedGetBuddySurface.mockResolvedValue({
+      profile: {
+        profile_id: "profile-1",
+      },
+    } as never);
+    mockedListIndustryInstances.mockResolvedValue([
+      {
+        instance_id: "buddy:profile-1",
+        label: "Buddy Carrier",
+        owner_scope: "profile-1",
+        team: {
+          agents: [
+            {
+              role_id: "execution-core",
+              agent_id: "agent-main-brain",
+              name: "Spider Mesh 主脑",
+            },
+          ],
+        },
+      },
+    ] as never);
+    mockedGetRuntimeIndustryDetail.mockResolvedValue({
+      instance_id: "buddy:profile-1",
+      label: "Buddy Carrier",
+      owner_scope: "profile-1",
+      profile: { industry: "Retail" },
+      team: {
+        agents: [
+          {
+            role_id: "execution-core",
+            agent_id: "agent-main-brain",
+            name: "Spider Mesh 主脑",
+          },
+        ],
+      },
+      goals: [],
+      schedules: [],
+      media_analyses: [],
+    } as never);
+    mockedPreviewIndustry.mockResolvedValue({
+      profile: { industry: "Retail" },
+      draft: {
+        team: {
+          label: "Buddy Carrier",
+          summary: "Adjusted carrier",
+          agents: [],
+        },
+        goals: [],
+        schedules: [],
+        generation_summary: "Adjusted draft",
+      },
+      recommendation_pack: {
+        summary: "",
+        items: [],
+        warnings: [],
+        sections: [],
+      },
+      readiness_checks: [],
+      can_activate: true,
+      media_analyses: [],
+      media_warnings: [],
+    } as never);
+    mockedUpdateIndustryTeam.mockResolvedValue({
+      team: {
+        team_id: "buddy:profile-1",
+        label: "Buddy Carrier",
+        agents: [
+          {
+            role_id: "execution-core",
+            agent_id: "agent-main-brain",
+            name: "Spider Mesh 主脑",
+          },
+        ],
+      },
+      routes: {
+        instance_summary: {
+          instance_id: "buddy:profile-1",
+          label: "Buddy Carrier",
+          owner_scope: "profile-1",
+          team: {
+            agents: [
+              {
+                role_id: "execution-core",
+                agent_id: "agent-main-brain",
+                name: "Spider Mesh 主脑",
+              },
+            ],
+          },
+        },
+      },
+    } as never);
+    mockedBootstrapIndustry.mockResolvedValue({
+      team: {
+        team_id: "industry-new",
+        label: "Wrong branch",
+        agents: [],
+      },
+      routes: {},
+    } as never);
+
+    const { result } = renderHook(() => {
+      const [briefForm] = Form.useForm();
+      const [draftForm] = Form.useForm();
+      return useIndustryPageState({
+        briefForm,
+        draftForm,
+        navigate: vi.fn() as never,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.selectedInstanceId).toBe("buddy:profile-1");
+    });
+
+    act(() => {
+      result.current.loadInstanceIntoDraft();
+    });
+
+    await waitFor(() => {
+      expect(result.current.draftSourceInstanceId).toBe("buddy:profile-1");
+    });
+
+    await act(async () => {
+      const ok = await result.current.handlePreview({
+        industry: "Retail",
+        company_name: "Buddy Co",
+        product: "Companion",
+        target_customers: "Creators",
+        goals: "Long-term growth",
+        constraints: "Time",
+        notes: "",
+        experience_mode: "system-led",
+        experience_notes: "",
+        operator_requirements: "",
+      });
+      expect(ok).toBe(true);
+    });
+
+    expect(result.current.draftSourceInstanceId).toBe("buddy:profile-1");
+
+    await act(async () => {
+      await result.current.handleApplyCarrierAdjustment();
+    });
+
+    expect(mockedUpdateIndustryTeam).toHaveBeenCalledWith(
+      "buddy:profile-1",
+      expect.any(Object),
+    );
+    expect(mockedBootstrapIndustry).not.toHaveBeenCalled();
+  });
+
+  it("blocks carrier adjustment when no existing carrier is bound", async () => {
+    mockedListIndustryInstances.mockResolvedValue([] as never);
+    mockedPreviewIndustry.mockResolvedValue({
+      profile: { industry: "Retail" },
+      draft: {
+        team: {
+          label: "Unbound Carrier",
+          summary: "Should never bootstrap from industry page",
+          agents: [],
+        },
+        goals: [],
+        schedules: [],
+        generation_summary: "Preview only",
+      },
+      recommendation_pack: {
+        summary: "",
+        items: [],
+        warnings: [],
+        sections: [],
+      },
+      readiness_checks: [],
+      can_activate: true,
+      media_analyses: [],
+      media_warnings: [],
+    } as never);
+
+    const { result } = renderHook(() => {
+      const [briefForm] = Form.useForm();
+      const [draftForm] = Form.useForm();
+      return useIndustryPageState({
+        briefForm,
+        draftForm,
+        navigate: vi.fn() as never,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.instances).toHaveLength(0);
+      expect(result.current.detail).toBeNull();
+    });
+
+    await act(async () => {
+      const ok = await result.current.handlePreview({
+        industry: "Retail",
+        company_name: "No Carrier Co",
+        product: "Companion",
+        target_customers: "Creators",
+        goals: "Long-term growth",
+        constraints: "Time",
+        notes: "",
+        experience_mode: "system-led",
+        experience_notes: "",
+        operator_requirements: "",
+      });
+      expect(ok).toBe(true);
+    });
+
+    expect(result.current.draftSourceInstanceId).toBeNull();
+
+    await act(async () => {
+      await result.current.handleApplyCarrierAdjustment();
+    });
+
+    expect(mockedUpdateIndustryTeam).not.toHaveBeenCalled();
+    expect(mockedBootstrapIndustry).not.toHaveBeenCalled();
+    expect(result.current.error).toBe("当前没有可调整的执行载体，请先完成伙伴建档。");
   });
 
   it("reloads detail with a focused runtime subview when selecting an assignment or backlog item", async () => {

@@ -14,6 +14,30 @@ ProtocolSurfaceKind = Literal[
     "unknown",
 ]
 TransportKind = Literal["mcp", "http", "sdk"]
+ProviderInjectionMode = Literal[
+    "environment",
+    "argument",
+    "config_file_patch",
+    "startup_wrapper",
+    "none",
+]
+VerifiedCapabilityStage = Literal[
+    "unverified",
+    "installed",
+    "runtime_operable",
+    "adapter_probe_passed",
+    "primary_action_verified",
+]
+ProviderResolutionStatus = Literal["pending", "resolved", "failed", "not_required"]
+CompatibilityStatus = Literal[
+    "unknown",
+    "compatible_native",
+    "compatible_via_bridge",
+    "blocked_missing_dependency",
+    "blocked_missing_provider_contract",
+    "blocked_unsupported_host",
+    "blocked_contract_violation",
+]
 ADAPTER_ATTRIBUTION_SCALAR_FIELDS = (
     "protocol_surface_kind",
     "transport_kind",
@@ -54,6 +78,78 @@ def _string_list(values: object | None) -> list[str]:
     return normalized
 
 
+def _int_value(value: object | None, *, default: int) -> int:
+    if isinstance(value, bool) or value is None:
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    text = _string(value)
+    if text is None:
+        return default
+    try:
+        return int(text)
+    except ValueError:
+        return default
+
+
+def normalize_provider_injection_mode(
+    value: object | None,
+) -> ProviderInjectionMode | None:
+    normalized = (_string(value) or "").lower().replace("-", "_").replace(" ", "_")
+    if normalized in {
+        "environment",
+        "argument",
+        "config_file_patch",
+        "startup_wrapper",
+        "none",
+    }:
+        return normalized  # type: ignore[return-value]
+    return None
+
+
+def normalize_verified_stage(
+    value: object | None,
+) -> VerifiedCapabilityStage | None:
+    normalized = (_string(value) or "").lower()
+    if normalized in {
+        "unverified",
+        "installed",
+        "runtime_operable",
+        "adapter_probe_passed",
+        "primary_action_verified",
+    }:
+        return normalized  # type: ignore[return-value]
+    return None
+
+
+def normalize_provider_resolution_status(
+    value: object | None,
+) -> ProviderResolutionStatus | None:
+    normalized = (_string(value) or "").lower()
+    if normalized in {"pending", "resolved", "failed", "not_required"}:
+        return normalized  # type: ignore[return-value]
+    return None
+
+
+def normalize_compatibility_status(
+    value: object | None,
+) -> CompatibilityStatus | None:
+    normalized = (_string(value) or "").lower()
+    if normalized in {
+        "unknown",
+        "compatible_native",
+        "compatible_via_bridge",
+        "blocked_missing_dependency",
+        "blocked_missing_provider_contract",
+        "blocked_unsupported_host",
+        "blocked_contract_violation",
+    }:
+        return normalized  # type: ignore[return-value]
+    return None
+
+
 class ExternalProtocolSurface(BaseModel):
     protocol_surface_kind: ProtocolSurfaceKind = "unknown"
     transport_kind: TransportKind | None = None
@@ -78,6 +174,33 @@ class CompiledAdapterContract(BaseModel):
     call_surface_ref: str
     actions: list[CompiledAdapterAction] = Field(default_factory=list)
     promotion_blockers: list[str] = Field(default_factory=list)
+
+
+class DonorExecutionEnvelope(BaseModel):
+    startup_timeout_sec: int = 30
+    action_timeout_sec: int = 120
+    idle_timeout_sec: int = 30
+    heartbeat_interval_sec: int = 10
+    cancel_grace_sec: int = 5
+    kill_grace_sec: int = 3
+    max_retries: int = 0
+    retry_backoff_policy: str = "none"
+    output_size_limit: int = 65_536
+    probe_kind: str = "none"
+    probe_timeout_sec: int = 10
+
+
+class HostCompatibilityRequirements(BaseModel):
+    supported_os: list[str] = Field(default_factory=list)
+    supported_architectures: list[str] = Field(default_factory=list)
+    required_runtimes: list[str] = Field(default_factory=list)
+    package_manager: str | None = None
+    required_provider_contract_kind: str | None = None
+    required_surfaces: list[str] = Field(default_factory=list)
+    required_env_keys: list[str] = Field(default_factory=list)
+    config_location_expectations: list[str] = Field(default_factory=list)
+    workspace_policy: str | None = None
+    startup_expectations: list[str] = Field(default_factory=list)
 
 
 def _action_entries(value: object | None) -> list[dict[str, Any]]:
@@ -230,6 +353,126 @@ def protocol_surface_from_metadata(
     )
 
 
+def donor_execution_envelope_from_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> DonorExecutionEnvelope | None:
+    payload = dict(metadata or {})
+    raw = payload.get("execution_envelope")
+    if isinstance(raw, Mapping):
+        payload = dict(raw)
+    elif raw is not None:
+        return None
+    if not payload:
+        return None
+    return DonorExecutionEnvelope(
+        startup_timeout_sec=_int_value(payload.get("startup_timeout_sec"), default=30),
+        action_timeout_sec=_int_value(payload.get("action_timeout_sec"), default=120),
+        idle_timeout_sec=_int_value(payload.get("idle_timeout_sec"), default=30),
+        heartbeat_interval_sec=_int_value(
+            payload.get("heartbeat_interval_sec"),
+            default=10,
+        ),
+        cancel_grace_sec=_int_value(payload.get("cancel_grace_sec"), default=5),
+        kill_grace_sec=_int_value(payload.get("kill_grace_sec"), default=3),
+        max_retries=_int_value(payload.get("max_retries"), default=0),
+        retry_backoff_policy=_string(payload.get("retry_backoff_policy")) or "none",
+        output_size_limit=_int_value(payload.get("output_size_limit"), default=65_536),
+        probe_kind=_string(payload.get("probe_kind")) or "none",
+        probe_timeout_sec=_int_value(payload.get("probe_timeout_sec"), default=10),
+    )
+
+
+def donor_execution_envelope_metadata(
+    envelope: DonorExecutionEnvelope | Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if isinstance(envelope, DonorExecutionEnvelope):
+        return envelope.model_dump(mode="json")
+    normalized = donor_execution_envelope_from_metadata(
+        {"execution_envelope": dict(envelope)}
+        if isinstance(envelope, Mapping)
+        else None,
+    )
+    return normalized.model_dump(mode="json") if normalized is not None else {}
+
+
+def host_compatibility_requirements_from_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> HostCompatibilityRequirements | None:
+    payload = dict(metadata or {})
+    raw = payload.get("host_compatibility_requirements")
+    if isinstance(raw, Mapping):
+        payload = dict(raw)
+    elif raw is not None:
+        return None
+    if not payload:
+        return None
+    return HostCompatibilityRequirements(
+        supported_os=_string_list(payload.get("supported_os")),
+        supported_architectures=_string_list(payload.get("supported_architectures")),
+        required_runtimes=_string_list(payload.get("required_runtimes")),
+        package_manager=_string(payload.get("package_manager")),
+        required_provider_contract_kind=_string(
+            payload.get("required_provider_contract_kind"),
+        ),
+        required_surfaces=_string_list(payload.get("required_surfaces")),
+        required_env_keys=_string_list(payload.get("required_env_keys")),
+        config_location_expectations=_string_list(
+            payload.get("config_location_expectations"),
+        ),
+        workspace_policy=_string(payload.get("workspace_policy")),
+        startup_expectations=_string_list(payload.get("startup_expectations")),
+    )
+
+
+def host_compatibility_requirements_metadata(
+    requirements: HostCompatibilityRequirements | Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if isinstance(requirements, HostCompatibilityRequirements):
+        return requirements.model_dump(mode="json")
+    normalized = host_compatibility_requirements_from_metadata(
+        {"host_compatibility_requirements": dict(requirements)}
+        if isinstance(requirements, Mapping)
+        else None,
+    )
+    return normalized.model_dump(mode="json") if normalized is not None else {}
+
+
+def donor_execution_contract_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    payload = dict(metadata or {})
+    normalized: dict[str, Any] = {}
+    provider_injection_mode = normalize_provider_injection_mode(
+        payload.get("provider_injection_mode"),
+    )
+    if provider_injection_mode is not None:
+        normalized["provider_injection_mode"] = provider_injection_mode
+    execution_envelope = donor_execution_envelope_from_metadata(payload)
+    if execution_envelope is not None:
+        normalized["execution_envelope"] = execution_envelope.model_dump(mode="json")
+    host_compatibility_requirements = host_compatibility_requirements_from_metadata(
+        payload,
+    )
+    if host_compatibility_requirements is not None:
+        normalized["host_compatibility_requirements"] = (
+            host_compatibility_requirements.model_dump(mode="json")
+        )
+    verified_stage = normalize_verified_stage(payload.get("verified_stage"))
+    if verified_stage is not None:
+        normalized["verified_stage"] = verified_stage
+    provider_resolution_status = normalize_provider_resolution_status(
+        payload.get("provider_resolution_status"),
+    )
+    if provider_resolution_status is not None:
+        normalized["provider_resolution_status"] = provider_resolution_status
+    compatibility_status = normalize_compatibility_status(
+        payload.get("compatibility_status"),
+    )
+    if compatibility_status is not None:
+        normalized["compatibility_status"] = compatibility_status
+    return normalized
+
+
 def adapter_attribution_metadata(
     metadata: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
@@ -267,6 +510,7 @@ def merge_adapter_attribution_metadata(
             continue
         merged.update(dict(payload))
         merged.update(adapter_attribution_metadata(payload))
+        merged.update(donor_execution_contract_metadata(payload))
     return merged
 
 
@@ -275,10 +519,25 @@ __all__ = [
     "ADAPTER_ATTRIBUTION_SCALAR_FIELDS",
     "CompiledAdapterAction",
     "CompiledAdapterContract",
+    "CompatibilityStatus",
+    "DonorExecutionEnvelope",
     "ExternalProtocolSurface",
+    "HostCompatibilityRequirements",
+    "ProviderInjectionMode",
+    "ProviderResolutionStatus",
+    "VerifiedCapabilityStage",
     "adapter_attribution_metadata",
     "classify_external_protocol_surface",
+    "donor_execution_contract_metadata",
+    "donor_execution_envelope_from_metadata",
+    "donor_execution_envelope_metadata",
+    "host_compatibility_requirements_from_metadata",
+    "host_compatibility_requirements_metadata",
     "merge_adapter_attribution_metadata",
+    "normalize_compatibility_status",
+    "normalize_provider_injection_mode",
+    "normalize_provider_resolution_status",
+    "normalize_verified_stage",
     "protocol_surface_from_metadata",
     "protocol_surface_metadata",
 ]

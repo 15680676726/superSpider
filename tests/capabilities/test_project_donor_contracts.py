@@ -197,6 +197,67 @@ def test_resolve_installed_python_project_contract_exposes_runtime_contract_pred
     assert contract.evidence_contract == ["shell-command", "runtime-event"]
 
 
+def test_resolve_installed_python_project_contract_exposes_formal_donor_execution_contract_metadata(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from copaw.capabilities.project_donor_contracts import (
+        project_installed_python_project_package_metadata,
+        resolve_installed_python_project_contract,
+    )
+
+    monkeypatch.setattr(
+        "copaw.capabilities.project_donor_contracts.inspect_installed_python_distribution",
+        lambda **kwargs: {
+            "distribution_name": "openspace",
+            "package_version": "0.1.0",
+            "entry_points": [
+                {
+                    "group": "console_scripts",
+                    "name": "openspace",
+                    "value": "openspace.__main__:run_main",
+                },
+            ],
+        },
+    )
+
+    scripts_dir = tmp_path / "Scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "openspace.exe").write_text("", encoding="utf-8")
+
+    contract = resolve_installed_python_project_contract(
+        python_path="D:/fake/.venv/Scripts/python.exe",
+        scripts_dir=str(scripts_dir),
+        distribution_name="openspace",
+        capability_kind="runtime-component",
+    )
+    projected_metadata = project_installed_python_project_package_metadata(contract)
+
+    assert contract.provider_injection_mode == "environment"
+    assert contract.metadata["provider_injection_mode"] == "environment"
+    assert contract.metadata["execution_envelope"]["probe_kind"] == "http"
+    assert contract.metadata["execution_envelope"]["probe_timeout_sec"] == 15
+    assert contract.metadata["host_compatibility_requirements"]["required_runtimes"] == [
+        "python",
+    ]
+    assert contract.metadata["host_compatibility_requirements"]["required_surfaces"] == [
+        "network",
+        "process",
+    ]
+    assert (
+        contract.metadata["host_compatibility_requirements"][
+            "required_provider_contract_kind"
+        ]
+        == "cooperative_provider_runtime"
+    )
+    assert projected_metadata["provider_injection_mode"] == "environment"
+    assert projected_metadata["execution_envelope"] == contract.metadata["execution_envelope"]
+    assert (
+        projected_metadata["host_compatibility_requirements"]
+        == contract.metadata["host_compatibility_requirements"]
+    )
+
+
 def test_resolve_installed_python_project_contract_prefers_service_entrypoint_for_runtime_components(
     monkeypatch,
     tmp_path,

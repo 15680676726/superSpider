@@ -5,7 +5,6 @@ import {
   Menu,
   Modal,
   Spin,
-  message,
   type MenuProps,
 } from "antd";
 import { useEffect, useState } from "react";
@@ -30,14 +29,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { LazyMarkdown } from "../components/LazyMarkdown";
-import api from "../api";
-import sessionApi from "../pages/Chat/sessionApi";
 import { useAppStore } from "../stores";
-import {
-  buildIndustryRoleChatBinding,
-  openRuntimeChat,
-  resolveIndustryExecutionCoreRole,
-} from "../utils/runtimeChat";
 import styles from "./index.module.less";
 
 const { Sider } = Layout;
@@ -227,36 +219,9 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
     },
   ];
 
-  const openPreferredChatEntry = async (): Promise<void> => {
-    const activeThreadId = sessionApi.getActiveThreadId();
-    if (activeThreadId) {
-      navigate(`/chat?threadId=${encodeURIComponent(activeThreadId)}`);
-      return;
-    }
-    try {
-      const instances = await api.listIndustryInstances(5);
-      const candidates = (Array.isArray(instances) ? instances : []).filter(
-        (instance) => resolveIndustryExecutionCoreRole(instance),
-      );
-      if (candidates.length === 1) {
-        const executionCoreRole = resolveIndustryExecutionCoreRole(candidates[0]);
-        if (executionCoreRole) {
-          await openRuntimeChat(
-            buildIndustryRoleChatBinding(candidates[0], executionCoreRole),
-            navigate,
-          );
-          return;
-        }
-      }
-    } catch (error) {
-      message.warning(error instanceof Error ? error.message : String(error));
-    }
-    navigate("/chat");
-  };
-
   const handleMenuClick = (event: { key: string }) => {
     if (event.key === "chat") {
-      void openPreferredChatEntry();
+      navigate("/chat");
       return;
     }
     const path = KEY_TO_PATH[event.key];

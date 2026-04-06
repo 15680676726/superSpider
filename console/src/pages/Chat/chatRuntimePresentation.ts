@@ -30,6 +30,8 @@ export function resolveChatUiVisibility({
   threadBootstrapError,
   hasBoundAgentContext,
   effectiveThreadPending,
+  allowUnboundBuddyShell,
+  disableComposer,
 }: {
   requestedThreadId: string | null;
   activeWindowThreadId: string | null;
@@ -37,15 +39,24 @@ export function resolveChatUiVisibility({
   threadBootstrapError: string | null;
   hasBoundAgentContext: boolean;
   effectiveThreadPending: boolean;
-}): { hasDirectBoundThreadContext: boolean; shouldRenderChatUi: boolean } {
+  allowUnboundBuddyShell: boolean;
+  disableComposer: boolean;
+}): {
+  hasDirectBoundThreadContext: boolean;
+  shouldRenderChatUi: boolean;
+  shouldRenderChatComposer: boolean;
+} {
   const hasDirectBoundThreadContext =
     requestedThreadLooksBound && !threadBootstrapError;
+  const canRenderBoundChatUi =
+    Boolean(requestedThreadId || activeWindowThreadId) &&
+    (hasBoundAgentContext || hasDirectBoundThreadContext) &&
+    !effectiveThreadPending;
+  const shouldRenderChatComposer = canRenderBoundChatUi && !disableComposer;
   return {
     hasDirectBoundThreadContext,
-    shouldRenderChatUi:
-      Boolean(requestedThreadId || activeWindowThreadId) &&
-      (hasBoundAgentContext || hasDirectBoundThreadContext) &&
-      !effectiveThreadPending,
+    shouldRenderChatComposer,
+    shouldRenderChatUi: canRenderBoundChatUi || allowUnboundBuddyShell,
   };
 }
 

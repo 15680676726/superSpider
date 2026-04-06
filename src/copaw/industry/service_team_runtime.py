@@ -694,11 +694,7 @@ class _IndustryTeamRuntimeMixin:
         current_focus_kind = _string(metadata.get("current_focus_kind"))
         current_focus_id = _string(metadata.get("current_focus_id"))
         current_focus = _string(metadata.get("current_focus"))
-        if goal_id or goal_title:
-            current_focus_kind = "goal"
-            current_focus_id = goal_id
-            current_focus = goal_title
-        elif assignment_active:
+        if assignment_active:
             current_focus_kind = "assignment"
             current_focus_id = assignment_id
             current_focus = assignment_title or assignment_summary or assignment_id

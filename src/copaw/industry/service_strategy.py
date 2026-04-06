@@ -1869,9 +1869,9 @@ class _IndustryStrategyMixin:
 
         existing = existing_strategy or self._peek_strategy_memory(record)
 
-        active_goal_ids = self._active_strategy_goal_ids(record.goal_ids or [])
+        active_goal_ids: list[str] = []
 
-        goal_titles = self._list_strategy_goal_titles(active_goal_ids)
+        goal_titles: list[str] = []
 
         priority_order = _unique_strings(
 
@@ -2541,7 +2541,9 @@ class _IndustryStrategyMixin:
             "assignment_count": len(assignment_records),
             "report_count": len(agent_report_records),
 
-            "schedule_count": len(record.schedule_ids or []),
+            "schedule_count": len(
+                self._list_schedule_ids_for_instance(record.instance_id),
+            ),
 
             "acquisition_proposal_count": len(acquisition_proposals),
 
@@ -3167,7 +3169,7 @@ class _IndustryStrategyMixin:
 
         statuses: list[str] = []
 
-        for goal_id in record.goal_ids:
+        for goal_id in self._resolve_instance_goal_ids(record):
 
             goal = self._goal_service.get_goal(goal_id)
 
@@ -3225,7 +3227,11 @@ class _IndustryStrategyMixin:
 
             return True
 
-        goal_ids = {goal_id for goal_id in record.goal_ids if isinstance(goal_id, str) and goal_id}
+        goal_ids = {
+            goal_id
+            for goal_id in self._resolve_instance_goal_ids(record)
+            if isinstance(goal_id, str) and goal_id
+        }
 
         task_repository = getattr(self._goal_service, "_task_repository", None)
 
@@ -3293,7 +3299,10 @@ class _IndustryStrategyMixin:
 
         if self._schedule_repository is not None:
 
-            for schedule_id in list(record.schedule_ids or []):
+            schedule_ids = list(record.schedule_ids or []) or self._list_schedule_ids_for_instance(
+                record.instance_id,
+            )
+            for schedule_id in schedule_ids:
 
                 schedule = self._schedule_repository.get_schedule(schedule_id)
 

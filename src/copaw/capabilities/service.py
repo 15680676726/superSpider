@@ -57,6 +57,7 @@ class CapabilityService:
         state_store: "SQLiteStateStore | None" = None,
         external_runtime_service: object | None = None,
         environment_service: object | None = None,
+        runtime_provider: object | None = None,
         cron_manager: object | None = None,
         load_config_fn: Callable[[], Any] | None = None,
         save_config_fn: Callable[[Any], None] | None = None,
@@ -82,6 +83,7 @@ class CapabilityService:
         self._state_store = state_store
         self._external_runtime_service = external_runtime_service
         self._environment_service = environment_service
+        self._runtime_provider = runtime_provider
         self._cron_manager = cron_manager
         self._load_config_fn = load_config_fn or (lambda: load_config())
         self._save_config_fn = save_config_fn or (lambda config: save_config(config))
@@ -136,6 +138,7 @@ class CapabilityService:
             external_adapter_execution=ExternalAdapterExecution(
                 mcp_manager=self._mcp_manager,
                 environment_service=self._environment_service,
+                provider_runtime_facade=self._runtime_provider,
             ),
             external_runtime_execution=(
                 ExternalRuntimeExecution(
@@ -206,6 +209,10 @@ class CapabilityService:
         self._environment_service = environment_service
         self._system_handler.set_environment_service(environment_service)
         self._execution.set_environment_service(environment_service)
+
+    def set_runtime_provider(self, runtime_provider: object | None) -> None:
+        self._runtime_provider = runtime_provider
+        self._execution.set_runtime_provider(runtime_provider)
 
     def set_channel_manager(self, channel_manager: "ChannelManager | None") -> None:
         self._channel_manager = channel_manager

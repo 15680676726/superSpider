@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SaveOutlined } from "@ant-design/icons";
-import { Select, Button, message } from "@/ui";
-import type { ActiveModelsInfo, ModelSlotRequest } from "../../../../../api/types";
+import { Button, Select, message } from "@/ui";
+
 import api from "../../../../../api";
+import type { ActiveModelsInfo, ModelSlotRequest } from "../../../../../api/types";
 import styles from "../../index.module.less";
 
 interface ModelsSectionProps {
@@ -26,26 +27,24 @@ export function ModelsSection({
   onSaved,
 }: ModelsSectionProps) {
   const [saving, setSaving] = useState(false);
-  const [selectedProviderId, setSelectedProviderId] = useState<
-    string | undefined
-  >(undefined);
-  const [selectedModel, setSelectedModel] = useState<string | undefined>(
+  const [selectedProviderId, setSelectedProviderId] = useState<string | undefined>(
     undefined,
   );
+  const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
   const [dirty, setDirty] = useState(false);
 
   const currentSlot = activeModels?.active_llm;
 
   const eligible = useMemo(
     () =>
-      providers.filter((p) => {
+      providers.filter((provider) => {
         const hasModels =
-          (p.models?.length ?? 0) + (p.extra_models?.length ?? 0) > 0;
+          (provider.models?.length ?? 0) + (provider.extra_models?.length ?? 0) > 0;
         if (!hasModels) return false;
-        if (p.is_local) return true;
-        if (p.id === "ollama") return !!p.base_url;
-        if (p.is_custom) return !!p.base_url;
-        return !!p.api_key;
+        if (provider.is_local) return true;
+        if (provider.id === "ollama") return Boolean(provider.base_url);
+        if (provider.is_custom) return Boolean(provider.base_url);
+        return Boolean(provider.api_key);
       }),
     [providers],
   );
@@ -56,17 +55,17 @@ export function ModelsSection({
       setSelectedModel(currentSlot.model || undefined);
     }
     setDirty(false);
-  }, [currentSlot?.provider_id, currentSlot?.model]);
+  }, [currentSlot?.model, currentSlot?.provider_id]);
 
-  const chosenProvider = providers.find((p) => p.id === selectedProviderId);
+  const chosenProvider = providers.find((provider) => provider.id === selectedProviderId);
   const modelOptions = [
     ...(chosenProvider?.models ?? []),
     ...(chosenProvider?.extra_models ?? []),
   ];
   const hasModels = modelOptions.length > 0;
 
-  const handleProviderChange = (pid: string) => {
-    setSelectedProviderId(pid);
+  const handleProviderChange = (providerId: string) => {
+    setSelectedProviderId(providerId);
     setSelectedModel(undefined);
     setDirty(true);
   };
@@ -77,7 +76,9 @@ export function ModelsSection({
   };
 
   const handleSave = async () => {
-    if (!selectedProviderId || !selectedModel) return;
+    if (!selectedProviderId || !selectedModel) {
+      return;
+    }
 
     const body: ModelSlotRequest = {
       provider_id: selectedProviderId,
@@ -87,12 +88,11 @@ export function ModelsSection({
     setSaving(true);
     try {
       await api.setActiveLlm(body);
-      message.success("å¯¹è¯æ¨¡åå·²æ´æ°");
+      message.success("对话模型已更新");
       setDirty(false);
       onSaved();
     } catch (error) {
-      const errMsg =
-        error instanceof Error ? error.message : "保存失败";
+      const errMsg = error instanceof Error ? error.message : "保存失败";
       message.error(errMsg);
     } finally {
       setSaving(false);
@@ -103,49 +103,47 @@ export function ModelsSection({
     currentSlot &&
     currentSlot.provider_id === selectedProviderId &&
     currentSlot.model === selectedModel;
-  const canSave = dirty && !!selectedProviderId && !!selectedModel;
+  const canSave = dirty && Boolean(selectedProviderId) && Boolean(selectedModel);
 
   return (
     <div className={styles.slotSection}>
       <div className={styles.slotHeader}>
-        <h3 className={styles.slotTitle}>{"å¯¹è¯æ¨¡åéç½®"}</h3>
-        {currentSlot?.provider_id && currentSlot?.model && (
+        <h3 className={styles.slotTitle}>对话模型配置</h3>
+        {currentSlot?.provider_id && currentSlot?.model ? (
           <span className={styles.slotCurrent}>
-            {`活动：${currentSlot.provider_id} / ${currentSlot.model}`}
+            {`当前：${currentSlot.provider_id} / ${currentSlot.model}`}
           </span>
-        )}
+        ) : null}
       </div>
 
       <div className={styles.slotForm}>
         <div className={styles.slotField}>
-          <label className={styles.slotLabel}>{"提供商"}</label>
+          <label className={styles.slotLabel}>提供商</label>
           <Select
             style={{ width: "100%" }}
-            placeholder={"选择提供商（必须已授权）"}
+            placeholder="选择提供商（必须已授权）"
             value={selectedProviderId}
             onChange={handleProviderChange}
-            options={eligible.map((p) => ({
-              value: p.id,
-              label: p.name,
+            options={eligible.map((provider) => ({
+              value: provider.id,
+              label: provider.name,
             }))}
           />
         </div>
 
         <div className={styles.slotField}>
-          <label className={styles.slotLabel}>{"模型"}</label>
+          <label className={styles.slotLabel}>模型</label>
           <Select
             style={{ width: "100%" }}
-            placeholder={
-              hasModels ? "选择模型" : "请先添加模型"
-            }
+            placeholder={hasModels ? "选择模型" : "请先添加模型"}
             disabled={!hasModels}
             showSearch
             optionFilterProp="label"
             value={selectedModel}
             onChange={handleModelChange}
-            options={modelOptions.map((m) => ({
-              value: m.id,
-              label: `${m.name} (${m.id})`,
+            options={modelOptions.map((model) => ({
+              value: model.id,
+              label: `${model.name} (${model.id})`,
             }))}
           />
         </div>
@@ -155,7 +153,7 @@ export function ModelsSection({
           style={{ flex: "0 0 auto", minWidth: "120px" }}
         >
           <label className={styles.slotLabel} style={{ visibility: "hidden" }}>
-            {"操作"}
+            操作
           </label>
           <Button
             type="primary"

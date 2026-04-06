@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveSelectedKey } from "../routes";
+import { resolveSelectedKey, routes } from "../routes";
 
 describe("resolveSelectedKey", () => {
   it("maps exact paths to correct keys", () => {
@@ -58,5 +58,9 @@ describe("resolveSelectedKey", () => {
     expect(resolveSelectedKey("/unknown")).toBe("runtime-center");
     expect(resolveSelectedKey("/foo/bar")).toBe("runtime-center");
     expect(resolveSelectedKey("")).toBe("runtime-center");
+  });
+
+  it("does not register the retired /agents front-end route", () => {
+    expect(routes.some((route) => route.path === "/agents")).toBe(false);
   });
 });

@@ -55,6 +55,26 @@ def _float_value(value: object | None) -> float | None:
         return None
 
 
+def _verified_stage(value: object | None, default: str) -> str:
+    from ..capabilities.external_adapter_contracts import normalize_verified_stage
+
+    return normalize_verified_stage(value) or default
+
+
+def _provider_resolution_status(value: object | None, default: str) -> str:
+    from ..capabilities.external_adapter_contracts import (
+        normalize_provider_resolution_status,
+    )
+
+    return normalize_provider_resolution_status(value) or default
+
+
+def _compatibility_status(value: object | None, default: str) -> str:
+    from ..capabilities.external_adapter_contracts import normalize_compatibility_status
+
+    return normalize_compatibility_status(value) or default
+
+
 def _merge_adapter_metadata(*payloads: object) -> dict[str, Any]:
     from ..capabilities.external_adapter_contracts import (
         merge_adapter_attribution_metadata,
@@ -92,6 +112,9 @@ class SkillTrialService:
         handoff_count: int = 0,
         operator_intervention_count: int = 0,
         latency_summary: dict[str, Any] | None = None,
+        verified_stage: str | None = None,
+        provider_resolution_status: str | None = None,
+        compatibility_status: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> SkillTrialRecord:
         existing = self.get_trial(candidate_id=candidate_id, scope_type=scope_type, scope_ref=scope_ref)
@@ -127,6 +150,18 @@ class SkillTrialService:
                     "handoff_count": max(0, int(handoff_count)),
                     "operator_intervention_count": max(0, int(operator_intervention_count)),
                     "latency_summary": dict(latency_summary or {}),
+                    "verified_stage": _verified_stage(
+                        verified_stage,
+                        existing.verified_stage,
+                    ),
+                    "provider_resolution_status": _provider_resolution_status(
+                        provider_resolution_status,
+                        existing.provider_resolution_status,
+                    ),
+                    "compatibility_status": _compatibility_status(
+                        compatibility_status,
+                        existing.compatibility_status,
+                    ),
                     "metadata": metadata_payload,
                 },
             )
@@ -153,6 +188,24 @@ class SkillTrialService:
                 handoff_count=max(0, int(handoff_count)),
                 operator_intervention_count=max(0, int(operator_intervention_count)),
                 latency_summary=dict(latency_summary or {}),
+                verified_stage=_verified_stage(
+                    verified_stage
+                    if verified_stage is not None
+                    else metadata_payload.get("verified_stage"),
+                    "unverified",
+                ),
+                provider_resolution_status=_provider_resolution_status(
+                    provider_resolution_status
+                    if provider_resolution_status is not None
+                    else metadata_payload.get("provider_resolution_status"),
+                    "pending",
+                ),
+                compatibility_status=_compatibility_status(
+                    compatibility_status
+                    if compatibility_status is not None
+                    else metadata_payload.get("compatibility_status"),
+                    "unknown",
+                ),
                 metadata=metadata_payload,
             )
         )
@@ -280,6 +333,9 @@ class SkillTrialService:
                     handoff_count,
                     operator_intervention_count,
                     latency_summary_json,
+                    verified_stage,
+                    provider_resolution_status,
+                    compatibility_status,
                     metadata_json,
                     created_at,
                     updated_at
@@ -306,6 +362,9 @@ class SkillTrialService:
                     :handoff_count,
                     :operator_intervention_count,
                     :latency_summary_json,
+                    :verified_stage,
+                    :provider_resolution_status,
+                    :compatibility_status,
                     :metadata_json,
                     :created_at,
                     :updated_at
@@ -329,6 +388,9 @@ class SkillTrialService:
                     handoff_count = excluded.handoff_count,
                     operator_intervention_count = excluded.operator_intervention_count,
                     latency_summary_json = excluded.latency_summary_json,
+                    verified_stage = excluded.verified_stage,
+                    provider_resolution_status = excluded.provider_resolution_status,
+                    compatibility_status = excluded.compatibility_status,
                     metadata_json = excluded.metadata_json,
                     updated_at = excluded.updated_at
                 """,
@@ -355,6 +417,9 @@ class SkillTrialService:
                     "handoff_count": record.handoff_count,
                     "operator_intervention_count": record.operator_intervention_count,
                     "latency_summary_json": _json_dumps(record.latency_summary),
+                    "verified_stage": record.verified_stage,
+                    "provider_resolution_status": record.provider_resolution_status,
+                    "compatibility_status": record.compatibility_status,
                     "metadata_json": _json_dumps(record.metadata),
                     "created_at": record.created_at.isoformat(),
                     "updated_at": record.updated_at.isoformat(),
@@ -385,6 +450,9 @@ class SkillTrialService:
             handoff_count=int(row["handoff_count"] or 0),
             operator_intervention_count=int(row["operator_intervention_count"] or 0),
             latency_summary=_json_load_dict(row["latency_summary_json"]),
+            verified_stage=row["verified_stage"],
+            provider_resolution_status=row["provider_resolution_status"],
+            compatibility_status=row["compatibility_status"],
             metadata=_json_load_dict(row["metadata_json"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],

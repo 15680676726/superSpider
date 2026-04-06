@@ -94,6 +94,7 @@ const mockSurface = (
 });
 
 const requestRuntimeSurfaceMock = vi.fn();
+const requestRuntimeBusinessAgentsMock = vi.fn();
 const readBuddyProfileIdMock = vi.fn();
 let runtimeEventHandler:
   | ((event: { event_name: string; payload: Record<string, unknown> }) => void)
@@ -102,6 +103,8 @@ let runtimeEventHandler:
 vi.mock("../../runtime/runtimeSurfaceClient", () => ({
   normalizeRuntimePath: vi.fn((path: string) => path),
   requestRuntimeSurface: (...args: unknown[]) => requestRuntimeSurfaceMock(...args),
+  requestRuntimeBusinessAgents: (...args: unknown[]) =>
+    requestRuntimeBusinessAgentsMock(...args),
   requestRuntimeRecord: vi.fn(),
 }));
 
@@ -124,20 +127,35 @@ describe("useRuntimeCenter", () => {
     runtimeEventHandler = null;
     readBuddyProfileIdMock.mockReturnValue("profile-bound");
     requestRuntimeSurfaceMock.mockResolvedValue(mockSurface());
+    requestRuntimeBusinessAgentsMock.mockResolvedValue([]);
   });
 
-  it("loads canonical surface once and derives business agents from overview cards", async () => {
+  it("loads canonical surface once and keeps business agents on canonical runtime agent endpoint", async () => {
     let resolveSurface!: (value: RuntimeCenterSurfaceResponse) => void;
     requestRuntimeSurfaceMock.mockReturnValue(
       new Promise<RuntimeCenterSurfaceResponse>((resolve) => {
         resolveSurface = resolve;
       }),
     );
+    requestRuntimeBusinessAgentsMock.mockResolvedValue([
+      {
+        agent_id: "agent-ops-1",
+        name: "Closer Nine",
+        role_name: "Closer",
+        role_summary: "Closing backlog",
+        status: "active",
+        current_focus_kind: "assignment",
+        current_focus_id: "assignment-1",
+        current_focus: "Close pipeline backlog",
+      },
+    ]);
 
     const { result } = renderHook(() => useRuntimeCenter());
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledWith();
+    expect(requestRuntimeBusinessAgentsMock).toHaveBeenCalledTimes(1);
+    expect(requestRuntimeBusinessAgentsMock).toHaveBeenCalledWith();
 
     resolveSurface(
       mockSurface({
@@ -161,11 +179,7 @@ describe("useRuntimeCenter", () => {
               owner: "Closer",
               summary: "Closing backlog",
               actions: {},
-              meta: {
-                current_focus_kind: "assignment",
-                current_focus_id: "assignment-1",
-                current_focus: "Close pipeline backlog",
-              },
+              meta: {},
             },
           ),
         ],
@@ -184,6 +198,7 @@ describe("useRuntimeCenter", () => {
     expect(result.current.businessAgents).toEqual([
       expect.objectContaining({
         agent_id: "agent-ops-1",
+        role_name: "Closer",
         current_focus_kind: "assignment",
         current_focus_id: "assignment-1",
         current_focus: "Close pipeline backlog",
@@ -211,6 +226,13 @@ describe("useRuntimeCenter", () => {
   });
 
   it("filters retired goals, schedules, and main-brain overview cards while returning business agents from overview", async () => {
+    requestRuntimeBusinessAgentsMock.mockResolvedValue([
+      {
+        agent_id: "agent-ops-2",
+        name: "Closer Nine",
+        role_name: "Closer",
+      },
+    ]);
     requestRuntimeSurfaceMock.mockResolvedValue(
       mockSurface({
         cards: [
@@ -282,10 +304,9 @@ describe("useRuntimeCenter", () => {
     );
 
     expect(result.current.data?.cards.map((card) => card.key)).toEqual(["agents", "tasks"]);
-    expect(result.current.businessAgents.map((agent) => agent.agent_id)).toEqual([
-      "agent-ops-2",
-    ]);
+    expect(result.current.businessAgents.map((agent) => agent.agent_id)).toEqual(["agent-ops-2"]);
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
+    expect(requestRuntimeBusinessAgentsMock).toHaveBeenCalledTimes(1);
   });
 
   it("requests runtime surface without a browser-side buddy binding override", async () => {

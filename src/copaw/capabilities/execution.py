@@ -149,6 +149,12 @@ class CapabilityExecutionFacade:
         if self._external_adapter_execution is not None:
             self._external_adapter_execution.set_mcp_manager(mcp_manager)
 
+    def set_runtime_provider(self, runtime_provider: object | None) -> None:
+        if self._external_adapter_execution is not None:
+            self._external_adapter_execution.set_provider_runtime_facade(
+                runtime_provider,
+            )
+
     def set_system_handler(self, system_handler: "SystemCapabilityHandler | None") -> None:
         self._system_handler = system_handler
 

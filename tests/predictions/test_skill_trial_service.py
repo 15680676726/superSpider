@@ -297,3 +297,143 @@ def test_skill_trial_service_preserves_adapter_attribution_metadata_across_updat
     assert updated.metadata["compiled_adapter_id"] == "adapter:demo"
     assert updated.metadata["compiled_action_ids"] == ["execute_task"]
     assert updated.metadata["selected_adapter_action_id"] == "execute_task"
+
+
+def test_skill_trial_and_lifecycle_services_persist_formal_donor_execution_contract_statuses(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.db")
+    candidate_service = CapabilityCandidateService(state_store=state_store)
+    trial_service = SkillTrialService(state_store=state_store)
+    decision_service = SkillLifecycleDecisionService(state_store=state_store)
+
+    candidate = candidate_service.normalize_candidate_source(
+        candidate_kind="adapter",
+        target_scope="seat",
+        target_role_id="execution-core",
+        target_seat_ref="seat-primary",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://github.com/example/donor-app",
+        candidate_source_version="main",
+        ingestion_mode="capability-market",
+        proposed_skill_name="donor_app",
+        summary="Governed external donor candidate.",
+    )
+
+    trial = trial_service.create_or_update_trial(
+        candidate_id=candidate.candidate_id,
+        scope_type="seat",
+        scope_ref="seat-primary",
+        verdict="passed",
+        summary="Seat-local adapter trial completed.",
+        verified_stage="adapter_probe_passed",
+        provider_resolution_status="resolved",
+        compatibility_status="compatible_via_bridge",
+    )
+    decision = decision_service.create_decision(
+        candidate_id=candidate.candidate_id,
+        decision_kind="promote_to_role",
+        from_stage="trial",
+        to_stage="active",
+        reason="Provider contract and bridge compatibility are verified.",
+        verified_stage="primary_action_verified",
+        provider_resolution_status="resolved",
+        compatibility_status="compatible_native",
+    )
+
+    with state_store.connection() as conn:
+        trial_row = conn.execute(
+            """
+            SELECT verified_stage, provider_resolution_status, compatibility_status
+            FROM skill_trials
+            WHERE trial_id = ?
+            """,
+            (trial.trial_id,),
+        ).fetchone()
+        decision_row = conn.execute(
+            """
+            SELECT verified_stage, provider_resolution_status, compatibility_status
+            FROM skill_lifecycle_decisions
+            WHERE decision_id = ?
+            """,
+            (decision.decision_id,),
+        ).fetchone()
+
+    reloaded_trial_service = SkillTrialService(
+        state_store=SQLiteStateStore(tmp_path / "state.db"),
+    )
+    reloaded_decision_service = SkillLifecycleDecisionService(
+        state_store=SQLiteStateStore(tmp_path / "state.db"),
+    )
+    reloaded_trial = reloaded_trial_service.get_trial(
+        candidate_id=candidate.candidate_id,
+        scope_type="seat",
+        scope_ref="seat-primary",
+    )
+    reloaded_decisions = reloaded_decision_service.list_decisions(
+        candidate_id=candidate.candidate_id,
+    )
+
+    assert trial_row is not None
+    assert trial_row["verified_stage"] == "adapter_probe_passed"
+    assert trial_row["provider_resolution_status"] == "resolved"
+    assert trial_row["compatibility_status"] == "compatible_via_bridge"
+    assert decision_row is not None
+    assert decision_row["verified_stage"] == "primary_action_verified"
+    assert decision_row["provider_resolution_status"] == "resolved"
+    assert decision_row["compatibility_status"] == "compatible_native"
+    assert reloaded_trial is not None
+    assert reloaded_trial.verified_stage == "adapter_probe_passed"
+    assert reloaded_trial.provider_resolution_status == "resolved"
+    assert reloaded_trial.compatibility_status == "compatible_via_bridge"
+    assert reloaded_decisions[0].decision_id == decision.decision_id
+    assert reloaded_decisions[0].verified_stage == "primary_action_verified"
+    assert reloaded_decisions[0].provider_resolution_status == "resolved"
+    assert reloaded_decisions[0].compatibility_status == "compatible_native"
+
+
+def test_skill_trial_service_does_not_regress_formal_statuses_from_stale_metadata(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.db")
+    candidate_service = CapabilityCandidateService(state_store=state_store)
+    trial_service = SkillTrialService(state_store=state_store)
+
+    candidate = candidate_service.normalize_candidate_source(
+        candidate_kind="adapter",
+        target_scope="seat",
+        target_role_id="execution-core",
+        target_seat_ref="seat-primary",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://github.com/example/donor-app",
+        candidate_source_version="main",
+        ingestion_mode="capability-market",
+        proposed_skill_name="donor_app",
+        summary="Governed external donor candidate.",
+    )
+
+    trial_service.create_or_update_trial(
+        candidate_id=candidate.candidate_id,
+        scope_type="seat",
+        scope_ref="seat-primary",
+        verdict="passed",
+        verified_stage="adapter_probe_passed",
+        provider_resolution_status="resolved",
+        compatibility_status="compatible_native",
+    )
+    updated = trial_service.create_or_update_trial(
+        candidate_id=candidate.candidate_id,
+        scope_type="seat",
+        scope_ref="seat-primary",
+        verdict="passed",
+        summary="Unrelated metadata refresh.",
+        metadata={
+            "verified_stage": "unverified",
+            "provider_resolution_status": "pending",
+            "compatibility_status": "blocked_contract_violation",
+        },
+    )
+
+    assert updated.verified_stage == "adapter_probe_passed"
+    assert updated.provider_resolution_status == "resolved"
+    assert updated.compatibility_status == "compatible_native"

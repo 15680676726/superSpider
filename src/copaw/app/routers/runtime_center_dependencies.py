@@ -297,7 +297,13 @@ def _get_learning_service(request: Request):
     service = getattr(request.app.state, "learning_service", None)
     if service is not None and any(
         callable(getattr(service, method_name, None))
-        for method_name in ("list_patches", "list_proposals", "list_growth", "get_growth_history")
+        for method_name in (
+            "list_patches",
+            "list_proposals",
+            "list_growth",
+            "get_growth_history",
+            "finalize_resolved_decision",
+        )
     ):
         return service
     raise HTTPException(503, detail="Learning service is not available")

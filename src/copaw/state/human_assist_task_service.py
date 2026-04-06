@@ -135,6 +135,155 @@ def _match_anchors(anchors: Sequence[str], source_text: str) -> tuple[list[str],
     return matched, missing
 
 
+def _spec_string_list(spec: Mapping[str, Any], *keys: str) -> list[str]:
+    for key in keys:
+        values = _string_list(spec.get(key))
+        if values:
+            return values
+    return []
+
+
+def _coerce_positive_int(value: object | None, *, default: int) -> int:
+    try:
+        resolved = int(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
+    return resolved if resolved > 0 else default
+
+
+def _resolve_mapping_path(payload: Mapping[str, Any], path: str) -> object | None:
+    current: object = payload
+    for part in [segment.strip() for segment in str(path).split(".") if segment.strip()]:
+        if isinstance(current, Mapping):
+            current = current.get(part)
+            continue
+        if isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
+            if not part.isdigit():
+                return None
+            index = int(part)
+            if index < 0 or index >= len(current):
+                return None
+            current = current[index]
+            continue
+        return None
+    return current
+
+
+def _collect_state_contract(
+    payload: Mapping[str, Any],
+    spec: Mapping[str, Any],
+) -> dict[str, Any]:
+    required_state_paths = _spec_string_list(
+        spec,
+        "required_state_paths",
+        "state_change_paths",
+        "required_state_fields",
+        "state_paths",
+    )
+    resolved_state_values: dict[str, Any] = {}
+    missing_state_paths: list[str] = []
+    for path in required_state_paths:
+        value = _resolve_mapping_path(payload, path)
+        if value in (None, "", [], {}, ()):
+            missing_state_paths.append(path)
+            continue
+        resolved_state_values[path] = value
+
+    contract_payload: dict[str, Any] = {}
+    for key in (
+        "state_change",
+        "state_changes",
+        "state_contract",
+        "state_delta",
+        "state_update",
+        "state_updates",
+        "verification_state",
+        "resume",
+    ):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            contract_payload[key] = dict(value)
+            continue
+        if isinstance(value, (list, tuple, set)):
+            items = _string_list(value)
+            if items:
+                contract_payload[key] = items
+            continue
+        text = _string(value)
+        if text is not None:
+            contract_payload[key] = text
+    state_refs = _string_list(
+        [
+            *_string_list(payload.get("state_refs")),
+            *_string_list(payload.get("state_change_refs")),
+            *_string_list(payload.get("verification_state_refs")),
+        ],
+    )
+    if state_refs:
+        contract_payload["state_refs"] = state_refs
+    if resolved_state_values:
+        contract_payload["required_state_values"] = resolved_state_values
+
+    if required_state_paths:
+        contract_present = not missing_state_paths
+    else:
+        contract_present = bool(contract_payload)
+    return {
+        "required_state_paths": required_state_paths,
+        "missing_state_paths": missing_state_paths,
+        "contract_payload": contract_payload,
+        "contract_present": contract_present,
+    }
+
+
+def _build_verification_payload(
+    *,
+    acceptance_mode: str,
+    outcome: str,
+    matched_hard_anchors: Sequence[str],
+    matched_result_anchors: Sequence[str],
+    missing_hard_anchors: Sequence[str],
+    missing_result_anchors: Sequence[str],
+    matched_negative_anchors: Sequence[str],
+    verification_evidence_refs: Sequence[str],
+    contract: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "acceptance_mode": acceptance_mode,
+        "matched_hard_anchors": list(matched_hard_anchors),
+        "matched_result_anchors": list(matched_result_anchors),
+        "missing_hard_anchors": list(missing_hard_anchors),
+        "missing_result_anchors": list(missing_result_anchors),
+        "matched_negative_anchors": list(matched_negative_anchors),
+        "verification_evidence_refs": list(verification_evidence_refs),
+        "outcome": outcome,
+    }
+    if contract:
+        payload["contract"] = dict(contract)
+    return payload
+
+
+def _resolve_verification_evidence_refs(
+    *evidence_groups: object | None,
+    payloads: Sequence[Mapping[str, Any] | None] = (),
+) -> list[str]:
+    refs: list[str] = []
+    for group in evidence_groups:
+        refs.extend(_string_list(group))
+    for payload in payloads:
+        mapping = _mapping(payload)
+        refs.extend(
+            _string_list(
+                [
+                    *list(mapping.get("media_analysis_ids") or []),
+                    *list(mapping.get("evidence_refs") or []),
+                    *list(mapping.get("verification_evidence_refs") or []),
+                ],
+            ),
+        )
+    return _string_list(refs)
+
+
 @dataclass(slots=True)
 class HumanAssistVerificationResult:
     outcome: str
@@ -348,11 +497,46 @@ class HumanAssistTaskService:
         observed_evidence_refs: Sequence[str] | None = None,
         observed_payload: Mapping[str, Any] | None = None,
     ) -> HumanAssistVerificationResult:
-        current = self._require_task(task_id)
-        verifying = current.model_copy(update={"status": "verifying", "updated_at": _utc_now()})
+        previous = self._require_task(task_id)
+        observed_submission_present = (
+            _string(observed_text) is not None
+            or bool(_string_list(observed_evidence_refs))
+            or bool(_mapping(observed_payload))
+        )
+        submission_snapshot = previous
+        if observed_submission_present:
+            now = _utc_now()
+            submission_snapshot = previous.model_copy(
+                update={
+                    "status": "submitted",
+                    "submission_text": (
+                        _string(observed_text)
+                        if _string(observed_text) is not None
+                        else previous.submission_text
+                    ),
+                    "submission_evidence_refs": _string_list(
+                        [
+                            *list(previous.submission_evidence_refs or []),
+                            *_string_list(observed_evidence_refs),
+                        ],
+                    ),
+                    "submission_payload": _merge_submission_payload(
+                        previous.submission_payload,
+                        observed_payload,
+                    ),
+                    "submitted_at": previous.submitted_at or now,
+                    "updated_at": now,
+                },
+            )
+            submission_snapshot = self._repository.upsert_task(submission_snapshot)
+        fallback_status = submission_snapshot.status
+        verifying = submission_snapshot.model_copy(
+            update={"status": "verifying", "updated_at": _utc_now()},
+        )
         current = self._repository.upsert_task(verifying)
 
         spec = _mapping(current.acceptance_spec)
+        acceptance_mode = _string(current.acceptance_mode) or "anchor_verified"
         source_text = _flatten_sources(
             current.submission_text,
             observed_text,
@@ -367,60 +551,116 @@ class HumanAssistTaskService:
             source_text,
         )
         matched_negative, _ = _match_anchors(spec.get("negative_anchors") or [], source_text)
+        verification_evidence_refs = _resolve_verification_evidence_refs(
+            current.submission_evidence_refs,
+            observed_evidence_refs,
+            payloads=[current.submission_payload, observed_payload],
+        )
+        state_contract = _collect_state_contract(
+            _merge_submission_payload(current.submission_payload, observed_payload),
+            spec,
+        )
+        contract_payload: dict[str, Any] | None = None
+        contract_requirements_missing: list[str] = []
+        if acceptance_mode == "evidence_verified":
+            if not verification_evidence_refs:
+                contract_requirements_missing.append("formal_evidence_refs")
+            contract_payload = {
+                "required_evidence_refs": max(
+                    1,
+                    _coerce_positive_int(spec.get("required_evidence_count"), default=1),
+                ),
+                "observed_evidence_refs": verification_evidence_refs,
+                "missing_requirements": list(contract_requirements_missing),
+            }
+        elif acceptance_mode == "state_change_verified":
+            if not verification_evidence_refs:
+                contract_requirements_missing.append("formal_evidence_refs")
+            if not bool(state_contract["contract_present"]):
+                contract_requirements_missing.append("state_change_contract")
+            contract_payload = {
+                "required_state_paths": list(state_contract["required_state_paths"]),
+                "missing_state_paths": list(state_contract["missing_state_paths"]),
+                "state_payload": dict(state_contract["contract_payload"]),
+                "missing_requirements": list(contract_requirements_missing),
+            }
 
         if matched_negative:
             return self._finalize_verification(
-                current,
+                previous,
                 outcome="rejected",
                 status="rejected",
                 action_summary="reject human assist task",
                 message="检测到不通过锚点，当前提交未通过验收。",
+                acceptance_mode=acceptance_mode,
                 matched_hard_anchors=matched_hard,
                 matched_result_anchors=matched_result,
                 missing_hard_anchors=missing_hard,
                 missing_result_anchors=missing_result,
                 matched_negative_anchors=matched_negative,
+                verification_evidence_refs=verification_evidence_refs,
+                contract_payload=contract_payload,
+                fallback_status=fallback_status,
                 resume_queued=False,
             )
 
-        if missing_hard or missing_result:
+        if missing_hard or missing_result or contract_requirements_missing:
             failure_hint = _string(spec.get("failure_hint")) or "请补充更多可验证证据后再提交。"
             return self._finalize_verification(
-                current,
+                previous,
                 outcome="need_more_evidence",
                 status="need_more_evidence",
                 action_summary="request more evidence for human assist task",
                 message=failure_hint,
+                acceptance_mode=acceptance_mode,
                 matched_hard_anchors=matched_hard,
                 matched_result_anchors=matched_result,
                 missing_hard_anchors=missing_hard,
                 missing_result_anchors=missing_result,
                 matched_negative_anchors=[],
+                verification_evidence_refs=verification_evidence_refs,
+                contract_payload=contract_payload,
+                fallback_status=fallback_status,
                 resume_queued=False,
             )
 
         reward_result = dict(current.reward_preview or {"协作值": 1, "同调经验": 1})
         reward_result["granted"] = True
+        verification_payload = _build_verification_payload(
+            acceptance_mode=acceptance_mode,
+            outcome="accepted",
+            matched_hard_anchors=matched_hard,
+            matched_result_anchors=matched_result,
+            missing_hard_anchors=[],
+            missing_result_anchors=[],
+            matched_negative_anchors=[],
+            verification_evidence_refs=verification_evidence_refs,
+            contract=contract_payload,
+        )
         accepted = current.model_copy(
             update={
                 "status": "accepted",
                 "reward_result": reward_result,
-                "verification_payload": {
-                    "matched_hard_anchors": matched_hard,
-                    "matched_result_anchors": matched_result,
-                    "matched_negative_anchors": [],
-                },
+                "verification_evidence_refs": verification_evidence_refs,
+                "verification_payload": verification_payload,
                 "verified_at": _utc_now(),
                 "updated_at": _utc_now(),
             },
         )
         persisted = self._repository.upsert_task(accepted)
-        self._append_evidence(
+        if not self._append_evidence(
             persisted,
             action_summary="accept human assist task",
             result_summary="human assist task accepted",
             metadata={"status": persisted.status, "reward_result": persisted.reward_result},
-        )
+        ):
+            return self._verification_record_failed(
+                previous,
+                pending_outcome="accepted",
+                pending_payload=verification_payload,
+                verification_evidence_refs=verification_evidence_refs,
+                fallback_status=fallback_status,
+            )
         return HumanAssistVerificationResult(
             outcome="accepted",
             task=persisted,
@@ -551,31 +791,40 @@ class HumanAssistTaskService:
         status: str,
         action_summary: str,
         message: str,
+        acceptance_mode: str,
         matched_hard_anchors: list[str],
         matched_result_anchors: list[str],
         missing_hard_anchors: list[str],
         missing_result_anchors: list[str],
         matched_negative_anchors: list[str],
+        verification_evidence_refs: list[str],
+        contract_payload: Mapping[str, Any] | None,
+        fallback_status: str,
         resume_queued: bool,
     ) -> HumanAssistVerificationResult:
         now = _utc_now()
+        verification_payload = _build_verification_payload(
+            acceptance_mode=acceptance_mode,
+            outcome=outcome,
+            matched_hard_anchors=matched_hard_anchors,
+            matched_result_anchors=matched_result_anchors,
+            missing_hard_anchors=missing_hard_anchors,
+            missing_result_anchors=missing_result_anchors,
+            matched_negative_anchors=matched_negative_anchors,
+            verification_evidence_refs=verification_evidence_refs,
+            contract=contract_payload,
+        )
         updated = task.model_copy(
             update={
                 "status": status,
-                "verification_payload": {
-                    "matched_hard_anchors": matched_hard_anchors,
-                    "matched_result_anchors": matched_result_anchors,
-                    "missing_hard_anchors": missing_hard_anchors,
-                    "missing_result_anchors": missing_result_anchors,
-                    "matched_negative_anchors": matched_negative_anchors,
-                    "outcome": outcome,
-                },
+                "verification_evidence_refs": verification_evidence_refs,
+                "verification_payload": verification_payload,
                 "verified_at": now,
                 "updated_at": now,
             },
         )
         persisted = self._repository.upsert_task(updated)
-        self._append_evidence(
+        if not self._append_evidence(
             persisted,
             action_summary=action_summary,
             result_summary=message,
@@ -585,7 +834,14 @@ class HumanAssistTaskService:
                 "missing_hard_anchors": missing_hard_anchors,
                 "missing_result_anchors": missing_result_anchors,
             },
-        )
+        ):
+            return self._verification_record_failed(
+                task,
+                pending_outcome=outcome,
+                pending_payload=verification_payload,
+                verification_evidence_refs=verification_evidence_refs,
+                fallback_status=fallback_status,
+            )
         return HumanAssistVerificationResult(
             outcome=outcome,
             task=persisted,
@@ -596,6 +852,51 @@ class HumanAssistTaskService:
             missing_result_anchors=missing_result_anchors,
             matched_negative_anchors=matched_negative_anchors,
             resume_queued=resume_queued,
+        )
+
+    def _verification_record_failed(
+        self,
+        task: HumanAssistTaskRecord,
+        *,
+        pending_outcome: str,
+        pending_payload: Mapping[str, Any],
+        verification_evidence_refs: Sequence[str],
+        fallback_status: str,
+    ) -> HumanAssistVerificationResult:
+        now = _utc_now()
+        failure_payload = dict(pending_payload)
+        failure_payload["outcome"] = "verification_record_failed"
+        failure_payload["pending_outcome"] = pending_outcome
+        failure_payload["error"] = "evidence-ledger-unavailable"
+        updated = task.model_copy(
+            update={
+                "status": fallback_status,
+                "verification_evidence_refs": list(verification_evidence_refs),
+                "verification_payload": failure_payload,
+                "updated_at": now,
+            },
+        )
+        persisted = self._repository.upsert_task(updated)
+        return HumanAssistVerificationResult(
+            outcome="verification_record_failed",
+            task=persisted,
+            message="验收结果未能正式落证，任务保持原状态。",
+            matched_hard_anchors=_string_list(
+                _mapping(pending_payload).get("matched_hard_anchors"),
+            ),
+            matched_result_anchors=_string_list(
+                _mapping(pending_payload).get("matched_result_anchors"),
+            ),
+            missing_hard_anchors=_string_list(
+                _mapping(pending_payload).get("missing_hard_anchors"),
+            ),
+            missing_result_anchors=_string_list(
+                _mapping(pending_payload).get("missing_result_anchors"),
+            ),
+            matched_negative_anchors=_string_list(
+                _mapping(pending_payload).get("matched_negative_anchors"),
+            ),
+            resume_queued=False,
         )
 
     def _require_task(self, task_id: str) -> HumanAssistTaskRecord:
@@ -611,9 +912,9 @@ class HumanAssistTaskService:
         action_summary: str,
         result_summary: str,
         metadata: Mapping[str, Any] | None = None,
-    ) -> None:
+    ) -> bool:
         if self._evidence_ledger is None:
-            return
+            return True
         try:
             self._evidence_ledger.append(
                 EvidenceRecord(
@@ -631,7 +932,8 @@ class HumanAssistTaskService:
                 ),
             )
         except Exception:
-            return
+            return False
+        return True
 
 
 __all__ = ["HumanAssistTaskService", "HumanAssistVerificationResult"]

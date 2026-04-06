@@ -44,6 +44,9 @@ class CapabilityCandidateRecord(UpdatedRecord):
     rollback_criteria: list[str] = Field(default_factory=list)
     source_task_ids: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
+    verified_stage: str = Field(default="unverified", min_length=1)
+    provider_resolution_status: str = Field(default="pending", min_length=1)
+    compatibility_status: str = Field(default="unknown", min_length=1)
     version: str = Field(default="v1", min_length=1)
     lineage_root_id: str | None = None
     supersedes: list[str] = Field(default_factory=list)
@@ -76,6 +79,9 @@ class SkillTrialRecord(UpdatedRecord):
     handoff_count: int = 0
     operator_intervention_count: int = 0
     latency_summary: dict[str, Any] = Field(default_factory=dict)
+    verified_stage: str = Field(default="unverified", min_length=1)
+    provider_resolution_status: str = Field(default="pending", min_length=1)
+    compatibility_status: str = Field(default="unknown", min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -104,6 +110,9 @@ class SkillLifecycleDecisionRecord(UpdatedRecord):
     replacement_target_ids: list[str] = Field(default_factory=list)
     protection_lifted: bool = False
     applied_by: str | None = None
+    verified_stage: str = Field(default="unverified", min_length=1)
+    provider_resolution_status: str = Field(default="pending", min_length=1)
+    compatibility_status: str = Field(default="unknown", min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -14,6 +14,8 @@ from urllib.request import urlopen
 
 from ..agents.tools import execute_shell_command
 from ..state.external_runtime_service import ExternalCapabilityRuntimeService
+from .donor_execution_envelope import run_donor_execution_envelope
+from .external_adapter_contracts import donor_execution_envelope_from_metadata
 from .execution_support import (
     _tool_response_payload,
     _tool_response_success,
@@ -33,6 +35,10 @@ def _runtime_contract(mount: CapabilityMount) -> dict[str, Any]:
     contract = dict((mount.metadata or {}).get("runtime_contract") or {})
     contract["ready_probe_config"] = dict(contract.get("ready_probe_config") or {})
     return contract
+
+
+def _execution_envelope(mount: CapabilityMount):
+    return donor_execution_envelope_from_metadata(mount.metadata or {})
 
 
 def _package_command(mount: CapabilityMount, *, key: str) -> str:
@@ -171,8 +177,19 @@ class ExternalRuntimeExecution:
                 "orphaned",
             )
         contract = _runtime_contract(mount)
+        envelope = _execution_envelope(mount)
         probe_kind = str(contract.get("ready_probe_kind") or "none").strip().lower()
         ready_probe_config = dict(contract.get("ready_probe_config") or {})
+        probe_timeout_sec = (
+            float(getattr(envelope, "probe_timeout_sec"))
+            if envelope is not None
+            else 10.0
+        )
+        heartbeat_interval_sec = (
+            float(getattr(envelope, "heartbeat_interval_sec"))
+            if envelope is not None
+            else None
+        )
         success = True
         summary = "Runtime is ready."
         if probe_kind == "command":
@@ -180,23 +197,64 @@ class ExternalRuntimeExecution:
                 ready_probe_config.get("command")
                 or _package_command(mount, key="healthcheck_command")
             ).strip()
-            response = await execute_shell_command(
-                command=command,
-                timeout=30,
-                cwd=None,
+            envelope_result = await run_donor_execution_envelope(
+                label=f"{mount.id}:probe:command",
+                awaitable_factory=lambda: execute_shell_command(
+                    command=command,
+                    timeout=max(int(probe_timeout_sec), 1),
+                    cwd=None,
+                ),
+                action_timeout_sec=probe_timeout_sec,
+                heartbeat_interval_sec=heartbeat_interval_sec,
+                heartbeat_snapshot_factory=lambda: {"probe_kind": "command"},
+                cancel_grace_sec=(
+                    float(getattr(envelope, "cancel_grace_sec"))
+                    if envelope is not None
+                    else None
+                ),
             )
+            if not envelope_result.get("success"):
+                return False, str(envelope_result.get("summary") or ""), None
+            response = envelope_result.get("output")
             success = _tool_response_success(response)
             summary = _tool_response_summary(response)
         elif probe_kind == "http":
             health_url = runtime.health_url or str(ready_probe_config.get("url") or "").strip()
-            success, summary = await asyncio.to_thread(_http_check, health_url, 3.0)
+            envelope_result = await run_donor_execution_envelope(
+                label=f"{mount.id}:probe:http",
+                awaitable_factory=lambda: asyncio.to_thread(
+                    _http_check,
+                    health_url,
+                    probe_timeout_sec,
+                ),
+                action_timeout_sec=probe_timeout_sec,
+                heartbeat_interval_sec=heartbeat_interval_sec,
+                heartbeat_snapshot_factory=lambda: {"probe_kind": "http"},
+            )
+            if not envelope_result.get("success"):
+                return False, str(envelope_result.get("summary") or ""), None
+            success, summary = envelope_result.get("output") or (False, "", None)
         elif probe_kind == "port":
             host = str(ready_probe_config.get("host") or "127.0.0.1")
             port = runtime.port or ready_probe_config.get("port")
             if not isinstance(port, int):
                 success, summary = False, "Port readiness probe requires runtime port."
             else:
-                success, summary = await asyncio.to_thread(_port_check, host, port, 3.0)
+                envelope_result = await run_donor_execution_envelope(
+                    label=f"{mount.id}:probe:port",
+                    awaitable_factory=lambda: asyncio.to_thread(
+                        _port_check,
+                        host,
+                        port,
+                        probe_timeout_sec,
+                    ),
+                    action_timeout_sec=probe_timeout_sec,
+                    heartbeat_interval_sec=heartbeat_interval_sec,
+                    heartbeat_snapshot_factory=lambda: {"probe_kind": "port"},
+                )
+                if not envelope_result.get("success"):
+                    return False, str(envelope_result.get("summary") or ""), None
+                success, summary = envelope_result.get("output") or (False, "", None)
         return success, summary, None
 
     async def _wait_for_service_ready(
@@ -291,12 +349,33 @@ class ExternalRuntimeExecution:
         payload: RunExternalRuntimePayload,
     ) -> dict[str, object]:
         command = _append_args(_package_command(mount, key="execute_command"), payload.args)
-        response = await execute_shell_command(
-            command=command,
-            timeout=int(payload.timeout_sec or 180),
-            cwd=None,
+        envelope = _execution_envelope(mount)
+        action_timeout_sec = float(
+            payload.timeout_sec
+            or (getattr(envelope, "action_timeout_sec") if envelope is not None else 180),
         )
-        success = _tool_response_success(response)
+        envelope_result = await run_donor_execution_envelope(
+            label=f"{mount.id}:run",
+            awaitable_factory=lambda: execute_shell_command(
+                command=command,
+                timeout=max(int(action_timeout_sec), 1),
+                cwd=None,
+            ),
+            action_timeout_sec=action_timeout_sec,
+            heartbeat_interval_sec=(
+                float(getattr(envelope, "heartbeat_interval_sec"))
+                if envelope is not None
+                else None
+            ),
+            heartbeat_snapshot_factory=lambda: {"runtime_action": "run"},
+            cancel_grace_sec=(
+                float(getattr(envelope, "cancel_grace_sec"))
+                if envelope is not None
+                else None
+            ),
+        )
+        response = envelope_result.get("output")
+        success = bool(envelope_result.get("success")) and _tool_response_success(response)
         runtime = self._runtime_service.record_cli_run(
             capability_id=mount.id,
             scope_kind="session",
@@ -311,10 +390,19 @@ class ExternalRuntimeExecution:
         )
         return {
             "success": success,
-            "summary": _tool_response_summary(response),
+            "summary": (
+                _tool_response_summary(response)
+                if response is not None
+                else str(envelope_result.get("summary") or "")
+            ),
             "status": runtime.status,
             "runtime_id": runtime.runtime_id,
             "output": _tool_response_payload(response),
+            "error": None if success else str(envelope_result.get("error") or runtime.last_error or ""),
+            "error_type": envelope_result.get("error_type"),
+            "outcome": envelope_result.get("outcome"),
+            "heartbeat_count": envelope_result.get("heartbeat_count", 0),
+            "heartbeat_snapshots": envelope_result.get("heartbeat_snapshots") or [],
             "evidence_metadata": {
                 "runtime_id": runtime.runtime_id,
                 "runtime_status": runtime.status,
@@ -434,6 +522,8 @@ class ExternalRuntimeExecution:
         mount: CapabilityMount,
         payload: HealthcheckExternalRuntimePayload,
     ) -> dict[str, object]:
+        contract = _runtime_contract(mount)
+        probe_kind = str(contract.get("ready_probe_kind") or "none").strip().lower()
         runtime = self._runtime_service.get_runtime(payload.runtime_id)
         if runtime is None:
             return {

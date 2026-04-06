@@ -16,6 +16,7 @@ from copaw.capabilities import CapabilityService
 from copaw.app.startup_recovery import StartupRecoverySummary
 from copaw.environments.models import SessionMount
 from copaw.evidence import EvidenceLedger
+from copaw.industry import IndustryService
 from copaw.kernel import (
     KernelDispatcher,
     KernelQueryExecutionService,
@@ -834,6 +835,75 @@ def test_runtime_center_main_brain_route_exposes_report_cognition_surface():
     )
     assert planning["replan"]["decision_kind"] == "lane_reweight"
     assert planning["replan"]["uncertainty_register"]["summary"]["uncertainty_count"] == 1
+
+
+def test_runtime_center_industry_detail_rejects_unsupported_focus_queries():
+    fake_industry_service = FakeIndustryService()
+
+    class _StubIndustryService(IndustryService):
+        def __init__(self) -> None:
+            pass
+
+        def list_instances(self, limit: int = 20):
+            return fake_industry_service.list_instances(limit=limit)
+
+        def get_instance_detail(
+            self,
+            instance_id: str,
+            *,
+            assignment_id: str | None = None,
+            backlog_item_id: str | None = None,
+        ):
+            _ = assignment_id, backlog_item_id
+            return fake_industry_service.get_instance_detail(instance_id)
+
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = _StubIndustryService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+
+    client = TestClient(app)
+    unsupported_routes = [
+        "/runtime-center/industry/industry-v1-ops?report_id=report-1",
+        "/runtime-center/industry/industry-v1-ops?lane_id=lane-growth",
+        "/runtime-center/industry/industry-v1-ops?cycle_id=cycle-1",
+        "/runtime-center/industry/industry-v1-ops?focus_kind=agent_report&focus_id=report-1",
+        "/runtime-center/industry/industry-v1-ops?focus_kind=lane&focus_id=lane-growth",
+        "/runtime-center/industry/industry-v1-ops?focus_kind=cycle&focus_id=cycle-1",
+        "/runtime-center/industry/industry-v1-ops?focus_kind=invalid&focus_id=x",
+    ]
+
+    for route in unsupported_routes:
+        response = client.get(route)
+        assert response.status_code == 400
+        assert response.json() == {
+            "detail": (
+                "Unsupported runtime-center industry focus; "
+                "only assignment/backlog focus is supported."
+            )
+        }
+
+    focus_id_only = client.get(
+        "/runtime-center/industry/industry-v1-ops?focus_id=assignment-1"
+    )
+    assert focus_id_only.status_code == 400
+    assert focus_id_only.json() == {
+        "detail": "focus_kind is required when focus_id is provided."
+    }
+
+    focus_kind_only = client.get(
+        "/runtime-center/industry/industry-v1-ops?focus_kind=assignment"
+    )
+    assert focus_kind_only.status_code == 400
+    assert focus_kind_only.json() == {
+        "detail": "focus_id is required when focus_kind is provided."
+    }
 
 
 def test_runtime_center_main_brain_route_exposes_unified_operator_sections():

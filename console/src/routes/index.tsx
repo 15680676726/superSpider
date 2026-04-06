@@ -4,7 +4,6 @@ import { Navigate } from "react-router-dom";
 const Chat = lazy(() => import("../pages/Chat"));
 const BuddyOnboardingPage = lazy(() => import("../pages/BuddyOnboarding"));
 const AgentConfigPage = lazy(() => import("../pages/Agent/Config"));
-const AgentWorkspacePage = lazy(() => import("../pages/Agent/Workspace"));
 const RuntimeCenterPage = lazy(() => import("../pages/RuntimeCenter"));
 const IndustryPage = lazy(() => import("../pages/Industry"));
 const PredictionsPage = lazy(() => import("../pages/Predictions"));
@@ -66,7 +65,6 @@ export const routes: RouteConfig[] = [
     element: <AgentConfigPage />,
     menuKey: "agent-config",
   },
-  { path: "/agents", element: <AgentWorkspacePage />, menuKey: "runtime-center" },
   { path: "*", element: <Navigate to="/runtime-center" replace /> },
 ];
 
@@ -77,7 +75,6 @@ const PATHNAME_TO_KEY: Array<[string, string]> = [
   ["/settings/models", "models"],
   ["/settings/environments", "environments"],
   ["/settings/agent-config", "agent-config"],
-  ["/agents", "runtime-center"],
   ["/industry", "industry"],
   ["/predictions", "predictions"],
   ["/knowledge", "knowledge"],

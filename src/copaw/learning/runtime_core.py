@@ -255,6 +255,21 @@ class LearningRuntimeCore:
             rejected_by=rejected_by,
         )
 
+    async def finalize_resolved_decision(
+        self,
+        decision_id: str,
+        *,
+        status: str,
+        actor: str = "system",
+        resolution: str | None = None,
+    ) -> dict[str, object]:
+        return await self._acquisition_runtime.finalize_resolved_decision(
+            decision_id,
+            status=status,
+            actor=actor,
+            resolution=resolution,
+        )
+
     def list_install_binding_plans(
         self,
         *,

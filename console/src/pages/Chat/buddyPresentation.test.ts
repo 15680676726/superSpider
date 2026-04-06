@@ -6,6 +6,7 @@ import {
   presentBuddyMoodLabel,
   presentBuddyPresenceLabel,
   presentBuddyStageLabel,
+  resolveBuddyDisplaySnapshot,
 } from "./buddyPresentation";
 
 describe("buddyPresentation", () => {
@@ -30,5 +31,46 @@ describe("buddyPresentation", () => {
         },
       } as never),
     ).toBe("Nova · 结伴 · 专注陪你 · 温暖");
+  });
+
+  it("resolves a single buddy display snapshot with fallbacks", () => {
+    expect(
+      resolveBuddyDisplaySnapshot({
+        growth_target: {
+          final_goal: "建立可持续的创作事业",
+          why_it_matters: "这是把长期方向落到现实里的关键一步",
+        },
+        relationship: {
+          buddy_name: "Nova",
+          encouragement_style: "old-friend",
+        },
+        presentation: {
+          buddy_name: "",
+          current_goal_summary: "",
+          current_task_summary: "先写出第一篇案例",
+          why_now_summary: "",
+          single_next_action_summary: "现在先打开文档，写下标题和三条要点",
+          companion_strategy_summary: "先接住情绪，再把任务缩成一个最小动作",
+          presence_state: "focused",
+          mood_state: "warm",
+          current_form: "seasoned",
+        },
+        growth: {
+          companion_experience: 180,
+          evolution_stage: "",
+        },
+      } as never),
+    ).toEqual(
+      expect.objectContaining({
+        buddyName: "Nova",
+        finalGoalSummary: "建立可持续的创作事业",
+        currentTaskSummary: "先写出第一篇案例",
+        whyNowSummary: "这是把长期方向落到现实里的关键一步",
+        singleNextActionSummary: "现在先打开文档，写下标题和三条要点",
+        companionStrategySummary: "先接住情绪，再把任务缩成一个最小动作",
+        stageLabel: "成熟",
+        encouragementStyleLabel: "像老朋友",
+      }),
+    );
   });
 });

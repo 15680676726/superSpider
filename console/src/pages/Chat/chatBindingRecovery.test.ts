@@ -11,7 +11,7 @@ const executionCoreInstance = {
 } as unknown as IndustryInstanceSummary;
 
 describe("chatBindingRecovery", () => {
-  it("auto-binds the sole execution-core suggestion when chat opens without an explicit thread", () => {
+  it("does not auto-bind an industry execution-core when chat opens without an explicit thread", () => {
     const action = resolveChatBindingRecoveryAction({
       requestedThreadId: null,
       requestedThreadLooksBound: false,
@@ -19,17 +19,11 @@ describe("chatBindingRecovery", () => {
       threadBootstrapPending: false,
       autoBindingPending: false,
       hasBoundAgentContext: false,
-      defaultAutoBindAttempted: false,
       recoveryAttempts: new Set<string>(),
       executionCoreSuggestions: [executionCoreInstance],
     });
 
-    expect(action).toEqual({
-      type: "bind-instance",
-      instance: executionCoreInstance,
-      recoveryToken: null,
-      markDefaultAttempt: true,
-    });
+    expect(action).toBeNull();
   });
 
   it("rebinds a failed industry control thread to its matched execution-core instance", () => {
@@ -40,7 +34,6 @@ describe("chatBindingRecovery", () => {
       threadBootstrapPending: false,
       autoBindingPending: false,
       hasBoundAgentContext: false,
-      defaultAutoBindAttempted: true,
       recoveryAttempts: new Set<string>(),
       executionCoreSuggestions: [executionCoreInstance],
     });
@@ -61,7 +54,6 @@ describe("chatBindingRecovery", () => {
       threadBootstrapPending: false,
       autoBindingPending: false,
       hasBoundAgentContext: false,
-      defaultAutoBindAttempted: true,
       recoveryAttempts: new Set<string>(),
       executionCoreSuggestions: [executionCoreInstance],
     });
@@ -81,7 +73,6 @@ describe("chatBindingRecovery", () => {
       threadBootstrapPending: false,
       autoBindingPending: false,
       hasBoundAgentContext: false,
-      defaultAutoBindAttempted: true,
       recoveryAttempts: new Set<string>([
         "rebind:industry-chat:industry-missing:execution-core:bootstrap-error",
       ]),
@@ -99,7 +90,6 @@ describe("chatBindingRecovery", () => {
       threadBootstrapPending: false,
       autoBindingPending: false,
       hasBoundAgentContext: false,
-      defaultAutoBindAttempted: true,
       recoveryAttempts: new Set<string>(),
       executionCoreSuggestions: [executionCoreInstance],
     });

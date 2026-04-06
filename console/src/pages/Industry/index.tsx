@@ -122,7 +122,6 @@ export default function IndustryPage() {
     installPlan,
     installPlanByRecommendationId,
     isEditing,
-    isEditingExistingTeam,
     loadInstanceIntoDraft,
     loadInstances,
     loadingDetail,
@@ -442,9 +441,9 @@ export default function IndustryPage() {
             <span style={{ color: "var(--baize-text-main)" }}>
               {isEditing
                 ? (
-                  isEditingExistingTeam
-                    ? (selectedIsCurrentBuddyCarrier ? INDUSTRY_TEXT.currentCarrierAdjustment : INDUSTRY_TEXT.updateTeam)
-                    : INDUSTRY_TEXT.previewTitle
+                  selectedIsCurrentBuddyCarrier
+                    ? INDUSTRY_TEXT.currentCarrierAdjustment
+                    : INDUSTRY_TEXT.updateTeam
                 )
                 : (detail?.team?.label || selectedSummary?.label || INDUSTRY_TEXT.industryDetail)}
             </span>
@@ -459,7 +458,7 @@ export default function IndustryPage() {
                   loading={applyCarrierLoading}
                   onClick={() => void handleApplyCarrierAdjustment()}
                 >
-                  {isEditingExistingTeam ? INDUSTRY_TEXT.updateTeam : INDUSTRY_TEXT.activateTeam}
+                  {INDUSTRY_TEXT.updateTeam}
                 </Button>
                 <Button onClick={() => { setPreview(null); setDraftSourceInstanceId(null); }}>取消</Button>
               </Space>

@@ -55,6 +55,12 @@ describe("sessionApi.openBoundThread", () => {
     await cleanupThread("chat:transient");
   });
 
+  it("throws a clean guidance message when no bound thread exists", async () => {
+    await expect(sessionApi.createSession({})).rejects.toThrow(
+      "运行聊天必须先进入主脑聊天入口或行业主脑控制线程。",
+    );
+  });
+
   it("falls back to the bound main-brain control thread when the conversation detail is still 404", async () => {
     mockedGetRuntimeConversation.mockRejectedValue(
       new ApiError({

@@ -66,14 +66,17 @@ import { useChatMedia } from "./useChatMedia";
 import { useChatRuntimeState } from "./useChatRuntimeState";
 import styles from "./index.module.less";
 import { useRuntimeBinding } from "./useRuntimeBinding";
-import { writeBuddyProfileId } from "../../runtime/buddyProfileBinding";
+import { resolveCanonicalBuddyProfileId } from "../../runtime/buddyProfileBinding";
 import {
   BUDDY_IDENTITY_CENTER_ROUTE,
   resolveBuddyNamingState,
 } from "../../runtime/buddyFlow";
 import {
+  mergeBuddyProfileIntoThreadMeta,
   resolveBuddyProfileIdFromBuddySurface,
+  resolveBuddySurfaceProfileRequest,
   resolveRequestedBuddyProfileId,
+  resolveThreadBuddyProfileId,
 } from "./buddyProfileSource";
 
 interface CustomWindow extends Window {
@@ -307,7 +310,6 @@ export default function ChatPage() {
   const [resolvedBuddyProfileId, setResolvedBuddyProfileId] = useState<string | null>(
     () => requestedBuddyProfileId,
   );
-  const buddyProfileId = resolvedBuddyProfileId;
 
   const [showModelPrompt, setShowModelPrompt] = useState(false);
   const [suggestedTeams, setSuggestedTeams] = useState<IndustryInstanceSummary[]>([]);
@@ -319,12 +321,26 @@ export default function ChatPage() {
   const [threadMeta, setThreadMeta] = useState<Record<string, unknown>>(
     normalizeThreadMeta(requestedThreadId ? window.currentThreadMeta : null),
   );
+  const canonicalThreadBuddyProfileId = useMemo(
+    () => resolveThreadBuddyProfileId(threadMeta),
+    [threadMeta],
+  );
   const effectiveThreadMeta = useMemo<Record<string, unknown>>(
-    () => ({
-      ...threadMeta,
-      ...(buddyProfileId ? { buddy_profile_id: buddyProfileId } : {}),
-    }),
-    [buddyProfileId, threadMeta],
+    () =>
+      mergeBuddyProfileIntoThreadMeta({
+        threadMeta,
+        requestedProfileId: requestedBuddyProfileId,
+      }),
+    [requestedBuddyProfileId, threadMeta],
+  );
+  const buddyProfileId = useMemo(
+    () =>
+      resolveCanonicalBuddyProfileId(
+        canonicalThreadBuddyProfileId,
+        resolvedBuddyProfileId,
+        requestedBuddyProfileId,
+      ),
+    [canonicalThreadBuddyProfileId, requestedBuddyProfileId, resolvedBuddyProfileId],
   );
 
   const {
@@ -332,8 +348,6 @@ export default function ChatPage() {
     activeChatThreadId,
     activeIndustryId,
     activeIndustryRoleId,
-    openWorkbench,
-    requestedIndustryThread,
     requestedThreadLooksBound,
   } = useRuntimeBinding({
     navigate,
@@ -356,7 +370,6 @@ export default function ChatPage() {
   const [buddyNameDraft, setBuddyNameDraft] = useState("");
   const [buddyNamingBusy, setBuddyNamingBusy] = useState(false);
   const recoveryAttemptsRef = useRef<Set<string>>(new Set());
-  const defaultAutoBindAttemptedRef = useRef(false);
   const optionsConfig: OptionsConfig = defaultConfig;
   const activeModels = useModelStore((s) => s.activeModels);
   const refreshActiveModels = useModelStore((s) => s.refreshActiveModels);
@@ -414,44 +427,62 @@ export default function ChatPage() {
     setBuddyLoading(true);
     setBuddyError(null);
     try {
-      const explicitProfileId = requestedBuddyProfileId || undefined;
+      const explicitProfileId =
+        resolveBuddySurfaceProfileRequest({
+          threadMeta,
+          requestedProfileId: requestedBuddyProfileId,
+        }) || undefined;
       const surface = await api.getBuddySurface(explicitProfileId);
       setBuddySurface(surface);
       const surfaceProfileId = resolveRequestedBuddyProfileId(
         surface?.profile?.profile_id,
       );
       const nextProfileId = resolveBuddyProfileIdFromBuddySurface({
-        requestedProfileId: requestedBuddyProfileId,
+        requestedProfileId: explicitProfileId,
         surfaceProfileId,
       });
       setResolvedBuddyProfileId(nextProfileId || null);
-      if (surfaceProfileId) {
-        writeBuddyProfileId(surfaceProfileId);
-      }
       setBuddyNameDraft("");
     } catch (error) {
       setBuddySurface(null);
-      setResolvedBuddyProfileId(requestedBuddyProfileId);
+      setResolvedBuddyProfileId(
+        resolveCanonicalBuddyProfileId(
+          canonicalThreadBuddyProfileId,
+          requestedBuddyProfileId,
+        ),
+      );
       if (error instanceof Error) {
         setBuddyError(error.message);
       }
     } finally {
       setBuddyLoading(false);
     }
-  }, [requestedBuddyProfileId]);
+  }, [canonicalThreadBuddyProfileId, requestedBuddyProfileId, threadMeta]);
 
   useEffect(() => {
     void loadBuddySurface();
   }, [loadBuddySurface]);
 
   const buddyNamingState = useMemo(
-    () => resolveBuddyNamingState(buddySurface, buddySessionId),
-    [buddySessionId, buddySurface],
+    () =>
+      resolveBuddyNamingState(
+        buddySurface,
+        buddySessionId,
+        typeof effectiveThreadMeta.buddy_session_id === "string"
+          ? effectiveThreadMeta.buddy_session_id
+          : null,
+      ),
+    [buddySessionId, buddySurface, effectiveThreadMeta.buddy_session_id],
   );
 
   useEffect(() => {
-    setResolvedBuddyProfileId(requestedBuddyProfileId);
-  }, [requestedBuddyProfileId]);
+    setResolvedBuddyProfileId(
+      resolveCanonicalBuddyProfileId(
+        canonicalThreadBuddyProfileId,
+        requestedBuddyProfileId,
+      ),
+    );
+  }, [canonicalThreadBuddyProfileId, requestedBuddyProfileId]);
 
   useEffect(() => {
     if (location.pathname !== "/chat") return;
@@ -512,10 +543,6 @@ export default function ChatPage() {
   }, [navigate, requestedThreadId, requestedThreadLooksBound]);
 
   useEffect(() => {
-    if (requestedThreadId) defaultAutoBindAttemptedRef.current = false;
-  }, [requestedThreadId]);
-
-  useEffect(() => {
     const sync = (e: Event) => {
       const ce = e as CustomEvent<{ meta?: Record<string, unknown> }>;
       setThreadMeta(normalizeThreadMeta(ce.detail?.meta));
@@ -539,10 +566,8 @@ export default function ChatPage() {
     activeIndustryId,
     activeIndustryRoleId,
     autoBindingPending,
-    defaultAutoBindAttemptedRef,
     navigate,
     optionsConfig,
-    requestedIndustryThread,
     requestedThreadId,
     requestedThreadLooksBound,
     recoveryAttemptsRef,
@@ -563,11 +588,9 @@ export default function ChatPage() {
   const {
     bindingLabel,
     currentFocus,
-    executionCoreSuggestions,
     hasBoundAgentContext,
     hasSuggestedTeams,
     options,
-    openSuggestedIndustryChat,
     approveCommitBusy,
     approveCommitDecisions,
     rejectCommitBusy,
@@ -592,13 +615,19 @@ export default function ChatPage() {
 
   const effectiveThreadPending = threadBootstrapPending || autoBindingPending;
   const activeWindowThreadId = normalizeThreadId(window.currentThreadId);
-  const { shouldRenderChatUi } = resolveChatUiVisibility({
+  const allowUnboundBuddyShell = Boolean(
+    buddyNamingState.needsNaming && buddyNamingState.sessionId,
+  );
+  const hasBuddyNamingGate = allowUnboundBuddyShell;
+  const { shouldRenderChatComposer, shouldRenderChatUi } = resolveChatUiVisibility({
     requestedThreadId,
     activeWindowThreadId,
     requestedThreadLooksBound,
     threadBootstrapError,
     hasBoundAgentContext,
     effectiveThreadPending,
+    allowUnboundBuddyShell,
+    disableComposer: hasBuddyNamingGate,
   });
 
   const chatNoticeVariant = resolveChatNoticeVariant({
@@ -660,7 +689,6 @@ export default function ChatPage() {
         requestedThreadId={requestedThreadId}
         industryTeamsError={industryTeamsError}
         hasSuggestedTeams={hasSuggestedTeams}
-        executionCoreSuggestions={executionCoreSuggestions}
         effectiveThreadPending={effectiveThreadPending}
         showModelPrompt={showModelPrompt}
         onCloseModelPrompt={() => setShowModelPrompt(false)}
@@ -669,9 +697,7 @@ export default function ChatPage() {
           navigate("/settings/models");
         }}
         onOpenIdentityCenter={() => navigate(BUDDY_IDENTITY_CENTER_ROUTE)}
-        onOpenWorkbench={openWorkbench}
         onReload={() => window.location.reload()}
-        onOpenSuggestedIndustryChat={openSuggestedIndustryChat}
       />
 
       {/* 主聊天区 */}
@@ -698,10 +724,12 @@ export default function ChatPage() {
             approvalButtonLabel={approvalButtonLabel}
             onOpenGovernanceApprovals={openGovernanceApprovals}
           />
-          <ChatHumanAssistPanel
-            activeChatThreadId={activeChatThreadId}
-            threadMeta={effectiveThreadMeta}
-          />
+          {shouldRenderChatComposer ? (
+            <ChatHumanAssistPanel
+              activeChatThreadId={activeChatThreadId}
+              threadMeta={effectiveThreadMeta}
+            />
+          ) : null}
           {buddyNamingState.needsNaming && buddyNamingState.sessionId ? (
             <Alert
               type="info"
@@ -761,24 +789,28 @@ export default function ChatPage() {
                 onOpen={() => setBuddyPanelOpen(true)}
               />
             ) : null}
-            <ChatComposerAdapter chatUiKey={chatUiKey} options={options} />
+            {shouldRenderChatComposer ? (
+              <ChatComposerAdapter chatUiKey={chatUiKey} options={options} />
+            ) : null}
 
             {/* 媒体附件区 */}
-            <MediaPanel
-              mediaError={mediaError}
-              clearMediaError={clearMediaError}
-              mediaPendingItems={mediaPendingItems}
-              removePendingMedia={removePendingMedia}
-              mediaAnalyses={mediaAnalyses}
-              selectedMediaAnalysisIds={selectedMediaAnalysisIds}
-              toggleMediaAnalysis={toggleMediaAnalysis}
-              mediaBusy={mediaBusy}
-              mediaLinkValue={mediaLinkValue}
-              setMediaLinkValue={setMediaLinkValue}
-              handleAddMediaLink={handleAddMediaLink}
-              handleMediaUploadChange={handleMediaUploadChange}
-              uploadMediaInputRef={uploadMediaInputRef}
-            />
+            {shouldRenderChatComposer ? (
+              <MediaPanel
+                mediaError={mediaError}
+                clearMediaError={clearMediaError}
+                mediaPendingItems={mediaPendingItems}
+                removePendingMedia={removePendingMedia}
+                mediaAnalyses={mediaAnalyses}
+                selectedMediaAnalysisIds={selectedMediaAnalysisIds}
+                toggleMediaAnalysis={toggleMediaAnalysis}
+                mediaBusy={mediaBusy}
+                mediaLinkValue={mediaLinkValue}
+                setMediaLinkValue={setMediaLinkValue}
+                handleAddMediaLink={handleAddMediaLink}
+                handleMediaUploadChange={handleMediaUploadChange}
+                uploadMediaInputRef={uploadMediaInputRef}
+              />
+            ) : null}
           </div>
           <BuddyPanel
             open={buddyPanelOpen}

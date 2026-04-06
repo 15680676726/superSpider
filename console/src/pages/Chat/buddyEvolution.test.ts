@@ -19,7 +19,9 @@ describe("buddyEvolution", () => {
     expect(presentBuddyRarityLabel("epic")).toBe("史诗");
     expect(
       resolveBuddyEvolutionView({
-        evolutionStage: "seasoned",
+        evolutionStage: "",
+        currentForm: "seasoned",
+        companionExperience: 20,
         rarity: "epic",
       }),
     ).toEqual(
