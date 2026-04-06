@@ -2,6 +2,7 @@
 """Kernel dispatcher: the single entry point for task admission/execution."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
@@ -190,7 +191,18 @@ class KernelDispatcher:
             raise RuntimeError("CapabilityService is not wired to the kernel dispatcher")
 
         try:
-            execution = await self._capability_service.execute_task(task)
+            execution_call = self._capability_service.execute_task(task)
+            timeout_seconds = self._config.execution_timeout_seconds
+            if timeout_seconds is not None:
+                execution = await asyncio.wait_for(execution_call, timeout=timeout_seconds)
+            else:
+                execution = await execution_call
+        except TimeoutError:
+            logger.exception("Kernel capability execution timed out for %s", task_id)
+            return self.fail_task(
+                task_id,
+                error=f"Execution timed out after {timeout_seconds:g} seconds.",
+            )
         except Exception as exc:
             logger.exception("Kernel capability execution failed for %s", task_id)
             return self.fail_task(task_id, error=str(exc))

@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Iterable
 
@@ -355,6 +356,58 @@ def _stable_payload_signature(payload: dict[str, object]) -> str:
         return repr(sorted(payload.items(), key=lambda item: str(item[0])))
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _seconds_since(value: object | None) -> float | None:
+    if not isinstance(value, datetime):
+        return None
+    target = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return (_utc_now() - target).total_seconds()
+
+
+def _reap_stale_kernel_tasks(
+    dispatcher: KernelDispatcher,
+    *,
+    logger: logging.Logger,
+) -> list[str]:
+    timeout_seconds = getattr(getattr(dispatcher, "_config", None), "execution_timeout_seconds", None)
+    if timeout_seconds is None:
+        return []
+    task_store = getattr(dispatcher, "task_store", None)
+    if task_store is None:
+        return []
+    list_tasks = getattr(task_store, "list_tasks", None)
+    get_runtime_record = getattr(task_store, "get_runtime_record", None)
+    fail_task = getattr(dispatcher, "fail_task", None)
+    if not callable(list_tasks) or not callable(get_runtime_record) or not callable(fail_task):
+        return []
+
+    reaped: list[str] = []
+    for task in list_tasks(phase="executing", limit=200):
+        task_id = str(getattr(task, "id", "") or "").strip()
+        if not task_id:
+            continue
+        runtime = get_runtime_record(task_id)
+        age_seconds = _seconds_since(getattr(runtime, "updated_at", None))
+        if age_seconds is None or age_seconds < float(timeout_seconds):
+            continue
+        timeout_label = f"{float(timeout_seconds):g}"
+        logger.warning(
+            "Reaping stale executing task %s after %ss without runtime progress",
+            task_id,
+            timeout_label,
+        )
+        fail_task(
+            task_id,
+            error=f"Execution timed out after {timeout_label} seconds.",
+            append_kernel_evidence=True,
+        )
+        reaped.append(task_id)
+    return reaped
+
+
 async def _automation_loop(
     *,
     task_name: str,
@@ -371,6 +424,7 @@ async def _automation_loop(
     while True:
         try:
             await asyncio.sleep(interval_seconds)
+            _reap_stale_kernel_tasks(kernel_dispatcher, logger=logger)
             allowed, reason = _resolve_automation_gate(should_run)
             if not allowed:
                 loop_state.mark_blocked(reason)

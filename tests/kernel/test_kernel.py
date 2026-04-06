@@ -295,6 +295,28 @@ class TestKernelDispatcher:
         assert result.success is True
         assert result.phase == "completed"
 
+    def test_execute_task_times_out_and_fails(self):
+        class _SlowCapabilityService:
+            async def execute_task(self, task):
+                del task
+                await asyncio.sleep(0.05)
+                return {"success": True, "summary": "should not complete"}
+
+        dispatcher = KernelDispatcher(
+            config=KernelConfig(execution_timeout_seconds=0.01),
+            capability_service=_SlowCapabilityService(),
+        )
+        task = KernelTask(title="Timeout task", capability_ref="system:dispatch_query")
+        dispatcher.submit(task)
+
+        result = asyncio.run(dispatcher.execute_task(task.id))
+
+        assert result.success is False
+        assert result.phase == "failed"
+        assert result.error is not None
+        assert "timed out" in result.error.lower()
+        assert dispatcher.lifecycle.get_task(task.id).phase == "failed"
+
     def test_execution_core_task_records_growth_and_experience(self, tmp_path):
         class _FakeCapabilityService:
             async def execute_task(self, task):

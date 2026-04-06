@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 import logging
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ from copaw.app.crons.heartbeat import run_heartbeat_once
 from copaw.app.runtime_bootstrap_repositories import build_runtime_repositories
 from copaw.app.runtime_lifecycle import (
     RuntimeRestartCoordinator,
+    _reap_stale_kernel_tasks,
     _should_run_host_recovery,
     _should_run_operating_cycle,
     _should_run_learning_strategy,
@@ -600,6 +602,54 @@ async def test_submit_kernel_automation_task_skips_duplicate_inflight_payload() 
 
     assert getattr(result, "phase", None) == "skipped"
     assert dispatcher.submitted == []
+
+
+def test_reap_stale_kernel_tasks_fails_expired_executing_tasks() -> None:
+    stale_task = SimpleNamespace(id="ktask-stale", title="Stale task")
+    fresh_task = SimpleNamespace(id="ktask-fresh", title="Fresh task")
+    now = datetime.now(timezone.utc)
+
+    class _TaskStore:
+        def list_tasks(self, *, phase=None, owner_agent_id=None, limit=200):
+            del owner_agent_id, limit
+            assert phase == "executing"
+            return [stale_task, fresh_task]
+
+        def get_runtime_record(self, task_id):
+            if task_id == "ktask-stale":
+                return SimpleNamespace(updated_at=now - timedelta(seconds=120))
+            if task_id == "ktask-fresh":
+                return SimpleNamespace(updated_at=now - timedelta(seconds=5))
+            return None
+
+    class _Dispatcher:
+        def __init__(self) -> None:
+            self.task_store = _TaskStore()
+            self._config = SimpleNamespace(execution_timeout_seconds=30.0)
+            self.failed = []
+
+        def fail_task(self, task_id, *, error, append_kernel_evidence=True):
+            self.failed.append(
+                {
+                    "task_id": task_id,
+                    "error": error,
+                    "append_kernel_evidence": append_kernel_evidence,
+                }
+            )
+            return SimpleNamespace(phase="failed", error=error)
+
+    dispatcher = _Dispatcher()
+
+    reaped = _reap_stale_kernel_tasks(dispatcher, logger=logging.getLogger(__name__))
+
+    assert reaped == ["ktask-stale"]
+    assert dispatcher.failed == [
+        {
+            "task_id": "ktask-stale",
+            "error": "Execution timed out after 30 seconds.",
+            "append_kernel_evidence": True,
+        }
+    ]
 
 
 def test_should_run_learning_strategy_uses_service_preflight() -> None:

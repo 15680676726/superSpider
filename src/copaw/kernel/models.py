@@ -130,3 +130,8 @@ class KernelConfig(BaseModel):
         default=72,
         description="Auto-expire confirmation decisions after this many hours.",
     )
+    execution_timeout_seconds: float | None = Field(
+        default=180.0,
+        gt=0,
+        description="Fail execution if a kernel capability call exceeds this timeout.",
+    )
