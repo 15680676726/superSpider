@@ -12,9 +12,9 @@ describe("ChatIntentShellCard", () => {
         shell={{
           mode: "plan",
           label: "PLAN",
-          summary: "Use a compact planning shell for this reply.",
+          summary: "这次回复使用精简计划模式。",
           hint:
-            "Goal, constraints, affected scope/files, checklist, acceptance criteria, verification steps.",
+            "覆盖焦点、约束、影响范围/文件、检查清单、验收标准和验证步骤。",
           triggerSource: "keyword",
           matchedText: "计划",
           confidence: 0.95,
@@ -33,9 +33,11 @@ describe("ChatIntentShellCard", () => {
 
     expect(screen.getByText("PLAN")).toBeTruthy();
     expect(
-      screen.getByText("Use a compact planning shell for this reply."),
+      screen.getByText("这次回复使用精简计划模式。"),
     ).toBeTruthy();
-    expect(screen.getByText(/Goal, constraints/)).toBeTruthy();
+    expect(
+      screen.getByText("覆盖焦点、约束、影响范围/文件、检查清单、验收标准和验证步骤。"),
+    ).toBeTruthy();
     expect(
       screen.getByText(
         "\u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d \u00b7 \u547d\u4e2d\uff1a\u8ba1\u5212 \u00b7 \u7f6e\u4fe1\u5ea6 95%",

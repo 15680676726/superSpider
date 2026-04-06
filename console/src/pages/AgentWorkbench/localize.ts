@@ -163,7 +163,7 @@ const REGEX_TEXT_MAP: Array<{
   },
   {
     pattern: /^Focus on the goal: (.+?)\.$/,
-    replace: (goalTitle) => `当前聚焦目标：${goalTitle}。`,
+    replace: (goalTitle) => `当前焦点：${goalTitle}。`,
   },
   {
     pattern: /^Review the current (.+?) brief\.$/,
@@ -195,7 +195,7 @@ const REGEX_TEXT_MAP: Array<{
   },
   {
     pattern: /^Run the daily control review for (.+?)\. Goal: (.+)$/,
-    replace: (label, goal) => `请执行 ${label} 的每日中枢复盘。目标：${goal}`,
+    replace: (label, goal) => `请执行 ${label} 的每日中枢复盘。焦点事项：${goal}`,
   },
   {
     pattern: /^Run the weekly signal synthesis for (.+?)\. Focus: (.+)$/,

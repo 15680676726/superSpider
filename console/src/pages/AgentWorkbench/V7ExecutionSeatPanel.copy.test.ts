@@ -18,7 +18,8 @@ describe("V7ExecutionSeatPanel copy", () => {
     expect(source).not.toContain("，decision ");
 
     expect(source).toContain("岗位生命周期");
-    expect(source).toContain("所属目标");
+    expect(source).not.toContain("所属目标");
+    expect(source).toContain("关联事项编号");
     expect(source).toContain("主脑控制链");
   });
 });

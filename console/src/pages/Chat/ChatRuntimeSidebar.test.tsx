@@ -20,7 +20,7 @@ describe("ChatRuntimeSidebar", () => {
         runtimeIntentShell={{
           mode: "plan",
           label: "PLAN",
-          summary: "Use a compact planning shell for this reply.",
+          summary: "这次回复使用精简计划模式。",
           hint: null,
           triggerSource: "keyword",
           matchedText: "\u8ba1\u5212",
@@ -74,7 +74,7 @@ describe("ChatRuntimeSidebar", () => {
         runtimeIntentShell={{
           mode: "review",
           label: "REVIEW",
-          summary: "Use a focused review shell for this reply.",
+          summary: "这次回复使用聚焦审查模式。",
           hint: null,
           triggerSource: "keyword",
           matchedText: null,
@@ -111,7 +111,7 @@ describe("ChatRuntimeSidebar", () => {
     ).toBeTruthy();
     expect(
       screen.getByTitle(
-        "Use a focused review shell for this reply. \u00b7 \u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d",
+        "这次回复使用聚焦审查模式。 \u00b7 \u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d",
       ),
     ).toBeTruthy();
     expect(screen.queryByTitle(/trigger=/)).toBeNull();

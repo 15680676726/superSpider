@@ -569,7 +569,7 @@ export default function V7ExecutionSeatPanel({
                 <Text strong>待办：</Text> {currentAssignment.backlog_item_id || "-"}
               </Paragraph>
               <Paragraph>
-                <Text strong>所属目标：</Text> {currentAssignment.goal_id || "-"}
+                <Text strong>关联事项编号：</Text> {currentAssignment.goal_id || "-"}
               </Paragraph>
               <Paragraph style={{ marginBottom: 0 }}>
                 <Text strong>最近更新：</Text>{" "}

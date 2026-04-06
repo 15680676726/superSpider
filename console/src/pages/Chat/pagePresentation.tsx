@@ -34,7 +34,7 @@ function presentWritebackTarget(target: ChatWritebackTarget): string {
     case "backlog":
       return "待办";
     case "immediate-goal":
-      return "当前目标";
+      return "当前焦点";
     default:
       return target;
   }

@@ -44,4 +44,20 @@ describe("pagePresentation", () => {
       }).writebackHint,
     ).toBe("targets=strategy,lane");
   });
+
+  it("uses current focus wording for immediate-goal writeback targets", () => {
+    expect(
+      resolveThreadRuntimePresentation({
+        currentFocus: "Ship phase split",
+        sessionKind: "industry-control-thread",
+        threadMeta: {
+          chat_writeback_targets: ["immediate-goal"],
+          current_focus_id: "backlog-42",
+          current_focus_kind: "backlog-item",
+          owner_scope: "industry",
+          thread_binding_kind: "control",
+        },
+      }).writebackLabel,
+    ).toBe("写回：战略/当前焦点");
+  });
 });

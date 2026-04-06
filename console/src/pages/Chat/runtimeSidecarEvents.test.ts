@@ -193,9 +193,9 @@ describe("runtimeSidecarEvents", () => {
           intent_shell: {
             mode_hint: "plan",
             label: "PLAN",
-            summary: "Use a compact planning shell for this reply.",
+            summary: "这次回复使用精简计划模式。",
             hint:
-              "Goal, constraints, affected scope/files, checklist, acceptance criteria, verification steps.",
+              "覆盖焦点、约束、影响范围/文件、检查清单、验收标准和验证步骤。",
             trigger_source: "keyword",
             matched_text: "计划",
             confidence: 0.95,
@@ -209,9 +209,9 @@ describe("runtimeSidecarEvents", () => {
     expect(nextState.currentIntentShell).toEqual({
       mode: "plan",
       label: "PLAN",
-      summary: "Use a compact planning shell for this reply.",
+      summary: "这次回复使用精简计划模式。",
       hint:
-        "Goal, constraints, affected scope/files, checklist, acceptance criteria, verification steps.",
+        "覆盖焦点、约束、影响范围/文件、检查清单、验收标准和验证步骤。",
       triggerSource: "keyword",
       matchedText: "计划",
       confidence: 0.95,
@@ -224,9 +224,9 @@ describe("runtimeSidecarEvents", () => {
       payload: {
         mode_hint: "plan",
         label: "PLAN",
-        summary: "Use a compact planning shell for this reply.",
+        summary: "这次回复使用精简计划模式。",
         hint:
-          "Goal, constraints, affected scope/files, checklist, acceptance criteria, verification steps.",
+          "覆盖焦点、约束、影响范围/文件、检查清单、验收标准和验证步骤。",
         trigger_source: "keyword",
         matched_text: "计划",
         confidence: 0.95,
@@ -237,13 +237,13 @@ describe("runtimeSidecarEvents", () => {
   it("formats a human-readable sidebar hint without raw debug fragments", () => {
     const hint = formatRuntimeIntentShellSidebarHint({
       label: "PLAN",
-      summary: "Use a compact planning shell for this reply.",
+      summary: "这次回复使用精简计划模式。",
       metaSummary:
         "\u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d \u00b7 \u547d\u4e2d\uff1a\u8ba1\u5212 \u00b7 \u7f6e\u4fe1\u5ea6 95%",
     });
 
     expect(hint).toBe(
-      "Use a compact planning shell for this reply. \u00b7 \u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d \u00b7 \u547d\u4e2d\uff1a\u8ba1\u5212 \u00b7 \u7f6e\u4fe1\u5ea6 95%",
+      "这次回复使用精简计划模式。 \u00b7 \u6765\u6e90\uff1a\u5173\u952e\u8bcd\u547d\u4e2d \u00b7 \u547d\u4e2d\uff1a\u8ba1\u5212 \u00b7 \u7f6e\u4fe1\u5ea6 95%",
     );
     expect(hint).not.toContain("trigger=");
     expect(hint).not.toContain("match=");
@@ -263,7 +263,7 @@ describe("runtimeSidecarEvents", () => {
           intent_shell: {
             mode_hint: "review",
             label: "REVIEW",
-            summary: "Use a focused review shell for this reply.",
+            summary: "这次回复使用聚焦审查模式。",
             trigger_source: "prediction:cycle",
           },
         },
