@@ -17,6 +17,7 @@ from .child_run_shell import (
 from .lease_heartbeat import LeaseHeartbeat
 from .models import KernelTask
 from .runtime_outcome import resolve_runtime_cleanup_disposition
+from .task_execution_projection import build_child_run_resume_payload
 
 
 def _utc_now() -> datetime:
@@ -309,7 +310,11 @@ class ActorWorker:
             phase=disposition.phase,
             conversation_thread_id=getattr(item, "conversation_thread_id", None),
             summary=summary,
-            resume_payload={"task_id": task_id, "phase": disposition.phase},
+            resume_payload=build_child_run_resume_payload(
+                mailbox_item=item,
+                task_id=task_id,
+                phase=disposition.phase,
+            ),
             snapshot_payload=snapshot_payload,
         )
         checkpoint_id = checkpoint.id if checkpoint is not None else None

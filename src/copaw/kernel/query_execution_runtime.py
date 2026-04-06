@@ -58,6 +58,11 @@ _EXECUTION_CORE_ALLOWED_LOCAL_TOOL_CAPABILITY_IDS = {
     "tool:write_file",
 }
 
+_EXECUTION_CORE_SURFACE_WRITER_TOOL_CAPABILITY_IDS = {
+    "tool:browser_use",
+    "tool:desktop_screenshot",
+}
+
 _RUNTIME_ENTROPY_FAILURE_SOURCE = "sidecar-memory"
 _RUNTIME_ENTROPY_DEGRADED_SUMMARY = (
     "The private compaction memory sidecar is unavailable; "
@@ -1046,6 +1051,8 @@ class _QueryExecutionRuntimeMixin(
                 owner_agent_id=owner_agent_id,
                 agent_profile=agent_profile,
                 system_capability_ids=system_capability_ids,
+                kernel_task_id=kernel_task_id,
+                conversation_thread_id=session_id,
             )
             team_role_gap_action_result = await self._handle_team_role_gap_chat_action(
                 msgs=msgs,
@@ -1775,8 +1782,11 @@ class _QueryExecutionRuntimeMixin(
             (execution_context or {}).get("work_context_id"),
         )
         environment_ref = _query_environment_ref(execution_context)
+        main_brain_runtime = _mapping_value(
+            (execution_context or {}).get("main_brain_runtime"),
+        )
         risk_level = _first_non_empty(
-            _mapping_value((execution_context or {}).get("main_brain_runtime")).get("risk_level"),
+            main_brain_runtime.get("risk_level"),
             "auto",
         ) or "auto"
         capability_trial_attribution = _normalize_capability_trial_attribution(
@@ -1785,6 +1795,15 @@ class _QueryExecutionRuntimeMixin(
 
         async def _delegate(capability_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             task_payload = dict(payload or {})
+            request_context = _mapping_value(task_payload.get("request_context"))
+            if work_context_id is not None and _first_non_empty(
+                request_context.get("work_context_id"),
+            ) is None:
+                request_context["work_context_id"] = work_context_id
+            if main_brain_runtime:
+                request_context["main_brain_runtime"] = dict(main_brain_runtime)
+            if request_context:
+                task_payload["request_context"] = request_context
             if capability_trial_attribution:
                 task_payload["metadata"] = {
                     **dict(_mapping_value(task_payload.get("metadata"))),
@@ -2400,17 +2419,33 @@ class _QueryExecutionRuntimeMixin(
             for capability_id in (system_capability_ids or set())
             if capability_id in allowed_system_capability_ids
         }
+        runtime_context = self._resolve_request_main_brain_runtime_context(request=request)
+        surface_contracts = _mapping_value(
+            _mapping_value(runtime_context).get("environment")
+        ).get("surface_contracts")
+        surface_contracts = _mapping_value(surface_contracts)
+        browser_writer_ready = _first_non_empty(
+            surface_contracts.get("browser_site_contract_status"),
+        ) in {"verified-writer", "writer-ready", "ready"}
+        desktop_writer_ready = _first_non_empty(
+            surface_contracts.get("desktop_app_contract_status"),
+        ) in {"verified-writer", "writer-ready", "ready"}
+        allowed_tool_capability_ids = set(_EXECUTION_CORE_ALLOWED_LOCAL_TOOL_CAPABILITY_IDS)
+        if browser_writer_ready:
+            allowed_tool_capability_ids.add("tool:browser_use")
+        if desktop_writer_ready:
+            allowed_tool_capability_ids.add("tool:desktop_screenshot")
         filtered_tool_capability_ids = {
             capability_id
             for capability_id in (tool_capability_ids or set())
-            if capability_id in _EXECUTION_CORE_ALLOWED_LOCAL_TOOL_CAPABILITY_IDS
+            if capability_id in allowed_tool_capability_ids
         }
         return (
             filtered_tool_capability_ids,
             set(),
             [],
             filtered_system_capability_ids,
-            False,
+            desktop_actuation_available or desktop_writer_ready,
         )
 
     def _resolve_delegation_first_guard(
@@ -2420,6 +2455,8 @@ class _QueryExecutionRuntimeMixin(
         owner_agent_id: str,
         agent_profile: Any | None,
         system_capability_ids: set[str] | None,
+        kernel_task_id: str | None = None,
+        conversation_thread_id: str | None = None,
     ) -> _DelegationFirstGuard | None:
         if not system_capability_ids:
             return None
@@ -2455,10 +2492,54 @@ class _QueryExecutionRuntimeMixin(
         )
         if not teammates:
             return None
-        return _DelegationFirstGuard(
+        guard = _DelegationFirstGuard(
             owner_agent_id=owner_agent_id,
             teammates=teammates,
         )
+        if self._has_terminal_child_reportback_checkpoint(
+            parent_task_id=kernel_task_id,
+            conversation_thread_id=conversation_thread_id,
+        ):
+            guard.unlocked = True
+        return guard
+
+    def _has_terminal_child_reportback_checkpoint(
+        self,
+        *,
+        parent_task_id: str | None,
+        conversation_thread_id: str | None,
+    ) -> bool:
+        mailbox_service = self._actor_mailbox_service
+        list_checkpoints = getattr(mailbox_service, "list_checkpoints", None)
+        if not callable(list_checkpoints):
+            return False
+        resolved_parent_task_id = _first_non_empty(parent_task_id)
+        if resolved_parent_task_id is None:
+            return False
+        checkpoints = list_checkpoints(limit=50)
+        for checkpoint in checkpoints:
+            if _first_non_empty(getattr(checkpoint, "checkpoint_kind", None)) != "task-result":
+                continue
+            if _first_non_empty(getattr(checkpoint, "phase", None)) not in {
+                "completed",
+                "failed",
+                "cancelled",
+                "waiting-confirm",
+            }:
+                continue
+            resume_payload = _mapping_value(getattr(checkpoint, "resume_payload", None))
+            if _first_non_empty(resume_payload.get("parent_task_id")) != resolved_parent_task_id:
+                continue
+            if conversation_thread_id is not None:
+                if _first_non_empty(
+                    resume_payload.get("control_thread_id"),
+                    resume_payload.get("session_id"),
+                ) != _first_non_empty(conversation_thread_id):
+                    continue
+            if _first_non_empty(resume_payload.get("report_back_mode")) is None:
+                continue
+            return True
+        return False
 
     async def _resolve_requested_main_brain_intake_contract(
         self,

@@ -245,7 +245,10 @@ class CapabilityExecutionFacade:
 
     async def execute_task(self, task: "KernelTask") -> dict[str, object]:
         capability_id = task.capability_ref or ""
-        payload = dict(task.payload or {})
+        payload = self._hydrate_builtin_tool_payload(
+            capability_id,
+            payload=dict(task.payload or {}),
+        )
         if capability_id.startswith(("project:", "adapter:", "runtime:")):
             payload.setdefault("owner_agent_id", task.owner_agent_id)
             payload.setdefault("environment_ref", task.environment_ref)
@@ -605,6 +608,40 @@ class CapabilityExecutionFacade:
             ttl_seconds=_DIRECT_WRITER_LEASE_TTL_SECONDS,
             heartbeat_interval_seconds=_DIRECT_WRITER_LEASE_HEARTBEAT_SECONDS,
         )
+
+    @staticmethod
+    def _hydrate_builtin_tool_payload(
+        capability_id: str,
+        *,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        if capability_id != "tool:browser_use":
+            return payload
+        if isinstance(payload.get("session_id"), str) and str(payload["session_id"]).strip():
+            return payload
+        request_context = payload.get("request_context")
+        if not isinstance(request_context, dict):
+            return payload
+        main_brain_runtime = request_context.get("main_brain_runtime")
+        runtime_environment = (
+            dict(main_brain_runtime.get("environment"))
+            if isinstance(main_brain_runtime, dict)
+            and isinstance(main_brain_runtime.get("environment"), dict)
+            else {}
+        )
+        resolved_session_id = None
+        for candidate in (
+            runtime_environment.get("session_id"),
+            request_context.get("session_id"),
+        ):
+            if isinstance(candidate, str) and candidate.strip():
+                resolved_session_id = candidate.strip()
+                break
+        if resolved_session_id is None:
+            return payload
+        hydrated = dict(payload)
+        hydrated["session_id"] = resolved_session_id
+        return hydrated
 
     async def _invoke_executor(self, executor: object, **kwargs) -> object:
         result = executor(**kwargs)

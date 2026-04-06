@@ -5,7 +5,7 @@ from .shared import *  # noqa: F401,F403
 from copaw.industry.chat_writeback import build_chat_writeback_plan
 from copaw.kernel.governance import GovernanceService
 from copaw.kernel.models import KernelTask
-from copaw.state import AgentReportRecord, AssignmentRecord, SQLiteStateStore
+from copaw.state import AgentReportRecord, AssignmentRecord, SQLiteStateStore, ScheduleRecord
 from copaw.state.repositories import SqliteGovernanceControlRepository
 from copaw.state.human_assist_task_service import HumanAssistTaskService
 from copaw.state.repositories import SqliteHumanAssistTaskRepository
@@ -333,6 +333,60 @@ def test_industry_runtime_sync_preserves_assignment_focus_without_goal(tmp_path)
     assert metadata["current_focus"] == "Review assignment relay"
 
 
+def test_industry_runtime_sync_clears_terminal_assignment_focus(tmp_path) -> None:
+    app = _build_industry_app(tmp_path)
+
+    owner_scope = "industry-v1-terminal-assignment-focus"
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Industrial Automation",
+            company_name="Northwind Robotics",
+            product="inspection orchestration",
+            goals=["close assignment focus cleanly"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(profile, owner_scope)
+    specialist = next(agent for agent in draft.team.agents if agent.agent_id != "copaw-agent-runner")
+
+    app.state.industry_service._sync_actor_runtime_surface(  # pylint: disable=protected-access
+        agent=specialist,
+        instance_id=draft.team.team_id,
+        owner_scope=owner_scope,
+        goal_id=None,
+        goal_title=None,
+        status="waiting",
+        assignment_id="assignment-ops-1",
+        assignment_title="Review assignment relay",
+        assignment_summary="Keep the specialist focused on the active assignment.",
+        assignment_status="running",
+    )
+    app.state.industry_service._sync_actor_runtime_surface(  # pylint: disable=protected-access
+        agent=specialist,
+        instance_id=draft.team.team_id,
+        owner_scope=owner_scope,
+        goal_id=None,
+        goal_title=None,
+        status="waiting",
+        assignment_id="assignment-ops-1",
+        assignment_title="Review assignment relay",
+        assignment_summary="Keep the specialist focused on the active assignment.",
+        assignment_status="completed",
+    )
+
+    runtime = app.state.agent_runtime_repository.get_runtime(specialist.agent_id)
+
+    assert runtime is not None
+    metadata = runtime.metadata
+    assert runtime.runtime_status == "idle"
+    assert "current_focus_kind" not in metadata
+    assert "current_focus_id" not in metadata
+    assert "current_focus" not in metadata
+    assert "current_assignment_id" not in metadata
+    assert "current_assignment_title" not in metadata
+    assert "current_assignment_summary" not in metadata
+    assert "current_assignment_status" not in metadata
+
+
 def test_industry_preview_returns_service_unavailable_when_chat_model_missing(
     tmp_path,
 ) -> None:
@@ -378,9 +432,7 @@ def test_industry_list_instances_hides_empty_placeholder_records(tmp_path) -> No
                 "summary": "placeholder",
                 "agents": [],
             },
-            goal_ids=["goal-placeholder"],
             agent_ids=[],
-            schedule_ids=[],
         ),
     )
 
@@ -447,9 +499,22 @@ def test_industry_list_instances_uses_lightweight_summary_without_detail_build(
                 "allowed_capabilities": ["system:dispatch_query"],
                 "evidence_expectations": ["next recommendation"],
             },
-            goal_ids=[],
             agent_ids=["copaw-agent-runner"],
-            schedule_ids=["schedule-1"],
+        ),
+    )
+    app.state.schedule_repository.upsert_schedule(
+        ScheduleRecord(
+            id="schedule-1",
+            title="Execution Core Follow-Up",
+            cron="0 9 * * *",
+            timezone="UTC",
+            status="scheduled",
+            enabled=True,
+            spec_payload={
+                "meta": {
+                    "industry_instance_id": "industry-v1-lightweight",
+                },
+            },
         ),
     )
 
@@ -526,7 +591,7 @@ def test_industry_bootstrap_response_uses_lightweight_instance_summary(
     assert "goals" not in summary
     assert summary["strategy_memory"]["scope_type"] == "industry"
     assert summary["strategy_memory"]["owner_agent_id"] == "copaw-agent-runner"
-    assert summary["strategy_memory"]["active_goal_ids"]
+    assert summary["strategy_memory"]["priority_order"]
     assert summary["strategy_memory"]["teammate_contracts"]
     assert summary["strategy_memory"]["metadata"]["experience_mode"] == "operator-guided"
     assert any(
@@ -572,8 +637,8 @@ def test_industry_chat_writeback_routes_matching_specialist_goal_schedule_and_st
     instance_id = response.json()["team"]["team_id"]
     baseline_record = app.state.industry_instance_repository.get_instance(instance_id)
     assert baseline_record is not None
-    initial_goal_count = len(baseline_record.goal_ids or [])
-    initial_schedule_count = len(baseline_record.schedule_ids or [])
+    initial_goal_count = len(app.state.industry_service._resolve_instance_goal_ids(baseline_record))
+    initial_schedule_count = len(app.state.industry_service._list_schedule_ids_for_instance(instance_id))
 
     result = asyncio.run(
         app.state.industry_service.apply_execution_chat_writeback(
@@ -609,8 +674,8 @@ def test_industry_chat_writeback_routes_matching_specialist_goal_schedule_and_st
 
     record = app.state.industry_instance_repository.get_instance(instance_id)
     assert record is not None
-    assert len(record.goal_ids or []) == initial_goal_count
-    assert len(record.schedule_ids or []) == initial_schedule_count + 1
+    assert len(app.state.industry_service._resolve_instance_goal_ids(record)) == initial_goal_count
+    assert len(app.state.industry_service._list_schedule_ids_for_instance(instance_id)) == initial_schedule_count + 1
     detail = app.state.industry_service.get_instance_detail(instance_id)
     assert detail is not None
     backlog_item = next(
@@ -665,7 +730,9 @@ def test_industry_chat_writeback_routes_matching_specialist_goal_schedule_and_st
     )
     assert selected_override is not None
     assert selected_override.current_focus_kind == "goal"
-    assert selected_override.current_focus_id in set(record.goal_ids or [])
+    assert selected_override.current_focus_id in set(
+        app.state.industry_service._resolve_instance_goal_ids(record),
+    )
     assert selected_override.current_focus
 
     duplicate = asyncio.run(
@@ -3318,9 +3385,7 @@ def test_industry_instance_status_reconciles_from_goal_states(tmp_path) -> None:
             status="active",
             profile_payload={"industry": "Industrial Equipment"},
             team_payload={},
-            goal_ids=[goal.id],
             agent_ids=[],
-            schedule_ids=[],
         ),
     )
 
@@ -3379,9 +3444,7 @@ def test_industry_instance_status_completes_with_static_team_membership_only(
                     },
                 ],
             },
-            goal_ids=[goal.id],
             agent_ids=["copaw-agent-runner", "staffed-researcher"],
-            schedule_ids=[],
         ),
     )
 
@@ -3454,9 +3517,7 @@ def test_industry_detail_backfills_execution_core_identity_with_delegation_first
                     },
                 ],
             },
-            goal_ids=[],
             agent_ids=["copaw-agent-runner", "fallback-solution-lead"],
-            schedule_ids=[],
         ),
     )
 

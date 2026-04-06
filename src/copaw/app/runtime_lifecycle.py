@@ -390,14 +390,34 @@ def _reap_stale_kernel_tasks(
         if not task_id:
             continue
         runtime = get_runtime_record(task_id)
-        age_seconds = _seconds_since(getattr(runtime, "updated_at", None))
-        if age_seconds is None or age_seconds < float(timeout_seconds):
+        runtime_age_seconds = _seconds_since(getattr(runtime, "updated_at", None))
+        leaf_progress_age_seconds = _seconds_since(getattr(task, "updated_at", None))
+        has_leaf_progress = bool(getattr(runtime, "last_evidence_id", None)) or bool(
+            getattr(runtime, "last_result_summary", None)
+            or getattr(runtime, "last_error_summary", None)
+        )
+        timed_out_without_runtime_progress = (
+            runtime_age_seconds is not None
+            and runtime_age_seconds >= float(timeout_seconds)
+        )
+        timed_out_without_leaf_progress = (
+            not has_leaf_progress
+            and leaf_progress_age_seconds is not None
+            and leaf_progress_age_seconds >= float(timeout_seconds)
+        )
+        if not (
+            timed_out_without_runtime_progress or timed_out_without_leaf_progress
+        ):
             continue
         timeout_label = f"{float(timeout_seconds):g}"
+        reason = "without runtime progress"
+        if timed_out_without_leaf_progress and not timed_out_without_runtime_progress:
+            reason = "without leaf progress"
         logger.warning(
-            "Reaping stale executing task %s after %ss without runtime progress",
+            "Reaping stale executing task %s after %ss %s",
             task_id,
             timeout_label,
+            reason,
         )
         fail_task(
             task_id,

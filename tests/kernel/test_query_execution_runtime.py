@@ -21,12 +21,21 @@ from copaw.agents.tools.evidence_runtime import (
 from copaw.agents.tools.file_io import read_file
 from copaw.memory.conversation_compaction_service import ConversationCompactionService
 from copaw.agents.tools.file_io import read_file
+from copaw.environments import (
+    EnvironmentRegistry,
+    EnvironmentRepository,
+    EnvironmentService,
+    SessionMountRepository,
+)
 from copaw.kernel import KernelTask
 from copaw.kernel.main_brain_intake import MainBrainIntakeContract
 from copaw.kernel.query_execution import KernelQueryExecutionService
 from copaw.constant import MEMORY_COMPACT_KEEP_RECENT
 from copaw.state import AgentRuntimeRecord, SQLiteStateStore
-from copaw.state.repositories import SqliteAgentRuntimeRepository
+from copaw.state.repositories import (
+    SqliteAgentLeaseRepository,
+    SqliteAgentRuntimeRepository,
+)
 
 
 async def _yield_once_with_runtime_bindings() -> None:
@@ -299,6 +308,79 @@ def test_query_execution_runtime_exposes_attached_entropy_budget_from_config(
     assert entropy["sidecar_memory"]["status"] == "available"
     assert entropy["sidecar_memory"]["availability"] == "attached"
     assert entropy["degradation"] == {}
+
+
+def test_query_execution_runtime_disables_missing_session_heartbeat_after_first_failure(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "query-heartbeat-missing-session.db")
+    session_repository = SessionMountRepository(state_store)
+    environment_service = EnvironmentService(
+        registry=EnvironmentRegistry(
+            repository=EnvironmentRepository(state_store),
+            session_repository=session_repository,
+        ),
+        lease_ttl_seconds=30,
+    )
+    environment_service.set_session_repository(session_repository)
+    agent_lease_repository = SqliteAgentLeaseRepository(state_store)
+    environment_service.set_agent_lease_repository(agent_lease_repository)
+
+    session_lease = environment_service.acquire_session_lease(
+        channel="console",
+        session_id="sess-heartbeat-missing",
+        user_id="user-1",
+        owner="copaw-agent-runner",
+    )
+    actor_lease = environment_service.acquire_actor_lease(
+        agent_id="copaw-agent-runner",
+        owner="sess-heartbeat-missing",
+    )
+    assert actor_lease is not None
+
+    session_heartbeat_calls: list[str] = []
+    actor_heartbeat_calls: list[str] = []
+    original_actor_heartbeat = environment_service.heartbeat_actor_lease
+
+    def _missing_session_heartbeat(*args, **kwargs):
+        session_heartbeat_calls.append(args[0])
+        raise KeyError(f"Session '{args[0]}' not found")
+
+    def _record_actor_heartbeat(*args, **kwargs):
+        actor_heartbeat_calls.append(args[0])
+        return original_actor_heartbeat(*args, **kwargs)
+
+    monkeypatch.setattr(
+        environment_service,
+        "heartbeat_session_lease",
+        _missing_session_heartbeat,
+    )
+    monkeypatch.setattr(
+        environment_service,
+        "heartbeat_actor_lease",
+        _record_actor_heartbeat,
+    )
+
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        environment_service=environment_service,
+        lease_heartbeat_interval_seconds=0.01,
+    )
+    heartbeat = service._build_query_lease_heartbeat(  # pylint: disable=protected-access
+        session_lease=session_lease,
+        actor_lease=actor_lease,
+    )
+    assert heartbeat is not None
+
+    async def _pulse_twice() -> None:
+        await heartbeat.pulse()
+        await heartbeat.pulse()
+
+    asyncio.run(_pulse_twice())
+
+    assert session_heartbeat_calls == [session_lease.id]
+    assert actor_heartbeat_calls == [actor_lease.id, actor_lease.id]
 
 
 def test_query_execution_runtime_projects_compaction_visibility_into_entropy_contract() -> None:
@@ -958,8 +1040,19 @@ async def test_query_execution_runtime_builds_capability_frontdoor_delegate_for_
         execution_context={
             "work_context_id": "work-context-1",
             "main_brain_runtime": {
+                "risk_level": "guarded",
                 "environment": {
                     "ref": "desktop:runtime",
+                    "session_id": "session:console:desktop-runtime",
+                    "live_session_bound": True,
+                    "surface_contracts": {
+                        "browser_site_contract_status": "verified-writer",
+                        "desktop_app_contract_status": "writer-ready",
+                    },
+                },
+                "recovery": {
+                    "mode": "resume",
+                    "reason": "runtime-bound",
                 },
             },
         },
@@ -979,7 +1072,28 @@ async def test_query_execution_runtime_builds_capability_frontdoor_delegate_for_
     assert submitted.owner_agent_id == "ops-agent"
     assert submitted.work_context_id == "work-context-1"
     assert submitted.environment_ref == "desktop:runtime"
-    assert submitted.payload == {"command": "git status"}
+    assert submitted.payload == {
+        "command": "git status",
+        "request_context": {
+            "work_context_id": "work-context-1",
+            "main_brain_runtime": {
+                "risk_level": "guarded",
+                "environment": {
+                    "ref": "desktop:runtime",
+                    "session_id": "session:console:desktop-runtime",
+                    "live_session_bound": True,
+                    "surface_contracts": {
+                        "browser_site_contract_status": "verified-writer",
+                        "desktop_app_contract_status": "writer-ready",
+                    },
+                },
+                "recovery": {
+                    "mode": "resume",
+                    "reason": "runtime-bound",
+                },
+            },
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -1031,6 +1145,10 @@ async def test_query_execution_runtime_delegate_and_wrapped_builtin_tool_form_en
             "main_brain_runtime": {
                 "environment": {
                     "ref": "desktop:e2e",
+                    "session_id": "session:console:e2e",
+                    "surface_contracts": {
+                        "browser_site_contract_status": "verified-writer",
+                    },
                 },
             },
         },
@@ -1048,7 +1166,20 @@ async def test_query_execution_runtime_delegate_and_wrapped_builtin_tool_form_en
     assert submitted.owner_agent_id == "ops-agent"
     assert submitted.work_context_id == "work-context-e2e"
     assert submitted.environment_ref == "desktop:e2e"
-    assert submitted.payload == {}
+    assert submitted.payload == {
+        "request_context": {
+            "work_context_id": "work-context-e2e",
+            "main_brain_runtime": {
+                "environment": {
+                    "ref": "desktop:e2e",
+                    "session_id": "session:console:e2e",
+                    "surface_contracts": {
+                        "browser_site_contract_status": "verified-writer",
+                    },
+                },
+            },
+        },
+    }
 
 
 def test_query_execution_runtime_filters_capabilities_by_effective_seat_layers(
@@ -1121,3 +1252,64 @@ def test_query_execution_runtime_filters_capabilities_by_effective_seat_layers(
     assert capability_layers.seat_instance_capability_ids == ["skill:crm-seat-playbook"]
     assert capability_layers.cycle_delta_capability_ids == ["mcp:campaign-dashboard"]
     assert capability_layers.session_overlay_capability_ids == ["mcp:browser-temp"]
+
+
+def test_query_execution_service_preserves_verified_browser_desktop_tools_for_execution_core() -> None:
+    def _mount(capability_id: str, source_kind: str) -> SimpleNamespace:
+        return SimpleNamespace(id=capability_id, source_kind=source_kind)
+
+    service = KernelQueryExecutionService(
+        session_backend=object(),
+        capability_service=SimpleNamespace(
+            list_accessible_capabilities=lambda *, agent_id, enabled_only=True: [
+                _mount("tool:read_file", "tool"),
+                _mount("tool:browser_use", "tool"),
+                _mount("tool:desktop_screenshot", "tool"),
+                _mount("system:dispatch_query", "system"),
+            ],
+        ),
+    )
+
+    (
+        tool_capability_ids,
+        _skill_names,
+        _mcp_client_keys,
+        system_capability_ids,
+        desktop_actuation_available,
+    ) = service._prune_execution_core_control_capability_context(  # pylint: disable=protected-access
+        request=SimpleNamespace(
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="execution-core",
+            _copaw_main_brain_runtime_context={
+                "environment": {
+                    "ref": "desktop:session-1",
+                    "kind": "desktop",
+                    "session_id": "session:console:desktop-session-1",
+                    "resume_ready": True,
+                    "live_session_bound": True,
+                    "surface_contracts": {
+                        "browser_site_contract_status": "verified-writer",
+                        "desktop_app_contract_status": "verified-writer",
+                    },
+                },
+            },
+        ),
+        owner_agent_id="ops-agent",
+        agent_profile=SimpleNamespace(
+            industry_instance_id="industry-v1-ops",
+            industry_role_id="execution-core",
+        ),
+        tool_capability_ids={"tool:read_file", "tool:browser_use", "tool:desktop_screenshot"},
+        skill_names=set(),
+        mcp_client_keys=[],
+        system_capability_ids={"system:dispatch_query"},
+        desktop_actuation_available=True,
+    )
+
+    assert tool_capability_ids == {
+        "tool:read_file",
+        "tool:browser_use",
+        "tool:desktop_screenshot",
+    }
+    assert system_capability_ids == {"system:dispatch_query"}
+    assert desktop_actuation_available is True

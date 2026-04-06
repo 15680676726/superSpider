@@ -2108,6 +2108,68 @@ def test_shell_execution_tool_bridge_evidence_carries_execution_contract_metadat
     assert record.metadata["tool_contract"] == "tool:execute_shell_command"
 
 
+def test_browser_tool_execution_hydrates_session_id_from_main_brain_runtime_request_context(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def _fake_browser_use(
+        action: str,
+        session_id: str = "",
+        page_id: str = "default",
+        **kwargs,
+    ):
+        captured.update(
+            {
+                "action": action,
+                "session_id": session_id,
+                "page_id": page_id,
+                "extra": dict(kwargs),
+            },
+        )
+        return {
+            "success": True,
+            "summary": f"Browser action '{action}' ran on {session_id or 'missing-session'}",
+        }
+
+    monkeypatch.setitem(
+        capability_execution_module._TOOL_EXECUTORS,
+        "tool:browser_use",
+        _fake_browser_use,
+    )
+    capability_service = CapabilityService(evidence_ledger=EvidenceLedger())
+    dispatcher = KernelDispatcher(capability_service=capability_service)
+
+    payload = _execute_capability_direct(
+        capability_service,
+        dispatcher,
+        capability_id="tool:browser_use",
+        owner_agent_id="ops-agent",
+        environment_ref="desktop:runtime-session",
+        payload={
+            "action": "snapshot",
+            "request_context": {
+                "session_id": "industry-chat:industry-v1-ops:execution-core",
+                "main_brain_runtime": {
+                    "risk_level": "guarded",
+                    "environment": {
+                        "ref": "desktop:runtime-session",
+                        "session_id": "session:console:desktop-runtime-session",
+                        "live_session_bound": True,
+                        "surface_contracts": {
+                            "browser_site_contract_status": "verified-writer",
+                        },
+                    },
+                },
+            },
+        },
+    )
+
+    assert payload["success"] is True
+    assert captured["action"] == "snapshot"
+    assert captured["session_id"] == "session:console:desktop-runtime-session"
+
+
 def test_system_dispatch_query_executes_through_kernel_query_execution_service() -> None:
     app = FastAPI()
     app.include_router(capabilities_router)

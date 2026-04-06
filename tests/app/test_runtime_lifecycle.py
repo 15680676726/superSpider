@@ -652,6 +652,59 @@ def test_reap_stale_kernel_tasks_fails_expired_executing_tasks() -> None:
     ]
 
 
+def test_reap_stale_kernel_tasks_reaps_execution_without_leaf_evidence_even_if_runtime_heartbeat_is_fresh() -> None:
+    now = datetime.now(timezone.utc)
+    stale_task = SimpleNamespace(
+        id="ktask-no-leaf-progress",
+        title="No leaf progress task",
+        updated_at=now - timedelta(seconds=120),
+    )
+
+    class _TaskStore:
+        def list_tasks(self, *, phase=None, owner_agent_id=None, limit=200):
+            del owner_agent_id, limit
+            assert phase == "executing"
+            return [stale_task]
+
+        def get_runtime_record(self, task_id):
+            assert task_id == "ktask-no-leaf-progress"
+            return SimpleNamespace(
+                updated_at=now - timedelta(seconds=5),
+                last_evidence_id=None,
+                last_result_summary=None,
+                last_error_summary=None,
+            )
+
+    class _Dispatcher:
+        def __init__(self) -> None:
+            self.task_store = _TaskStore()
+            self._config = SimpleNamespace(execution_timeout_seconds=30.0)
+            self.failed = []
+
+        def fail_task(self, task_id, *, error, append_kernel_evidence=True):
+            self.failed.append(
+                {
+                    "task_id": task_id,
+                    "error": error,
+                    "append_kernel_evidence": append_kernel_evidence,
+                }
+            )
+            return SimpleNamespace(phase="failed", error=error)
+
+    dispatcher = _Dispatcher()
+
+    reaped = _reap_stale_kernel_tasks(dispatcher, logger=logging.getLogger(__name__))
+
+    assert reaped == ["ktask-no-leaf-progress"]
+    assert dispatcher.failed == [
+        {
+            "task_id": "ktask-no-leaf-progress",
+            "error": "Execution timed out after 30 seconds.",
+            "append_kernel_evidence": True,
+        }
+    ]
+
+
 def test_should_run_learning_strategy_uses_service_preflight() -> None:
     allowed, reason = _should_run_learning_strategy(
         SimpleNamespace(

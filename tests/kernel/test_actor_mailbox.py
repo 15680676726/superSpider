@@ -187,3 +187,124 @@ def test_actor_mailbox_startup_recovery_resume_payload_keeps_continuity_fields(
     runtime = runtime_repository.get_runtime("agent-1")
     assert runtime is not None
     assert runtime.runtime_status == "queued"
+
+
+def test_actor_mailbox_terminal_checkpoint_clears_stale_active_assignment_runtime_status(
+    tmp_path,
+) -> None:
+    mailbox_service, checkpoint_repository, runtime_repository = _build_mailbox_service(
+        tmp_path,
+    )
+    runtime = runtime_repository.get_runtime("agent-1")
+    assert runtime is not None
+    runtime_repository.upsert_runtime(
+        runtime.model_copy(
+            update={
+                "metadata": {
+                    **dict(runtime.metadata or {}),
+                    "current_assignment_id": "assignment-1",
+                    "current_assignment_status": "queued",
+                    "current_assignment_title": "Prepare the support execution brief",
+                },
+            },
+        ),
+    )
+    item = mailbox_service.enqueue_item(
+        agent_id="agent-1",
+        task_id="task-complete-assignment",
+        title="Completed assignment task",
+        capability_ref="system:dispatch_query",
+        conversation_thread_id="agent-chat:agent-1",
+        work_context_id="work-context-1",
+        source_agent_id="execution-core-agent",
+        payload={
+            "request_context": {
+                "session_id": "industry-chat:industry-1:execution-core",
+                "context_key": "control-thread:industry-1",
+                "work_context_id": "work-context-1",
+            },
+        },
+        metadata={
+            "parent_task_id": "task-parent-1",
+            "assignment_id": "assignment-1",
+            "report_back_mode": "summary",
+            "industry_instance_id": "industry-1",
+            "industry_role_id": "ops-worker",
+        },
+    )
+    mailbox_service.start_item(
+        item.id,
+        worker_id="actor-worker-test",
+        task_id="task-complete-assignment",
+    )
+
+    checkpoint = mailbox_service.create_checkpoint(
+        agent_id="agent-1",
+        mailbox_id=item.id,
+        task_id="task-complete-assignment",
+        work_context_id="work-context-1",
+        checkpoint_kind="task-result",
+        status="applied",
+        phase="completed",
+        conversation_thread_id="agent-chat:agent-1",
+        resume_payload={
+            "mailbox_id": item.id,
+            "task_id": "task-complete-assignment",
+            "phase": "completed",
+            "agent_id": "agent-1",
+            "source_agent_id": "execution-core-agent",
+            "capability_ref": "system:dispatch_query",
+            "work_context_id": "work-context-1",
+            "conversation_thread_id": "agent-chat:agent-1",
+            "session_id": "industry-chat:industry-1:execution-core",
+            "control_thread_id": "control-thread:industry-1",
+            "assignment_id": "assignment-1",
+            "report_back_mode": "summary",
+            "parent_task_id": "task-parent-1",
+            "industry_instance_id": "industry-1",
+            "industry_role_id": "ops-worker",
+        },
+        summary="Completed task-complete-assignment",
+    )
+    mailbox_service.complete_item(
+        item.id,
+        result_summary="Completed task-complete-assignment",
+        checkpoint_id=checkpoint.id if checkpoint is not None else None,
+        task_id="task-complete-assignment",
+    )
+
+    refreshed_runtime = runtime_repository.get_runtime("agent-1")
+    assert refreshed_runtime is not None
+    assert refreshed_runtime.runtime_status == "idle"
+    assert refreshed_runtime.last_checkpoint_id == checkpoint.id
+    stored_checkpoint = checkpoint_repository.get_checkpoint(checkpoint.id)
+    assert stored_checkpoint is not None
+    assert stored_checkpoint.phase == "completed"
+
+
+def test_actor_mailbox_missing_assignment_status_does_not_mark_runtime_assigned(
+    tmp_path,
+) -> None:
+    mailbox_service, _checkpoint_repository, runtime_repository = _build_mailbox_service(
+        tmp_path,
+    )
+    runtime = runtime_repository.get_runtime("agent-1")
+    assert runtime is not None
+    runtime_repository.upsert_runtime(
+        runtime.model_copy(
+            update={
+                "metadata": {
+                    **dict(runtime.metadata or {}),
+                    "current_assignment_id": "assignment-stale-1",
+                    "current_assignment_title": "Stale assignment without status",
+                },
+            },
+        ),
+    )
+
+    refreshed = mailbox_service._sync_runtime(  # pylint: disable=protected-access
+        "agent-1",
+        current_mailbox_id=None,
+    )
+
+    assert refreshed.runtime_status == "idle"

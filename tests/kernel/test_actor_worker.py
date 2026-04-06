@@ -582,6 +582,93 @@ def test_actor_worker_marks_interrupted_runs_as_cancelled(tmp_path) -> None:
     assert checkpoints[0].status == "abandoned"
 
 
+def test_actor_worker_terminal_checkpoint_preserves_child_run_continuity_fields(
+    tmp_path,
+) -> None:
+    mailbox_service, _runtime_repository, checkpoint_repository, _state_store = _build_mailbox_runtime(
+        tmp_path,
+    )
+    mailbox_service.enqueue_item(
+        agent_id="agent-1",
+        task_id="task-child-continuity",
+        title="Continuity-rich child task",
+        capability_ref="system:dispatch_query",
+        work_context_id="work-context-1",
+        source_agent_id="execution-core-agent",
+        conversation_thread_id="agent-chat:agent-1",
+        payload={
+            "request_context": {
+                "session_id": "industry-chat:industry-1:execution-core",
+                "context_key": "control-thread:industry-1",
+                "work_context_id": "work-context-1",
+            },
+            "payload": {
+                "meta": {
+                    "assignment_id": "assignment-shadow",
+                    "lane_id": "lane-shadow",
+                    "cycle_id": "cycle-shadow",
+                    "report_back_mode": "shadow-report",
+                    "environment_ref": "session:shadow",
+                },
+            },
+        },
+        metadata={
+            "parent_task_id": "task-parent-1",
+            "assignment_id": "assignment-1",
+            "lane_id": "lane-1",
+            "cycle_id": "cycle-1",
+            "report_back_mode": "summary",
+            "environment_ref": "session:console:shared",
+            "industry_instance_id": "industry-1",
+            "industry_role_id": "ops-worker",
+            "execution_source": "assignment",
+            "access_mode": "writer",
+            "lease_class": "exclusive-writer",
+            "writer_lock_scope": "workbook:weekly-report",
+        },
+    )
+    worker = ActorWorker(
+        worker_id="actor-worker-test",
+        mailbox_service=mailbox_service,
+        kernel_dispatcher=_SlowDispatcher(),
+    )
+
+    handled = asyncio.run(worker.run_once("agent-1"))
+
+    assert handled is True
+    checkpoints = checkpoint_repository.list_checkpoints(agent_id="agent-1", limit=None)
+    terminal_checkpoint = next(
+        checkpoint
+        for checkpoint in checkpoints
+        if checkpoint.checkpoint_kind == "task-result"
+    )
+    assert terminal_checkpoint.phase == "completed"
+    assert terminal_checkpoint.resume_payload == {
+        "mailbox_id": terminal_checkpoint.mailbox_id,
+        "task_id": "task-child-continuity",
+        "phase": "completed",
+        "agent_id": "agent-1",
+        "source_agent_id": "execution-core-agent",
+        "capability_ref": "system:dispatch_query",
+        "work_context_id": "work-context-1",
+        "conversation_thread_id": "agent-chat:agent-1",
+        "session_id": "industry-chat:industry-1:execution-core",
+        "control_thread_id": "control-thread:industry-1",
+        "assignment_id": "assignment-1",
+        "lane_id": "lane-1",
+        "cycle_id": "cycle-1",
+        "report_back_mode": "summary",
+        "parent_task_id": "task-parent-1",
+        "environment_ref": "session:console:shared",
+        "industry_instance_id": "industry-1",
+        "industry_role_id": "ops-worker",
+        "execution_source": "assignment",
+        "access_mode": "writer",
+        "lease_class": "exclusive-writer",
+        "writer_lock_scope": "workbook:weekly-report",
+    }
+
+
 def test_actor_mailbox_retry_clears_stale_blocked_error(tmp_path) -> None:
     mailbox_service, runtime_repository, _checkpoint_repository, _state_store = _build_mailbox_runtime(
         tmp_path,

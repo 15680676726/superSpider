@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from copaw.kernel import ActorWorker
+
 from .shared import *  # noqa: F401,F403
 
 
@@ -320,7 +322,18 @@ def test_query_execution_service_query_turn_binds_builtin_tool_delegate_into_run
     assert submitted.owner_agent_id == "ops-agent"
     assert submitted.work_context_id == "work-context-frontdoor"
     assert submitted.environment_ref == "desktop:query-frontdoor"
-    assert submitted.payload == {}
+    assert submitted.payload == {
+        "request_context": {
+            "work_context_id": "work-context-frontdoor",
+            "main_brain_runtime": {
+                "environment": {
+                    "ref": "desktop:query-frontdoor",
+                    "resume_ready": False,
+                    "live_session_bound": False,
+                },
+            },
+        },
+    }
 
 
 def test_query_execution_service_query_turn_falls_back_to_builtin_when_delegate_fails(
@@ -530,6 +543,224 @@ def test_query_execution_service_delegation_first_guard_blocks_direct_work_until
 
     preflight = service._build_tool_preflight(delegation_guard=delegation_guard)
     assert preflight("execute_shell_command") is None
+
+
+def test_query_execution_service_delegation_first_guard_unlocks_after_child_terminal_report(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "delegation-guard.sqlite3")
+    mailbox_repository = SqliteAgentMailboxRepository(state_store)
+    checkpoint_repository = SqliteAgentCheckpointRepository(state_store)
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    mailbox_service = ActorMailboxService(
+        mailbox_repository=mailbox_repository,
+        runtime_repository=runtime_repository,
+        checkpoint_repository=checkpoint_repository,
+    )
+    kernel_dispatcher = _FakeKernelDispatcher()
+    capability_service = _FakeCapabilityService()
+    agent_profile_service = _FakeAgentProfileService()
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=capability_service,
+        kernel_dispatcher=kernel_dispatcher,
+        agent_profile_service=agent_profile_service,
+        industry_service=_FakeIndustryService(),
+        actor_mailbox_service=mailbox_service,
+        agent_runtime_repository=runtime_repository,
+    )
+    agent_profile = agent_profile_service.get_agent("ops-agent")
+    request = SimpleNamespace(
+        session_id="industry-chat-1",
+        user_id="ops-agent",
+        channel="industry",
+        owner_scope="industry-v1-ops-scope",
+        industry_instance_id="industry-v1-ops",
+        industry_role_id="execution-core",
+        session_kind="industry-agent-chat",
+        entry_source="agent-workbench",
+    )
+    parent_task_id = "task-parent-1"
+    child_task_id = "task-child-1"
+    mailbox_item = mailbox_service.enqueue_item(
+        agent_id="ops-researcher",
+        task_id=child_task_id,
+        work_context_id="work-context-1",
+        source_agent_id="ops-agent",
+        envelope_type="delegation",
+        title="delegated child task",
+        summary="research the blocker and report back",
+        capability_ref="system:dispatch_query",
+        conversation_thread_id="agent-chat:ops-researcher",
+        payload={
+            "request": {
+                "session_id": request.session_id,
+                "control_thread_id": request.session_id,
+            },
+            "report_back_mode": "summary",
+        },
+        metadata={
+            "parent_task_id": parent_task_id,
+            "report_back_mode": "summary",
+            "session_id": request.session_id,
+            "control_thread_id": request.session_id,
+            "work_context_id": "work-context-1",
+        },
+    )
+    mailbox_service.create_checkpoint(
+        agent_id="ops-researcher",
+        mailbox_id=mailbox_item.id,
+        task_id=child_task_id,
+        work_context_id="work-context-1",
+        checkpoint_kind="task-result",
+        status="applied",
+        phase="completed",
+        conversation_thread_id="agent-chat:ops-researcher",
+        summary="child task finished and reported back",
+        resume_payload={
+            "task_id": child_task_id,
+            "phase": "completed",
+            "parent_task_id": parent_task_id,
+            "report_back_mode": "summary",
+            "session_id": request.session_id,
+            "control_thread_id": request.session_id,
+            "work_context_id": "work-context-1",
+        },
+    )
+
+    delegation_guard = service._resolve_delegation_first_guard(
+        request=request,
+        owner_agent_id="ops-agent",
+        agent_profile=agent_profile,
+        system_capability_ids={
+            "system:dispatch_query",
+            "system:delegate_task",
+        },
+        kernel_task_id=parent_task_id,
+        conversation_thread_id=request.session_id,
+    )
+
+    assert delegation_guard is not None
+    assert delegation_guard.locked is False
+
+    assert service._build_delegation_policy_lines(
+        delegation_guard=delegation_guard,
+    ) == []
+
+
+def test_query_execution_service_delegation_first_guard_unlocks_after_real_worker_terminal_report(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "delegation-guard-worker.sqlite3")
+    mailbox_repository = SqliteAgentMailboxRepository(state_store)
+    checkpoint_repository = SqliteAgentCheckpointRepository(state_store)
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    mailbox_service = ActorMailboxService(
+        mailbox_repository=mailbox_repository,
+        runtime_repository=runtime_repository,
+        checkpoint_repository=checkpoint_repository,
+    )
+
+    class _ChildCompleteDispatcher:
+        async def execute_task(self, task_id: str):
+            return SimpleNamespace(
+                phase="completed",
+                summary=f"Completed {task_id}",
+                model_dump=lambda mode="json": {
+                    "phase": "completed",
+                    "summary": f"Completed {task_id}",
+                },
+            )
+
+    worker = ActorWorker(
+        worker_id="actor-worker-test",
+        mailbox_service=mailbox_service,
+        kernel_dispatcher=_ChildCompleteDispatcher(),
+    )
+    capability_service = _FakeCapabilityService()
+    agent_profile_service = _FakeAgentProfileService()
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=capability_service,
+        kernel_dispatcher=_FakeKernelDispatcher(),
+        agent_profile_service=agent_profile_service,
+        industry_service=_FakeIndustryService(),
+        actor_mailbox_service=mailbox_service,
+        agent_runtime_repository=runtime_repository,
+    )
+    agent_profile = agent_profile_service.get_agent("ops-agent")
+    request = SimpleNamespace(
+        session_id="industry-chat-1",
+        user_id="ops-agent",
+        channel="industry",
+        owner_scope="industry-v1-ops-scope",
+        industry_instance_id="industry-v1-ops",
+        industry_role_id="execution-core",
+        session_kind="industry-agent-chat",
+        entry_source="agent-workbench",
+    )
+    parent_task_id = "task-parent-real-worker"
+    child_task_id = "task-child-real-worker"
+    mailbox_service.enqueue_item(
+        agent_id="ops-researcher",
+        task_id=child_task_id,
+        work_context_id="work-context-1",
+        source_agent_id="ops-agent",
+        envelope_type="delegation",
+        title="delegated child task",
+        summary="research the blocker and report back",
+        capability_ref="system:dispatch_query",
+        conversation_thread_id="agent-chat:ops-researcher",
+        payload={
+            "request_context": {
+                "session_id": request.session_id,
+                "context_key": request.session_id,
+                "work_context_id": "work-context-1",
+            },
+        },
+        metadata={
+            "parent_task_id": parent_task_id,
+            "assignment_id": "assignment-1",
+            "report_back_mode": "summary",
+            "session_id": request.session_id,
+            "control_thread_id": request.session_id,
+            "work_context_id": "work-context-1",
+            "industry_instance_id": "industry-v1-ops",
+            "industry_role_id": "researcher",
+        },
+    )
+
+    handled = asyncio.run(worker.run_once("ops-researcher"))
+
+    assert handled is True
+    checkpoints = checkpoint_repository.list_checkpoints(agent_id="ops-researcher", limit=None)
+    terminal_checkpoint = next(
+        checkpoint
+        for checkpoint in checkpoints
+        if checkpoint.checkpoint_kind == "task-result"
+    )
+    assert terminal_checkpoint.resume_payload["parent_task_id"] == parent_task_id
+    assert terminal_checkpoint.resume_payload["report_back_mode"] == "summary"
+    assert terminal_checkpoint.resume_payload["control_thread_id"] == request.session_id
+    assert terminal_checkpoint.resume_payload["assignment_id"] == "assignment-1"
+
+    delegation_guard = service._resolve_delegation_first_guard(
+        request=request,
+        owner_agent_id="ops-agent",
+        agent_profile=agent_profile,
+        system_capability_ids={
+            "system:dispatch_query",
+            "system:delegate_task",
+        },
+        kernel_task_id=parent_task_id,
+        conversation_thread_id=request.session_id,
+    )
+
+    assert delegation_guard is not None
+    assert delegation_guard.locked is False
+    assert service._build_delegation_policy_lines(
+        delegation_guard=delegation_guard,
+    ) == []
 
 
 def test_query_execution_service_rejects_unbound_frontdoor_chat(monkeypatch) -> None:

@@ -921,7 +921,10 @@ class ActorMailboxService:
             runtime_status = "blocked"
         elif queue_depth > 0:
             runtime_status = "queued"
-        elif self._runtime_has_active_assignment(runtime):
+        elif self._runtime_has_active_assignment(
+            runtime,
+            checkpoint_id=checkpoint_id,
+        ):
             runtime_status = "assigned"
         else:
             runtime_status = "idle"
@@ -940,7 +943,12 @@ class ActorMailboxService:
         )
         return self._runtime_repository.upsert_runtime(updated)
 
-    def _runtime_has_active_assignment(self, runtime: AgentRuntimeRecord | None) -> bool:
+    def _runtime_has_active_assignment(
+        self,
+        runtime: AgentRuntimeRecord | None,
+        *,
+        checkpoint_id: str | None = None,
+    ) -> bool:
         if runtime is None:
             return False
         metadata = dict(runtime.metadata or {})
@@ -948,7 +956,52 @@ class ActorMailboxService:
         assignment_status = _non_empty_str(metadata.get("current_assignment_status"))
         if assignment_id is None:
             return False
-        return assignment_status in _ACTIVE_ASSIGNMENT_STATUSES or assignment_status is None
+        if assignment_status not in _ACTIVE_ASSIGNMENT_STATUSES:
+            return False
+        if self._terminal_checkpoint_closes_active_assignment(
+            runtime,
+            assignment_id=assignment_id,
+            checkpoint_id=checkpoint_id,
+        ):
+            return False
+        return True
+
+    def _terminal_checkpoint_closes_active_assignment(
+        self,
+        runtime: AgentRuntimeRecord,
+        *,
+        assignment_id: str,
+        checkpoint_id: str | None,
+    ) -> bool:
+        repository = self._checkpoint_repository
+        if repository is None:
+            return False
+        resolved_checkpoint_id = _non_empty_str(checkpoint_id, runtime.last_checkpoint_id)
+        if resolved_checkpoint_id is None:
+            return False
+        checkpoint = repository.get_checkpoint(resolved_checkpoint_id)
+        if checkpoint is None:
+            return False
+        checkpoint_phase = _non_empty_str(
+            getattr(checkpoint, "phase", None),
+            dict(getattr(checkpoint, "resume_payload", None) or {}).get("phase"),
+        )
+        if checkpoint_phase not in _TERMINAL_KERNEL_PHASES:
+            return False
+        resume_payload = dict(getattr(checkpoint, "resume_payload", None) or {})
+        checkpoint_assignment_id = _non_empty_str(resume_payload.get("assignment_id"))
+        if checkpoint_assignment_id is not None:
+            return checkpoint_assignment_id == assignment_id
+        checkpoint_task_id = _non_empty_str(
+            getattr(checkpoint, "task_id", None),
+            resume_payload.get("task_id"),
+        )
+        runtime_task_id = _non_empty_str(runtime.current_task_id)
+        return (
+            checkpoint_task_id is not None
+            and runtime_task_id is not None
+            and checkpoint_task_id == runtime_task_id
+        )
 
     def _resolve_mailbox_runtime_status(self, mailbox_id: str | None) -> str | None:
         if not isinstance(mailbox_id, str) or not mailbox_id.strip():
