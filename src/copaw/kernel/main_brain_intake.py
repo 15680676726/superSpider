@@ -132,6 +132,17 @@ def normalize_main_brain_runtime_context(
                         if isinstance(environment_payload, dict)
                         else value.get("environment_resume_ready", False)
                     ),
+                    "live_session_bound": bool(
+                        environment_payload.get("live_session_bound")
+                        if isinstance(environment_payload, dict)
+                        else value.get("environment_live_session_bound", False)
+                    ),
+                    "surface_contracts": (
+                        dict(environment_payload.get("surface_contracts"))
+                        if isinstance(environment_payload, dict)
+                        and isinstance(environment_payload.get("surface_contracts"), dict)
+                        else {}
+                    ),
                 },
                 "recovery": {
                     "mode": _first_non_empty(
@@ -187,6 +198,12 @@ def normalize_main_brain_runtime_context(
                 "continuity_token": _first_non_empty(value.get("environment_continuity_token")),
                 "continuity_source": _first_non_empty(value.get("environment_continuity_source")),
                 "resume_ready": bool(value.get("environment_resume_ready", False)),
+                "live_session_bound": bool(value.get("environment_live_session_bound", False)),
+                "surface_contracts": (
+                    dict(value.get("surface_contracts"))
+                    if isinstance(value.get("surface_contracts"), dict)
+                    else {}
+                ),
             },
             "recovery": {
                 "mode": _first_non_empty(value.get("recovery_mode")),

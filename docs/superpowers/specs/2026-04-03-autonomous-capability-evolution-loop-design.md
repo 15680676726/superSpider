@@ -1,5 +1,31 @@
 # 2026-04-03 Autonomous Capability Evolution Loop Design
 
+## Status Correction (`2026-04-07`)
+
+This document remains valid for the governed `capability-evolution` slice only.
+
+It is not the full "second-tier" end state for main-brain-controlled self-optimization.
+
+The full second-tier target is broader:
+
+- scheduled main-brain review cadence
+- discovery / diagnosis intake
+- unified optimization case truth
+- baseline vs challenger trial discipline
+- evidence-backed evaluator
+- lifecycle decisions across skill / MCP / donor / package
+- Runtime Center visibility for the whole loop
+
+This file should therefore be read as:
+
+- `capability package evolution design`
+
+not as:
+
+- `the entire autonomous self-optimization architecture`
+
+When the two differ, the broader second-tier design takes precedence and this file remains the donor/package/lifecycle slice inside that larger loop.
+
 ## 1. Purpose
 
 This document defines the complete-loop design for how CoPaw should autonomously discover, ingest, reuse, synthesize only when necessary, trial, promote, replace, and retire long-lived capability packages in the formal long-horizon autonomy architecture.

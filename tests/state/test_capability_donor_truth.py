@@ -137,6 +137,53 @@ def test_capability_donor_service_roundtrips_normalized_donor_truth(
     assert trust.last_canonical_package_id == "pkg:research-pack"
 
 
+def test_capability_donor_service_persists_donor_execution_contract_snapshot_on_package(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    donor_service = CapabilityDonorService(state_store=store)
+    candidate = CapabilityCandidateRecord(
+        candidate_kind="adapter",
+        target_scope="seat",
+        target_role_id="researcher",
+        target_seat_ref="seat-1",
+        status="candidate",
+        lifecycle_stage="trial",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://example.com/adapters/openspace.zip",
+        candidate_source_version="1.2.3",
+        candidate_source_lineage="donor:openspace",
+        canonical_package_id="pkg:openspace",
+        proposed_skill_name="openspace_adapter",
+        metadata={
+            "provider_injection_mode": "environment",
+            "execution_envelope": {
+                "action_timeout_sec": 45,
+                "probe_timeout_sec": 12,
+            },
+            "host_compatibility_requirements": {
+                "required_provider_contract_kind": "cooperative_provider_runtime",
+                "required_runtimes": ["python"],
+            },
+        },
+    )
+
+    _donor_id, package_id, _source_profile_id = donor_service.register_candidate_source(
+        candidate,
+    )
+
+    package = next(item for item in donor_service.list_packages() if item.package_id == package_id)
+
+    assert package.metadata["provider_injection_mode"] == "environment"
+    assert package.metadata["execution_envelope"]["action_timeout_sec"] == 45
+    assert (
+        package.metadata["host_compatibility_requirements"][
+            "required_provider_contract_kind"
+        ]
+        == "cooperative_provider_runtime"
+    )
+
+
 def test_state_store_accepts_new_candidate_trial_and_lifecycle_columns(
     tmp_path: Path,
 ) -> None:

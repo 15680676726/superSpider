@@ -177,6 +177,40 @@ async def build_capability_governance_projection(
                 "route": governance_route,
             },
         )
+    replace_pressure_count = support._int(
+        portfolio_summary.get("replace_pressure_count"),
+        0,
+    )
+    retire_pressure_count = support._int(
+        portfolio_summary.get("retire_pressure_count"),
+        0,
+    )
+    revision_pressure_count = support._int(
+        portfolio_summary.get("revision_pressure_count"),
+        0,
+    )
+    if replace_pressure_count > 0:
+        degraded_components.append(
+            {
+                "component": "replacement-pressure",
+                "status": "degraded",
+                "summary": (
+                    f"{replace_pressure_count} active donor profiles are carrying formal replacement pressure."
+                ),
+                "route": governance_route,
+            },
+        )
+    if retire_pressure_count > 0:
+        degraded_components.append(
+            {
+                "component": "retirement-pressure",
+                "status": "degraded",
+                "summary": (
+                    f"{retire_pressure_count} active donor profiles are carrying formal retirement pressure."
+                ),
+                "route": governance_route,
+            },
+        )
     if over_budget_scope_count > 0:
         degraded_components.append(
             {
@@ -247,14 +281,9 @@ async def build_capability_governance_projection(
                 0,
             ),
             "degraded_donor_count": degraded_donor_count,
-            "replace_pressure_count": support._int(
-                portfolio_summary.get("replace_pressure_count"),
-                0,
-            ),
-            "retire_pressure_count": support._int(
-                portfolio_summary.get("retire_pressure_count"),
-                0,
-            ),
+            "replace_pressure_count": replace_pressure_count,
+            "retire_pressure_count": retire_pressure_count,
+            "revision_pressure_count": revision_pressure_count,
             "over_budget_scope_count": over_budget_scope_count,
             "planning_actions": list(
                 portfolio_summary.get("planning_actions")

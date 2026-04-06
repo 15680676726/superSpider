@@ -125,12 +125,55 @@ class SkillGapDetector:
             reasons.append("trial-regression")
         if _int_value(summary.get("operator_intervention_count")) > 0:
             reasons.append("human-takeover")
+        history = list(summary.get("history") or []) if isinstance(summary.get("history"), list) else []
         decision_kind = str(latest_decision_kind or "").strip().lower()
         if decision_kind in {"rollback", "retire"}:
             reasons.append(decision_kind)
+        replacement_target_ids: list[str] = []
+        for item in history:
+            if not isinstance(item, Mapping):
+                continue
+            for value in list(item.get("replacement_target_ids") or []):
+                text = str(value).strip()
+                if text and text not in replacement_target_ids:
+                    replacement_target_ids.append(text)
+        reentry_kind = "stable"
+        replacement_pressure = False
+        retirement_pressure = False
+        revision_pressure = False
+        if decision_kind == "retire":
+            reentry_kind = "retirement"
+            retirement_pressure = True
+        elif decision_kind in {
+            "rollback",
+            "replace_existing",
+            "promote_to_role",
+            "replacement",
+        }:
+            reentry_kind = "replacement"
+            replacement_pressure = True
+        elif reasons:
+            reentry_kind = "revision"
+            revision_pressure = True
         if not reasons:
-            return {"status": "stable", "reasons": []}
-        return {"status": "pressure", "reasons": reasons}
+            return {
+                "status": "stable",
+                "reasons": [],
+                "reentry_kind": reentry_kind,
+                "replacement_pressure": replacement_pressure,
+                "retirement_pressure": retirement_pressure,
+                "revision_pressure": revision_pressure,
+                "replacement_target_ids": replacement_target_ids,
+            }
+        return {
+            "status": "pressure",
+            "reasons": reasons,
+            "reentry_kind": reentry_kind,
+            "replacement_pressure": replacement_pressure,
+            "retirement_pressure": retirement_pressure,
+            "revision_pressure": revision_pressure,
+            "replacement_target_ids": replacement_target_ids,
+        }
 
 
 __all__ = ["SkillGapDetector"]

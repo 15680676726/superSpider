@@ -707,9 +707,38 @@ def test_capability_market_overview_prefers_runtime_center_candidate_projection(
                     "candidate_kind": "mcp-bundle",
                     "candidate_source_kind": "external_catalog",
                     "supply_path": "healthy-reuse",
+                    "provenance": {
+                        "candidate_source_ref": "registry://browser-runtime",
+                        "candidate_source_version": "2026.04.04",
+                        "candidate_source_lineage": "donor:browser-runtime",
+                        "protection_flags": [
+                            "protected_from_auto_replace",
+                        ],
+                    },
+                    "baseline_projection": {
+                        "is_baseline_import": True,
+                        "is_active": True,
+                        "protection_flags": [
+                            "protected_from_auto_replace",
+                        ],
+                    },
                     "lifecycle_history": {
                         "trial_count": 1,
                         "latest_trial_verdict": "passed",
+                        "history": [
+                            {
+                                "entry_kind": "trial",
+                                "scope_ref": "seat-primary",
+                                "verdict": "passed",
+                            },
+                        ],
+                    },
+                    "drift_reentry": {
+                        "status": "pressure",
+                        "reentry_kind": "revision",
+                        "revision_pressure": True,
+                        "replacement_pressure": False,
+                        "retirement_pressure": False,
                     },
                 },
             ][: limit or 20]
@@ -724,6 +753,11 @@ def test_capability_market_overview_prefers_runtime_center_candidate_projection(
     assert payload["capability_candidates"][0]["candidate_kind"] == "mcp-bundle"
     assert payload["capability_candidates"][0]["supply_path"] == "healthy-reuse"
     assert payload["capability_candidates"][0]["lifecycle_history"]["trial_count"] == 1
+    assert payload["capability_candidates"][0]["provenance"]["candidate_source_ref"] == (
+        "registry://browser-runtime"
+    )
+    assert payload["capability_candidates"][0]["baseline_projection"]["is_baseline_import"] is True
+    assert payload["capability_candidates"][0]["drift_reentry"]["reentry_kind"] == "revision"
 
 
 def test_capability_market_overview_uses_one_public_snapshot_for_summary() -> None:

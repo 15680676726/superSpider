@@ -439,7 +439,7 @@ async def test_system_trial_remote_skill_assignment_attaches_candidate_to_select
     apply_calls: list[dict[str, object]] = []
     attach_calls: list[dict[str, object]] = []
 
-    async def _attach_trial(payload: dict[str, object]) -> dict[str, object]:
+    async def _attach_trial(**payload: object) -> dict[str, object]:
         attach_calls.append(dict(payload))
         return {
             "success": True,

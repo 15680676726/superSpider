@@ -558,6 +558,16 @@ class CapabilityDonorService:
                     **dict(record.metadata or {}),
                     "candidate_kind": candidate.candidate_kind,
                     "ingestion_mode": candidate.ingestion_mode,
+                    **{
+                        key: value
+                        for key, value in dict(candidate.metadata or {}).items()
+                        if key
+                        in {
+                            "provider_injection_mode",
+                            "execution_envelope",
+                            "host_compatibility_requirements",
+                        }
+                    },
                 },
             },
         )

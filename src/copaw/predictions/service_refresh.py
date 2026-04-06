@@ -15,8 +15,8 @@ class _PredictionServiceRefreshMixin:
         self,
         record: PredictionRecommendationRecord,
     ) -> None:
-        service = getattr(self, "_skill_trial_service", None)
-        upsert_trial = getattr(service, "create_or_update_trial", None)
+        trial_service = getattr(self, "_skill_trial_service", None)
+        upsert_trial = getattr(trial_service, "create_or_update_trial", None)
         if not callable(upsert_trial):
             return
         metadata = _safe_dict(record.metadata)
@@ -46,8 +46,50 @@ class _PredictionServiceRefreshMixin:
         failure_count = 1 if verdict == "failed" else 0
         evidence_refs = _string_list(record.execution_evidence_id, metadata.get("evidence_refs"))
         task_ids = _string_list(record.execution_task_id, metadata.get("source_task_ids"))
+        verified_stage = _string(metadata.get("verified_stage"))
+        provider_resolution_status = _string(metadata.get("provider_resolution_status"))
+        compatibility_status = _string(metadata.get("compatibility_status"))
+        installed_capability_ids = _string_list(metadata.get("installed_capability_ids"))
+        replacement_target_ids = _string_list(metadata.get("replacement_target_ids"))
+        candidate_service = getattr(self, "_capability_candidate_service", None)
+        get_candidate = getattr(candidate_service, "get_candidate", None)
+        update_candidate_status = getattr(candidate_service, "update_candidate_status", None)
+        candidate = get_candidate(candidate_id) if callable(get_candidate) else None
+        previous_stage = _string(getattr(candidate, "lifecycle_stage", None)) or "candidate"
+        metadata_updates = {
+            "recommendation_id": record.recommendation_id,
+            "trial_scope": _string(metadata.get("trial_scope")),
+            "selected_scope": _string(metadata.get("selected_scope")),
+            "skill_trial_id": _string(metadata.get("skill_trial_id")),
+            "selected_seat_ref": selected_seat_ref,
+            "target_agent_id": target_agent_id,
+            "target_role_id": _string(metadata.get("target_role_id")),
+            "installed_capability_ids": installed_capability_ids,
+            "replacement_target_ids": replacement_target_ids,
+        }
+        if callable(update_candidate_status):
+            updated_candidate = update_candidate_status(
+                candidate_id,
+                status="trial",
+                lifecycle_stage="trial",
+                verified_stage=verified_stage,
+                provider_resolution_status=provider_resolution_status,
+                compatibility_status=compatibility_status,
+                metadata_updates=metadata_updates,
+            )
+            if updated_candidate is not None:
+                candidate = updated_candidate
         upsert_trial(
             candidate_id=candidate_id,
+            donor_id=getattr(candidate, "donor_id", None),
+            package_id=getattr(candidate, "package_id", None),
+            source_profile_id=getattr(candidate, "source_profile_id", None),
+            canonical_package_id=getattr(candidate, "canonical_package_id", None),
+            candidate_source_lineage=getattr(candidate, "candidate_source_lineage", None),
+            source_aliases=list(getattr(candidate, "source_aliases", None) or []),
+            equivalence_class=getattr(candidate, "equivalence_class", None),
+            capability_overlap_score=getattr(candidate, "capability_overlap_score", None),
+            replacement_relation=getattr(candidate, "replacement_relation", None),
             scope_type=scope_type,
             scope_ref=scope_ref,
             verdict=verdict,
@@ -59,6 +101,9 @@ class _PredictionServiceRefreshMixin:
             handoff_count=0,
             operator_intervention_count=1 if record.status in {"failed", "rejected"} else 0,
             latency_summary={},
+            verified_stage=verified_stage,
+            provider_resolution_status=provider_resolution_status,
+            compatibility_status=compatibility_status,
             metadata={
                 "recommendation_id": record.recommendation_id,
                 "trial_scope": _string(metadata.get("trial_scope")),
@@ -67,8 +112,50 @@ class _PredictionServiceRefreshMixin:
                 "selected_seat_ref": selected_seat_ref,
                 "target_agent_id": target_agent_id,
                 "target_role_id": _string(metadata.get("target_role_id")),
-                "lifecycle_stage": _string(metadata.get("lifecycle_stage")),
-                "replacement_target_ids": _string_list(metadata.get("replacement_target_ids")),
+                "lifecycle_stage": "trial",
+                "installed_capability_ids": installed_capability_ids,
+                "replacement_target_ids": replacement_target_ids,
+            },
+        )
+        decision_service = getattr(self, "_skill_lifecycle_decision_service", None)
+        create_decision = getattr(decision_service, "create_decision", None)
+        list_decisions = getattr(decision_service, "list_decisions", None)
+        if not callable(create_decision):
+            return
+        if callable(list_decisions):
+            for item in list_decisions(candidate_id=candidate_id, limit=100):
+                item_metadata = _safe_dict(getattr(item, "metadata", None))
+                if (
+                    getattr(item, "decision_kind", None) == "continue_trial"
+                    and _string(item_metadata.get("source_recommendation_id"))
+                    == record.recommendation_id
+                ):
+                    return
+        create_decision(
+            candidate_id=candidate_id,
+            donor_id=getattr(candidate, "donor_id", None),
+            package_id=getattr(candidate, "package_id", None),
+            source_profile_id=getattr(candidate, "source_profile_id", None),
+            canonical_package_id=getattr(candidate, "canonical_package_id", None),
+            candidate_source_lineage=getattr(candidate, "candidate_source_lineage", None),
+            source_aliases=list(getattr(candidate, "source_aliases", None) or []),
+            equivalence_class=getattr(candidate, "equivalence_class", None),
+            capability_overlap_score=getattr(candidate, "capability_overlap_score", None),
+            replacement_relation=getattr(candidate, "replacement_relation", None),
+            decision_kind="continue_trial",
+            from_stage=previous_stage,
+            to_stage="trial",
+            reason=_string(record.outcome_summary) or record.summary,
+            evidence_refs=evidence_refs,
+            replacement_target_ids=replacement_target_ids,
+            applied_by=target_agent_id or "prediction-service",
+            verified_stage=verified_stage,
+            provider_resolution_status=provider_resolution_status,
+            compatibility_status=compatibility_status,
+            metadata={
+                **metadata_updates,
+                "source_recommendation_id": record.recommendation_id,
+                "execution_status": record.status,
             },
         )
 

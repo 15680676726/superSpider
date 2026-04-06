@@ -47,6 +47,9 @@ class DonorTrustService:
                 "trial_failure_count": 0,
                 "underperformance_count": 0,
                 "last_trial_verdict": None,
+                "compatibility_block_count": 0,
+                "compatibility_bridge_count": 0,
+                "last_compatibility_status": None,
             }
         )
         if callable(trial_lister):
@@ -62,12 +65,26 @@ class DonorTrustService:
                 if failure_count > success_count:
                     payload["underperformance_count"] = int(payload["underperformance_count"]) + 1
                 payload["last_trial_verdict"] = _string(getattr(item, "verdict", None))
+                compatibility_status = _string(getattr(item, "compatibility_status", None))
+                if compatibility_status is not None:
+                    if compatibility_status.startswith("blocked_"):
+                        payload["compatibility_block_count"] = (
+                            int(payload["compatibility_block_count"]) + 1
+                        )
+                    if compatibility_status == "compatible_via_bridge":
+                        payload["compatibility_bridge_count"] = (
+                            int(payload["compatibility_bridge_count"]) + 1
+                        )
+                    payload["last_compatibility_status"] = compatibility_status
         decision_totals: dict[str, dict[str, int | str | None]] = defaultdict(
             lambda: {
                 "rollback_count": 0,
                 "replacement_pressure_count": 0,
                 "retirement_count": 0,
                 "last_decision_kind": None,
+                "compatibility_block_count": 0,
+                "compatibility_bridge_count": 0,
+                "last_compatibility_status": None,
             }
         )
         if callable(decision_lister):
@@ -86,6 +103,17 @@ class DonorTrustService:
                 if decision_kind == "retire":
                     payload["retirement_count"] = int(payload["retirement_count"]) + 1
                 payload["last_decision_kind"] = decision_kind or None
+                compatibility_status = _string(getattr(item, "compatibility_status", None))
+                if compatibility_status is not None:
+                    if compatibility_status.startswith("blocked_"):
+                        payload["compatibility_block_count"] = (
+                            int(payload["compatibility_block_count"]) + 1
+                        )
+                    if compatibility_status == "compatible_via_bridge":
+                        payload["compatibility_bridge_count"] = (
+                            int(payload["compatibility_bridge_count"]) + 1
+                        )
+                    payload["last_compatibility_status"] = compatibility_status
 
         updater = getattr(self._donor_service, "upsert_trust_record", None)
         refreshed: list[CapabilityDonorTrustRecord] = []
@@ -99,6 +127,11 @@ class DonorTrustService:
             trust_status = "observing"
             if int(decision_payload["retirement_count"]) > 0:
                 trust_status = "retired"
+            elif (
+                int(trial_payload["compatibility_block_count"]) > 0
+                or int(decision_payload["compatibility_block_count"]) > 0
+            ):
+                trust_status = "blocked"
             elif int(decision_payload["rollback_count"]) > 0 or int(trial_payload["underperformance_count"]) > 0:
                 trust_status = "degraded"
             elif int(trial_payload["trial_success_count"]) > 0 and int(trial_payload["trial_failure_count"]) == 0:
@@ -120,7 +153,21 @@ class DonorTrustService:
                     "retirement_count": int(decision_payload["retirement_count"]),
                     "last_trial_verdict": _string(trial_payload["last_trial_verdict"]),
                     "last_decision_kind": _string(decision_payload["last_decision_kind"]),
-                    "metadata": dict(current.metadata or {}),
+                    "metadata": {
+                        **dict(current.metadata or {}),
+                        "last_compatibility_status": (
+                            _string(decision_payload["last_compatibility_status"])
+                            or _string(trial_payload["last_compatibility_status"])
+                        ),
+                        "compatibility_block_count": (
+                            int(trial_payload["compatibility_block_count"])
+                            + int(decision_payload["compatibility_block_count"])
+                        ),
+                        "compatibility_bridge_count": (
+                            int(trial_payload["compatibility_bridge_count"])
+                            + int(decision_payload["compatibility_bridge_count"])
+                        ),
+                    },
                 }
             )
             if callable(updater):
