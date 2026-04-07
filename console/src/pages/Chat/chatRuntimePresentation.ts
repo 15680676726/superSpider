@@ -23,6 +23,16 @@ export function resolveChatUiKey({
   return "chat-runtime";
 }
 
+export function resolveChatComposerKey(
+  chatUiKey: string,
+  lastReplyDoneAt: number | null,
+): string {
+  if (typeof lastReplyDoneAt !== "number" || !Number.isFinite(lastReplyDoneAt)) {
+    return chatUiKey;
+  }
+  return `${chatUiKey}:reply-done:${lastReplyDoneAt}`;
+}
+
 export function resolveChatUiVisibility({
   requestedThreadId,
   activeWindowThreadId,

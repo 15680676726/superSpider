@@ -42,6 +42,7 @@ import {
   normalizeThreadMeta,
 } from "./chatPageHelpers";
 import {
+  resolveChatComposerKey,
   resolveChatUiKey,
   resolveChatUiVisibility,
 } from "./chatRuntimePresentation";
@@ -655,6 +656,14 @@ export default function ChatPage() {
       }),
     [activeAgentId, activeIndustryId, activeIndustryRoleId, requestedThreadId],
   );
+  const chatComposerKey = useMemo(
+    () =>
+      resolveChatComposerKey(
+        chatUiKey,
+        runtimeCommitState.lastReplyDoneAt,
+      ),
+    [chatUiKey, runtimeCommitState.lastReplyDoneAt],
+  );
 
   const submitBuddyNaming = useCallback(async () => {
     if (!buddyNamingState.sessionId || !buddyNameDraft.trim()) return;
@@ -790,7 +799,7 @@ export default function ChatPage() {
               />
             ) : null}
             {shouldRenderChatComposer ? (
-              <ChatComposerAdapter chatUiKey={chatUiKey} options={options} />
+              <ChatComposerAdapter chatUiKey={chatComposerKey} options={options} />
             ) : null}
 
             {/* 媒体附件区 */}
