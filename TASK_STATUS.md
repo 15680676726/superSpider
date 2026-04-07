@@ -35,6 +35,27 @@
 
 ---
 
+## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
+
+- Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`
+- `CompanionRelationship.companion_experience` 继续保留，但只作为关系层信号，不再决定 stage
+- 新增正式后端链路：
+  - `POST /buddy/onboarding/direction-transition-preview`
+  - `POST /buddy/onboarding/confirm-direction` with `capability_action`
+  - `GET /buddy/surface` / Runtime Center buddy summary 统一读取 active domain capability
+- 新增正式状态对象：
+  - `BuddyDomainCapabilityRecord`
+    - `domain_key / domain_label / capability_score / evolution_stage / strategy_score / execution_score / evidence_score / stability_score`
+- 前端已同步把 stage 文案收口为：
+  - `幼年期 / 成长期 / 成熟期 / 完全体 / 究极体`
+- 当前 fresh verification：
+  - backend：
+    - `python -m pytest tests/kernel/test_buddy_domain_capability.py tests/kernel/test_buddy_projection_service.py tests/kernel/test_buddy_projection_capability.py tests/app/test_buddy_cutover.py -q`
+    - 结果：`18 passed`
+  - console：
+    - `npm --prefix console test -- src/api/modules/buddy.test.ts src/pages/BuddyOnboarding/index.test.tsx src/pages/Chat/buddyEvolution.test.ts src/pages/Chat/buddyPresentation.test.ts src/pages/Chat/BuddyPanel.test.tsx src/pages/Chat/BuddyCompanion.test.tsx src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx src/runtime/buddyFlow.test.ts`
+    - 结果：`33 passed`
+
 ## 1.2 `2026-04-05` donor-first 开源项目能力落位补充
 
 - GitHub open-source donor 不再只以 `SKILL.md` bundle 形式落地。

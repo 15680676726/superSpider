@@ -5,6 +5,7 @@ from copaw.industry.models import IndustryProfile
 from copaw.kernel.buddy_onboarding_service import (
     BuddyOnboardingService,
     _CREATOR_DIRECTION,
+    _HEALTH_DIRECTION,
 )
 from copaw.state import SQLiteStateStore
 from copaw.state.main_brain_service import (
@@ -21,6 +22,7 @@ from copaw.state.repositories import (
     SqliteOperatingLaneRepository,
 )
 from copaw.state.repositories_buddy import (
+    SqliteBuddyDomainCapabilityRepository,
     SqliteBuddyOnboardingSessionRepository,
     SqliteCompanionRelationshipRepository,
     SqliteGrowthTargetRepository,
@@ -34,6 +36,7 @@ def _build_service(tmp_path) -> BuddyOnboardingService:
         profile_repository=SqliteHumanProfileRepository(store),
         growth_target_repository=SqliteGrowthTargetRepository(store),
         relationship_repository=SqliteCompanionRelationshipRepository(store),
+        domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(store),
     )
 
@@ -45,6 +48,7 @@ def _build_service_with_planning(tmp_path) -> tuple[BuddyOnboardingService, SQLi
         profile_repository=SqliteHumanProfileRepository(store),
         growth_target_repository=SqliteGrowthTargetRepository(store),
         relationship_repository=SqliteCompanionRelationshipRepository(store),
+        domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(store),
         industry_instance_repository=industry_repository,
         operating_lane_service=OperatingLaneService(
@@ -161,10 +165,13 @@ def test_buddy_onboarding_requires_exactly_one_primary_direction(tmp_path) -> No
     result = service.confirm_primary_direction(
         session_id=identity.session_id,
         selected_direction=clarification.recommended_direction,
+        capability_action="start-new",
     )
 
     assert result.growth_target.primary_direction == clarification.recommended_direction
     assert result.relationship.encouragement_style == "old-friend"
+    assert result.domain_capability.domain_key == "writing"
+    assert result.domain_capability.status == "active"
 
 
 def test_buddy_naming_updates_relationship(tmp_path) -> None:
@@ -186,6 +193,7 @@ def test_buddy_naming_updates_relationship(tmp_path) -> None:
     service.confirm_primary_direction(
         session_id=identity.session_id,
         selected_direction=clarification.recommended_direction,
+        capability_action="start-new",
     )
 
     relationship = service.name_buddy(
@@ -244,6 +252,7 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
     result = service.confirm_primary_direction(
         session_id=identity.session_id,
         selected_direction=clarification.recommended_direction,
+        capability_action="start-new",
     )
 
     assert result.execution_carrier is not None
@@ -293,6 +302,7 @@ def test_confirm_primary_direction_writes_direction_first_industry_profile(tmp_p
     result = service.confirm_primary_direction(
         session_id=identity.session_id,
         selected_direction=clarification.recommended_direction,
+        capability_action="start-new",
     )
 
     industry_repository = SqliteIndustryInstanceRepository(store)
@@ -354,3 +364,212 @@ def test_record_chat_interaction_advances_growth_only_on_runtime_checkpoint(tmp_
     assert relationship is not None
     assert relationship.communication_count == 1
     assert relationship.companion_experience > 0
+
+
+def test_preview_primary_direction_transition_keeps_same_domain_capability(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing"],
+        strengths=["storytelling"],
+        constraints=["time"],
+        goal_intention="Build a creator path with long-term proof of work.",
+    )
+    clarification = service.answer_clarification_turn(
+        session_id=identity.session_id,
+        answer="I want a creator direction with proof of work and leverage.",
+        existing_question_count=9,
+    )
+    first = service.confirm_primary_direction(
+        session_id=identity.session_id,
+        selected_direction=clarification.recommended_direction,
+        capability_action="start-new",
+    )
+    seeded = first.domain_capability.model_copy(
+        update={"capability_score": 68, "evolution_stage": "seasoned"},
+    )
+    service._domain_capability_repository.upsert_domain_capability(  # pylint: disable=protected-access
+        seeded,
+    )
+
+    second_identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing", "content"],
+        strengths=["storytelling"],
+        constraints=["time"],
+        goal_intention="Scale the same creator direction further.",
+    )
+    second_clarification = service.answer_clarification_turn(
+        session_id=second_identity.session_id,
+        answer="I want to stay on the same creator track and push it further.",
+        existing_question_count=9,
+    )
+
+    preview = service.preview_primary_direction_transition(
+        session_id=second_identity.session_id,
+        selected_direction=second_clarification.recommended_direction,
+    )
+    result = service.confirm_primary_direction(
+        session_id=second_identity.session_id,
+        selected_direction=second_clarification.recommended_direction,
+        capability_action="keep-active",
+    )
+
+    assert preview.suggestion_kind == "same-domain"
+    assert preview.recommended_action == "keep-active"
+    assert result.domain_capability.capability_score == 68
+    assert result.domain_capability.evolution_stage == "seasoned"
+
+
+def test_confirm_primary_direction_archives_old_domain_and_starts_new_one(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    creator_identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing"],
+        strengths=["storytelling"],
+        constraints=["time"],
+        goal_intention="Build a creator path with long-term proof of work.",
+    )
+    creator_clarification = service.answer_clarification_turn(
+        session_id=creator_identity.session_id,
+        answer="I want a creator direction with proof of work and leverage.",
+        existing_question_count=9,
+    )
+    creator_result = service.confirm_primary_direction(
+        session_id=creator_identity.session_id,
+        selected_direction=creator_clarification.recommended_direction,
+        capability_action="start-new",
+    )
+    service._domain_capability_repository.upsert_domain_capability(  # pylint: disable=protected-access
+        creator_result.domain_capability.model_copy(
+            update={"capability_score": 68, "evolution_stage": "seasoned"},
+        )
+    )
+
+    health_identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["health", "fitness"],
+        strengths=["consistency"],
+        constraints=["time"],
+        goal_intention="I need to rebuild my health and discipline.",
+    )
+    health_clarification = service.answer_clarification_turn(
+        session_id=health_identity.session_id,
+        answer="I want to rebuild energy, exercise, and stable health habits.",
+        existing_question_count=9,
+    )
+
+    preview = service.preview_primary_direction_transition(
+        session_id=health_identity.session_id,
+        selected_direction=_HEALTH_DIRECTION,
+    )
+    result = service.confirm_primary_direction(
+        session_id=health_identity.session_id,
+        selected_direction=_HEALTH_DIRECTION,
+        capability_action="start-new",
+    )
+    records = service._domain_capability_repository.list_domain_capabilities(  # pylint: disable=protected-access
+        creator_identity.profile.profile_id,
+    )
+    creator_record = next(record for record in records if record.domain_key == "writing")
+
+    assert health_clarification.recommended_direction == _HEALTH_DIRECTION
+    assert preview.suggestion_kind == "start-new-domain"
+    assert result.domain_capability.domain_key == "fitness"
+    assert result.domain_capability.capability_score == 0
+    assert result.domain_capability.evolution_stage == "seed"
+    assert creator_record.status == "archived"
+    assert creator_record.capability_score == 68
+
+
+def test_confirm_primary_direction_restores_matching_archived_domain(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    creator_identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing"],
+        strengths=["storytelling"],
+        constraints=["time"],
+        goal_intention="Build a creator path with long-term proof of work.",
+    )
+    creator_clarification = service.answer_clarification_turn(
+        session_id=creator_identity.session_id,
+        answer="I want a creator direction with proof of work and leverage.",
+        existing_question_count=9,
+    )
+    creator_result = service.confirm_primary_direction(
+        session_id=creator_identity.session_id,
+        selected_direction=creator_clarification.recommended_direction,
+        capability_action="start-new",
+    )
+    service._domain_capability_repository.upsert_domain_capability(  # pylint: disable=protected-access
+        creator_result.domain_capability.model_copy(
+            update={"capability_score": 68, "evolution_stage": "seasoned"},
+        )
+    )
+
+    health_identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["health", "fitness"],
+        strengths=["consistency"],
+        constraints=["time"],
+        goal_intention="I need to rebuild my health and discipline.",
+    )
+    service.answer_clarification_turn(
+        session_id=health_identity.session_id,
+        answer="I want to rebuild energy, exercise, and stable health habits.",
+        existing_question_count=9,
+    )
+    service.confirm_primary_direction(
+        session_id=health_identity.session_id,
+        selected_direction=_HEALTH_DIRECTION,
+        capability_action="start-new",
+    )
+
+    creator_return_identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing"],
+        strengths=["storytelling"],
+        constraints=["time"],
+        goal_intention="Return to creator work.",
+    )
+    creator_return_clarification = service.answer_clarification_turn(
+        session_id=creator_return_identity.session_id,
+        answer="I want to return to the same creator direction I was already building.",
+        existing_question_count=9,
+    )
+
+    preview = service.preview_primary_direction_transition(
+        session_id=creator_return_identity.session_id,
+        selected_direction=creator_return_clarification.recommended_direction,
+    )
+    restored = service.confirm_primary_direction(
+        session_id=creator_return_identity.session_id,
+        selected_direction=creator_return_clarification.recommended_direction,
+        capability_action="restore-archived",
+        target_domain_id=preview.archived_matches[0]["domain_id"],
+    )
+    active = service._domain_capability_repository.get_active_domain_capability(  # pylint: disable=protected-access
+        creator_identity.profile.profile_id,
+    )
+
+    assert preview.suggestion_kind == "switch-to-archived-domain"
+    assert preview.recommended_action == "restore-archived"
+    assert restored.domain_capability.domain_key == "writing"
+    assert restored.domain_capability.capability_score == 68
+    assert restored.domain_capability.evolution_stage == "seasoned"
+    assert active is not None
+    assert active.domain_key == "writing"

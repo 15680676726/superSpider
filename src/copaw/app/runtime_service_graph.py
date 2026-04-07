@@ -65,6 +65,7 @@ from ..sop_kernel import FixedSopService
 from ..state import SQLiteStateStore
 from ..state.human_assist_task_service import HumanAssistTaskService
 from ..state.repositories_buddy import (
+    SqliteBuddyDomainCapabilityRepository,
     SqliteBuddyOnboardingSessionRepository,
     SqliteCompanionRelationshipRepository,
     SqliteGrowthTargetRepository,
@@ -481,6 +482,7 @@ def build_runtime_bootstrap(
     buddy_profile_repository = SqliteHumanProfileRepository(state_store)
     buddy_growth_target_repository = SqliteGrowthTargetRepository(state_store)
     buddy_relationship_repository = SqliteCompanionRelationshipRepository(state_store)
+    buddy_domain_capability_repository = SqliteBuddyDomainCapabilityRepository(state_store)
     buddy_onboarding_session_repository = SqliteBuddyOnboardingSessionRepository(state_store)
     donor_source_service = DonorSourceService(
         state_store=state_store,
@@ -671,6 +673,7 @@ def build_runtime_bootstrap(
         profile_repository=buddy_profile_repository,
         growth_target_repository=buddy_growth_target_repository,
         relationship_repository=buddy_relationship_repository,
+        domain_capability_repository=buddy_domain_capability_repository,
         onboarding_session_repository=buddy_onboarding_session_repository,
         industry_instance_repository=repositories.industry_instance_repository,
         operating_lane_service=operating_lane_service,
@@ -682,6 +685,7 @@ def build_runtime_bootstrap(
         profile_repository=buddy_profile_repository,
         growth_target_repository=buddy_growth_target_repository,
         relationship_repository=buddy_relationship_repository,
+        domain_capability_repository=buddy_domain_capability_repository,
         onboarding_session_repository=buddy_onboarding_session_repository,
         human_assist_task_service=human_assist_task_service,
         current_focus_resolver=buddy_current_focus_resolver,

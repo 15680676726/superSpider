@@ -29,6 +29,13 @@ class BuddyClarifyRequest(BaseModel):
 class BuddyConfirmDirectionRequest(BaseModel):
     session_id: str = Field(..., min_length=1)
     selected_direction: str = Field(..., min_length=1)
+    capability_action: str = Field(..., min_length=1)
+    target_domain_id: str | None = None
+
+
+class BuddyDirectionTransitionPreviewRequest(BaseModel):
+    session_id: str = Field(..., min_length=1)
+    selected_direction: str = Field(..., min_length=1)
 
 
 class BuddyNameRequest(BaseModel):
@@ -103,8 +110,25 @@ async def confirm_buddy_direction(
         "session": result.session.model_dump(mode="json"),
         "growth_target": result.growth_target.model_dump(mode="json"),
         "relationship": result.relationship.model_dump(mode="json"),
+        "domain_capability": result.domain_capability.model_dump(mode="json"),
         "execution_carrier": result.execution_carrier,
     }
+
+
+@router.post("/onboarding/direction-transition-preview")
+async def preview_buddy_direction_transition(
+    request: Request,
+    payload: BuddyDirectionTransitionPreviewRequest,
+) -> dict[str, object]:
+    service = _get_buddy_onboarding_service(request)
+    try:
+        result = service.preview_primary_direction_transition(
+            session_id=payload.session_id,
+            selected_direction=payload.selected_direction,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    return result.model_dump(mode="json")
 
 
 @router.post("/name")

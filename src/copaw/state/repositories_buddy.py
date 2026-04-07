@@ -2,12 +2,18 @@
 """Buddy-specific repositories for onboarding truth and transitional sessions."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 
 from pydantic import Field
 
 from .model_support import UpdatedRecord, _new_record_id
-from .models_buddy import CompanionRelationship, GrowthTarget, HumanProfile
+from .models_buddy import (
+    BuddyDomainCapabilityRecord,
+    CompanionRelationship,
+    GrowthTarget,
+    HumanProfile,
+)
 from .store import SQLiteStateStore
 
 
@@ -70,6 +76,12 @@ def _relationship_from_row(row) -> CompanionRelationship | None:
         payload.pop("avoidance_patterns_json", None),
     )
     return CompanionRelationship.model_validate(payload)
+
+
+def _domain_capability_from_row(row) -> BuddyDomainCapabilityRecord | None:
+    if row is None:
+        return None
+    return BuddyDomainCapabilityRecord.model_validate(dict(row))
 
 
 def _session_from_row(row) -> BuddyOnboardingSessionRecord | None:
@@ -260,6 +272,152 @@ class SqliteCompanionRelationshipRepository:
         return relationship
 
 
+class SqliteBuddyDomainCapabilityRepository:
+    def __init__(self, store: SQLiteStateStore) -> None:
+        self._store = store
+        self._store.initialize()
+
+    def get_domain_capability(self, domain_id: str) -> BuddyDomainCapabilityRecord | None:
+        with self._store.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM buddy_domain_capabilities WHERE domain_id = ?",
+                (domain_id,),
+            ).fetchone()
+        return _domain_capability_from_row(row)
+
+    def get_active_domain_capability(
+        self,
+        profile_id: str,
+    ) -> BuddyDomainCapabilityRecord | None:
+        with self._store.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM buddy_domain_capabilities
+                WHERE profile_id = ? AND status = 'active'
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (profile_id,),
+            ).fetchone()
+        return _domain_capability_from_row(row)
+
+    def list_domain_capabilities(
+        self,
+        profile_id: str,
+        *,
+        include_archived: bool = True,
+    ) -> list[BuddyDomainCapabilityRecord]:
+        query = """
+            SELECT * FROM buddy_domain_capabilities
+            WHERE profile_id = ?
+        """
+        params: list[object] = [profile_id]
+        if not include_archived:
+            query += " AND status = 'active'"
+        query += """
+            ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END,
+                     updated_at DESC,
+                     created_at DESC
+        """
+        with self._store.connection() as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
+        return [
+            record
+            for record in (_domain_capability_from_row(row) for row in rows)
+            if record is not None
+        ]
+
+    def find_domain_capabilities_by_key(
+        self,
+        profile_id: str,
+        domain_key: str,
+    ) -> list[BuddyDomainCapabilityRecord]:
+        with self._store.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM buddy_domain_capabilities
+                WHERE profile_id = ? AND domain_key = ?
+                ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END,
+                         updated_at DESC,
+                         created_at DESC
+                """,
+                (profile_id, domain_key),
+            ).fetchall()
+        return [
+            record
+            for record in (_domain_capability_from_row(row) for row in rows)
+            if record is not None
+        ]
+
+    def upsert_domain_capability(
+        self,
+        record: BuddyDomainCapabilityRecord,
+    ) -> BuddyDomainCapabilityRecord:
+        payload = record.model_dump(mode="json")
+        with self._store.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO buddy_domain_capabilities (
+                    domain_id, profile_id, domain_key, domain_label, status,
+                    strategy_score, execution_score, evidence_score, stability_score,
+                    capability_score, evolution_stage, knowledge_value, skill_value,
+                    completed_support_runs, completed_assisted_closures,
+                    evidence_count, report_count, last_activated_at, last_progress_at,
+                    created_at, updated_at
+                ) VALUES (
+                    :domain_id, :profile_id, :domain_key, :domain_label, :status,
+                    :strategy_score, :execution_score, :evidence_score, :stability_score,
+                    :capability_score, :evolution_stage, :knowledge_value, :skill_value,
+                    :completed_support_runs, :completed_assisted_closures,
+                    :evidence_count, :report_count, :last_activated_at, :last_progress_at,
+                    :created_at, :updated_at
+                )
+                ON CONFLICT(domain_id) DO UPDATE SET
+                    profile_id = excluded.profile_id,
+                    domain_key = excluded.domain_key,
+                    domain_label = excluded.domain_label,
+                    status = excluded.status,
+                    strategy_score = excluded.strategy_score,
+                    execution_score = excluded.execution_score,
+                    evidence_score = excluded.evidence_score,
+                    stability_score = excluded.stability_score,
+                    capability_score = excluded.capability_score,
+                    evolution_stage = excluded.evolution_stage,
+                    knowledge_value = excluded.knowledge_value,
+                    skill_value = excluded.skill_value,
+                    completed_support_runs = excluded.completed_support_runs,
+                    completed_assisted_closures = excluded.completed_assisted_closures,
+                    evidence_count = excluded.evidence_count,
+                    report_count = excluded.report_count,
+                    last_activated_at = excluded.last_activated_at,
+                    last_progress_at = excluded.last_progress_at,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at
+                """,
+                payload,
+            )
+        return record
+
+    def archive_active_domain_capabilities(
+        self,
+        profile_id: str,
+        *,
+        except_domain_id: str | None = None,
+    ) -> None:
+        now = _utc_now_iso()
+        query = """
+            UPDATE buddy_domain_capabilities
+            SET status = 'archived', updated_at = ?
+            WHERE profile_id = ? AND status = 'active'
+        """
+        params: list[object] = [now, profile_id]
+        if except_domain_id:
+            query += " AND domain_id != ?"
+            params.append(except_domain_id)
+        with self._store.connection() as conn:
+            conn.execute(query, tuple(params))
+
+
 class SqliteBuddyOnboardingSessionRepository:
     def __init__(self, store: SQLiteStateStore) -> None:
         self._store = store
@@ -327,8 +485,13 @@ class SqliteBuddyOnboardingSessionRepository:
         return session
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 __all__ = [
     "BuddyOnboardingSessionRecord",
+    "SqliteBuddyDomainCapabilityRepository",
     "SqliteBuddyOnboardingSessionRepository",
     "SqliteCompanionRelationshipRepository",
     "SqliteGrowthTargetRepository",

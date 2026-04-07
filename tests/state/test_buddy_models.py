@@ -8,6 +8,7 @@ from copaw.state import SQLiteStateStore
 
 def test_buddy_models_round_trip_required_fields() -> None:
     from copaw.state import (
+        BuddyDomainCapabilityRecord,
         BuddyGrowthProjection,
         BuddyPresentation,
         CompanionRelationship,
@@ -67,12 +68,27 @@ def test_buddy_models_round_trip_required_fields() -> None:
         evolution_stage="seed",
         progress_to_next_stage=42,
     )
+    domain = BuddyDomainCapabilityRecord(
+        domain_id="domain-1",
+        profile_id=profile.profile_id,
+        domain_key="writing",
+        domain_label="写作",
+        status="active",
+        strategy_score=18,
+        execution_score=14,
+        evidence_score=8,
+        stability_score=6,
+        capability_score=46,
+        evolution_stage="capable",
+    )
 
     assert profile.display_name == "Alex"
     assert target.primary_direction.startswith("Build")
     assert relationship.encouragement_style == "old-friend"
     assert presentation.buddy_name == "Milo"
     assert growth.evolution_stage == "seed"
+    assert domain.domain_label == "写作"
+    assert domain.evolution_stage == "capable"
 
 
 def test_sqlite_state_store_creates_buddy_tables(tmp_path) -> None:
@@ -91,3 +107,4 @@ def test_sqlite_state_store_creates_buddy_tables(tmp_path) -> None:
     assert "human_profiles" in tables
     assert "growth_targets" in tables
     assert "companion_relationships" in tables
+    assert "buddy_domain_capabilities" in tables

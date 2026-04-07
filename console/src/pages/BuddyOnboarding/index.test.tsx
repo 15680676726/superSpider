@@ -12,6 +12,7 @@ const { navigateMock, apiMock } = vi.hoisted(() => ({
     getBuddySurface: vi.fn(),
     submitBuddyIdentity: vi.fn(),
     answerBuddyClarification: vi.fn(),
+    previewBuddyDirectionTransition: vi.fn(),
     confirmBuddyDirection: vi.fn(),
   },
 }));
@@ -69,6 +70,16 @@ describe("BuddyOnboardingPage", () => {
         "建立稳定、自主、长期向上的人生成长主方向",
       ],
       recommended_direction: "建立独立创作与内容事业的长期成长路径",
+    });
+    apiMock.previewBuddyDirectionTransition.mockResolvedValue({
+      session_id: "session-1",
+      selected_direction: "寤虹珛鐙珛鍒涗綔涓庡唴瀹逛簨涓氱殑闀挎湡鎴愰暱璺緞",
+      selected_domain_key: "writing",
+      suggestion_kind: "start-new-domain",
+      recommended_action: "start-new",
+      reason_summary: "start new",
+      archived_matches: [],
+      current_domain: null,
     });
     apiMock.confirmBuddyDirection.mockResolvedValue({
       session: {
@@ -149,7 +160,19 @@ describe("BuddyOnboardingPage", () => {
     fireEvent.click(screen.getByTestId("buddy-direction-confirm"));
 
     await waitFor(() => {
-      expect(apiMock.confirmBuddyDirection).toHaveBeenCalled();
+      expect(apiMock.previewBuddyDirectionTransition).toHaveBeenCalledWith(
+        expect.objectContaining({
+          session_id: "session-1",
+          selected_direction: expect.stringContaining("建立独立创作"),
+        }),
+      );
+      expect(apiMock.confirmBuddyDirection).toHaveBeenCalledWith(
+        expect.objectContaining({
+          session_id: "session-1",
+          selected_direction: expect.stringContaining("建立独立创作"),
+          capability_action: "start-new",
+        }),
+      );
     });
     expect(navigateMock).not.toHaveBeenCalled();
     expect(screen.getByTestId("buddy-direction-confirmed")).toBeInTheDocument();
@@ -504,7 +527,19 @@ describe("BuddyOnboardingPage", () => {
     fireEvent.click(screen.getByTestId("buddy-direction-confirm"));
 
     await waitFor(() => {
-      expect(apiMock.confirmBuddyDirection).toHaveBeenCalled();
+      expect(apiMock.previewBuddyDirectionTransition).toHaveBeenCalledWith(
+        expect.objectContaining({
+          session_id: "session-1",
+          selected_direction: expect.stringContaining("建立独立创作"),
+        }),
+      );
+      expect(apiMock.confirmBuddyDirection).toHaveBeenCalledWith(
+        expect.objectContaining({
+          session_id: "session-1",
+          selected_direction: expect.stringContaining("建立独立创作"),
+          capability_action: "start-new",
+        }),
+      );
     });
 
     fireEvent.click(screen.getByTestId("buddy-direction-enter-chat"));

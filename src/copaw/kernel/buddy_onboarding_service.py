@@ -12,8 +12,17 @@ from .buddy_execution_carrier import (
     EXECUTION_CORE_ROLE_ID,
     build_buddy_execution_carrier_handoff,
 )
+from .buddy_domain_capability import (
+    derive_buddy_domain_key,
+    preview_domain_transition,
+)
 from ..industry.models import IndustryProfile
-from ..state import CompanionRelationship, GrowthTarget, HumanProfile
+from ..state import (
+    BuddyDomainCapabilityRecord,
+    CompanionRelationship,
+    GrowthTarget,
+    HumanProfile,
+)
 from ..state.main_brain_service import (
     AssignmentService,
     BacklogService,
@@ -24,6 +33,7 @@ from ..state.models import IndustryInstanceRecord
 from ..state.repositories import SqliteIndustryInstanceRepository
 from ..state.repositories_buddy import (
     BuddyOnboardingSessionRecord,
+    SqliteBuddyDomainCapabilityRepository,
     SqliteBuddyOnboardingSessionRepository,
     SqliteCompanionRelationshipRepository,
     SqliteGrowthTargetRepository,
@@ -49,11 +59,23 @@ class BuddyClarificationResult(BaseModel):
     recommended_direction: str = ""
 
 
+class BuddyDirectionTransitionPreviewResult(BaseModel):
+    session_id: str
+    selected_direction: str
+    selected_domain_key: str
+    suggestion_kind: str
+    recommended_action: str
+    reason_summary: str
+    current_domain: dict[str, object] | None = None
+    archived_matches: list[dict[str, object]] = Field(default_factory=list)
+
+
 @dataclass(slots=True)
 class BuddyDirectionConfirmationResult:
     session: BuddyOnboardingSessionRecord
     growth_target: GrowthTarget
     relationship: CompanionRelationship
+    domain_capability: BuddyDomainCapabilityRecord
     execution_carrier: dict[str, object] | None = None
 
 
@@ -372,6 +394,7 @@ class BuddyOnboardingService:
         profile_repository: SqliteHumanProfileRepository,
         growth_target_repository: SqliteGrowthTargetRepository,
         relationship_repository: SqliteCompanionRelationshipRepository,
+        domain_capability_repository: SqliteBuddyDomainCapabilityRepository | None = None,
         onboarding_session_repository: SqliteBuddyOnboardingSessionRepository,
         industry_instance_repository: SqliteIndustryInstanceRepository | None = None,
         operating_lane_service: OperatingLaneService | None = None,
@@ -382,6 +405,7 @@ class BuddyOnboardingService:
         self._profile_repository = profile_repository
         self._growth_target_repository = growth_target_repository
         self._relationship_repository = relationship_repository
+        self._domain_capability_repository = domain_capability_repository
         self._onboarding_session_repository = onboarding_session_repository
         self._industry_instance_repository = industry_instance_repository
         self._operating_lane_service = operating_lane_service
@@ -513,19 +537,74 @@ class BuddyOnboardingService:
             recommended_direction=session.recommended_direction,
         )
 
+    def preview_primary_direction_transition(
+        self,
+        *,
+        session_id: str,
+        selected_direction: str,
+    ) -> BuddyDirectionTransitionPreviewResult:
+        session = self._require_session(session_id)
+        profile = self._require_profile(session.profile_id)
+        normalized = self._validate_selected_direction(
+            session=session,
+            selected_direction=selected_direction,
+        )
+        active_record = None
+        archived_records: list[BuddyDomainCapabilityRecord] = []
+        if self._domain_capability_repository is not None:
+            active_record = self._domain_capability_repository.get_active_domain_capability(
+                profile.profile_id,
+            )
+            archived_records = [
+                record
+                for record in self._domain_capability_repository.list_domain_capabilities(
+                    profile.profile_id,
+                )
+                if record.status == "archived"
+            ]
+        preview = preview_domain_transition(
+            selected_direction=normalized,
+            active_record=active_record,
+            archived_records=archived_records,
+        )
+        return BuddyDirectionTransitionPreviewResult(
+            session_id=session.session_id,
+            selected_direction=normalized,
+            selected_domain_key=preview.selected_domain_key,
+            suggestion_kind=preview.suggestion_kind,
+            recommended_action=preview.recommended_action,
+            reason_summary=preview.reason_summary,
+            current_domain=preview.current_domain,
+            archived_matches=preview.archived_matches or [],
+        )
+
     def confirm_primary_direction(
         self,
         *,
         session_id: str,
         selected_direction: str,
+        capability_action: str | None = None,
+        target_domain_id: str | None = None,
     ) -> BuddyDirectionConfirmationResult:
         session = self._require_session(session_id)
         profile = self._require_profile(session.profile_id)
-        normalized = selected_direction.strip()
-        if not normalized:
-            raise ValueError("selected_direction is required")
-        if session.candidate_directions and normalized not in session.candidate_directions:
-            raise ValueError("selected_direction must match one generated candidate")
+        normalized = self._validate_selected_direction(
+            session=session,
+            selected_direction=selected_direction,
+        )
+        preview = self.preview_primary_direction_transition(
+            session_id=session_id,
+            selected_direction=normalized,
+        )
+        resolved_capability_action = str(
+            capability_action or preview.recommended_action or "",
+        ).strip()
+        if resolved_capability_action not in {
+            "keep-active",
+            "restore-archived",
+            "start-new",
+        }:
+            raise ValueError("capability_action is required")
         growth_target = self._growth_target_repository.upsert_target(
             GrowthTarget(
                 profile_id=profile.profile_id,
@@ -557,6 +636,13 @@ class BuddyOnboardingService:
                 },
             ),
         )
+        domain_capability = self._activate_domain_capability(
+            profile=profile,
+            selected_direction=normalized,
+            capability_action=resolved_capability_action,
+            target_domain_id=target_domain_id,
+            preview=preview,
+        )
         growth_target, execution_carrier = self._ensure_growth_scaffold(
             profile=profile,
             growth_target=growth_target,
@@ -574,6 +660,7 @@ class BuddyOnboardingService:
             session=updated_session,
             growth_target=growth_target,
             relationship=relationship,
+            domain_capability=domain_capability,
             execution_carrier=execution_carrier,
         )
 
@@ -665,6 +752,111 @@ class BuddyOnboardingService:
         if profile is None:
             raise ValueError(f"Human profile '{profile_id}' not found")
         return profile
+
+    def _validate_selected_direction(
+        self,
+        *,
+        session: BuddyOnboardingSessionRecord,
+        selected_direction: str,
+    ) -> str:
+        normalized = selected_direction.strip()
+        if not normalized:
+            raise ValueError("selected_direction is required")
+        if session.candidate_directions and normalized not in session.candidate_directions:
+            raise ValueError("selected_direction must match one generated candidate")
+        return normalized
+
+    def _activate_domain_capability(
+        self,
+        *,
+        profile: HumanProfile,
+        selected_direction: str,
+        capability_action: str,
+        target_domain_id: str | None,
+        preview: BuddyDirectionTransitionPreviewResult,
+    ) -> BuddyDomainCapabilityRecord:
+        if self._domain_capability_repository is None:
+            return BuddyDomainCapabilityRecord(
+                profile_id=profile.profile_id,
+                domain_key=preview.selected_domain_key,
+                domain_label=self._present_domain_label(
+                    preview.selected_domain_key,
+                    selected_direction,
+                ),
+                status="active",
+                last_activated_at=_utc_now().isoformat(),
+            )
+
+        if capability_action == "keep-active":
+            active = self._domain_capability_repository.get_active_domain_capability(
+                profile.profile_id,
+            )
+            if active is None:
+                raise ValueError("cannot keep-active without an active domain capability")
+            updated = active.model_copy(
+                update={
+                    "domain_label": self._present_domain_label(
+                        preview.selected_domain_key,
+                        selected_direction,
+                    ),
+                    "status": "active",
+                    "last_activated_at": _utc_now().isoformat(),
+                },
+            )
+            return self._domain_capability_repository.upsert_domain_capability(updated)
+
+        if capability_action == "restore-archived":
+            resolved_target_domain_id = target_domain_id
+            if not resolved_target_domain_id and len(preview.archived_matches) == 1:
+                resolved_target_domain_id = str(preview.archived_matches[0]["domain_id"])
+            if not resolved_target_domain_id:
+                raise ValueError("target_domain_id is required for restore-archived")
+            archived = self._domain_capability_repository.get_domain_capability(
+                resolved_target_domain_id,
+            )
+            if archived is None or archived.profile_id != profile.profile_id:
+                raise ValueError("target_domain_id does not belong to the current profile")
+            self._domain_capability_repository.archive_active_domain_capabilities(
+                profile.profile_id,
+                except_domain_id=archived.domain_id,
+            )
+            restored = archived.model_copy(
+                update={
+                    "status": "active",
+                    "domain_label": self._present_domain_label(
+                        preview.selected_domain_key,
+                        selected_direction,
+                    ),
+                    "last_activated_at": _utc_now().isoformat(),
+                },
+            )
+            return self._domain_capability_repository.upsert_domain_capability(restored)
+
+        self._domain_capability_repository.archive_active_domain_capabilities(
+            profile.profile_id,
+        )
+        created = BuddyDomainCapabilityRecord(
+            profile_id=profile.profile_id,
+            domain_key=preview.selected_domain_key,
+            domain_label=self._present_domain_label(
+                preview.selected_domain_key,
+                selected_direction,
+            ),
+            status="active",
+            capability_score=0,
+            evolution_stage="seed",
+            last_activated_at=_utc_now().isoformat(),
+        )
+        return self._domain_capability_repository.upsert_domain_capability(created)
+
+    def _present_domain_label(self, domain_key: str, selected_direction: str) -> str:
+        if domain_key == "stocks":
+            return "股票"
+        if domain_key == "writing":
+            return "写作"
+        if domain_key == "fitness":
+            return "健身"
+        return selected_direction.strip() or domain_key
 
     def _ensure_growth_scaffold(
         self,
@@ -883,6 +1075,7 @@ def _utc_now() -> datetime:
 __all__ = [
     "BuddyClarificationResult",
     "BuddyDirectionConfirmationResult",
+    "BuddyDirectionTransitionPreviewResult",
     "BuddyIdentitySubmitResult",
     "BuddyOnboardingService",
 ]
