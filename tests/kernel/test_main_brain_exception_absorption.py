@@ -7,6 +7,11 @@ from datetime import UTC, datetime, timedelta
 from copaw.kernel.main_brain_exception_absorption import (
     MainBrainExceptionAbsorptionService,
 )
+from copaw.compiler.planning import ReportReplanEngine
+from copaw.evidence import EvidenceLedger
+from copaw.state import SQLiteStateStore
+from copaw.state.human_assist_task_service import HumanAssistTaskService
+from copaw.state.repositories import SqliteHumanAssistTaskRepository
 
 
 @dataclass(slots=True)
@@ -184,3 +189,70 @@ def test_absorption_service_classifies_stale_lease_from_long_held_runtime() -> N
 
     assert [case.case_kind for case in summary.active_cases] == ["stale-lease"]
     assert summary.active_cases[0].recovery_rung == "cleanup"
+
+
+def test_absorption_service_escalates_repeated_same_scope_blockers_to_cycle_rebalance(
+    tmp_path,
+) -> None:
+    now = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
+    service = MainBrainExceptionAbsorptionService()
+
+    result = service.absorb(
+        runtimes=[
+            _Runtime(
+                agent_id="agent-ops",
+                runtime_status="blocked",
+                metadata={
+                    "assignment_id": "assignment-1",
+                    "blocked_scope_ref": "assignment:assignment-1",
+                    "repeated_blocker_count": 3,
+                },
+            )
+        ],
+        mailbox_items=[],
+        human_assist_tasks=[],
+        now=now,
+        report_replan_engine=ReportReplanEngine(),
+    )
+
+    assert result is not None
+    assert result.kind == "replan"
+    assert result.replan_decision_kind == "cycle_rebalance"
+    assert result.human_required is False
+
+
+def test_absorption_service_emits_one_human_action_only_after_safe_recovery_budget_exhausted(
+    tmp_path,
+) -> None:
+    now = datetime(2026, 4, 7, 10, 0, tzinfo=UTC)
+    service = MainBrainExceptionAbsorptionService(
+        waiting_confirm_orphan_after=timedelta(minutes=15),
+    )
+    human_assist_service = HumanAssistTaskService(
+        repository=SqliteHumanAssistTaskRepository(SQLiteStateStore(tmp_path / "state.db")),
+        evidence_ledger=EvidenceLedger(database_path=tmp_path / "evidence.sqlite3"),
+    )
+
+    result = service.absorb(
+        runtimes=[],
+        mailbox_items=[
+            _MailboxItem(
+                agent_id="agent-2",
+                status="blocked",
+                task_id="task-confirm-1",
+                metadata={
+                    "task_phase": "waiting-confirm",
+                    "updated_at": (now - timedelta(minutes=31)).isoformat(),
+                    "checkpoint_id": "checkpoint-1",
+                },
+            )
+        ],
+        human_assist_tasks=[],
+        now=now,
+        human_assist_contract_builder=human_assist_service.build_exception_absorption_contract,
+    )
+
+    assert result is not None
+    assert result.kind == "human-assist"
+    assert result.human_required is True
+    assert result.human_action_summary

@@ -531,6 +531,58 @@ class ReportReplanEngine:
             },
         )
 
+    def compile_exception_absorption_replan(
+        self,
+        *,
+        case_kind: str,
+        scope_ref: str | None = None,
+        owner_agent_id: str | None = None,
+        summary: str | None = None,
+    ) -> ReportReplanDecision:
+        normalized_case_kind = _string(case_kind) or "internal-exception"
+        rationale = _string(summary) or "Internal exception pressure requires main-brain replan."
+        decision_kind = {
+            "repeated-blocker-same-scope": "cycle_rebalance",
+            "progressless-runtime": "cycle_rebalance",
+            "retry-loop": "lane_reweight",
+        }.get(normalized_case_kind, "follow_up_backlog")
+        trigger_family = {
+            "cycle_rebalance": "repeated_blocker_across_cycles",
+            "lane_reweight": "repeated_assignment_miss_same_lane_objective",
+        }.get(decision_kind, "local_follow_up_pressure")
+        trigger_evidence = [
+            {
+                "blocker_key": normalized_case_kind,
+                "scope_ref": _string(scope_ref),
+                "owner_agent_id": _string(owner_agent_id),
+                "summary": rationale,
+            },
+        ]
+        strategy_change_context: dict[str, Any]
+        if decision_kind == "cycle_rebalance":
+            strategy_change_context = {"repeated_blockers": trigger_evidence}
+        elif decision_kind == "lane_reweight":
+            strategy_change_context = {"assignment_misses": trigger_evidence}
+        else:
+            strategy_change_context = {}
+        return self.compile(
+            {
+                "needs_replan": True,
+                "summary": rationale,
+                "replan_reasons": [rationale],
+                "replan_decision": {
+                    "decision_id": f"report-synthesis:needs-replan:{normalized_case_kind}",
+                    "status": "needs-replan",
+                    "decision_kind": decision_kind,
+                    "summary": rationale,
+                    "reason_ids": [f"absorption:{normalized_case_kind}"],
+                    "trigger_family": trigger_family,
+                    "strategy_change_context": strategy_change_context,
+                },
+                "strategy_change_context": strategy_change_context,
+            },
+        )
+
     def _classify_strategy_change(
         self,
         *,

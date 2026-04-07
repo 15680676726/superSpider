@@ -440,3 +440,20 @@ def test_human_assist_task_service_allows_resubmission_after_need_more_evidence(
     assert first.outcome == "need_more_evidence"
     assert second.outcome == "accepted"
     assert second.task.status == "accepted"
+
+
+def test_human_assist_task_service_builds_exception_absorption_contract_without_leaking_case_code(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+
+    contract = service.build_exception_absorption_contract(
+        case_kind="waiting-confirm-orphan",
+        scope_ref="task-confirm-1",
+        summary="A confirmation-bound task has remained blocked past its safe waiting window.",
+    )
+
+    assert contract["title"] == "补一个必要确认"
+    assert "确认" in contract["required_action"]
+    assert contract["acceptance_spec"]["hard_anchors"] == ["task-confirm-1"]
+    assert "waiting-confirm-orphan" not in contract["required_action"]

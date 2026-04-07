@@ -81,6 +81,22 @@ def test_report_replan_engine_translates_synthesis_surface_into_follow_up_backlo
     }
 
 
+def test_report_replan_engine_compiles_exception_absorption_replan_to_cycle_rebalance() -> None:
+    engine = ReportReplanEngine()
+
+    decision = engine.compile_exception_absorption_replan(
+        case_kind="repeated-blocker-same-scope",
+        scope_ref="assignment:assignment-1",
+        owner_agent_id="agent-ops",
+        summary="Repeated blocker pressure is hitting the same execution scope.",
+    )
+
+    assert decision.status == "needs-replan"
+    assert decision.strategy_change_decision == "cycle_rebalance"
+    assert _trigger_family(decision) == "repeated_blocker_across_cycles"
+    assert decision.planning_shell["fork_key"] == "decision:cycle_rebalance"
+
+
 def test_report_replan_engine_escalates_repeated_blocker_across_cycles_to_cycle_rebalance() -> None:
     engine = ReportReplanEngine()
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 
 def _mapping(value: object | None) -> dict[str, object]:
@@ -101,6 +102,21 @@ class AbsorptionSummary:
         return len(self.active_cases)
 
 
+@dataclass(frozen=True, slots=True)
+class AbsorptionAction:
+    kind: str
+    case_kind: str
+    recovery_rung: str
+    owner_agent_id: str | None
+    scope_ref: str | None
+    summary: str | None = None
+    replan_decision_kind: str | None = None
+    replan_decision: dict[str, object] = field(default_factory=dict)
+    human_required: bool = False
+    human_action_summary: str | None = None
+    human_action_contract: dict[str, object] = field(default_factory=dict)
+
+
 @dataclass(slots=True)
 class MainBrainExceptionAbsorptionService:
     retry_loop_threshold: int = 3
@@ -148,6 +164,90 @@ class MainBrainExceptionAbsorptionService:
             recovery_counts=recovery_counts,
             main_brain_summary=summary,
             human_required_case_count=human_required_case_count,
+        )
+
+    def absorb(
+        self,
+        *,
+        runtimes: list[object] | tuple[object, ...],
+        mailbox_items: list[object] | tuple[object, ...],
+        human_assist_tasks: list[object] | tuple[object, ...],
+        now: datetime,
+        report_replan_engine: object | None = None,
+        human_assist_contract_builder: object | None = None,
+    ) -> AbsorptionAction | None:
+        summary = self.scan(
+            runtimes=runtimes,
+            mailbox_items=mailbox_items,
+            human_assist_tasks=human_assist_tasks,
+            now=now,
+        )
+        active_human_assist_count = self._count_active_human_assist_tasks(human_assist_tasks)
+        human_case = next((case for case in summary.active_cases if case.human_required), None)
+        if human_case is not None and active_human_assist_count <= 0:
+            contract = self._build_human_action_contract(
+                case=human_case,
+                human_assist_contract_builder=human_assist_contract_builder,
+            )
+            return AbsorptionAction(
+                kind="human-assist",
+                case_kind=human_case.case_kind,
+                recovery_rung=human_case.recovery_rung,
+                owner_agent_id=human_case.owner_agent_id,
+                scope_ref=human_case.scope_ref,
+                summary=human_case.summary,
+                human_required=True,
+                human_action_summary=(
+                    _string(contract.get("required_action"))
+                    or _string(contract.get("summary"))
+                    or human_case.summary
+                ),
+                human_action_contract=contract,
+            )
+        structural_case = next(
+            (
+                case
+                for case in summary.active_cases
+                if case.case_kind in {"repeated-blocker-same-scope", "progressless-runtime", "retry-loop"}
+            ),
+            None,
+        )
+        if structural_case is None:
+            return None
+        replan_decision_payload: dict[str, Any] = {}
+        replan_decision_kind: str | None = None
+        compiler = getattr(report_replan_engine, "compile_exception_absorption_replan", None)
+        if callable(compiler):
+            decision = compiler(
+                case_kind=structural_case.case_kind,
+                scope_ref=structural_case.scope_ref,
+                owner_agent_id=structural_case.owner_agent_id,
+                summary=structural_case.summary,
+            )
+            model_dump = getattr(decision, "model_dump", None)
+            if callable(model_dump):
+                payload = model_dump(mode="json", exclude_none=True)
+                if isinstance(payload, dict):
+                    replan_decision_payload = payload
+            replan_decision_kind = _string(
+                replan_decision_payload.get("strategy_change_decision")
+                or replan_decision_payload.get("decision_kind"),
+            )
+        if replan_decision_kind is None:
+            replan_decision_kind = {
+                "repeated-blocker-same-scope": "cycle_rebalance",
+                "progressless-runtime": "cycle_rebalance",
+                "retry-loop": "lane_reweight",
+            }.get(structural_case.case_kind, "follow_up_backlog")
+        return AbsorptionAction(
+            kind="replan",
+            case_kind=structural_case.case_kind,
+            recovery_rung=structural_case.recovery_rung,
+            owner_agent_id=structural_case.owner_agent_id,
+            scope_ref=structural_case.scope_ref,
+            summary=structural_case.summary,
+            replan_decision_kind=replan_decision_kind,
+            replan_decision=replan_decision_payload,
         )
 
     def _scan_runtime(self, *, runtime: object, now: datetime) -> list[AbsorptionCase]:
@@ -281,8 +381,52 @@ class MainBrainExceptionAbsorptionService:
             "autonomous recovery before escalating."
         )
 
+    def _count_active_human_assist_tasks(
+        self,
+        human_assist_tasks: list[object] | tuple[object, ...],
+    ) -> int:
+        return sum(
+            1
+            for task in list(human_assist_tasks or [])
+            if _string(_field(task, "status")) not in {"resume_queued", "closed", "expired", "cancelled"}
+        )
+
+    def _build_human_action_contract(
+        self,
+        *,
+        case: AbsorptionCase,
+        human_assist_contract_builder: object | None,
+    ) -> dict[str, object]:
+        builder = human_assist_contract_builder if callable(human_assist_contract_builder) else None
+        if builder is not None:
+            try:
+                payload = builder(
+                    case_kind=case.case_kind,
+                    scope_ref=case.scope_ref,
+                    summary=case.summary,
+                )
+            except TypeError:
+                payload = builder(case.case_kind, case.scope_ref, case.summary)
+            if isinstance(payload, dict):
+                return dict(payload)
+        anchor = _string(case.scope_ref) or "human-return"
+        return {
+            "title": "补一个必要确认" if case.case_kind == "waiting-confirm-orphan" else "补一个必要人类动作",
+            "summary": _string(case.summary)
+            or "主脑已经完成内部恢复，当前需要一个明确的人类动作才能继续。",
+            "required_action": (
+                f"请在聊天里完成并确认 “{anchor}” 对应的人类步骤，系统收到后会继续自动恢复。"
+            ),
+            "acceptance_spec": {
+                "version": "v1",
+                "hard_anchors": [anchor],
+            },
+            "resume_checkpoint_ref": anchor,
+        }
+
 
 __all__ = [
+    "AbsorptionAction",
     "AbsorptionCase",
     "AbsorptionSummary",
     "MainBrainExceptionAbsorptionService",

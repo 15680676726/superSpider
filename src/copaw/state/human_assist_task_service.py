@@ -370,6 +370,52 @@ class HumanAssistTaskService:
         )
         return persisted
 
+    def build_exception_absorption_contract(
+        self,
+        *,
+        case_kind: str,
+        scope_ref: str | None = None,
+        summary: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_scope_ref = _string(scope_ref) or "human-return"
+        case_key = _string(case_kind) or "human-step-required"
+        anchor_hint = f"“{normalized_scope_ref}”"
+        if case_key == "waiting-confirm-orphan":
+            title = "补一个必要确认"
+            required_action = (
+                f"请在聊天里补充这一步确认，并在回复里包含 {anchor_hint}。"
+            )
+            fallback_summary = "主脑已经完成内部恢复，当前只差你补一个必要确认。"
+            failure_hint = (
+                f"还需要这一步确认。请在聊天里明确说明已完成，并包含 {anchor_hint}。"
+            )
+        else:
+            title = "补一个必要人类动作"
+            required_action = (
+                f"请在聊天里完成并确认 {anchor_hint} 对应的人类步骤，系统收到后会继续自动恢复。"
+            )
+            fallback_summary = "主脑已经把内部恢复走到边界，现在需要你补一个明确的人类动作。"
+            failure_hint = (
+                f"还需要一个可验证的人类动作。请在聊天里明确说明已完成，并包含 {anchor_hint}。"
+            )
+        resolved_summary = _string(summary) or fallback_summary
+        return {
+            "title": title,
+            "summary": resolved_summary,
+            "task_type": "exception-absorption-human-step",
+            "reason_code": "main-brain-exception-absorption",
+            "reason_summary": resolved_summary,
+            "required_action": required_action,
+            "submission_mode": "chat-message",
+            "acceptance_mode": "anchor_verified",
+            "acceptance_spec": {
+                "version": "v1",
+                "hard_anchors": [normalized_scope_ref],
+                "failure_hint": failure_hint,
+            },
+            "resume_checkpoint_ref": normalized_scope_ref,
+        }
+
     def ensure_host_handoff_task(
         self,
         *,
