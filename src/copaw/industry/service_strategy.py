@@ -2240,25 +2240,6 @@ class _IndustryStrategyMixin:
                 ),
             },
         )
-
-
-
-    def _list_strategy_goal_titles(self, goal_ids: list[str]) -> list[str]:
-
-        titles: list[str] = []
-
-        for goal_id in goal_ids:
-
-            goal = self._goal_service.get_goal(goal_id)
-
-            title = _string(getattr(goal, "title", None)) if goal is not None else None
-
-            if title is not None:
-
-                titles.append(title)
-
-        return titles
-
     def _build_strategy_uncertainties(
         self,
         *,
@@ -3209,33 +3190,6 @@ class _IndustryStrategyMixin:
             "researcher": researcher,
 
         }
-
-
-
-    def _collect_instance_goal_statuses(
-
-        self,
-
-        record: IndustryInstanceRecord,
-
-    ) -> list[str]:
-
-        statuses: list[str] = []
-
-        for goal_id in self._resolve_instance_goal_ids(record):
-
-            goal = self._goal_service.get_goal(goal_id)
-
-            if goal is None:
-
-                continue
-
-            statuses.append(_string(goal.status))
-
-        return statuses
-
-
-
     def _instance_has_live_operation_surface(
 
         self,
@@ -3278,6 +3232,15 @@ class _IndustryStrategyMixin:
 
             return True
 
+        enabled_schedule_records = getattr(
+            self,
+            "_enabled_schedule_records_for_instance",
+            None,
+        )
+        if callable(enabled_schedule_records) and enabled_schedule_records(record):
+
+            return True
+
         return False
 
 
@@ -3292,33 +3255,17 @@ class _IndustryStrategyMixin:
 
             return "active"
 
-        statuses = [status for status in self._collect_instance_goal_statuses(record) if status]
+        current_status = _string(record.status)
+        lifecycle_status = _string(record.lifecycle_status)
+        if current_status in {"blocked", "paused", "draft", "waiting-confirm"}:
 
-        if not statuses:
+            return current_status
 
-            return record.status
-
-        if any(status == "blocked" for status in statuses):
-
-            return "blocked"
-
-        if all(status in {"completed", "archived"} for status in statuses):
-
-            if self._instance_has_live_operation_surface(record):
-
-                return "active"
+        if lifecycle_status in {"completed", "cancelled"}:
 
             return "completed"
 
-        if any(status in {"active", "paused"} for status in statuses):
-
-            return "active"
-
-        if any(status == "draft" for status in statuses):
-
-            return "draft"
-
-        return record.status
+        return "completed"
 
 
 

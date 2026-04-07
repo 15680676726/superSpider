@@ -1334,6 +1334,60 @@ def test_workflow_step_detail_prefers_persisted_task_links_over_legacy_goal_link
     assert refreshed_step_detail_payload["linked_tasks"]
 
 
+def test_workflow_step_detail_uses_goal_override_context_when_legacy_goal_links_are_missing(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    instance_id = _bootstrap_industry(client)
+
+    launched = _launch_workflow_via_service(
+        client,
+        template_id="industry-weekly-research-synthesis",
+        industry_instance_id=instance_id,
+        parameters={
+            "focus_area": "channel conversion",
+            "weekly_review_cron": "0 12 * * 2",
+            "timezone": "UTC",
+        },
+    )
+    run_id = launched.run["run_id"]
+
+    detail = client.get(f"/workflow-runs/{run_id}")
+    assert detail.status_code == 200
+    goal_step = next(
+        item
+        for item in detail.json()["step_execution"]
+        if item["kind"] == "goal"
+    )
+
+    run_record = client.app.state.workflow_run_repository.get_run(run_id)
+    assert run_record is not None
+    metadata = dict(run_record.metadata or {})
+    step_seed = []
+    for item in list(metadata.get("step_execution_seed") or []):
+        if not isinstance(item, dict):
+            continue
+        copied = dict(item)
+        if copied.get("step_id") == goal_step["step_id"]:
+            copied["linked_goal_ids"] = []
+        step_seed.append(copied)
+    client.app.state.workflow_run_repository.upsert_run(
+        run_record.model_copy(
+            update={
+                "metadata": {
+                    **metadata,
+                    "step_execution_seed": step_seed,
+                },
+            },
+        ),
+    )
+
+    step_detail = client.get(f"/workflow-runs/{run_id}/steps/{goal_step['step_id']}")
+    assert step_detail.status_code == 200
+    payload = step_detail.json()
+    assert payload["linked_goals"]
+
+
 def test_workflow_resume_uses_persisted_runtime_context_without_rehydrating_legacy_links(
     tmp_path,
 ) -> None:
@@ -1481,6 +1535,96 @@ def test_workflow_resume_uses_persisted_runtime_context_without_rehydrating_lega
     resumed_schedule_payload = resumed_schedule_detail.json()
     assert "linked_schedule_ids" not in resumed_schedule_payload["step"]
     assert resumed_schedule_payload["linked_schedules"]
+
+
+def test_workflow_resume_uses_goal_override_context_without_recreating_legacy_goal_links(
+    tmp_path,
+) -> None:
+    client = TestClient(_build_workflow_app(tmp_path))
+    instance_id = _bootstrap_industry(client)
+
+    launched = _launch_workflow_via_service(
+        client,
+        template_id="industry-weekly-research-synthesis",
+        industry_instance_id=instance_id,
+        parameters={
+            "focus_area": "channel conversion",
+            "weekly_review_cron": "0 12 * * 2",
+            "timezone": "UTC",
+        },
+    )
+    run_id = launched.run["run_id"]
+
+    detail = client.get(f"/workflow-runs/{run_id}")
+    assert detail.status_code == 200
+    goal_step = next(
+        item
+        for item in detail.json()["step_execution"]
+        if item["kind"] == "goal"
+    )
+
+    service = client.app.state.workflow_template_service
+    linked_goal_overrides_before = [
+        override
+        for override in service._goal_override_repository.list_overrides()
+        if str((override.compiler_context or {}).get("workflow_run_id") or "") == run_id
+        and str((override.compiler_context or {}).get("workflow_step_id") or "")
+        == goal_step["step_id"]
+    ]
+    assert len(linked_goal_overrides_before) == 1
+
+    run_record = client.app.state.workflow_run_repository.get_run(run_id)
+    assert run_record is not None
+    metadata = dict(run_record.metadata or {})
+    step_seed = []
+    for item in list(metadata.get("step_execution_seed") or []):
+        if not isinstance(item, dict):
+            continue
+        copied = dict(item)
+        if copied.get("step_id") == goal_step["step_id"]:
+            copied["linked_goal_ids"] = []
+        step_seed.append(copied)
+    client.app.state.workflow_run_repository.upsert_run(
+        run_record.model_copy(
+            update={
+                "metadata": {
+                    **metadata,
+                    "step_execution_seed": step_seed,
+                },
+            },
+        ),
+    )
+
+    resumed = asyncio.run(
+        service.resume_run(
+            run_id,
+            actor="copaw-operator",
+        ),
+    )
+    resumed_goal_step = next(
+        item
+        for item in resumed.step_execution
+        if item.step_id == goal_step["step_id"]
+    )
+    assert resumed_goal_step.linked_goal_ids
+
+    linked_goal_overrides_after = [
+        override
+        for override in service._goal_override_repository.list_overrides()
+        if str((override.compiler_context or {}).get("workflow_run_id") or "") == run_id
+        and str((override.compiler_context or {}).get("workflow_step_id") or "")
+        == goal_step["step_id"]
+    ]
+    assert len(linked_goal_overrides_after) == 1
+
+    persisted_run = client.app.state.workflow_run_repository.get_run(run_id)
+    assert persisted_run is not None
+    persisted_seed_by_id = {
+        str(item.get("step_id")): dict(item)
+        for item in list(dict(persisted_run.metadata or {}).get("step_execution_seed") or [])
+        if isinstance(item, dict)
+    }
+    assert persisted_seed_by_id[goal_step["step_id"]].get("linked_goal_ids") == []
 
 
 def test_workflow_run_public_surface_hides_historical_goal_schedule_id_fields(

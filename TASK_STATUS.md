@@ -1191,6 +1191,23 @@
   - `python -m pytest tests/app/test_workflow_templates_api.py::test_workflow_run_public_surface_hides_historical_goal_schedule_id_fields -q` -> `1 passed`
   - `python -m pytest tests/app/test_workflow_templates_api.py -k "run_step_detail_stays_read_only_and_service_resume_rehydrates_missing_links or step_detail_prefers_persisted_task_links_over_legacy_goal_links or resume_uses_persisted_runtime_context_without_rehydrating_legacy_links" -q` -> `3 passed, 26 deselected`
 
+### 3.3.6 `2026-04-07` final residual purity tightening
+
+- `industry` 状态与删除链继续去 legacy bridge：
+  - instance status 现在只以 live `cycle/backlog/assignment/report/schedule` surface 判定 active，不再依赖 goal status 才能把“静态 team + 无 live work”的实例收口为 completed。
+  - instance delete / retire 的 task 收集现在优先按 `industry_instance_id`，并把 goal-linked leaf task 并入同一 task set；execution-core 自有 task 即使没有 `goal_id` 也不会再被清理链漏掉。
+- reporting / prediction 继续去 goal 次级前门：
+  - prediction task collection 已彻底删除 `goal_ids` query fallback，正式顺序收口为 `industry_instance_id -> owner_agent_id -> agent_ids`。
+  - reporting task-scoped learning projection 不再因为“同 goal”把不在当前 task scope 内的 proposal 拉进 report。
+- workflow 继续去历史 link 真相：
+  - run detail / resume 的 goal step 现在优先按 `GoalOverride.compiler_context(workflow_run_id, workflow_step_id)` 派生 goal link，不再以持久化 `linked_goal_ids` 为正式真相。
+  - schedule step 继续只按 deterministic schedule identity 恢复，不再读历史 `linked_schedule_ids`。
+- 这轮完成后仍然真实存在的残留只剩：
+  - `industry` bootstrap 仍会 materialize bootstrap goal/schedule，再喂给 backlog/cycle。
+  - cycle reconcile / cycle prediction 仍保留 `goal_statuses` sidecar。
+  - workflow internal `linked_goal_ids / linked_schedule_ids` 还保留为内部派生字段，但已不是 persistence truth front-door。
+  - `runtime_service_graph.py` + `runtime_bootstrap_models.py` 的 wiring graph 仍偏重。
+
 ### 3.3.4 `2026-04-07` Buddy carrier direction-truth fix
 
 - Buddy onboarding 的正式方向边界已补正：`BuddyOnboardingService._ensure_growth_scaffold(...)` 不再把 `HumanProfile` 当前资料直接写进 `IndustryInstanceRecord.profile_payload`。

@@ -186,7 +186,39 @@ class _WorkflowServicePreviewMixin:
         evidence: list[dict[str, Any]] = []
         goal_detail_by_id: dict[str, dict[str, Any]] = {}
         step_seed_items = _workflow_step_execution_seed(run)
-        goal_ids = _workflow_linked_resource_ids(run, key="linked_goal_ids")
+        step_seed_by_id = {
+            str(seed.get("step_id") or ""): seed
+            for seed in step_seed_items
+            if str(seed.get("step_id") or "").strip()
+        }
+        goal_ids_by_step = _workflow_goal_ids_by_step(
+            run,
+            goal_override_repository=self._goal_override_repository,
+        )
+        visible_goal_ids: set[str] = set()
+        for step in preview.steps:
+            if step.kind != "goal":
+                continue
+            seed = step_seed_by_id.get(step.step_id, {})
+            persisted_task_ids = [
+                str(item)
+                for item in list(seed.get("linked_task_ids") or [])
+                if str(item).strip()
+            ]
+            persisted_decision_ids = [
+                str(item)
+                for item in list(seed.get("linked_decision_ids") or [])
+                if str(item).strip()
+            ]
+            persisted_evidence_ids = [
+                str(item)
+                for item in list(seed.get("linked_evidence_ids") or [])
+                if str(item).strip()
+            ]
+            if persisted_task_ids or persisted_decision_ids or persisted_evidence_ids:
+                continue
+            visible_goal_ids.update(goal_ids_by_step.get(step.step_id, []))
+        goal_ids = sorted(visible_goal_ids)
         for goal_id in goal_ids:
             detail = self._goal_service.get_goal_detail(goal_id)
             if detail is None:
@@ -231,6 +263,7 @@ class _WorkflowServicePreviewMixin:
         step_execution = self._build_step_execution_records(
             run=run,
             preview=preview,
+            goal_ids_by_step=goal_ids_by_step,
             goal_detail_by_id=goal_detail_by_id,
             schedule_by_id=schedule_by_id,
             tasks=tasks,
@@ -280,6 +313,7 @@ class _WorkflowServicePreviewMixin:
         *,
         run: WorkflowRunRecord,
         preview: WorkflowTemplatePreview,
+        goal_ids_by_step: dict[str, list[str]],
         goal_detail_by_id: dict[str, dict[str, Any]],
         schedule_by_id: dict[str, dict[str, Any]],
         tasks: list[dict[str, Any]],
@@ -295,27 +329,6 @@ class _WorkflowServicePreviewMixin:
         step_records: list[WorkflowStepExecutionRecord] = []
         for step in preview.steps:
             seed = step_seed_by_id.get(step.step_id) or {}
-            linked_goal_ids = [
-                str(item)
-                for item in list(seed.get("linked_goal_ids") or [])
-                if str(item).strip()
-            ]
-            linked_schedule_ids = _unique_strings(
-                [
-                    str(item)
-                    for item in list(seed.get("linked_schedule_ids") or [])
-                    if str(item).strip()
-                ],
-                [
-                    _workflow_step_schedule_id(
-                        run,
-                        step_id=step.step_id,
-                        payload_preview=dict(step.payload_preview or {}),
-                    )
-                ]
-                if step.kind == "schedule"
-                else [],
-            )
             persisted_task_ids = [
                 str(item)
                 for item in list(seed.get("linked_task_ids") or [])
@@ -331,6 +344,22 @@ class _WorkflowServicePreviewMixin:
                 for item in list(seed.get("linked_evidence_ids") or [])
                 if str(item).strip()
             ]
+            linked_goal_ids = (
+                []
+                if persisted_task_ids or persisted_decision_ids or persisted_evidence_ids
+                else list(goal_ids_by_step.get(step.step_id, []))
+            )
+            linked_schedule_ids = (
+                [
+                    _workflow_step_schedule_id(
+                        run,
+                        step_id=step.step_id,
+                        payload_preview=dict(step.payload_preview or {}),
+                    )
+                ]
+                if step.kind == "schedule"
+                else []
+            )
             linked_tasks = [
                 item
                 for item in tasks

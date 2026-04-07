@@ -575,8 +575,13 @@ class _IndustryCleanupMixin:
         superseded_by_instance_id: str,
     ) -> None:
         resolved_goal_ids = self._resolve_instance_goal_ids(record)
-        await self._cancel_instance_tasks(
+        resolved_task_ids = self._resolve_instance_task_ids(
+            instance_id=record.instance_id,
             goal_ids=resolved_goal_ids,
+            agent_ids=self._resolve_instance_agent_ids(record),
+        )
+        await self._cancel_instance_tasks(
+            task_ids=resolved_task_ids,
             reason=(
                 f"Industry instance '{record.instance_id}' was superseded by "
                 f"'{superseded_by_instance_id}'."
@@ -671,6 +676,7 @@ class _IndustryCleanupMixin:
     def _resolve_instance_task_ids(
         self,
         *,
+        instance_id: str,
         goal_ids: list[str],
         agent_ids: list[str],
     ) -> list[str]:
@@ -678,8 +684,12 @@ class _IndustryCleanupMixin:
         if task_repository is None:
             return []
         task_ids: set[str] = set()
+        normalized_instance_id = _string(instance_id)
         normalized_goal_ids = [goal_id for goal_id in goal_ids if goal_id]
         normalized_agent_ids = [agent_id for agent_id in agent_ids if agent_id]
+        if normalized_instance_id is not None:
+            for task in task_repository.list_tasks(industry_instance_id=normalized_instance_id):
+                task_ids.add(task.id)
         if normalized_goal_ids:
             for task in task_repository.list_tasks(goal_ids=normalized_goal_ids):
                 task_ids.add(task.id)
@@ -696,7 +706,7 @@ class _IndustryCleanupMixin:
     async def _cancel_instance_tasks(
         self,
         *,
-        goal_ids: list[str],
+        task_ids: list[str],
         reason: str,
     ) -> None:
         task_repository = getattr(self._goal_service, "_task_repository", None)
@@ -704,14 +714,14 @@ class _IndustryCleanupMixin:
             return
         runtime_repository = getattr(self._goal_service, "_task_runtime_repository", None)
         dispatcher = getattr(self._goal_service, "_dispatcher", None)
-        normalized_goal_ids = [
-            goal_id.strip()
-            for goal_id in goal_ids
-            if isinstance(goal_id, str) and goal_id.strip()
+        normalized_task_ids = [
+            task_id.strip()
+            for task_id in task_ids
+            if isinstance(task_id, str) and task_id.strip()
         ]
-        if not normalized_goal_ids:
+        if not normalized_task_ids:
             return
-        for task in task_repository.list_tasks(goal_ids=normalized_goal_ids):
+        for task in task_repository.list_tasks(task_ids=normalized_task_ids):
             runtime = (
                 runtime_repository.get_runtime(task.id)
                 if runtime_repository is not None
@@ -995,6 +1005,7 @@ class _IndustryCleanupMixin:
             for agent_id in _unique_strings(agent_ids)
             if not is_execution_core_agent_id(agent_id)
         }
+        use_goal_fallback = not normalized_task_ids and not normalized_evidence_ids
 
         proposal_ids: list[str] = []
         for proposal in self._call_learning_lister("list_proposals", limit=None):
@@ -1002,7 +1013,10 @@ class _IndustryCleanupMixin:
             if proposal_id is None:
                 continue
             if (
-                _string(getattr(proposal, "goal_id", None)) in normalized_goal_ids
+                (
+                    use_goal_fallback
+                    and _string(getattr(proposal, "goal_id", None)) in normalized_goal_ids
+                )
                 or _string(getattr(proposal, "task_id", None)) in normalized_task_ids
                 or _string(getattr(proposal, "agent_id", None)) in normalized_agent_ids
                 or _sequence_intersects(
@@ -1020,7 +1034,10 @@ class _IndustryCleanupMixin:
                 continue
             if (
                 _string(getattr(patch, "proposal_id", None)) in normalized_proposal_ids
-                or _string(getattr(patch, "goal_id", None)) in normalized_goal_ids
+                or (
+                    use_goal_fallback
+                    and _string(getattr(patch, "goal_id", None)) in normalized_goal_ids
+                )
                 or _string(getattr(patch, "task_id", None)) in normalized_task_ids
                 or _string(getattr(patch, "agent_id", None)) in normalized_agent_ids
                 or _string(getattr(patch, "source_evidence_id", None))
@@ -1039,7 +1056,10 @@ class _IndustryCleanupMixin:
             if event_id is None:
                 continue
             if (
-                _string(getattr(event, "goal_id", None)) in normalized_goal_ids
+                (
+                    use_goal_fallback
+                    and _string(getattr(event, "goal_id", None)) in normalized_goal_ids
+                )
                 or _string(getattr(event, "task_id", None)) in normalized_task_ids
                 or _string(getattr(event, "agent_id", None)) in normalized_agent_ids
                 or _string(getattr(event, "source_patch_id", None))
@@ -1463,12 +1483,13 @@ class _IndustryCleanupMixin:
         if not callable(lister):
             return []
         proposals: list[dict[str, Any]] = []
+        use_goal_fallback = not task_ids
         for proposal in list(lister()):
             proposal_goal_id = _string(getattr(proposal, "goal_id", None))
             proposal_task_id = _string(getattr(proposal, "task_id", None))
             proposal_agent_id = _string(getattr(proposal, "agent_id", None))
             if (
-                proposal_goal_id in goal_ids
+                (use_goal_fallback and proposal_goal_id in goal_ids)
                 or proposal_task_id in task_ids
                 or proposal_agent_id in agent_ids
             ):

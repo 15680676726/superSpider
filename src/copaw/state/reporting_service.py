@@ -1603,11 +1603,11 @@ class StateReportingService:
         goal_id = getattr(item, "goal_id", None)
         task_id = getattr(item, "task_id", None)
         agent_id = getattr(item, "agent_id", None)
-        if goal_id and goal_id in goal_ids:
-            return True
         if task_id and task_id in task_ids:
             return True
         if agent_id and agent_id in agent_ids:
+            return True
+        if goal_id and goal_id in goal_ids and not task_ids:
             return True
         return False
 

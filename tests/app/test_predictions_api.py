@@ -798,6 +798,53 @@ def test_prediction_service_does_not_fallback_to_goal_id_queries_when_industry_t
     assert "goal_ids" not in created["case"]["input_payload"]
 
 
+def test_prediction_service_prefers_agent_task_truth_before_goal_fallback(
+    tmp_path,
+) -> None:
+    app = _build_predictions_app(tmp_path)
+    app.state.agent_profile_override_repository.upsert_override(
+        AgentProfileOverrideRecord(
+            agent_id="industry-solution-lead-demo",
+            name="Solution Lead",
+            role_name="Solution Lead",
+            agent_class="business",
+            status="active",
+            industry_instance_id="industry-demo",
+            industry_role_id="solution-lead",
+        ),
+    )
+    app.state.task_repository.upsert_task(
+        TaskRecord(
+            id="task-agent-anchor",
+            title="Agent runtime blocker",
+            summary="Industry agent task should be enough to build prediction task scope.",
+            task_type="analysis",
+            status="running",
+            industry_instance_id=None,
+            owner_agent_id="industry-solution-lead-demo",
+        ),
+    )
+    client = TestClient(app)
+    created = _create_prediction_case(client)
+    case = PredictionCaseRecord.model_validate(created["case"])
+
+    original_list_tasks = app.state.task_repository.list_tasks
+
+    def _guarded_list_tasks(*args, **kwargs):
+        if kwargs.get("goal_ids"):
+            raise AssertionError(
+                "prediction task collection should prefer agent task truth before goal_ids fallback",
+            )
+        return original_list_tasks(*args, **kwargs)
+
+    app.state.task_repository.list_tasks = _guarded_list_tasks
+
+    facts = app.state.prediction_service._collect_facts(case)
+
+    assert facts.tasks
+    assert any(task.id == "task-agent-anchor" for task in facts.tasks)
+
+
 def test_prediction_cycle_case_deduplicates_same_operating_fingerprint(tmp_path) -> None:
     app = _build_predictions_app(tmp_path)
     service = app.state.prediction_service
@@ -1696,7 +1743,11 @@ def test_prediction_remote_skill_trial_and_retirement_loop(
     detail = client.get(f"/predictions/{case_id}")
     assert detail.status_code == 200
     detail_payload = detail.json()
-    optimization_case = detail_payload["optimization_cases"][0]
+    optimization_case = next(
+        item
+        for item in detail_payload["optimization_cases"]
+        if item["gap_kind"] == "underperforming_capability"
+    )
     refreshed = next(
         item
         for item in detail_payload["recommendations"]

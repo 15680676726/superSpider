@@ -110,6 +110,42 @@ def _workflow_linked_resource_ids(
     )
 
 
+def _workflow_goal_ids_by_step(
+    run: WorkflowRunRecord,
+    *,
+    goal_override_repository: SqliteGoalOverrideRepository | None,
+) -> dict[str, list[str]]:
+    ids_by_step: dict[str, list[str]] = {}
+    for seed in _workflow_step_execution_seed(run):
+        step_id = _string(seed.get("step_id"))
+        if step_id is None:
+            continue
+        legacy_ids = [
+            str(item)
+            for item in list(seed.get("linked_goal_ids") or [])
+            if str(item).strip()
+        ]
+        if legacy_ids:
+            ids_by_step[step_id] = _unique_strings(legacy_ids)
+    if goal_override_repository is None:
+        return ids_by_step
+    list_overrides = getattr(goal_override_repository, "list_overrides", None)
+    if not callable(list_overrides):
+        return ids_by_step
+    for override in list_overrides() or []:
+        goal_id = _string(getattr(override, "goal_id", None))
+        compiler_context = dict(getattr(override, "compiler_context", None) or {})
+        workflow_run_id = _string(compiler_context.get("workflow_run_id"))
+        workflow_step_id = _string(compiler_context.get("workflow_step_id"))
+        if workflow_run_id != run.run_id or workflow_step_id is None or goal_id is None:
+            continue
+        ids_by_step[workflow_step_id] = _unique_strings(
+            ids_by_step.get(workflow_step_id, []),
+            [goal_id],
+        )
+    return ids_by_step
+
+
 def _workflow_step_schedule_id(
     run: WorkflowRunRecord,
     *,
@@ -124,7 +160,8 @@ def _workflow_schedule_ids_for_preview(
     run: WorkflowRunRecord,
     preview: WorkflowTemplatePreview,
 ) -> list[str]:
-    derived_ids = [
+    return _unique_strings(
+        [
         _workflow_step_schedule_id(
             run,
             step_id=step.step_id,
@@ -132,10 +169,7 @@ def _workflow_schedule_ids_for_preview(
         )
         for step in preview.steps
         if step.kind == "schedule"
-    ]
-    return _unique_strings(
-        derived_ids,
-        _workflow_linked_resource_ids(run, key="linked_schedule_ids"),
+        ],
     )
 
 

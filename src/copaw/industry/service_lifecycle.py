@@ -4355,6 +4355,7 @@ class _IndustryLifecycleMixin:
         agent_ids = self._resolve_instance_agent_ids(record)
         thread_ids = self._resolve_instance_thread_ids(record.instance_id)
         task_ids = self._resolve_instance_task_ids(
+            instance_id=record.instance_id,
             goal_ids=goal_ids,
             agent_ids=agent_ids,
         )
@@ -4389,7 +4390,7 @@ class _IndustryLifecycleMixin:
             learning_deletion_plan.acquisition_proposal_ids,
         )
         await self._cancel_instance_tasks(
-            goal_ids=goal_ids,
+            task_ids=task_ids,
             reason=f"Industry instance '{record.instance_id}' was deleted.",
         )
         deleted_counts = {
