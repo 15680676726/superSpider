@@ -631,6 +631,77 @@ def test_fill_form_fails_when_requested_ref_is_missing(monkeypatch) -> None:
     assert "missing-ref" in payload["error"]
 
 
+def test_fill_form_supports_selector_fields_without_snapshot_refs(monkeypatch) -> None:
+    class _FakeLocator:
+        def __init__(self) -> None:
+            self.value = ""
+
+        @property
+        def first(self):
+            return self
+
+        async def fill(self, value: str) -> None:
+            self.value = value
+
+        async def input_value(self) -> str:
+            return self.value
+
+    class _FakePage:
+        def __init__(self) -> None:
+            self.locators = {
+                "#name": _FakeLocator(),
+                "#notes": _FakeLocator(),
+            }
+
+        def locator(self, selector: str):
+            return self.locators[selector]
+
+    page = _FakePage()
+    monkeypatch.setattr(
+        browser_control_actions_extended,
+        "_get_page",
+        lambda page_id, session_id="default": page,
+    )
+    monkeypatch.setattr(
+        browser_control_actions_extended,
+        "_get_refs",
+        lambda page_id, session_id="default": {},
+    )
+    monkeypatch.setattr(
+        browser_control_actions_extended,
+        "_get_root",
+        lambda page_obj, page_id, frame_selector="": page_obj,
+    )
+    monkeypatch.setattr(
+        browser_control_actions_extended,
+        "_session_bucket",
+        lambda key, session_id="default", create=False: {},
+    )
+    monkeypatch.setattr(
+        browser_control_actions_extended,
+        "_touch_activity",
+        lambda session_id="default": None,
+    )
+
+    response = asyncio.run(
+        browser_control_actions_extended._action_fill_form(
+            "page-form",
+            json.dumps(
+                [
+                    {"selector": "#name", "value": "Carrier Runtime"},
+                    {"selector": "#notes", "value": "fill-form-ok"},
+                ]
+            ),
+            "default",
+        ),
+    )
+
+    payload = _response_payload(response)
+    assert payload["ok"] is True
+    assert payload["verification"]["verified"] is True
+    assert payload["verification"]["verified_fields"] == ["#name", "#notes"]
+
+
 def test_tabs_select_rejects_unknown_target(monkeypatch) -> None:
     monkeypatch.setattr(
         browser_control_actions_extended,

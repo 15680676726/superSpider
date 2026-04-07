@@ -276,6 +276,69 @@ def test_type_text_and_press_keys_dispatch_input_events() -> None:
     assert user32.calls == [4, 4]
 
 
+def test_press_keys_holds_explicit_modifiers_during_chord() -> None:
+    class _CapturingUser32(_FakeUser32):
+        def __init__(self, gui: _FakeWin32GUI | None = None) -> None:
+            super().__init__(gui)
+            self.events: list[tuple[int, int]] = []
+
+        def SendInput(self, count: int, array, _size: int) -> int:
+            self.calls.append(count)
+            for index in range(count):
+                key_input = array[index].union.ki
+                self.events.append((int(key_input.wVk), int(key_input.dwFlags)))
+            return count
+
+    gui = _FakeWin32GUI()
+    api = _FakeWin32API()
+    user32 = _CapturingUser32(gui)
+    host = WindowsDesktopHost(
+        platform_name="win32",
+        win32gui_module=gui,
+        win32process_module=_FakeWin32Process(),
+        win32api_module=api,
+        win32con_module=SimpleNamespace(
+            MOUSEEVENTF_LEFTDOWN=2,
+            MOUSEEVENTF_LEFTUP=4,
+            MOUSEEVENTF_RIGHTDOWN=8,
+            MOUSEEVENTF_RIGHTUP=16,
+            SW_RESTORE=9,
+            SW_SHOW=5,
+            WM_CLOSE=16,
+            VK_MENU=18,
+            VK_BACK=8,
+            VK_CONTROL=17,
+            VK_DELETE=46,
+            VK_DOWN=40,
+            VK_END=35,
+            VK_ESCAPE=27,
+            VK_HOME=36,
+            VK_LEFT=37,
+            VK_LWIN=91,
+            VK_NEXT=34,
+            VK_PRIOR=33,
+            VK_RETURN=13,
+            VK_RIGHT=39,
+            VK_SHIFT=16,
+            VK_SPACE=32,
+            VK_TAB=9,
+            VK_UP=38,
+        ),
+        user32=user32,
+        kernel32=_FakeKernel32(),
+    )
+
+    result = host.press_keys(keys="Ctrl+S", selector=WindowSelector(title="Notepad"))
+
+    assert result["success"] is True
+    assert user32.events == [
+        (17, 0),
+        (83, 0),
+        (83, 2),
+        (17, 2),
+    ]
+
+
 def test_poll_operator_abort_signal_publishes_abort_request() -> None:
     gui = _FakeWin32GUI()
     api = _FakeWin32API()

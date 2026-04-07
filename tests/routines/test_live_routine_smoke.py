@@ -780,6 +780,64 @@ def _run_live_browser_case(
     not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
     reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
 )
+def test_live_browser_routine_fill_form_with_selectors_smoke(tmp_path) -> None:
+    screenshot_path = tmp_path / "browser-routine-fill-form-selectors.png"
+    html_path = tmp_path / "routine-fill-form-selectors.html"
+    html_path.write_text(
+        textwrap.dedent(
+            """
+            <!doctype html>
+            <html lang="en">
+              <head>
+                <meta charset="utf-8" />
+                <title>Fill Form Selector Smoke</title>
+              </head>
+              <body>
+                <label for="name">Name</label>
+                <input id="name" name="name" type="text" />
+                <label for="notes">Notes</label>
+                <textarea id="notes" name="notes"></textarea>
+                <p id="status">Ready</p>
+              </body>
+            </html>
+            """,
+        ),
+        encoding="utf-8",
+    )
+    payload = _run_live_browser_case(
+        tmp_path,
+        routine_key="live-browser-fill-form-selectors-smoke",
+        name="Live Browser Fill Form Selectors Smoke",
+        summary="Open a local page, fill fields by selector without snapshot refs, and capture a screenshot.",
+        session_id="live-browser-fill-form-selectors",
+        action_contract=[
+            {"action": "open", "page_id": "page-1", "url": html_path.resolve().as_uri()},
+            {
+                "action": "fill_form",
+                "page_id": "page-1",
+                "fields": [
+                    {"selector": "#name", "value": "Carrier Runtime"},
+                    {"selector": "#notes", "value": "selector-fill-ok"},
+                ],
+            },
+            {"action": "screenshot", "page_id": "page-1", "path": str(screenshot_path)},
+        ],
+        evidence_expectations=["open", "fill_form", "screenshot"],
+    )
+    run = payload["runs"][0]
+    assert run["status"] == "completed"
+    assert run["deterministic_result"] == "replay-complete"
+    assert all(run["screenshot_exists"].values())
+    assert run["actions"] == ["open", "fill_form", "screenshot"]
+    verification_summary = dict(run["verification_summary"] or {})
+    assert verification_summary.get("chain_status") == "verified"
+    assert verification_summary.get("verified_steps") == 3
+
+
+@pytest.mark.skipif(
+    not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
+    reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
+)
 def test_live_browser_routine_replay_round_trip(tmp_path) -> None:
     screenshot_path = tmp_path / "browser-routine-smoke.png"
     payload = _run_live_browser_case(
@@ -1325,6 +1383,98 @@ def test_live_browser_routine_authenticated_continuation_cross_tab_save_reopen_s
     assert len(anchors) == 9
     assert anchors[3].get("action") == "tabs"
     assert anchors[-1].get("artifact_path") == str(screenshot_path)
+
+
+@pytest.mark.skipif(
+    not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
+    reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
+)
+@pytest.mark.asyncio
+async def test_live_desktop_routine_launch_edit_save_round_trip(tmp_path) -> None:
+    if sys.platform != "win32":
+        pytest.skip("Desktop live routine smoke requires a Windows host.")
+
+    harness = _build_live_routine_harness(tmp_path)
+    target_path = tmp_path / "live-desktop-routine-launch-note.txt"
+    target_path.write_text("alpha", encoding="utf-8")
+    selector = {"title_contains": target_path.name}
+    try:
+        routine = harness.service.create_routine(
+            RoutineCreateRequest(
+                routine_key="live-desktop-routine-launch-smoke",
+                name="Live Desktop Routine Launch Smoke",
+                summary="Launch Notepad on a unique file, click into the window, replace the content, save, and close through the V6 desktop routine path.",
+                engine_kind="desktop",
+                environment_kind="desktop",
+                action_contract=[
+                    {
+                        "action": "launch_application",
+                        "executable": "notepad.exe",
+                        "args": [str(target_path)],
+                    },
+                    {
+                        "action": "wait_for_window",
+                        "selector": selector,
+                        "timeout_seconds": 10.0,
+                        "include_hidden": True,
+                    },
+                    {
+                        "action": "click",
+                        "selector": selector,
+                        "relative_to_window": True,
+                        "x": 120,
+                        "y": 120,
+                    },
+                    {
+                        "action": "press_keys",
+                        "selector": selector,
+                        "keys": "Ctrl+A",
+                    },
+                    {
+                        "action": "type_text",
+                        "selector": selector,
+                        "text": "desktop runtime verified",
+                    },
+                    {
+                        "action": "press_keys",
+                        "selector": selector,
+                        "keys": "Ctrl+S",
+                    },
+                    {
+                        "action": "close_window",
+                        "selector": selector,
+                    },
+                ],
+            ),
+        )
+
+        response = await harness.service.replay_routine(
+            routine.id,
+            RoutineReplayRequest(),
+        )
+
+        assert response.run.status == "completed"
+        assert response.run.deterministic_result == "desktop-replay-complete"
+        for _ in range(10):
+            if target_path.read_text(encoding="utf-8") == "desktop runtime verified":
+                break
+            await asyncio.sleep(0.5)
+        assert target_path.read_text(encoding="utf-8") == "desktop runtime verified"
+        verification_summary = dict(response.run.metadata.get("verification_summary") or {})
+        assert verification_summary.get("chain_status") == "verified"
+        assert verification_summary.get("verified_steps") == 7
+        records = harness.ledger.list_by_task(f"routine-run:{response.run.id}")
+        assert [record.metadata.get("action") for record in records] == [
+            "launch_application",
+            "wait_for_window",
+            "click",
+            "press_keys",
+            "type_text",
+            "press_keys",
+            "close_window",
+        ]
+    finally:
+        harness.ledger.close()
 
 
 @pytest.mark.skipif(

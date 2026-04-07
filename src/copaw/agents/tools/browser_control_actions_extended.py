@@ -567,16 +567,29 @@ async def _action_fill_form(
     # Use last snapshot's frame so fill_form works after iframe snapshot
     frame = _session_bucket("refs_frame", session_id).get(page_id, "")
     try:
+        root = _get_root(page, page_id, frame)
         verified_fields: list[str] = []
         missing_refs: list[str] = []
         verification_failures: list[dict[str, Any]] = []
         for index, f in enumerate(fields):
             ref = (f.get("ref") or "").strip()
-            field_label = ref or f"field-{index + 1}"
-            if not ref or ref not in refs:
+            selector = (f.get("selector") or "").strip()
+            field_label = ref or selector or f"field-{index + 1}"
+            locator = None
+            if ref:
+                if ref not in refs:
+                    if not selector:
+                        missing_refs.append(field_label)
+                        continue
+                else:
+                    locator = _get_locator_by_ref(page, page_id, ref, frame, session_id)
+            elif selector:
+                locator = root.locator(selector).first
+            else:
                 missing_refs.append(field_label)
                 continue
-            locator = _get_locator_by_ref(page, page_id, ref, frame, session_id)
+            if locator is None and selector:
+                locator = root.locator(selector).first
             if locator is None:
                 verification_failures.append(
                     {

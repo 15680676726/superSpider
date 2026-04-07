@@ -971,18 +971,20 @@ class WindowsDesktopHost:
         self._dispatch_inputs(inputs)
 
     def _send_key_chord(self, tokens: Sequence[str]) -> None:
-        combos: list[tuple[list[int], int]] = []
+        inputs: list[INPUT] = []
+        pending_modifiers: list[int] = []
         for token in tokens:
             modifiers, virtual_key = self._vk_for_token(token)
-            combos.append((modifiers, virtual_key))
-
-        pressed_modifiers: list[int] = []
-        inputs: list[INPUT] = []
-        for modifiers, virtual_key in combos:
-            for modifier in modifiers:
-                if modifier not in pressed_modifiers:
-                    inputs.append(self._keyboard_input(virtual_key=modifier))
-                    pressed_modifiers.append(modifier)
+            normalized = token.strip().upper()
+            if normalized in {"CTRL", "SHIFT", "ALT", "WIN"} and not modifiers:
+                pending_modifiers.append(virtual_key)
+                continue
+            chord_modifiers: list[int] = []
+            for modifier in [*pending_modifiers, *modifiers]:
+                if modifier not in chord_modifiers:
+                    chord_modifiers.append(modifier)
+            for modifier in chord_modifiers:
+                inputs.append(self._keyboard_input(virtual_key=modifier))
             inputs.append(self._keyboard_input(virtual_key=virtual_key))
             inputs.append(
                 self._keyboard_input(
@@ -990,7 +992,18 @@ class WindowsDesktopHost:
                     flags=KEYEVENTF_KEYUP,
                 ),
             )
-        for modifier in reversed(pressed_modifiers):
+            for modifier in reversed(chord_modifiers):
+                inputs.append(
+                    self._keyboard_input(
+                        virtual_key=modifier,
+                        flags=KEYEVENTF_KEYUP,
+                    ),
+                )
+            pending_modifiers = []
+        for modifier in pending_modifiers:
+            inputs.append(
+                self._keyboard_input(virtual_key=modifier),
+            )
             inputs.append(
                 self._keyboard_input(
                     virtual_key=modifier,
