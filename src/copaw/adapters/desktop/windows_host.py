@@ -1037,6 +1037,10 @@ class WindowsDesktopHost:
             "UP": self._win32con.VK_UP,
             "WIN": self._win32con.VK_LWIN,
         }
+        for function_key_index in range(1, 13):
+            virtual_key = getattr(self._win32con, f"VK_F{function_key_index}", None)
+            if virtual_key is not None:
+                key_map[f"F{function_key_index}"] = int(virtual_key)
         upper = normalized.upper()
         if upper in key_map:
             return [], key_map[upper]

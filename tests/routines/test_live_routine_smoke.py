@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import textwrap
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -1395,7 +1396,8 @@ async def test_live_desktop_routine_launch_edit_save_round_trip(tmp_path) -> Non
         pytest.skip("Desktop live routine smoke requires a Windows host.")
 
     harness = _build_live_routine_harness(tmp_path)
-    target_path = tmp_path / "live-desktop-routine-launch-note.txt"
+    unique_name = f"live-desktop-routine-launch-note-{uuid.uuid4().hex[:8]}.txt"
+    target_path = tmp_path / unique_name
     target_path.write_text("alpha", encoding="utf-8")
     selector = {"title_contains": target_path.name}
     try:
