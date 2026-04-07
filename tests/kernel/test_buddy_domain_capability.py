@@ -5,11 +5,12 @@ from types import SimpleNamespace
 
 from copaw.kernel.buddy_domain_capability import (
     BuddyDomainCapabilitySignals,
-    capability_stage_from_score,
     derive_capability_metrics,
     derive_buddy_domain_key,
     preview_domain_transition,
-    progress_to_next_capability_stage,
+    progress_to_next_stage,
+    resolve_stage_transition,
+    stage_from_points,
 )
 
 
@@ -33,26 +34,146 @@ def _record(
     )
 
 
-def test_capability_stage_from_score_uses_five_domain_bands() -> None:
-    assert capability_stage_from_score(0) == "seed"
-    assert capability_stage_from_score(19) == "seed"
-    assert capability_stage_from_score(20) == "bonded"
-    assert capability_stage_from_score(39) == "bonded"
-    assert capability_stage_from_score(40) == "capable"
-    assert capability_stage_from_score(59) == "capable"
-    assert capability_stage_from_score(60) == "seasoned"
-    assert capability_stage_from_score(79) == "seasoned"
-    assert capability_stage_from_score(80) == "signature"
-    assert capability_stage_from_score(100) == "signature"
+def test_stage_from_points_uses_five_domain_bands() -> None:
+    assert stage_from_points(0) == "seed"
+    assert stage_from_points(19) == "seed"
+    assert stage_from_points(20) == "bonded"
+    assert stage_from_points(39) == "bonded"
+    assert stage_from_points(40) == "capable"
+    assert stage_from_points(99) == "capable"
+    assert stage_from_points(100) == "seasoned"
+    assert stage_from_points(199) == "seasoned"
+    assert stage_from_points(200) == "signature"
+    assert stage_from_points(500) == "signature"
 
 
-def test_progress_to_next_capability_stage_tracks_current_band() -> None:
-    assert progress_to_next_capability_stage(0) == 0
-    assert progress_to_next_capability_stage(10) == 50
-    assert progress_to_next_capability_stage(20) == 0
-    assert progress_to_next_capability_stage(50) == 50
-    assert progress_to_next_capability_stage(79) == 95
-    assert progress_to_next_capability_stage(80) == 100
+def test_progress_to_next_stage_tracks_current_points_band() -> None:
+    assert progress_to_next_stage(0) == 0
+    assert progress_to_next_stage(10) == 50
+    assert progress_to_next_stage(20) == 0
+    assert progress_to_next_stage(70) == 50
+    assert progress_to_next_stage(150) == 50
+    assert progress_to_next_stage(200) == 100
+
+
+def test_capable_stage_requires_at_least_one_real_closure() -> None:
+    assert (
+        resolve_stage_transition(
+            previous_stage="bonded",
+            points=40,
+            settled_closure_count=0,
+            independent_outcome_count=0,
+            recent_completion_rate=0,
+            recent_execution_error_rate=0,
+            distinct_settled_cycle_count=0,
+        )
+        == "bonded"
+    )
+    assert (
+        resolve_stage_transition(
+            previous_stage="bonded",
+            points=40,
+            settled_closure_count=1,
+            independent_outcome_count=0,
+            recent_completion_rate=0,
+            recent_execution_error_rate=0,
+            distinct_settled_cycle_count=0,
+        )
+        == "capable"
+    )
+
+
+def test_seasoned_stage_requires_three_distinct_settled_cycles() -> None:
+    assert (
+        resolve_stage_transition(
+            previous_stage="capable",
+            points=100,
+            settled_closure_count=20,
+            independent_outcome_count=0,
+            recent_completion_rate=0.9,
+            recent_execution_error_rate=0.02,
+            distinct_settled_cycle_count=2,
+        )
+        == "capable"
+    )
+    assert (
+        resolve_stage_transition(
+            previous_stage="capable",
+            points=100,
+            settled_closure_count=20,
+            independent_outcome_count=0,
+            recent_completion_rate=0.9,
+            recent_execution_error_rate=0.02,
+            distinct_settled_cycle_count=3,
+        )
+        == "seasoned"
+    )
+
+
+def test_signature_stage_requires_points_and_reliability_gates() -> None:
+    assert (
+        resolve_stage_transition(
+            previous_stage="seasoned",
+            points=200,
+            settled_closure_count=100,
+            independent_outcome_count=9,
+            recent_completion_rate=0.95,
+            recent_execution_error_rate=0.02,
+            distinct_settled_cycle_count=5,
+        )
+        == "seasoned"
+    )
+    assert (
+        resolve_stage_transition(
+            previous_stage="seasoned",
+            points=200,
+            settled_closure_count=100,
+            independent_outcome_count=10,
+            recent_completion_rate=0.91,
+            recent_execution_error_rate=0.02,
+            distinct_settled_cycle_count=5,
+        )
+        == "seasoned"
+    )
+    assert (
+        resolve_stage_transition(
+            previous_stage="seasoned",
+            points=200,
+            settled_closure_count=100,
+            independent_outcome_count=10,
+            recent_completion_rate=0.95,
+            recent_execution_error_rate=0.04,
+            distinct_settled_cycle_count=5,
+        )
+        == "seasoned"
+    )
+    assert (
+        resolve_stage_transition(
+            previous_stage="seasoned",
+            points=200,
+            settled_closure_count=100,
+            independent_outcome_count=10,
+            recent_completion_rate=0.95,
+            recent_execution_error_rate=0.03,
+            distinct_settled_cycle_count=5,
+        )
+        == "signature"
+    )
+
+
+def test_demotion_can_only_drop_one_stage() -> None:
+    assert (
+        resolve_stage_transition(
+            previous_stage="signature",
+            points=10,
+            settled_closure_count=0,
+            independent_outcome_count=0,
+            recent_completion_rate=0.1,
+            recent_execution_error_rate=0.9,
+            distinct_settled_cycle_count=0,
+        )
+        == "seasoned"
+    )
 
 
 def test_derive_capability_metrics_caps_each_component_and_maps_stage() -> None:
