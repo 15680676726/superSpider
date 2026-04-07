@@ -37,6 +37,7 @@ export function BuddyPanel({
     ? resolveBuddyEvolutionView({
         evolutionStage: surface.growth.evolution_stage,
         currentForm: surface.presentation.current_form,
+        capabilityScore: surface.growth.capability_score,
         companionExperience: surface.growth.companion_experience,
         rarity: surface.presentation.rarity,
       })
@@ -88,7 +89,7 @@ export function BuddyPanel({
                 {" 的伙伴显化"}
               </Paragraph>
               <Paragraph style={{ marginBottom: 0 }}>
-                当前形态：{snapshot.stageLabel}
+                当前阶段：{snapshot.stageLabel}
                 {" / "}
                 {evolution?.rarityLabel ?? surface.presentation.rarity}
               </Paragraph>
@@ -128,23 +129,31 @@ export function BuddyPanel({
                   <Statistic title="等级" value={surface.growth.growth_level} />
                 </Col>
                 <Col span={12}>
-                  <Statistic title="陪伴经验" value={surface.growth.companion_experience} />
+                  <Statistic title="能力分" value={surface.growth.capability_score ?? 0} />
                 </Col>
               </Row>
+              <Paragraph style={{ marginTop: 12, marginBottom: 0 }}>
+                当前领域：{surface.growth.domain_label || "未确认"}
+              </Paragraph>
               <Progress percent={surface.growth.progress_to_next_stage} style={{ marginTop: 12 }} />
             </Card>
           </Col>
           <Col span={24}>
-            <Card size="small" title="能力">
+            <Card size="small" title="领域能力">
               <Row gutter={12}>
-                <Col span={8}>
-                  <Statistic title="知识值" value={surface.growth.knowledge_value} />
+                <Col span={12}>
+                  <Statistic title="策略分" value={surface.growth.strategy_score ?? 0} />
                 </Col>
-                <Col span={8}>
-                  <Statistic title="技能值" value={surface.growth.skill_value} />
+                <Col span={12}>
+                  <Statistic title="执行分" value={surface.growth.execution_score ?? 0} />
                 </Col>
-                <Col span={8}>
-                  <Statistic title="沟通次数" value={surface.growth.communication_count} />
+              </Row>
+              <Row gutter={12} style={{ marginTop: 12 }}>
+                <Col span={12}>
+                  <Statistic title="证据分" value={surface.growth.evidence_score ?? 0} />
+                </Col>
+                <Col span={12}>
+                  <Statistic title="稳定度" value={surface.growth.stability_score ?? 0} />
                 </Col>
               </Row>
             </Card>
@@ -174,9 +183,10 @@ export function BuddyPanel({
             <Tag>{`帽子 ${avatar.hatLabel}`}</Tag>
             <Tag>{`陪伴状态 ${snapshot.presenceLabel}`}</Tag>
             <Tag color={evolution?.accentTone ?? "purple"}>
-              {`陪跑完成 ${surface.growth.completed_support_runs}`}
+              {`领域 ${surface.growth.domain_label || "未确认"}`}
             </Tag>
-            <Tag color="green">{`愉快度 ${surface.growth.pleasant_interaction_score}`}</Tag>
+            <Tag color="green">{`能力分 ${surface.growth.capability_score ?? 0}`}</Tag>
+            
           </Col>
         </Row>
       )}

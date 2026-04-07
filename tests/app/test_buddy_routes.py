@@ -8,6 +8,7 @@ from copaw.app.routers.buddy_routes import router as buddy_router
 from copaw.kernel.buddy_onboarding_service import BuddyOnboardingService
 from copaw.state import SQLiteStateStore
 from copaw.state.repositories_buddy import (
+    SqliteBuddyDomainCapabilityRepository,
     SqliteBuddyOnboardingSessionRepository,
     SqliteCompanionRelationshipRepository,
     SqliteGrowthTargetRepository,
@@ -21,6 +22,7 @@ def _build_client(tmp_path) -> TestClient:
         profile_repository=SqliteHumanProfileRepository(store),
         growth_target_repository=SqliteGrowthTargetRepository(store),
         relationship_repository=SqliteCompanionRelationshipRepository(store),
+        domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=SqliteBuddyOnboardingSessionRepository(store),
     )
     app = FastAPI()
@@ -108,15 +110,27 @@ def test_confirm_primary_direction_and_name_buddy(tmp_path) -> None:
     )
     recommended = clarify.json()["recommended_direction"]
 
-    confirm = client.post(
-        "/buddy/onboarding/confirm-direction",
+    preview = client.post(
+        "/buddy/onboarding/direction-transition-preview",
         json={
             "session_id": identity["session_id"],
             "selected_direction": recommended,
         },
     )
+    assert preview.status_code == 200
+    assert preview.json()["recommended_action"] == "start-new"
+
+    confirm = client.post(
+        "/buddy/onboarding/confirm-direction",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": recommended,
+            "capability_action": "start-new",
+        },
+    )
     assert confirm.status_code == 200
     assert confirm.json()["growth_target"]["primary_direction"] == recommended
+    assert confirm.json()["domain_capability"]["status"] == "active"
 
     naming = client.post(
         "/buddy/name",
@@ -127,3 +141,68 @@ def test_confirm_primary_direction_and_name_buddy(tmp_path) -> None:
     )
     assert naming.status_code == 200
     assert naming.json()["buddy_name"] == "Nova"
+
+
+def test_direction_transition_preview_suggests_keep_active_for_same_domain(tmp_path) -> None:
+    client = _build_client(tmp_path)
+    identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Mina",
+            "profession": "Writer",
+            "current_stage": "restart",
+            "interests": ["writing", "content"],
+            "strengths": ["consistency"],
+            "constraints": ["money"],
+            "goal_intention": "Build a creator direction.",
+        },
+    ).json()
+    clarify = client.post(
+        "/buddy/onboarding/clarify",
+        json={
+            "session_id": identity["session_id"],
+            "answer": "I want a creator direction with leverage and long-term proof of work.",
+            "existing_question_count": 9,
+        },
+    ).json()
+    client.post(
+        "/buddy/onboarding/confirm-direction",
+        json={
+            "session_id": identity["session_id"],
+            "selected_direction": clarify["recommended_direction"],
+            "capability_action": "start-new",
+        },
+    )
+
+    resumed_identity = client.post(
+        "/buddy/onboarding/identity",
+        json={
+            "display_name": "Mina",
+            "profession": "Writer",
+            "current_stage": "restart",
+            "interests": ["writing", "content"],
+            "strengths": ["consistency"],
+            "constraints": ["money"],
+            "goal_intention": "Scale the same creator direction.",
+        },
+    ).json()
+    resumed_clarify = client.post(
+        "/buddy/onboarding/clarify",
+        json={
+            "session_id": resumed_identity["session_id"],
+            "answer": "I want to stay on the same creator direction and push it further.",
+            "existing_question_count": 9,
+        },
+    ).json()
+
+    preview = client.post(
+        "/buddy/onboarding/direction-transition-preview",
+        json={
+            "session_id": resumed_identity["session_id"],
+            "selected_direction": resumed_clarify["recommended_direction"],
+        },
+    )
+
+    assert preview.status_code == 200
+    assert preview.json()["suggestion_kind"] == "same-domain"
+    assert preview.json()["recommended_action"] == "keep-active"

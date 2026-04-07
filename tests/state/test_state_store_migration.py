@@ -123,6 +123,7 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
     store.initialize()
 
     with sqlite3.connect(path) as conn:
+        assert "buddy_domain_capabilities" in _table_names(conn)
         assert "work_contexts" in _table_names(conn)
         assert "human_assist_tasks" in _table_names(conn)
         assert "sop_adapter_templates" not in _table_names(conn)
@@ -166,6 +167,15 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
             "primary_thread_id",
             "parent_work_context_id",
         }.issubset(_column_names(conn, "work_contexts"))
+        assert {
+            "domain_id",
+            "profile_id",
+            "domain_key",
+            "domain_label",
+            "status",
+            "capability_score",
+            "evolution_stage",
+        }.issubset(_column_names(conn, "buddy_domain_capabilities"))
         assert {
             "chat_thread_id",
             "acceptance_mode",

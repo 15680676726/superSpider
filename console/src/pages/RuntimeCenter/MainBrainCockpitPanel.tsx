@@ -972,7 +972,9 @@ export default function MainBrainCockpitPanel({
                     <div className={styles.briefList}>
                       <div className={styles.briefItem}>
                         {localizeRuntimeText(
-                          `${presentBuddyStageLabel(summary.evolution_stage)} / 心情 ${presentBuddyMoodLabel(summary.mood_state)}`,
+                          `${presentBuddyStageLabel(summary.evolution_stage)} / ${
+                            summary.domain_label ? `领域 ${summary.domain_label} / ` : ""
+                          }能力分 ${summary.capability_score ?? 0} / 心情 ${presentBuddyMoodLabel(summary.mood_state)}`,
                         )}
                       </div>
                       <div className={styles.briefItem}>

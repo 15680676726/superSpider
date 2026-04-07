@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { BuddyPanel } from "./BuddyPanel";
 
 describe("BuddyPanel", () => {
-  it("renders relationship, growth, and buddy goal/task summaries from the buddy surface", () => {
+  it("renders relationship, domain capability, and buddy goal/task summaries from the buddy surface", () => {
     render(
       <BuddyPanel
         open
@@ -34,9 +34,15 @@ describe("BuddyPanel", () => {
             },
             growth: {
               evolution_stage: "bonded",
+              domain_label: "写作",
               intimacy: 25,
               affinity: 19,
               growth_level: 2,
+              capability_score: 28,
+              strategy_score: 10,
+              execution_score: 9,
+              evidence_score: 5,
+              stability_score: 4,
               companion_experience: 45,
               knowledge_value: 20,
               skill_value: 12,
@@ -52,12 +58,14 @@ describe("BuddyPanel", () => {
 
     expect(screen.getByText("Nova 的伙伴面板")).toBeInTheDocument();
     expect(screen.getByText(/当前陪伴状态：/)).toBeInTheDocument();
+    expect(screen.getByText(/当前阶段：成长期/)).toBeInTheDocument();
     expect(screen.getByText("建立可持续的创作事业与独立成长轨道")).toBeInTheDocument();
     expect(screen.getByText("写出第一篇真正代表自己的案例文章")).toBeInTheDocument();
     expect(screen.getByText("现在先打开文档，写下案例标题和三条核心观点。")).toBeInTheDocument();
     expect(screen.getByText("先接住情绪，再把任务缩成一个最小动作；避免高压催促。")).toBeInTheDocument();
     expect(screen.getByTestId("buddy-panel-avatar-species")).toBeInTheDocument();
     expect(screen.getByTestId("buddy-panel-avatar-rarity")).toBeInTheDocument();
-    expect(screen.getByText(/知识值/)).toBeInTheDocument();
+    expect(screen.getAllByText(/能力分/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/策略分/)).toBeInTheDocument();
   });
 });

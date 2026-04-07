@@ -6,6 +6,7 @@ from copaw.kernel.buddy_projection_service import BuddyProjectionService
 from copaw.state.models import HumanAssistTaskRecord
 from copaw.state import SQLiteStateStore
 from copaw.state.repositories_buddy import (
+    SqliteBuddyDomainCapabilityRepository,
     SqliteBuddyOnboardingSessionRepository,
     SqliteCompanionRelationshipRepository,
     SqliteGrowthTargetRepository,
@@ -18,17 +19,20 @@ def _build_services(tmp_path):
     profile_repository = SqliteHumanProfileRepository(store)
     growth_target_repository = SqliteGrowthTargetRepository(store)
     relationship_repository = SqliteCompanionRelationshipRepository(store)
+    domain_capability_repository = SqliteBuddyDomainCapabilityRepository(store)
     session_repository = SqliteBuddyOnboardingSessionRepository(store)
     onboarding = BuddyOnboardingService(
         profile_repository=profile_repository,
         growth_target_repository=growth_target_repository,
         relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
     )
     projection = BuddyProjectionService(
         profile_repository=profile_repository,
         growth_target_repository=growth_target_repository,
         relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
         current_focus_resolver=lambda profile_id: {
             "profile_id": profile_id,
@@ -59,6 +63,7 @@ def test_buddy_projection_derives_growth_from_formal_truth(tmp_path) -> None:
     onboarding.confirm_primary_direction(
         session_id=identity.session_id,
         selected_direction=clarification.recommended_direction,
+        capability_action="start-new",
     )
     onboarding.name_buddy(session_id=identity.session_id, buddy_name="Nova")
 
@@ -152,6 +157,7 @@ def test_buddy_projection_filters_human_assist_fallback_by_profile(tmp_path) -> 
         profile_repository=_projection._profile_repository,
         growth_target_repository=_projection._growth_target_repository,
         relationship_repository=_projection._relationship_repository,
+        domain_capability_repository=_projection._domain_capability_repository,
         onboarding_session_repository=_projection._onboarding_session_repository,
         human_assist_task_service=_HumanAssistStub(),
         current_focus_resolver=lambda _profile_id: {},
@@ -194,6 +200,7 @@ def test_buddy_projection_prefers_human_assist_task_over_carrier_assignment(tmp_
         profile_repository=_projection._profile_repository,
         growth_target_repository=_projection._growth_target_repository,
         relationship_repository=_projection._relationship_repository,
+        domain_capability_repository=_projection._domain_capability_repository,
         onboarding_session_repository=_projection._onboarding_session_repository,
         human_assist_task_service=_HumanAssistStub(),
         current_focus_resolver=lambda _profile_id: {
@@ -224,6 +231,7 @@ def test_buddy_projection_honestly_degrades_when_runtime_focus_is_missing(tmp_pa
         profile_repository=profile_repository,
         growth_target_repository=growth_target_repository,
         relationship_repository=relationship_repository,
+        domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=session_repository,
     )
     identity = onboarding.submit_identity(
@@ -243,11 +251,13 @@ def test_buddy_projection_honestly_degrades_when_runtime_focus_is_missing(tmp_pa
     onboarding.confirm_primary_direction(
         session_id=identity.session_id,
         selected_direction=clarification.recommended_direction,
+        capability_action="start-new",
     )
     projection = BuddyProjectionService(
         profile_repository=profile_repository,
         growth_target_repository=growth_target_repository,
         relationship_repository=relationship_repository,
+        domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=session_repository,
         current_focus_resolver=lambda _profile_id: {},
     )
@@ -278,6 +288,7 @@ def test_buddy_projection_turns_relationship_memory_into_companion_strategy(tmp_
     onboarding.confirm_primary_direction(
         session_id=identity.session_id,
         selected_direction=clarification.recommended_direction,
+        capability_action="start-new",
     )
     onboarding.name_buddy(session_id=identity.session_id, buddy_name="Nova")
     relationship = projection._relationship_repository.get_relationship(  # pylint: disable=protected-access

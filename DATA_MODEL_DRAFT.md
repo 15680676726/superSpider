@@ -23,6 +23,12 @@
   - single-loop main-brain chat keeps exactly one formal chat/control thread; `/runtime-center/chat/run` streams reply tokens first and same-thread commit sidecar events second, and must not reintroduce `task-chat:*` or a second chat object
   - `main_brain.phase2_commit` is canonical session snapshot state; conversation read surfaces may project it as `meta.main_brain_commit` for same-thread reload, but that projection is not a new top-level runtime object
   - truth-first main-brain scope snapshots are derived caches keyed by `work_context / industry / agent`; media adopt/retain/writeback must dirty-mark the relevant scope and refresh incrementally instead of rebuilding the entire prompt memory every turn
+- `2026-04-07` supplement:
+  - Buddy 的成长阶段正式拆成“关系层”和“领域能力层”两条链路，禁止再把 `CompanionRelationship.companion_experience` 直接投影成 stage
+  - active `BuddyDomainCapabilityRecord` 是 Buddy 当前领域能力的唯一正式对象，承载 `domain_key / domain_label / capability_score / evolution_stage / strategy_score / execution_score / evidence_score / stability_score`
+  - Chat surface、Runtime Center buddy summary 与前端 stage 展示必须统一读取 active `BuddyDomainCapabilityRecord`
+  - `CompanionRelationship` 继续只负责命名、陪伴风格、亲密度、契合度、沟通次数与关系记忆，不再主导 stage
+  - 换目标写链允许 `keep-active / restore-archived / start-new` 三种领域能力切换，旧领域档案归档保留，后续切回可恢复
 
 本文件用于定义 `CoPaw` 理想载体升级中的**正式数据模型草案**。
 
