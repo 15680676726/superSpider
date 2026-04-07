@@ -566,6 +566,7 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
                         else role
                     ),
                     "goal_context": list(goal_context or []),
+                    "providers": ["install-template"],
                 },
             ),
         )

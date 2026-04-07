@@ -11,6 +11,7 @@ from .models_agents_runtime import (
     AutomationLoopRuntimeRecord,
 )
 from .models_buddy import (
+    BuddyDomainCapabilityRecord,
     BuddyGrowthProjection,
     BuddyPresentation,
     CompanionRelationship,
@@ -139,6 +140,7 @@ __all__ = [
     "AgentThreadBindingKind",
     "AgentThreadBindingRecord",
     "AutomationLoopRuntimeRecord",
+    "BuddyDomainCapabilityRecord",
     "BuddyGrowthProjection",
     "BuddyPresentation",
     "CompanionRelationship",

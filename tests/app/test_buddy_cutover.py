@@ -8,6 +8,7 @@ from copaw.kernel.buddy_onboarding_service import BuddyOnboardingService
 from copaw.kernel.buddy_projection_service import BuddyProjectionService
 from copaw.state import SQLiteStateStore
 from copaw.state.repositories_buddy import (
+    SqliteBuddyDomainCapabilityRepository,
     SqliteBuddyOnboardingSessionRepository,
     SqliteCompanionRelationshipRepository,
     SqliteGrowthTargetRepository,
@@ -22,17 +23,20 @@ def _build_client(tmp_path) -> TestClient:
     profile_repository = SqliteHumanProfileRepository(store)
     growth_target_repository = SqliteGrowthTargetRepository(store)
     relationship_repository = SqliteCompanionRelationshipRepository(store)
+    domain_capability_repository = SqliteBuddyDomainCapabilityRepository(store)
     session_repository = SqliteBuddyOnboardingSessionRepository(store)
     onboarding_service = BuddyOnboardingService(
         profile_repository=profile_repository,
         growth_target_repository=growth_target_repository,
         relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
     )
     projection_service = BuddyProjectionService(
         profile_repository=profile_repository,
         growth_target_repository=growth_target_repository,
         relationship_repository=relationship_repository,
+        domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
         current_focus_resolver=lambda _profile_id: {
             "current_task_summary": "Finish today's current task",
@@ -73,6 +77,7 @@ def test_buddy_surface_and_runtime_center_surface_share_same_projection(tmp_path
         json={
             "session_id": identity["session_id"],
             "selected_direction": clarification["recommended_direction"],
+            "capability_action": "start-new",
         },
     )
     client.post(
@@ -92,6 +97,8 @@ def test_buddy_surface_and_runtime_center_surface_share_same_projection(tmp_path
     )
     assert surface["presentation"]["buddy_name"] == "Mochi"
     assert summary["buddy_name"] == "Mochi"
+    assert summary["evolution_stage"] == surface["growth"]["evolution_stage"]
+    assert summary["capability_score"] == surface["growth"]["capability_score"]
     assert summary["current_task_summary"] == "Finish today's current task"
 
 
@@ -130,6 +137,7 @@ def test_buddy_confirm_direction_returns_execution_carrier_for_chat_binding(tmp_
         json={
             "session_id": identity["session_id"],
             "selected_direction": clarification["recommended_direction"],
+            "capability_action": "start-new",
         },
     ).json()
 
@@ -159,12 +167,14 @@ def test_runtime_center_chat_run_preserves_strong_pull_signal_for_buddy_growth(t
         profile_repository=profile_repository,
         growth_target_repository=growth_target_repository,
         relationship_repository=relationship_repository,
+        domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=session_repository,
     )
     projection_service = BuddyProjectionService(
         profile_repository=profile_repository,
         growth_target_repository=growth_target_repository,
         relationship_repository=relationship_repository,
+        domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
         onboarding_session_repository=session_repository,
     )
     app = build_runtime_center_app()

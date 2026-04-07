@@ -40,6 +40,7 @@ BuddyEvolutionStage = Literal[
     "signature",
 ]
 BuddyRarity = Literal["common", "uncommon", "rare", "epic", "signature"]
+BuddyDomainCapabilityStatus = Literal["active", "archived"]
 
 
 class HumanProfile(UpdatedRecord):
@@ -98,6 +99,30 @@ class CompanionRelationship(UpdatedRecord):
         return _normalize_text_list(value)
 
 
+class BuddyDomainCapabilityRecord(UpdatedRecord):
+    """Persisted Buddy capability progress for one domain/direction."""
+
+    domain_id: str = Field(default_factory=_new_record_id, min_length=1)
+    profile_id: str = Field(..., min_length=1)
+    domain_key: str = Field(..., min_length=1)
+    domain_label: str = Field(..., min_length=1)
+    status: BuddyDomainCapabilityStatus = "active"
+    strategy_score: int = Field(default=0, ge=0, le=25)
+    execution_score: int = Field(default=0, ge=0, le=35)
+    evidence_score: int = Field(default=0, ge=0, le=20)
+    stability_score: int = Field(default=0, ge=0, le=20)
+    capability_score: int = Field(default=0, ge=0, le=100)
+    evolution_stage: BuddyEvolutionStage = "seed"
+    knowledge_value: int = Field(default=0, ge=0)
+    skill_value: int = Field(default=0, ge=0)
+    completed_support_runs: int = Field(default=0, ge=0)
+    completed_assisted_closures: int = Field(default=0, ge=0)
+    evidence_count: int = Field(default=0, ge=0)
+    report_count: int = Field(default=0, ge=0)
+    last_activated_at: str | None = None
+    last_progress_at: str | None = None
+
+
 class BuddyPresentation(UpdatedRecord):
     """Derived Buddy presentation payload for chat/cockpit surfaces."""
 
@@ -119,10 +144,18 @@ class BuddyGrowthProjection(UpdatedRecord):
     """Derived game-like Buddy growth surface."""
 
     profile_id: str = Field(..., min_length=1)
+    domain_id: str = ""
+    domain_key: str = ""
+    domain_label: str = ""
     intimacy: int = Field(default=0, ge=0)
     affinity: int = Field(default=0, ge=0)
     growth_level: int = Field(default=1, ge=1)
     companion_experience: int = Field(default=0, ge=0)
+    capability_score: int = Field(default=0, ge=0, le=100)
+    strategy_score: int = Field(default=0, ge=0)
+    execution_score: int = Field(default=0, ge=0)
+    evidence_score: int = Field(default=0, ge=0)
+    stability_score: int = Field(default=0, ge=0)
     knowledge_value: int = Field(default=0, ge=0)
     skill_value: int = Field(default=0, ge=0)
     pleasant_interaction_score: int = Field(default=0, ge=0)
@@ -134,6 +167,8 @@ class BuddyGrowthProjection(UpdatedRecord):
 
 
 __all__ = [
+    "BuddyDomainCapabilityRecord",
+    "BuddyDomainCapabilityStatus",
     "BuddyEvolutionStage",
     "BuddyGrowthProjection",
     "BuddyLifecycleState",

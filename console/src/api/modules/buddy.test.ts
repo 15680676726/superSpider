@@ -45,9 +45,14 @@ describe("buddyApi", () => {
       answer: "I want more autonomy",
       existing_question_count: 5,
     });
+    await buddyApi.previewBuddyDirectionTransition({
+      session_id: "session-1",
+      selected_direction: "Build an independent creator-business growth path",
+    });
     await buddyApi.confirmBuddyDirection({
       session_id: "session-1",
       selected_direction: "Build an independent creator-business growth path",
+      capability_action: "start-new",
     });
     await buddyApi.nameBuddy({
       session_id: "session-1",
@@ -64,7 +69,7 @@ describe("buddyApi", () => {
     });
     expect(requestMock).toHaveBeenNthCalledWith(
       2,
-      "/buddy/onboarding/confirm-direction",
+      "/buddy/onboarding/direction-transition-preview",
       {
         method: "POST",
         body: JSON.stringify({
@@ -73,7 +78,19 @@ describe("buddyApi", () => {
         }),
       },
     );
-    expect(requestMock).toHaveBeenNthCalledWith(3, "/buddy/name", {
+    expect(requestMock).toHaveBeenNthCalledWith(
+      3,
+      "/buddy/onboarding/confirm-direction",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          session_id: "session-1",
+          selected_direction: "Build an independent creator-business growth path",
+          capability_action: "start-new",
+        }),
+      },
+    );
+    expect(requestMock).toHaveBeenNthCalledWith(4, "/buddy/name", {
       method: "POST",
       body: JSON.stringify({
         session_id: "session-1",

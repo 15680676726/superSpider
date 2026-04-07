@@ -176,11 +176,11 @@ def test_industry_bootstrap_persists_final_edited_draft(tmp_path) -> None:
 
     assert any(
         result["owner_agent_id"] == "industry-field-enablement-northwind-robotics"
-        for result in payload["goals"]
+        for result in bootstrap_draft_goals(payload)
     )
     assert any(
         result["schedule_id"].endswith("field-enablement-review")
-        for result in payload["schedules"]
+        for result in bootstrap_schedule_summaries(payload)
     )
 
     runtime_detail = client.get(f"/runtime-center/industry/{instance_id}")
@@ -277,7 +277,7 @@ def test_industry_bootstrap_accepts_standard_full_weekday_range_cron(tmp_path) -
     payload = response.json()
     assert any(
         schedule["schedule_id"].endswith("daily-control-loop")
-        for schedule in payload["schedules"]
+        for schedule in bootstrap_schedule_summaries(payload)
     )
 
     instance_id = payload["team"]["team_id"]
@@ -1262,7 +1262,7 @@ def test_industry_rebootstrap_prunes_stale_agents_and_archives_superseded_goals(
     )
     assert first_response.status_code == 200
     first_payload = first_response.json()
-    first_goal_ids = {item["goal"]["id"] for item in first_payload["goals"]}
+    first_goal_ids = set(bootstrap_goal_ids(first_payload))
     instance_id = first_payload["team"]["team_id"]
     assert app.state.agent_profile_override_repository.get_override(extra_role.agent_id) is not None
 
@@ -1276,7 +1276,7 @@ def test_industry_rebootstrap_prunes_stale_agents_and_archives_superseded_goals(
     )
     assert second_response.status_code == 200
     second_payload = second_response.json()
-    second_goal_ids = {item["goal"]["id"] for item in second_payload["goals"]}
+    second_goal_ids = set(bootstrap_goal_ids(second_payload))
     stale_goal_ids = first_goal_ids - second_goal_ids
 
     assert second_payload["team"]["team_id"] == instance_id
@@ -1427,8 +1427,8 @@ def test_industry_bootstrap_retire_previous_active_instance_globally(tmp_path) -
     assert first_response.status_code == 200
     first_payload = first_response.json()
     first_instance_id = first_payload["team"]["team_id"]
-    first_goal_ids = [item["goal"]["id"] for item in first_payload["goals"]]
-    first_schedule_ids = [item["schedule_id"] for item in first_payload["schedules"]]
+    first_goal_ids = bootstrap_goal_ids(first_payload)
+    first_schedule_ids = bootstrap_schedule_ids(first_payload)
     assert app.state.agent_thread_binding_repository.list_bindings(
         industry_instance_id=first_instance_id,
         active_only=False,
@@ -1460,7 +1460,7 @@ def test_industry_bootstrap_retire_previous_active_instance_globally(tmp_path) -
     assert second_response.status_code == 200
     second_payload = second_response.json()
     second_instance_id = second_payload["team"]["team_id"]
-    second_goal_ids = [item["goal"]["id"] for item in second_payload["goals"]]
+    second_goal_ids = bootstrap_goal_ids(second_payload)
 
     assert second_instance_id != first_instance_id
 
@@ -1548,7 +1548,11 @@ def test_public_bootstrap_auto_activate_keeps_instance_active_without_legacy_goa
     assert record is not None
     assert record.status == "active"
     assert record.autonomy_status == "coordinating"
-    assert all(item["dispatch"] is None for item in payload["goals"])
+    assert "goals" not in payload
+    assert "schedules" not in payload
+    assert payload["draft"]["team"]["team_id"] == instance_id
+    assert payload["cycle"]["industry_instance_id"] == instance_id
+    assert payload["assignments"]
     assert app.state.task_repository.list_tasks(
         industry_instance_id=instance_id,
         limit=None,
@@ -1593,7 +1597,10 @@ def test_public_bootstrap_auto_dispatch_materializes_assignment_tasks_without_go
     assert response.status_code == 200
     payload = response.json()
     instance_id = payload["team"]["team_id"]
-    assert all(item["dispatch"] is None for item in payload["goals"])
+    assert "goals" not in payload
+    assert "schedules" not in payload
+    assert payload["draft"]["goals"]
+    assert payload["assignments"]
 
     created_tasks = app.state.task_repository.list_tasks(
         industry_instance_id=instance_id,
@@ -1645,7 +1652,9 @@ def test_public_bootstrap_persists_draft_truth_and_uses_draft_goal_identity(
     draft_goal_ids = [goal.goal_id for goal in canonicalized_draft.goals]
     assert record.draft_payload["team"]["team_id"] == canonicalized_draft.team.team_id
     assert [item["goal_id"] for item in record.draft_payload["goals"]] == draft_goal_ids
-    assert [item["goal"]["id"] for item in payload["goals"]] == draft_goal_ids
+    assert [item["goal_id"] for item in payload["draft"]["goals"]] == draft_goal_ids
+    assert "goals" not in payload
+    assert "schedules" not in payload
 
     assignments = app.state.assignment_repository.list_assignments(
         industry_instance_id=instance_id,
@@ -1668,6 +1677,99 @@ def test_public_bootstrap_persists_draft_truth_and_uses_draft_goal_identity(
         for task in tasks
         if task.goal_id is not None
     }.issubset(set(draft_goal_ids))
+
+
+def test_public_bootstrap_hard_cuts_legacy_goal_schedule_response_surface(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": True,
+            "auto_dispatch": False,
+            "execute": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "goals" not in payload
+    assert "schedules" not in payload
+    assert "goals" not in payload["routes"]
+    assert "schedules" not in payload["routes"]
+    assert payload["draft"]["goals"]
+    assert payload["schedule_summaries"]
+    assert payload["backlog"]
+    assert payload["assignments"]
+    assert payload["cycle"] is not None
+
+
+def test_public_bootstrap_seeds_backlog_from_canonical_schedule_specs(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+
+    backlog_service = app.state.backlog_service
+    original = backlog_service.seed_bootstrap_items_from_goal_specs
+    observed_schedule_specs: list[dict[str, object]] = []
+
+    def _capture_seed(*args, **kwargs):
+        assert "schedule_specs" in kwargs
+        assert "schedules" not in kwargs
+        schedule_specs = kwargs["schedule_specs"]
+        assert isinstance(schedule_specs, list)
+        assert schedule_specs
+        assert all(isinstance(item, dict) for item in schedule_specs)
+        assert all(item.get("schedule_id") for item in schedule_specs)
+        observed_schedule_specs.extend(schedule_specs)
+        return original(*args, **kwargs)
+
+    with patch.object(
+        backlog_service,
+        "seed_bootstrap_items_from_goal_specs",
+        side_effect=_capture_seed,
+    ):
+        response = client.post(
+            "/industry/v1/bootstrap",
+            json={
+                "profile": preview_payload["profile"],
+                "draft": preview_payload["draft"],
+                "auto_activate": True,
+                "auto_dispatch": False,
+                "execute": False,
+            },
+        )
+
+    assert response.status_code == 200
+    assert observed_schedule_specs
 
 
 def test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch(
@@ -1727,6 +1829,81 @@ def test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_go
     ]
     assert created_tasks
     assert all(task.assignment_id in started_assignment_ids for task in created_tasks)
+
+
+def test_kickoff_execution_from_chat_does_not_block_on_learning_acquisition_cycle_by_default(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": False,
+            "auto_dispatch": False,
+            "execute": False,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    captured_calls: list[dict[str, object]] = []
+
+    async def _record_acquisition_cycle(**kwargs):
+        captured_calls.append(dict(kwargs))
+        return {
+            "success": True,
+            "industry_instance_id": instance_id,
+            "summary": "background acquisition queued",
+            "proposals": [],
+            "plans": [],
+            "onboarding_runs": [],
+            "warnings": [],
+        }
+
+    with patch.object(
+        app.state.learning_service,
+        "run_industry_acquisition_cycle",
+        side_effect=_record_acquisition_cycle,
+    ):
+        async def _run_kickoff():
+            result = await app.state.industry_service.kickoff_execution_from_chat(
+                industry_instance_id=instance_id,
+                message_text="Start the first execution cycle for today.",
+                owner_agent_id="copaw-agent-runner",
+                session_id=f"industry:{instance_id}",
+                channel="console",
+            )
+            await asyncio.sleep(0)
+            return result
+
+        kickoff = asyncio.run(_run_kickoff())
+
+    assert kickoff is not None
+    assert kickoff["kickoff_stage"] == "learning"
+    assert kickoff["started_assignment_ids"]
+    assert kickoff["acquisition_cycle"] is None
+    assert captured_calls == [
+        {
+            "industry_instance_id": instance_id,
+            "actor": "copaw-agent-runner",
+            "rerun_existing": False,
+        },
+    ]
 
 
 def test_chat_writeback_schedule_creation_does_not_expand_instance_schedule_truth(

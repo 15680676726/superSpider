@@ -211,7 +211,6 @@ class _IndustryActivationMixin:
             else []
         )
 
-        goal_results: list[IndustryBootstrapGoalResult] = []
         goal_ids: list[str] = []
         goal_by_agent_id: dict[str, tuple[str, str]] = {}
         goal_specs: list[dict[str, object]] = []
@@ -255,37 +254,35 @@ class _IndustryActivationMixin:
                 status=initial_agent_status,
             )
 
-        schedule_results: list[IndustryBootstrapScheduleResult] = []
-        schedule_ids: list[str] = []
+        schedule_specs: list[dict[str, object]] = []
         schedule_enabled = False if pending_chat_kickoff else auto_dispatch or execute
         for seed in plan.schedule_seeds:
-            schedule_ids.append(seed.schedule_id)
             lane = self._resolve_goal_lane(
                 instance_id=team_id,
                 role=self._resolve_role_blueprint(plan.draft.team, seed.metadata.get("industry_role_id")),
                 goal_kind=_string(seed.metadata.get("goal_kind")),
                 owner_agent_id=seed.owner_agent_id,
             )
-            schedule_result = await self._upsert_schedule_seed(seed, enabled=schedule_enabled)
-            self._upsert_schedule_lane(
-                schedule_id=seed.schedule_id,
-                lane_id=lane.id if lane is not None else None,
-                schedule_kind="cadence",
-                trigger_target=_string(seed.metadata.get("goal_kind")) or "main-brain",
+            schedule_specs.append(
+                {
+                    "schedule_id": seed.schedule_id,
+                    "title": seed.title,
+                    "summary": seed.summary,
+                    "lane_id": lane.id if lane is not None else None,
+                    "schedule_kind": "cadence",
+                    "trigger_target": _string(seed.metadata.get("goal_kind")) or "main-brain",
+                    "spec_payload": self._build_schedule_spec(
+                        seed,
+                        enabled=schedule_enabled,
+                    ),
+                },
             )
-            schedule_results.append(schedule_result)
 
-        persisted_schedules = [
-            schedule
-            for schedule_id in schedule_ids
-            if self._schedule_repository is not None
-            if (schedule := self._schedule_repository.get_schedule(schedule_id)) is not None
-        ]
         backlog_items = (
             self._backlog_service.seed_bootstrap_items_from_goal_specs(
                 industry_instance_id=team_id,
                 goal_specs=goal_specs,
-                schedules=persisted_schedules,
+                schedule_specs=schedule_specs,
             )
             if self._backlog_service is not None
             else []
@@ -468,6 +465,23 @@ class _IndustryActivationMixin:
                     assignment_id=assignment.id if assignment is not None else None,
                 )
 
+        persisted_schedules = []
+        for schedule_spec, seed in zip(schedule_specs, plan.schedule_seeds):
+            await self._persist_schedule_spec(dict(schedule_spec["spec_payload"]))
+            self._upsert_schedule_lane(
+                schedule_id=seed.schedule_id,
+                lane_id=_string(schedule_spec.get("lane_id")),
+                schedule_kind=_string(schedule_spec.get("schedule_kind")) or "cadence",
+                trigger_target=(
+                    _string(schedule_spec.get("trigger_target")) or "main-brain"
+                ),
+            )
+            if self._schedule_repository is None:
+                continue
+            schedule = self._schedule_repository.get_schedule(seed.schedule_id)
+            if schedule is not None:
+                persisted_schedules.append(schedule)
+
         for seed in plan.goal_seeds:
             lane = self._resolve_goal_lane(
                 instance_id=team_id,
@@ -502,21 +516,6 @@ class _IndustryActivationMixin:
                     reason=f"Industry bootstrap for {plan.profile.primary_label()}",
                 ),
             )
-            goal_results.append(
-                IndustryBootstrapGoalResult(
-                    kind=seed.kind,
-                    owner_agent_id=seed.owner_agent_id,
-                    goal=goal.model_dump(mode="json"),
-                    override=override.model_dump(mode="json"),
-                    dispatch=None,
-                    routes={
-                        "goal": f"/api/goals/{goal.id}/detail",
-                        "agent": f"/api/runtime-center/agents/{seed.owner_agent_id}",
-                        "industry": f"/api/runtime-center/industry/{team_id}",
-                    },
-                ),
-            )
-
         if auto_dispatch:
             await self._dispatch_operating_cycle_assignments(
                 instance_id=team_id,
@@ -600,13 +599,38 @@ class _IndustryActivationMixin:
                 analysis_ids=plan.media_analysis_ids,
             )
         summary = self._build_instance_summary(final_record)
+        schedule_summaries = [
+            {
+                "schedule_id": schedule.id,
+                "title": schedule.title,
+                "owner_agent_id": _string(schedule.spec_payload.get("meta", {}).get("owner_agent_id")),
+                "industry_role_id": _string(
+                    schedule.spec_payload.get("request", {}).get("industry_role_id")
+                )
+                or _string(schedule.spec_payload.get("meta", {}).get("industry_role_id")),
+                "goal_kind": _string(schedule.spec_payload.get("meta", {}).get("goal_kind")),
+                "cron": schedule.cron,
+                "timezone": schedule.timezone,
+                "enabled": bool(schedule.spec_payload.get("enabled")),
+                "dispatch_mode": _string(schedule.spec_payload.get("dispatch_mode"))
+                or _string(schedule.spec_payload.get("request", {}).get("dispatch_mode")),
+                "spec_payload": dict(schedule.spec_payload),
+                "routes": {
+                    "runtime_detail": f"/api/runtime-center/schedules/{schedule.id}",
+                },
+            }
+            for schedule in persisted_schedules
+        ]
         return IndustryBootstrapResponse(
             profile=plan.profile,
             team=plan.draft.team,
+            draft=plan.draft,
             recommendation_pack=plan.recommendation_pack,
             install_results=install_results,
-            goals=goal_results,
-            schedules=schedule_results,
+            backlog=[item.model_dump(mode="json") for item in backlog_items],
+            assignments=[assignment.model_dump(mode="json") for assignment in assignments],
+            cycle=current_cycle.model_dump(mode="json") if current_cycle is not None else None,
+            schedule_summaries=schedule_summaries,
             readiness_checks=plan.readiness_checks,
             media_analyses=adopted_media_analyses,
             routes={
@@ -616,14 +640,6 @@ class _IndustryActivationMixin:
                 "agents": [
                     f"/api/runtime-center/agents/{agent.agent_id}"
                     for agent in plan.draft.team.agents
-                ],
-                "goals": [
-                    f"/api/goals/{item.goal['id']}/detail"
-                    for item in goal_results
-                ],
-                "schedules": [
-                    f"/api/runtime-center/schedules/{item.schedule_id}"
-                    for item in schedule_results
                 ],
                 "instance_summary": summary.model_dump(mode="json"),
             },

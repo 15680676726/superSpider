@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from copaw.app.routers.predictions import router as predictions_router
 from copaw.app.routers.runtime_center import router as runtime_center_router
 from copaw.capabilities import CapabilityService
+from copaw.capabilities.skill_service import CapabilitySkillService
 from copaw.capabilities.remote_skill_contract import RemoteSkillCandidate
 from copaw.config import load_config, save_config
 from copaw.config.config import MCPClientConfig
@@ -169,6 +170,7 @@ def _build_predictions_app(
     *,
     enable_remote_hub_search: bool = False,
     enable_remote_curated_search: bool = False,
+    use_real_skill_service: bool = False,
     seed_cases: list[PredictionCaseRecord] | None = None,
     seed_recommendations: list[PredictionRecommendationRecord] | None = None,
 ) -> FastAPI:
@@ -205,7 +207,11 @@ def _build_predictions_app(
     strategy_memory_service = StateStrategyMemoryService(
         repository=strategy_memory_repository,
     )
-    skill_service = _InMemorySkillService()
+    skill_service = (
+        CapabilitySkillService()
+        if use_real_skill_service
+        else _InMemorySkillService()
+    )
     config_path = tmp_path / "copaw-config.json"
     config = load_config(config_path)
     config.mcp.clients["desktop_windows"] = MCPClientConfig(

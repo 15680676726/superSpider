@@ -209,6 +209,8 @@ export interface RuntimeMainBrainBuddySummary {
   mood_state: string;
   evolution_stage: string;
   growth_level: number;
+  capability_score?: number;
+  domain_label?: string;
   intimacy: number;
   affinity: number;
   current_goal_summary: string;

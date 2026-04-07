@@ -324,7 +324,7 @@ class BacklogService:
         *,
         industry_instance_id: str,
         goal_specs: Sequence[Mapping[str, object]],
-        schedules: Sequence[ScheduleRecord],
+        schedule_specs: Sequence[Mapping[str, object]],
     ) -> list[BacklogItemRecord]:
         seeded: list[BacklogItemRecord] = []
         now = _utc_now()
@@ -361,24 +361,39 @@ class BacklogService:
                 updated_at=now,
             )
             seeded.append(self._repository.upsert_item(item))
-        for schedule in schedules:
-            stable_id = _stable_id("backlog-schedule", industry_instance_id, schedule.id)
+        for schedule_spec in schedule_specs:
+            schedule_id = _string(schedule_spec.get("schedule_id"))
+            title = _string(schedule_spec.get("title"))
+            spec_payload = _mapping(schedule_spec.get("spec_payload"))
+            if schedule_id is None or title is None or not spec_payload:
+                continue
+            stable_id = _stable_id("backlog-schedule", industry_instance_id, schedule_id)
             existing = self._repository.get_item(stable_id)
+            trigger_target = (
+                _string(schedule_spec.get("trigger_target"))
+                or _string(spec_payload.get("meta", {}).get("goal_kind"))
+                or "main-brain"
+            )
+            schedule_kind = _string(schedule_spec.get("schedule_kind")) or "cadence"
             item = BacklogItemRecord(
                 id=stable_id,
                 industry_instance_id=industry_instance_id,
-                lane_id=schedule.lane_id,
-                title=schedule.title,
-                summary=schedule.spec_payload.get("meta", {}).get("summary") or schedule.source_ref or "",
+                lane_id=_string(schedule_spec.get("lane_id")),
+                title=title,
+                summary=(
+                    _string(spec_payload.get("meta", {}).get("summary"))
+                    or _string(schedule_spec.get("summary"))
+                    or f"schedule:{schedule_id}"
+                ),
                 status="open",
                 priority=2,
                 source_kind="schedule",
-                source_ref=f"schedule:{schedule.id}",
+                source_ref=f"schedule:{schedule_id}",
                 metadata={
-                    "schedule_id": schedule.id,
-                    "schedule_kind": schedule.schedule_kind,
-                    "trigger_target": schedule.trigger_target,
-                    "spec_payload": dict(schedule.spec_payload),
+                    "schedule_id": schedule_id,
+                    "schedule_kind": schedule_kind,
+                    "trigger_target": trigger_target,
+                    "spec_payload": spec_payload,
                 },
                 created_at=existing.created_at if existing is not None else now,
                 updated_at=now,

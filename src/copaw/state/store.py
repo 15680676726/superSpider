@@ -78,6 +78,36 @@ CREATE TABLE IF NOT EXISTS buddy_onboarding_sessions (
 CREATE INDEX IF NOT EXISTS idx_buddy_onboarding_sessions_profile_updated
     ON buddy_onboarding_sessions(profile_id, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS buddy_domain_capabilities (
+    domain_id TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL,
+    domain_key TEXT NOT NULL,
+    domain_label TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    strategy_score INTEGER NOT NULL DEFAULT 0,
+    execution_score INTEGER NOT NULL DEFAULT 0,
+    evidence_score INTEGER NOT NULL DEFAULT 0,
+    stability_score INTEGER NOT NULL DEFAULT 0,
+    capability_score INTEGER NOT NULL DEFAULT 0,
+    evolution_stage TEXT NOT NULL DEFAULT 'seed',
+    knowledge_value INTEGER NOT NULL DEFAULT 0,
+    skill_value INTEGER NOT NULL DEFAULT 0,
+    completed_support_runs INTEGER NOT NULL DEFAULT 0,
+    completed_assisted_closures INTEGER NOT NULL DEFAULT 0,
+    evidence_count INTEGER NOT NULL DEFAULT 0,
+    report_count INTEGER NOT NULL DEFAULT 0,
+    last_activated_at TEXT,
+    last_progress_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(profile_id) REFERENCES human_profiles(profile_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_buddy_domain_capabilities_profile_status
+    ON buddy_domain_capabilities(profile_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_buddy_domain_capabilities_profile_key
+    ON buddy_domain_capabilities(profile_id, domain_key, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS goals (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,

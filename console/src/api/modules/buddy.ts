@@ -82,7 +82,45 @@ export interface BuddyConfirmDirectionResponse {
     buddy_name: string;
     encouragement_style: string;
   };
+  domain_capability?: {
+    domain_id: string;
+    profile_id: string;
+    domain_key: string;
+    domain_label: string;
+    status: string;
+    strategy_score: number;
+    execution_score: number;
+    evidence_score: number;
+    stability_score: number;
+    capability_score: number;
+    evolution_stage: string;
+  } | null;
   execution_carrier?: BuddyExecutionCarrier | null;
+}
+
+export interface BuddyDirectionTransitionPreviewResponse {
+  session_id: string;
+  selected_direction: string;
+  selected_domain_key: string;
+  suggestion_kind: string;
+  recommended_action: "keep-active" | "restore-archived" | "start-new";
+  reason_summary: string;
+  current_domain?: {
+    domain_id: string;
+    domain_key: string;
+    domain_label: string;
+    status: string;
+    capability_score: number;
+    evolution_stage: string;
+  } | null;
+  archived_matches: Array<{
+    domain_id: string;
+    domain_key: string;
+    domain_label: string;
+    status: string;
+    capability_score: number;
+    evolution_stage: string;
+  }>;
 }
 
 export interface BuddySurfaceResponse {
@@ -127,10 +165,18 @@ export interface BuddySurfaceResponse {
   };
   growth: {
     profile_id: string;
+    domain_id?: string;
+    domain_key?: string;
+    domain_label?: string;
     intimacy: number;
     affinity: number;
     growth_level: number;
     companion_experience: number;
+    capability_score?: number;
+    strategy_score?: number;
+    execution_score?: number;
+    evidence_score?: number;
+    stability_score?: number;
     knowledge_value: number;
     skill_value: number;
     pleasant_interaction_score: number;
@@ -177,9 +223,23 @@ export const buddyApi = {
       `/buddy/onboarding/${encodeURIComponent(sessionId)}/candidates`,
     );
   },
+  previewBuddyDirectionTransition(payload: {
+    session_id: string;
+    selected_direction: string;
+  }) {
+    return request<BuddyDirectionTransitionPreviewResponse>(
+      "/buddy/onboarding/direction-transition-preview",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+  },
   confirmBuddyDirection(payload: {
     session_id: string;
     selected_direction: string;
+    capability_action: "keep-active" | "restore-archived" | "start-new";
+    target_domain_id?: string;
   }) {
     return request<BuddyConfirmDirectionResponse>("/buddy/onboarding/confirm-direction", {
       method: "POST",

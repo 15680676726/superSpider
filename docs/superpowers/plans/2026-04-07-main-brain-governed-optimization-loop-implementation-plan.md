@@ -269,6 +269,20 @@ Result:
 
 - `122 passed`
 
+Live external acceptance added after closure:
+
+```powershell
+$env:PYTHONPATH='src'
+$env:COPAW_RUN_LIVE_OPTIMIZATION_SMOKE='1'
+python -m pytest tests/app/test_mcp_runtime_contract.py tests/app/test_predictions_api.py tests/app/test_skill_runtime_smoke.py tests/app/test_main_brain_optimization_loop_e2e.py tests/app/test_main_brain_optimization_planning_writeback.py tests/app/test_live_optimization_smoke.py tests/app/runtime_center_api_parts/overview_governance.py -q
+```
+
+Result:
+
+- `125 passed`
+- includes real `desktop-windows` MCP acceptance
+- includes real remote SkillHub search/install/trial -> review -> retirement -> next planning writeback
+
 Deferred on purpose:
 
 - Batch 2 quality enhancers

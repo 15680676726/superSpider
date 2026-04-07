@@ -29,6 +29,7 @@ export function BuddyCompanion({
   const evolution = resolveBuddyEvolutionView({
     evolutionStage: surface.growth.evolution_stage,
     currentForm: surface.presentation.current_form,
+    capabilityScore: surface.growth.capability_score,
     companionExperience: surface.growth.companion_experience,
     rarity: surface.presentation.rarity,
   });

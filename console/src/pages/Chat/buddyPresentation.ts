@@ -17,15 +17,15 @@ function firstNonEmptyString(...values: unknown[]): string {
 export function presentBuddyStageLabel(stage?: string | null): string {
   switch ((stage || "").trim()) {
     case "seed":
-      return "初生";
+      return "幼年期";
     case "bonded":
-      return "结伴";
+      return "成长期";
     case "capable":
-      return "得力";
+      return "成熟期";
     case "seasoned":
-      return "成熟";
+      return "完全体";
     case "signature":
-      return "标志形态";
+      return "究极体";
     default:
       return "成长中";
   }
@@ -103,6 +103,7 @@ export function resolveBuddyDisplaySnapshot(
   const evolution = resolveBuddyEvolutionView({
     evolutionStage: surface.growth?.evolution_stage,
     currentForm: surface.presentation?.current_form,
+    capabilityScore: surface.growth?.capability_score,
     companionExperience: surface.growth?.companion_experience,
     rarity: surface.presentation?.rarity,
   });

@@ -35,6 +35,27 @@
 
 ---
 
+## 1.1.1 `2026-04-07` Buddy 领域能力阶段收口补充
+
+- Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`
+- `CompanionRelationship.companion_experience` 继续保留，但只作为关系层信号，不再决定 stage
+- 新增正式后端链路：
+  - `POST /buddy/onboarding/direction-transition-preview`
+  - `POST /buddy/onboarding/confirm-direction` with `capability_action`
+  - `GET /buddy/surface` / Runtime Center buddy summary 统一读取 active domain capability
+- 新增正式状态对象：
+  - `BuddyDomainCapabilityRecord`
+    - `domain_key / domain_label / capability_score / evolution_stage / strategy_score / execution_score / evidence_score / stability_score`
+- 前端已同步把 stage 文案收口为：
+  - `幼年期 / 成长期 / 成熟期 / 完全体 / 究极体`
+- 当前 fresh verification：
+  - backend：
+    - `python -m pytest tests/kernel/test_buddy_domain_capability.py tests/kernel/test_buddy_projection_service.py tests/kernel/test_buddy_projection_capability.py tests/app/test_buddy_cutover.py -q`
+    - 结果：`18 passed`
+  - console：
+    - `npm --prefix console test -- src/api/modules/buddy.test.ts src/pages/BuddyOnboarding/index.test.tsx src/pages/Chat/buddyEvolution.test.ts src/pages/Chat/buddyPresentation.test.ts src/pages/Chat/BuddyPanel.test.tsx src/pages/Chat/BuddyCompanion.test.tsx src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx src/runtime/buddyFlow.test.ts`
+    - 结果：`33 passed`
+
 ## 1.2 `2026-04-05` donor-first 开源项目能力落位补充
 
 - GitHub open-source donor 不再只以 `SKILL.md` bundle 形式落地。
@@ -1230,7 +1251,6 @@
   - `PredictionService.create_cycle_case(...)` 不再把 `goal_statuses` 写进 cycle fingerprint 或 case metadata。
   - `WorkflowStepExecutionRecord` 已删除内部 `linked_goal_ids / linked_schedule_ids` 字段；step detail 改为读时推导，不再靠 step record 持有 legacy link。
 - 这轮完成后仍然真实存在的残留只剩：
-  - `industry` bootstrap 仍会 materialize bootstrap goal/schedule，再喂给 backlog/cycle。
   - workflow `step_execution_seed` 仍允许保留 `linked_goal_ids / linked_schedule_ids` 作为旧 run 兼容回填输入，但公开 step record/detail 已不再依赖它们。
   - `runtime_service_graph.py` + `runtime_bootstrap_models.py` 的 wiring graph 仍偏重。
 
@@ -1245,6 +1265,19 @@
   - `python -m pytest tests/state/test_state_store_migration.py::test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_indexes tests/state/test_sqlite_repositories.py::test_sqlite_override_repositories_crud_round_trip tests/app/industry_api_parts/bootstrap_lifecycle.py::test_public_bootstrap_persists_draft_truth_and_uses_draft_goal_identity tests/app/industry_api_parts/retirement_chain.py::test_industry_delete_retired_instance_removes_persisted_runtime_state tests/app/industry_api_parts/runtime_updates.py::test_industry_chat_writeback_approved_staffing_proposal_unblocks_materialization -q` -> `5 passed`
   - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py::test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch -vv -s` -> `1 passed in 864.29s`
 
+### 3.3.8 `2026-04-07` bootstrap hard-cut 2A
+
+- `/industry/v1/bootstrap` 的正式公开 contract 已从 legacy `goals / schedules` 收口到 canonical `draft / backlog / cycle / assignments / schedule_summaries`；`routes` 里也不再暴露 legacy `goals` / `schedules` surface。
+- bootstrap write-path 现已进一步从 “先持久化 legacy schedule，再把 `ScheduleRecord[]` 喂给 backlog seed” 改成 “先用 canonical `goal_specs + schedule_specs` 起 `backlog/cycle/assignment`，再在下游物化 compatibility `GoalRecord / ScheduleRecord`”。
+- 这意味着此前“industry bootstrap 仍会 materialize bootstrap goal/schedule，再喂给 backlog/cycle”的残留判断已过时；当前 bootstrap 主链的正式起点已经收口到 canonical draft/spec truth。
+- compatibility 边界仍然存在，但角色已经变化：
+  - `GoalRecord / GoalOverrideRecord` 现在是 assignment-native seed 之后的 leaf/detail artifact。
+  - `ScheduleRecord` 现在是 canonical schedule spec 落库后的 runtime/cadence artifact，不再是 bootstrap seed 的前置真相。
+- 本次追加 focused verification：
+  - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py -k "public_bootstrap_auto_activate_keeps_instance_active_without_legacy_goal_dispatch or public_bootstrap_auto_dispatch_materializes_assignment_tasks_without_goal_dispatch or public_bootstrap_persists_draft_truth_and_uses_draft_goal_identity or public_bootstrap_hard_cuts_legacy_goal_schedule_response_surface or public_bootstrap_seeds_backlog_from_canonical_schedule_specs" -q` -> `5 passed, 42 deselected`
+  - `python -m pytest tests/app/industry_api_parts/retirement_chain.py::test_industry_delete_retired_instance_removes_persisted_runtime_state tests/app/industry_api_parts/retirement_chain.py::test_industry_delete_active_instance_clears_current_team tests/app/industry_api_parts/retirement_chain.py::test_industry_bootstrap_defaults_to_live_coordinating_contract -q` -> `3 passed`
+  - `python -m pytest tests/app/industry_api_parts/runtime_updates.py::test_industry_bootstrap_goal_compile_regression_keeps_specialist_runtime_contract tests/app/industry_api_parts/runtime_updates.py::test_industry_bootstrap_specialist_runtime_metadata_only_persists_current_focus tests/app/industry_api_parts/runtime_updates.py::test_bootstrap_researcher_schedule_report_keeps_main_brain_continuity tests/app/industry_api_parts/runtime_updates.py::test_researcher_followup_assignment_persists_execution_core_continuity_without_backlog_anchor -q` -> `4 passed`
+
 ### 3.3.4 `2026-04-07` Buddy carrier direction-truth fix
 
 - Buddy onboarding 的正式方向边界已补正：`BuddyOnboardingService._ensure_growth_scaffold(...)` 不再把 `HumanProfile` 当前资料直接写进 `IndustryInstanceRecord.profile_payload`。
@@ -1257,3 +1290,19 @@
 - 本轮 focused verification：
   - `PYTHONPATH=src python -m pytest tests/kernel/test_buddy_onboarding_service.py tests/app/test_buddy_cutover.py -q` -> `14 passed`
   - `cmd /c npm --prefix console run test -- src/pages/Industry/pageHelpers.test.ts` -> `6 passed`
+
+### 3.3.9 `2026-04-07` industry learning kickoff acquisition-closure
+
+- `IndustryService.kickoff_execution_from_chat(...)` 默认已不再同步阻塞 `run_industry_acquisition_cycle(...)`；默认行为现已改成“前台 kickoff 立即返回、learning acquisition 在后台自动继续跑”。
+- 只有显式传入 `include_learning_acquisition_cycle=True` 时，当前这次 kickoff 才会同步等待 acquisition 并把 `acquisition_cycle` 结果直接带回返回值。
+- 这意味着默认 kickoff 主链只负责 assignment/backlog/cycle 的正式执行起链，不再因为自动 acquisition 扫描把 operator / retirement / runtime-detail 相关测试和读面一起拖进慢链；但系统仍会继续自动找 install-template / builtin runtime，不是直接关掉 acquisition。
+- `LearningAcquisitionRuntimeService._discover_role_acquisition_candidates(...)` 现在已把 automatic industry acquisition discovery 默认收口到 `providers=["install-template"]`：
+  - install-template / builtin-runtime 仍保留在自动 acquisition 主链内；
+  - SOP template 搜索仍由 discovery service 的独立 `sop_templates` 分支提供；
+  - curated skill / MCP registry / remote provider 扫描不再作为 industry auto kickoff 的默认同步步骤。
+- 因此，`test_industry_learning_kickoff_materializes_acquisition_objects_and_exposes_them` 这条此前会长时间卡住的 industry learning 闭环现在已能在本地环境内 fresh 跑通。
+- 本次追加 focused verification：
+  - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py::test_kickoff_execution_from_chat_does_not_block_on_learning_acquisition_cycle_by_default -q` -> `1 passed`
+  - `python -m pytest tests/app/industry_api_parts/retirement_chain.py::test_industry_learning_kickoff_scopes_acquisition_discovery_to_install_templates -q` -> `1 passed`
+  - `python -m pytest tests/app/industry_api_parts/retirement_chain.py::test_industry_learning_kickoff_materializes_acquisition_objects_and_exposes_them -q` -> `1 passed in 88.75s`
+  - `python -m pytest tests/app/industry_api_parts/retirement_chain.py::test_industry_runtime_detail_and_goal_detail_use_formal_instance_store -q` -> `1 passed`

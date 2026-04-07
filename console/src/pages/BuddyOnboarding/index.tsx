@@ -206,9 +206,19 @@ export default function BuddyOnboardingPage() {
     setSubmitting(true);
     setError(null);
     try {
+      const preview = await api.previewBuddyDirectionTransition({
+        session_id: identity.session_id,
+        selected_direction: selectedDirection,
+      });
+      const targetDomainId =
+        preview.recommended_action === "restore-archived"
+          ? preview.archived_matches[0]?.domain_id
+          : undefined;
       const result = await api.confirmBuddyDirection({
         session_id: identity.session_id,
         selected_direction: selectedDirection,
+        capability_action: preview.recommended_action,
+        target_domain_id: targetDomainId,
       });
       writeBuddyProfileId(result.session.profile_id);
       setConfirmPayload(result);

@@ -22,6 +22,10 @@
   - 上位正式目标改为 `Intent-Native Universal Carrier`
   - execution-side 正式框架改为 `Symbiotic Host Runtime`
   - `Seat Runtime / Host Companion Session / Workspace Graph / Host Event` 必须继续映射回统一 `state / evidence / capability / environment`
+- `2026-04-07` Buddy 补充：
+  - `POST /buddy/onboarding/direction-transition-preview` 已成为换方向时的正式 preview 前门，返回 `recommended_action + archived_matches + current_domain`
+  - `POST /buddy/onboarding/confirm-direction` 不再只是写 `GrowthTarget`，还要显式确认 `capability_action` 并切换 active `BuddyDomainCapabilityRecord`
+  - `GET /buddy/surface` 与 `Runtime Center` 的 `buddy_summary` 已改为读取 active domain capability truth；`companion_experience` 只保留关系层展示，不再主导成长阶段
 
 ---
 
