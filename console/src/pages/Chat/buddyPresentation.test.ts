@@ -28,6 +28,7 @@ describe("buddyPresentation", () => {
         },
         growth: {
           evolution_stage: "bonded",
+          capability_points: 24,
           capability_score: 24,
         },
       } as never),
@@ -54,9 +55,10 @@ describe("buddyPresentation", () => {
           companion_strategy_summary: "先接住情绪，再把任务缩成一个最小动作。",
           presence_state: "focused",
           mood_state: "warm",
-          current_form: "seasoned",
+          current_form: "",
         },
         growth: {
+          capability_points: 40,
           capability_score: 63,
           companion_experience: 180,
           evolution_stage: "",
@@ -70,7 +72,7 @@ describe("buddyPresentation", () => {
         whyNowSummary: "这是把长期方向落到现实里的关键一步。",
         singleNextActionSummary: "现在先打开文档，写下标题和三条要点",
         companionStrategySummary: "先接住情绪，再把任务缩成一个最小动作。",
-        stageLabel: "完全体",
+        stageLabel: "成熟期",
         encouragementStyleLabel: "像老朋友",
       }),
     );

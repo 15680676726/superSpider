@@ -38,6 +38,12 @@ describe("BuddyPanel", () => {
               intimacy: 25,
               affinity: 19,
               growth_level: 2,
+              capability_points: 24,
+              settled_closure_count: 12,
+              independent_outcome_count: 3,
+              recent_completion_rate: 0.93,
+              recent_execution_error_rate: 0.02,
+              distinct_settled_cycle_count: 3,
               capability_score: 28,
               strategy_score: 10,
               execution_score: 9,
@@ -65,7 +71,8 @@ describe("BuddyPanel", () => {
     expect(screen.getByText("先接住情绪，再把任务缩成一个最小动作；避免高压催促。")).toBeInTheDocument();
     expect(screen.getByTestId("buddy-panel-avatar-species")).toBeInTheDocument();
     expect(screen.getByTestId("buddy-panel-avatar-rarity")).toBeInTheDocument();
-    expect(screen.getAllByText(/能力分/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/成长积分/)).toBeInTheDocument();
+    expect(screen.getByText(/有效闭环/)).toBeInTheDocument();
     expect(screen.getByText(/策略分/)).toBeInTheDocument();
   });
 });

@@ -365,6 +365,7 @@ def _serialize_domain_record(record: object | None) -> dict[str, object] | None:
     domain_key = getattr(record, "domain_key", None)
     domain_label = getattr(record, "domain_label", None)
     status = getattr(record, "status", None)
+    capability_points = getattr(record, "capability_points", None)
     capability_score = getattr(record, "capability_score", None)
     evolution_stage = getattr(record, "evolution_stage", None)
     if not domain_id or not domain_key:
@@ -374,8 +375,13 @@ def _serialize_domain_record(record: object | None) -> dict[str, object] | None:
         "domain_key": str(domain_key),
         "domain_label": str(domain_label or domain_key),
         "status": str(status or ""),
+        "capability_points": int(capability_points or 0),
         "capability_score": int(capability_score or 0),
-        "evolution_stage": str(evolution_stage or capability_stage_from_score(int(capability_score or 0))),
+        "evolution_stage": str(
+            evolution_stage
+            or stage_from_points(int(capability_points or 0))
+            or capability_stage_from_score(int(capability_score or 0))
+        ),
     }
 
 

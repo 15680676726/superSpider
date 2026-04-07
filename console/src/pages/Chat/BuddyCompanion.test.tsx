@@ -32,6 +32,7 @@ describe("BuddyCompanion", () => {
             },
             growth: {
               evolution_stage: "bonded",
+              capability_points: 24,
               intimacy: 24,
               companion_experience: 48,
             },
@@ -67,6 +68,7 @@ describe("BuddyCompanion", () => {
       "focused",
     );
     expect(screen.getByText("亲密度 24")).toBeInTheDocument();
+    expect(screen.getByText("积分 24")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("buddy-companion-trigger"));
     expect(onOpen).toHaveBeenCalledTimes(1);
   });

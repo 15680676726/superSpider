@@ -472,13 +472,13 @@ export default function BuddyOnboardingPage() {
                   {transitionPreview.current_domain ? (
                     <Paragraph style={{ marginBottom: 0 }}>
                       <strong>当前活跃领域：</strong>
-                      {` ${transitionPreview.current_domain.domain_label} · 能力分 ${transitionPreview.current_domain.capability_score}`}
+                      {` ${transitionPreview.current_domain.domain_label} · 积分 ${transitionPreview.current_domain.capability_points ?? 0}`}
                     </Paragraph>
                   ) : null}
                   {transitionPreview.archived_matches.length ? (
                     <Paragraph style={{ marginBottom: 0 }}>
                       <strong>可恢复历史领域：</strong>
-                      {` ${transitionPreview.archived_matches.map((item) => `${item.domain_label}(${item.capability_score})`).join(" / ")}`}
+                      {` ${transitionPreview.archived_matches.map((item) => `${item.domain_label}(积分 ${item.capability_points ?? 0})`).join(" / ")}`}
                     </Paragraph>
                   ) : null}
                   <Radio.Group
@@ -516,7 +516,7 @@ export default function BuddyOnboardingPage() {
                       <Space direction="vertical" size={8} style={{ width: "100%" }}>
                         {transitionPreview.archived_matches.map((item) => (
                           <Radio key={item.domain_id} value={item.domain_id}>
-                            {`${item.domain_label} · 能力分 ${item.capability_score}`}
+                            {`${item.domain_label} · 积分 ${item.capability_points ?? 0}`}
                           </Radio>
                         ))}
                       </Space>

@@ -6,19 +6,20 @@ export type BuddyEvolutionStage =
   | "signature";
 
 type BuddyEvolutionInput = {
+  capabilityPoints?: number | null;
   capabilityScore?: number | null;
   companionExperience?: number | null;
 };
 
-const CAPABILITY_STAGE_BANDS: Array<{
-  minimumScore: number;
+const POINT_STAGE_BANDS: Array<{
+  minimumPoints: number;
   stage: BuddyEvolutionStage;
 }> = [
-  { minimumScore: 80, stage: "signature" },
-  { minimumScore: 60, stage: "seasoned" },
-  { minimumScore: 40, stage: "capable" },
-  { minimumScore: 20, stage: "bonded" },
-  { minimumScore: 0, stage: "seed" },
+  { minimumPoints: 200, stage: "signature" },
+  { minimumPoints: 100, stage: "seasoned" },
+  { minimumPoints: 40, stage: "capable" },
+  { minimumPoints: 20, stage: "bonded" },
+  { minimumPoints: 0, stage: "seed" },
 ];
 
 const EXPERIENCE_FALLBACK_THRESHOLDS: Array<{
@@ -48,11 +49,11 @@ function normalizeKnownStage(raw?: string | null): BuddyEvolutionStage | null {
 export function resolveBuddyEvolutionStage(
   input: BuddyEvolutionInput,
 ): BuddyEvolutionStage {
-  const capabilityScore = input.capabilityScore;
-  if (typeof capabilityScore === "number" && Number.isFinite(capabilityScore)) {
-    const normalizedScore = Math.max(0, Math.min(100, capabilityScore));
+  const capabilityPoints = input.capabilityPoints;
+  if (typeof capabilityPoints === "number" && Number.isFinite(capabilityPoints)) {
+    const normalizedPoints = Math.max(0, capabilityPoints);
     return (
-      CAPABILITY_STAGE_BANDS.find((item) => normalizedScore >= item.minimumScore)?.stage ??
+      POINT_STAGE_BANDS.find((item) => normalizedPoints >= item.minimumPoints)?.stage ??
       "seed"
     );
   }
@@ -84,6 +85,7 @@ export function resolveBuddyEvolutionView(input: {
   evolutionStage?: string | null;
   rarity?: string | null;
   currentForm?: string | null;
+  capabilityPoints?: number | null;
   capabilityScore?: number | null;
   companionExperience?: number | null;
 }) {
@@ -91,6 +93,7 @@ export function resolveBuddyEvolutionView(input: {
     normalizeKnownStage(input.evolutionStage) ||
     normalizeKnownStage(input.currentForm) ||
     resolveBuddyEvolutionStage({
+      capabilityPoints: input.capabilityPoints,
       capabilityScore: input.capabilityScore,
       companionExperience: input.companionExperience,
     });
