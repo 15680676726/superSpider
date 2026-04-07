@@ -17,6 +17,7 @@ import api, { isApiError } from "../../api";
 import type {
   BuddyClarificationResponse,
   BuddyConfirmDirectionResponse,
+  BuddyDirectionTransitionPreviewResponse,
   BuddyIdentityResponse,
 } from "../../api/modules/buddy";
 import { resolveBuddyEntryDecision } from "../../runtime/buddyFlow";
@@ -62,6 +63,12 @@ export default function BuddyOnboardingPage() {
   const [confirmPayload, setConfirmPayload] =
     useState<BuddyConfirmDirectionResponse | null>(null);
   const [selectedDirection, setSelectedDirection] = useState("");
+  const [transitionPreview, setTransitionPreview] =
+    useState<BuddyDirectionTransitionPreviewResponse | null>(null);
+  const [selectedCapabilityAction, setSelectedCapabilityAction] = useState<
+    "keep-active" | "restore-archived" | "start-new" | null
+  >(null);
+  const [selectedTargetDomainId, setSelectedTargetDomainId] = useState<string | undefined>();
 
   useEffect(() => {
     let cancelled = false;
@@ -172,6 +179,9 @@ export default function BuddyOnboardingPage() {
       setIdentity(result);
       setClarification(null);
       setSelectedDirection("");
+      setTransitionPreview(null);
+      setSelectedCapabilityAction(null);
+      setSelectedTargetDomainId(undefined);
     } catch (rawError) {
       setError(rawError instanceof Error ? rawError.message : "身份建档失败");
     } finally {
@@ -194,6 +204,9 @@ export default function BuddyOnboardingPage() {
       if (result.finished && result.recommended_direction) {
         setSelectedDirection(result.recommended_direction);
       }
+      setTransitionPreview(null);
+      setSelectedCapabilityAction(null);
+      setSelectedTargetDomainId(undefined);
     } catch (rawError) {
       setError(rawError instanceof Error ? rawError.message : "方向澄清失败");
     } finally {
@@ -201,7 +214,7 @@ export default function BuddyOnboardingPage() {
     }
   };
 
-  const handleConfirmDirection = async () => {
+  const handlePreviewDirectionTransition = async () => {
     if (!identity || !selectedDirection.trim()) return;
     setSubmitting(true);
     setError(null);
@@ -210,15 +223,39 @@ export default function BuddyOnboardingPage() {
         session_id: identity.session_id,
         selected_direction: selectedDirection,
       });
-      const targetDomainId =
+      setTransitionPreview(preview);
+      setSelectedCapabilityAction(preview.recommended_action);
+      setSelectedTargetDomainId(
         preview.recommended_action === "restore-archived"
           ? preview.archived_matches[0]?.domain_id
-          : undefined;
+          : undefined,
+      );
+    } catch (rawError) {
+      setError(rawError instanceof Error ? rawError.message : "主方向确认失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleConfirmDirection = async () => {
+    if (!identity || !selectedDirection.trim() || !transitionPreview || !selectedCapabilityAction) {
+      return;
+    }
+    if (selectedCapabilityAction === "restore-archived" && !selectedTargetDomainId) {
+      setError("请选择要恢复的历史领域能力。");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
       const result = await api.confirmBuddyDirection({
         session_id: identity.session_id,
         selected_direction: selectedDirection,
-        capability_action: preview.recommended_action,
-        target_domain_id: targetDomainId,
+        capability_action: selectedCapabilityAction,
+        target_domain_id:
+          selectedCapabilityAction === "restore-archived"
+            ? selectedTargetDomainId
+            : undefined,
       });
       writeBuddyProfileId(result.session.profile_id);
       setConfirmPayload(result);
@@ -379,7 +416,12 @@ export default function BuddyOnboardingPage() {
             </Paragraph>
             <Radio.Group
               value={selectedDirection}
-              onChange={(event) => setSelectedDirection(event.target.value)}
+              onChange={(event) => {
+                setSelectedDirection(event.target.value);
+                setTransitionPreview(null);
+                setSelectedCapabilityAction(null);
+                setSelectedTargetDomainId(undefined);
+              }}
               style={{ width: "100%" }}
             >
               <Space direction="vertical" size={12} style={{ width: "100%" }}>
@@ -397,15 +439,109 @@ export default function BuddyOnboardingPage() {
               description={clarification.recommended_direction}
               data-testid="buddy-direction-recommendation"
             />
-            <Button
-              type="primary"
-              disabled={!selectedDirection}
-              loading={submitting}
-              onClick={() => void handleConfirmDirection()}
-              data-testid="buddy-direction-confirm"
-            >
-              确认这个主方向，进入聊天主场
-            </Button>
+            {!transitionPreview ? (
+              <Button
+                type="primary"
+                disabled={!selectedDirection}
+                loading={submitting}
+                onClick={() => void handlePreviewDirectionTransition()}
+                data-testid="buddy-direction-confirm"
+              >
+                先预览能力继承方式
+              </Button>
+            ) : (
+              <Card
+                size="small"
+                title="确认这次目标切换怎么处理 Buddy 的能力积累"
+                data-testid="buddy-transition-choice-panel"
+              >
+                <Space direction="vertical" size={16} style={{ width: "100%" }}>
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="系统建议"
+                    description={transitionPreview.reason_summary}
+                  />
+                  {transitionPreview.current_domain ? (
+                    <Paragraph style={{ marginBottom: 0 }}>
+                      <strong>当前活跃领域：</strong>
+                      {` ${transitionPreview.current_domain.domain_label} · 能力分 ${transitionPreview.current_domain.capability_score}`}
+                    </Paragraph>
+                  ) : null}
+                  {transitionPreview.archived_matches.length ? (
+                    <Paragraph style={{ marginBottom: 0 }}>
+                      <strong>可恢复历史领域：</strong>
+                      {` ${transitionPreview.archived_matches.map((item) => `${item.domain_label}(${item.capability_score})`).join(" / ")}`}
+                    </Paragraph>
+                  ) : null}
+                  <Radio.Group
+                    value={selectedCapabilityAction}
+                    onChange={(event) =>
+                      setSelectedCapabilityAction(event.target.value)
+                    }
+                    style={{ width: "100%" }}
+                  >
+                    <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                      <Radio
+                        value="keep-active"
+                        disabled={!transitionPreview.current_domain}
+                      >
+                        继续当前领域能力
+                      </Radio>
+                      <Radio
+                        value="restore-archived"
+                        disabled={!transitionPreview.archived_matches.length}
+                      >
+                        恢复历史领域能力
+                      </Radio>
+                      <Radio value="start-new">作为新领域重新开始</Radio>
+                    </Space>
+                  </Radio.Group>
+                  {selectedCapabilityAction === "restore-archived" &&
+                  transitionPreview.archived_matches.length ? (
+                    <Radio.Group
+                      value={selectedTargetDomainId}
+                      onChange={(event) =>
+                        setSelectedTargetDomainId(event.target.value)
+                      }
+                      style={{ width: "100%" }}
+                    >
+                      <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                        {transitionPreview.archived_matches.map((item) => (
+                          <Radio key={item.domain_id} value={item.domain_id}>
+                            {`${item.domain_label} · 能力分 ${item.capability_score}`}
+                          </Radio>
+                        ))}
+                      </Space>
+                    </Radio.Group>
+                  ) : null}
+                  <Space>
+                    <Button
+                      onClick={() => {
+                        setTransitionPreview(null);
+                        setSelectedCapabilityAction(null);
+                        setSelectedTargetDomainId(undefined);
+                      }}
+                    >
+                      重新选择方向
+                    </Button>
+                    <Button
+                      type="primary"
+                      loading={submitting}
+                      disabled={
+                        !selectedCapabilityAction ||
+                        (selectedCapabilityAction === "restore-archived" &&
+                          !selectedTargetDomainId)
+                      }
+                      onClick={() => void handleConfirmDirection()}
+                      data-testid="buddy-transition-confirm"
+                    >
+                      确认切换方式，进入聊天主场
+                    </Button>
+                  </Space>
+                </Space>
+              </Card>
+            )}
           </Space>
         </Card>
       ) : null}

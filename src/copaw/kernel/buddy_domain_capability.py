@@ -20,6 +20,38 @@ class BuddyDomainTransitionPreview:
     archived_matches: list[dict[str, object]] | None = None
 
 
+@dataclass(slots=True)
+class BuddyDomainCapabilitySignals:
+    has_active_instance: bool
+    lane_count: int
+    backlog_count: int
+    cycle_count: int
+    completed_cycle_count: int
+    has_current_cycle: bool
+    assignment_count: int
+    active_assignment_count: int
+    completed_assignment_count: int
+    report_count: int
+    completed_report_count: int
+    evidence_count: int
+
+
+@dataclass(slots=True)
+class BuddyDomainCapabilityMetrics:
+    strategy_score: int
+    execution_score: int
+    evidence_score: int
+    stability_score: int
+    capability_score: int
+    evolution_stage: BuddyEvolutionStage
+    knowledge_value: int
+    skill_value: int
+    completed_support_runs: int
+    completed_assisted_closures: int
+    evidence_count: int
+    report_count: int
+
+
 _CAPABILITY_STAGE_BANDS: tuple[tuple[int, BuddyEvolutionStage], ...] = (
     (80, "signature"),
     (60, "seasoned"),
@@ -115,6 +147,61 @@ def progress_to_next_capability_stage(score: int) -> int:
     return min(100, max(0, ((normalized - lower_bound) * 100) // span))
 
 
+def derive_capability_metrics(
+    signals: BuddyDomainCapabilitySignals,
+) -> BuddyDomainCapabilityMetrics:
+    strategy_score = _clamp_metric(
+        (3 if signals.has_active_instance else 0)
+        + (3 if signals.lane_count > 0 else 0)
+        + (2 if signals.backlog_count > 0 else 0)
+        + (4 if signals.has_current_cycle else 0)
+        + (3 if signals.assignment_count > 0 else 0)
+        + (1 if signals.lane_count >= 2 else 0)
+        + (1 if signals.backlog_count >= 3 else 0)
+        + (1 if signals.assignment_count >= 3 else 0)
+        + (1 if signals.cycle_count >= 2 else 0),
+        ceiling=25,
+    )
+    execution_score = _clamp_metric(
+        min(18, max(0, signals.completed_assignment_count) * 6)
+        + min(8, max(0, signals.completed_report_count) * 4),
+        ceiling=35,
+    )
+    evidence_score = _clamp_metric(
+        min(12, max(0, signals.evidence_count) * 4)
+        + min(8, max(0, signals.report_count) * 2),
+        ceiling=20,
+    )
+    stability_score = _clamp_metric(
+        (6 if signals.completed_cycle_count > 0 else 0)
+        + min(6, max(0, signals.completed_cycle_count - 1) * 3)
+        + (4 if signals.completed_assignment_count >= 2 else 0)
+        + (4 if signals.completed_report_count >= 2 else 0)
+        + (4 if signals.evidence_count >= 3 else 0),
+        ceiling=20,
+    )
+    capability_score = _clamp_capability_score(
+        strategy_score + execution_score + evidence_score + stability_score,
+    )
+    return BuddyDomainCapabilityMetrics(
+        strategy_score=strategy_score,
+        execution_score=execution_score,
+        evidence_score=evidence_score,
+        stability_score=stability_score,
+        capability_score=capability_score,
+        evolution_stage=capability_stage_from_score(capability_score),
+        knowledge_value=min(
+            100,
+            strategy_score * 4 + evidence_score * 2 + stability_score,
+        ),
+        skill_value=min(100, execution_score * 3 + stability_score * 2),
+        completed_support_runs=max(0, signals.completed_assignment_count),
+        completed_assisted_closures=max(0, signals.completed_report_count),
+        evidence_count=max(0, signals.evidence_count),
+        report_count=max(0, signals.report_count),
+    )
+
+
 def derive_buddy_domain_key(direction: str) -> str:
     normalized = _normalize_domain_text(direction)
     for key, tokens in _DOMAIN_RULES:
@@ -197,9 +284,16 @@ def _normalize_domain_text(value: str | None) -> str:
     return normalized
 
 
+def _clamp_metric(value: int, *, ceiling: int) -> int:
+    return max(0, min(ceiling, int(value)))
+
+
 __all__ = [
+    "BuddyDomainCapabilityMetrics",
+    "BuddyDomainCapabilitySignals",
     "BuddyDomainTransitionPreview",
     "capability_stage_from_score",
+    "derive_capability_metrics",
     "derive_buddy_domain_key",
     "preview_domain_transition",
     "progress_to_next_capability_stage",

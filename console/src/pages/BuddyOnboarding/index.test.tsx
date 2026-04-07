@@ -166,6 +166,13 @@ describe("BuddyOnboardingPage", () => {
           selected_direction: expect.stringContaining("建立独立创作"),
         }),
       );
+    });
+    expect(apiMock.confirmBuddyDirection).not.toHaveBeenCalled();
+    expect(screen.getByTestId("buddy-transition-choice-panel")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("buddy-transition-confirm"));
+
+    await waitFor(() => {
       expect(apiMock.confirmBuddyDirection).toHaveBeenCalledWith(
         expect.objectContaining({
           session_id: "session-1",
@@ -533,6 +540,12 @@ describe("BuddyOnboardingPage", () => {
           selected_direction: expect.stringContaining("建立独立创作"),
         }),
       );
+    });
+    expect(apiMock.confirmBuddyDirection).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("buddy-transition-confirm"));
+
+    await waitFor(() => {
       expect(apiMock.confirmBuddyDirection).toHaveBeenCalledWith(
         expect.objectContaining({
           session_id: "session-1",
@@ -548,5 +561,185 @@ describe("BuddyOnboardingPage", () => {
       expect(runtimeChatMock.openRuntimeChat).toHaveBeenCalled();
     });
     expect(screen.getByText("runtime unavailable")).toBeInTheDocument();
+  });
+
+  it("lets the user explicitly keep the active domain capability", async () => {
+    apiMock.previewBuddyDirectionTransition.mockResolvedValueOnce({
+      session_id: "session-1",
+      selected_direction: "股票赚 100 万",
+      selected_domain_key: "stocks",
+      suggestion_kind: "same-domain",
+      recommended_action: "keep-active",
+      reason_summary: "same domain",
+      current_domain: {
+        domain_id: "domain-stock",
+        domain_key: "stocks",
+        domain_label: "股票",
+        status: "active",
+        capability_score: 38,
+        evolution_stage: "bonded",
+      },
+      archived_matches: [
+        {
+          domain_id: "domain-writing",
+          domain_key: "writing",
+          domain_label: "写作",
+          status: "archived",
+          capability_score: 26,
+          evolution_stage: "bonded",
+        },
+      ],
+    });
+
+    render(<BuddyOnboardingPage />);
+
+    await waitFor(() => {
+      expect(apiMock.getBuddySurface).toHaveBeenCalled();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("你希望我怎么称呼你？"), {
+      target: { value: "Alex" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("你现在主要在做什么？"), {
+      target: { value: "交易员" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("例如：探索期、转型期、重建期、稳定增长期"), {
+      target: { value: "放大期" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("先说你隐约想改变什么，模糊也没有关系。"), {
+      target: { value: "我想把股票体系做大。" },
+    });
+    fireEvent.submit(screen.getByTestId("buddy-identity-form"));
+
+    await waitFor(() => {
+      expect(apiMock.submitBuddyIdentity).toHaveBeenCalled();
+    });
+
+    apiMock.answerBuddyClarification.mockResolvedValueOnce({
+      session_id: "session-1",
+      question_count: 9,
+      tightened: true,
+      finished: true,
+      next_question: "",
+      candidate_directions: ["股票赚 100 万"],
+      recommended_direction: "股票赚 100 万",
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("用最真实的话回答我，不用写得很工整。"), {
+      target: { value: "我想在原有股票体系上做更大的目标。" },
+    });
+    fireEvent.click(screen.getByTestId("buddy-clarification-submit"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("股票赚 100 万")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("股票赚 100 万"));
+    fireEvent.click(screen.getByTestId("buddy-direction-confirm"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("buddy-transition-choice-panel")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByLabelText("继续当前领域能力"));
+    fireEvent.click(screen.getByTestId("buddy-transition-confirm"));
+
+    await waitFor(() => {
+      expect(apiMock.confirmBuddyDirection).toHaveBeenCalledWith(
+        expect.objectContaining({
+          capability_action: "keep-active",
+          target_domain_id: undefined,
+        }),
+      );
+    });
+  });
+
+  it("lets the user explicitly restore an archived domain capability", async () => {
+    apiMock.previewBuddyDirectionTransition.mockResolvedValueOnce({
+      session_id: "session-1",
+      selected_direction: "写作副业变现",
+      selected_domain_key: "writing",
+      suggestion_kind: "switch-to-archived-domain",
+      recommended_action: "restore-archived",
+      reason_summary: "restore archived",
+      current_domain: {
+        domain_id: "domain-stock",
+        domain_key: "stocks",
+        domain_label: "股票",
+        status: "active",
+        capability_score: 41,
+        evolution_stage: "capable",
+      },
+      archived_matches: [
+        {
+          domain_id: "domain-writing",
+          domain_key: "writing",
+          domain_label: "写作",
+          status: "archived",
+          capability_score: 52,
+          evolution_stage: "capable",
+        },
+      ],
+    });
+
+    render(<BuddyOnboardingPage />);
+
+    await waitFor(() => {
+      expect(apiMock.getBuddySurface).toHaveBeenCalled();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("你希望我怎么称呼你？"), {
+      target: { value: "Alex" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("你现在主要在做什么？"), {
+      target: { value: "写作者" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("例如：探索期、转型期、重建期、稳定增长期"), {
+      target: { value: "重启期" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("先说你隐约想改变什么，模糊也没有关系。"), {
+      target: { value: "我想回到写作这条线。" },
+    });
+    fireEvent.submit(screen.getByTestId("buddy-identity-form"));
+
+    await waitFor(() => {
+      expect(apiMock.submitBuddyIdentity).toHaveBeenCalled();
+    });
+
+    apiMock.answerBuddyClarification.mockResolvedValueOnce({
+      session_id: "session-1",
+      question_count: 9,
+      tightened: true,
+      finished: true,
+      next_question: "",
+      candidate_directions: ["写作副业变现"],
+      recommended_direction: "写作副业变现",
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("用最真实的话回答我，不用写得很工整。"), {
+      target: { value: "我想把旧写作能力重新接回来。" },
+    });
+    fireEvent.click(screen.getByTestId("buddy-clarification-submit"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("写作副业变现")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("写作副业变现"));
+    fireEvent.click(screen.getByTestId("buddy-direction-confirm"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("buddy-transition-choice-panel")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByLabelText("恢复历史领域能力"));
+    fireEvent.click(screen.getByTestId("buddy-transition-confirm"));
+
+    await waitFor(() => {
+      expect(apiMock.confirmBuddyDirection).toHaveBeenCalledWith(
+        expect.objectContaining({
+          capability_action: "restore-archived",
+          target_domain_id: "domain-writing",
+        }),
+      );
+    });
   });
 });

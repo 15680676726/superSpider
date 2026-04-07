@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copaw.industry.models import IndustryProfile
+from copaw.kernel.buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from copaw.kernel.buddy_onboarding_service import (
     BuddyOnboardingService,
     _CREATOR_DIRECTION,
@@ -44,6 +45,22 @@ def _build_service(tmp_path) -> BuddyOnboardingService:
 def _build_service_with_planning(tmp_path) -> tuple[BuddyOnboardingService, SQLiteStateStore]:
     store = SQLiteStateStore(tmp_path / "buddy-onboarding-planning.sqlite3")
     industry_repository = SqliteIndustryInstanceRepository(store)
+    growth_service = BuddyDomainCapabilityGrowthService(
+        domain_capability_repository=SqliteBuddyDomainCapabilityRepository(store),
+        industry_instance_repository=industry_repository,
+        operating_lane_service=OperatingLaneService(
+            repository=SqliteOperatingLaneRepository(store),
+        ),
+        backlog_service=BacklogService(
+            repository=SqliteBacklogItemRepository(store),
+        ),
+        operating_cycle_service=OperatingCycleService(
+            repository=SqliteOperatingCycleRepository(store),
+        ),
+        assignment_service=AssignmentService(
+            repository=SqliteAssignmentRepository(store),
+        ),
+    )
     service = BuddyOnboardingService(
         profile_repository=SqliteHumanProfileRepository(store),
         growth_target_repository=SqliteGrowthTargetRepository(store),
@@ -63,6 +80,7 @@ def _build_service_with_planning(tmp_path) -> tuple[BuddyOnboardingService, SQLi
         assignment_service=AssignmentService(
             repository=SqliteAssignmentRepository(store),
         ),
+        domain_capability_growth_service=growth_service,
     )
     return service, store
 
@@ -280,6 +298,9 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
 
     assignments = assignment_repository.list_assignments(industry_instance_id=instance.instance_id)
     assert any(assignment.industry_instance_id == instance.instance_id for assignment in assignments)
+    assert result.domain_capability.capability_score > 0
+    assert result.domain_capability.strategy_score > 0
+    assert result.domain_capability.evolution_stage == "seed"
 
 
 def test_confirm_primary_direction_writes_direction_first_industry_profile(tmp_path) -> None:

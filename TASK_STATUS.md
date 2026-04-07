@@ -48,13 +48,22 @@
     - `domain_key / domain_label / capability_score / evolution_stage / strategy_score / execution_score / evidence_score / stability_score`
 - 前端已同步把 stage 文案收口为：
   - `幼年期 / 成长期 / 成熟期 / 完全体 / 究极体`
+- Buddy 领域能力分现在会从当前 execution carrier 的正式规划/执行事实自动刷新：
+  - `industry_instance / lanes / backlog / cycles / assignments / agent_reports / evidence_ids`
+  - 不再停留在“record 结构已存在，但能力分不会自己增长”的半成品状态
+- BuddyOnboarding 的换目标确认现在是显式人工确认 UI：
+  - 先 preview，再由用户明确选择 `keep-active / restore-archived / start-new`
+  - 前端不再自动接受系统推荐动作
 - 当前 fresh verification：
   - backend：
-    - `python -m pytest tests/kernel/test_buddy_domain_capability.py tests/kernel/test_buddy_projection_service.py tests/kernel/test_buddy_projection_capability.py tests/app/test_buddy_cutover.py -q`
-    - 结果：`18 passed`
+    - `python -m pytest tests/kernel/test_buddy_domain_capability.py tests/kernel/test_buddy_onboarding_service.py tests/kernel/test_buddy_projection_service.py tests/kernel/test_buddy_projection_capability.py tests/app/test_buddy_routes.py tests/app/test_buddy_cutover.py -q`
+    - 结果：`37 passed`
   - console：
     - `npm --prefix console test -- src/api/modules/buddy.test.ts src/pages/BuddyOnboarding/index.test.tsx src/pages/Chat/buddyEvolution.test.ts src/pages/Chat/buddyPresentation.test.ts src/pages/Chat/BuddyPanel.test.tsx src/pages/Chat/BuddyCompanion.test.tsx src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx src/runtime/buddyFlow.test.ts`
-    - 结果：`33 passed`
+    - 结果：`35 passed`
+  - console build：
+    - `npm --prefix console run build`
+    - 结果：通过
 
 ## 1.2 `2026-04-05` donor-first 开源项目能力落位补充
 

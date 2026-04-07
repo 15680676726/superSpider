@@ -11,6 +11,7 @@ from .buddy_domain_capability import (
     derive_buddy_domain_key,
     progress_to_next_capability_stage,
 )
+from .buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from .buddy_execution_carrier import build_buddy_execution_carrier_handoff
 from .buddy_runtime_focus import resolve_active_human_assist_focus
 from ..state import (
@@ -66,6 +67,7 @@ class BuddyProjectionService:
         relationship_repository: SqliteCompanionRelationshipRepository,
         onboarding_session_repository: SqliteBuddyOnboardingSessionRepository,
         domain_capability_repository: SqliteBuddyDomainCapabilityRepository | None = None,
+        domain_capability_growth_service: BuddyDomainCapabilityGrowthService | None = None,
         human_assist_task_service: object | None = None,
         current_focus_resolver: CurrentFocusResolver | None = None,
     ) -> None:
@@ -74,6 +76,7 @@ class BuddyProjectionService:
         self._relationship_repository = relationship_repository
         self._onboarding_session_repository = onboarding_session_repository
         self._domain_capability_repository = domain_capability_repository
+        self._domain_capability_growth_service = domain_capability_growth_service
         self._human_assist_task_service = human_assist_task_service
         self._current_focus_resolver = current_focus_resolver
 
@@ -224,6 +227,12 @@ class BuddyProjectionService:
         self,
         profile_id: str,
     ) -> BuddyDomainCapabilityRecord | None:
+        if self._domain_capability_growth_service is not None:
+            refreshed = self._domain_capability_growth_service.refresh_active_domain_capability(
+                profile_id=profile_id,
+            )
+            if refreshed is not None:
+                return refreshed
         if self._domain_capability_repository is None:
             return None
         return self._domain_capability_repository.get_active_domain_capability(profile_id)

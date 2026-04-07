@@ -12,6 +12,7 @@ from .buddy_execution_carrier import (
     EXECUTION_CORE_ROLE_ID,
     build_buddy_execution_carrier_handoff,
 )
+from .buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from .buddy_domain_capability import (
     derive_buddy_domain_key,
     preview_domain_transition,
@@ -401,6 +402,7 @@ class BuddyOnboardingService:
         backlog_service: BacklogService | None = None,
         operating_cycle_service: OperatingCycleService | None = None,
         assignment_service: AssignmentService | None = None,
+        domain_capability_growth_service: BuddyDomainCapabilityGrowthService | None = None,
     ) -> None:
         self._profile_repository = profile_repository
         self._growth_target_repository = growth_target_repository
@@ -412,6 +414,7 @@ class BuddyOnboardingService:
         self._backlog_service = backlog_service
         self._operating_cycle_service = operating_cycle_service
         self._assignment_service = assignment_service
+        self._domain_capability_growth_service = domain_capability_growth_service
 
     def submit_identity(
         self,
@@ -647,6 +650,12 @@ class BuddyOnboardingService:
             profile=profile,
             growth_target=growth_target,
         )
+        if self._domain_capability_growth_service is not None:
+            refreshed = self._domain_capability_growth_service.refresh_active_domain_capability(
+                profile_id=profile.profile_id,
+            )
+            if refreshed is not None:
+                domain_capability = refreshed
         updated_session = self._onboarding_session_repository.upsert_session(
             session.model_copy(
                 update={
