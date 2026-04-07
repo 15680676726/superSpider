@@ -289,6 +289,40 @@ class _VersionedIndustryService:
         )
 
 
+class _VersionedActorSupervisor:
+    def __init__(self) -> None:
+        self.version = 1
+
+    def snapshot(self) -> dict[str, object]:
+        if self.version == 1:
+            return {
+                "available": True,
+                "status": "degraded",
+                "running": True,
+                "absorption_case_count": 1,
+                "human_required_case_count": 0,
+                "absorption_case_counts": {"writer-contention": 1},
+                "absorption_recovery_counts": {"cleanup": 1},
+                "absorption_summary": (
+                    "Main brain is absorbing internal execution pressure and is still attempting "
+                    "autonomous recovery before escalating."
+                ),
+            }
+        return {
+            "available": True,
+            "status": "degraded",
+            "running": True,
+            "absorption_case_count": 1,
+            "human_required_case_count": 1,
+            "absorption_case_counts": {"waiting-confirm-orphan": 1},
+            "absorption_recovery_counts": {"escalate": 1},
+            "absorption_summary": (
+                "Main brain is absorbing internal execution pressure and at least one case "
+                "now requires a governed human step."
+            ),
+        }
+
+
 class _TruthFirstDerivedIndexService:
     def __init__(self) -> None:
         now = datetime.now(UTC)
@@ -970,6 +1004,58 @@ async def test_main_brain_chat_service_rebuilds_heavy_prompt_context_when_runtim
     assert len(model.calls) == 2
 
 
+@pytest.mark.asyncio
+async def test_main_brain_chat_service_rebuilds_prompt_context_when_exception_absorption_changes(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    backend = _FakeSessionBackend()
+    industry_service = _VersionedIndustryService()
+    actor_supervisor = _VersionedActorSupervisor()
+    model = _PromptCapturingResponseModel("ok")
+    service = MainBrainChatService(
+        session_backend=backend,
+        industry_service=industry_service,
+        actor_supervisor=actor_supervisor,
+        model_factory=lambda: model,
+    )
+    request = SimpleNamespace(
+        session_id="sess-absorption-refresh",
+        user_id="user-absorption-refresh",
+        industry_instance_id="industry-v1-demo",
+        work_context_id=None,
+        agent_id=None,
+    )
+    call_counts = {"runtime": 0}
+    original_runtime_snapshot = main_brain_chat_service_module._format_runtime_snapshot
+
+    def _count_runtime(detail: object | None) -> str:
+        call_counts["runtime"] += 1
+        return original_runtime_snapshot(detail)
+
+    monkeypatch.setattr(main_brain_chat_service_module, "_format_runtime_snapshot", _count_runtime)
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn one")],
+            request=request,
+        )
+    ]
+
+    actor_supervisor.version = 2
+
+    _ = [
+        item
+        async for item in service.execute_stream(
+            msgs=[Msg(name="user", role="user", content="turn two")],
+            request=request,
+        )
+    ]
+
+    assert call_counts["runtime"] == 2
+    assert len(model.calls) == 2
+
+
 def test_main_brain_chat_service_history_context_shaping_stays_bounded():
     service = MainBrainChatService(
         session_backend=_FakeSessionBackend(),
@@ -1185,6 +1271,36 @@ def test_main_brain_chat_service_prompt_guides_structured_goal_and_auto_progress
     system_prompt = prompt_messages[0]["content"]
     assert "不要反复追问“是否开始执行”" in system_prompt
     assert "结构化执行目标" in system_prompt
+
+
+def test_main_brain_chat_service_prompt_includes_exception_absorption_summary_without_low_level_case_names():
+    actor_supervisor = _VersionedActorSupervisor()
+    service = MainBrainChatService(
+        session_backend=_FakeSessionBackend(),
+        industry_service=_VersionedIndustryService(),
+        actor_supervisor=actor_supervisor,
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+    request = SimpleNamespace(
+        session_id="sess-absorption-prompt",
+        user_id="user-absorption-prompt",
+        industry_instance_id="industry-v1-demo",
+        work_context_id=None,
+        agent_id=None,
+    )
+
+    prompt_messages = service._build_prompt_messages(  # pylint: disable=protected-access
+        request=request,
+        query="现在内部情况怎么样？",
+        prior_messages=[],
+        current_messages=[],
+    )
+
+    context_prompt = prompt_messages[1]["content"]
+    assert "## 主脑异常吸收" in context_prompt
+    assert "internal execution pressure" in context_prompt
+    assert "writer-contention" not in context_prompt
+    assert "waiting-confirm-orphan" not in context_prompt
 
 
 def test_main_brain_chat_service_default_shell_tail_reinforces_short_direct_replies():

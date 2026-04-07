@@ -21,6 +21,7 @@ class RuntimeCenterMainBrainAssembly:
         return value is getattr(self._support, "_missing_sentinel", None)
 
     async def build_main_brain_card(self, app_state: Any) -> RuntimeOverviewCard:
+        exception_absorption = self.resolve_exception_absorption_meta(app_state)
         strategy_items = await self._call_list_method(
             getattr(app_state, "strategy_memory_service", None),
             "list_strategies",
@@ -43,6 +44,7 @@ class RuntimeCenterMainBrainAssembly:
             strategies=strategies,
             industries=industries,
             industry_by_instance_id=industry_by_instance_id,
+            exception_absorption=exception_absorption,
         )
         if not entries:
             return self._unavailable_card(
@@ -74,6 +76,7 @@ class RuntimeCenterMainBrainAssembly:
         strategies: list[Any],
         industries: list[Any],
         industry_by_instance_id: Mapping[str, Any],
+        exception_absorption: Mapping[str, Any] | None = None,
     ) -> list[RuntimeOverviewEntry]:
         if strategies:
             return self._build_mapped_entries(
@@ -83,6 +86,7 @@ class RuntimeCenterMainBrainAssembly:
                 builder=lambda item: self.build_main_brain_entry_from_strategy(
                     item,
                     industry_by_instance_id=industry_by_instance_id,
+                    exception_absorption=exception_absorption,
                 ),
             )
         if not industries:
@@ -91,7 +95,10 @@ class RuntimeCenterMainBrainAssembly:
             industries,
             "updated_at",
             "created_at",
-            builder=lambda item: self.build_main_brain_entry_from_industry(item),
+            builder=lambda item: self.build_main_brain_entry_from_industry(
+                item,
+                exception_absorption=exception_absorption,
+            ),
         )
 
     def build_main_brain_entry_from_strategy(
@@ -99,6 +106,7 @@ class RuntimeCenterMainBrainAssembly:
         strategy: Any,
         *,
         industry_by_instance_id: Mapping[str, Any],
+        exception_absorption: Mapping[str, Any] | None = None,
     ) -> RuntimeOverviewEntry:
         strategy_id = self._string(self._get_field(strategy, "strategy_id", "id")) or "main-brain"
         industry_instance_id = self._string(
@@ -123,10 +131,16 @@ class RuntimeCenterMainBrainAssembly:
                 industry_instance_id=industry_instance_id,
                 stats=stats,
                 carrier=self._mapping(industry) or {},
+                exception_absorption=exception_absorption,
             ),
         )
 
-    def build_main_brain_entry_from_industry(self, industry: Any) -> RuntimeOverviewEntry:
+    def build_main_brain_entry_from_industry(
+        self,
+        industry: Any,
+        *,
+        exception_absorption: Mapping[str, Any] | None = None,
+    ) -> RuntimeOverviewEntry:
         instance_id = self._string(self._get_field(industry, "instance_id", "id")) or "unknown-industry"
         stats = self._mapping(self._get_field(industry, "stats")) or {}
         routes = self._mapping(self._get_field(industry, "routes")) or {}
@@ -145,6 +159,7 @@ class RuntimeCenterMainBrainAssembly:
                 industry_instance_id=instance_id,
                 stats=stats,
                 carrier=self._mapping(industry) or {},
+                exception_absorption=exception_absorption,
             ),
         )
 
@@ -155,6 +170,7 @@ class RuntimeCenterMainBrainAssembly:
         industry_instance_id: str | None,
         stats: Mapping[str, Any],
         carrier: Mapping[str, Any],
+        exception_absorption: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         lane_count = self._int(stats.get("lane_count"), 0)
         backlog_count = self._int(stats.get("backlog_count"), 0)
@@ -171,7 +187,7 @@ class RuntimeCenterMainBrainAssembly:
             or stats.get("report_unconsumed_count"),
             0,
         )
-        return {
+        payload = {
             "strategy_id": strategy_id,
             "industry_instance_id": industry_instance_id,
             "industry_route": carrier_route
@@ -192,6 +208,33 @@ class RuntimeCenterMainBrainAssembly:
             "current_focus_count": self._int(stats.get("current_focus_count"), 0),
             "next_cycle_due_at": self._string(stats.get("next_cycle_due_at")),
         }
+        normalized_exception_absorption = self._mapping(exception_absorption) or {}
+        if normalized_exception_absorption:
+            payload["exception_absorption"] = normalized_exception_absorption
+        return payload
+
+    def resolve_exception_absorption_meta(self, app_state: Any) -> dict[str, Any]:
+        snapshot_getter = getattr(app_state, "actor_supervisor_snapshot", None)
+        snapshot = snapshot_getter() if callable(snapshot_getter) else None
+        payload = self._mapping(snapshot) or {}
+        if not payload:
+            return {}
+        case_count = self._int(payload.get("absorption_case_count"), 0)
+        human_required_case_count = self._int(payload.get("human_required_case_count"), 0)
+        summary = self._string(payload.get("absorption_summary"))
+        status = "clear"
+        if human_required_case_count > 0:
+            status = "human-required"
+        elif case_count > 0:
+            status = "absorbing"
+        return {
+            "status": status,
+            "case_count": case_count,
+            "human_required_case_count": human_required_case_count,
+            "summary": summary,
+            "case_counts": self._mapping(payload.get("absorption_case_counts")) or {},
+            "recovery_counts": self._mapping(payload.get("absorption_recovery_counts")) or {},
+        }
 
     def main_brain_card_meta(
         self,
@@ -210,6 +253,7 @@ class RuntimeCenterMainBrainAssembly:
         evidence_count = self._int(entry_meta.get("evidence_count"), 0)
         decision_count = self._int(entry_meta.get("decision_count"), 0)
         patch_count = self._int(entry_meta.get("patch_count"), 0)
+        exception_absorption = self._mapping(entry_meta.get("exception_absorption")) or {}
         cycle_title = self._string(entry_meta.get("current_cycle_title"))
         cycle_status = self._string(entry_meta.get("current_cycle_status")) or "active"
         cycle_focus_count = self._int(entry_meta.get("current_focus_count"), 0)
@@ -289,6 +333,21 @@ class RuntimeCenterMainBrainAssembly:
                 "route": "/api/runtime-center/learning/patches",
             },
         }
+        if exception_absorption:
+            case_count = self._int(exception_absorption.get("case_count"), 0)
+            human_required_case_count = self._int(
+                exception_absorption.get("human_required_case_count"),
+                0,
+            )
+            signals["exception_absorption"] = {
+                "key": "exception_absorption",
+                "count": case_count,
+                "human_required_case_count": human_required_case_count,
+                "detail": self._string(exception_absorption.get("summary"))
+                or "Main brain is currently handling internal execution pressure.",
+                "route": industry_route or first_entry.route,
+                "status": self._string(exception_absorption.get("status")) or "clear",
+            }
         return {
             "carrier": signals["carrier"],
             "strategy": signals["strategy"],
@@ -300,6 +359,7 @@ class RuntimeCenterMainBrainAssembly:
                 signals["backlog"],
                 signals["current_cycle"],
                 signals["assignments"],
+                *([signals["exception_absorption"]] if isinstance(signals.get("exception_absorption"), dict) else []),
                 signals["agent_reports"],
                 signals["environment"],
                 signals["evidence"],
@@ -317,6 +377,7 @@ class RuntimeCenterMainBrainAssembly:
             "strategy_id": entry_meta.get("strategy_id"),
             "industry_instance_id": entry_meta.get("industry_instance_id"),
             "industry_route": industry_route,
+            "exception_absorption": exception_absorption,
             "visible_count": 1 if total > 0 else 0,
             "truncated": total > 1,
         }
@@ -330,12 +391,22 @@ class RuntimeCenterMainBrainAssembly:
         evidence_count = self._int(meta.get("evidence_count"), 0)
         decision_count = self._int(meta.get("decision_count"), 0)
         patch_count = self._int(meta.get("patch_count"), 0)
-        return (
+        summary = (
             "Main-brain cockpit tracks "
             f"{lane_count} lane(s), {backlog_count} backlog item(s), {assignment_count} assignment(s), "
             f"{report_count} report(s), {evidence_count} evidence record(s), "
             f"{decision_count} decision(s), and {patch_count} patch(es)."
         )
+        exception_absorption = self._mapping(meta.get("exception_absorption")) or {}
+        case_count = self._int(exception_absorption.get("case_count"), 0)
+        human_required_case_count = self._int(
+            exception_absorption.get("human_required_case_count"),
+            0,
+        )
+        exception_summary = self._string(exception_absorption.get("summary"))
+        if exception_summary and (case_count > 0 or human_required_case_count > 0):
+            return f"{exception_summary} {summary}"
+        return summary
 
     def index_industry_by_instance_id(self, items: list[Any]) -> dict[str, Any]:
         indexed: dict[str, Any] = {}

@@ -178,6 +178,22 @@ def _safe_mapping(value: object) -> dict[str, Any]:
     return {}
 
 
+def _int(value: object | None, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    text = str(value or "").strip()
+    if not text:
+        return default
+    try:
+        return int(text)
+    except ValueError:
+        return default
+
+
 def _resolve_snapshot_user_id(request: object) -> str:
     return str(
         _first_non_empty(
@@ -471,6 +487,61 @@ def _format_runtime_snapshot(detail: object | None) -> str:
     return "\n".join(parts)
 
 
+def _normalize_exception_absorption_snapshot(snapshot: object | None) -> dict[str, Any]:
+    payload = _safe_mapping(snapshot)
+    if not payload:
+        return {}
+    case_count = _int(
+        _first_non_empty(
+            payload.get("case_count"),
+            payload.get("absorption_case_count"),
+        ),
+        0,
+    )
+    human_required_case_count = _int(
+        _first_non_empty(
+            payload.get("human_required_case_count"),
+            payload.get("absorption_human_required_case_count"),
+        ),
+        0,
+    )
+    summary = _first_non_empty(
+        payload.get("summary"),
+        payload.get("absorption_summary"),
+    )
+    status = "clear"
+    if human_required_case_count > 0:
+        status = "human-required"
+    elif case_count > 0:
+        status = "absorbing"
+    return {
+        "status": status,
+        "case_count": case_count,
+        "human_required_case_count": human_required_case_count,
+        "summary": summary,
+    }
+
+
+def _format_exception_absorption_snapshot(snapshot: object | None) -> str:
+    normalized = _normalize_exception_absorption_snapshot(snapshot)
+    if not normalized:
+        return ""
+    case_count = _int(normalized.get("case_count"), 0)
+    human_required_case_count = _int(normalized.get("human_required_case_count"), 0)
+    summary = _first_non_empty(normalized.get("summary")) or "Main brain is clear of active internal exception pressure."
+    lines = [
+        f"- 状态：{summary}",
+        f"- 当前内部恢复中的问题数：{case_count}",
+    ]
+    if human_required_case_count > 0:
+        lines.append(f"- 其中需要人类一步的事项：{human_required_case_count}")
+    elif case_count > 0:
+        lines.append("- 当前仍优先尝试主脑自治恢复，不会先把内部故障直接抛给用户。")
+    else:
+        lines.append("- 当前没有需要用户接管的内部异常压力。")
+    return "\n".join(lines)
+
+
 def _format_strategy_summary(detail: object | None) -> str:
     if detail is None:
         return "暂无正式战略摘要。"
@@ -709,6 +780,7 @@ class MainBrainChatService:
         agent_profile_service: AgentProfileService | None = None,
         memory_recall_service: MemoryRecallService | None = None,
         buddy_projection_service: Any | None = None,
+        actor_supervisor: object | None = None,
         model_factory: Callable[[], object] | None = None,
         scope_snapshot_service: MainBrainScopeSnapshotService | None = None,
         commit_service: MainBrainCommitService | None = None,
@@ -718,6 +790,7 @@ class MainBrainChatService:
         self._agent_profile_service = agent_profile_service
         self._memory_recall_service = memory_recall_service
         self._buddy_projection_service = buddy_projection_service
+        self._actor_supervisor = actor_supervisor
         self._model_factory = model_factory or _missing_main_brain_chat_model
         self._scope_snapshot_service = scope_snapshot_service or MainBrainScopeSnapshotService(
             stable_prefix_builder=self._build_stable_prompt_prefix,
@@ -758,6 +831,9 @@ class MainBrainChatService:
 
     def set_buddy_projection_service(self, buddy_projection_service: Any | None) -> None:
         self._buddy_projection_service = buddy_projection_service
+
+    def set_actor_supervisor(self, actor_supervisor: object | None) -> None:
+        self._actor_supervisor = actor_supervisor
 
     def mark_scope_snapshot_dirty(
         self,
@@ -1713,6 +1789,7 @@ class MainBrainChatService:
         detail: object | None,
         owner_agent_id: str | None,
     ) -> str:
+        exception_absorption = self._load_actor_supervisor_snapshot()
         roster_lines = _format_team_roster(
             detail=detail,
             agent_profile_service=self._agent_profile_service,
@@ -1722,6 +1799,11 @@ class MainBrainChatService:
         context_sections = [
             f"## 主脑身份\n- 当前身份：Spider Mesh 主脑\n- 当前会话：{_clip_text(getattr(request, 'session_id', ''), limit=80) or '未命名会话'}",
             f"## 当前运行摘要\n{_format_runtime_snapshot(detail)}",
+            *(
+                [f"## 主脑异常吸收\n{_format_exception_absorption_snapshot(exception_absorption)}"]
+                if exception_absorption
+                else []
+            ),
             f"## 主脑 cognitive closure\n{_format_cognitive_closure(detail=detail, request=request)}",
             f"## 正式战略摘要\n{_format_strategy_summary(detail)}",
             "## 团队职业成员 roster\n"
@@ -1844,6 +1926,7 @@ class MainBrainChatService:
             "backlog": list(payload.get("backlog") or [])[:8],
             "lanes": list(payload.get("lanes") or [])[:6],
             "agent_reports": list(payload.get("agent_reports") or [])[:6],
+            "exception_absorption": self._load_actor_supervisor_snapshot(),
         }
         try:
             return json.dumps(
@@ -1870,6 +1953,18 @@ class MainBrainChatService:
         except Exception:
             logger.exception("Failed to load industry detail for pure chat")
             return None
+
+    def _load_actor_supervisor_snapshot(self) -> dict[str, Any]:
+        supervisor = self._actor_supervisor
+        if supervisor is None:
+            return {}
+        snapshot_getter = getattr(supervisor, "snapshot", None)
+        try:
+            snapshot = snapshot_getter() if callable(snapshot_getter) else supervisor
+        except Exception:
+            logger.debug("failed to load actor supervisor snapshot for pure chat", exc_info=True)
+            return {}
+        return _normalize_exception_absorption_snapshot(snapshot)
 
     def _resolve_owner_agent_id(self, request: Any, *, detail: object | None) -> str | None:
         explicit = str(getattr(request, "agent_id", "") or "").strip()

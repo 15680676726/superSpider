@@ -409,6 +409,7 @@ def build_runtime_domain_services(
         industry_service=industry_service,
         agent_profile_service=agent_profile_service,
         memory_recall_service=memory_recall_service,
+        actor_supervisor=actor_supervisor,
         model_factory=runtime_provider.get_active_chat_model,
     )
     main_brain_orchestrator = MainBrainOrchestrator(

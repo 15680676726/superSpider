@@ -598,6 +598,27 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
     app.state.governance_service = governance_service
     app.state.routine_service = FakeRoutineService()
     app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.actor_supervisor = SimpleNamespace(
+        snapshot=lambda: {
+            "available": True,
+            "status": "degraded",
+            "running": True,
+            "absorption_case_count": 2,
+            "human_required_case_count": 1,
+            "absorption_case_counts": {
+                "writer-contention": 1,
+                "waiting-confirm-orphan": 1,
+            },
+            "absorption_recovery_counts": {
+                "cleanup": 1,
+                "escalate": 1,
+            },
+            "absorption_summary": (
+                "Main brain is absorbing internal execution pressure and at least one case "
+                "now requires a governed human step."
+            ),
+        }
+    )
 
     client = TestClient(app)
     response = client.get("/runtime-center/surface")
@@ -608,7 +629,7 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
 
     payload = response.json()
     assert payload["surface"]["version"] == "runtime-center-v1"
-    assert payload["surface"]["status"] == "state-service"
+    assert payload["surface"]["status"] == "degraded"
     assert "bridge" not in payload
 
     cards = {card["key"]: card for card in payload["cards"]}
@@ -663,6 +684,10 @@ def test_runtime_center_overview_uses_state_and_evidence_services():
     assert main_brain_entry["meta"]["patch_count"] == 3
     assert main_brain_entry["meta"]["evidence_count"] == 4
     assert main_brain_entry["meta"]["strategy_id"] == "strategy:industry:industry-v1-ops:copaw-agent-runner"
+    assert cards["main-brain"]["meta"]["exception_absorption"]["case_count"] == 2
+    assert cards["main-brain"]["meta"]["exception_absorption"]["human_required_case_count"] == 1
+    assert cards["main-brain"]["meta"]["exception_absorption"]["status"] == "human-required"
+    assert "absorbing internal execution pressure" in cards["main-brain"]["summary"]
     assert cards["decisions"]["entries"][0]["status"] == "open"
     assert cards["decisions"]["entries"][0]["actions"]["approve"] == "/api/runtime-center/decisions/decision-1/approve"
     assert cards["patches"]["source"] == "learning_service"
