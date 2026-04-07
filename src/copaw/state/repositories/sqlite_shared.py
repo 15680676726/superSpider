@@ -532,6 +532,7 @@ _INDUSTRY_INSTANCE_COLUMNS = (
     "status",
     "profile_payload_json",
     "team_payload_json",
+    "draft_payload_json",
     "execution_core_identity_payload_json",
     "agent_ids_json",
     "lifecycle_status",

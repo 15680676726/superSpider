@@ -1234,6 +1234,17 @@
   - workflow `step_execution_seed` 仍允许保留 `linked_goal_ids / linked_schedule_ids` 作为旧 run 兼容回填输入，但公开 step record/detail 已不再依赖它们。
   - `runtime_service_graph.py` + `runtime_bootstrap_models.py` 的 wiring graph 仍偏重。
 
+### 3.3.7 `2026-04-07` bootstrap draft-truth hardening
+
+- `IndustryInstanceRecord` 新增正式 `draft_payload` 真相字段，并已落到 SQLite schema / repository 持久化。
+- industry bootstrap 现在会把 canonicalized `IndustryDraftPlan` 原样落到 `IndustryInstanceRecord.draft_payload`，后续 strategy/runtime 读取行业草案时优先消费这份实例内真相，而不是再从 legacy goal truth 反推。
+- bootstrap backlog/cycle/assignment seed 已改为直接消费 canonical goal specs；`GoalRecord` 改为在 assignment-native seed 完成后按稳定 `goal_id` 物化，避免“先 materialize goal 再把 goal 当唯一 bootstrap truth”的旧顺序。
+- canonical goal identity 已按 `team_id + goal slug` 稳定化，同一实例的 bootstrap/replay/delete 都使用同一组 goal ids，同时避免跨实例 goal id 冲突。
+- 这轮为了让 fresh 进程回归稳定收集，还补正了 `copaw.compiler.planning` 的公开导出面；`PlanningStrategicUncertainty / StrategyTriggerRule` 现已重新加入 package export，`IndustryService` 新进程导入不再因 planning package re-export 断层而在 collect 阶段失败。
+- 本次追加 focused verification：
+  - `python -m pytest tests/state/test_state_store_migration.py::test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_indexes tests/state/test_sqlite_repositories.py::test_sqlite_override_repositories_crud_round_trip tests/app/industry_api_parts/bootstrap_lifecycle.py::test_public_bootstrap_persists_draft_truth_and_uses_draft_goal_identity tests/app/industry_api_parts/retirement_chain.py::test_industry_delete_retired_instance_removes_persisted_runtime_state tests/app/industry_api_parts/runtime_updates.py::test_industry_chat_writeback_approved_staffing_proposal_unblocks_materialization -q` -> `5 passed`
+  - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py::test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch -vv -s` -> `1 passed in 864.29s`
+
 ### 3.3.4 `2026-04-07` Buddy carrier direction-truth fix
 
 - Buddy onboarding 的正式方向边界已补正：`BuddyOnboardingService._ensure_growth_scaffold(...)` 不再把 `HumanProfile` 当前资料直接写进 `IndustryInstanceRecord.profile_payload`。

@@ -214,7 +214,7 @@ class _IndustryActivationMixin:
         goal_results: list[IndustryBootstrapGoalResult] = []
         goal_ids: list[str] = []
         goal_by_agent_id: dict[str, tuple[str, str]] = {}
-        goal_seed_links: list[tuple[GoalRecord, GoalOverrideRecord, IndustryGoalSeed]] = []
+        goal_specs: list[dict[str, object]] = []
         for agent in plan.draft.team.agents:
             self._upsert_agent_profile(
                 agent,
@@ -231,54 +231,28 @@ class _IndustryActivationMixin:
                 goal_kind=seed.kind,
                 owner_agent_id=seed.owner_agent_id,
             )
-            goal = self._goal_service.create_goal(
-                title=seed.title,
-                summary=seed.summary,
-                status=initial_goal_status,
-                priority=goal_priority,
-                owner_scope=plan.owner_scope,
-                industry_instance_id=team_id,
-                lane_id=lane.id if lane is not None else None,
-                goal_class="bootstrap-goal",
+            goal_ids.append(seed.goal_id)
+            goal_by_agent_id.setdefault(seed.owner_agent_id, (seed.goal_id, seed.title))
+            goal_specs.append(
+                {
+                    "goal_id": seed.goal_id,
+                    "kind": seed.kind,
+                    "goal_kind": seed.kind,
+                    "owner_agent_id": seed.owner_agent_id,
+                    "industry_role_id": seed.role.role_id,
+                    "lane_id": lane.id if lane is not None else None,
+                    "title": seed.title,
+                    "summary": seed.summary,
+                    "priority": goal_priority,
+                    "goal_class": "bootstrap-goal",
+                },
             )
-            goal_ids.append(goal.id)
-            override = self._goal_override_repository.upsert_override(
-                GoalOverrideRecord(
-                    goal_id=goal.id,
-                    plan_steps=list(seed.plan_steps),
-                    compiler_context={
-                        "channel": "industry",
-                        "bootstrap_kind": "industry-v1",
-                        "industry_instance_id": team_id,
-                        "lane_id": lane.id if lane is not None else None,
-                        "report_back_mode": "summary",
-                        **seed.compiler_context,
-                    },
-                    reason=f"Industry bootstrap for {plan.profile.primary_label()}",
-                ),
-            )
-            goal_seed_links.append((goal, override, seed))
-            goal_by_agent_id.setdefault(seed.owner_agent_id, (goal.id, goal.title))
             self._upsert_agent_profile(
                 seed.role,
                 instance_id=team_id,
-                goal_id=goal.id,
-                goal_title=goal.title,
+                goal_id=seed.goal_id,
+                goal_title=seed.title,
                 status=initial_agent_status,
-            )
-            goal_results.append(
-                IndustryBootstrapGoalResult(
-                    kind=seed.kind,
-                    owner_agent_id=seed.owner_agent_id,
-                    goal=goal.model_dump(mode="json"),
-                    override=override.model_dump(mode="json"),
-                    dispatch=None,
-                    routes={
-                        "goal": f"/api/goals/{goal.id}/detail",
-                        "agent": f"/api/runtime-center/agents/{seed.owner_agent_id}",
-                        "industry": f"/api/runtime-center/industry/{team_id}",
-                    },
-                ),
             )
 
         schedule_results: list[IndustryBootstrapScheduleResult] = []
@@ -308,9 +282,9 @@ class _IndustryActivationMixin:
             if (schedule := self._schedule_repository.get_schedule(schedule_id)) is not None
         ]
         backlog_items = (
-            self._backlog_service.seed_bootstrap_items(
+            self._backlog_service.seed_bootstrap_items_from_goal_specs(
                 industry_instance_id=team_id,
-                goals=[goal for goal, _override, _seed in goal_seed_links],
+                goal_specs=goal_specs,
                 schedules=persisted_schedules,
             )
             if self._backlog_service is not None
@@ -384,28 +358,21 @@ class _IndustryActivationMixin:
                 for item in backlog_items
                 if item.goal_id is not None
             }
-            for goal, _override, seed in goal_seed_links:
+            for seed in plan.goal_seeds:
                 lane = self._resolve_goal_lane(
                     instance_id=team_id,
                     role=seed.role,
                     goal_kind=seed.kind,
                     owner_agent_id=seed.owner_agent_id,
                 )
-                goal = self._goal_service.update_goal(
-                    goal.id,
-                    industry_instance_id=team_id,
-                    lane_id=lane.id if lane is not None else goal.lane_id,
-                    cycle_id=current_cycle.id,
-                    goal_class="bootstrap-goal",
-                )
-                backlog_item = backlog_item_by_goal_id.get(goal.id)
+                backlog_item = backlog_item_by_goal_id.get(seed.goal_id)
                 assignment_plan = (
                     self._assignment_planner.plan(
                         assignment_id=self._stable_assignment_id(
                             cycle_id=current_cycle.id,
-                            goal_id=goal.id,
+                            goal_id=seed.goal_id,
                             backlog_item_id=backlog_item.id if backlog_item is not None else None,
-                            title=goal.title,
+                            title=seed.title,
                         ),
                         cycle_id=current_cycle.id,
                         backlog_item=backlog_item,
@@ -426,7 +393,7 @@ class _IndustryActivationMixin:
                     "goal_kind": seed.kind,
                     "industry_role_id": seed.role.role_id,
                     "owner_agent_id": seed.owner_agent_id,
-                    "source_ref": f"goal:{goal.id}",
+                    "source_ref": f"goal:{seed.goal_id}",
                     "source_kind": "bootstrap-goal",
                 }
                 if assignment_plan is not None:
@@ -439,7 +406,7 @@ class _IndustryActivationMixin:
                     }
                 assignment_specs.append(
                     {
-                        "goal_id": goal.id,
+                        "goal_id": seed.goal_id,
                         "lane_id": lane.id if lane is not None else None,
                         "owner_agent_id": (
                             assignment_plan.owner_agent_id
@@ -451,14 +418,14 @@ class _IndustryActivationMixin:
                             if assignment_plan is not None
                             else seed.role.role_id
                         ),
-                        "title": goal.title,
-                        "summary": goal.summary,
-                        "goal_status": goal.status,
+                        "title": seed.title,
+                        "summary": seed.summary,
+                        "goal_status": initial_goal_status,
                         "backlog_item_id": next(
                             (
                                 item.id
                                 for item in backlog_items
-                                if item.goal_id == goal.id
+                                if item.goal_id == seed.goal_id
                             ),
                             None,
                         ),
@@ -500,6 +467,55 @@ class _IndustryActivationMixin:
                     goal_id=item.goal_id,
                     assignment_id=assignment.id if assignment is not None else None,
                 )
+
+        for seed in plan.goal_seeds:
+            lane = self._resolve_goal_lane(
+                instance_id=team_id,
+                role=seed.role,
+                goal_kind=seed.kind,
+                owner_agent_id=seed.owner_agent_id,
+            )
+            goal = self._goal_service.create_goal(
+                goal_id=seed.goal_id,
+                title=seed.title,
+                summary=seed.summary,
+                status=initial_goal_status,
+                priority=goal_priority,
+                owner_scope=plan.owner_scope,
+                industry_instance_id=team_id,
+                lane_id=lane.id if lane is not None else None,
+                cycle_id=current_cycle.id if current_cycle is not None else None,
+                goal_class="bootstrap-goal",
+            )
+            override = self._goal_override_repository.upsert_override(
+                GoalOverrideRecord(
+                    goal_id=seed.goal_id,
+                    plan_steps=list(seed.plan_steps),
+                    compiler_context={
+                        "channel": "industry",
+                        "bootstrap_kind": "industry-v1",
+                        "industry_instance_id": team_id,
+                        "lane_id": lane.id if lane is not None else None,
+                        "report_back_mode": "summary",
+                        **seed.compiler_context,
+                    },
+                    reason=f"Industry bootstrap for {plan.profile.primary_label()}",
+                ),
+            )
+            goal_results.append(
+                IndustryBootstrapGoalResult(
+                    kind=seed.kind,
+                    owner_agent_id=seed.owner_agent_id,
+                    goal=goal.model_dump(mode="json"),
+                    override=override.model_dump(mode="json"),
+                    dispatch=None,
+                    routes={
+                        "goal": f"/api/goals/{goal.id}/detail",
+                        "agent": f"/api/runtime-center/agents/{seed.owner_agent_id}",
+                        "industry": f"/api/runtime-center/industry/{team_id}",
+                    },
+                ),
+            )
 
         if auto_dispatch:
             await self._dispatch_operating_cycle_assignments(

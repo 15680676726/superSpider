@@ -3,8 +3,10 @@
 from .models import (
     AssignmentPlanEnvelope,
     CyclePlanningDecision,
+    PlanningStrategicUncertainty,
     PlanningStrategyConstraints,
     ReportReplanDecision,
+    StrategyTriggerRule,
 )
 from .assignment_planner import AssignmentPlanningCompiler
 from .cycle_planner import CyclePlanningCompiler
@@ -17,9 +19,11 @@ __all__ = [
     "AssignmentPlanningCompiler",
     "CyclePlanningCompiler",
     "CyclePlanningDecision",
+    "PlanningStrategicUncertainty",
     "PlanningStrategyConstraints",
     "ReportReplanEngine",
     "ReportReplanDecision",
+    "StrategyTriggerRule",
     "StrategyPlanningCompiler",
     "build_uncertainty_register_payload",
 ]

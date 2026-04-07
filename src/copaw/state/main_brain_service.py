@@ -319,6 +319,73 @@ class BacklogService:
             seeded.append(self._repository.upsert_item(item))
         return seeded
 
+    def seed_bootstrap_items_from_goal_specs(
+        self,
+        *,
+        industry_instance_id: str,
+        goal_specs: Sequence[Mapping[str, object]],
+        schedules: Sequence[ScheduleRecord],
+    ) -> list[BacklogItemRecord]:
+        seeded: list[BacklogItemRecord] = []
+        now = _utc_now()
+        for spec in goal_specs:
+            goal_id = _string(spec.get("goal_id"))
+            title = _string(spec.get("title"))
+            if goal_id is None or title is None:
+                continue
+            stable_id = _stable_id("backlog-goal", industry_instance_id, goal_id)
+            existing = self._repository.get_item(stable_id)
+            metadata = dict(existing.metadata or {}) if existing is not None else {}
+            metadata.update(
+                {
+                    "goal_kind": _string(spec.get("goal_kind")) or _string(spec.get("kind")),
+                    "goal_class": _string(spec.get("goal_class")) or "bootstrap-goal",
+                    "industry_role_id": _string(spec.get("industry_role_id")),
+                    "owner_agent_id": _string(spec.get("owner_agent_id")),
+                },
+            )
+            item = BacklogItemRecord(
+                id=stable_id,
+                industry_instance_id=industry_instance_id,
+                lane_id=_string(spec.get("lane_id")),
+                cycle_id=_string(spec.get("cycle_id")),
+                goal_id=goal_id,
+                title=title,
+                summary=_string(spec.get("summary")) or "",
+                status="materialized",
+                priority=max(0, int(spec.get("priority") or 0)),
+                source_kind="bootstrap-goal",
+                source_ref=f"goal:{goal_id}",
+                metadata=metadata,
+                created_at=existing.created_at if existing is not None else now,
+                updated_at=now,
+            )
+            seeded.append(self._repository.upsert_item(item))
+        for schedule in schedules:
+            stable_id = _stable_id("backlog-schedule", industry_instance_id, schedule.id)
+            existing = self._repository.get_item(stable_id)
+            item = BacklogItemRecord(
+                id=stable_id,
+                industry_instance_id=industry_instance_id,
+                lane_id=schedule.lane_id,
+                title=schedule.title,
+                summary=schedule.spec_payload.get("meta", {}).get("summary") or schedule.source_ref or "",
+                status="open",
+                priority=2,
+                source_kind="schedule",
+                source_ref=f"schedule:{schedule.id}",
+                metadata={
+                    "schedule_id": schedule.id,
+                    "schedule_kind": schedule.schedule_kind,
+                    "trigger_target": schedule.trigger_target,
+                    "spec_payload": dict(schedule.spec_payload),
+                },
+                created_at=existing.created_at if existing is not None else now,
+                updated_at=now,
+            )
+            seeded.append(self._repository.upsert_item(item))
+        return seeded
+
     def record_generated_item(
         self,
         *,

@@ -307,6 +307,7 @@ def canonicalize_industry_draft(
     goals = _canonicalize_goals(
         profile,
         draft.goals,
+        team_id=team.team_id,
         roles=roles,
         alias_to_agent_id=alias_to_agent_id,
     )
@@ -350,6 +351,7 @@ def compile_industry_goal_seeds(
     roles_by_agent_id = {role.agent_id: role for role in draft.team.agents}
     return [
         IndustryGoalSeed(
+            goal_id=goal.goal_id,
             kind=goal.kind,
             owner_agent_id=goal.owner_agent_id,
             title=goal.title,
@@ -728,6 +730,7 @@ def _canonicalize_goals(
     profile: IndustryProfile,
     goals: list[IndustryDraftGoal],
     *,
+    team_id: str,
     roles: list[IndustryRoleBlueprint],
     alias_to_agent_id: dict[str, str],
 ) -> list[IndustryDraftGoal]:
@@ -743,7 +746,10 @@ def _canonicalize_goals(
             continue
         role = roles_by_agent_id[owner_agent_id]
         goal_id = _reserve_identifier(
-            _slugify_identifier(goal.goal_id or goal.kind or role.goal_kind, fallback=role.goal_kind),
+            _slugify_identifier(
+                f"{team_id}-{goal.goal_id or goal.kind or role.goal_kind}",
+                fallback=f"{team_id}-{role.goal_kind}",
+            ),
             seen_goal_ids,
         )
         goal_kind = _slugify_identifier(

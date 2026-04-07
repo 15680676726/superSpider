@@ -263,6 +263,28 @@ class _IndustryStrategyMixin:
         record: IndustryInstanceRecord,
 
     ) -> dict[str, list[str]]:
+        draft_payload = dict(record.draft_payload or {})
+        draft_goals = draft_payload.get("goals")
+        if isinstance(draft_goals, list):
+            context_by_agent_id: dict[str, list[str]] = {}
+            for item in draft_goals:
+                if not isinstance(item, dict):
+                    continue
+                owner_agent_id = _string(item.get("owner_agent_id"))
+                if owner_agent_id is None:
+                    continue
+                bucket = context_by_agent_id.setdefault(owner_agent_id, [])
+                bucket.extend(
+                    _unique_strings(
+                        item.get("title"),
+                        item.get("summary"),
+                        list(item.get("plan_steps") or []),
+                    ),
+                )
+            return {
+                agent_id: _unique_strings(values)
+                for agent_id, values in context_by_agent_id.items()
+            }
 
         owner_scope = _string(record.owner_scope)
 
@@ -1354,6 +1376,8 @@ class _IndustryStrategyMixin:
             profile_payload=plan.profile.model_dump(mode="json"),
 
             team_payload=plan.draft.team.model_dump(mode="json"),
+
+            draft_payload=plan.draft.model_dump(mode="json"),
 
             execution_core_identity_payload=execution_core_identity.model_dump(mode="json"),
 

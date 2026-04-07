@@ -1603,6 +1603,73 @@ def test_public_bootstrap_auto_dispatch_materializes_assignment_tasks_without_go
     assert all(task.assignment_id for task in created_tasks)
 
 
+def test_public_bootstrap_persists_draft_truth_and_uses_draft_goal_identity(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    owner_scope = "industry-v1-northwind-robotics"
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Industrial Equipment",
+            company_name="Northwind Robotics",
+            product="factory monitoring copilots",
+            goals=["stabilize the first operating loop"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(profile, owner_scope)
+
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_activate": True,
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    instance_id = payload["team"]["team_id"]
+    record = app.state.industry_instance_repository.get_instance(instance_id)
+    assert record is not None
+
+    canonicalized_draft = canonicalize_industry_draft(
+        profile,
+        draft,
+        owner_scope=owner_scope,
+    )
+    draft_goal_ids = [goal.goal_id for goal in canonicalized_draft.goals]
+    assert record.draft_payload["team"]["team_id"] == canonicalized_draft.team.team_id
+    assert [item["goal_id"] for item in record.draft_payload["goals"]] == draft_goal_ids
+    assert [item["goal"]["id"] for item in payload["goals"]] == draft_goal_ids
+
+    assignments = app.state.assignment_repository.list_assignments(
+        industry_instance_id=instance_id,
+        limit=None,
+    )
+    assert assignments
+    assert {
+        assignment.goal_id
+        for assignment in assignments
+        if assignment.goal_id is not None
+    } == set(draft_goal_ids)
+
+    tasks = app.state.task_repository.list_tasks(
+        industry_instance_id=instance_id,
+        limit=None,
+    )
+    assert tasks
+    assert {
+        task.goal_id
+        for task in tasks
+        if task.goal_id is not None
+    }.issubset(set(draft_goal_ids))
+
+
 def test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch(
     tmp_path,
 ) -> None:

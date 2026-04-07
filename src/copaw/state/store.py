@@ -981,6 +981,7 @@ CREATE TABLE IF NOT EXISTS industry_instances (
     status TEXT NOT NULL,
     profile_payload_json TEXT NOT NULL DEFAULT '{}',
     team_payload_json TEXT NOT NULL DEFAULT '{}',
+    draft_payload_json TEXT NOT NULL DEFAULT '{}',
     execution_core_identity_payload_json TEXT NOT NULL DEFAULT '{}',
     agent_ids_json TEXT NOT NULL DEFAULT '[]',
     lifecycle_status TEXT NOT NULL DEFAULT 'running',
@@ -1787,6 +1788,7 @@ _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = 
     (
         "industry_instances",
         (
+            ("draft_payload_json", "TEXT NOT NULL DEFAULT '{}'"),
             ("execution_core_identity_payload_json", "TEXT NOT NULL DEFAULT '{}'"),
             ("lifecycle_status", "TEXT NOT NULL DEFAULT 'running'"),
             ("autonomy_status", "TEXT NOT NULL DEFAULT 'waiting-confirm'"),
