@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 from copaw.capabilities.models import CapabilityMount
 from copaw.discovery.models import NormalizedDiscoveryHit
@@ -153,6 +154,87 @@ class _RevisionRecommendationHarness(_PredictionServiceRecommendationMixin):
     ):
         _ = (case, facts, telemetry)
         return [dict(self._finding)]
+
+    def _json_safe(self, payload):
+        return payload
+
+
+class _PredictionAgentProfileService:
+    def get_agent_detail(self, agent_id: str):
+        if agent_id != "industry-solution-lead-demo":
+            return {"runtime": {"metadata": {}}}
+        return {
+            "runtime": {
+                "metadata": {
+                    "selected_seat_ref": "env-browser-primary",
+                },
+            },
+        }
+
+
+class _MCPCapabilityService:
+    def __init__(self, existing_client: dict[str, object] | None) -> None:
+        self._existing_client = dict(existing_client or {}) if existing_client else None
+
+    def get_mcp_client_info(self, client_key: str):
+        if self._existing_client is None:
+            return None
+        if str(self._existing_client.get("key") or "") == client_key:
+            return dict(self._existing_client)
+        return None
+
+
+class _MissingMCPRecommendationHarness(_PredictionServiceRecommendationMixin):
+    def __init__(
+        self,
+        *,
+        candidate_service: CapabilityCandidateService,
+        existing_client: dict[str, object] | None,
+    ) -> None:
+        self._capability_candidate_service = candidate_service
+        self._capability_service = _MCPCapabilityService(existing_client)
+        self._agent_profile_service = _PredictionAgentProfileService()
+        self._skill_lifecycle_decision_service = _RecordingLifecycleDecisionService()
+        self._skill_evolution_service = None
+
+    def _hottest_agent(self, facts: _FactPack):
+        _ = facts
+        return {"agent_id": "industry-solution-lead-demo"}
+
+    def _case_confidence(self, signals, reviews):
+        _ = (signals, reviews)
+        return 0.58
+
+    def _team_role_gap_findings(self, *, case: PredictionCaseRecord, facts: _FactPack):
+        _ = (case, facts)
+        return {}
+
+    def _missing_donor_capability_findings(self, *, facts: _FactPack):
+        _ = facts
+        return []
+
+    def _capability_telemetry(self, *, case: PredictionCaseRecord, facts: _FactPack):
+        _ = (case, facts)
+        return {}
+
+    def _underperforming_donor_capability_findings(
+        self,
+        *,
+        facts: _FactPack,
+        telemetry: dict[tuple[str, str], dict[str, object]],
+    ):
+        _ = (facts, telemetry)
+        return []
+
+    def _trial_followup_findings(
+        self,
+        *,
+        case: PredictionCaseRecord,
+        facts: _FactPack,
+        telemetry: dict[tuple[str, str], dict[str, object]],
+    ):
+        _ = (case, facts, telemetry)
+        return []
 
     def _json_safe(self, payload):
         return payload
@@ -843,6 +925,90 @@ def test_prediction_recommendations_convert_revision_reentry_into_formal_continu
     assert created["to_stage"] == "trial"
     assert created["metadata"]["gap_kind"] == "capability_revision"
     assert created["metadata"]["trial_scope"] == "single-seat"
+
+
+def test_prediction_missing_mcp_recommendation_carries_shared_trial_contract_metadata(
+    tmp_path: Path,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "mcp-trial-contract.sqlite3")
+    donor_service = CapabilityDonorService(state_store=store)
+    candidate_service = CapabilityCandidateService(
+        state_store=store,
+        donor_service=donor_service,
+    )
+    service = _MissingMCPRecommendationHarness(
+        candidate_service=candidate_service,
+        existing_client={
+            "key": "desktop_windows",
+            "name": "Desktop Windows",
+            "enabled": False,
+            "transport": "stdio",
+        },
+    )
+    case = PredictionCaseRecord(
+        case_id="case-mcp-gap",
+        title="Desktop capability gap",
+        summary="Need local desktop MCP before the workflow can continue.",
+        industry_instance_id="industry-demo",
+        owner_scope="industry-demo-scope",
+    )
+    facts = _FactPack(
+        scope_type="industry",
+        scope_id="industry-demo",
+        report={},
+        performance={},
+        goals=[],
+        tasks=[],
+        workflows=[
+            SimpleNamespace(
+                run_id="run-desktop-gap",
+                title="Desktop outreach smoke",
+                preview_payload={
+                    "dependencies": [
+                        {
+                            "capability_id": "mcp:desktop_windows",
+                            "target_agent_ids": ["industry-solution-lead-demo"],
+                            "install_templates": [
+                                {
+                                    "template_id": "desktop-windows",
+                                    "name": "Desktop Windows",
+                                    "default_client_key": "desktop_windows",
+                                }
+                            ],
+                        }
+                    ],
+                    "missing_capability_ids": ["mcp:desktop_windows"],
+                    "assignment_gap_capability_ids": [],
+                },
+            )
+        ],
+        agents=[],
+        capabilities=[],
+        strategy={},
+    )
+
+    recommendations = service._build_recommendations(case=case, facts=facts, signals=[])
+
+    recommendation = next(
+        item
+        for item in recommendations
+        if item.action_kind == "system:update_mcp_client"
+    )
+    assert recommendation.metadata["candidate_id"]
+    assert recommendation.metadata["candidate_kind"] == "mcp-bundle"
+    assert recommendation.metadata["candidate_source_kind"] == "external_catalog"
+    assert recommendation.metadata["target_agent_id"] == "industry-solution-lead-demo"
+    assert recommendation.metadata["selected_scope"] == "seat"
+    assert recommendation.metadata["selected_seat_ref"] == "env-browser-primary"
+    assert recommendation.metadata["rollback_target_ids"] == ["mcp:desktop_windows"]
+    assert recommendation.metadata["target_capability_family"] == "mcp"
+    assert recommendation.metadata["trial_contract"]["challenger_ref"] == (
+        "template:desktop-windows:desktop_windows"
+    )
+    assert recommendation.metadata["trial_contract"]["rollback"]["fallback_action"] == (
+        "disable_mcp_client"
+    )
+    assert recommendation.action_payload["trial_contract"]["selected_scope"] == "seat"
 
 
 def test_capability_candidate_service_persists_candidate_attribution_fields(

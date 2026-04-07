@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from copaw.app.mcp.manager import MCPClientManager
+from copaw.app.mcp.runtime_contract import build_mcp_trial_contract
 from copaw.config.config import MCPClientConfig, MCPConfig
 from copaw.kernel import TaskDelegationService
 from copaw.kernel.models import KernelTask
@@ -63,6 +64,28 @@ class _RecordingMCPManager:
 
     async def clear_scope_overlay(self, scope_ref: str) -> None:
         self.clear_calls.append(scope_ref)
+
+
+def test_build_mcp_trial_contract_projects_local_scope_and_rollback_boundary() -> None:
+    contract = build_mcp_trial_contract(
+        baseline_ref="mcp:desktop_windows",
+        challenger_ref="template:desktop-windows:desktop_windows",
+        client_key="desktop_windows",
+        target_agent_id="industry-solution-lead-demo",
+        target_role_id="solution-lead",
+        selected_scope="seat",
+        selected_seat_ref="env-browser-primary",
+        target_capability_ids=["mcp:desktop_windows"],
+        rollback_target_ids=["mcp:desktop_windows"],
+    )
+
+    assert contract.contract_kind == "mcp"
+    assert contract.target_capability_family == "mcp"
+    assert contract.selected_scope == "seat"
+    assert contract.selected_seat_ref == "env-browser-primary"
+    assert contract.rollback.client_key == "desktop_windows"
+    assert contract.rollback.rollback_target_ids == ["mcp:desktop_windows"]
+    assert contract.rollback.fallback_action == "disable_mcp_client"
 
 
 def _child_run_overlay_payload(

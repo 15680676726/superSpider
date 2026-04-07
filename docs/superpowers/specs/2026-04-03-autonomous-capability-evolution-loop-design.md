@@ -26,6 +26,20 @@ not as:
 
 When the two differ, the broader second-tier design takes precedence and this file remains the donor/package/lifecycle slice inside that larger loop.
 
+## Landed Boundary (`2026-04-07`)
+
+What is now live in code for this slice:
+
+- donor / candidate / package truth stays formal and shared
+- trial records and lifecycle decisions stay on the same truth chain
+- evaluator verdicts now write back into lifecycle decisions instead of floating as side metadata only
+- MCP challengers can now enter the same governed trial vocabulary as skill challengers
+
+What this file should no longer imply:
+
+- that capability evolution by itself equals the whole self-optimization loop
+- that skill-only challengers are the mainline and MCP is a side path
+
 ## 1. Purpose
 
 This document defines the complete-loop design for how CoPaw should autonomously discover, ingest, reuse, synthesize only when necessary, trial, promote, replace, and retire long-lived capability packages in the formal long-horizon autonomy architecture.

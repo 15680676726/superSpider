@@ -231,3 +231,33 @@ PYTHONPATH=src python -m pytest tests/app/test_predictions_api.py tests/app/test
 - [ ] After implementation, update the docs with the honest landed boundary.
 - [ ] List what is complete, what is intentionally deferred, and what old wording is now superseded.
 - [ ] Commit the documentation closure.
+
+---
+
+## Completion Note (`2026-04-07`)
+
+This plan is now implemented for the intended Batch 1 loop boundary.
+
+Landed in code:
+
+- discovery-first prediction intake
+- unified optimization case projection
+- shared MCP / skill trial contract vocabulary
+- evaluator verdict -> lifecycle decision writeback
+- Runtime Center optimization actionable/history surface
+- end-to-end loop verification from discovery to Runtime Center readback
+
+Focused verification used for closure:
+
+```powershell
+python -m pytest tests/predictions/test_skill_candidate_service.py tests/predictions/test_skill_trial_service.py tests/app/test_mcp_runtime_contract.py tests/app/test_skill_runtime_smoke.py tests/app/test_predictions_api.py tests/app/test_main_brain_optimization_loop_e2e.py tests/app/runtime_center_api_parts/overview_governance.py -q
+```
+
+Result:
+
+- `147 passed`
+
+Deferred on purpose:
+
+- Batch 2 quality enhancers
+- Batch 3 excluded surfaces

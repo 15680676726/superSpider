@@ -256,3 +256,91 @@ def test_prediction_remote_skill_trial_syncs_candidate_and_runtime_center_read_m
     assert runtime_decisions.status_code == 200
     assert len(runtime_decisions.json()) == 1
     assert runtime_decisions.json()[0]["decision_kind"] == "continue_trial"
+
+
+def test_prediction_failed_skill_trial_syncs_rollback_decision(tmp_path, monkeypatch) -> None:
+    app = _build_predictions_app(
+        tmp_path,
+        enable_remote_curated_search=True,
+    )
+    _attach_runtime_center_state_query(app)
+    _seed_underperforming_skill_trial_setup(app)
+
+    client = TestClient(app)
+
+    def _fake_search(_query: str, **_kwargs):
+        return [
+            RemoteSkillCandidate(
+                candidate_key="hub:nextgen-outreach",
+                source_kind="hub",
+                source_label="SkillHub",
+                title="NextGen Outreach",
+                description="A remote outreach skill optimized for guarded desktop follow-up.",
+                bundle_url="https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/nextgen-outreach.zip",
+                source_url="https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/nextgen-outreach.zip",
+                slug="nextgen-outreach",
+                version="1.0.0",
+                install_name="nextgen_outreach",
+                capability_ids=["skill:nextgen_outreach"],
+                capability_tags=["skill", "remote"],
+                review_required=False,
+                search_query=_query,
+            ),
+        ]
+
+    monkeypatch.setattr(
+        "copaw.predictions.service.search_allowlisted_remote_skill_candidates",
+        _fake_search,
+    )
+
+    def _failing_install_skill_from_hub(
+        *,
+        bundle_url: str,
+        version: str = "",
+        enable: bool = True,
+        overwrite: bool = False,
+    ):
+        _ = bundle_url, version, enable, overwrite
+        raise RuntimeError("remote install failed")
+
+    app.state.capability_service._system_handler._skills._skill_service.install_skill_from_hub = (
+        _failing_install_skill_from_hub
+    )
+
+    created = _create_prediction_case(client)
+    recommendation = next(
+        item
+        for item in created["recommendations"]
+        if item["recommendation"]["metadata"].get("gap_kind")
+        == "underperforming_capability"
+    )
+    candidate_id = recommendation["recommendation"]["metadata"]["candidate_id"]
+
+    execution_payload = _execute_prediction_recommendation_direct(
+        app,
+        case_id=created["case"]["case_id"],
+        recommendation_id=recommendation["recommendation"]["recommendation_id"],
+    )
+
+    assert execution_payload["execution"]["phase"] == "failed"
+
+    trial_records = app.state.skill_trial_service.list_trials(candidate_id=candidate_id)
+    assert len(trial_records) == 1
+    assert trial_records[0].verdict == "failed"
+
+    decision_records = app.state.skill_lifecycle_decision_service.list_decisions(
+        candidate_id=candidate_id,
+    )
+    assert len(decision_records) == 1
+    assert decision_records[0].decision_kind == "rollback"
+    assert decision_records[0].from_stage == "trial"
+    assert decision_records[0].to_stage == "blocked"
+    assert decision_records[0].metadata["evaluator_verdict"] == "rollback_recommended"
+
+    runtime_decisions = client.get(
+        "/runtime-center/capabilities/lifecycle-decisions",
+        params={"candidate_id": candidate_id, "limit": 20},
+    )
+    assert runtime_decisions.status_code == 200
+    assert len(runtime_decisions.json()) == 1
+    assert runtime_decisions.json()[0]["decision_kind"] == "rollback"

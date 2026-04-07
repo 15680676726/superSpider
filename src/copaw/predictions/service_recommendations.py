@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from ..app.mcp.runtime_contract import build_mcp_trial_contract
 from .service_shared import *  # noqa: F401,F403
 
 
@@ -306,6 +307,103 @@ class _PredictionServiceRecommendationMixin:
         if resolved_seat_ref is not None:
             payload["selected_seat_ref"] = resolved_seat_ref
         return payload
+
+    def _capability_client_key(self, capability_id: str | None) -> str | None:
+        if not capability_id:
+            return None
+        normalized = capability_id.strip()
+        if normalized.startswith("mcp:"):
+            suffix = normalized.split(":", 1)[1].strip()
+            return suffix or None
+        return None
+
+    def _build_mcp_trial_contract_payload(
+        self,
+        *,
+        capability_id: str,
+        client_key: str | None,
+        target_agent_id: str | None,
+        target_role_id: str | None = None,
+        selected_seat_ref: str | None = None,
+        trial_scope: str | None = None,
+        install_templates: list[dict[str, Any]] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        resolved_client_key = _string(client_key) or self._capability_client_key(capability_id)
+        if resolved_client_key is None:
+            resolved_client_key = capability_id
+        scope_payload = self._resolve_agent_scope_payload(
+            target_agent_id=target_agent_id,
+            selected_seat_ref=selected_seat_ref,
+            trial_scope=trial_scope,
+        )
+        primary_template = (
+            install_templates[0]
+            if isinstance(install_templates, list) and install_templates
+            else {}
+        )
+        template_id = _string(_safe_dict(primary_template).get("template_id"))
+        challenger_ref = (
+            f"template:{template_id}:{resolved_client_key}"
+            if template_id is not None
+            else f"mcp:{resolved_client_key}"
+        )
+        contract = build_mcp_trial_contract(
+            baseline_ref=capability_id,
+            challenger_ref=challenger_ref,
+            client_key=resolved_client_key,
+            target_agent_id=_string(scope_payload.get("target_agent_id")),
+            target_role_id=_string(target_role_id),
+            selected_scope=_string(scope_payload.get("selected_scope")) or "agent",
+            selected_seat_ref=_string(scope_payload.get("selected_seat_ref")),
+            target_capability_ids=[capability_id],
+            rollback_target_ids=[capability_id],
+        )
+        return contract.model_dump(mode="json"), scope_payload
+
+    def _build_mcp_candidate_payload(
+        self,
+        *,
+        capability_id: str,
+        client_key: str | None,
+        install_templates: list[dict[str, Any]] | None,
+        existing_client: dict[str, Any] | None,
+        trial_contract: dict[str, Any],
+    ) -> dict[str, Any]:
+        primary_template = (
+            install_templates[0]
+            if isinstance(install_templates, list) and install_templates
+            else {}
+        )
+        resolved_client_key = _string(client_key) or self._capability_client_key(capability_id)
+        title = (
+            _string(_safe_dict(primary_template).get("name"))
+            or _string(_safe_dict(existing_client).get("name"))
+            or resolved_client_key
+            or capability_id
+        )
+        template_id = _string(_safe_dict(primary_template).get("template_id"))
+        source_kind = "install-template" if template_id is not None else "mcp-registry"
+        candidate_ref = (
+            _string(trial_contract.get("challenger_ref"))
+            or f"mcp:{resolved_client_key or capability_id}"
+        )
+        return {
+            "candidate_kind": "mcp-bundle",
+            "source_kind": source_kind,
+            "candidate_key": candidate_ref,
+            "source_url": candidate_ref,
+            "title": title,
+            "slug": resolved_client_key or capability_id,
+            "install_name": resolved_client_key or capability_id,
+            "version": (
+                _string(_safe_dict(primary_template).get("version"))
+                or _string(_safe_dict(existing_client).get("version"))
+                or "current"
+            ),
+            "capability_ids": [capability_id],
+            "canonical_package_id": candidate_ref,
+            "default_client_key": resolved_client_key,
+        }
 
     def _build_lifecycle_action_payload(
         self,
@@ -984,6 +1082,40 @@ class _PredictionServiceRecommendationMixin:
                         _safe_dict(item)
                         for item in _safe_list(dependency.get("install_templates"))
                     ]
+                    target_agent_ids = [
+                        str(item).strip()
+                        for item in _safe_list(dependency.get("target_agent_ids"))
+                        if str(item).strip()
+                    ]
+                    target_agent_id = (
+                        target_agent_ids[0]
+                        if target_agent_ids
+                        else _string(hottest_agent.get("agent_id")) if hottest_agent else None
+                    )
+                    trial_contract, scope_payload = self._build_mcp_trial_contract_payload(
+                        capability_id=capability_id,
+                        client_key=client_key,
+                        target_agent_id=target_agent_id,
+                        install_templates=install_templates,
+                    )
+                    shared_mcp_metadata = {
+                        "workflow_run_id": workflow.run_id,
+                        "capability_id": capability_id,
+                        "install_templates": install_templates,
+                        "candidate": self._build_mcp_candidate_payload(
+                            capability_id=capability_id,
+                            client_key=client_key,
+                            install_templates=install_templates,
+                            existing_client=existing_client if isinstance(existing_client, dict) else None,
+                            trial_contract=trial_contract,
+                        ),
+                        "target_agent_id": _string(scope_payload.get("target_agent_id")),
+                        "selected_scope": _string(scope_payload.get("selected_scope")),
+                        "selected_seat_ref": _string(scope_payload.get("selected_seat_ref")),
+                        "rollback_target_ids": [capability_id],
+                        "target_capability_family": "mcp",
+                        "trial_contract": trial_contract,
+                    }
                     if client_key and isinstance(existing_client, dict):
                         append_recommendation(
                             recommendation_type="capability_recommendation",
@@ -1004,12 +1136,15 @@ class _PredictionServiceRecommendationMixin:
                                 "client_key": client_key,
                                 "client": {"enabled": True},
                                 "reason": f"prediction:{case.case_id}:enable-mcp",
+                                "target_agent_id": _string(scope_payload.get("target_agent_id")),
+                                "selected_scope": _string(scope_payload.get("selected_scope")),
+                                "selected_seat_ref": _string(scope_payload.get("selected_seat_ref")),
+                                "capability_ids": [capability_id],
+                                "target_capability_ids": [capability_id],
+                                "rollback_target_ids": [capability_id],
+                                "trial_contract": trial_contract,
                             },
-                            metadata={
-                                "workflow_run_id": workflow.run_id,
-                                "capability_id": capability_id,
-                                "install_templates": install_templates,
-                            },
+                            metadata=shared_mcp_metadata,
                         )
                     else:
                         append_recommendation(
@@ -1027,11 +1162,7 @@ class _PredictionServiceRecommendationMixin:
                             auto_eligible=False,
                             status="manual-only",
                             target_capability_ids=[capability_id],
-                            metadata={
-                                "workflow_run_id": workflow.run_id,
-                                "capability_id": capability_id,
-                                "install_templates": install_templates,
-                            },
+                            metadata=shared_mcp_metadata,
                         )
                 if capability_id in assignment_gap_ids:
                     target_agent_ids = [

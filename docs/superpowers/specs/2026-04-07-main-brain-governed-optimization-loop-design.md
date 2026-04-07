@@ -555,3 +555,28 @@ The correct rule is:
 - Batch 1 makes the system able to optimize
 - Batch 2 makes it optimize better
 - Batch 3 stays outside until the platform is much more mature
+
+---
+
+## 13. Landed Boundary (`2026-04-07`)
+
+This second-tier loop is now live at the current repository boundary with these pieces wired end to end:
+
+- prediction records act as the formal discovery intake
+- optimization cases project from the existing truth chain instead of a parallel object
+- skill and MCP challengers can both enter a scoped trial contract
+- evaluator verdicts write back into lifecycle decisions
+- Runtime Center shows actionable/history optimization cases with projection details
+- review -> discovery -> main-brain handoff -> trial -> lifecycle -> Runtime Center readback has a passing e2e path
+
+What is intentionally still outside this landed boundary:
+
+- generic chat-history optimization
+- pure frontend configuration tuning
+- self-modifying source-code optimization
+- broader strategy-quality enhancers that are useful but not required for the loop to exist
+
+What old wording is now superseded:
+
+- the older `autonomous capability evolution` document is the capability-evolution slice, not the whole loop
+- `latest decision` in the optimization read-model must mean the current recommendation/case decision, not just the latest candidate-global decision
