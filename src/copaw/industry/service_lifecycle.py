@@ -9,8 +9,10 @@ from .service_recommendation_pack import *  # noqa: F401,F403
 from ..compiler.planning import (
     AssignmentPlanningCompiler,
     CyclePlanningCompiler,
+    PlanningStrategicUncertainty,
     PlanningStrategyConstraints,
     ReportReplanEngine,
+    StrategyTriggerRule,
     StrategyPlanningCompiler,
     build_uncertainty_register_payload,
 )
@@ -448,6 +450,346 @@ class _IndustryLifecycleMixin:
         )
         return dict(payload) if isinstance(payload, Mapping) else {}
 
+    def _prediction_donor_trust_summary(
+        self,
+        *,
+        prediction_service: object | None,
+    ) -> dict[str, Any]:
+        donor_service = getattr(prediction_service, "_capability_donor_service", None)
+        lister = getattr(donor_service, "list_trust_records", None)
+        if not callable(lister):
+            return {}
+
+        records = list(lister(limit=None) or [])
+        by_status: dict[str, int] = {}
+        for item in records:
+            trust_status = _string(getattr(item, "trust_status", None)) or "unknown"
+            by_status[trust_status] = by_status.get(trust_status, 0) + 1
+        return {
+            "trust_record_count": len(records),
+            "trusted_count": by_status.get("trusted", 0),
+            "degraded_count": by_status.get("degraded", 0),
+            "retired_count": by_status.get("retired", 0),
+            "blocked_count": by_status.get("blocked", 0),
+            "local_count": by_status.get("local", 0),
+            "by_status": by_status,
+        }
+
+    def _prediction_optimization_writeback_payload(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+    ) -> dict[str, Any]:
+        prediction_service = getattr(self, "_prediction_service", None)
+        getter = getattr(
+            prediction_service,
+            "get_runtime_capability_optimization_overview",
+            None,
+        )
+        if not callable(getter):
+            return {}
+
+        try:
+            overview = getter(
+                industry_instance_id=record.instance_id,
+                owner_scope=record.owner_scope,
+                limit=6,
+                history_limit=6,
+                window_days=21,
+            )
+        except Exception:
+            return {}
+
+        summary = self._planner_sidecar_payload(getattr(overview, "summary", None))
+        portfolio = self._planner_sidecar_payload(getattr(overview, "portfolio", None))
+        actionable_projections = [
+            self._planner_sidecar_payload(getattr(item, "projection", None))
+            for item in list(getattr(overview, "actionable", []) or [])
+            if self._planner_sidecar_payload(getattr(item, "projection", None))
+        ]
+        history_projections = [
+            self._planner_sidecar_payload(getattr(item, "projection", None))
+            for item in list(getattr(overview, "history", []) or [])
+            if self._planner_sidecar_payload(getattr(item, "projection", None))
+        ]
+        donor_trust = self._prediction_donor_trust_summary(
+            prediction_service=prediction_service,
+        )
+
+        def _int_value(value: object | None) -> int:
+            if isinstance(value, bool):
+                return int(value)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, float):
+                return int(value)
+            text = _string(value)
+            if text is None:
+                return 0
+            try:
+                return int(text)
+            except ValueError:
+                return 0
+
+        actionable_count = _int_value(summary.get("actionable_count"))
+        replace_pressure_count = _int_value(portfolio.get("replace_pressure_count"))
+        retire_pressure_count = _int_value(portfolio.get("retire_pressure_count"))
+        degraded_donor_count = _int_value(donor_trust.get("degraded_count"))
+        retired_donor_count = _int_value(donor_trust.get("retired_count"))
+
+        if not any(
+            (
+                actionable_count,
+                replace_pressure_count,
+                retire_pressure_count,
+                degraded_donor_count,
+                retired_donor_count,
+                actionable_projections,
+                history_projections,
+            ),
+        ):
+            return {}
+
+        gap_kinds = _unique_strings(
+            [
+                projection.get("gap_kind")
+                for projection in actionable_projections[:6]
+            ],
+            [
+                projection.get("gap_kind")
+                for projection in history_projections[:4]
+            ],
+        )
+        donor_ids = _unique_strings(
+            [
+                _mapping(projection.get("donor_trust_impact")).get("donor_id")
+                for projection in actionable_projections[:6]
+            ],
+            [
+                _mapping(projection.get("donor_trust_impact")).get("donor_id")
+                for projection in history_projections[:4]
+            ],
+        )
+        projected_retired_count = sum(
+            1
+            for projection in [*actionable_projections, *history_projections]
+            if int(
+                _mapping(projection.get("donor_trust_impact")).get("retirement_count")
+                or 0,
+            )
+            > 0
+        )
+        projected_degraded_count = sum(
+            1
+            for projection in [*actionable_projections, *history_projections]
+            if _string(
+                _mapping(projection.get("donor_trust_impact")).get("trust_status"),
+            )
+            in {"degraded", "retired", "blocked"}
+        )
+        donor_trust["retired_count"] = max(
+            int(donor_trust.get("retired_count") or 0),
+            projected_retired_count,
+        )
+        donor_trust["degraded_count"] = max(
+            int(donor_trust.get("degraded_count") or 0),
+            projected_degraded_count,
+        )
+        strategy_reopen_signals = _unique_strings(
+            [
+                _mapping(projection.get("planning_impact")).get(
+                    "strategy_reopen_signals",
+                )
+                for projection in actionable_projections[:6]
+            ],
+        )
+        planning_actions = self._mapping_list(portfolio.get("planning_actions"))[:6]
+        focus_strings = _unique_strings(
+            "capability governance",
+            "future discovery pressure" if actionable_count else None,
+            "replacement pressure" if replace_pressure_count else None,
+            "retirement pressure" if retire_pressure_count else None,
+            "donor trust" if degraded_donor_count or retired_donor_count else None,
+            gap_kinds,
+            donor_ids,
+            strategy_reopen_signals,
+            [item.get("summary") for item in planning_actions],
+        )
+        future_discovery_pressure = {
+            "actionable_count": actionable_count,
+            "history_count": _int_value(summary.get("history_count")),
+            "case_count": _int_value(summary.get("case_count")),
+            "missing_capability_count": _int_value(
+                summary.get("missing_capability_count"),
+            ),
+            "underperforming_capability_count": _int_value(
+                summary.get("underperforming_capability_count"),
+            ),
+            "trial_count": _int_value(summary.get("trial_count")),
+            "rollout_count": _int_value(summary.get("rollout_count")),
+            "retire_count": _int_value(summary.get("retire_count")),
+        }
+        return {
+            "summary": summary,
+            "donor_trust": donor_trust,
+            "portfolio": portfolio,
+            "future_discovery_pressure": future_discovery_pressure,
+            "actionable_cases": actionable_projections[:4],
+            "history_cases": history_projections[:4],
+            "gap_kinds": gap_kinds,
+            "donor_ids": donor_ids,
+            "planning_actions": planning_actions,
+            "strategy_reopen_signals": strategy_reopen_signals,
+            "focus_strings": focus_strings,
+        }
+
+    def _augment_strategy_constraints_with_optimization_writeback(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        constraints: PlanningStrategyConstraints,
+    ) -> PlanningStrategyConstraints:
+        writeback = self._prediction_optimization_writeback_payload(record=record)
+        if not writeback:
+            return constraints
+
+        summary = _mapping(writeback.get("summary"))
+        donor_trust = _mapping(writeback.get("donor_trust"))
+        portfolio = _mapping(writeback.get("portfolio"))
+        future_discovery_pressure = _mapping(
+            writeback.get("future_discovery_pressure"),
+        )
+        focus_strings = _unique_strings(writeback.get("focus_strings"))
+        gap_kinds = _unique_strings(writeback.get("gap_kinds"))
+        donor_ids = _unique_strings(writeback.get("donor_ids"))
+        strategy_reopen_signals = _unique_strings(
+            writeback.get("strategy_reopen_signals"),
+        )
+        planning_actions = self._mapping_list(writeback.get("planning_actions"))
+
+        actionable_count = int(summary.get("actionable_count") or 0)
+        degraded_donor_count = int(donor_trust.get("degraded_count") or 0)
+        retired_donor_count = int(donor_trust.get("retired_count") or 0)
+        replace_pressure_count = int(portfolio.get("replace_pressure_count") or 0)
+        retire_pressure_count = int(portfolio.get("retire_pressure_count") or 0)
+
+        strategic_uncertainties = list(constraints.strategic_uncertainties or [])
+        if actionable_count > 0:
+            strategic_uncertainties.append(
+                PlanningStrategicUncertainty(
+                    uncertainty_id=f"optimization-actionable:{record.instance_id}",
+                    statement=(
+                        f"{actionable_count} scoped capability optimization case(s) remain open "
+                        "and should be handled before net-new expansion."
+                    ),
+                    scope="cycle",
+                    impact_level=(
+                        "high"
+                        if replace_pressure_count or retire_pressure_count
+                        else "medium"
+                    ),
+                    current_confidence=(
+                        0.32
+                        if replace_pressure_count or retire_pressure_count
+                        else 0.55
+                    ),
+                    escalate_when=[
+                        "future-discovery-pressure",
+                        "replacement-pressure",
+                        "retirement-pressure",
+                    ],
+                    metadata={
+                        "source": "optimization-writeback",
+                        "gap_kinds": gap_kinds,
+                        "donor_ids": donor_ids,
+                    },
+                ),
+            )
+        if degraded_donor_count or retired_donor_count:
+            strategic_uncertainties.append(
+                PlanningStrategicUncertainty(
+                    uncertainty_id=f"optimization-donor-trust:{record.instance_id}",
+                    statement=(
+                        "Recent governed trials degraded donor trust and may require "
+                        "review before broader rollout."
+                    ),
+                    scope="strategy",
+                    impact_level="high" if retired_donor_count else "medium",
+                    current_confidence=0.3 if retired_donor_count else 0.42,
+                    escalate_when=[
+                        "donor-trust-degraded",
+                        "retirement-pressure",
+                    ],
+                    metadata={
+                        "source": "optimization-writeback",
+                        "degraded_donor_count": degraded_donor_count,
+                        "retired_donor_count": retired_donor_count,
+                    },
+                ),
+            )
+
+        trigger_rules = list(constraints.strategy_trigger_rules or [])
+        if actionable_count or replace_pressure_count or retire_pressure_count:
+            trigger_rules.append(
+                StrategyTriggerRule(
+                    rule_id=f"optimization-governance:{record.instance_id}",
+                    source_type="review_rule",
+                    source_ref=f"prediction:{record.instance_id}:capability-governance",
+                    trigger_family="capability_governance",
+                    summary=(
+                        "Recent capability optimization pressure should be reviewed before "
+                        "net-new expansion."
+                    ),
+                    decision_hint="follow_up_backlog",
+                    source="optimization-writeback",
+                    decision_kind="follow_up_backlog",
+                    trigger_signals=_unique_strings(
+                        gap_kinds,
+                        strategy_reopen_signals,
+                        [
+                            item.get("action")
+                            for item in planning_actions
+                            if isinstance(item, Mapping)
+                        ],
+                    ),
+                    uncertainty_ids=[
+                        f"optimization-actionable:{record.instance_id}",
+                        f"optimization-donor-trust:{record.instance_id}",
+                    ],
+                ),
+            )
+
+        return constraints.model_copy(
+            update={
+                "planning_policy": _unique_strings(
+                    constraints.planning_policy,
+                    "prefer-capability-governance-before-net-new",
+                ),
+                "current_focuses": _unique_strings(
+                    constraints.current_focuses,
+                    focus_strings,
+                    [item.get("summary") for item in planning_actions],
+                ),
+                "strategic_uncertainties": strategic_uncertainties,
+                "strategy_trigger_rules": trigger_rules,
+                "graph_focus_opinions": _unique_strings(
+                    constraints.graph_focus_opinions,
+                    gap_kinds,
+                    [
+                        f"donor-trust:{status}"
+                        for status, count in dict(donor_trust.get("by_status") or {}).items()
+                        if int(count or 0) > 0
+                    ],
+                    strategy_reopen_signals,
+                ),
+                "graph_focus_relations": _unique_strings(
+                    constraints.graph_focus_relations,
+                    [f"capability-governance:{item.get('action')}" for item in planning_actions],
+                    [f"donor:{donor_id}" for donor_id in donor_ids],
+                ),
+            },
+        )
+
     def _strategy_constraints_sidecar_payload(
         self,
         *,
@@ -476,6 +818,11 @@ class _IndustryLifecycleMixin:
             payload["strategic_uncertainties"] = strategic_uncertainties
         if lane_budgets:
             payload["lane_budgets"] = lane_budgets
+        optimization_writeback = self._prediction_optimization_writeback_payload(
+            record=record,
+        )
+        if optimization_writeback:
+            payload["optimization_writeback"] = optimization_writeback
         return payload
 
     def _report_replan_sidecar_payload(
@@ -596,6 +943,39 @@ class _IndustryLifecycleMixin:
         )
         if uncertainty_register:
             payload["uncertainty_register"] = uncertainty_register
+        optimization_writeback = _mapping(
+            _mapping(strategy_constraints_payload).get("optimization_writeback"),
+        )
+        if optimization_writeback:
+            payload["optimization_writeback"] = optimization_writeback
+            future_discovery_pressure = _mapping(
+                optimization_writeback.get("future_discovery_pressure"),
+            )
+            donor_trust = _mapping(optimization_writeback.get("donor_trust"))
+            portfolio_pressure = _mapping(optimization_writeback.get("portfolio"))
+            trigger_context = _mapping(payload.get("trigger_context"))
+            trigger_context["optimization_actionable_count"] = int(
+                future_discovery_pressure.get("actionable_count") or 0,
+            )
+            trigger_context["optimization_missing_capability_count"] = int(
+                future_discovery_pressure.get("missing_capability_count") or 0,
+            )
+            trigger_context["optimization_underperforming_capability_count"] = int(
+                future_discovery_pressure.get("underperforming_capability_count") or 0,
+            )
+            trigger_context["optimization_retire_pressure_count"] = int(
+                portfolio_pressure.get("retire_pressure_count") or 0,
+            )
+            trigger_context["optimization_replace_pressure_count"] = int(
+                portfolio_pressure.get("replace_pressure_count") or 0,
+            )
+            trigger_context["optimization_degraded_donor_count"] = int(
+                donor_trust.get("degraded_count") or 0,
+            )
+            trigger_context["optimization_retired_donor_count"] = int(
+                donor_trust.get("retired_count") or 0,
+            )
+            payload["trigger_context"] = trigger_context
         return payload
 
     def _stable_assignment_id(
@@ -2315,9 +2695,6 @@ class _IndustryLifecycleMixin:
                         limit=None,
                     )
                 ],
-                allow_paused_goals_without_confirmation=(
-                    _string(updated_record.autonomy_status) in {"learning", "coordinating"}
-                ),
             )
         if execute_background:
             self._sync_role_runtime_surfaces_for_record(record=updated_record)
@@ -3229,6 +3606,13 @@ class _IndustryLifecycleMixin:
         create_cycle_case = getattr(prediction_service, "create_cycle_case", None)
         if not callable(create_cycle_case) or self._backlog_service is None:
             return (None, [])
+        effective_strategy_constraints = self._augment_strategy_constraints_with_optimization_writeback(
+            record=record,
+            constraints=(
+                strategy_constraints
+                or self._compile_strategy_constraints(record=record)
+            ),
+        )
         planning_backlog = [
             item for item in open_backlog if _string(item.source_kind) != "prediction"
         ]
@@ -3253,12 +3637,12 @@ class _IndustryLifecycleMixin:
                 open_backlog=self._materializable_backlog_items(planning_backlog),
                 pending_reports=pending_reports,
                 force=force,
-                strategy_constraints=strategy_constraints,
+                strategy_constraints=effective_strategy_constraints,
                 task_subgraph=task_subgraph,
             )
             strategy_constraints_payload = self._strategy_constraints_sidecar_payload(
                 record=record,
-                strategy_constraints=strategy_constraints,
+                strategy_constraints=effective_strategy_constraints,
             )
             report_replan_payload = self._report_replan_sidecar_payload(
                 synthesis=report_synthesis,
@@ -3789,6 +4173,10 @@ class _IndustryLifecycleMixin:
         strategy_constraints = self._apply_activation_to_strategy_constraints(
             constraints=strategy_constraints,
             activation_result=planning_activation_result,
+        )
+        strategy_constraints = self._augment_strategy_constraints_with_optimization_writeback(
+            record=record,
+            constraints=strategy_constraints,
         )
         reason: str | None = None
         new_cycle: OperatingCycleRecord | None = None

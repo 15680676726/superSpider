@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
+import sys
 
 import pytest
 
+from copaw.adapters.desktop import build_windows_desktop_mcp_client_config
 from copaw.app.mcp.manager import MCPClientManager
 from copaw.app.mcp.runtime_contract import build_mcp_trial_contract
 from copaw.config.config import MCPClientConfig, MCPConfig
@@ -736,3 +739,42 @@ async def test_child_run_direct_delegation_mounts_session_overlay_under_selected
         "seat:agent-1",
     ]
     assert mcp_manager.clear_calls == ["session:agent-1:delegated-child-run"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "win32", reason="requires Windows desktop MCP host")
+async def test_windows_desktop_template_connects_and_calls_real_tool() -> None:
+    manager = MCPClientManager()
+    config = MCPConfig(
+        clients={
+            "desktop_windows": MCPClientConfig(
+                **build_windows_desktop_mcp_client_config(enabled=True),
+            ),
+        },
+    )
+
+    try:
+        await manager.init_from_config(config, strict=False, timeout=20.0)
+        record = await manager.get_runtime_record("desktop_windows")
+        assert record is not None
+        assert record.status == "ready"
+        assert record.connected is True
+
+        client = await manager.get_client("desktop_windows")
+        assert client is not None
+
+        callable_fn = await client.get_callable_function(
+            "get_foreground_window",
+            wrap_tool_result=True,
+            execution_timeout=15.0,
+        )
+        response = await callable_fn()
+        content = getattr(response, "content", None)
+        assert isinstance(content, list)
+        assert content
+        payload = json.loads(str(content[0].get("text") or "{}"))
+        assert payload["tool"] == "get_foreground_window"
+        assert payload["success"] is True
+        assert payload["handle"]
+    finally:
+        await manager.close_all()

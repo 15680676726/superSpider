@@ -246,6 +246,8 @@ Landed in code:
 - evaluator verdict -> lifecycle decision writeback
 - Runtime Center optimization actionable/history surface
 - end-to-end loop verification from discovery to Runtime Center readback
+- real `desktop-windows` MCP template acceptance through manager connect + safe tool call
+- optimization review results written back into the next formal planning turn through planning constraints / donor trust / portfolio pressure / future discovery pressure
 
 Focused verification used for closure:
 
@@ -256,6 +258,16 @@ python -m pytest tests/predictions/test_skill_candidate_service.py tests/predict
 Result:
 
 - `147 passed`
+
+Additional closure verification:
+
+```powershell
+python -m pytest tests/app/test_mcp_runtime_contract.py tests/app/test_predictions_api.py tests/app/test_main_brain_optimization_loop_e2e.py tests/app/test_main_brain_optimization_planning_writeback.py tests/app/runtime_center_api_parts/overview_governance.py -q
+```
+
+Result:
+
+- `122 passed`
 
 Deferred on purpose:
 
