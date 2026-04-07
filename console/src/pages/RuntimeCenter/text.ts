@@ -15,6 +15,7 @@ const MAIN_BRAIN_SIGNAL_LABELS: Record<string, string> = {
   backlog: "待办",
   current_cycle: "当前周期",
   assignments: "派工",
+  exception_absorption: "异常吸收",
   agent_reports: "智能体汇报",
   environment: "环境",
   governance: "运行治理",

@@ -142,6 +142,12 @@ const unifiedMeta: RuntimeMainBrainMeta = {
   control_chain: [
     { key: "carrier", value: "Northwind Ops" },
     { key: "strategy", value: "Northwind field operations strategy" },
+    {
+      key: "exception_absorption",
+      value: "human-required",
+      detail: "Main brain is absorbing one human-required runtime case.",
+      status: "human-required",
+    },
     { key: "report_cognition", value: "attention" },
     { key: "governance", value: "blocked" },
     { key: "automation", value: "active" },
@@ -539,6 +545,10 @@ describe("MainBrainCockpitPanel", () => {
 
     expect(screen.getAllByText("Resolve handoff return evidence gap").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Northwind field operations strategy").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("异常吸收").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Main brain is absorbing one human-required runtime case.").length,
+    ).toBeGreaterThan(0);
     expect(screen.getAllByText("browser_backoffice, office_document").length).toBeGreaterThan(0);
   });
 

@@ -222,6 +222,10 @@ def test_system_self_check_exposes_runtime_summary_for_automation_and_recovery(
         expired_decisions=0,
         pending_decisions=1,
         active_schedules=2,
+        absorption_action_kind="human-assist",
+        absorption_action_summary="Need one governed confirmation to resume.",
+        absorption_action_materialized=True,
+        absorption_human_task_id="human-assist-1",
         notes=["Recovered canonical scheduler ownership after restart."],
     )
     app.state.automation_tasks = [
@@ -265,10 +269,33 @@ def test_system_self_check_exposes_runtime_summary_for_automation_and_recovery(
     assert runtime_summary["startup_recovery"]["reason"] == "Recovered leases after restart."
     assert runtime_summary["startup_recovery"]["active_schedules"] == 2
     assert runtime_summary["startup_recovery"]["pending_decisions"] == 1
+    assert runtime_summary["startup_recovery"]["absorption_action_kind"] == (
+        "human-assist"
+    )
+    assert runtime_summary["startup_recovery"]["absorption_action_summary"] == (
+        "Need one governed confirmation to resume."
+    )
+    assert runtime_summary["startup_recovery"]["absorption_action_materialized"] is True
+    assert runtime_summary["startup_recovery"]["absorption_human_task_id"] == (
+        "human-assist-1"
+    )
     assert runtime_summary["startup_recovery"]["notes"] == [
         "Recovered canonical scheduler ownership after restart."
     ]
     assert runtime_summary["status"] == "degraded"
+    by_name = {item["name"]: item for item in payload["checks"]}
+    assert by_name["startup_recovery"]["meta"]["recovery_summary"][
+        "absorption_action_kind"
+    ] == "human-assist"
+    assert by_name["startup_recovery"]["meta"]["recovery_summary"][
+        "absorption_action_summary"
+    ] == "Need one governed confirmation to resume."
+    assert by_name["startup_recovery"]["meta"]["recovery_summary"][
+        "absorption_action_materialized"
+    ] is True
+    assert by_name["startup_recovery"]["meta"]["recovery_summary"][
+        "absorption_human_task_id"
+    ] == "human-assist-1"
 
 
 def test_system_self_check_prefers_environment_runtime_recovery_report(

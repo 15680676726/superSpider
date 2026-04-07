@@ -69,6 +69,7 @@ const SIGNAL_ICONS: Record<string, ReactNode> = {
   backlog: <Waypoints size={18} color="#1B4FD8" />,
   current_cycle: <RotateCcw size={18} color="#C9A84C" />,
   assignments: <Bot size={18} color="#10b981" />,
+  exception_absorption: <ShieldAlert size={18} color="#f97316" />,
   agent_reports: <Bot size={18} color="#10b981" />,
   report_cognition: <ShieldAlert size={18} color="#f97316" />,
   environment: <ShieldCheck size={18} color="#10b981" />,

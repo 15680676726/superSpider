@@ -53,6 +53,10 @@ def test_runtime_center_recovery_latest_endpoint_returns_summary() -> None:
         pending_decisions=2,
         hydrated_waiting_confirm_tasks=1,
         active_schedules=3,
+        absorption_action_kind="human-assist",
+        absorption_action_summary="Need one governed confirmation to resume.",
+        absorption_action_materialized=True,
+        absorption_human_task_id="human-assist-1",
     )
 
     client = TestClient(app)
@@ -65,6 +69,13 @@ def test_runtime_center_recovery_latest_endpoint_returns_summary() -> None:
     assert payload["pending_decisions"] == 2
     assert payload["hydrated_waiting_confirm_tasks"] == 1
     assert payload["active_schedules"] == 3
+    assert payload["absorption_action_kind"] == "human-assist"
+    assert (
+        payload["absorption_action_summary"]
+        == "Need one governed confirmation to resume."
+    )
+    assert payload["absorption_action_materialized"] is True
+    assert payload["absorption_human_task_id"] == "human-assist-1"
     assert payload["detail"]["leases"]["reaped_expired_leases"] == 2
     assert payload["detail"]["mailbox"]["recovered_orphaned_mailbox_items"] == 3
     assert payload["detail"]["decisions"]["pending_decisions"] == 2
