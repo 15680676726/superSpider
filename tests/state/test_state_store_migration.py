@@ -148,6 +148,7 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
             "lane_id",
         }.issubset(_column_names(conn, "schedules"))
         assert {
+            "draft_payload_json",
             "execution_core_identity_payload_json",
             "lifecycle_status",
             "autonomy_status",

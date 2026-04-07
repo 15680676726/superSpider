@@ -93,6 +93,7 @@ class _GoalServiceCoreMixin:
     def create_goal(
         self,
         *,
+        goal_id: str | None = None,
         title: str,
         summary: str = "",
         status: str = "draft",
@@ -103,16 +104,21 @@ class _GoalServiceCoreMixin:
         cycle_id: str | None = None,
         goal_class: str = "goal",
     ) -> GoalRecord:
-        goal = GoalRecord(
-            title=title,
-            summary=summary,
-            status=status,
-            priority=priority,
-            owner_scope=owner_scope,
-            industry_instance_id=industry_instance_id,
-            lane_id=lane_id,
-            cycle_id=cycle_id,
-            goal_class=goal_class,
+        goal_kwargs = {
+            "title": title,
+            "summary": summary,
+            "status": status,
+            "priority": priority,
+            "owner_scope": owner_scope,
+            "industry_instance_id": industry_instance_id,
+            "lane_id": lane_id,
+            "cycle_id": cycle_id,
+            "goal_class": goal_class,
+        }
+        goal = (
+            GoalRecord(id=goal_id, **goal_kwargs)
+            if goal_id is not None
+            else GoalRecord(**goal_kwargs)
         )
         created = self._repository.upsert_goal(goal)
         self._publish_runtime_event(

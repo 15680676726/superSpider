@@ -21,6 +21,7 @@ class IndustryInstanceRecord(UpdatedRecord):
     status: str = "draft"
     profile_payload: dict[str, Any] = Field(default_factory=dict)
     team_payload: dict[str, Any] = Field(default_factory=dict)
+    draft_payload: dict[str, Any] = Field(default_factory=dict)
     execution_core_identity_payload: dict[str, Any] = Field(default_factory=dict)
     agent_ids: list[str] = Field(default_factory=list)
     lifecycle_status: str = "running"

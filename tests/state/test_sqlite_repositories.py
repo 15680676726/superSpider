@@ -1433,12 +1433,28 @@ def test_sqlite_override_repositories_crud_round_trip(tmp_path) -> None:
         status="active",
         profile_payload={"industry": "Operations"},
         team_payload={"team_id": "industry-v1-ops", "agents": []},
+        draft_payload={
+            "schema_version": "industry-draft-v1",
+            "team": {"team_id": "industry-v1-ops", "agents": []},
+            "goals": [
+                {
+                    "goal_id": "ops-closeout",
+                    "kind": "operations",
+                    "owner_agent_id": "ops-agent",
+                    "title": "Close the runtime loop",
+                    "summary": "Keep the operations lane closed with evidence.",
+                    "plan_steps": ["review", "verify", "close"],
+                },
+            ],
+            "schedules": [],
+        },
         agent_ids=["ops-agent"],
     )
     industry_repo.upsert_instance(industry_instance)
     stored_instance = industry_repo.get_instance("industry-v1-ops")
     assert stored_instance is not None
     assert stored_instance.agent_ids == ["ops-agent"]
+    assert stored_instance.draft_payload["goals"][0]["goal_id"] == "ops-closeout"
     assert [item.instance_id for item in industry_repo.list_instances()] == [
         "industry-v1-ops",
     ]

@@ -572,6 +572,7 @@ class IndustryGoalSeed(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     schema_version: Literal["industry-goal-seed-v1"] = "industry-goal-seed-v1"
+    goal_id: str
     kind: str
     owner_agent_id: str
     title: str

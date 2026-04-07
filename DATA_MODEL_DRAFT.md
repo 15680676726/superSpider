@@ -1258,6 +1258,8 @@ Windows-first 约束：
 - `IndustryBootstrapRequest` 当前语义已收敛为 `{ profile, draft, activation options }`，bootstrap 不再从 brief 重新生成模板团队
 - steady-state 持久化与 `/api/industry/v1/instances*`、`/api/runtime-center/industry*` 读面已统一读取 `IndustryInstanceRecord`；`GoalOverride.compiler_context` 与 `AgentProfileOverride` 只保留最小链接字段和一次性 legacy backfill 清洗职责
 - `IndustryInstanceRecord.execution_core_identity_payload` 已成为“唯一物理 Spider Mesh 执行中枢如何绑定到当前行业实例”的正式真相字段；`goal detail`、`runtime detail` 与 `query execution` 只做只读投影，不再各自维护平行行业身份状态
+- `2026-04-07` 对象补充：`IndustryInstanceRecord.draft_payload` 已成为 bootstrap canonical draft 的正式持久化字段；industry strategy/runtime consumer 现在优先读取实例内 `draft_payload`，而不是再从 legacy `GoalRecord`/`ScheduleRecord` 反推出 bootstrap 草案
+- `2026-04-07` bootstrap hardening：canonical bootstrap goal identity 现已稳定到 `team_id + goal slug`，backlog/cycle/assignment seed 直接消费 goal specs；`GoalRecord` 改为 assignment-native seed 完成后按同一稳定 `goal_id` 物化，避免 bootstrap write path 再把 materialized goal 当唯一 draft truth
 - `V4` 规划补充：内部 canonical `execution-core` 与物理 runtime 继续保留，但其产品语义应逐步收敛为“团队总控核”；后续对象字段应能显式表达其 `operating_mode=control-core` 与 `direct_execution_policy=fallback-only`
 - `2026-03-14` 对象补充：`IndustryTeamBlueprint` 现应显式承载 `topology=solo|lead-plus-support|pod|full-team`；`researcher` 从固定常驻岗降为可选支援角色，由 draft/compiler 按 brief 的独立证据环路决定是否生成
 
@@ -1635,6 +1637,7 @@ Windows-first 约束：
 - `Patch / GrowthEvent` 当前已经显式挂上 `goal_id / task_id / agent_id / source_evidence_id` 等学习闭环锚点
 - `compiler_context / task_seed` 当前已经稳定承载 learning feedback metadata，不再只是 compile 输入快照
 - `IndustryInstanceRecord` 已成为正式 `state` repository object，并作为 `/api/industry/v1/instances*` 与 `/api/runtime-center/industry*` 的 steady-state truth source
+- `IndustryInstanceRecord.draft_payload` 当前已进入正式 schema/repository contract，用于持久化 canonical `IndustryDraftPlan`；它与 `execution_core_identity_payload` 一起构成 industry bootstrap 的实例内真相锚点
 - `IndustryProfile / IndustryRoleBlueprint / IndustryTeamBlueprint / IndustryGoalSeed` 已有正式模型与编译器；它们现在是稳定的 compiler/product-layer objects，不再承担长期运行真相源
 - `employment_mode / activation_mode` 已成为稳定岗位契约字段：前者定义 `career / temporary` seat 生命周期，后者定义 `persistent / on-demand` 唤醒方式；`/industry`、`Runtime Center` 与 `AgentWorkbench` 必须消费同一套字段
 - `2026-03-14` 语义补充：`IndustryTeamBlueprint.topology` 已进入正式模型，用于约束“最小合理团队”；`execution-core` 继续固定为团队总控核，而 `researcher` 只作为可选支援角色存在

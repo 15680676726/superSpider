@@ -59,6 +59,7 @@ class SqliteIndustryInstanceRepository(BaseIndustryInstanceRepository):
         payload = _payload(instance)
         payload["profile_payload_json"] = _encode_json(instance.profile_payload)
         payload["team_payload_json"] = _encode_json(instance.team_payload)
+        payload["draft_payload_json"] = _encode_json(instance.draft_payload)
         payload["execution_core_identity_payload_json"] = _encode_json(
             instance.execution_core_identity_payload,
         )
@@ -79,6 +80,7 @@ class SqliteIndustryInstanceRepository(BaseIndustryInstanceRepository):
                     status,
                     profile_payload_json,
                     team_payload_json,
+                    draft_payload_json,
                     execution_core_identity_payload_json,
                     agent_ids_json,
                     lifecycle_status,
@@ -97,6 +99,7 @@ class SqliteIndustryInstanceRepository(BaseIndustryInstanceRepository):
                     :status,
                     :profile_payload_json,
                     :team_payload_json,
+                    :draft_payload_json,
                     :execution_core_identity_payload_json,
                     :agent_ids_json,
                     :lifecycle_status,
@@ -115,6 +118,7 @@ class SqliteIndustryInstanceRepository(BaseIndustryInstanceRepository):
                     status = excluded.status,
                     profile_payload_json = excluded.profile_payload_json,
                     team_payload_json = excluded.team_payload_json,
+                    draft_payload_json = excluded.draft_payload_json,
                     execution_core_identity_payload_json = excluded.execution_core_identity_payload_json,
                     agent_ids_json = excluded.agent_ids_json,
                     lifecycle_status = excluded.lifecycle_status,
@@ -974,6 +978,9 @@ def _industry_instance_from_row(
     )
     payload["team_payload"] = _decode_json_mapping(
         payload.pop("team_payload_json", None),
+    )
+    payload["draft_payload"] = _decode_json_mapping(
+        payload.pop("draft_payload_json", None),
     )
     payload["execution_core_identity_payload"] = _decode_json_mapping(
         payload.pop("execution_core_identity_payload_json", None),

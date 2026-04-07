@@ -560,6 +560,9 @@ class _PredictionServiceCoreMixin:
                 **replan_activation,
                 **_mapping_dict(persisted_replan.get("activation")),
             }
+        replan_optimization_writeback = _mapping_dict(
+            persisted_replan.get("optimization_writeback"),
+        ) or _mapping_dict(strategy_constraints.get("optimization_writeback"))
         return {
             "is_truth_store": False,
             "overlap_with_formal_review": overlap_with_formal_review,
@@ -601,6 +604,7 @@ class _PredictionServiceCoreMixin:
                 "directives": replan_directives,
                 "recommended_actions": replan_recommended_actions,
                 "activation": replan_activation,
+                "optimization_writeback": replan_optimization_writeback,
                 "directive_count": len(replan_directives),
                 "recommended_action_count": len(replan_recommended_actions),
                 "activation_keys": sorted(replan_activation.keys())[:8],
