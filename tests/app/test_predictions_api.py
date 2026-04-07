@@ -859,7 +859,6 @@ def test_prediction_cycle_case_deduplicates_same_operating_fingerprint(tmp_path)
         pending_report_ids=["report-a"],
         open_backlog_ids=["backlog-a"],
         open_backlog_source_refs=["operator:backlog-a"],
-        goal_statuses={"goal-prediction": "active"},
         meeting_window="morning",
         participant_inputs=[
             {
@@ -891,7 +890,6 @@ def test_prediction_cycle_case_deduplicates_same_operating_fingerprint(tmp_path)
         pending_report_ids=["report-a"],
         open_backlog_ids=["backlog-a"],
         open_backlog_source_refs=["operator:backlog-a"],
-        goal_statuses={"goal-prediction": "active"},
         meeting_window="morning",
         participant_inputs=[
             {
@@ -923,6 +921,7 @@ def test_prediction_cycle_case_deduplicates_same_operating_fingerprint(tmp_path)
     assert first.case["metadata"]["meeting_trigger_mode"] == "windowed-operating-cycle"
     assert first.case["metadata"]["meeting_window"] == "morning"
     assert first.case["metadata"]["review_date_local"]
+    assert "goal_statuses" not in first.case["metadata"]
     assert first.case["metadata"]["participant_inputs"][0]["assignment_id"] == "assignment-1"
     assert first.case["metadata"]["assignment_summaries"][0]["assignment_id"] == "assignment-1"
     assert first.case["metadata"]["lane_summaries"][0]["lane_id"] == "lane-growth"
@@ -944,7 +943,6 @@ def test_prediction_cycle_case_exposes_light_formal_planning_context_in_detail(t
         pending_report_ids=["report-a", "report-b"],
         open_backlog_ids=["backlog-a"],
         open_backlog_source_refs=["operator:backlog-a"],
-        goal_statuses={"goal-prediction": "active"},
         meeting_window="morning",
         participant_inputs=[
             {

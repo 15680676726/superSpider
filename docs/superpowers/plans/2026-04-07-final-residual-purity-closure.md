@@ -60,3 +60,14 @@
 - [ ] Update the docs so only the current residuals remain documented.
 - [ ] Run the focused verification matrix for industry, reporting/prediction, and workflow.
 - [ ] Commit and push the final closure bundle.
+
+## Status Update (`2026-04-07`)
+
+- Completed:
+  - reporting / prediction task-first closure
+  - workflow internal step-record removal of `linked_goal_ids / linked_schedule_ids`
+  - cycle reconcile / prediction case removal of `goal_statuses` sidecar
+- Remaining:
+  - industry bootstrap still materializes bootstrap goal/schedule before canonical backlog/cycle takes over
+  - workflow `step_execution_seed` still accepts legacy goal/schedule ids as compatibility input for older runs
+  - `runtime_service_graph.py` / `runtime_bootstrap_models.py` wiring remains heavy and manually assembled

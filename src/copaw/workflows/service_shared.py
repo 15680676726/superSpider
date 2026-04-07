@@ -93,6 +93,36 @@ def _workflow_step_execution_seed(run: WorkflowRunRecord) -> list[dict[str, Any]
     ]
 
 
+def _workflow_step_seed_by_id(run: WorkflowRunRecord) -> dict[str, dict[str, Any]]:
+    return {
+        str(item.get("step_id")): dict(item)
+        for item in _workflow_step_execution_seed(run)
+        if str(item.get("step_id") or "").strip()
+    }
+
+
+def _workflow_step_persisted_runtime_ids(
+    seed: dict[str, Any] | None,
+) -> tuple[list[str], list[str], list[str]]:
+    payload = dict(seed or {})
+    task_ids = [
+        str(item)
+        for item in list(payload.get("linked_task_ids") or [])
+        if str(item).strip()
+    ]
+    decision_ids = [
+        str(item)
+        for item in list(payload.get("linked_decision_ids") or [])
+        if str(item).strip()
+    ]
+    evidence_ids = [
+        str(item)
+        for item in list(payload.get("linked_evidence_ids") or [])
+        if str(item).strip()
+    ]
+    return task_ids, decision_ids, evidence_ids
+
+
 def _workflow_linked_resource_ids(
     run: WorkflowRunRecord,
     *,
@@ -171,6 +201,24 @@ def _workflow_schedule_ids_for_preview(
         if step.kind == "schedule"
         ],
     )
+
+
+def _workflow_step_schedule_ids(
+    run: WorkflowRunRecord,
+    *,
+    step_kind: str,
+    step_id: str,
+    payload_preview: dict[str, Any] | None = None,
+) -> list[str]:
+    if step_kind != "schedule":
+        return []
+    return [
+        _workflow_step_schedule_id(
+            run,
+            step_id=step_id,
+            payload_preview=payload_preview,
+        )
+    ]
 
 
 def _render_text(template: object | None, context: dict[str, Any]) -> str:

@@ -1202,10 +1202,13 @@
 - workflow 继续去历史 link 真相：
   - run detail / resume 的 goal step 现在优先按 `GoalOverride.compiler_context(workflow_run_id, workflow_step_id)` 派生 goal link，不再以持久化 `linked_goal_ids` 为正式真相。
   - schedule step 继续只按 deterministic schedule identity 恢复，不再读历史 `linked_schedule_ids`。
+- `2026-04-07` follow-up hard cut:
+  - `OperatingCycleService.reconcile_cycle(...)` 已删除 `goal_statuses` 输入，cycle status 现在只按 assignment/report truth 判定。
+  - `PredictionService.create_cycle_case(...)` 不再把 `goal_statuses` 写进 cycle fingerprint 或 case metadata。
+  - `WorkflowStepExecutionRecord` 已删除内部 `linked_goal_ids / linked_schedule_ids` 字段；step detail 改为读时推导，不再靠 step record 持有 legacy link。
 - 这轮完成后仍然真实存在的残留只剩：
   - `industry` bootstrap 仍会 materialize bootstrap goal/schedule，再喂给 backlog/cycle。
-  - cycle reconcile / cycle prediction 仍保留 `goal_statuses` sidecar。
-  - workflow internal `linked_goal_ids / linked_schedule_ids` 还保留为内部派生字段，但已不是 persistence truth front-door。
+  - workflow `step_execution_seed` 仍允许保留 `linked_goal_ids / linked_schedule_ids` 作为旧 run 兼容回填输入，但公开 step record/detail 已不再依赖它们。
   - `runtime_service_graph.py` + `runtime_bootstrap_models.py` 的 wiring graph 仍偏重。
 
 ### 3.3.4 `2026-04-07` Buddy carrier direction-truth fix

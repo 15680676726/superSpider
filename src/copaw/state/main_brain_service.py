@@ -544,30 +544,19 @@ class OperatingCycleService:
         self,
         cycle: OperatingCycleRecord,
         *,
-        goal_statuses: Sequence[str],
         assignment_statuses: Sequence[str],
         report_ids: Sequence[str],
-        allow_paused_goals_without_confirmation: bool = False,
     ) -> OperatingCycleRecord:
         next_status = cycle.status
-        normalized_goal_statuses = [status for status in goal_statuses if status]
         normalized_assignment_statuses = [status for status in assignment_statuses if status]
-        has_paused_or_draft_goal = any(
-            status in {"paused", "draft"} for status in normalized_goal_statuses
-        )
-        if has_paused_or_draft_goal and not allow_paused_goals_without_confirmation:
-            next_status = "waiting-confirm"
-        elif any(status in {"active"} for status in normalized_goal_statuses) or (
-            allow_paused_goals_without_confirmation and has_paused_or_draft_goal
+        if any(
+            status in {"planned", "queued", "running", "waiting-report"}
+            for status in normalized_assignment_statuses
         ):
             next_status = "active"
-        elif any(status in {"planned", "queued", "running", "waiting-report"} for status in normalized_assignment_statuses):
-            next_status = "active"
-        elif any(status in {"blocked"} for status in normalized_goal_statuses):
-            next_status = "review"
         elif any(status in {"failed", "cancelled"} for status in normalized_assignment_statuses):
             next_status = "review"
-        elif normalized_goal_statuses or normalized_assignment_statuses:
+        elif normalized_assignment_statuses or report_ids:
             next_status = "completed"
         updated = cycle.model_copy(
             update={

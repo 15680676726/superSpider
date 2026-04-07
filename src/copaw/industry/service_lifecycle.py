@@ -2122,11 +2122,6 @@ class _IndustryLifecycleMixin:
             if current_cycle is not None and self._operating_cycle_service is not None:
                 self._operating_cycle_service.reconcile_cycle(
                     current_cycle,
-                    goal_statuses=[
-                        goal.status
-                        for owned_goal_id in self._resolve_instance_goal_ids(record)
-                        if (goal := self._goal_service.get_goal(owned_goal_id)) is not None
-                    ],
                     assignment_statuses=[
                         assignment.status
                         for assignment in self._list_assignment_records(
@@ -2142,9 +2137,6 @@ class _IndustryLifecycleMixin:
                             limit=None,
                         )
                     ],
-                    allow_paused_goals_without_confirmation=(
-                        _string(record.autonomy_status) in {"learning", "coordinating"}
-                    ),
                 )
             record = self._retire_completed_temporary_roles(record=record)
             updated = self.reconcile_instance_status(record.instance_id) or record
@@ -2308,7 +2300,6 @@ class _IndustryLifecycleMixin:
         if current_cycle is not None and self._operating_cycle_service is not None:
             self._operating_cycle_service.reconcile_cycle(
                 current_cycle,
-                goal_statuses=[],
                 assignment_statuses=[
                     assignment.status
                     for assignment in self._list_assignment_records(
@@ -3280,12 +3271,6 @@ class _IndustryLifecycleMixin:
                 strategy_constraints_sidecar=strategy_constraints_payload,
                 report_replan_sidecar=report_replan_payload,
             )
-        goal_statuses: dict[str, str] = {}
-        for goal_id in self._resolve_instance_goal_ids(record):
-            goal = self._goal_service.get_goal(goal_id)
-            if goal is None:
-                continue
-            goal_statuses[goal.id] = goal.status
         assignments = self._list_assignment_records(
             record.instance_id,
             cycle_id=current_cycle.id if current_cycle is not None else None,
@@ -3303,7 +3288,6 @@ class _IndustryLifecycleMixin:
                 item.source_ref or item.id
                 for item in planning_backlog
             ],
-            goal_statuses=goal_statuses,
             meeting_window=meeting_window,
             participant_inputs=self._build_prediction_participant_inputs(
                 record=record,
@@ -3786,7 +3770,6 @@ class _IndustryLifecycleMixin:
         if current_cycle is not None:
             current_cycle = self._operating_cycle_service.reconcile_cycle(
                 current_cycle,
-                goal_statuses=[goal.status for goal in goals_by_id.values()],
                 assignment_statuses=[assignment.status for assignment in assignments],
                 report_ids=[
                     report.id
@@ -3796,9 +3779,6 @@ class _IndustryLifecycleMixin:
                         limit=None,
                     )
                 ],
-                allow_paused_goals_without_confirmation=(
-                    _string(record.autonomy_status) in {"learning", "coordinating"}
-                ),
             )
             current_cycle = self._persist_cycle_report_synthesis(
                 cycle=current_cycle,

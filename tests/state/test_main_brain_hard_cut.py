@@ -6,6 +6,7 @@ import asyncio
 from fastapi.testclient import TestClient
 
 from copaw.industry import IndustryPreviewRequest, normalize_industry_profile
+from copaw.state import IndustryInstanceRecord, OperatingCycleRecord
 from tests.app.industry_api_parts.runtime_updates import _build_test_chat_writeback_plan
 from tests.app.industry_api_parts.shared import FakeIndustryDraftGenerator, _build_industry_app
 
@@ -168,3 +169,46 @@ def test_runtime_center_retired_frontdoors_stay_removed_after_hard_cut(tmp_path)
     for route, payload in retired_routes:
         response = client.post(route, json=payload)
         assert response.status_code == 404, route
+
+
+def test_operating_cycle_reconcile_uses_assignment_truth_only_after_hard_cut(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    app.state.industry_instance_repository.upsert_instance(
+        IndustryInstanceRecord(
+            instance_id="industry-hard-cut",
+            label="Hard Cut Industry",
+            summary="Cycle reconcile should no longer depend on legacy goal statuses.",
+            owner_scope="industry-hard-cut",
+            status="active",
+            lifecycle_status="running",
+            autonomy_status="coordinating",
+            profile_payload={},
+            team_payload={},
+            agent_ids=[],
+        ),
+    )
+
+    cycle = app.state.operating_cycle_repository.upsert_cycle(
+        OperatingCycleRecord(
+            id="cycle:hard-cut:assignment-only",
+            industry_instance_id="industry-hard-cut",
+            cycle_kind="daily",
+            title="Assignment-only cycle",
+            summary="Cycle status should reconcile from assignment truth only.",
+            status="active",
+            focus_lane_ids=[],
+            backlog_item_ids=[],
+            assignment_ids=["assignment-1"],
+            report_ids=[],
+        ),
+    )
+
+    reconciled = app.state.operating_cycle_service.reconcile_cycle(
+        cycle,
+        assignment_statuses=["completed"],
+        report_ids=[],
+    )
+
+    assert reconciled.status == "completed"

@@ -307,7 +307,6 @@ class _PredictionServiceCoreMixin:
         pending_report_ids: list[str] | None = None,
         open_backlog_ids: list[str] | None = None,
         open_backlog_source_refs: list[str] | None = None,
-        goal_statuses: dict[str, str] | None = None,
         meeting_window: str | None = None,
         participant_inputs: list[dict[str, Any]] | None = None,
         assignment_summaries: list[dict[str, Any]] | None = None,
@@ -364,10 +363,6 @@ class _PredictionServiceCoreMixin:
                     )
                     if assignment_id is not None
                 ],
-                "goal_statuses": {
-                    str(goal_id): str(status)
-                    for goal_id, status in sorted((goal_statuses or {}).items())
-                },
             }
         fingerprint = _stable_prediction_fingerprint(fingerprint_payload)
         if not force:
@@ -426,7 +421,6 @@ class _PredictionServiceCoreMixin:
                 "pending_report_ids": _string_list(pending_report_ids),
                 "open_backlog_ids": _string_list(open_backlog_ids),
                 "open_backlog_source_refs": _string_list(open_backlog_source_refs),
-                "goal_statuses": dict(goal_statuses or {}),
                 "participant_inputs": list(participant_inputs or []),
                 "assignment_summaries": list(assignment_summaries or []),
                 "lane_summaries": list(lane_summaries or []),

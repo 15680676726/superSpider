@@ -823,23 +823,52 @@ class _WorkflowServiceRunMixin:
         step_id: str,
     ) -> WorkflowStepExecutionDetail:
         detail = self.get_run_detail(run_id)
+        run = self._workflow_run_repository.get_run(run_id)
+        if run is None:
+            raise KeyError(f"Workflow run '{run_id}' not found")
         step = next(
             (item for item in detail.step_execution if item.step_id == step_id),
             None,
         )
         if step is None:
             raise KeyError(f"Workflow step '{step_id}' not found in run '{run_id}'")
+        preview_step = next(
+            (item for item in detail.preview.steps if item.step_id == step_id),
+            None,
+        )
+        if preview_step is None:
+            raise KeyError(f"Workflow step '{step_id}' preview missing in run '{run_id}'")
+        seed = _workflow_step_seed_by_id(run).get(step_id)
+        persisted_task_ids, persisted_decision_ids, persisted_evidence_ids = (
+            _workflow_step_persisted_runtime_ids(seed)
+        )
+        linked_goal_ids = (
+            []
+            if persisted_task_ids or persisted_decision_ids or persisted_evidence_ids
+            else list(
+                _workflow_goal_ids_by_step(
+                    run,
+                    goal_override_repository=self._goal_override_repository,
+                ).get(step_id, []),
+            )
+        )
+        linked_schedule_ids = _workflow_step_schedule_ids(
+            run,
+            step_kind=preview_step.kind,
+            step_id=step_id,
+            payload_preview=dict(preview_step.payload_preview or {}),
+        )
         return WorkflowStepExecutionDetail(
             step=step,
             linked_goals=[
                 item
                 for item in detail.goals
-                if str(item.get("id") or "") in set(step.linked_goal_ids)
+                if str(item.get("id") or "") in set(linked_goal_ids)
             ],
             linked_schedules=[
                 item
                 for item in detail.schedules
-                if str(item.get("id") or "") in set(step.linked_schedule_ids)
+                if str(item.get("id") or "") in set(linked_schedule_ids)
             ],
             linked_tasks=[
                 item

@@ -1200,8 +1200,8 @@ def test_workflow_run_step_detail_stays_read_only_and_service_resume_rehydrates_
         for item in resumed.step_execution
         if item.step_id == schedule_step["step_id"]
     )
-    assert resumed_goal_step.linked_goal_ids
-    assert resumed_schedule_step.linked_schedule_ids
+    assert not hasattr(resumed_goal_step, "linked_goal_ids")
+    assert not hasattr(resumed_schedule_step, "linked_schedule_ids")
 
     resumed_step_detail = client.get(
         f"/workflow-runs/{run_id}/steps/{goal_step['step_id']}",
@@ -1514,9 +1514,9 @@ def test_workflow_resume_uses_persisted_runtime_context_without_rehydrating_lega
         if item.step_id == schedule_step["step_id"]
     )
 
-    assert resumed_goal_step.linked_goal_ids == []
+    assert not hasattr(resumed_goal_step, "linked_goal_ids")
     assert resumed_goal_step.linked_task_ids == goal_step["linked_task_ids"]
-    assert resumed_schedule_step.linked_schedule_ids
+    assert not hasattr(resumed_schedule_step, "linked_schedule_ids")
 
     persisted_run = client.app.state.workflow_run_repository.get_run(run_id)
     assert persisted_run is not None
@@ -1606,7 +1606,13 @@ def test_workflow_resume_uses_goal_override_context_without_recreating_legacy_go
         for item in resumed.step_execution
         if item.step_id == goal_step["step_id"]
     )
-    assert resumed_goal_step.linked_goal_ids
+    assert not hasattr(resumed_goal_step, "linked_goal_ids")
+
+    resumed_goal_detail = client.get(
+        f"/workflow-runs/{run_id}/steps/{goal_step['step_id']}",
+    )
+    assert resumed_goal_detail.status_code == 200
+    assert resumed_goal_detail.json()["linked_goals"]
 
     linked_goal_overrides_after = [
         override
