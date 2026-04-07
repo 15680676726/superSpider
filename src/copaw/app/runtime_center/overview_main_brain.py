@@ -216,6 +216,10 @@ class RuntimeCenterMainBrainAssembly:
     def resolve_exception_absorption_meta(self, app_state: Any) -> dict[str, Any]:
         snapshot_getter = getattr(app_state, "actor_supervisor_snapshot", None)
         snapshot = snapshot_getter() if callable(snapshot_getter) else None
+        if snapshot is None:
+            actor_supervisor = getattr(app_state, "actor_supervisor", None)
+            supervisor_snapshot = getattr(actor_supervisor, "snapshot", None)
+            snapshot = supervisor_snapshot() if callable(supervisor_snapshot) else None
         payload = self._mapping(snapshot) or {}
         if not payload:
             return {}
