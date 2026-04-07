@@ -1098,7 +1098,16 @@ class _PredictionServiceRecommendationMixin:
                         target_agent_id=target_agent_id,
                         install_templates=install_templates,
                     )
+                    selected_scope = _string(scope_payload.get("selected_scope")) or "agent"
+                    trial_scope = "single-agent"
+                    if selected_scope == "seat":
+                        trial_scope = "single-seat"
+                    elif selected_scope == "session":
+                        trial_scope = "single-session"
                     shared_mcp_metadata = {
+                        "gap_kind": "missing_capability",
+                        "optimization_stage": "trial",
+                        "industry_instance_id": case.industry_instance_id,
                         "workflow_run_id": workflow.run_id,
                         "capability_id": capability_id,
                         "install_templates": install_templates,
@@ -1110,7 +1119,8 @@ class _PredictionServiceRecommendationMixin:
                             trial_contract=trial_contract,
                         ),
                         "target_agent_id": _string(scope_payload.get("target_agent_id")),
-                        "selected_scope": _string(scope_payload.get("selected_scope")),
+                        "selected_scope": selected_scope,
+                        "trial_scope": trial_scope,
                         "selected_seat_ref": _string(scope_payload.get("selected_seat_ref")),
                         "rollback_target_ids": [capability_id],
                         "target_capability_family": "mcp",
