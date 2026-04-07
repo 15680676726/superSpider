@@ -684,6 +684,43 @@ def test_learning_acquisition_run_requires_kernel_dispatcher_without_legacy_fall
     assert app.state.decision_request_repository.list_decision_requests(limit=None) == []
 
 
+def test_learning_api_acquisition_run_keeps_explicit_discovery_broad_by_default(
+    tmp_path,
+) -> None:
+    captured_payloads: list[dict[str, object]] = []
+
+    class _CapturingDiscoveryService(_FakeDiscoveryService):
+        async def discover(self, payload: dict[str, object]) -> dict[str, object]:
+            captured_payloads.append(dict(payload))
+            return await super().discover(payload)
+
+    class _CapturingCapabilityService(_FakeCapabilityService):
+        def __init__(self) -> None:
+            self._discovery_service = _CapturingDiscoveryService()
+
+    app = _build_learning_app(tmp_path)
+    app.state.learning_service.set_industry_service(_FakeIndustryService())
+    app.state.learning_service.set_capability_service(_CapturingCapabilityService())
+    app.state.learning_service.set_agent_profile_service(
+        SimpleNamespace(
+            get_capability_surface=lambda agent_id: {
+                "effective_capabilities": [],
+            },
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/learning/acquisition/run",
+        json={"industry_instance_id": "industry-v1-demo"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert captured_payloads
+    assert all("providers" not in payload for payload in captured_payloads)
+
+
 def test_learning_api_acquisition_review_gate_approves_and_materializes(
     tmp_path,
     monkeypatch,

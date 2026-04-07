@@ -1902,8 +1902,100 @@ def test_kickoff_execution_from_chat_does_not_block_on_learning_acquisition_cycl
             "industry_instance_id": instance_id,
             "actor": "copaw-agent-runner",
             "rerun_existing": False,
+            "providers": ["install-template"],
         },
     ]
+
+
+def test_kickoff_execution_from_chat_publishes_background_acquisition_failure_event(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": False,
+            "auto_dispatch": False,
+            "execute": False,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    captured_events: list[dict[str, object]] = []
+
+    async def _failed_acquisition_cycle(**kwargs):
+        _ = kwargs
+        return {
+            "success": False,
+            "industry_instance_id": instance_id,
+            "summary": "background acquisition failed",
+            "proposals": [],
+            "plans": [],
+            "onboarding_runs": [],
+            "warnings": ["discovery-unavailable"],
+        }
+
+    def _capture_event(*, topic: str, action: str, payload: dict[str, object]) -> None:
+        captured_events.append(
+            {
+                "topic": topic,
+                "action": action,
+                "payload": dict(payload),
+            },
+        )
+
+    with patch.object(
+        app.state.learning_service,
+        "run_industry_acquisition_cycle",
+        side_effect=_failed_acquisition_cycle,
+    ), patch.object(
+        app.state.learning_service,
+        "_publish_runtime_event",
+        side_effect=_capture_event,
+    ):
+        async def _run_kickoff():
+            result = await app.state.industry_service.kickoff_execution_from_chat(
+                industry_instance_id=instance_id,
+                message_text="Start the first execution cycle for today.",
+                owner_agent_id="copaw-agent-runner",
+                session_id=f"industry:{instance_id}",
+                channel="console",
+            )
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            return result
+
+        kickoff = asyncio.run(_run_kickoff())
+
+    assert kickoff is not None
+    assert kickoff["kickoff_stage"] == "learning"
+    assert any(
+        event["action"] == "background-cycle-queued"
+        and event["payload"]["industry_instance_id"] == instance_id
+        for event in captured_events
+    )
+    assert any(
+        event["action"] == "background-cycle-failed"
+        and event["payload"]["industry_instance_id"] == instance_id
+        and event["payload"]["warnings"] == ["discovery-unavailable"]
+        for event in captured_events
+    )
 
 
 def test_chat_writeback_schedule_creation_does_not_expand_instance_schedule_truth(

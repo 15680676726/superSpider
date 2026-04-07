@@ -2556,6 +2556,7 @@ class _IndustryLifecycleMixin:
                     industry_instance_id=record.instance_id,
                     actor=owner_agent_id or EXECUTION_CORE_AGENT_ID,
                     rerun_existing=False,
+                    providers=["install-template"],
                 )
             except Exception as exc:
                 return {
@@ -2571,11 +2572,62 @@ class _IndustryLifecycleMixin:
         def _queue_learning_acquisition_cycle() -> None:
             if not callable(acquisition_runner):
                 return
+            publish_runtime_event = getattr(
+                self._learning_service,
+                "_publish_runtime_event",
+                None,
+            )
+            if callable(publish_runtime_event):
+                publish_runtime_event(
+                    topic="learning-acquisition",
+                    action="background-cycle-queued",
+                    payload={"industry_instance_id": record.instance_id},
+                )
 
             async def _run_background() -> None:
                 try:
-                    await _run_learning_acquisition_cycle()
+                    result = await _run_learning_acquisition_cycle()
+                    if not callable(publish_runtime_event):
+                        return
+                    payload = {
+                        "industry_instance_id": record.instance_id,
+                    }
+                    if isinstance(result, dict):
+                        payload.update(
+                            {
+                                "success": bool(result.get("success")),
+                                "summary": _string(result.get("summary")),
+                                "warnings": [
+                                    item
+                                    for item in (
+                                        _string(warning)
+                                        for warning in list(result.get("warnings") or [])
+                                    )
+                                    if item is not None
+                                ],
+                            },
+                        )
+                    publish_runtime_event(
+                        topic="learning-acquisition",
+                        action=(
+                            "background-cycle-completed"
+                            if bool((result or {}).get("success"))
+                            else "background-cycle-failed"
+                        ),
+                        payload=payload,
+                    )
                 except Exception:
+                    if callable(publish_runtime_event):
+                        publish_runtime_event(
+                            topic="learning-acquisition",
+                            action="background-cycle-failed",
+                            payload={
+                                "industry_instance_id": record.instance_id,
+                                "success": False,
+                                "summary": "Automatic acquisition cycle failed.",
+                                "warnings": ["acquisition-cycle-exception"],
+                            },
+                        )
                     logger.exception(
                         "Industry background acquisition cycle failed for %s",
                         record.instance_id,

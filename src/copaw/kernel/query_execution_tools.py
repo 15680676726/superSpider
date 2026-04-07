@@ -518,6 +518,8 @@ class _QueryExecutionToolsMixin:
                         "builtin-runtime",
                         "curated-skill",
                         "hub-skill",
+                        "mcp",
+                        "mcp-registry",
                         "remote",
                     }
                 ]

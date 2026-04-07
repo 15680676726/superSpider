@@ -305,6 +305,7 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
         industry_instance_id: str,
         actor: str = _MAIN_BRAIN_ACTOR,
         rerun_existing: bool = False,
+        providers: list[str] | None = None,
         max_install_recommendations_per_role: int = 4,
         max_sop_templates_per_role: int = 2,
     ) -> dict[str, object]:
@@ -357,6 +358,12 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
         skipped_applied = 0
         pending_approvals = 0
         skipped_rejected = 0
+        normalized_providers: list[str] = []
+        for item in list(providers or []):
+            provider = _normalize_optional_str(item)
+            if provider is None:
+                continue
+            normalized_providers.append(provider.lower())
 
         for role in list(getattr(team, "agents", []) or []):
             agent_id = _normalize_optional_str(getattr(role, "agent_id", None))
@@ -368,6 +375,7 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
                 profile=profile,
                 role=role,
                 goal_context=goal_context_by_agent.get(agent_id, []),
+                providers=normalized_providers or None,
             )
             warnings = _merge_string_lists(
                 warnings,
@@ -548,27 +556,28 @@ class LearningAcquisitionRuntimeService(LearningRuntimeDelegate):
         profile: object,
         role: object,
         goal_context: list[str],
+        providers: list[str] | None = None,
     ) -> dict[str, list[dict[str, object]] | list[str]]:
         discover = getattr(discovery_service, "discover", None)
         if not callable(discover):
             return {"recommendations": [], "sop_templates": [], "warnings": []}
-        raw = await _maybe_await(
-            discover(
-                {
-                    "industry_profile": (
-                        profile.model_dump(mode="json")
-                        if hasattr(profile, "model_dump")
-                        else profile
-                    ),
-                    "role": (
-                        role.model_dump(mode="json")
-                        if hasattr(role, "model_dump")
-                        else role
-                    ),
-                    "goal_context": list(goal_context or []),
-                    "providers": ["install-template"],
-                },
+        payload = {
+            "industry_profile": (
+                profile.model_dump(mode="json")
+                if hasattr(profile, "model_dump")
+                else profile
             ),
+            "role": (
+                role.model_dump(mode="json")
+                if hasattr(role, "model_dump")
+                else role
+            ),
+            "goal_context": list(goal_context or []),
+        }
+        if providers:
+            payload["providers"] = list(providers)
+        raw = await _maybe_await(
+            discover(payload),
         )
         if not isinstance(raw, dict):
             return {"recommendations": [], "sop_templates": [], "warnings": []}

@@ -1305,13 +1305,25 @@
 - `IndustryService.kickoff_execution_from_chat(...)` 默认已不再同步阻塞 `run_industry_acquisition_cycle(...)`；默认行为现已改成“前台 kickoff 立即返回、learning acquisition 在后台自动继续跑”。
 - 只有显式传入 `include_learning_acquisition_cycle=True` 时，当前这次 kickoff 才会同步等待 acquisition 并把 `acquisition_cycle` 结果直接带回返回值。
 - 这意味着默认 kickoff 主链只负责 assignment/backlog/cycle 的正式执行起链，不再因为自动 acquisition 扫描把 operator / retirement / runtime-detail 相关测试和读面一起拖进慢链；但系统仍会继续自动找 install-template / builtin runtime，不是直接关掉 acquisition。
-- `LearningAcquisitionRuntimeService._discover_role_acquisition_candidates(...)` 现在已把 automatic industry acquisition discovery 默认收口到 `providers=["install-template"]`：
+- 当前收窄只作用于 kickoff 管理的 automatic acquisition：
   - install-template / builtin-runtime 仍保留在自动 acquisition 主链内；
   - SOP template 搜索仍由 discovery service 的独立 `sop_templates` 分支提供；
   - curated skill / MCP registry / remote provider 扫描不再作为 industry auto kickoff 的默认同步步骤。
+- `LearningAcquisitionRuntimeService.run_industry_acquisition_cycle(...)` 的显式调用已恢复为 broad discovery default：
+  - `/learning/acquisition/run` 在未显式指定 provider 时，不再被硬锁成 `providers=["install-template"]`；
+  - 这意味着显式 acquisition run、后续 capability-gap / governed acquisition flow 仍能看到 `mcp-registry / curated-skill / remote`。
+- `query_execution_tools.py` 的 `discover_capabilities` 前门已恢复 `mcp-registry / mcp` provider 透传，不再在 query/tool 层把 MCP discovery 截断。
+- kickoff 背景 acquisition 现在会补 runtime event 可见性：
+  - queued: `learning-acquisition.background-cycle-queued`
+  - completed: `learning-acquisition.background-cycle-completed`
+  - failed: `learning-acquisition.background-cycle-failed`
 - 因此，`test_industry_learning_kickoff_materializes_acquisition_objects_and_exposes_them` 这条此前会长时间卡住的 industry learning 闭环现在已能在本地环境内 fresh 跑通。
 - 本次追加 focused verification：
   - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py::test_kickoff_execution_from_chat_does_not_block_on_learning_acquisition_cycle_by_default -q` -> `1 passed`
+  - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py::test_kickoff_execution_from_chat_publishes_background_acquisition_failure_event -q` -> `1 passed`
   - `python -m pytest tests/app/industry_api_parts/retirement_chain.py::test_industry_learning_kickoff_scopes_acquisition_discovery_to_install_templates -q` -> `1 passed`
   - `python -m pytest tests/app/industry_api_parts/retirement_chain.py::test_industry_learning_kickoff_materializes_acquisition_objects_and_exposes_them -q` -> `1 passed in 88.75s`
   - `python -m pytest tests/app/industry_api_parts/retirement_chain.py::test_industry_runtime_detail_and_goal_detail_use_formal_instance_store -q` -> `1 passed`
+  - `python -m pytest tests/app/test_learning_api.py -k "acquisition_run or acquisition_review_gate" -q` -> `6 passed, 10 deselected`
+  - `python -m pytest tests/kernel/query_execution_environment_parts/dispatch.py -k "discover_capabilities" -q` -> `1 passed, 10 deselected`
+  - `python -m pytest tests/app/test_prediction_mcp_optimization_flow.py::test_missing_mcp_recommendation_executes_into_optimization_closure -q` -> `1 passed`

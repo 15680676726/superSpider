@@ -188,6 +188,61 @@ def test_query_execution_service_system_dispatch_tools_execute_via_kernel_dispat
     assert delegate_task.payload["owner_agent_id"] == "ops-researcher"
 
 
+def test_query_execution_service_discover_capabilities_preserves_mcp_registry_provider() -> None:
+    capability_service = _FakeCapabilityService()
+    kernel_dispatcher = _FakeKernelDispatcher()
+    agent_profile_service = _FakeAgentProfileService()
+    service = KernelQueryExecutionService(
+        session_backend=_FakeSessionBackend(),
+        capability_service=capability_service,
+        kernel_dispatcher=kernel_dispatcher,
+        agent_profile_service=agent_profile_service,
+        industry_service=_FakeIndustryService(),
+    )
+    agent_profile = agent_profile_service.get_agent("ops-agent")
+    request = SimpleNamespace(
+        session_id="industry-chat-1",
+        user_id="ops-agent",
+        channel="industry",
+        owner_scope="industry-v1-ops-scope",
+        industry_instance_id="industry-v1-ops",
+        industry_role_id="execution-core",
+        session_kind="industry-agent-chat",
+        entry_source="agent-workbench",
+    )
+
+    tool_functions = service._build_system_tool_functions(
+        request=request,
+        owner_agent_id="ops-agent",
+        agent_profile=agent_profile,
+        system_capability_ids={"system:discover_capabilities"},
+        kernel_task_id="task-1",
+    )
+    tools_by_name = {
+        tool_fn.__name__: tool_fn
+        for tool_fn in tool_functions
+    }
+
+    discover_capabilities_result = asyncio.run(
+        tools_by_name["discover_capabilities"](
+            query_text="browser automation",
+            providers=["remote", "mcp-registry"],
+        ),
+    )
+
+    assert isinstance(discover_capabilities_result, ToolResponse)
+    discover_capabilities_payload = query_execution_module._structured_tool_payload(
+        discover_capabilities_result,
+        default_error="discover_capabilities test payload missing",
+    )
+    assert discover_capabilities_payload["success"] is True
+    discover_capabilities_task = kernel_dispatcher.submitted[0]
+    assert discover_capabilities_task.payload["providers"] == [
+        "remote",
+        "mcp-registry",
+    ]
+
+
 def test_query_execution_service_query_turn_binds_builtin_tool_delegate_into_runtime_stream(
     monkeypatch,
 ) -> None:
