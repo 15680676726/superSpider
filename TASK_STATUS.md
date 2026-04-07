@@ -1191,6 +1191,21 @@
   - `python -m pytest tests/app/test_workflow_templates_api.py::test_workflow_run_public_surface_hides_historical_goal_schedule_id_fields -q` -> `1 passed`
   - `python -m pytest tests/app/test_workflow_templates_api.py -k "run_step_detail_stays_read_only_and_service_resume_rehydrates_missing_links or step_detail_prefers_persisted_task_links_over_legacy_goal_links or resume_uses_persisted_runtime_context_without_rehydrating_legacy_links" -q` -> `3 passed, 26 deselected`
 
+### 3.3.6 `2026-04-07` main-brain internal exception absorption closure
+
+- 主脑内部异常吸收这一轮已正式落成同一条后台 truth chain，不新增 incident 子系统：
+  - `MainBrainExceptionAbsorptionService` 继续只扫描现有 `AgentRuntimeRecord + mailbox + HumanAssistTask`。
+  - `ActorSupervisor.snapshot()` / startup recovery / Runtime Center / 主脑聊天现在统一消费同一份 derived absorption summary。
+- Runtime Center 主脑卡与主脑聊天 prompt 已收口成主脑口径：
+  - 主脑卡会在存在内部异常压力时优先显示 shared absorption summary，并带 `exception_absorption` 结构化 meta。
+  - 主脑聊天 scope snapshot 会带 `## 主脑异常吸收`，但不再把 `writer-contention` / `waiting-confirm-orphan` 这类低层 case 名直接暴露到前台口径。
+- 结构性升级已补齐正式 escalation 落点，而不是自由文本告警：
+  - `ReportReplanEngine.compile_exception_absorption_replan(...)` 会把重复同 scope blocker 这类结构性压力提升成正式 `cycle_rebalance / lane_reweight / follow_up_backlog` replan shell。
+  - `HumanAssistTaskService.build_exception_absorption_contract(...)` 会把确实需要人的最终一步编成正式 human-assist contract，而不是 ad hoc 文案。
+  - `MainBrainExceptionAbsorptionService.absorb(...)` 现在只负责在上述两个正式输出之间做 bounded 选择。
+- 本轮 focused verification：
+  - `python -m pytest tests/kernel/test_main_brain_exception_absorption.py tests/kernel/test_actor_supervisor.py tests/kernel/test_actor_mailbox.py tests/app/test_startup_recovery.py tests/app/runtime_center_api_parts/overview_governance.py tests/kernel/test_main_brain_chat_service.py tests/state/test_human_assist_task_service.py tests/compiler/test_report_replan_engine.py -q` -> `181 passed`
+
 ### 3.3.4 `2026-04-07` Buddy carrier direction-truth fix
 
 - Buddy onboarding 的正式方向边界已补正：`BuddyOnboardingService._ensure_growth_scaffold(...)` 不再把 `HumanProfile` 当前资料直接写进 `IndustryInstanceRecord.profile_payload`。
