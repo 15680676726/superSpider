@@ -1861,28 +1861,49 @@ def test_kickoff_execution_from_chat_does_not_block_on_learning_acquisition_cycl
     assert bootstrap.status_code == 200
     instance_id = bootstrap.json()["team"]["team_id"]
 
-    async def _unexpected_acquisition_cycle(**kwargs):
-        raise AssertionError(f"acquisition cycle should not run by default: {kwargs}")
+    captured_calls: list[dict[str, object]] = []
+
+    async def _record_acquisition_cycle(**kwargs):
+        captured_calls.append(dict(kwargs))
+        return {
+            "success": True,
+            "industry_instance_id": instance_id,
+            "summary": "background acquisition queued",
+            "proposals": [],
+            "plans": [],
+            "onboarding_runs": [],
+            "warnings": [],
+        }
 
     with patch.object(
         app.state.learning_service,
         "run_industry_acquisition_cycle",
-        side_effect=_unexpected_acquisition_cycle,
+        side_effect=_record_acquisition_cycle,
     ):
-        kickoff = asyncio.run(
-            app.state.industry_service.kickoff_execution_from_chat(
+        async def _run_kickoff():
+            result = await app.state.industry_service.kickoff_execution_from_chat(
                 industry_instance_id=instance_id,
                 message_text="Start the first execution cycle for today.",
                 owner_agent_id="copaw-agent-runner",
                 session_id=f"industry:{instance_id}",
                 channel="console",
-            ),
-        )
+            )
+            await asyncio.sleep(0)
+            return result
+
+        kickoff = asyncio.run(_run_kickoff())
 
     assert kickoff is not None
     assert kickoff["kickoff_stage"] == "learning"
     assert kickoff["started_assignment_ids"]
     assert kickoff["acquisition_cycle"] is None
+    assert captured_calls == [
+        {
+            "industry_instance_id": instance_id,
+            "actor": "copaw-agent-runner",
+            "rerun_existing": False,
+        },
+    ]
 
 
 def test_chat_writeback_schedule_creation_does_not_expand_instance_schedule_truth(

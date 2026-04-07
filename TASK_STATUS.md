@@ -1293,8 +1293,9 @@
 
 ### 3.3.9 `2026-04-07` industry learning kickoff acquisition-closure
 
-- `IndustryService.kickoff_execution_from_chat(...)` 默认已不再同步阻塞 `run_industry_acquisition_cycle(...)`；learning acquisition 现在只有在显式传入 `include_learning_acquisition_cycle=True` 时才会加入本次 kickoff 返回。
-- 这意味着默认 kickoff 主链只负责 assignment/backlog/cycle 的正式执行起链，不再因为自动 acquisition 扫描把 operator / retirement / runtime-detail 相关测试和读面一起拖进慢链。
+- `IndustryService.kickoff_execution_from_chat(...)` 默认已不再同步阻塞 `run_industry_acquisition_cycle(...)`；默认行为现已改成“前台 kickoff 立即返回、learning acquisition 在后台自动继续跑”。
+- 只有显式传入 `include_learning_acquisition_cycle=True` 时，当前这次 kickoff 才会同步等待 acquisition 并把 `acquisition_cycle` 结果直接带回返回值。
+- 这意味着默认 kickoff 主链只负责 assignment/backlog/cycle 的正式执行起链，不再因为自动 acquisition 扫描把 operator / retirement / runtime-detail 相关测试和读面一起拖进慢链；但系统仍会继续自动找 install-template / builtin runtime，不是直接关掉 acquisition。
 - `LearningAcquisitionRuntimeService._discover_role_acquisition_candidates(...)` 现在已把 automatic industry acquisition discovery 默认收口到 `providers=["install-template"]`：
   - install-template / builtin-runtime 仍保留在自动 acquisition 主链内；
   - SOP template 搜索仍由 discovery service 的独立 `sop_templates` 分支提供；

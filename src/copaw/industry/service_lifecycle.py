@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
+import asyncio
 import json
+import logging
 from collections.abc import Mapping
 from hashlib import sha1
 from .service_context import *  # noqa: F401,F403
@@ -40,6 +42,8 @@ _BOOTSTRAP_DEFERRED_CAPABILITY_MESSAGE = (
 _TEAM_UPDATE_DEFERRED_CAPABILITY_MESSAGE = (
     "团队更新阶段暂不立即匹配技能、MCP 与工作流；更新完成后由主脑结合学习上下文继续配置。"
 )
+
+logger = logging.getLogger(__name__)
 
 class _IndustryLifecycleMixin:
     def __init__(
@@ -2544,11 +2548,7 @@ class _IndustryLifecycleMixin:
             None,
         )
 
-        async def _maybe_run_learning_acquisition_cycle() -> dict[str, Any] | None:
-            if execute_background:
-                return None
-            if not include_learning_acquisition_cycle:
-                return None
+        async def _run_learning_acquisition_cycle() -> dict[str, Any] | None:
             if not callable(acquisition_runner):
                 return None
             try:
@@ -2567,6 +2567,21 @@ class _IndustryLifecycleMixin:
                     "onboarding_runs": [],
                     "warnings": ["acquisition-cycle-exception"],
                 }
+
+        def _queue_learning_acquisition_cycle() -> None:
+            if not callable(acquisition_runner):
+                return
+
+            async def _run_background() -> None:
+                try:
+                    await _run_learning_acquisition_cycle()
+                except Exception:
+                    logger.exception(
+                        "Industry background acquisition cycle failed for %s",
+                        record.instance_id,
+                    )
+
+            asyncio.create_task(_run_background())
         pending_assignments = self._list_pending_kickoff_assignments(record)
         pending_assignment_entries = [
             (
@@ -2591,7 +2606,11 @@ class _IndustryLifecycleMixin:
                     "assignment_dispatches": [],
                     "goal_dispatches": [],
                     "pending_execution_remaining": False,
-                    "acquisition_cycle": await _maybe_run_learning_acquisition_cycle(),
+                    "acquisition_cycle": (
+                        await _run_learning_acquisition_cycle()
+                        if include_learning_acquisition_cycle and not execute_background
+                        else None
+                    ),
                 }
             return None
         has_pending_learning = any(
@@ -2611,7 +2630,11 @@ class _IndustryLifecycleMixin:
                 "assignment_dispatches": [],
                 "goal_dispatches": [],
                 "pending_execution_remaining": True,
-                "acquisition_cycle": await _maybe_run_learning_acquisition_cycle(),
+                "acquisition_cycle": (
+                    await _run_learning_acquisition_cycle()
+                    if include_learning_acquisition_cycle and not execute_background
+                    else None
+                ),
             }
         else:
             kickoff_stage = "execution"
@@ -2709,7 +2732,10 @@ class _IndustryLifecycleMixin:
             self._sync_strategy_memory_for_instance(updated_record)
         acquisition_cycle: dict[str, Any] | None = None
         if kickoff_stage == "learning":
-            acquisition_cycle = await _maybe_run_learning_acquisition_cycle()
+            if include_learning_acquisition_cycle and not execute_background:
+                acquisition_cycle = await _run_learning_acquisition_cycle()
+            else:
+                _queue_learning_acquisition_cycle()
         return {
             "activated": bool(started_assignment_ids),
             "kickoff_stage": kickoff_stage,
