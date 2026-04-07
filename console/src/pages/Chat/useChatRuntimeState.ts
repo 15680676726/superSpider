@@ -34,6 +34,7 @@ import {
 } from "./runtimeTransport";
 import {
   hydrateRuntimeSidecarState,
+  markRuntimeResponseTerminal,
   parseRuntimeSidecarEvent,
   reduceRuntimeSidecarEvent,
   type RuntimeIntentShellSurface,
@@ -272,6 +273,10 @@ export function useChatRuntimeState({
         window.dispatchEvent(new CustomEvent("copaw:governance-status-dirty")),
       dispatchHumanAssistDirty: () =>
         window.dispatchEvent(new CustomEvent("copaw:human-assist-dirty")),
+      onRuntimeResponseTerminal: () =>
+        setRuntimeCommitState((currentState) =>
+          markRuntimeResponseTerminal(currentState),
+        ),
     });
 
     return {

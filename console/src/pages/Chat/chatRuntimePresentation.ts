@@ -26,11 +26,21 @@ export function resolveChatUiKey({
 export function resolveChatComposerKey(
   chatUiKey: string,
   lastReplyDoneAt: number | null,
+  lastTerminalResponseAt: number | null,
 ): string {
-  if (typeof lastReplyDoneAt !== "number" || !Number.isFinite(lastReplyDoneAt)) {
+  const resetAt = Math.max(
+    typeof lastReplyDoneAt === "number" && Number.isFinite(lastReplyDoneAt)
+      ? lastReplyDoneAt
+      : -1,
+    typeof lastTerminalResponseAt === "number" &&
+      Number.isFinite(lastTerminalResponseAt)
+      ? lastTerminalResponseAt
+      : -1,
+  );
+  if (!Number.isFinite(resetAt) || resetAt < 0) {
     return chatUiKey;
   }
-  return `${chatUiKey}:reply-done:${lastReplyDoneAt}`;
+  return `${chatUiKey}:reset:${resetAt}`;
 }
 
 export function resolveChatUiVisibility({

@@ -70,6 +70,7 @@ interface CreateRuntimeTransportArgs {
   dispatchGovernanceDirty?: () => void;
   dispatchHumanAssistDirty?: () => void;
   onRuntimeSidecarEvent?: (event: RuntimeSidecarRecord) => void;
+  onRuntimeResponseTerminal?: () => void;
 }
 
 interface ParseRuntimeResponseChunkArgs {
@@ -81,6 +82,7 @@ interface ParseRuntimeResponseChunkArgs {
   dispatchGovernanceDirty?: () => void;
   dispatchHumanAssistDirty?: () => void;
   onRuntimeSidecarEvent?: (event: RuntimeSidecarRecord) => void;
+  onRuntimeResponseTerminal?: () => void;
 }
 
 interface LinkedAbortController {
@@ -739,6 +741,7 @@ export function parseRuntimeResponseChunk(
       parserArgs.setRuntimeWaitState(null);
       parserArgs.dispatchGovernanceDirty?.();
       parserArgs.dispatchHumanAssistDirty?.();
+      parserArgs.onRuntimeResponseTerminal?.();
     }
   }
 
@@ -761,6 +764,7 @@ export function createRuntimeTransport({
   dispatchGovernanceDirty,
   dispatchHumanAssistDirty,
   onRuntimeSidecarEvent,
+  onRuntimeResponseTerminal,
 }: CreateRuntimeTransportArgs): {
   fetch: (data: RuntimeWebUiFetchData) => Promise<Response>;
   responseParser: (rawChunk: string) => unknown;
@@ -774,6 +778,7 @@ export function createRuntimeTransport({
     dispatchGovernanceDirty,
     dispatchHumanAssistDirty,
     onRuntimeSidecarEvent,
+    onRuntimeResponseTerminal,
   };
 
   const customFetch = async (data: RuntimeWebUiFetchData): Promise<Response> => {

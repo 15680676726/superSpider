@@ -54,10 +54,16 @@ describe("chatRuntimePresentation", () => {
   });
 
   it("forces a composer remount after reply_done so the send control can exit stop mode", () => {
-    expect(resolveChatComposerKey("thread-1", null)).toBe("thread-1");
-    expect(resolveChatComposerKey("thread-1", 1712476800000)).toBe(
-      "thread-1:reply-done:1712476800000",
+    expect(resolveChatComposerKey("thread-1", null, null)).toBe("thread-1");
+    expect(resolveChatComposerKey("thread-1", 1712476800000, null)).toBe(
+      "thread-1:reset:1712476800000",
     );
+    expect(resolveChatComposerKey("thread-1", null, 1712476801000)).toBe(
+      "thread-1:reset:1712476801000",
+    );
+    expect(
+      resolveChatComposerKey("thread-1", 1712476800000, 1712476801000),
+    ).toBe("thread-1:reset:1712476801000");
   });
 
   it("keeps chat hidden while a directly bound thread is still pending without verified context", () => {

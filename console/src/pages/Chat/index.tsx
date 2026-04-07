@@ -661,8 +661,13 @@ export default function ChatPage() {
       resolveChatComposerKey(
         chatUiKey,
         runtimeCommitState.lastReplyDoneAt,
+        runtimeCommitState.lastTerminalResponseAt,
       ),
-    [chatUiKey, runtimeCommitState.lastReplyDoneAt],
+    [
+      chatUiKey,
+      runtimeCommitState.lastReplyDoneAt,
+      runtimeCommitState.lastTerminalResponseAt,
+    ],
   );
 
   const submitBuddyNaming = useCallback(async () => {

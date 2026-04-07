@@ -4,6 +4,7 @@ import {
   createInitialRuntimeSidecarState,
   formatRuntimeIntentShellSidebarHint,
   hydrateRuntimeSidecarState,
+  markRuntimeResponseTerminal,
   parseRuntimeSidecarEvent,
   reduceRuntimeSidecarEvent,
 } from "./runtimeSidecarEvents";
@@ -232,6 +233,17 @@ describe("runtimeSidecarEvents", () => {
         confidence: 0.95,
       },
     });
+  });
+
+  it("records a terminal response boundary even when no reply_done sidecar arrives", () => {
+    const initialState = createInitialRuntimeSidecarState(
+      "industry-chat:industry-1:execution-core",
+    );
+
+    const nextState = markRuntimeResponseTerminal(initialState, 650);
+
+    expect(nextState.lastReplyDoneAt).toBeNull();
+    expect(nextState.lastTerminalResponseAt).toBe(650);
   });
 
   it("formats a human-readable sidebar hint without raw debug fragments", () => {

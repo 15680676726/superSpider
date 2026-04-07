@@ -787,6 +787,7 @@ describe("runtimeTransport", () => {
     const setRuntimeHealthNotice = vi.fn();
     const setRuntimeWaitState = vi.fn();
     const dispatchGovernanceDirty = vi.fn();
+    const onRuntimeResponseTerminal = vi.fn();
 
     const parsed = parseRuntimeResponseChunk(
       JSON.stringify({
@@ -797,6 +798,7 @@ describe("runtimeTransport", () => {
         setRuntimeHealthNotice,
         setRuntimeWaitState,
         dispatchGovernanceDirty,
+        onRuntimeResponseTerminal,
       },
     );
 
@@ -806,6 +808,7 @@ describe("runtimeTransport", () => {
     });
     expect(setRuntimeWaitState).toHaveBeenCalledWith(null);
     expect(dispatchGovernanceDirty).toHaveBeenCalledTimes(1);
+    expect(onRuntimeResponseTerminal).toHaveBeenCalledTimes(1);
     expect(setRuntimeHealthNotice).not.toHaveBeenCalled();
   });
 

@@ -56,6 +56,7 @@ export type RuntimeSidecarState = {
   currentIntentShell: RuntimeIntentShellSurface | null;
   history: RuntimeCommitStatus[];
   lastReplyDoneAt: number | null;
+  lastTerminalResponseAt: number | null;
 };
 
 const SIDECAR_EVENTS = new Set<RuntimeSidecarEventName>([
@@ -288,6 +289,17 @@ export function createInitialRuntimeSidecarState(
     currentIntentShell: null,
     history: [],
     lastReplyDoneAt: null,
+    lastTerminalResponseAt: null,
+  };
+}
+
+export function markRuntimeResponseTerminal(
+  state: RuntimeSidecarState,
+  now: number = Date.now(),
+): RuntimeSidecarState {
+  return {
+    ...state,
+    lastTerminalResponseAt: now,
   };
 }
 
@@ -372,6 +384,7 @@ export function reduceRuntimeSidecarEvent(
       ...state,
       currentIntentShell: resolveIntentShellSurface(sidecarEvent.payload, now),
       lastReplyDoneAt: now,
+      lastTerminalResponseAt: state.lastTerminalResponseAt,
     };
   }
 
@@ -406,6 +419,7 @@ export function reduceRuntimeSidecarEvent(
     currentIntentShell: state.currentIntentShell,
     history: trimHistory([...state.history, status]),
     lastReplyDoneAt: state.lastReplyDoneAt,
+    lastTerminalResponseAt: state.lastTerminalResponseAt,
   };
 }
 
