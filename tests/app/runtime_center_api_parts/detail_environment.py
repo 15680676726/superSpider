@@ -317,6 +317,11 @@ def test_runtime_center_environment_read_endpoints() -> None:
         detail_response.json()["browser_site_contract"]["site_contract_status"]
         == "verified-writer"
     )
+    assert detail_response.json()["browser_site_contract"]["navigation_guard"] == {
+        "allowed_hosts": ["seller.jd.com"],
+        "blocked_hosts": ["ads.jd.com"],
+    }
+    assert detail_response.json()["browser_site_contract"]["action_timeout_seconds"] == 12.5
     assert (
         detail_response.json()["browser_site_contract"]["last_verified_dom_anchor"]
         == "#shop-header"

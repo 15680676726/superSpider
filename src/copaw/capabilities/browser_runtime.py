@@ -29,6 +29,14 @@ def _bool_to_int(value: bool) -> int:
     return 1 if value else 0
 
 
+def _positive_timeout(value: object) -> float | None:
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        return None
+    return timeout if timeout > 0 else None
+
+
 def _profile_storage_state_path(profile_id: str) -> str:
     safe_profile_id = "".join(
         character if character.isalnum() or character in {"-", "_"} else "-"
@@ -101,7 +109,15 @@ def _browser_continuity_contract(
     ) or bool(
         attached or save_reopen_verification or (effective_persist_login_state and runtime_session)
     )
+    browser_mode = str(runtime_session.get("browser_mode") or "managed-isolated").strip() or "managed-isolated"
+    navigation_guard = runtime_session.get("navigation_guard")
+    if not isinstance(navigation_guard, dict):
+        navigation_guard = {}
+    action_timeout_seconds = _positive_timeout(
+        runtime_session.get("action_timeout_seconds"),
+    )
     return {
+        "browser_mode": browser_mode,
         "host_mode": "managed-isolated",
         "resume_kind": (
             "attach-running-session"
@@ -118,6 +134,8 @@ def _browser_continuity_contract(
         "file_upload": True,
         "download_verification": download_verification,
         "save_reopen_verification": save_reopen_verification,
+        "navigation_guard": dict(navigation_guard),
+        "action_timeout_seconds": action_timeout_seconds,
         "page_count": page_count,
         "page_ids": list(runtime_session.get("page_ids") or []),
         "verification": {
@@ -182,6 +200,8 @@ class BrowserSessionStartOptions(BaseModel):
     entry_url: str | None = None
     reuse_running_session: bool | None = None
     persist_login_state: bool | None = None
+    navigation_guard: dict[str, Any] | None = None
+    action_timeout_seconds: float | None = None
 
 
 class BrowserRuntimeService:
@@ -570,6 +590,21 @@ class BrowserRuntimeService:
             str(options.entry_url or "").strip()
             or (str(profile.entry_url or "").strip() if profile is not None else "")
         )
+        navigation_guard = (
+            dict(options.navigation_guard)
+            if isinstance(options.navigation_guard, dict)
+            else dict(profile.metadata.get("navigation_guard") or {})
+            if profile is not None and isinstance(profile.metadata, dict)
+            else {}
+        )
+        action_timeout_seconds = (
+            _positive_timeout(options.action_timeout_seconds)
+            or (
+                _positive_timeout(profile.metadata.get("action_timeout_seconds"))
+                if profile is not None and isinstance(profile.metadata, dict)
+                else None
+            )
+        )
         session_id = str(options.session_id or "default").strip() or "default"
         runtime_before = get_browser_runtime_snapshot()
         active_session_ids = {
@@ -606,6 +641,12 @@ class BrowserRuntimeService:
                 if profile is not None and persist_login_state
                 else ""
             ),
+            navigation_guard_json=(
+                json.dumps(navigation_guard, ensure_ascii=False)
+                if navigation_guard
+                else ""
+            ),
+            action_timeout_seconds=action_timeout_seconds or 0,
         )
         text = self._tool_response_text(response)
         runtime_after_start = get_browser_runtime_snapshot()

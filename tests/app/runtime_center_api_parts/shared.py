@@ -1922,6 +1922,11 @@ class FakeEnvironmentService:
             "attach_transport_ref": "transport:cdp:local",
             "provider_kind": "local-managed-browser",
             "provider_session_ref": "browser-session:web:main",
+            "navigation_guard": {
+                "allowed_hosts": ["seller.jd.com"],
+                "blocked_hosts": ["ads.jd.com"],
+            },
+            "action_timeout_seconds": 12.5,
             "download_policy": "workspace-bucket",
             "storage_scope": "profile+workspace",
             "account_scope_ref": "windows:user:alice",

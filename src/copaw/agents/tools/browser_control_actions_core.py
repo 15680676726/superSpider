@@ -151,6 +151,8 @@ async def _ensure_browser_session(
     entry_url: str = "",
     persist_login_state: bool = False,
     storage_state_path: str = "",
+    navigation_guard: dict[str, Any] | None = None,
+    action_timeout_seconds: float | None = None,
 ) -> dict[str, Any] | None:
     if not await _ensure_browser():
         return None
@@ -163,8 +165,11 @@ async def _ensure_browser_session(
         session["context"] = context
     if profile_id:
         session["profile_id"] = profile_id
+    session["browser_mode"] = "managed-isolated"
     if entry_url:
         session["entry_url"] = entry_url
+    session["navigation_guard"] = _normalize_navigation_guard(navigation_guard)
+    session["action_timeout_seconds"] = _normalize_positive_timeout(action_timeout_seconds)
     session["persist_login_state"] = bool(persist_login_state)
     session["storage_state_path"] = storage_state_path or ""
     _state["current_session_id"] = session_id
@@ -310,6 +315,8 @@ async def _action_start(
     entry_url: str = "",
     persist_login_state: bool = False,
     storage_state_path: str = "",
+    navigation_guard_json: str = "",
+    action_timeout_seconds: float = 0,
 ) -> ToolResponse:
     # Check browser state based on mode
     if _USE_SYNC_PLAYWRIGHT:
@@ -338,6 +345,9 @@ async def _action_start(
             )
     # Default to a visible local browser unless headless mode is explicitly requested.
     _state["headless"] = not headed
+    navigation_guard = _normalize_navigation_guard(
+        _parse_json_param(navigation_guard_json, {}),
+    )
 
     try:
         if not await _ensure_browser_session(
@@ -346,6 +356,8 @@ async def _action_start(
             entry_url=entry_url,
             persist_login_state=persist_login_state,
             storage_state_path=storage_state_path,
+            navigation_guard=navigation_guard,
+            action_timeout_seconds=action_timeout_seconds,
         ):
             raise RuntimeError(_state.get("_last_browser_error") or "Browser start failed")
         _state["_sync_headless"] = not headed
@@ -465,6 +477,20 @@ async def _action_open(url: str, page_id: str, session_id: str) -> ToolResponse:
                 indent=2,
             ),
         )
+    guardrail_violation = _navigation_guard_violation(url, session_id)
+    if guardrail_violation is not None:
+        return _tool_response(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": guardrail_violation["error"],
+                    "guardrail": guardrail_violation["guardrail"],
+                    "url": url,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
     if not await _ensure_browser():
         err = _state.get("_last_browser_error") or "Browser not started"
         return _tool_response(
@@ -535,6 +561,20 @@ async def _action_navigate(url: str, page_id: str, session_id: str) -> ToolRespo
         return _tool_response(
             json.dumps(
                 {"ok": False, "error": "url required for navigate"},
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+    guardrail_violation = _navigation_guard_violation(url, session_id)
+    if guardrail_violation is not None:
+        return _tool_response(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": guardrail_violation["error"],
+                    "guardrail": guardrail_violation["guardrail"],
+                    "url": url,
+                },
                 ensure_ascii=False,
                 indent=2,
             ),

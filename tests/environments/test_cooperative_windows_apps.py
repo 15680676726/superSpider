@@ -1033,6 +1033,61 @@ async def test_execute_windows_app_action_blocks_when_shared_writer_scope_is_alr
         )
 
 
+@pytest.mark.asyncio
+async def test_execute_windows_app_action_times_out_and_still_runs_cleanup(
+    tmp_path,
+) -> None:
+    service, _, _ = _build_environment_service(tmp_path)
+    lease = _acquire_desktop_session(service)
+    service.register_windows_app_adapter(
+        session_mount_id=lease.id,
+        adapter_refs=["app-adapter:excel"],
+        app_identity="excel",
+        control_channel="accessibility-tree",
+    )
+
+    call_order: list[str] = []
+
+    class _Executor:
+        async def prepare_execution_cleanup(self, **_kwargs):
+            call_order.append("prepare")
+            return {"foreground_window": {"handle": 101}}
+
+        async def restore_foreground(self, **_kwargs):
+            call_order.append("restore_foreground")
+            return {"restored": True}
+
+        async def cleanup_execution(self, **_kwargs):
+            call_order.append("cleanup")
+            return {"cleaned": True}
+
+        async def __call__(self, **_kwargs):
+            call_order.append("execute")
+            await asyncio.sleep(0.05)
+            return {"success": True}
+
+    service.register_windows_app_executor("excel", _Executor())
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        await service.execute_windows_app_action(
+            session_mount_id=lease.id,
+            action="write_cells",
+            contract={
+                "app_identity": "excel",
+                "guardrails": {
+                    "action_timeout_seconds": 0.01,
+                },
+            },
+        )
+
+    assert call_order == [
+        "prepare",
+        "execute",
+        "restore_foreground",
+        "cleanup",
+    ]
+
+
 @pytest.mark.parametrize("surface_kind", ["browser", "document", "windows-app"])
 def test_execution_path_resolver_prefers_native_semantic_then_ui(
     surface_kind: str,

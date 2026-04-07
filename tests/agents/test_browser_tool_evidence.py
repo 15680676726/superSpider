@@ -79,12 +79,16 @@ def test_browser_use_starts_visible_browser_by_default(monkeypatch) -> None:
         entry_url: str,
         persist_login_state: bool,
         storage_state_path: str,
+        navigation_guard_json: str,
+        action_timeout_seconds: float,
     ):
         seen.update(
             {
                 "headed": headed,
                 "session_id": session_id,
                 "profile_id": profile_id,
+                "navigation_guard_json": navigation_guard_json,
+                "action_timeout_seconds": action_timeout_seconds,
             }
         )
         return _json_response({"ok": True, "message": "Browser session started (visible window)"})
@@ -96,6 +100,8 @@ def test_browser_use_starts_visible_browser_by_default(monkeypatch) -> None:
     assert "visible window" in response.content[0]["text"]
     assert seen["headed"] is True
     assert seen["session_id"] == "default"
+    assert seen["navigation_guard_json"] == ""
+    assert seen["action_timeout_seconds"] == 0
 
 
 def test_browser_use_emits_open_success_payload(monkeypatch) -> None:
@@ -129,6 +135,183 @@ def test_browser_use_emits_open_success_payload(monkeypatch) -> None:
     assert payloads[0]["metadata"]["verification"]["verified"] is True
     assert payloads[0]["metadata"]["verification"]["kind"] == "navigation"
     assert payloads[0]["metadata"]["verification"]["observed_after"]["url"] == "https://example.com"
+
+
+def test_browser_open_blocks_host_outside_navigation_guard_allowlist(monkeypatch) -> None:
+    class _FakePage:
+        def __init__(self) -> None:
+            self.goto_calls: list[str] = []
+            self.url = ""
+
+        def on(self, *_args, **_kwargs) -> None:
+            return None
+
+        async def goto(self, url: str) -> None:
+            self.goto_calls.append(url)
+            self.url = url
+
+    class _FakeContext:
+        def __init__(self) -> None:
+            self.page = _FakePage()
+            self.new_page_calls = 0
+
+        def on(self, *_args, **_kwargs) -> None:
+            return None
+
+        async def new_page(self):
+            self.new_page_calls += 1
+            return self.page
+
+    browser_control_shared._state["sessions"] = {}
+    browser_control_shared._state["current_session_id"] = None
+    session = browser_control_shared._get_session_state("default", create=True)
+    assert session is not None
+    context = _FakeContext()
+    session["context"] = context
+    session["navigation_guard"] = {"allowed_hosts": ["example.com"]}
+
+    async def fake_ensure_browser() -> bool:
+        return True
+
+    async def fake_ensure_browser_session(*_args, **_kwargs):
+        return session
+
+    monkeypatch.setattr(browser_control_actions_core, "_ensure_browser", fake_ensure_browser)
+    monkeypatch.setattr(
+        browser_control_actions_core,
+        "_ensure_browser_session",
+        fake_ensure_browser_session,
+    )
+
+    response = asyncio.run(
+        browser_control_actions_core._action_open(
+            "https://blocked.example.net",
+            "page-1",
+            "default",
+        ),
+    )
+
+    payload = _response_payload(response)
+    assert payload["ok"] is False
+    assert payload["guardrail"]["kind"] == "navigation-guard"
+    assert "not allowlisted" in payload["error"].lower()
+    assert context.new_page_calls == 0
+
+
+def test_browser_navigate_blocks_host_inside_navigation_guard_blocklist() -> None:
+    class _FakePage:
+        def __init__(self) -> None:
+            self.goto_calls: list[str] = []
+            self.url = "https://example.com"
+
+        async def goto(self, url: str) -> None:
+            self.goto_calls.append(url)
+            self.url = url
+
+    browser_control_shared._state["sessions"] = {}
+    browser_control_shared._state["current_session_id"] = None
+    session = browser_control_shared._get_session_state("default", create=True)
+    assert session is not None
+    page = _FakePage()
+    session["pages"] = {"page-1": page}
+    session["navigation_guard"] = {"blocked_hosts": ["internal.example.com"]}
+
+    response = asyncio.run(
+        browser_control_actions_core._action_navigate(
+            "https://internal.example.com/dashboard",
+            "page-1",
+            "default",
+        ),
+    )
+
+    payload = _response_payload(response)
+    assert payload["ok"] is False
+    assert payload["guardrail"]["kind"] == "navigation-guard"
+    assert "blocked by browser navigation guard" in payload["error"].lower()
+    assert page.goto_calls == []
+
+
+def test_browser_use_emits_navigation_guardrail_metadata_when_navigation_is_blocked(
+    monkeypatch,
+) -> None:
+    payloads: list[dict[str, object]] = []
+
+    browser_control_shared._state["sessions"] = {}
+    browser_control_shared._state["current_session_id"] = None
+    session = browser_control_shared._get_session_state("default", create=True)
+    assert session is not None
+    session["navigation_guard"] = {"allowed_hosts": ["example.com"]}
+
+    async def fake_ensure_browser() -> bool:
+        return True
+
+    async def fake_ensure_browser_session(*_args, **_kwargs):
+        return session
+
+    monkeypatch.setattr(browser_control_actions_core, "_ensure_browser", fake_ensure_browser)
+    monkeypatch.setattr(
+        browser_control_actions_core,
+        "_ensure_browser_session",
+        fake_ensure_browser_session,
+    )
+
+    async def run() -> None:
+        with bind_browser_evidence_sink(payloads.append):
+            await browser_use(
+                action="open",
+                url="https://blocked.example.net",
+                page_id="page-1",
+                session_id="default",
+            )
+
+    asyncio.run(run())
+
+    assert len(payloads) == 1
+    assert payloads[0]["status"] == "error"
+    assert payloads[0]["metadata"]["guardrail"]["kind"] == "navigation-guard"
+    assert payloads[0]["metadata"]["guardrail"]["policy"] == "allowlist"
+
+
+def test_browser_use_times_out_and_emits_timeout_guardrail(monkeypatch) -> None:
+    payloads: list[dict[str, object]] = []
+
+    browser_control_shared._state["sessions"] = {}
+    browser_control_shared._state["current_session_id"] = None
+    session = browser_control_shared._get_session_state("default", create=True)
+    assert session is not None
+    session["action_timeout_seconds"] = 0.01
+
+    async def fake_open(url: str, page_id: str, session_id: str):
+        await asyncio.sleep(0.05)
+        return _json_response(
+            {
+                "ok": True,
+                "message": f"Opened {url}",
+                "page_id": page_id,
+                "url": url,
+            },
+        )
+
+    monkeypatch.setattr("copaw.agents.tools.browser_control._action_open", fake_open)
+
+    async def run() -> ToolResponse:
+        with bind_browser_evidence_sink(payloads.append):
+            return await browser_use(
+                action="open",
+                url="https://example.com/slow",
+                page_id="page-1",
+                session_id="default",
+            )
+
+    response = asyncio.run(run())
+    payload = _response_payload(response)
+
+    assert payload["ok"] is False
+    assert payload["guardrail"]["kind"] == "timeout"
+    assert "timed out" in payload["error"].lower()
+    assert len(payloads) == 1
+    assert payloads[0]["status"] == "error"
+    assert payloads[0]["metadata"]["guardrail"]["kind"] == "timeout"
 
 
 def test_browser_use_emits_click_error_payload(monkeypatch) -> None:
@@ -928,6 +1111,7 @@ def test_browser_runtime_attach_reports_continuity_contract(tmp_path, monkeypatc
     )
 
     assert result["status"] == "attached"
+    assert result["continuity"]["browser_mode"] == "managed-isolated"
     assert result["continuity"]["resume_kind"] == "attach-running-session"
     assert result["continuity"]["authenticated_continuation"] is True
     assert result["continuity"]["cross_tab_continuation"] is True
@@ -995,6 +1179,53 @@ def test_browser_runtime_attach_does_not_fake_save_reopen_verification(tmp_path,
     assert result["status"] == "attached"
     assert result["continuity"]["save_reopen_verification"] is False
     assert result["continuity"]["verification"]["save_reopen"]["verified"] is False
+
+
+def test_browser_runtime_start_session_passes_profile_navigation_guard_to_browser_start(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    service = BrowserRuntimeService(SQLiteStateStore(tmp_path / "state.sqlite3"))
+    service.ensure_default_profile(
+        profile_id="browser-local-default",
+        persist_login_state=True,
+        metadata={
+            "navigation_guard": {
+                "allowed_hosts": ["example.com"],
+                "blocked_hosts": ["internal.example.com"],
+            },
+            "action_timeout_seconds": 15.0,
+        },
+    )
+
+    seen: dict[str, object] = {}
+
+    async def fake_browser_use(**kwargs):
+        seen.update(kwargs)
+        return _json_response({"ok": True, "message": "Browser session started"})
+
+    monkeypatch.setattr(browser_runtime_module, "browser_use", fake_browser_use)
+    monkeypatch.setattr(
+        browser_runtime_module,
+        "get_browser_runtime_snapshot",
+        lambda: {"running": True, "sessions": []},
+    )
+
+    result = asyncio.run(
+        service.start_session(
+            BrowserSessionStartOptions(
+                session_id="default",
+                reuse_running_session=False,
+            ),
+        ),
+    )
+
+    assert result["status"] == "started"
+    assert json.loads(str(seen["navigation_guard_json"])) == {
+        "allowed_hosts": ["example.com"],
+        "blocked_hosts": ["internal.example.com"],
+    }
+    assert seen["action_timeout_seconds"] == 15.0
 
 
 def test_browser_runtime_companion_snapshot_preserves_mount_truth_continuity_refs(

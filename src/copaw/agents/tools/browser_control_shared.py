@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from agentscope.message import TextBlock
 from agentscope.tool import ToolResponse
@@ -77,6 +78,110 @@ def _parse_tool_response_json(response: ToolResponse) -> dict[str, Any]:
 def _path_exists(path: str | None) -> bool:
     text = str(path or "").strip()
     return bool(text) and Path(text).exists()
+
+
+def _normalize_string_list(value: object) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        items = list(value)
+    elif value is None:
+        items = []
+    else:
+        items = [value]
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        text = str(item or "").strip().lower()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _normalize_positive_timeout(value: object) -> float | None:
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        return None
+    return timeout if timeout > 0 else None
+
+
+def _normalize_navigation_guard(raw: object) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    normalized: dict[str, Any] = {}
+    allowed_hosts = _normalize_string_list(raw.get("allowed_hosts"))
+    blocked_hosts = _normalize_string_list(raw.get("blocked_hosts"))
+    if allowed_hosts:
+        normalized["allowed_hosts"] = allowed_hosts
+    if blocked_hosts:
+        normalized["blocked_hosts"] = blocked_hosts
+    return normalized
+
+
+def _host_matches_pattern(host: str, pattern: str) -> bool:
+    normalized_host = str(host or "").strip().lower()
+    normalized_pattern = str(pattern or "").strip().lower()
+    if not normalized_host or not normalized_pattern:
+        return False
+    if normalized_pattern.startswith("*."):
+        suffix = normalized_pattern[2:]
+        return normalized_host == suffix or normalized_host.endswith(f".{suffix}")
+    return normalized_host == normalized_pattern or normalized_host.endswith(
+        f".{normalized_pattern}"
+    )
+
+
+def _navigation_guard_violation(
+    url: str,
+    session_id: str | None = None,
+) -> dict[str, Any] | None:
+    session = _get_session_state(session_id)
+    if not isinstance(session, dict):
+        return None
+    guard = _normalize_navigation_guard(session.get("navigation_guard"))
+    if not guard:
+        return None
+    parsed = urlparse(str(url or "").strip())
+    host = str(parsed.hostname or "").strip().lower()
+    if not host:
+        return None
+    blocked_hosts = list(guard.get("blocked_hosts") or [])
+    if any(_host_matches_pattern(host, pattern) for pattern in blocked_hosts):
+        return {
+            "error": (
+                f"Blocked by browser navigation guard: host '{host}' is explicitly blocked."
+            ),
+            "guardrail": {
+                "kind": "navigation-guard",
+                "policy": "blocklist",
+                "host": host,
+                "blocked_hosts": blocked_hosts,
+            },
+        }
+    allowed_hosts = list(guard.get("allowed_hosts") or [])
+    if allowed_hosts and not any(
+        _host_matches_pattern(host, pattern) for pattern in allowed_hosts
+    ):
+        return {
+            "error": (
+                f"Blocked by browser navigation guard: host '{host}' is not allowlisted for this browser session."
+            ),
+            "guardrail": {
+                "kind": "navigation-guard",
+                "policy": "allowlist",
+                "host": host,
+                "allowed_hosts": allowed_hosts,
+            },
+        }
+    return None
+
+
+def _session_action_timeout_seconds(session_id: str | None = None) -> float | None:
+    session = _get_session_state(session_id)
+    if not isinstance(session, dict):
+        return None
+    return _normalize_positive_timeout(session.get("action_timeout_seconds"))
 
 
 def _normalized_download_record(record: dict[str, Any], *, page_id: str) -> dict[str, Any]:
@@ -382,7 +487,14 @@ def get_browser_runtime_snapshot() -> dict[str, Any]:
             {
                 "session_id": session_id,
                 "profile_id": session.get("profile_id"),
+                "browser_mode": str(session.get("browser_mode") or "managed-isolated"),
                 "entry_url": session.get("entry_url"),
+                "navigation_guard": _normalize_navigation_guard(
+                    session.get("navigation_guard"),
+                ),
+                "action_timeout_seconds": _normalize_positive_timeout(
+                    session.get("action_timeout_seconds"),
+                ),
                 "persist_login_state": bool(session.get("persist_login_state")),
                 "storage_state_path": storage_state_path or None,
                 "storage_state_available": storage_state_available,
@@ -466,6 +578,9 @@ async def _emit_browser_action_evidence(
     finished_at = _utc_now()
     duration_ms = max(0, int((finished_at - started_at).total_seconds() * 1000))
     event_metadata = dict(metadata or {})
+    payload_guardrail = payload.get("guardrail")
+    if isinstance(payload_guardrail, dict) and "guardrail" not in event_metadata:
+        event_metadata["guardrail"] = dict(payload_guardrail)
     verification = _build_browser_verification(
         action=action,
         payload=payload,
@@ -578,7 +693,10 @@ def _initial_session_state(session_id: str) -> dict[str, Any]:
         "current_page_id": None,
         "page_counter": 0,
         "profile_id": None,
+        "browser_mode": "managed-isolated",
         "entry_url": "",
+        "navigation_guard": {},
+        "action_timeout_seconds": None,
         "persist_login_state": False,
         "storage_state_path": "",
         "created_at": _utc_now().isoformat(),

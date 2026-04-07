@@ -416,6 +416,9 @@ class BrowserProfileUpsertRequest(BaseModel):
     reuse_running_session: bool | None = Field(default=None)
     persist_login_state: bool | None = Field(default=None)
     entry_url: str | None = Field(default=None)
+    allowed_hosts: list[str] = Field(default_factory=list)
+    blocked_hosts: list[str] = Field(default_factory=list)
+    action_timeout_seconds: float | None = Field(default=None)
     is_default: bool | None = Field(default=None)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -427,6 +430,9 @@ class BrowserSessionStartRequest(BaseModel):
     entry_url: str | None = Field(default=None)
     reuse_running_session: bool | None = Field(default=None)
     persist_login_state: bool | None = Field(default=None)
+    allowed_hosts: list[str] = Field(default_factory=list)
+    blocked_hosts: list[str] = Field(default_factory=list)
+    action_timeout_seconds: float | None = Field(default=None)
 
 
 class CapabilityMarketInstallTemplateInstallResponse(BaseModel):
@@ -3222,6 +3228,16 @@ async def install_market_install_template(
     target_ref = template.default_capability_id
     summary = template.description
     if template_id == "browser-local" and browser_runtime_service is not None:
+        profile_metadata: dict[str, Any] = {"source_template_id": template_id}
+        if normalized_config.get("allowed_hosts") or normalized_config.get("blocked_hosts"):
+            profile_metadata["navigation_guard"] = {
+                "allowed_hosts": list(normalized_config.get("allowed_hosts") or []),
+                "blocked_hosts": list(normalized_config.get("blocked_hosts") or []),
+            }
+        if normalized_config.get("action_timeout_seconds") is not None:
+            profile_metadata["action_timeout_seconds"] = normalized_config.get(
+                "action_timeout_seconds"
+            )
         default_profile = browser_runtime_service.ensure_default_profile(
             profile_id=str(
                 normalized_config.get("profile_id") or "browser-local-default"
@@ -3237,7 +3253,7 @@ async def install_market_install_template(
                 normalized_config.get("persist_login_state", True)
             ),
             entry_url=str(normalized_config.get("entry_url") or ""),
-            metadata={"source_template_id": template_id},
+            metadata=profile_metadata,
         )
         target_ref = default_profile.profile_id
         summary = f"{template.description} Default profile: {default_profile.label}"
@@ -3318,6 +3334,18 @@ async def upsert_browser_runtime_profile(
         str(payload.label or "").strip()
         or (existing.label if existing is not None else "Default browser runtime")
     )
+    profile_metadata = dict(existing.metadata or {}) if existing is not None else {}
+    if (
+        payload.allowed_hosts
+        or payload.blocked_hosts
+        or payload.action_timeout_seconds is not None
+    ):
+        profile_metadata["navigation_guard"] = {
+            "allowed_hosts": [item for item in payload.allowed_hosts if str(item).strip()],
+            "blocked_hosts": [item for item in payload.blocked_hosts if str(item).strip()],
+        }
+        profile_metadata["action_timeout_seconds"] = payload.action_timeout_seconds
+    profile_metadata.update(dict(payload.metadata or {}))
     record = BrowserProfileRecord(
         profile_id=profile_id,
         label=label,
@@ -3351,11 +3379,7 @@ async def upsert_browser_runtime_profile(
             if existing is not None
             else False
         ),
-        metadata=(
-            dict(existing.metadata or {}) | dict(payload.metadata or {})
-            if existing is not None
-            else dict(payload.metadata or {})
-        ),
+        metadata=profile_metadata,
         created_at=(
             existing.created_at
             if existing is not None
@@ -3394,6 +3418,13 @@ async def start_browser_runtime_session(
             entry_url=request_payload.entry_url,
             reuse_running_session=request_payload.reuse_running_session,
             persist_login_state=request_payload.persist_login_state,
+            navigation_guard={
+                "allowed_hosts": [item for item in request_payload.allowed_hosts if str(item).strip()],
+                "blocked_hosts": [item for item in request_payload.blocked_hosts if str(item).strip()],
+            }
+            if request_payload.allowed_hosts or request_payload.blocked_hosts
+            else None,
+            action_timeout_seconds=request_payload.action_timeout_seconds,
         )
     )
 

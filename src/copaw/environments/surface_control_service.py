@@ -29,6 +29,10 @@ _DOCUMENT_FAMILY_BY_SUFFIX = {
 }
 
 
+class SurfaceActionTimeoutError(RuntimeError):
+    """Raised when a live surface action exceeds its execution timeout."""
+
+
 class SurfaceControlService:
     """Routes surface actions through cooperative-native, semantic, then UI fallback."""
 
@@ -143,6 +147,7 @@ class SurfaceControlService:
         browser_site_contract = self._mapping(detail.get("browser_site_contract"))
         result = await self._execute_live_action(
             surface_kind="browser",
+            surface_label="Browser",
             session_mount_id=session_mount_id,
             action=action,
             contract=contract,
@@ -153,6 +158,10 @@ class SurfaceControlService:
             semantic_executor=None,
             host_executor=host_executor,
             selected_executor=selected_executor,
+            runtime_guardrails=self._mapping(companion.get("execution_guardrails")),
+            default_action_timeout_seconds=self._positive_timeout(
+                browser_site_contract.get("action_timeout_seconds"),
+            ),
             guardrail_runner=self._enforce_browser_guardrails,
             guardrail_kwargs={
                 "session_mount_id": session_mount_id,
@@ -222,6 +231,7 @@ class SurfaceControlService:
         detail = self._service.get_session_detail(session_mount_id, limit=limit) or {}
         result = await self._execute_live_action(
             surface_kind="document",
+            surface_label="Document",
             session_mount_id=session_mount_id,
             action=action,
             contract=contract,
@@ -232,6 +242,7 @@ class SurfaceControlService:
             semantic_executor=None,
             host_executor=host_executor,
             selected_executor=selected_executor,
+            runtime_guardrails=self._mapping(bridge.get("execution_guardrails")),
             guardrail_runner=self._enforce_document_guardrails,
             guardrail_kwargs={
                 "session_mount_id": session_mount_id,
@@ -306,6 +317,7 @@ class SurfaceControlService:
         )
         result = await self._execute_live_action(
             surface_kind="windows-app",
+            surface_label="Windows app",
             session_mount_id=session_mount_id,
             action=action,
             contract=contract,
@@ -316,6 +328,7 @@ class SurfaceControlService:
             semantic_executor=semantic_executor,
             host_executor=host_executor,
             selected_executor=selected_executor,
+            runtime_guardrails=self._mapping(adapters.get("execution_guardrails")),
             guardrail_runner=self._enforce_windows_app_guardrails,
             guardrail_kwargs={
                 "session_mount_id": session_mount_id,
@@ -341,6 +354,7 @@ class SurfaceControlService:
         self,
         *,
         surface_kind: str,
+        surface_label: str,
         session_mount_id: str,
         action: str,
         contract: dict[str, Any],
@@ -351,6 +365,8 @@ class SurfaceControlService:
         semantic_executor: object | None,
         host_executor: object | None,
         selected_executor: object | None,
+        runtime_guardrails: dict[str, Any],
+        default_action_timeout_seconds: float | None = None,
         guardrail_runner,
         guardrail_kwargs: dict[str, Any],
         execution_kwargs: dict[str, Any],
@@ -358,6 +374,11 @@ class SurfaceControlService:
         cleanup_executors = self._cleanup_executors(
             selected_executor=selected_executor,
             host_executor=host_executor,
+        )
+        action_timeout_seconds = self._resolve_action_timeout_seconds(
+            contract=contract,
+            runtime_guardrails=runtime_guardrails,
+            default_timeout_seconds=default_action_timeout_seconds,
         )
         await self._poll_host_operator_abort(
             host_executor,
@@ -376,8 +397,10 @@ class SurfaceControlService:
             release = getattr(self._service, "release_shared_writer_lease", None)
             if resolution_selected_path is None or not callable(acquire) or not callable(release):
                 execution_started = True
-                result = await self._execute_selected_path(
-                    resolution_selected_path,
+                result = await self._execute_selected_path_with_timeout(
+                    selected_path=resolution_selected_path,
+                    action_timeout_seconds=action_timeout_seconds,
+                    surface_label=surface_label,
                     cooperative_executor=cooperative_executor,
                     semantic_executor=semantic_executor,
                     host_executor=host_executor,
@@ -416,8 +439,10 @@ class SurfaceControlService:
                 release_reason = f"{surface_kind} action completed"
                 execution_started = True
                 try:
-                    result = await self._execute_selected_path(
-                        resolution_selected_path,
+                    result = await self._execute_selected_path_with_timeout(
+                        selected_path=resolution_selected_path,
+                        action_timeout_seconds=action_timeout_seconds,
+                        surface_label=surface_label,
                         cooperative_executor=cooperative_executor,
                         semantic_executor=semantic_executor,
                         host_executor=host_executor,
@@ -425,6 +450,9 @@ class SurfaceControlService:
                     )
                 except asyncio.CancelledError:
                     release_reason = f"{surface_kind} action cancelled"
+                    raise
+                except SurfaceActionTimeoutError:
+                    release_reason = f"{surface_kind} action timed out"
                     raise
                 except Exception:
                     release_reason = f"{surface_kind} action failed"
@@ -527,6 +555,41 @@ class SurfaceControlService:
             ) or f"resource-slot:shared-writer:{writer_lock_scope}",
         }
         return owner, metadata
+
+    async def _execute_selected_path_with_timeout(
+        self,
+        *,
+        selected_path: str | None,
+        action_timeout_seconds: float | None,
+        surface_label: str,
+        cooperative_executor: object | None,
+        semantic_executor: object | None,
+        host_executor: object | None,
+        **kwargs,
+    ) -> dict[str, Any]:
+        if action_timeout_seconds is None:
+            return await self._execute_selected_path(
+                selected_path,
+                cooperative_executor=cooperative_executor,
+                semantic_executor=semantic_executor,
+                host_executor=host_executor,
+                **kwargs,
+            )
+        try:
+            return await asyncio.wait_for(
+                self._execute_selected_path(
+                    selected_path,
+                    cooperative_executor=cooperative_executor,
+                    semantic_executor=semantic_executor,
+                    host_executor=host_executor,
+                    **kwargs,
+                ),
+                timeout=action_timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise SurfaceActionTimeoutError(
+                f"{surface_label} action timed out after {action_timeout_seconds:g} seconds.",
+            ) from exc
 
     async def _execute_selected_path(
         self,
@@ -1076,6 +1139,8 @@ class SurfaceControlService:
             return "completed"
         if isinstance(failure, asyncio.CancelledError):
             return "cancelled"
+        if isinstance(failure, SurfaceActionTimeoutError):
+            return "timed_out"
         if execution_started:
             return "failed"
         return "blocked"
@@ -1216,4 +1281,38 @@ class SurfaceControlService:
                 normalized = value.strip()
                 if normalized:
                     return normalized
+        return None
+
+    @staticmethod
+    def _positive_timeout(value: object) -> float | None:
+        try:
+            timeout = float(value)
+        except (TypeError, ValueError):
+            return None
+        return timeout if timeout > 0 else None
+
+    def _resolve_action_timeout_seconds(
+        self,
+        *,
+        contract: dict[str, Any],
+        runtime_guardrails: dict[str, Any],
+        default_timeout_seconds: float | None = None,
+    ) -> float | None:
+        explicit_guardrails = self._mapping(contract.get("guardrails"))
+        candidates = (
+            contract.get("action_timeout_seconds"),
+            contract.get("execution_timeout_seconds"),
+            contract.get("timeout_seconds"),
+            explicit_guardrails.get("action_timeout_seconds"),
+            explicit_guardrails.get("execution_timeout_seconds"),
+            explicit_guardrails.get("timeout_seconds"),
+            runtime_guardrails.get("action_timeout_seconds"),
+            runtime_guardrails.get("execution_timeout_seconds"),
+            runtime_guardrails.get("timeout_seconds"),
+            default_timeout_seconds,
+        )
+        for value in candidates:
+            timeout = self._positive_timeout(value)
+            if timeout is not None:
+                return timeout
         return None

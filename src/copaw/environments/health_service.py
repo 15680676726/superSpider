@@ -726,6 +726,18 @@ class EnvironmentHealthService:
             site_contract_ref,
             active_tab_ref,
         )
+        navigation_guard = self._first_mapping(
+            session_metadata.get("navigation_guard"),
+            mount_metadata.get("navigation_guard"),
+            runtime_descriptor.get("navigation_guard"),
+            live_descriptor.get("navigation_guard"),
+        )
+        action_timeout_seconds = self._positive_timeout(
+            session_metadata.get("action_timeout_seconds"),
+            mount_metadata.get("action_timeout_seconds"),
+            runtime_descriptor.get("action_timeout_seconds"),
+            live_descriptor.get("action_timeout_seconds"),
+        )
         return {
             "projection_kind": "browser_site_contract_projection",
             "is_projection": True,
@@ -805,6 +817,8 @@ class EnvironmentHealthService:
                 runtime_descriptor.get("provider_session_ref"),
                 live_descriptor.get("provider_session_ref"),
             ),
+            "navigation_guard": navigation_guard,
+            "action_timeout_seconds": action_timeout_seconds,
             "download_policy": download_policy,
             "storage_scope": self._first_string(
                 session_metadata.get("storage_scope"),
@@ -3520,6 +3534,12 @@ class EnvironmentHealthService:
     def _mapping(self, value: object) -> dict[str, object]:
         return dict(value) if isinstance(value, dict) else {}
 
+    def _first_mapping(self, *values: object) -> dict[str, object]:
+        for value in values:
+            if isinstance(value, dict):
+                return dict(value)
+        return {}
+
     def _first_string(self, *values: object) -> str | None:
         for value in values:
             if isinstance(value, str):
@@ -3532,6 +3552,16 @@ class EnvironmentHealthService:
         for value in values:
             if isinstance(value, bool):
                 return value
+        return None
+
+    def _positive_timeout(self, *values: object) -> float | None:
+        for value in values:
+            try:
+                timeout = float(value)
+            except (TypeError, ValueError):
+                continue
+            if timeout > 0:
+                return timeout
         return None
 
     def _first_int(self, *values: object) -> int | None:

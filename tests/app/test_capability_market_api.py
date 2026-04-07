@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import time
 from types import SimpleNamespace
@@ -2692,6 +2693,9 @@ def test_capability_market_browser_local_install_persists_profile_and_sessions(
                 "headed": True,
                 "reuse_running_session": False,
                 "persist_login_state": True,
+                "allowed_hosts": ["example.com", "*.example.org"],
+                "blocked_hosts": ["internal.example.com"],
+                "action_timeout_seconds": 15.0,
             },
         },
     )
@@ -2712,6 +2716,11 @@ def test_capability_market_browser_local_install_persists_profile_and_sessions(
     assert profile["reuse_running_session"] is False
     assert profile["persist_login_state"] is True
     assert profile["is_default"] is True
+    assert profile["metadata"]["navigation_guard"] == {
+        "allowed_hosts": ["example.com", "*.example.org"],
+        "blocked_hosts": ["internal.example.com"],
+    }
+    assert profile["metadata"]["action_timeout_seconds"] == 15.0
 
     detail = client.get("/capability-market/install-templates/browser-local")
     assert detail.status_code == 200
@@ -2774,6 +2783,11 @@ def test_capability_market_browser_local_install_persists_profile_and_sessions(
         == "https://example.com/login"
     )
     assert mocked_browser_use.call_args.kwargs["persist_login_state"] is True
+    assert json.loads(mocked_browser_use.call_args.kwargs["navigation_guard_json"]) == {
+        "allowed_hosts": ["example.com", "*.example.org"],
+        "blocked_hosts": ["internal.example.com"],
+    }
+    assert mocked_browser_use.call_args.kwargs["action_timeout_seconds"] == 15.0
 
     with (
         patch(
@@ -2876,6 +2890,112 @@ def test_capability_market_browser_local_install_defaults_to_visible_profile(
         item for item in profiles.json() if item["profile_id"] == "browser-local-default"
     )
     assert profile["headed"] is True
+    assert profile["metadata"] == {"source_template_id": "browser-local"}
+
+
+def test_capability_market_browser_profile_upsert_persists_navigation_guard_and_timeout(
+    tmp_path,
+) -> None:
+    client = TestClient(build_runtime_app(tmp_path))
+
+    response = client.post(
+        "/capability-market/install-templates/browser-local/profiles",
+        json={
+            "profile_id": "ops-browser",
+            "label": "Ops Browser",
+            "allowed_hosts": ["example.com"],
+            "blocked_hosts": ["internal.example.com"],
+            "action_timeout_seconds": 12.5,
+            "is_default": True,
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["profile_id"] == "ops-browser"
+    assert payload["metadata"]["navigation_guard"] == {
+        "allowed_hosts": ["example.com"],
+        "blocked_hosts": ["internal.example.com"],
+    }
+    assert payload["metadata"]["action_timeout_seconds"] == 12.5
+
+
+def test_capability_market_browser_session_start_request_overrides_profile_guard_and_timeout(
+    tmp_path,
+) -> None:
+    client = TestClient(build_runtime_app(tmp_path))
+
+    installed = client.post(
+        "/capability-market/install-templates/browser-local/install",
+        json={
+            "config": {
+                "profile_id": "ops-browser",
+                "profile_label": "Ops Browser",
+                "allowed_hosts": ["example.com"],
+                "action_timeout_seconds": 15.0,
+            },
+        },
+    )
+    assert installed.status_code == 201
+
+    with (
+        patch(
+            "copaw.capabilities.browser_runtime.get_browser_runtime_snapshot",
+            side_effect=[
+                {
+                    "running": False,
+                    "headless": False,
+                    "current_session_id": None,
+                    "session_count": 0,
+                    "sessions": [],
+                    "current_page_id": None,
+                    "page_count": 0,
+                    "page_ids": [],
+                },
+                {
+                    "running": True,
+                    "headless": False,
+                    "current_session_id": "ops-browser-session",
+                    "session_count": 1,
+                    "sessions": [
+                        {
+                            "session_id": "ops-browser-session",
+                            "profile_id": "ops-browser",
+                            "entry_url": "",
+                            "persist_login_state": True,
+                            "current_page_id": "page-1",
+                            "page_count": 1,
+                            "page_ids": ["page-1"],
+                        }
+                    ],
+                    "current_page_id": "page-1",
+                    "page_count": 1,
+                    "page_ids": ["page-1"],
+                },
+            ],
+        ),
+        patch(
+            "copaw.capabilities.browser_runtime.browser_use",
+            return_value=_fake_tool_response('{"ok": true, "message": "started"}'),
+        ) as mocked_browser_use,
+    ):
+        started = client.post(
+            "/capability-market/install-templates/browser-local/sessions/start",
+            json={
+                "session_id": "ops-browser-session",
+                "profile_id": "ops-browser",
+                "allowed_hosts": ["override.example.org"],
+                "blocked_hosts": ["blocked.example.org"],
+                "action_timeout_seconds": 8.0,
+            },
+        )
+
+    assert started.status_code == 200
+    assert json.loads(mocked_browser_use.call_args.kwargs["navigation_guard_json"]) == {
+        "allowed_hosts": ["override.example.org"],
+        "blocked_hosts": ["blocked.example.org"],
+    }
+    assert mocked_browser_use.call_args.kwargs["action_timeout_seconds"] == 8.0
 
 
 def test_capability_market_install_template_assignment_requires_existing_target_agents(

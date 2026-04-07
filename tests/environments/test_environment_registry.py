@@ -3468,6 +3468,11 @@ def test_environment_detail_projects_browser_attach_runtime_truth(tmp_path):
             "work_context_id": "ctx-browser-attach",
             "browser_mode": "tab-attached",
             "profile_ref": "profile:copaw:main",
+            "navigation_guard": {
+                "allowed_hosts": ["seller.jd.com"],
+                "blocked_hosts": ["ads.jd.com"],
+            },
+            "action_timeout_seconds": 12.5,
             "handoff_state": "agent-attached",
         },
     )
@@ -3487,6 +3492,11 @@ def test_environment_detail_projects_browser_attach_runtime_truth(tmp_path):
     assert detail["browser_site_contract"]["attach_session_ref"] == "browser-session:web:main"
     assert detail["browser_site_contract"]["attach_scope_ref"] == "site:jd:seller-center"
     assert detail["browser_site_contract"]["attach_reconnect_token"] == "reconnect-token-1"
+    assert detail["browser_site_contract"]["navigation_guard"] == {
+        "allowed_hosts": ["seller.jd.com"],
+        "blocked_hosts": ["ads.jd.com"],
+    }
+    assert detail["browser_site_contract"]["action_timeout_seconds"] == 12.5
 
 
 def test_shared_operator_abort_state_uses_same_session_environment_truth(tmp_path):

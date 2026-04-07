@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from copaw.app.runtime_events import RuntimeEventBus
@@ -749,4 +751,69 @@ async def test_browser_action_uses_host_executor_for_abort_producer_and_cleanup(
         "prepare_host",
         "restore_host",
         "cleanup_host",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_browser_action_times_out_and_still_runs_cleanup(tmp_path) -> None:
+    (
+        environment_service,
+        _env_repo,
+        _session_repo,
+        _event_bus,
+        environment,
+        session,
+        companion_runtime,
+        _browser_runtime,
+    ) = _build_services(tmp_path)
+
+    companion_runtime.register_companion(
+        environment_id=environment.id,
+        session_mount_id=session.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+    )
+
+    call_order: list[str] = []
+
+    class _Executor:
+        async def prepare_execution_cleanup(self, **_kwargs):
+            call_order.append("prepare")
+            return {"foreground_window": {"handle": 101}}
+
+        async def restore_foreground(self, **_kwargs):
+            call_order.append("restore_foreground")
+            return {"restored": True}
+
+        async def cleanup_execution(self, **_kwargs):
+            call_order.append("cleanup")
+            return {"cleaned": True}
+
+        async def __call__(self, **_kwargs):
+            call_order.append("execute")
+            await asyncio.sleep(0.05)
+            return {"success": True}
+
+    environment_service.register_browser_companion_executor(
+        "transport:browser-companion:localhost",
+        _Executor(),
+    )
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        await environment_service.execute_browser_action(
+            session_mount_id=session.id,
+            action="click",
+            contract={
+                "guardrails": {
+                    "action_timeout_seconds": 0.01,
+                },
+            },
+        )
+
+    assert call_order == [
+        "prepare",
+        "execute",
+        "restore_foreground",
+        "cleanup",
     ]

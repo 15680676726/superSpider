@@ -636,3 +636,56 @@ def test_document_action_publishes_guardrail_block_event(tmp_path) -> None:
     assert blocked
     assert blocked[-1].payload["guardrail_kind"] == "operator-abort"
     assert blocked[-1].payload["reason"] == "global-esc"
+
+
+@pytest.mark.asyncio
+async def test_document_action_times_out_and_still_runs_cleanup(tmp_path) -> None:
+    service, _, _, _event_bus = _build_environment_service(tmp_path)
+    lease = _acquire_document_session(service)
+    service.register_document_bridge(
+        session_mount_id=lease.id,
+        bridge_ref="document-bridge:office",
+        status="ready",
+        supported_families=["documents"],
+    )
+
+    call_order: list[str] = []
+
+    class _Executor:
+        async def prepare_execution_cleanup(self, **_kwargs):
+            call_order.append("prepare")
+            return {"foreground_window": {"handle": 101}}
+
+        async def restore_foreground(self, **_kwargs):
+            call_order.append("restore_foreground")
+            return {"restored": True}
+
+        async def cleanup_execution(self, **_kwargs):
+            call_order.append("cleanup")
+            return {"cleaned": True}
+
+        async def __call__(self, **_kwargs):
+            call_order.append("execute")
+            await asyncio.sleep(0.05)
+            return {"success": True}
+
+    service.register_document_bridge_executor("document-bridge:office", _Executor())
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        await service.execute_document_action(
+            session_mount_id=lease.id,
+            action="write_document",
+            document_family="documents",
+            contract={
+                "guardrails": {
+                    "action_timeout_seconds": 0.01,
+                },
+            },
+        )
+
+    assert call_order == [
+        "prepare",
+        "execute",
+        "restore_foreground",
+        "cleanup",
+    ]

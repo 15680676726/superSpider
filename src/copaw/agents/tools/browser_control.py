@@ -13,6 +13,7 @@ from ...environments.lease_service import (
 
 _ORIGINAL_ATTACH_PAGE_LISTENERS = browser_control_actions_core_module._attach_page_listeners
 _OPERATOR_ABORT_EXEMPT_ACTIONS = frozenset({"stop"})
+_TIMEOUT_EXEMPT_ACTIONS = frozenset({"stop", "wait_for"})
 
 
 def _attach_page_listeners_with_downloads(page, page_id: str, session_id: str) -> None:
@@ -71,6 +72,8 @@ async def browser_use(  # pylint: disable=R0911,R0912
     entry_url: str = "",
     persist_login_state: bool = False,
     storage_state_path: str = "",
+    navigation_guard_json: str = "",
+    action_timeout_seconds: float = 0,
 ) -> ToolResponse:
     """Control browser (Playwright). Default opens a visible browser window.
     Set headed=False with action=start to force background headless mode. Flow:
@@ -248,6 +251,58 @@ async def browser_use(  # pylint: disable=R0911,R0912
         )
         return response
 
+    resolved_timeout_seconds = (
+        _normalize_positive_timeout(action_timeout_seconds)
+        or (
+            None
+            if action in _TIMEOUT_EXEMPT_ACTIONS
+            else _session_action_timeout_seconds(resolved_session_id)
+        )
+    )
+
+    async def _invoke_action(
+        handler,
+        *handler_args,
+        emit_evidence: bool = False,
+        **handler_kwargs,
+    ) -> ToolResponse:
+        try:
+            if resolved_timeout_seconds is not None and action not in _TIMEOUT_EXEMPT_ACTIONS:
+                response = await asyncio.wait_for(
+                    _invoke_browser_handler(
+                        handler,
+                        *handler_args,
+                        **handler_kwargs,
+                    ),
+                    timeout=resolved_timeout_seconds,
+                )
+            else:
+                response = await _invoke_browser_handler(
+                    handler,
+                    *handler_args,
+                    **handler_kwargs,
+                )
+        except asyncio.TimeoutError:
+            response = _tool_response(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": (
+                            f"Browser action timed out after {resolved_timeout_seconds:.2f}s."
+                        ),
+                        "guardrail": {
+                            "kind": "timeout",
+                            "timeout_seconds": resolved_timeout_seconds,
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            )
+        if emit_evidence:
+            return await _with_evidence(response)
+        return response
+
     if action not in _OPERATOR_ABORT_EXEMPT_ACTIONS:
         abort_binding = resolve_operator_abort_binding_for_runtime_session(
             resolved_session_id,
@@ -292,7 +347,7 @@ async def browser_use(  # pylint: disable=R0911,R0912
 
     try:
         if action == "start":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_start,
                 headed=headed,
                 session_id=resolved_session_id,
@@ -300,52 +355,51 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 entry_url=entry_url,
                 persist_login_state=persist_login_state,
                 storage_state_path=storage_state_path,
+                navigation_guard_json=navigation_guard_json,
+                action_timeout_seconds=action_timeout_seconds,
             )
         if action == "stop":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_stop,
                 session_id=resolved_session_id if raw_session_id else None,
             )
         if action == "open":
-            return await _with_evidence(
-                await _invoke_browser_handler(
-                    _action_open,
-                    url,
-                    page_id,
-                    resolved_session_id,
-                )
+            return await _invoke_action(
+                _action_open,
+                url,
+                page_id,
+                resolved_session_id,
+                emit_evidence=True,
             )
         if action == "navigate":
-            return await _with_evidence(
-                await _invoke_browser_handler(
-                    _action_navigate,
-                    url,
-                    page_id,
-                    resolved_session_id,
-                )
+            return await _invoke_action(
+                _action_navigate,
+                url,
+                page_id,
+                resolved_session_id,
+                emit_evidence=True,
             )
         if action == "navigate_back":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_navigate_back,
                 page_id,
                 resolved_session_id,
             )
         if action in ("screenshot", "take_screenshot"):
-            return await _with_evidence(
-                await _invoke_browser_handler(
-                    _action_screenshot,
-                    page_id,
-                    path or filename,
-                    full_page,
-                    screenshot_type,
-                    ref,
-                    element,
-                    frame_selector,
-                    resolved_session_id,
-                ),
+            return await _invoke_action(
+                _action_screenshot,
+                page_id,
+                path or filename,
+                full_page,
+                screenshot_type,
+                ref,
+                element,
+                frame_selector,
+                resolved_session_id,
+                emit_evidence=True,
             )
         if action == "snapshot":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_snapshot,
                 page_id,
                 snapshot_filename or filename,
@@ -353,23 +407,22 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 resolved_session_id,
             )
         if action == "click":
-            return await _with_evidence(
-                await _invoke_browser_handler(
-                    _action_click,
-                    page_id,
-                    selector,
-                    ref,
-                    element,
-                    wait,
-                    double_click,
-                    button,
-                    modifiers_json,
-                    frame_selector,
-                    resolved_session_id,
-                ),
+            return await _invoke_action(
+                _action_click,
+                page_id,
+                selector,
+                ref,
+                element,
+                wait,
+                double_click,
+                button,
+                modifiers_json,
+                frame_selector,
+                resolved_session_id,
+                emit_evidence=True,
             )
         if action == "type":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_type,
                 page_id,
                 selector,
@@ -382,14 +435,14 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 resolved_session_id,
             )
         if action == "eval":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_eval,
                 page_id,
                 code,
                 resolved_session_id,
             )
         if action == "evaluate":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_evaluate,
                 page_id,
                 code,
@@ -399,7 +452,7 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 resolved_session_id,
             )
         if action == "resize":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_resize,
                 page_id,
                 width,
@@ -407,7 +460,7 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 resolved_session_id,
             )
         if action == "console_messages":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_console_messages,
                 page_id,
                 level,
@@ -415,7 +468,7 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 resolved_session_id,
             )
         if action == "handle_dialog":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_handle_dialog,
                 page_id,
                 accept,
@@ -423,34 +476,32 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 resolved_session_id,
             )
         if action == "file_upload":
-            return await _with_evidence(
-                await _invoke_browser_handler(
-                    _action_file_upload,
-                    page_id,
-                    paths_json,
-                    resolved_session_id,
-                )
+            return await _invoke_action(
+                _action_file_upload,
+                page_id,
+                paths_json,
+                resolved_session_id,
+                emit_evidence=True,
             )
         if action == "fill_form":
-            return await _with_evidence(
-                await _invoke_browser_handler(
-                    _action_fill_form,
-                    page_id,
-                    fields_json,
-                    resolved_session_id,
-                )
+            return await _invoke_action(
+                _action_fill_form,
+                page_id,
+                fields_json,
+                resolved_session_id,
+                emit_evidence=True,
             )
         if action == "install":
-            return await _invoke_browser_handler(_action_install)
+            return await _invoke_action(_action_install)
         if action == "press_key":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_press_key,
                 page_id,
                 key,
                 resolved_session_id,
             )
         if action == "network_requests":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_network_requests,
                 page_id,
                 include_static,
@@ -458,14 +509,14 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 resolved_session_id,
             )
         if action == "run_code":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_run_code,
                 page_id,
                 code,
                 resolved_session_id,
             )
         if action == "drag":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_drag,
                 page_id,
                 start_ref,
@@ -478,7 +529,7 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 resolved_session_id,
             )
         if action == "hover":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_hover,
                 page_id,
                 ref,
@@ -488,7 +539,7 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 resolved_session_id,
             )
         if action == "select_option":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_select_option,
                 page_id,
                 ref,
@@ -498,17 +549,16 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 resolved_session_id,
             )
         if action == "tabs":
-            return await _with_evidence(
-                await _invoke_browser_handler(
-                    _action_tabs,
-                    page_id,
-                    tab_action,
-                    index,
-                    resolved_session_id,
-                )
+            return await _invoke_action(
+                _action_tabs,
+                page_id,
+                tab_action,
+                index,
+                resolved_session_id,
+                emit_evidence=True,
             )
         if action == "wait_for":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_wait_for,
                 page_id,
                 wait_time,
@@ -517,16 +567,15 @@ async def browser_use(  # pylint: disable=R0911,R0912
                 resolved_session_id,
             )
         if action == "pdf":
-            return await _with_evidence(
-                await _invoke_browser_handler(
-                    _action_pdf,
-                    page_id,
-                    path,
-                    resolved_session_id,
-                )
+            return await _invoke_action(
+                _action_pdf,
+                page_id,
+                path,
+                resolved_session_id,
+                emit_evidence=True,
             )
         if action == "close":
-            return await _invoke_browser_handler(
+            return await _invoke_action(
                 _action_close,
                 page_id,
                 resolved_session_id,

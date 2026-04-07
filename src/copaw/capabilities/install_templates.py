@@ -322,6 +322,15 @@ def _normalize_install_template_config_value(
                 + ", ".join(field.choices)
             )
         return text
+    if field_type == "number":
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Install template field '{field.key}' must be a number"
+            ) from exc
     if value is None:
         return ""
     return str(value)
@@ -1265,6 +1274,30 @@ def _build_browser_install_template(
                     required=False,
                     default=True,
                     description="Persist Playwright storage state per saved profile so login checkpoints can be reused.",
+                ),
+                InstallTemplateConfigField(
+                    key="allowed_hosts",
+                    label="Allowed hosts",
+                    field_type="string[]",
+                    required=False,
+                    default=[],
+                    description="Optional browser host allowlist. When set, navigation outside these hosts is blocked for sessions started from this profile.",
+                ),
+                InstallTemplateConfigField(
+                    key="blocked_hosts",
+                    label="Blocked hosts",
+                    field_type="string[]",
+                    required=False,
+                    default=[],
+                    description="Optional browser host blocklist. Matching hosts are always blocked for sessions started from this profile.",
+                ),
+                InstallTemplateConfigField(
+                    key="action_timeout_seconds",
+                    label="Action timeout seconds",
+                    field_type="number",
+                    required=False,
+                    default=None,
+                    description="Optional default timeout for browser actions started from this profile.",
                 ),
             ],
         ),
@@ -2835,6 +2868,16 @@ async def _browser_example_run(
                         if "persist_login_state" in normalized_config
                         else None
                     ),
+                    navigation_guard={
+                        "allowed_hosts": list(normalized_config.get("allowed_hosts") or []),
+                        "blocked_hosts": list(normalized_config.get("blocked_hosts") or []),
+                    }
+                    if (
+                        normalized_config.get("allowed_hosts")
+                        or normalized_config.get("blocked_hosts")
+                    )
+                    else None,
+                    action_timeout_seconds=normalized_config.get("action_timeout_seconds"),
                 )
             )
             start_result = dict(start_payload.get("result") or {})
