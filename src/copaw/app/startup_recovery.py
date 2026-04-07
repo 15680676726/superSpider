@@ -32,6 +32,11 @@ class StartupRecoverySummary(BaseModel):
     recovered_legacy_chat_writebacks: int = 0
     cancelled_legacy_chat_writeback_tasks: int = 0
     active_schedules: int = 0
+    absorption_case_count: int = 0
+    absorption_human_required_case_count: int = 0
+    absorption_case_counts: dict[str, int] = Field(default_factory=dict)
+    absorption_recovery_counts: dict[str, int] = Field(default_factory=dict)
+    absorption_summary: str = ""
     notes: list[str] = Field(default_factory=list)
 
 
@@ -313,6 +318,9 @@ def run_startup_recovery(
     kernel_dispatcher: Any | None,
     kernel_task_store: Any | None,
     schedule_repository: Any | None,
+    runtime_repository: Any | None = None,
+    exception_absorption_service: Any | None = None,
+    human_assist_task_service: Any | None = None,
     backlog_item_repository: Any | None = None,
     assignment_repository: Any | None = None,
     goal_repository: Any | None = None,
@@ -447,6 +455,34 @@ def run_startup_recovery(
             )
         except Exception as exc:  # pragma: no cover - guardrail
             summary.notes.append(f"schedule scan failed: {exc}")
+
+    if exception_absorption_service is not None:
+        resolved_runtime_repository = runtime_repository or getattr(
+            actor_mailbox_service,
+            "_runtime_repository",
+            None,
+        )
+        list_runtimes = getattr(resolved_runtime_repository, "list_runtimes", None)
+        list_items = getattr(actor_mailbox_service, "list_items", None)
+        list_human_assist = getattr(human_assist_task_service, "list_tasks", None)
+        try:
+            absorption_summary = exception_absorption_service.scan(
+                runtimes=list_runtimes(limit=None) if callable(list_runtimes) else [],
+                mailbox_items=list_items(limit=None) if callable(list_items) else [],
+                human_assist_tasks=(
+                    list_human_assist(limit=None) if callable(list_human_assist) else []
+                ),
+                now=_utc_now(),
+            )
+            summary.absorption_case_count = absorption_summary.case_count
+            summary.absorption_human_required_case_count = (
+                absorption_summary.human_required_case_count
+            )
+            summary.absorption_case_counts = dict(absorption_summary.case_counts)
+            summary.absorption_recovery_counts = dict(absorption_summary.recovery_counts)
+            summary.absorption_summary = absorption_summary.main_brain_summary
+        except Exception as exc:  # pragma: no cover - guardrail
+            summary.notes.append(f"exception absorption scan failed: {exc}")
 
     if runtime_event_bus is not None:
         runtime_event_bus.publish(

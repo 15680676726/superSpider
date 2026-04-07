@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .actor_mailbox import ActorMailboxService
+from .main_brain_exception_absorption import AbsorptionSummary, MainBrainExceptionAbsorptionService
 from .actor_worker import ActorWorker
 from .runtime_outcome import normalize_runtime_summary, should_block_runtime_error
 from ..state import AgentRuntimeRecord
@@ -30,17 +31,22 @@ class ActorSupervisor:
         mailbox_service: ActorMailboxService,
         worker: ActorWorker,
         runtime_event_bus: object | None = None,
+        exception_absorption_service: MainBrainExceptionAbsorptionService | None = None,
+        human_assist_task_service: object | None = None,
         poll_interval_seconds: float = 1.0,
     ) -> None:
         self._runtime_repository = runtime_repository
         self._mailbox_service = mailbox_service
         self._worker = worker
         self._runtime_event_bus = runtime_event_bus
+        self._exception_absorption_service = exception_absorption_service
+        self._human_assist_task_service = human_assist_task_service
         self._poll_interval_seconds = max(0.2, float(poll_interval_seconds))
         self._loop_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
         self._agent_locks: dict[str, asyncio.Lock] = {}
         self._agent_tasks: dict[str, asyncio.Task[bool]] = {}
+        self._last_absorption_summary: AbsorptionSummary | None = None
 
     async def start(self) -> None:
         if self._loop_task is not None and not self._loop_task.done():
@@ -106,9 +112,15 @@ class ActorSupervisor:
                     last_failure_type = (
                         str(failure_type) if failure_type is not None else None
                     )
+        absorption_summary = (
+            self._last_absorption_summary
+            or self._refresh_exception_absorption_summary(now=_utc_now())
+        )
 
         status = "idle"
         if recent_failure_count > 0 or blocked_runtime_count > 0:
+            status = "degraded"
+        elif absorption_summary is not None and absorption_summary.case_count > 0:
             status = "degraded"
         elif running or active_agent_run_count > 0:
             status = "active"
@@ -125,6 +137,29 @@ class ActorSupervisor:
             "recent_failure_count": recent_failure_count,
             "last_failure_at": last_failure_at,
             "last_failure_type": last_failure_type,
+            "absorption_case_count": (
+                absorption_summary.case_count if absorption_summary is not None else 0
+            ),
+            "human_required_case_count": (
+                absorption_summary.human_required_case_count
+                if absorption_summary is not None
+                else 0
+            ),
+            "absorption_case_counts": (
+                dict(absorption_summary.case_counts)
+                if absorption_summary is not None
+                else {}
+            ),
+            "absorption_recovery_counts": (
+                dict(absorption_summary.recovery_counts)
+                if absorption_summary is not None
+                else {}
+            ),
+            "absorption_summary": (
+                absorption_summary.main_brain_summary
+                if absorption_summary is not None
+                else ""
+            ),
         }
 
     async def run_agent_once(self, agent_id: str) -> bool:
@@ -164,10 +199,12 @@ class ActorSupervisor:
             )
         ]
         if not agent_ids:
+            self._refresh_exception_absorption_summary(now=_utc_now())
             return False
         results = await asyncio.gather(
             *(self.run_agent_once(agent_id) for agent_id in agent_ids),
         )
+        self._refresh_exception_absorption_summary(now=_utc_now())
         return any(results)
 
     async def _run_loop(self) -> None:
@@ -241,6 +278,27 @@ class ActorSupervisor:
                 "error_type": type(exc).__name__,
             },
         )
+        self._refresh_exception_absorption_summary(now=now)
+
+    def _refresh_exception_absorption_summary(
+        self,
+        *,
+        now: datetime,
+    ) -> AbsorptionSummary | None:
+        if self._exception_absorption_service is None:
+            return None
+        list_items = getattr(self._mailbox_service, "list_items", None)
+        mailbox_items = list_items(limit=None) if callable(list_items) else []
+        list_tasks = getattr(self._human_assist_task_service, "list_tasks", None)
+        human_assist_tasks = list_tasks(limit=None) if callable(list_tasks) else []
+        summary = self._exception_absorption_service.scan(
+            runtimes=self._runtime_repository.list_runtimes(limit=None),
+            mailbox_items=mailbox_items,
+            human_assist_tasks=human_assist_tasks,
+            now=now,
+        )
+        self._last_absorption_summary = summary
+        return summary
 
     def _publish_runtime_event(
         self,

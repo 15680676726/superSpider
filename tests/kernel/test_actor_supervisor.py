@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from copaw.kernel import ActorSupervisor
+from copaw.kernel import AbsorptionCase, AbsorptionSummary, ActorSupervisor
 from copaw.state import AgentRuntimeRecord, SQLiteStateStore
 from copaw.state.repositories import SqliteAgentRuntimeRepository
 
@@ -55,6 +55,35 @@ class _RecordingEventBus:
 
     def publish(self, *, topic: str, action: str, payload: dict[str, object]) -> None:
         self.events.append((topic, action, payload))
+
+
+class _RecordingAbsorptionService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def scan(self, *, runtimes, mailbox_items, human_assist_tasks, now):
+        self.calls.append(
+            {
+                "runtime_count": len(list(runtimes)),
+                "mailbox_count": len(list(mailbox_items)),
+                "human_assist_count": len(list(human_assist_tasks)),
+                "now": now,
+            }
+        )
+        return AbsorptionSummary(
+            active_cases=[
+                AbsorptionCase(
+                    case_kind="writer-contention",
+                    owner_agent_id="agent-1",
+                    scope_ref="desktop:sheet-1",
+                    recovery_rung="cleanup",
+                )
+            ],
+            case_counts={"writer-contention": 1},
+            recovery_counts={"cleanup": 1},
+            human_required_case_count=0,
+            main_brain_summary="Main brain is absorbing internal execution pressure.",
+        )
 
 
 def _build_runtime_repository(tmp_path) -> SqliteAgentRuntimeRepository:
@@ -255,3 +284,59 @@ def test_actor_supervisor_exposes_public_snapshot_for_runtime_center(tmp_path) -
     assert snapshot["blocked_runtime_count"] == 1
     assert snapshot["recent_failure_count"] == 1
     assert snapshot["last_failure_type"] == "RuntimeError"
+
+
+def test_actor_supervisor_snapshot_includes_absorption_counts(tmp_path) -> None:
+    runtime_repository = _build_runtime_repository(tmp_path)
+    absorption_service = _RecordingAbsorptionService()
+    supervisor = ActorSupervisor(
+        runtime_repository=runtime_repository,
+        mailbox_service=None,  # type: ignore[arg-type]
+        worker=_RecordingWorker(),  # type: ignore[arg-type]
+        exception_absorption_service=absorption_service,  # type: ignore[arg-type]
+        poll_interval_seconds=0.1,
+    )
+
+    snapshot = supervisor.snapshot()
+
+    assert snapshot["absorption_case_count"] == 1
+    assert snapshot["human_required_case_count"] == 0
+    assert snapshot["absorption_case_counts"] == {"writer-contention": 1}
+    assert snapshot["absorption_recovery_counts"] == {"cleanup": 1}
+    assert snapshot["absorption_summary"] == (
+        "Main brain is absorbing internal execution pressure."
+    )
+    assert len(absorption_service.calls) == 1
+
+
+def test_actor_supervisor_run_poll_cycle_refreshes_absorption_summary(tmp_path) -> None:
+    runtime_repository = _build_runtime_repository(tmp_path)
+    absorption_service = _RecordingAbsorptionService()
+    supervisor = ActorSupervisor(
+        runtime_repository=runtime_repository,
+        mailbox_service=None,  # type: ignore[arg-type]
+        worker=_RecordingWorker(),  # type: ignore[arg-type]
+        exception_absorption_service=absorption_service,  # type: ignore[arg-type]
+        poll_interval_seconds=0.01,
+    )
+
+    ran_any = asyncio.run(supervisor.run_poll_cycle())
+
+    assert ran_any is True
+    assert len(absorption_service.calls) == 1
+
+
+def test_actor_supervisor_failure_path_refreshes_absorption_summary(tmp_path) -> None:
+    runtime_repository = _build_runtime_repository(tmp_path)
+    absorption_service = _RecordingAbsorptionService()
+    supervisor = ActorSupervisor(
+        runtime_repository=runtime_repository,
+        mailbox_service=None,  # type: ignore[arg-type]
+        worker=_SelectiveFailingWorker(),  # type: ignore[arg-type]
+        exception_absorption_service=absorption_service,  # type: ignore[arg-type]
+        poll_interval_seconds=0.01,
+    )
+
+    asyncio.run(supervisor.run_agent_once("agent-1"))
+
+    assert len(absorption_service.calls) == 1

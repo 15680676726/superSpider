@@ -9,7 +9,15 @@ from copaw.app.runtime_events import RuntimeEventBus
 from copaw.app.runtime_session import SafeJSONSession
 from copaw.app.startup_recovery import _detect_requested_surfaces, run_startup_recovery
 from copaw.environments import EnvironmentRegistry, EnvironmentRepository, EnvironmentService, SessionMountRepository
-from copaw.kernel import ActorMailboxService, KernelConfig, KernelDispatcher, KernelTask, KernelTaskStore
+from copaw.kernel import (
+    AbsorptionCase,
+    AbsorptionSummary,
+    ActorMailboxService,
+    KernelConfig,
+    KernelDispatcher,
+    KernelTask,
+    KernelTaskStore,
+)
 from copaw.state import (
     AgentCheckpointRecord,
     AgentLeaseRecord,
@@ -48,6 +56,35 @@ from copaw.state.repositories import (
     SqliteTaskRepository,
     SqliteTaskRuntimeRepository,
 )
+
+
+class _RecordingAbsorptionService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def scan(self, *, runtimes, mailbox_items, human_assist_tasks, now):
+        self.calls.append(
+            {
+                "runtime_count": len(list(runtimes)),
+                "mailbox_count": len(list(mailbox_items)),
+                "human_assist_count": len(list(human_assist_tasks)),
+                "now": now,
+            }
+        )
+        return AbsorptionSummary(
+            active_cases=[
+                AbsorptionCase(
+                    case_kind="stale-lease",
+                    owner_agent_id="ops-agent",
+                    scope_ref="session:console:desktop-1",
+                    recovery_rung="cleanup",
+                )
+            ],
+            case_counts={"stale-lease": 1},
+            recovery_counts={"cleanup": 1},
+            human_required_case_count=0,
+            main_brain_summary="Main brain is absorbing internal execution pressure.",
+        )
 
 
 def test_startup_recovery_surface_detection_prefers_capability_layers() -> None:
@@ -277,6 +314,57 @@ def test_startup_recovery_recovers_local_orphans_and_expires_decisions(tmp_path)
 
     events = event_bus.list_events(after_id=0, limit=20)
     assert any(event.event_name == "system.recovery" for event in events)
+
+
+def test_startup_recovery_projects_absorption_summary_into_result(tmp_path) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="ops-agent",
+            actor_key="industry:test:ops-agent",
+            actor_fingerprint="fp-ops-agent",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="running",
+            metadata={
+                "lease_started_at": (
+                    datetime.now(timezone.utc) - timedelta(minutes=25)
+                ).isoformat(),
+                "environment_ref": "session:console:desktop-1",
+            },
+        )
+    )
+    mailbox_repository = SqliteAgentMailboxRepository(state_store)
+    checkpoint_repository = SqliteAgentCheckpointRepository(state_store)
+    mailbox_service = ActorMailboxService(
+        mailbox_repository=mailbox_repository,
+        runtime_repository=runtime_repository,
+        checkpoint_repository=checkpoint_repository,
+    )
+    absorption_service = _RecordingAbsorptionService()
+
+    summary = run_startup_recovery(
+        environment_service=None,
+        actor_mailbox_service=mailbox_service,
+        decision_request_repository=None,
+        kernel_dispatcher=None,
+        kernel_task_store=None,
+        schedule_repository=None,
+        runtime_repository=runtime_repository,
+        exception_absorption_service=absorption_service,
+        human_assist_task_service=None,
+        reason="startup",
+    )
+
+    assert summary.absorption_case_count == 1
+    assert summary.absorption_human_required_case_count == 0
+    assert summary.absorption_case_counts == {"stale-lease": 1}
+    assert summary.absorption_recovery_counts == {"cleanup": 1}
+    assert summary.absorption_summary == (
+        "Main brain is absorbing internal execution pressure."
+    )
+    assert len(absorption_service.calls) == 1
 
 
 def test_startup_recovery_requeues_legacy_execution_core_chat_writeback_gap(
