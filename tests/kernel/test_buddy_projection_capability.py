@@ -1,9 +1,25 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from copaw.kernel.buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from copaw.kernel.buddy_onboarding_service import BuddyOnboardingService
 from copaw.kernel.buddy_projection_service import BuddyProjectionService
-from copaw.state import SQLiteStateStore
+from copaw.state import AgentReportRecord, SQLiteStateStore
+from copaw.state.main_brain_service import (
+    AgentReportService,
+    AssignmentService,
+    BacklogService,
+    OperatingCycleService,
+    OperatingLaneService,
+)
+from copaw.state.repositories import (
+    SqliteAgentReportRepository,
+    SqliteAssignmentRepository,
+    SqliteBacklogItemRepository,
+    SqliteIndustryInstanceRepository,
+    SqliteOperatingCycleRepository,
+    SqliteOperatingLaneRepository,
+)
 from copaw.state.repositories_buddy import (
     SqliteBuddyDomainCapabilityRepository,
     SqliteBuddyOnboardingSessionRepository,
@@ -20,12 +36,33 @@ def _build_services(tmp_path):
     relationship_repository = SqliteCompanionRelationshipRepository(store)
     domain_capability_repository = SqliteBuddyDomainCapabilityRepository(store)
     session_repository = SqliteBuddyOnboardingSessionRepository(store)
+    industry_repository = SqliteIndustryInstanceRepository(store)
+    lane_service = OperatingLaneService(repository=SqliteOperatingLaneRepository(store))
+    backlog_service = BacklogService(repository=SqliteBacklogItemRepository(store))
+    cycle_service = OperatingCycleService(repository=SqliteOperatingCycleRepository(store))
+    assignment_service = AssignmentService(repository=SqliteAssignmentRepository(store))
+    report_service = AgentReportService(repository=SqliteAgentReportRepository(store))
+    growth_service = BuddyDomainCapabilityGrowthService(
+        domain_capability_repository=domain_capability_repository,
+        industry_instance_repository=industry_repository,
+        operating_lane_service=lane_service,
+        backlog_service=backlog_service,
+        operating_cycle_service=cycle_service,
+        assignment_service=assignment_service,
+        agent_report_service=report_service,
+    )
     onboarding = BuddyOnboardingService(
         profile_repository=profile_repository,
         growth_target_repository=growth_target_repository,
         relationship_repository=relationship_repository,
         domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
+        industry_instance_repository=industry_repository,
+        operating_lane_service=lane_service,
+        backlog_service=backlog_service,
+        operating_cycle_service=cycle_service,
+        assignment_service=assignment_service,
+        domain_capability_growth_service=growth_service,
     )
     projection = BuddyProjectionService(
         profile_repository=profile_repository,
@@ -33,6 +70,7 @@ def _build_services(tmp_path):
         relationship_repository=relationship_repository,
         domain_capability_repository=domain_capability_repository,
         onboarding_session_repository=session_repository,
+        domain_capability_growth_service=growth_service,
         current_focus_resolver=lambda profile_id: {
             "profile_id": profile_id,
             "current_task_summary": "Ship the first portfolio case study",
@@ -40,11 +78,11 @@ def _build_services(tmp_path):
             "single_next_action_summary": "Open the draft and write the headline plus three proof points.",
         },
     )
-    return onboarding, projection
+    return onboarding, projection, store
 
 
-def test_buddy_projection_reads_stage_from_active_domain_capability(tmp_path) -> None:
-    onboarding, projection = _build_services(tmp_path)
+def test_buddy_projection_refreshes_stage_from_runtime_capability_growth(tmp_path) -> None:
+    onboarding, projection, store = _build_services(tmp_path)
     identity = onboarding.submit_identity(
         display_name="Alex",
         profession="Designer",
@@ -64,29 +102,48 @@ def test_buddy_projection_reads_stage_from_active_domain_capability(tmp_path) ->
         selected_direction=clarification.recommended_direction,
         capability_action="start-new",
     )
-    projection._domain_capability_repository.upsert_domain_capability(  # pylint: disable=protected-access
-        result.domain_capability.model_copy(
+    assignment_repository = SqliteAssignmentRepository(store)
+    report_repository = SqliteAgentReportRepository(store)
+    instance_id = f"buddy:{identity.profile.profile_id}"
+    assignments = assignment_repository.list_assignments(industry_instance_id=instance_id)
+    assert assignments
+    first_assignment = assignments[0]
+    assignment_repository.upsert_assignment(
+        first_assignment.model_copy(
             update={
-                "capability_score": 63,
-                "strategy_score": 18,
-                "execution_score": 24,
-                "evidence_score": 12,
-                "stability_score": 9,
-                "evolution_stage": "seasoned",
-            },
+                "status": "completed",
+                "evidence_ids": ["ev-proof-1", "ev-proof-2"],
+                "last_report_id": "report-buddy-1",
+            }
+        )
+    )
+    report_repository.upsert_report(
+        AgentReportRecord(
+            id="report-buddy-1",
+            industry_instance_id=instance_id,
+            cycle_id=first_assignment.cycle_id,
+            assignment_id=first_assignment.id,
+            lane_id=first_assignment.lane_id,
+            headline="First proof shipped",
+            summary="The first portfolio case study is now published.",
+            status="recorded",
+            result="completed",
+            evidence_ids=["ev-proof-1", "ev-proof-2"],
         )
     )
 
     payload = projection.build_chat_surface(profile_id=identity.profile.profile_id)
 
-    assert payload.growth.evolution_stage == "seasoned"
-    assert payload.growth.capability_score == 63
-    assert payload.presentation.current_form == "seasoned"
+    assert payload.growth.capability_score > result.domain_capability.capability_score
+    assert payload.growth.execution_score > 0
+    assert payload.growth.evidence_score > 0
+    assert payload.growth.evolution_stage != "seed"
+    assert payload.presentation.current_form == payload.growth.evolution_stage
     assert payload.growth.domain_label == "写作"
 
 
 def test_relationship_experience_no_longer_upgrades_stage_without_domain_progress(tmp_path) -> None:
-    onboarding, projection = _build_services(tmp_path)
+    onboarding, projection, _store = _build_services(tmp_path)
     identity = onboarding.submit_identity(
         display_name="Alex",
         profession="Designer",
@@ -106,6 +163,7 @@ def test_relationship_experience_no_longer_upgrades_stage_without_domain_progres
         selected_direction=clarification.recommended_direction,
         capability_action="start-new",
     )
+    baseline = projection.build_chat_surface(profile_id=identity.profile.profile_id)
     relationship = projection._relationship_repository.get_relationship(  # pylint: disable=protected-access
         identity.profile.profile_id,
     )
@@ -122,5 +180,5 @@ def test_relationship_experience_no_longer_upgrades_stage_without_domain_progres
 
     payload = projection.build_chat_surface(profile_id=identity.profile.profile_id)
 
-    assert payload.growth.evolution_stage == "seed"
-    assert payload.growth.capability_score == 0
+    assert payload.growth.evolution_stage == baseline.growth.evolution_stage
+    assert payload.growth.capability_score == baseline.growth.capability_score

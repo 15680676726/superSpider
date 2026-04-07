@@ -4,7 +4,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from copaw.kernel.buddy_domain_capability import (
+    BuddyDomainCapabilitySignals,
     capability_stage_from_score,
+    derive_capability_metrics,
     derive_buddy_domain_key,
     preview_domain_transition,
     progress_to_next_capability_stage,
@@ -51,6 +53,32 @@ def test_progress_to_next_capability_stage_tracks_current_band() -> None:
     assert progress_to_next_capability_stage(50) == 50
     assert progress_to_next_capability_stage(79) == 95
     assert progress_to_next_capability_stage(80) == 100
+
+
+def test_derive_capability_metrics_caps_each_component_and_maps_stage() -> None:
+    metrics = derive_capability_metrics(
+        BuddyDomainCapabilitySignals(
+            has_active_instance=True,
+            lane_count=5,
+            backlog_count=4,
+            cycle_count=3,
+            completed_cycle_count=2,
+            has_current_cycle=True,
+            assignment_count=6,
+            active_assignment_count=3,
+            completed_assignment_count=4,
+            report_count=5,
+            completed_report_count=3,
+            evidence_count=7,
+        )
+    )
+
+    assert metrics.strategy_score == 19
+    assert metrics.execution_score == 26
+    assert metrics.evidence_score == 20
+    assert metrics.stability_score == 20
+    assert metrics.capability_score == 85
+    assert metrics.evolution_stage == "signature"
 
 
 def test_derive_buddy_domain_key_normalizes_same_domain_variants() -> None:

@@ -17,6 +17,7 @@ __all__ = [
     "AgentProfileService",
     "AgentStatus",
     "BuddyOnboardingService",
+    "BuddyDomainCapabilityGrowthService",
     "BuddyProjectionService",
     "DEFAULT_AGENTS",
     "GovernanceBatchResult",
@@ -55,6 +56,10 @@ _EXPORTS = {
     "AgentProfileService": (".agent_profile_service", "AgentProfileService"),
     "AgentStatus": (".agent_profile", "AgentStatus"),
     "BuddyOnboardingService": (".buddy_onboarding_service", "BuddyOnboardingService"),
+    "BuddyDomainCapabilityGrowthService": (
+        ".buddy_domain_capability_growth",
+        "BuddyDomainCapabilityGrowthService",
+    ),
     "BuddyProjectionService": (".buddy_projection_service", "BuddyProjectionService"),
     "DEFAULT_AGENTS": (".agent_profile", "DEFAULT_AGENTS"),
     "GovernanceBatchResult": (".governance", "GovernanceBatchResult"),

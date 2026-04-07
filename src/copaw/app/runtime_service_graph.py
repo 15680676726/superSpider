@@ -16,6 +16,7 @@ from ..kernel import (
     ActorSupervisor,
     ActorWorker,
     AgentProfileService,
+    BuddyDomainCapabilityGrowthService,
     BuddyOnboardingService,
     BuddyProjectionService,
     GovernanceService,
@@ -669,6 +670,15 @@ def build_runtime_bootstrap(
         assignment_service=assignment_service,
         backlog_service=backlog_service,
     )
+    buddy_domain_capability_growth_service = BuddyDomainCapabilityGrowthService(
+        domain_capability_repository=buddy_domain_capability_repository,
+        industry_instance_repository=repositories.industry_instance_repository,
+        operating_lane_service=operating_lane_service,
+        backlog_service=backlog_service,
+        operating_cycle_service=operating_cycle_service,
+        assignment_service=assignment_service,
+        agent_report_service=agent_report_service,
+    )
     buddy_onboarding_service = BuddyOnboardingService(
         profile_repository=buddy_profile_repository,
         growth_target_repository=buddy_growth_target_repository,
@@ -680,6 +690,7 @@ def build_runtime_bootstrap(
         backlog_service=backlog_service,
         operating_cycle_service=operating_cycle_service,
         assignment_service=assignment_service,
+        domain_capability_growth_service=buddy_domain_capability_growth_service,
     )
     buddy_projection_service = BuddyProjectionService(
         profile_repository=buddy_profile_repository,
@@ -687,6 +698,7 @@ def build_runtime_bootstrap(
         relationship_repository=buddy_relationship_repository,
         domain_capability_repository=buddy_domain_capability_repository,
         onboarding_session_repository=buddy_onboarding_session_repository,
+        domain_capability_growth_service=buddy_domain_capability_growth_service,
         human_assist_task_service=human_assist_task_service,
         current_focus_resolver=buddy_current_focus_resolver,
     )
