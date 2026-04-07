@@ -80,6 +80,7 @@ def _latest_decision(
     *,
     skill_lifecycle_decision_service: object | None,
     candidate_id: str | None,
+    recommendation_id: str | None = None,
 ) -> dict[str, Any]:
     normalized_candidate_id = _string(candidate_id)
     if normalized_candidate_id is None:
@@ -87,9 +88,15 @@ def _latest_decision(
     lister = getattr(skill_lifecycle_decision_service, "list_decisions", None)
     if not callable(lister):
         return {}
-    decisions = list(lister(candidate_id=normalized_candidate_id, limit=1))
+    decisions = list(lister(candidate_id=normalized_candidate_id, limit=50))
     if not decisions:
         return {}
+    normalized_recommendation_id = _string(recommendation_id)
+    if normalized_recommendation_id is not None:
+        for item in decisions:
+            metadata = _mapping(getattr(item, "metadata", None))
+            if _string(metadata.get("source_recommendation_id")) == normalized_recommendation_id:
+                return _mapping(item)
     return _mapping(decisions[0])
 
 
@@ -162,6 +169,7 @@ def build_optimization_case_projection(
     latest_decision = _latest_decision(
         skill_lifecycle_decision_service=skill_lifecycle_decision_service,
         candidate_id=candidate_id,
+        recommendation_id=_string(recommendation_payload.get("recommendation_id")),
     )
     trust_payload = {}
     trust_getter = getattr(capability_donor_service, "get_trust_record", None)

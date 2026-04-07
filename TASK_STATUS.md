@@ -1214,6 +1214,26 @@
   - `python -m pytest tests/kernel/test_main_brain_exception_absorption.py tests/kernel/test_actor_supervisor.py tests/kernel/test_actor_mailbox.py tests/app/test_startup_recovery.py tests/app/runtime_center_api_parts/overview_governance.py tests/kernel/test_main_brain_chat_service.py tests/state/test_human_assist_task_service.py tests/compiler/test_report_replan_engine.py -q` -> `181 passed`
   - `python -m pytest tests/kernel/test_main_brain_exception_absorption.py tests/kernel/test_actor_supervisor.py tests/kernel/test_main_brain_chat_service.py tests/app/test_startup_recovery.py tests/app/runtime_center_api_parts/overview_governance.py tests/state/test_human_assist_task_service.py tests/compiler/test_report_replan_engine.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_execution_provider_wiring.py -q` -> `225 passed`
 
+### 3.3.6 `2026-04-07` final residual purity tightening
+
+- `industry` 状态与删除链继续去 legacy bridge：
+  - instance status 现在只以 live `cycle/backlog/assignment/report/schedule` surface 判定 active，不再依赖 goal status 才能把“静态 team + 无 live work”的实例收口为 completed。
+  - instance delete / retire 的 task 收集现在优先按 `industry_instance_id`，并把 goal-linked leaf task 并入同一 task set；execution-core 自有 task 即使没有 `goal_id` 也不会再被清理链漏掉。
+- reporting / prediction 继续去 goal 次级前门：
+  - prediction task collection 已彻底删除 `goal_ids` query fallback，正式顺序收口为 `industry_instance_id -> owner_agent_id -> agent_ids`。
+  - reporting task-scoped learning projection 不再因为“同 goal”把不在当前 task scope 内的 proposal 拉进 report。
+- workflow 继续去历史 link 真相：
+  - run detail / resume 的 goal step 现在优先按 `GoalOverride.compiler_context(workflow_run_id, workflow_step_id)` 派生 goal link，不再以持久化 `linked_goal_ids` 为正式真相。
+  - schedule step 继续只按 deterministic schedule identity 恢复，不再读历史 `linked_schedule_ids`。
+- `2026-04-07` follow-up hard cut:
+  - `OperatingCycleService.reconcile_cycle(...)` 已删除 `goal_statuses` 输入，cycle status 现在只按 assignment/report truth 判定。
+  - `PredictionService.create_cycle_case(...)` 不再把 `goal_statuses` 写进 cycle fingerprint 或 case metadata。
+  - `WorkflowStepExecutionRecord` 已删除内部 `linked_goal_ids / linked_schedule_ids` 字段；step detail 改为读时推导，不再靠 step record 持有 legacy link。
+- 这轮完成后仍然真实存在的残留只剩：
+  - `industry` bootstrap 仍会 materialize bootstrap goal/schedule，再喂给 backlog/cycle。
+  - workflow `step_execution_seed` 仍允许保留 `linked_goal_ids / linked_schedule_ids` 作为旧 run 兼容回填输入，但公开 step record/detail 已不再依赖它们。
+  - `runtime_service_graph.py` + `runtime_bootstrap_models.py` 的 wiring graph 仍偏重。
+
 ### 3.3.4 `2026-04-07` Buddy carrier direction-truth fix
 
 - Buddy onboarding 的正式方向边界已补正：`BuddyOnboardingService._ensure_growth_scaffold(...)` 不再把 `HumanProfile` 当前资料直接写进 `IndustryInstanceRecord.profile_payload`。

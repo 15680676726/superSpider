@@ -515,3 +515,62 @@ def test_skill_trial_service_does_not_regress_formal_statuses_from_stale_metadat
     assert updated.verified_stage == "adapter_probe_passed"
     assert updated.provider_resolution_status == "resolved"
     assert updated.compatibility_status == "compatible_native"
+
+
+def test_skill_lifecycle_decision_service_upserts_evaluator_verdict_decisions(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.db")
+    candidate_service = CapabilityCandidateService(state_store=state_store)
+    decision_service = SkillLifecycleDecisionService(state_store=state_store)
+
+    candidate = candidate_service.normalize_candidate_source(
+        candidate_kind="skill",
+        target_scope="seat",
+        target_role_id="solution-lead",
+        target_seat_ref="seat-primary",
+        candidate_source_kind="external_remote",
+        candidate_source_ref="https://example.com/skills/nextgen-outreach.zip",
+        candidate_source_version="1.0.0",
+        ingestion_mode="prediction-recommendation",
+        proposed_skill_name="nextgen_outreach",
+        summary="Governed remote skill candidate for outreach.",
+    )
+
+    created = decision_service.upsert_evaluator_verdict_decision(
+        candidate_id=candidate.candidate_id,
+        aggregate_verdict="passed",
+        source_recommendation_id="rec-trial-1",
+        reason="Seat-local trial completed cleanly.",
+        evidence_refs=["ev-trial-pass"],
+        replacement_target_ids=["skill:legacy_outreach"],
+        applied_by="prediction-service",
+        metadata={"selected_seat_ref": "seat-primary"},
+    )
+
+    assert created.decision_kind == "continue_trial"
+    assert created.from_stage == "candidate"
+    assert created.to_stage == "trial"
+    assert created.metadata["evaluator_verdict"] == "passed"
+    assert created.metadata["verdict_source"] == "trial_evaluator"
+
+    updated = decision_service.upsert_evaluator_verdict_decision(
+        candidate_id=candidate.candidate_id,
+        aggregate_verdict="rollback_recommended",
+        source_recommendation_id="rec-trial-1",
+        reason="Trial regressed and now requires rollback.",
+        evidence_refs=["ev-trial-fail"],
+        replacement_target_ids=["skill:legacy_outreach"],
+        applied_by="prediction-service",
+        metadata={"selected_seat_ref": "seat-primary"},
+    )
+
+    listed = decision_service.list_decisions(candidate_id=candidate.candidate_id)
+
+    assert updated.decision_id == created.decision_id
+    assert updated.decision_kind == "rollback"
+    assert updated.from_stage == "trial"
+    assert updated.to_stage == "blocked"
+    assert updated.evidence_refs == ["ev-trial-fail"]
+    assert updated.metadata["evaluator_verdict"] == "rollback_recommended"
+    assert len(listed) == 1

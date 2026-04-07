@@ -245,15 +245,9 @@ class _WorkflowServiceRunMixin:
                 "owner_role_id": step.owner_role_id,
                 "owner_role_candidates": list(step.owner_role_candidates or []),
                 "owner_agent_id": step.owner_agent_id,
-                "linked_goal_ids": [],
             }
             for step in preview.steps
         ]
-        step_seed_by_id = {
-            str(item.get("step_id")): item
-            for item in step_execution_seed
-            if str(item.get("step_id") or "").strip()
-        }
         run = WorkflowRunRecord(
             template_id=template.template_id,
             title=preview.title,
@@ -301,11 +295,6 @@ class _WorkflowServiceRunMixin:
                     priority=3,
                     owner_scope=preview.owner_scope,
                 )
-                step_seed = step_seed_by_id.get(step.step_id)
-                if isinstance(step_seed, dict):
-                    linked_goal_ids = list(step_seed.get("linked_goal_ids") or [])
-                    linked_goal_ids.append(goal.id)
-                    step_seed["linked_goal_ids"] = linked_goal_ids
                 if self._goal_override_repository is not None:
                     self._goal_override_repository.upsert_override(
                         GoalOverrideRecord(
@@ -407,7 +396,14 @@ class _WorkflowServiceRunMixin:
         if run.status == "cancelled":
             return self.get_run_detail(run_id)
 
-        for goal_id in _workflow_linked_resource_ids(run, key="linked_goal_ids"):
+        for goal_id in _unique_strings(
+            *list(
+                _workflow_goal_ids_by_step(
+                    run,
+                    goal_override_repository=self._goal_override_repository,
+                ).values(),
+            ),
+        ):
             goal = self._goal_service.get_goal(goal_id)
             if goal is None:
                 continue
@@ -463,15 +459,14 @@ class _WorkflowServiceRunMixin:
             for item in step_seed_items
             if isinstance(item, dict) and str(item.get("step_id") or "").strip()
         }
+        goal_ids_by_step = _workflow_goal_ids_by_step(
+            run,
+            goal_override_repository=self._goal_override_repository,
+        )
         for step in detail.preview.steps:
             step_payload = dict(step.payload_preview or {})
             step_seed = step_seed_by_id.get(step.step_id)
             if step.kind == "goal":
-                linked_goal_ids = (
-                    list(step_seed.get("linked_goal_ids") or [])
-                    if isinstance(step_seed, dict)
-                    else []
-                )
                 persisted_task_ids = (
                     [
                         str(item)
@@ -481,8 +476,35 @@ class _WorkflowServiceRunMixin:
                     if isinstance(step_seed, dict)
                     else []
                 )
+                persisted_decision_ids = (
+                    [
+                        str(item)
+                        for item in list(step_seed.get("linked_decision_ids") or [])
+                        if str(item).strip()
+                    ]
+                    if isinstance(step_seed, dict)
+                    else []
+                )
+                persisted_evidence_ids = (
+                    [
+                        str(item)
+                        for item in list(step_seed.get("linked_evidence_ids") or [])
+                        if str(item).strip()
+                    ]
+                    if isinstance(step_seed, dict)
+                    else []
+                )
+                linked_goal_ids = (
+                    []
+                    if persisted_task_ids or persisted_decision_ids or persisted_evidence_ids
+                    else list(goal_ids_by_step.get(step.step_id, []))
+                )
                 if not linked_goal_ids:
-                    if not persisted_task_ids:
+                    if (
+                        not persisted_task_ids
+                        and not persisted_decision_ids
+                        and not persisted_evidence_ids
+                    ):
                         goal = self._goal_service.create_goal(
                             title=step.title,
                             summary=step.summary,
@@ -491,8 +513,6 @@ class _WorkflowServiceRunMixin:
                             owner_scope=detail.preview.owner_scope,
                         )
                         linked_goal_ids = [goal.id]
-                        if isinstance(step_seed, dict):
-                            step_seed["linked_goal_ids"] = linked_goal_ids
                         if self._goal_override_repository is not None:
                             self._goal_override_repository.upsert_override(
                                 GoalOverrideRecord(
@@ -536,24 +556,13 @@ class _WorkflowServiceRunMixin:
                             activate=True,
                         )
             elif step.kind == "schedule":
-                linked_schedule_ids = _unique_strings(
-                    (
-                        [
-                            str(item)
-                            for item in list(step_seed.get("linked_schedule_ids") or [])
-                            if str(item).strip()
-                        ]
-                        if isinstance(step_seed, dict)
-                        else []
-                    ),
-                    [
-                        _workflow_step_schedule_id(
-                            run,
-                            step_id=step.step_id,
-                            payload_preview=step_payload,
-                        )
-                    ],
-                )
+                linked_schedule_ids = [
+                    _workflow_step_schedule_id(
+                        run,
+                        step_id=step.step_id,
+                        payload_preview=step_payload,
+                    )
+                ]
                 if linked_schedule_ids:
                     missing_schedule_ids = [
                         schedule_id
@@ -814,23 +823,52 @@ class _WorkflowServiceRunMixin:
         step_id: str,
     ) -> WorkflowStepExecutionDetail:
         detail = self.get_run_detail(run_id)
+        run = self._workflow_run_repository.get_run(run_id)
+        if run is None:
+            raise KeyError(f"Workflow run '{run_id}' not found")
         step = next(
             (item for item in detail.step_execution if item.step_id == step_id),
             None,
         )
         if step is None:
             raise KeyError(f"Workflow step '{step_id}' not found in run '{run_id}'")
+        preview_step = next(
+            (item for item in detail.preview.steps if item.step_id == step_id),
+            None,
+        )
+        if preview_step is None:
+            raise KeyError(f"Workflow step '{step_id}' preview missing in run '{run_id}'")
+        seed = _workflow_step_seed_by_id(run).get(step_id)
+        persisted_task_ids, persisted_decision_ids, persisted_evidence_ids = (
+            _workflow_step_persisted_runtime_ids(seed)
+        )
+        linked_goal_ids = (
+            []
+            if persisted_task_ids or persisted_decision_ids or persisted_evidence_ids
+            else list(
+                _workflow_goal_ids_by_step(
+                    run,
+                    goal_override_repository=self._goal_override_repository,
+                ).get(step_id, []),
+            )
+        )
+        linked_schedule_ids = _workflow_step_schedule_ids(
+            run,
+            step_kind=preview_step.kind,
+            step_id=step_id,
+            payload_preview=dict(preview_step.payload_preview or {}),
+        )
         return WorkflowStepExecutionDetail(
             step=step,
             linked_goals=[
                 item
                 for item in detail.goals
-                if str(item.get("id") or "") in set(step.linked_goal_ids)
+                if str(item.get("id") or "") in set(linked_goal_ids)
             ],
             linked_schedules=[
                 item
                 for item in detail.schedules
-                if str(item.get("id") or "") in set(step.linked_schedule_ids)
+                if str(item.get("id") or "") in set(linked_schedule_ids)
             ],
             linked_tasks=[
                 item

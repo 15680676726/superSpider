@@ -320,7 +320,11 @@ def test_reporting_service_exposes_work_context_continuity_in_followup_outputs(t
         task_two_work_context_id="ctx-followup-chain",
     )
 
-    weekly = service.get_report(window="weekly")
+    weekly = service.get_report(
+        window="weekly",
+        scope_type="agent",
+        scope_id="research-agent",
+    )
 
     assert any("[work_context:ctx-followup-chain]" in item for item in weekly.blockers)
     assert weekly.next_steps == [
@@ -428,3 +432,26 @@ def test_reporting_service_industry_scope_prefers_industry_task_truth_without_go
     assert report.task_ids == ["task-industry-truth"]
     assert report.task_count == 1
     assert report.focus_items == ["Assignment-native follow-up"]
+
+
+def test_reporting_service_does_not_pull_goal_only_learning_records_into_task_scoped_report(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+    service._learning_service.create_proposal(
+        title="Legacy goal-only proposal",
+        description=(
+            "This proposal should not leak into the report when task scope truth already exists."
+        ),
+        agent_id="outside-agent",
+        goal_id="goal-1",
+        task_id="task-outside",
+    )
+
+    weekly = service.get_report(
+        window="weekly",
+        scope_type="agent",
+        scope_id="research-agent",
+    )
+
+    assert weekly.proposal_count == 1

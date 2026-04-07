@@ -34,6 +34,7 @@ MCPReloadOutcome = Literal[
     "overlay_removed",
 ]
 MCPOverlayMode = Literal["base", "additive", "replace"]
+MCPTrialScope = Literal["agent", "seat", "session"]
 
 
 def _utc_now() -> datetime:
@@ -99,6 +100,25 @@ class MCPClientRuntimeRecord(BaseModel):
     connected: bool = False
     rebuild_info: MCPClientRebuildSpec
     reload_state: MCPClientReloadState = Field(default_factory=MCPClientReloadState)
+
+
+class MCPTrialRollbackContract(BaseModel):
+    client_key: str
+    rollback_target_ids: list[str] = Field(default_factory=list)
+    fallback_action: Literal["disable_mcp_client"] = "disable_mcp_client"
+
+
+class MCPTrialContract(BaseModel):
+    contract_kind: Literal["mcp"] = "mcp"
+    baseline_ref: str | None = None
+    challenger_ref: str
+    target_capability_family: Literal["mcp"] = "mcp"
+    target_agent_id: str | None = None
+    target_role_id: str | None = None
+    selected_scope: MCPTrialScope = "agent"
+    selected_seat_ref: str | None = None
+    target_capability_ids: list[str] = Field(default_factory=list)
+    rollback: MCPTrialRollbackContract
 
 
 def build_mcp_rebuild_spec(
@@ -198,6 +218,50 @@ def build_mcp_reload_state(
     )
 
 
+def build_mcp_trial_contract(
+    *,
+    baseline_ref: str | None,
+    challenger_ref: str,
+    client_key: str,
+    target_agent_id: str | None,
+    target_role_id: str | None,
+    selected_scope: str,
+    selected_seat_ref: str | None,
+    target_capability_ids: list[str] | None = None,
+    rollback_target_ids: list[str] | None = None,
+) -> MCPTrialContract:
+    normalized_scope = str(selected_scope or "agent").strip().lower() or "agent"
+    if normalized_scope not in {"agent", "seat", "session"}:
+        normalized_scope = "agent"
+    return MCPTrialContract(
+        baseline_ref=str(baseline_ref).strip() or None if baseline_ref is not None else None,
+        challenger_ref=str(challenger_ref).strip(),
+        target_agent_id=str(target_agent_id).strip() or None
+        if target_agent_id is not None
+        else None,
+        target_role_id=str(target_role_id).strip() or None
+        if target_role_id is not None
+        else None,
+        selected_scope=normalized_scope,  # type: ignore[arg-type]
+        selected_seat_ref=str(selected_seat_ref).strip() or None
+        if selected_seat_ref is not None
+        else None,
+        target_capability_ids=[
+            str(item).strip()
+            for item in list(target_capability_ids or [])
+            if str(item).strip()
+        ],
+        rollback=MCPTrialRollbackContract(
+            client_key=str(client_key).strip(),
+            rollback_target_ids=[
+                str(item).strip()
+                for item in list(rollback_target_ids or [])
+                if str(item).strip()
+            ],
+        ),
+    )
+
+
 def _default_summary(
     *,
     key: str,
@@ -226,6 +290,10 @@ __all__ = [
     "MCPRuntimeAuthPolicy",
     "MCPRuntimeErrorPolicy",
     "MCPRuntimeSessionPolicy",
+    "MCPTrialContract",
+    "MCPTrialRollbackContract",
+    "MCPTrialScope",
+    "build_mcp_trial_contract",
     "MCPTransport",
     "build_mcp_reload_state",
     "build_mcp_rebuild_spec",

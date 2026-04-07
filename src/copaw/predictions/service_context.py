@@ -158,7 +158,6 @@ class _PredictionServiceContextMixin:
         if repository is None:
             return []
         since = _utc_now() - timedelta(days=max(1, case.time_window_days))
-        goal_ids = [goal.id for goal in goals if getattr(goal, "id", None)]
         agent_ids = [
             str(getattr(agent, "agent_id", "") or "")
             for agent in agents
@@ -177,13 +176,6 @@ class _PredictionServiceContextMixin:
                 owner_agent_id=case.owner_agent_id,
                 activity_since=since,
                 limit=50,
-            ):
-                task_map[task.id] = task
-        if not task_map and goal_ids:
-            for task in repository.list_tasks(
-                goal_ids=goal_ids,
-                activity_since=since,
-                limit=200,
             ):
                 task_map[task.id] = task
         if agent_ids:

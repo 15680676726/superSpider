@@ -367,6 +367,90 @@ def test_industry_delete_active_instance_clears_current_team(tmp_path) -> None:
     assert client.get(f"/runtime-center/industry/{instance_id}").status_code == 404
 
 
+def test_industry_delete_active_instance_collects_execution_core_tasks_without_goal_ids(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Industrial Automation",
+            company_name="Northwind Robotics",
+            product="factory monitoring copilots",
+            goals=["launch two pilot deployments"],
+        ),
+    )
+    draft = FakeIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-robotics",
+    )
+    bootstrap_response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_activate": True,
+        },
+    )
+    assert bootstrap_response.status_code == 200
+    instance_id = bootstrap_response.json()["team"]["team_id"]
+
+    synthetic_task = app.state.task_repository.upsert_task(
+        TaskRecord(
+            id="task:industry-delete:execution-core-only",
+            industry_instance_id=instance_id,
+            title="Execution-core industry cleanup anchor",
+            summary="Delete this execution-core-owned task with the industry instance.",
+            task_type="industry-follow-up",
+            status="running",
+            owner_agent_id="copaw-agent-runner",
+            current_risk_level="guarded",
+        ),
+    )
+    task_evidence = app.state.evidence_ledger.append(
+        EvidenceRecord(
+            task_id=synthetic_task.id,
+            actor_ref="copaw-agent-runner",
+            capability_ref="system:dispatch_query",
+            risk_level="guarded",
+            action_summary="industry delete execution-core task preflight",
+            result_summary="captured execution-core-only task evidence before delete",
+        ),
+    )
+    proposal = app.state.learning_service.create_proposal(
+        title="Execution-core-only cleanup proposal",
+        description="Delete this task-only proposal with the industry instance.",
+        source_agent_id="copaw-agent-runner",
+        goal_id=None,
+        task_id=synthetic_task.id,
+        agent_id="copaw-agent-runner",
+        evidence_refs=[task_evidence.id],
+    )
+    app.state.decision_request_repository.upsert_decision_request(
+        DecisionRequestRecord(
+            task_id=synthetic_task.id,
+            decision_type="manual-review",
+            risk_level="confirm",
+            summary="Delete this execution-core task decision with the industry instance.",
+            requested_by="copaw-main-brain",
+        ),
+    )
+
+    delete_response = client.delete(f"/industry/v1/instances/{instance_id}")
+    assert delete_response.status_code == 200
+    delete_payload = delete_response.json()
+    assert delete_payload["deleted"] is True
+    assert delete_payload["deleted_counts"]["tasks"] >= 1
+    assert delete_payload["deleted_counts"]["learning_proposals"] >= 1
+    assert delete_payload["deleted_counts"]["evidence"] >= 1
+    assert app.state.task_repository.get_task(synthetic_task.id) is None
+    assert app.state.evidence_ledger.get_record(task_evidence.id) is None
+    assert not any(
+        item.id == proposal.id for item in app.state.learning_service.list_proposals(limit=None)
+    )
+
+
 def test_industry_learning_kickoff_materializes_acquisition_objects_and_exposes_them(
     tmp_path,
     monkeypatch,

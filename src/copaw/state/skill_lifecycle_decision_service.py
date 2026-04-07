@@ -91,6 +91,7 @@ class SkillLifecycleDecisionService:
     def create_decision(
         self,
         *,
+        decision_id: str | None = None,
         candidate_id: str,
         donor_id: str | None = None,
         package_id: str | None = None,
@@ -118,50 +119,157 @@ class SkillLifecycleDecisionService:
         metadata: dict[str, Any] | None = None,
     ) -> SkillLifecycleDecisionRecord:
         metadata_payload = _merge_adapter_metadata(metadata or {})
-        record = SkillLifecycleDecisionRecord(
-            candidate_id=candidate_id,
-            donor_id=_string(donor_id),
-            package_id=_string(package_id),
-            source_profile_id=_string(source_profile_id),
-            canonical_package_id=_string(canonical_package_id),
-            candidate_source_lineage=_string(candidate_source_lineage),
-            source_aliases=list(source_aliases or []),
-            equivalence_class=_string(equivalence_class),
-            capability_overlap_score=_float_value(capability_overlap_score),
-            replacement_relation=_string(replacement_relation),
-            decision_kind=_string(decision_kind) or "continue_trial",
-            from_stage=_string(from_stage),
-            to_stage=_string(to_stage),
-            reason=str(reason or ""),
-            retirement_reason=_string(retirement_reason),
-            retirement_scope=_string(retirement_scope),
-            evidence_refs=list(evidence_refs or []),
-            retirement_evidence_refs=list(retirement_evidence_refs or []),
-            replacement_target_ids=list(replacement_target_ids or []),
-            protection_lifted=bool(protection_lifted),
-            applied_by=_string(applied_by),
-            verified_stage=_verified_stage(
+        payload = {
+            "candidate_id": candidate_id,
+            "donor_id": _string(donor_id),
+            "package_id": _string(package_id),
+            "source_profile_id": _string(source_profile_id),
+            "canonical_package_id": _string(canonical_package_id),
+            "candidate_source_lineage": _string(candidate_source_lineage),
+            "source_aliases": list(source_aliases or []),
+            "equivalence_class": _string(equivalence_class),
+            "capability_overlap_score": _float_value(capability_overlap_score),
+            "replacement_relation": _string(replacement_relation),
+            "decision_kind": _string(decision_kind) or "continue_trial",
+            "from_stage": _string(from_stage),
+            "to_stage": _string(to_stage),
+            "reason": str(reason or ""),
+            "retirement_reason": _string(retirement_reason),
+            "retirement_scope": _string(retirement_scope),
+            "evidence_refs": list(evidence_refs or []),
+            "retirement_evidence_refs": list(retirement_evidence_refs or []),
+            "replacement_target_ids": list(replacement_target_ids or []),
+            "protection_lifted": bool(protection_lifted),
+            "applied_by": _string(applied_by),
+            "verified_stage": _verified_stage(
                 verified_stage
                 if verified_stage is not None
                 else metadata_payload.get("verified_stage"),
                 "unverified",
             ),
-            provider_resolution_status=_provider_resolution_status(
+            "provider_resolution_status": _provider_resolution_status(
                 provider_resolution_status
                 if provider_resolution_status is not None
                 else metadata_payload.get("provider_resolution_status"),
                 "pending",
             ),
-            compatibility_status=_compatibility_status(
+            "compatibility_status": _compatibility_status(
                 compatibility_status
                 if compatibility_status is not None
                 else metadata_payload.get("compatibility_status"),
                 "unknown",
             ),
-            metadata=metadata_payload,
-        )
+            "metadata": metadata_payload,
+        }
+        normalized_decision_id = _string(decision_id)
+        if normalized_decision_id is not None:
+            payload["decision_id"] = normalized_decision_id
+        record = SkillLifecycleDecisionRecord(**payload)
         self._upsert_record(record)
         return record
+
+    def upsert_evaluator_verdict_decision(
+        self,
+        *,
+        candidate_id: str,
+        aggregate_verdict: str,
+        source_recommendation_id: str | None = None,
+        donor_id: str | None = None,
+        package_id: str | None = None,
+        source_profile_id: str | None = None,
+        canonical_package_id: str | None = None,
+        candidate_source_lineage: str | None = None,
+        source_aliases: list[str] | None = None,
+        equivalence_class: str | None = None,
+        capability_overlap_score: float | None = None,
+        replacement_relation: str | None = None,
+        from_stage: str | None = None,
+        reason: str = "",
+        evidence_refs: list[str] | None = None,
+        replacement_target_ids: list[str] | None = None,
+        applied_by: str | None = None,
+        verified_stage: str | None = None,
+        provider_resolution_status: str | None = None,
+        compatibility_status: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SkillLifecycleDecisionRecord:
+        normalized_verdict = _string(aggregate_verdict) or "no-trials"
+        normalized_source_recommendation_id = _string(source_recommendation_id)
+        existing: SkillLifecycleDecisionRecord | None = None
+        if normalized_source_recommendation_id is not None:
+            for item in self.list_decisions(candidate_id=candidate_id, limit=100):
+                item_metadata = dict(item.metadata or {})
+                if (
+                    _string(item_metadata.get("verdict_source")) == "trial_evaluator"
+                    and _string(item_metadata.get("source_recommendation_id"))
+                    == normalized_source_recommendation_id
+                ):
+                    existing = item
+                    break
+
+        mapped_from_stage = _string(from_stage) or "candidate"
+        mapped_decision_kind = "continue_trial"
+        mapped_to_stage = "trial"
+        if normalized_verdict == "rollback_recommended":
+            mapped_decision_kind = "rollback"
+            mapped_from_stage = "trial"
+            mapped_to_stage = "blocked"
+        elif mapped_from_stage not in {"candidate", "trial"}:
+            mapped_from_stage = "trial"
+
+        existing_metadata = dict(existing.metadata or {}) if existing is not None else {}
+        metadata_payload = _merge_adapter_metadata(
+            existing_metadata,
+            metadata or {},
+            {
+                "source_recommendation_id": normalized_source_recommendation_id,
+                "evaluator_verdict": normalized_verdict,
+                "verdict_source": "trial_evaluator",
+            },
+        )
+        return self.create_decision(
+            decision_id=existing.decision_id if existing is not None else None,
+            candidate_id=candidate_id,
+            donor_id=_string(donor_id) or getattr(existing, "donor_id", None),
+            package_id=_string(package_id) or getattr(existing, "package_id", None),
+            source_profile_id=_string(source_profile_id)
+            or getattr(existing, "source_profile_id", None),
+            canonical_package_id=_string(canonical_package_id)
+            or getattr(existing, "canonical_package_id", None),
+            candidate_source_lineage=_string(candidate_source_lineage)
+            or getattr(existing, "candidate_source_lineage", None),
+            source_aliases=list(source_aliases or getattr(existing, "source_aliases", []) or []),
+            equivalence_class=_string(equivalence_class)
+            or getattr(existing, "equivalence_class", None),
+            capability_overlap_score=(
+                _float_value(capability_overlap_score)
+                if _float_value(capability_overlap_score) is not None
+                else getattr(existing, "capability_overlap_score", None)
+            ),
+            replacement_relation=_string(replacement_relation)
+            or getattr(existing, "replacement_relation", None),
+            decision_kind=mapped_decision_kind,
+            from_stage=mapped_from_stage,
+            to_stage=mapped_to_stage,
+            reason=reason or getattr(existing, "reason", "") or normalized_verdict,
+            evidence_refs=list(
+                evidence_refs
+                or getattr(existing, "evidence_refs", [])
+                or []
+            ),
+            replacement_target_ids=list(
+                replacement_target_ids
+                or getattr(existing, "replacement_target_ids", [])
+                or []
+            ),
+            applied_by=_string(applied_by) or getattr(existing, "applied_by", None),
+            verified_stage=verified_stage or getattr(existing, "verified_stage", None),
+            provider_resolution_status=provider_resolution_status
+            or getattr(existing, "provider_resolution_status", None),
+            compatibility_status=compatibility_status
+            or getattr(existing, "compatibility_status", None),
+            metadata=metadata_payload,
+        )
 
     def list_decisions(
         self,

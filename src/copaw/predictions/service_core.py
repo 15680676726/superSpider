@@ -158,10 +158,13 @@ class _PredictionServiceCoreMixin:
         recommendations = self._recommendation_repository.list_recommendations(case_id=case_id)
         reviews = self._review_repository.list_reviews(case_id=case_id)
         recommendation_views = [self._recommendation_view(item) for item in recommendations]
-        optimization_cases = [
-            self._build_optimization_case_projection(
-                case=case,
-                recommendation_view=recommendation_view,
+        optimization_items = [
+            (
+                record,
+                self._build_optimization_case_projection(
+                    case=case,
+                    recommendation_view=recommendation_view,
+                ),
             )
             for record, recommendation_view in zip(
                 recommendations,
@@ -170,6 +173,21 @@ class _PredictionServiceCoreMixin:
             )
             if self._is_capability_optimization_recommendation(record)
         ]
+        optimization_items.sort(
+            key=lambda item: (
+                {"confirm": 0, "guarded": 1, "auto": 2}.get(
+                    str(item[0].risk_level or "").strip().lower(),
+                    3,
+                ),
+                {"rollback": 0, "retire": 1, "rollout": 2, "trial": 3}.get(
+                    str(_safe_dict(item[0].metadata).get("optimization_stage") or "").strip(),
+                    4,
+                ),
+                -int(item[0].priority or 0),
+                -item[0].updated_at.timestamp(),
+            ),
+        )
+        optimization_cases = [item[1] for item in optimization_items]
         pending_decisions = sum(
             1
             for item in recommendation_views
@@ -289,7 +307,6 @@ class _PredictionServiceCoreMixin:
         pending_report_ids: list[str] | None = None,
         open_backlog_ids: list[str] | None = None,
         open_backlog_source_refs: list[str] | None = None,
-        goal_statuses: dict[str, str] | None = None,
         meeting_window: str | None = None,
         participant_inputs: list[dict[str, Any]] | None = None,
         assignment_summaries: list[dict[str, Any]] | None = None,
@@ -346,10 +363,6 @@ class _PredictionServiceCoreMixin:
                     )
                     if assignment_id is not None
                 ],
-                "goal_statuses": {
-                    str(goal_id): str(status)
-                    for goal_id, status in sorted((goal_statuses or {}).items())
-                },
             }
         fingerprint = _stable_prediction_fingerprint(fingerprint_payload)
         if not force:
@@ -408,7 +421,6 @@ class _PredictionServiceCoreMixin:
                 "pending_report_ids": _string_list(pending_report_ids),
                 "open_backlog_ids": _string_list(open_backlog_ids),
                 "open_backlog_source_refs": _string_list(open_backlog_source_refs),
-                "goal_statuses": dict(goal_statuses or {}),
                 "participant_inputs": list(participant_inputs or []),
                 "assignment_summaries": list(assignment_summaries or []),
                 "lane_summaries": list(lane_summaries or []),

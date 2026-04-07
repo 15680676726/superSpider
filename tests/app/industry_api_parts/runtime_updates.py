@@ -3374,14 +3374,8 @@ def test_industry_instance_summary_backfills_execution_core_role_from_agent_prof
     assert execution_core["role_name"]
 
 
-def test_industry_instance_status_reconciles_from_goal_states(tmp_path) -> None:
+def test_industry_instance_status_completes_without_legacy_goal_truth(tmp_path) -> None:
     app = _build_industry_app(tmp_path)
-    goal = app.state.goal_service.create_goal(
-        title="Completed goal",
-        summary="The work is done.",
-        status="completed",
-        owner_scope="industry-v1-northwind-robotics",
-    )
     app.state.industry_instance_repository.upsert_instance(
         IndustryInstanceRecord(
             instance_id="industry-v1-northwind-robotics",
@@ -3416,12 +3410,6 @@ def test_industry_instance_status_completes_with_static_team_membership_only(
     tmp_path,
 ) -> None:
     app = _build_industry_app(tmp_path)
-    goal = app.state.goal_service.create_goal(
-        title="Completed staffed goal",
-        summary="The staffed team finished the work.",
-        status="completed",
-        owner_scope="industry-v1-staffed",
-    )
     app.state.industry_instance_repository.upsert_instance(
         IndustryInstanceRecord(
             instance_id="industry-v1-staffed",

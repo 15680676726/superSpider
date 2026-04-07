@@ -118,21 +118,28 @@ class _PredictionServiceRefreshMixin:
             },
         )
         decision_service = getattr(self, "_skill_lifecycle_decision_service", None)
-        create_decision = getattr(decision_service, "create_decision", None)
-        list_decisions = getattr(decision_service, "list_decisions", None)
-        if not callable(create_decision):
+        upsert_evaluator_decision = getattr(
+            decision_service,
+            "upsert_evaluator_verdict_decision",
+            None,
+        )
+        if not callable(upsert_evaluator_decision):
             return
-        if callable(list_decisions):
-            for item in list_decisions(candidate_id=candidate_id, limit=100):
-                item_metadata = _safe_dict(getattr(item, "metadata", None))
-                if (
-                    getattr(item, "decision_kind", None) == "continue_trial"
-                    and _string(item_metadata.get("source_recommendation_id"))
-                    == record.recommendation_id
-                ):
-                    return
-        create_decision(
+        verdict_summary = getattr(
+            trial_service,
+            "get_candidate_verdict_summary",
+            None,
+        )
+        evaluator_payload = (
+            _safe_dict(verdict_summary(candidate_id=candidate_id))
+            if callable(verdict_summary)
+            else {}
+        )
+        upsert_evaluator_decision(
             candidate_id=candidate_id,
+            aggregate_verdict=_string(evaluator_payload.get("aggregate_verdict"))
+            or ("passed" if verdict == "passed" else "rollback_recommended"),
+            source_recommendation_id=record.recommendation_id,
             donor_id=getattr(candidate, "donor_id", None),
             package_id=getattr(candidate, "package_id", None),
             source_profile_id=getattr(candidate, "source_profile_id", None),
@@ -142,9 +149,7 @@ class _PredictionServiceRefreshMixin:
             equivalence_class=getattr(candidate, "equivalence_class", None),
             capability_overlap_score=getattr(candidate, "capability_overlap_score", None),
             replacement_relation=getattr(candidate, "replacement_relation", None),
-            decision_kind="continue_trial",
             from_stage=previous_stage,
-            to_stage="trial",
             reason=_string(record.outcome_summary) or record.summary,
             evidence_refs=evidence_refs,
             replacement_target_ids=replacement_target_ids,
