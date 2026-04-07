@@ -1113,6 +1113,42 @@ def test_runtime_center_main_brain_route_prefers_canonical_latest_recovery_repor
     assert payload["recovery"]["detail"]["automation"]["active_schedules"] == 4
 
 
+def test_runtime_center_main_brain_route_projects_absorption_action_into_recovery_card():
+    app = build_runtime_center_app()
+    app.state.state_query_service = FakeStateQueryService()
+    app.state.evidence_query_service = FakeEvidenceQueryService()
+    app.state.capability_service = FakeCapabilityService()
+    app.state.learning_service = FakeLearningService()
+    app.state.agent_profile_service = FakeAgentProfileService()
+    app.state.industry_service = FakeIndustryService()
+    app.state.prediction_service = FakePredictionService()
+    app.state.governance_service = FakeGovernanceService()
+    app.state.routine_service = FakeRoutineService()
+    app.state.strategy_memory_service = FakeStrategyMemoryService()
+    app.state.startup_recovery_summary = StartupRecoverySummary(
+        reason="Recovered expired decisions and runtime leases during startup.",
+        pending_decisions=2,
+        active_schedules=1,
+        absorption_action_kind="human-assist",
+        absorption_action_summary="Need one governed confirmation to resume.",
+        absorption_action_materialized=True,
+        absorption_human_task_id="human-assist-1",
+    )
+
+    client = TestClient(app)
+    response = client.get("/runtime-center/surface?sections=main_brain")
+
+    assert response.status_code == 200
+    payload = response.json()["main_brain"]
+    assert payload["recovery"]["absorption_action_kind"] == "human-assist"
+    assert (
+        payload["recovery"]["absorption_action_summary"]
+        == "Need one governed confirmation to resume."
+    )
+    assert payload["recovery"]["absorption_action_materialized"] is True
+    assert payload["recovery"]["absorption_human_task_id"] == "human-assist-1"
+
+
 def test_runtime_center_overview_capabilities_card_exposes_skill_mcp_governance_projection():
     app = build_runtime_center_app()
     app.state.state_query_service = FakeStateQueryService()

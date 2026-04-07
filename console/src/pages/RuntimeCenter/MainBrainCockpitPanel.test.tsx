@@ -542,6 +542,30 @@ describe("MainBrainCockpitPanel", () => {
     expect(screen.getAllByText("browser_backoffice, office_document").length).toBeGreaterThan(0);
   });
 
+  it("renders recovery absorption action details when the dedicated cockpit payload includes them", () => {
+    renderPanel({
+      ...unifiedPayload,
+      recovery: {
+        ...unifiedPayload.recovery,
+        absorption_action_kind: "human-assist",
+        absorption_action_summary: "Need one governed confirmation to resume.",
+        absorption_action_materialized: true,
+        absorption_human_task_id: "human-assist-1",
+      },
+    });
+
+    expect(screen.getByText("吸收动作")).toBeInTheDocument();
+    expect(screen.getByText("人协动作")).toBeInTheDocument();
+    expect(screen.getByText("动作摘要")).toBeInTheDocument();
+    expect(
+      screen.getByText("Need one governed confirmation to resume."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("动作结果")).toBeInTheDocument();
+    expect(screen.getByText("已物化")).toBeInTheDocument();
+    expect(screen.getByText("人协任务")).toBeInTheDocument();
+    expect(screen.getByText("human-assist-1")).toBeInTheDocument();
+  });
+
   it("renders report cognition and explicit replan visibility from the dedicated cockpit payload", () => {
     renderPanel(unifiedPayload);
 

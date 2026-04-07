@@ -1248,7 +1248,7 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
                 "notes": [],
             }
         payload = project_latest_recovery_summary(summary, source=source)
-        return {
+        recovery_payload = {
             "available": True,
             "status": "ready",
             "summary": self._string(payload.get("reason"))
@@ -1263,6 +1263,30 @@ class _RuntimeCenterOverviewCardsSupport(_RuntimeCenterOverviewEntryBuildersMixi
             "detail": self._mapping(payload.get("detail")) or {},
             "notes": list(payload.get("notes") or []),
         }
+        absorption_action_kind = self._string(payload.get("absorption_action_kind"))
+        absorption_action_summary = self._string(payload.get("absorption_action_summary"))
+        absorption_replan_decision_kind = self._string(
+            payload.get("absorption_replan_decision_kind"),
+        )
+        absorption_human_task_id = self._string(payload.get("absorption_human_task_id"))
+        absorption_action_materialized = payload.get("absorption_action_materialized")
+        if (
+            absorption_action_kind is not None
+            or absorption_action_summary is not None
+            or absorption_replan_decision_kind is not None
+            or absorption_human_task_id is not None
+            or bool(absorption_action_materialized)
+        ):
+            recovery_payload["absorption_action_kind"] = absorption_action_kind
+            recovery_payload["absorption_action_summary"] = absorption_action_summary
+            recovery_payload["absorption_action_materialized"] = bool(
+                absorption_action_materialized,
+            )
+            recovery_payload["absorption_replan_decision_kind"] = (
+                absorption_replan_decision_kind
+            )
+            recovery_payload["absorption_human_task_id"] = absorption_human_task_id
+        return recovery_payload
 
     async def _build_main_brain_automation_payload(
         self,

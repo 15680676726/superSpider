@@ -297,6 +297,45 @@ function firstString(...values: unknown[]): string | null {
   return null;
 }
 
+function presentRecoveryAbsorptionActionKind(value: unknown): string | null {
+  const normalized = firstString(value)?.toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  switch (normalized) {
+    case "human-assist":
+      return "人协动作";
+    case "replan":
+      return "正式重规划";
+    default:
+      return normalized;
+  }
+}
+
+function presentRecoveryAbsorptionMaterialized(value: unknown): string | null {
+  if (typeof value !== "boolean") {
+    return null;
+  }
+  return value ? "已物化" : "未物化";
+}
+
+function presentRecoveryReplanDecisionKind(value: unknown): string | null {
+  const normalized = firstString(value)?.toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  switch (normalized) {
+    case "cycle_rebalance":
+      return "周期重平衡";
+    case "lane_reweight":
+      return "泳道再权衡";
+    case "follow_up_backlog":
+      return "转后续待办";
+    default:
+      return normalized;
+  }
+}
+
 function extractTimestamp(value: unknown): string | null {
   if (typeof value === "string" && value.trim()) {
     return value.trim();
@@ -1561,6 +1600,11 @@ export default function MainBrainCockpitPanel({
                   ["活动计划", firstString(recoveryPayload?.active_schedules)],
                   ["恢复时间", firstString(recoveryPayload?.recovered_at)],
                   ["原因", firstString(recoveryPayload?.reason)],
+                  ["吸收动作", presentRecoveryAbsorptionActionKind(recoveryPayload?.absorption_action_kind)],
+                  ["动作摘要", firstString(recoveryPayload?.absorption_action_summary)],
+                  ["动作结果", presentRecoveryAbsorptionMaterialized(recoveryPayload?.absorption_action_materialized)],
+                  ["重规划类型", presentRecoveryReplanDecisionKind(recoveryPayload?.absorption_replan_decision_kind)],
+                  ["人协任务", firstString(recoveryPayload?.absorption_human_task_id)],
                 ],
                 onOpenRoute,
               })}
