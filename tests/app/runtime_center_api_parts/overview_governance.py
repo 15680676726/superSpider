@@ -1992,6 +1992,11 @@ def test_runtime_center_capability_optimizations_endpoint() -> None:
     payload = response.json()
     assert payload["summary"]["actionable_count"] == 1
     assert payload["summary"]["retire_count"] == 1
+    assert payload["actionable"][0]["projection"]["discovery_case_id"] == "case-gap-1"
+    assert (
+        payload["actionable"][0]["projection"]["evaluator_verdict"]["aggregate_verdict"]
+        == "continue_trial"
+    )
     assert (
         payload["actionable"][0]["recommendation"]["recommendation"]["metadata"][
             "gap_kind"
@@ -2003,6 +2008,9 @@ def test_runtime_center_capability_optimizations_endpoint() -> None:
             "optimization_stage"
         ]
         == "retire"
+    )
+    assert payload["history"][0]["projection"]["lifecycle_decision"]["decision_kind"] == (
+        "retire"
     )
     assert payload["portfolio"]["donor_count"] == 2
     assert payload["portfolio"]["retire_pressure_count"] == 1
@@ -2185,6 +2193,12 @@ def test_runtime_center_governance_status_includes_capability_governance_project
     assert capability_governance["discovery"]["status"] == "ready"
     assert capability_governance["discovery"]["source_profile_count"] == 2
     assert capability_governance["discovery"]["fallback_only_source_count"] == 1
+    assert capability_governance["actionable"][0]["projection"]["discovery_case_id"] == (
+        "case-gap-1"
+    )
+    assert capability_governance["history"][0]["projection"]["gap_kind"] == (
+        "capability_retirement"
+    )
     assert capability_governance["degraded"] is True
     components = {
         item["component"] for item in capability_governance["degraded_components"]

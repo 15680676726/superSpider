@@ -57,6 +57,16 @@ async def build_capability_governance_projection(
     delta = support._mapping(optimization_overview.get("summary")) or {}
     discovery = support._mapping(optimization_overview.get("discovery")) or {}
     portfolio_summary = support._mapping(optimization_overview.get("portfolio")) or {}
+    actionable = list(
+        optimization_overview.get("actionable")
+        if isinstance(optimization_overview.get("actionable"), list)
+        else []
+    )
+    history = list(
+        optimization_overview.get("history")
+        if isinstance(optimization_overview.get("history"), list)
+        else []
+    )
     if state_query_service is not None:
         get_capability_portfolio_summary = getattr(
             state_query_service,
@@ -322,6 +332,8 @@ async def build_capability_governance_projection(
             if isinstance(discovery.get("routes"), Mapping)
             else {},
         },
+        "actionable": actionable,
+        "history": history,
         "degraded": bool(degraded_components),
         "degraded_components": degraded_components,
     }

@@ -7,6 +7,7 @@ from ..compiler.planning import ReportReplanEngine
 from ..capabilities.skill_evolution_service import SkillEvolutionService
 from ..kernel.governed_mutation_dispatch import dispatch_governed_mutation_runtime
 from ..learning.skill_gap_detector import SkillGapDetector
+from .optimization_case_projection import build_optimization_case_projection
 from .service_shared import *  # noqa: F401,F403
 
 
@@ -157,6 +158,18 @@ class _PredictionServiceCoreMixin:
         recommendations = self._recommendation_repository.list_recommendations(case_id=case_id)
         reviews = self._review_repository.list_reviews(case_id=case_id)
         recommendation_views = [self._recommendation_view(item) for item in recommendations]
+        optimization_cases = [
+            self._build_optimization_case_projection(
+                case=case,
+                recommendation_view=recommendation_view,
+            )
+            for record, recommendation_view in zip(
+                recommendations,
+                recommendation_views,
+                strict=False,
+            )
+            if self._is_capability_optimization_recommendation(record)
+        ]
         pending_decisions = sum(
             1
             for item in recommendation_views
@@ -174,6 +187,7 @@ class _PredictionServiceCoreMixin:
             scenarios=[item.model_dump(mode="json") for item in scenarios],
             signals=[item.model_dump(mode="json") for item in signals],
             recommendations=recommendation_views,
+            optimization_cases=optimization_cases,
             reviews=[item.model_dump(mode="json") for item in reviews],
             stats={
                 "scenario_count": len(scenarios),
@@ -966,6 +980,10 @@ class _PredictionServiceCoreMixin:
                 PredictionCapabilityOptimizationItem(
                     case=case.model_dump(mode="json"),
                     recommendation=recommendation_view,
+                    projection=self._build_optimization_case_projection(
+                        case=case,
+                        recommendation_view=recommendation_view,
+                    ),
                     status_bucket=status_bucket,  # type: ignore[arg-type]
                     routes={
                         "case": _route_prediction(case.case_id),
@@ -1050,6 +1068,22 @@ class _PredictionServiceCoreMixin:
             routes={
                 "predictions": "/api/predictions",
             },
+        )
+
+    def _build_optimization_case_projection(
+        self,
+        *,
+        case: object,
+        recommendation_view: object,
+    ) -> PredictionOptimizationCaseProjection:
+        return build_optimization_case_projection(
+            case=case,
+            recommendation_view=recommendation_view,
+            capability_candidate_service=self._capability_candidate_service,
+            skill_trial_service=self._skill_trial_service,
+            skill_lifecycle_decision_service=self._skill_lifecycle_decision_service,
+            capability_donor_service=self._capability_donor_service,
+            capability_portfolio_service=self._capability_portfolio_service,
         )
 
     def _build_governed_portfolio_summary(self) -> dict[str, Any]:

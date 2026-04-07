@@ -75,6 +75,9 @@ class PredictionCaseDetail(BaseModel):
     scenarios: list[dict[str, Any]] = Field(default_factory=list)
     signals: list[dict[str, Any]] = Field(default_factory=list)
     recommendations: list[PredictionRecommendationView] = Field(default_factory=list)
+    optimization_cases: list["PredictionOptimizationCaseProjection"] = Field(
+        default_factory=list,
+    )
     reviews: list[dict[str, Any]] = Field(default_factory=list)
     stats: dict[str, Any] = Field(default_factory=dict)
     routes: dict[str, Any] = Field(default_factory=dict)
@@ -103,6 +106,108 @@ class PredictionRecommendationCoordinationResponse(BaseModel):
     chat_route: str | None = None
 
 
+class PredictionOptimizationCaseBaseline(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    candidate_id: str | None = None
+    capability_ids: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+
+class PredictionOptimizationCaseChallenger(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    candidate_id: str | None = None
+    donor_id: str | None = None
+    package_id: str | None = None
+    capability_ids: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+
+class PredictionOptimizationCaseTrialScope(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    scope_kind: str | None = None
+    scope_ref: str | None = None
+    owner_agent_id: str | None = None
+
+
+class PredictionOptimizationCaseEvaluatorVerdict(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    aggregate_verdict: str = "no-trials"
+    trial_count: int = 0
+    success_count: int = 0
+    failure_count: int = 0
+    handoff_count: int = 0
+    operator_intervention_count: int = 0
+    latest_decision_kind: str | None = None
+
+
+class PredictionOptimizationCaseLifecycleDecision(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    decision_kind: str | None = None
+    from_stage: str | None = None
+    to_stage: str | None = None
+    reason: str = ""
+    route: str | None = None
+
+
+class PredictionOptimizationCaseDonorTrustImpact(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    donor_id: str | None = None
+    trust_status: str | None = None
+    replacement_pressure_count: int = 0
+    retirement_count: int = 0
+    rollback_count: int = 0
+    compatibility_status: str | None = None
+
+
+class PredictionOptimizationCasePlanningImpact(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    planning_actions: list[dict[str, Any]] = Field(default_factory=list)
+    future_review_pressure: bool = False
+    replacement_pressure: bool = False
+    retirement_pressure: bool = False
+    revision_pressure: bool = False
+    strategy_reopen_signals: list[str] = Field(default_factory=list)
+
+
+class PredictionOptimizationCaseProjection(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    issue_source: str | None = None
+    discovery_case_id: str | None = None
+    gap_kind: str | None = None
+    baseline: PredictionOptimizationCaseBaseline = Field(
+        default_factory=PredictionOptimizationCaseBaseline,
+    )
+    challenger: PredictionOptimizationCaseChallenger = Field(
+        default_factory=PredictionOptimizationCaseChallenger,
+    )
+    trial_scope: PredictionOptimizationCaseTrialScope = Field(
+        default_factory=PredictionOptimizationCaseTrialScope,
+    )
+    owner: dict[str, Any] = Field(default_factory=dict)
+    evaluator_verdict: PredictionOptimizationCaseEvaluatorVerdict = Field(
+        default_factory=PredictionOptimizationCaseEvaluatorVerdict,
+    )
+    lifecycle_decision: PredictionOptimizationCaseLifecycleDecision = Field(
+        default_factory=PredictionOptimizationCaseLifecycleDecision,
+    )
+    donor_trust_impact: PredictionOptimizationCaseDonorTrustImpact = Field(
+        default_factory=PredictionOptimizationCaseDonorTrustImpact,
+    )
+    planning_impact: PredictionOptimizationCasePlanningImpact = Field(
+        default_factory=PredictionOptimizationCasePlanningImpact,
+    )
+    rollback_route: str | None = None
+    writeback_targets: list[str] = Field(default_factory=list)
+
+
 class PredictionCapabilityOptimizationSummary(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -125,6 +230,9 @@ class PredictionCapabilityOptimizationItem(BaseModel):
 
     case: dict[str, Any]
     recommendation: PredictionRecommendationView
+    projection: PredictionOptimizationCaseProjection = Field(
+        default_factory=PredictionOptimizationCaseProjection,
+    )
     status_bucket: Literal["actionable", "history"] = "actionable"
     routes: dict[str, str] = Field(default_factory=dict)
 
