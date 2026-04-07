@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import traceback
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -31,6 +32,7 @@ from ..app.runtime_commands import (
     is_command,
     run_command_path,
 )
+from ..industry.identity import is_execution_core_role_id
 from ..providers.model_diagnostics import normalize_runtime_exception
 from .runtime_outcome import (
     build_execution_diagnostics,
@@ -105,6 +107,50 @@ _SHORT_CHAT_INSPECTION_TOKENS = (
     "看下",
     "看看",
 )
+_DIRECT_AGENT_EXECUTION_TARGET_TOKENS = (
+    "browser capability",
+    "mounted browser",
+    "browser",
+    "screenshot",
+    "desktop",
+    "浏览器",
+    "截图",
+    "桌面",
+)
+_DIRECT_AGENT_EXECUTION_ACTION_TOKENS = (
+    "use ",
+    "open ",
+    "navigate",
+    "click",
+    "type ",
+    "fill ",
+    "upload",
+    "save ",
+    "take a screenshot",
+    "打开",
+    "点击",
+    "输入",
+    "填写",
+    "上传",
+    "保存",
+    "截图",
+    "执行",
+)
+_DIRECT_AGENT_EXECUTION_ORDER_TOKENS = (
+    "right now",
+    "do not answer until",
+    "don't answer until",
+    "then report",
+    "现在就",
+    "立刻",
+    "先别回复",
+    "不要回答直到",
+    "再汇报",
+)
+_DIRECT_AGENT_EXECUTION_RESOURCE_RE = re.compile(
+    r"(https?://|file://|[a-z]:\\\\|\.png\b|\.jpg\b|\.jpeg\b|\.pdf\b)",
+    re.IGNORECASE,
+)
 
 
 def summarize_stream_message(msg: Any) -> str | None:
@@ -171,6 +217,40 @@ def _is_short_chat_inspection(text: str) -> bool:
     if not normalized or len(normalized) > 12:
         return False
     return any(token in normalized for token in _SHORT_CHAT_INSPECTION_TOKENS)
+
+
+def _looks_like_direct_industry_agent_execution_request(
+    *,
+    request: AgentRequest,
+    text: str,
+) -> bool:
+    session_kind = str(getattr(request, "session_kind", "") or "").strip().lower()
+    if session_kind != "industry-agent-chat":
+        return False
+    if is_execution_core_role_id(getattr(request, "industry_role_id", None)):
+        return False
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return False
+    if _is_hypothetical_control_text(normalized):
+        return False
+    if "?" in normalized or "？" in normalized:
+        return False
+    has_target = any(
+        token in normalized for token in _DIRECT_AGENT_EXECUTION_TARGET_TOKENS
+    )
+    if not has_target:
+        return False
+    has_action = any(
+        token in normalized for token in _DIRECT_AGENT_EXECUTION_ACTION_TOKENS
+    )
+    if not has_action:
+        return False
+    has_order = any(
+        token in normalized for token in _DIRECT_AGENT_EXECUTION_ORDER_TOKENS
+    )
+    has_resource = bool(_DIRECT_AGENT_EXECUTION_RESOURCE_RE.search(normalized))
+    return has_order or has_resource
 
 
 def _assistant_mentions_cognitive_pressure(msgs: list[Any]) -> bool:
@@ -452,6 +532,11 @@ async def _resolve_auto_chat_mode(
         return "chat"
     if not has_cognitive_pressure and _is_short_chat_inspection(text):
         return "chat"
+    if _looks_like_direct_industry_agent_execution_request(
+        request=request,
+        text=text,
+    ):
+        return "orchestrate"
     intake_contract = None
     if _first_non_empty(
         getattr(request, "industry_instance_id", None),

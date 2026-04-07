@@ -437,6 +437,64 @@ async def test_kernel_turn_executor_auto_mode_routes_questions_to_chat_service()
 
 
 @pytest.mark.asyncio
+async def test_kernel_turn_executor_auto_mode_routes_explicit_industry_agent_execution_requests_to_orchestrate(
+    monkeypatch,
+):
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    main_brain_orchestrator = FakeMainBrainOrchestrator()
+    kernel_dispatcher = FakeKernelDispatcher()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        kernel_dispatcher=kernel_dispatcher,
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+        main_brain_orchestrator=main_brain_orchestrator,
+    )
+    request = AgentRequest(
+        id="req-auto-industry-agent-execution",
+        session_id="industry-chat:industry-demo:solution-lead",
+        user_id="industry-solution-lead-demo",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "auto"
+    request.agent_id = "industry-solution-lead-demo"
+    request.industry_instance_id = "industry-demo"
+    request.industry_role_id = "solution-lead"
+    request.session_kind = "industry-agent-chat"
+    msgs = [
+        Msg(
+            name="user",
+            role="user",
+            content=(
+                "Use the mounted browser capability right now. "
+                "Open https://example.com and save a screenshot to "
+                "C:\\temp\\live-browser.png. "
+                "Do not answer until the screenshot is really saved, then report the path."
+            ),
+        )
+    ]
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(None),
+    )
+
+    streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "orchestrator done"
+    assert streamed[0][1] is True
+    assert len(main_brain_orchestrator.calls) == 1
+    assert main_brain_chat_service.calls == []
+    assert query_execution_service.calls == []
+    assert request._copaw_requested_interaction_mode == "auto"
+    assert request._copaw_resolved_interaction_mode == "orchestrate"
+    assert kernel_dispatcher.submitted
+
+
+@pytest.mark.asyncio
 async def test_kernel_turn_executor_auto_mode_keeps_action_wording_in_chat_without_intake_result(
     monkeypatch,
 ):
