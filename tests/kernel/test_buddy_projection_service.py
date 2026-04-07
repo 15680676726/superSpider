@@ -60,7 +60,7 @@ def test_buddy_projection_derives_growth_from_formal_truth(tmp_path) -> None:
         answer="I want leverage, proof of work, and independence.",
         existing_question_count=9,
     )
-    onboarding.confirm_primary_direction(
+    confirmation = onboarding.confirm_primary_direction(
         session_id=identity.session_id,
         selected_direction=clarification.recommended_direction,
         capability_action="start-new",
@@ -70,11 +70,17 @@ def test_buddy_projection_derives_growth_from_formal_truth(tmp_path) -> None:
     projection_payload = projection.build_chat_surface(profile_id=identity.profile.profile_id)
 
     assert projection_payload.execution_carrier is not None
-    assert projection_payload.execution_carrier["instance_id"] == (
-        f"buddy:{identity.profile.profile_id}"
+    assert (
+        projection_payload.execution_carrier["instance_id"]
+        == confirmation.domain_capability.industry_instance_id
     )
-    assert projection_payload.execution_carrier["thread_id"] == (
-        f"industry-chat:buddy:{identity.profile.profile_id}:execution-core"
+    assert (
+        projection_payload.execution_carrier["thread_id"]
+        == confirmation.domain_capability.control_thread_id
+    )
+    assert (
+        projection_payload.execution_carrier["control_thread_id"]
+        == confirmation.domain_capability.control_thread_id
     )
     assert projection_payload.growth.intimacy >= 0
     assert projection_payload.growth.communication_count >= 2

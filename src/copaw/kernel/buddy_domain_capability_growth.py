@@ -8,6 +8,7 @@ from .buddy_domain_capability import (
     BuddyDomainCapabilitySignals,
     derive_capability_metrics,
 )
+from .buddy_execution_carrier import build_buddy_domain_control_thread_id
 from ..state import BuddyDomainCapabilityRecord
 from ..state.repositories_buddy import SqliteBuddyDomainCapabilityRepository
 
@@ -44,7 +45,8 @@ class BuddyDomainCapabilityGrowthService:
         active = self._domain_capability_repository.get_active_domain_capability(profile_id)
         if active is None:
             return None
-        signals = self._collect_signals(profile_id=profile_id)
+        active = self._backfill_legacy_binding(profile_id=profile_id, active=active)
+        signals = self._collect_signals(active=active)
         if signals is None:
             return active
         metrics = derive_capability_metrics(signals)
@@ -74,12 +76,14 @@ class BuddyDomainCapabilityGrowthService:
     def _collect_signals(
         self,
         *,
-        profile_id: str,
+        active: BuddyDomainCapabilityRecord,
     ) -> BuddyDomainCapabilitySignals | None:
         get_instance = getattr(self._industry_instance_repository, "get_instance", None)
         if not callable(get_instance):
             return None
-        instance_id = f"buddy:{profile_id}"
+        instance_id = str(active.industry_instance_id or "").strip()
+        if not instance_id:
+            return None
         instance = get_instance(instance_id)
         if instance is None:
             return None
@@ -156,6 +160,29 @@ class BuddyDomainCapabilityGrowthService:
             completed_report_count=completed_report_count,
             evidence_count=len(evidence_ids),
         )
+
+    def _backfill_legacy_binding(
+        self,
+        *,
+        profile_id: str,
+        active: BuddyDomainCapabilityRecord,
+    ) -> BuddyDomainCapabilityRecord:
+        if str(active.industry_instance_id or "").strip():
+            return active
+        get_instance = getattr(self._industry_instance_repository, "get_instance", None)
+        if not callable(get_instance):
+            return active
+        legacy_instance_id = f"buddy:{profile_id}"
+        if get_instance(legacy_instance_id) is None:
+            return active
+        updated = active.model_copy(
+            update={
+                "industry_instance_id": legacy_instance_id,
+                "control_thread_id": str(active.control_thread_id or "").strip()
+                or build_buddy_domain_control_thread_id(instance_id=legacy_instance_id),
+            },
+        )
+        return self._domain_capability_repository.upsert_domain_capability(updated)
 
     @staticmethod
     def _list_records(service: object | None, method_name: str, **kwargs) -> list[object]:

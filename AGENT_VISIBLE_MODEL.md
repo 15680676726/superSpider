@@ -34,6 +34,13 @@
 - `Runtime Center` 只显示 Buddy 的紧凑摘要，不把 Buddy 当成一个普通 seat 卡来渲染。
 - `Industry` 只承接 Buddy 当前执行载体与执行位编排，不负责再次创建 Buddy 身份。
 
+### 0.2 `2026-04-07` Buddy stage/carrier 补充
+
+- Buddy 的可见成长口径现在必须写成“当前阶段”，不再混用“当前形态”。
+- Buddy 当前阶段只来自 active `BuddyDomainCapabilityRecord`，不再由关系经验直接投影。
+- Buddy 当前执行连续性也必须跟随 active domain 绑定 carrier 显示：`industry_instance_id / control_thread_id` 是当前主领域 continuity 的正式锚点。
+- Chat 内的普通领域扩展继续发生在当前 domain 内；页面确认流只负责 Buddy 主领域的硬切换或历史领域恢复。
+
 ---
 
 ## 1. 核心原则
@@ -91,13 +98,14 @@ Buddy 的同类问题需要换一种问法：
 
 Buddy 需要单独的可见入口合同，至少包括：
 
-- 伙伴形象与当前形态
+- 伙伴形象与当前阶段
 - 伙伴名称
 - 最后目标
 - 当前任务
 - 单一步动作
 - 关系状态
 - 成长/进化阶段
+- 当前领域 carrier 连续性
 - 聊天主入口
 
 约束：

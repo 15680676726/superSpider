@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 
 from .buddy_execution_carrier import (
     EXECUTION_CORE_ROLE_ID,
+    build_buddy_domain_control_thread_id,
+    build_buddy_domain_instance_id,
     build_buddy_execution_carrier_handoff,
 )
 from .buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
@@ -646,9 +648,11 @@ class BuddyOnboardingService:
             target_domain_id=target_domain_id,
             preview=preview,
         )
-        growth_target, execution_carrier = self._ensure_growth_scaffold(
+        growth_target, domain_capability, execution_carrier = self._ensure_growth_scaffold(
             profile=profile,
             growth_target=growth_target,
+            domain_capability=domain_capability,
+            capability_action=resolved_capability_action,
         )
         if self._domain_capability_growth_service is not None:
             refreshed = self._domain_capability_growth_service.refresh_active_domain_capability(
@@ -872,8 +876,19 @@ class BuddyOnboardingService:
         *,
         profile: HumanProfile,
         growth_target: GrowthTarget,
-    ) -> tuple[GrowthTarget, dict[str, object] | None]:
-        instance_id = f"buddy:{profile.profile_id}"
+        domain_capability: BuddyDomainCapabilityRecord,
+        capability_action: str,
+    ) -> tuple[GrowthTarget, BuddyDomainCapabilityRecord, dict[str, object] | None]:
+        instance_id, control_thread_id = self._resolve_domain_carrier_binding(
+            profile=profile,
+            domain_capability=domain_capability,
+            capability_action=capability_action,
+        )
+        bound_domain_capability = self._persist_domain_carrier_binding(
+            domain_capability=domain_capability,
+            instance_id=instance_id,
+            control_thread_id=control_thread_id,
+        )
         if (
             self._industry_instance_repository is None
             or self._operating_lane_service is None
@@ -881,9 +896,10 @@ class BuddyOnboardingService:
             or self._operating_cycle_service is None
             or self._assignment_service is None
         ):
-            return growth_target, self._build_execution_carrier_handoff(
+            return growth_target, bound_domain_capability, self._build_execution_carrier_handoff(
                 profile=profile,
                 instance_id=instance_id,
+                control_thread_id=control_thread_id,
                 label=profile.display_name,
                 current_cycle_id=growth_target.current_cycle_label or "Cycle 1",
                 team_generated=False,
@@ -978,19 +994,122 @@ class BuddyOnboardingService:
         updated_target = self._growth_target_repository.upsert_target(
             growth_target.model_copy(update={"current_cycle_label": cycle.title}),
         )
-        return updated_target, self._build_execution_carrier_handoff(
+        self._sync_domain_carrier_lifecycle(
+            profile_id=profile.profile_id,
+            active_domain_id=bound_domain_capability.domain_id,
+            active_instance_id=instance_id,
+        )
+        return updated_target, bound_domain_capability, self._build_execution_carrier_handoff(
             profile=profile,
             instance_id=instance_id,
+            control_thread_id=control_thread_id,
             label=persisted_instance.label,
             current_cycle_id=cycle.id,
             team_generated=True,
         )
+
+    def _resolve_domain_carrier_binding(
+        self,
+        *,
+        profile: HumanProfile,
+        domain_capability: BuddyDomainCapabilityRecord,
+        capability_action: str,
+    ) -> tuple[str, str]:
+        instance_id = str(domain_capability.industry_instance_id or "").strip()
+        control_thread_id = str(domain_capability.control_thread_id or "").strip()
+        if not instance_id:
+            if capability_action != "start-new":
+                legacy_instance_id = f"buddy:{profile.profile_id}"
+                has_legacy_instance = (
+                    self._industry_instance_repository is not None
+                    and self._industry_instance_repository.get_instance(legacy_instance_id)
+                    is not None
+                )
+                if has_legacy_instance:
+                    instance_id = legacy_instance_id
+            if not instance_id:
+                instance_id = build_buddy_domain_instance_id(
+                    profile_id=profile.profile_id,
+                    domain_id=domain_capability.domain_id,
+                )
+        if not control_thread_id:
+            control_thread_id = build_buddy_domain_control_thread_id(
+                instance_id=instance_id,
+            )
+        return instance_id, control_thread_id
+
+    def _persist_domain_carrier_binding(
+        self,
+        *,
+        domain_capability: BuddyDomainCapabilityRecord,
+        instance_id: str,
+        control_thread_id: str,
+    ) -> BuddyDomainCapabilityRecord:
+        if (
+            domain_capability.industry_instance_id == instance_id
+            and domain_capability.control_thread_id == control_thread_id
+        ):
+            return domain_capability
+        updated = domain_capability.model_copy(
+            update={
+                "industry_instance_id": instance_id,
+                "control_thread_id": control_thread_id,
+            },
+        )
+        if self._domain_capability_repository is None:
+            return updated
+        return self._domain_capability_repository.upsert_domain_capability(updated)
+
+    def _sync_domain_carrier_lifecycle(
+        self,
+        *,
+        profile_id: str,
+        active_domain_id: str,
+        active_instance_id: str,
+    ) -> None:
+        if (
+            self._domain_capability_repository is None
+            or self._industry_instance_repository is None
+        ):
+            return
+        now = _utc_now()
+        for record in self._domain_capability_repository.list_domain_capabilities(profile_id):
+            instance_id = str(record.industry_instance_id or "").strip()
+            if not instance_id:
+                continue
+            instance = self._industry_instance_repository.get_instance(instance_id)
+            if instance is None:
+                continue
+            if record.domain_id == active_domain_id and instance_id == active_instance_id:
+                self._industry_instance_repository.upsert_instance(
+                    instance.model_copy(
+                        update={
+                            "status": "active",
+                            "lifecycle_status": "running",
+                            "autonomy_status": "guided",
+                            "updated_at": now,
+                        },
+                    ),
+                )
+                continue
+            if record.status == "archived":
+                self._industry_instance_repository.upsert_instance(
+                    instance.model_copy(
+                        update={
+                            "status": "archived",
+                            "lifecycle_status": "archived",
+                            "autonomy_status": "archived",
+                            "updated_at": now,
+                        },
+                    ),
+                )
 
     def _build_execution_carrier_handoff(
         self,
         *,
         profile: HumanProfile,
         instance_id: str,
+        control_thread_id: str,
         label: str,
         current_cycle_id: str,
         team_generated: bool,
@@ -998,6 +1117,7 @@ class BuddyOnboardingService:
         return build_buddy_execution_carrier_handoff(
             profile=profile,
             instance_id=instance_id,
+            control_thread_id=control_thread_id,
             label=label,
             current_cycle_id=current_cycle_id,
             team_generated=team_generated,

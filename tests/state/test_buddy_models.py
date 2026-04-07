@@ -74,6 +74,10 @@ def test_buddy_models_round_trip_required_fields() -> None:
         domain_key="writing",
         domain_label="写作",
         status="active",
+        industry_instance_id="buddy:hp-1:domain-1",
+        control_thread_id="industry-chat:buddy:hp-1:domain-1:execution-core",
+        domain_scope_summary="Long-form writing plus adjacent creator products",
+        domain_scope_tags=["writing", "ip"],
         strategy_score=18,
         execution_score=14,
         evidence_score=8,
@@ -89,6 +93,9 @@ def test_buddy_models_round_trip_required_fields() -> None:
     assert growth.evolution_stage == "seed"
     assert domain.domain_label == "写作"
     assert domain.evolution_stage == "capable"
+    assert domain.industry_instance_id == "buddy:hp-1:domain-1"
+    assert domain.control_thread_id == "industry-chat:buddy:hp-1:domain-1:execution-core"
+    assert domain.domain_scope_tags == ["writing", "ip"]
 
 
 def test_sqlite_state_store_creates_buddy_tables(tmp_path) -> None:

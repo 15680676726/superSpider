@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-STATE_SCHEMA_VERSION = 34
+STATE_SCHEMA_VERSION = 35
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS human_profiles (
@@ -84,6 +84,10 @@ CREATE TABLE IF NOT EXISTS buddy_domain_capabilities (
     domain_key TEXT NOT NULL,
     domain_label TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active',
+    industry_instance_id TEXT NOT NULL DEFAULT '',
+    control_thread_id TEXT NOT NULL DEFAULT '',
+    domain_scope_summary TEXT NOT NULL DEFAULT '',
+    domain_scope_tags_json TEXT NOT NULL DEFAULT '[]',
     strategy_score INTEGER NOT NULL DEFAULT 0,
     execution_score INTEGER NOT NULL DEFAULT 0,
     evidence_score INTEGER NOT NULL DEFAULT 0,
@@ -1723,6 +1727,15 @@ CREATE INDEX IF NOT EXISTS idx_skill_lifecycle_decisions_attribution
 """
 
 _ADDITIVE_SCHEMA_COLUMNS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "buddy_domain_capabilities",
+        (
+            ("industry_instance_id", "TEXT NOT NULL DEFAULT ''"),
+            ("control_thread_id", "TEXT NOT NULL DEFAULT ''"),
+            ("domain_scope_summary", "TEXT NOT NULL DEFAULT ''"),
+            ("domain_scope_tags_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ),
+    ),
     (
         "companion_relationships",
         (

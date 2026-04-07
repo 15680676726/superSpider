@@ -462,6 +462,13 @@ export default function BuddyOnboardingPage() {
                     message="系统建议"
                     description={transitionPreview.reason_summary}
                   />
+                  <Paragraph
+                    type="secondary"
+                    style={{ marginBottom: 0 }}
+                    data-testid="buddy-transition-scope-note"
+                  >
+                    普通领域扩展继续在聊天里推进；这里只用于切换当前主领域。
+                  </Paragraph>
                   {transitionPreview.current_domain ? (
                     <Paragraph style={{ marginBottom: 0 }}>
                       <strong>当前活跃领域：</strong>

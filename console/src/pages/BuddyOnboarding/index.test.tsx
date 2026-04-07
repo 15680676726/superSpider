@@ -98,16 +98,18 @@ describe("BuddyOnboardingPage", () => {
       },
       relationship: { encouragement_style: "old-friend" },
       execution_carrier: {
-        instance_id: "buddy:profile-1",
+        instance_id: "buddy:profile-1:domain-writing",
         label: "Alex 的成长载体",
         owner_scope: "profile-1",
         current_cycle_id: "cycle-1",
         team_generated: true,
+        thread_id: "industry-chat:buddy:profile-1:domain-writing:execution-core",
+        control_thread_id: "industry-chat:buddy:profile-1:domain-writing:execution-core",
       },
     });
     runtimeChatMock.buildBuddyExecutionCarrierChatBinding.mockReturnValue({
       name: "Alex growth carrier",
-      threadId: "industry-chat:buddy:profile-1:execution-core",
+      threadId: "industry-chat:buddy:profile-1:domain-writing:execution-core",
       userId: "buddy:profile-1",
       channel: "console",
       meta: {
@@ -169,6 +171,7 @@ describe("BuddyOnboardingPage", () => {
     });
     expect(apiMock.confirmBuddyDirection).not.toHaveBeenCalled();
     expect(screen.getByTestId("buddy-transition-choice-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("buddy-transition-scope-note")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("buddy-transition-confirm"));
 
@@ -192,13 +195,13 @@ describe("BuddyOnboardingPage", () => {
         profileId: "profile-1",
         profileDisplayName: "Alex",
         executionCarrier: expect.objectContaining({
-          instance_id: "buddy:profile-1",
+          instance_id: "buddy:profile-1:domain-writing",
         }),
       });
     });
     expect(runtimeChatMock.openRuntimeChat).toHaveBeenCalledWith(
       expect.objectContaining({
-        threadId: "industry-chat:buddy:profile-1:execution-core",
+        threadId: "industry-chat:buddy:profile-1:domain-writing:execution-core",
       }),
       navigateMock,
     );
@@ -479,7 +482,7 @@ describe("BuddyOnboardingPage", () => {
     });
     expect(runtimeChatMock.openRuntimeChat).toHaveBeenCalledWith(
       expect.objectContaining({
-        threadId: "industry-chat:buddy:profile-1:execution-core",
+        threadId: "industry-chat:buddy:profile-1:domain-writing:execution-core",
       }),
       navigateMock,
       expect.objectContaining({

@@ -274,7 +274,9 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
     )
 
     assert result.execution_carrier is not None
-    assert result.execution_carrier["instance_id"] == f"buddy:{result.growth_target.profile_id}"
+    assert result.domain_capability.industry_instance_id
+    assert result.execution_carrier["instance_id"] == result.domain_capability.industry_instance_id
+    assert result.execution_carrier["control_thread_id"] == result.domain_capability.control_thread_id
     assert result.execution_carrier["team_generated"] is True
 
     industry_repository = SqliteIndustryInstanceRepository(store)
@@ -283,7 +285,7 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
     cycle_repository = SqliteOperatingCycleRepository(store)
     assignment_repository = SqliteAssignmentRepository(store)
 
-    instance = industry_repository.get_instance(f"buddy:{result.growth_target.profile_id}")
+    instance = industry_repository.get_instance(result.domain_capability.industry_instance_id)
     assert instance is not None
     assert instance.current_cycle_id
 
@@ -327,7 +329,7 @@ def test_confirm_primary_direction_writes_direction_first_industry_profile(tmp_p
     )
 
     industry_repository = SqliteIndustryInstanceRepository(store)
-    instance = industry_repository.get_instance(f"buddy:{result.growth_target.profile_id}")
+    instance = industry_repository.get_instance(result.domain_capability.industry_instance_id)
 
     assert instance is not None
     profile = IndustryProfile.model_validate(instance.profile_payload)
@@ -336,6 +338,135 @@ def test_confirm_primary_direction_writes_direction_first_industry_profile(tmp_p
     assert set(profile.constraints) >= {"time", "money"}
     assert "profession" not in instance.profile_payload
     assert "current_stage" not in instance.profile_payload
+
+
+def test_confirm_primary_direction_start_new_creates_fresh_domain_carrier_binding(tmp_path) -> None:
+    service, store = _build_service_with_planning(tmp_path)
+    creator_identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing"],
+        strengths=["storytelling"],
+        constraints=["time"],
+        goal_intention="Build a creator path with long-term proof of work.",
+    )
+    creator_clarification = service.answer_clarification_turn(
+        session_id=creator_identity.session_id,
+        answer="I want a creator direction with proof of work and leverage.",
+        existing_question_count=9,
+    )
+    creator = service.confirm_primary_direction(
+        session_id=creator_identity.session_id,
+        selected_direction=creator_clarification.recommended_direction,
+        capability_action="start-new",
+    )
+
+    health_identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["health", "fitness"],
+        strengths=["consistency"],
+        constraints=["time"],
+        goal_intention="I need to rebuild my health and discipline.",
+    )
+    service.answer_clarification_turn(
+        session_id=health_identity.session_id,
+        answer="I want to rebuild energy, exercise, and stable health habits.",
+        existing_question_count=9,
+    )
+    health = service.confirm_primary_direction(
+        session_id=health_identity.session_id,
+        selected_direction=_HEALTH_DIRECTION,
+        capability_action="start-new",
+    )
+
+    assert creator.domain_capability.industry_instance_id
+    assert creator.domain_capability.control_thread_id
+    assert health.domain_capability.industry_instance_id
+    assert health.domain_capability.control_thread_id
+    assert health.domain_capability.industry_instance_id != creator.domain_capability.industry_instance_id
+    assert health.domain_capability.control_thread_id != creator.domain_capability.control_thread_id
+    assert SqliteIndustryInstanceRepository(store).get_instance(
+        health.domain_capability.industry_instance_id,
+    ) is not None
+
+
+def test_confirm_primary_direction_restore_archived_reuses_archived_carrier_binding(tmp_path) -> None:
+    service = _build_service_with_planning(tmp_path)[0]
+    creator_identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing"],
+        strengths=["storytelling"],
+        constraints=["time"],
+        goal_intention="Build a creator path with long-term proof of work.",
+    )
+    creator_clarification = service.answer_clarification_turn(
+        session_id=creator_identity.session_id,
+        answer="I want a creator direction with proof of work and leverage.",
+        existing_question_count=9,
+    )
+    creator = service.confirm_primary_direction(
+        session_id=creator_identity.session_id,
+        selected_direction=creator_clarification.recommended_direction,
+        capability_action="start-new",
+    )
+    creator_instance_id = creator.domain_capability.industry_instance_id
+    creator_thread_id = creator.domain_capability.control_thread_id
+
+    health_identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["health", "fitness"],
+        strengths=["consistency"],
+        constraints=["time"],
+        goal_intention="I need to rebuild my health and discipline.",
+    )
+    service.answer_clarification_turn(
+        session_id=health_identity.session_id,
+        answer="I want to rebuild energy, exercise, and stable health habits.",
+        existing_question_count=9,
+    )
+    service.confirm_primary_direction(
+        session_id=health_identity.session_id,
+        selected_direction=_HEALTH_DIRECTION,
+        capability_action="start-new",
+    )
+
+    creator_return_identity = service.submit_identity(
+        display_name="Nora",
+        profession="Writer",
+        current_stage="restart",
+        interests=["writing"],
+        strengths=["storytelling"],
+        constraints=["time"],
+        goal_intention="Return to creator work.",
+    )
+    creator_return_clarification = service.answer_clarification_turn(
+        session_id=creator_return_identity.session_id,
+        answer="I want to return to the same creator direction I was already building.",
+        existing_question_count=9,
+    )
+    preview = service.preview_primary_direction_transition(
+        session_id=creator_return_identity.session_id,
+        selected_direction=creator_return_clarification.recommended_direction,
+    )
+    restored = service.confirm_primary_direction(
+        session_id=creator_return_identity.session_id,
+        selected_direction=creator_return_clarification.recommended_direction,
+        capability_action="restore-archived",
+        target_domain_id=preview.archived_matches[0]["domain_id"],
+    )
+
+    assert restored.domain_capability.industry_instance_id == creator_instance_id
+    assert restored.domain_capability.control_thread_id == creator_thread_id
+    assert restored.execution_carrier is not None
+    assert restored.execution_carrier["instance_id"] == creator_instance_id
+    assert restored.execution_carrier["control_thread_id"] == creator_thread_id
 
 
 def test_record_chat_interaction_increments_strong_pull_for_stuck_or_avoidance_messages(
