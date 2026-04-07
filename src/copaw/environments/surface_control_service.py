@@ -498,6 +498,11 @@ class SurfaceControlService:
         contract_surface = self._mapping(contract.get("surface_contract"))
         desktop_from_snapshot = self._mapping(snapshot_mapping.get("desktop_app_contract"))
         desktop_from_detail = self._mapping(detail_mapping.get("desktop_app_contract"))
+        derived_document_scope = self._derive_document_writer_scope(
+            contract=contract,
+            snapshot=snapshot_mapping,
+            detail=detail_mapping,
+        )
         return self._normalize_string(
             contract.get("writer_lock_scope"),
             contract.get("lock_scope_ref"),
@@ -506,8 +511,31 @@ class SurfaceControlService:
             desktop_from_snapshot.get("writer_lock_scope"),
             desktop_from_detail.get("writer_lock_scope"),
             session_metadata.get("writer_lock_scope"),
+            derived_document_scope,
             session_mount_id,
         ) or session_mount_id
+
+    def _derive_document_writer_scope(
+        self,
+        *,
+        contract: dict[str, Any],
+        snapshot: dict[str, Any],
+        detail: dict[str, Any],
+    ) -> str | None:
+        path = self._normalize_string(
+            contract.get("path"),
+            self._mapping(contract.get("surface_contract")).get("path"),
+            snapshot.get("document_path"),
+            detail.get("document_path"),
+        )
+        if path is None:
+            return None
+        try:
+            normalized_path = Path(path).expanduser().resolve(strict=False)
+        except Exception:
+            normalized_path = Path(path)
+        stable_key = normalized_path.as_posix().lower()
+        return f"document-path:{stable_key}"
 
     def _build_live_surface_writer_lease_payload(
         self,

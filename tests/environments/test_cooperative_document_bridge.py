@@ -531,6 +531,80 @@ async def test_document_action_acquires_and_releases_shared_writer_lease(
 
 
 @pytest.mark.asyncio
+async def test_document_action_derives_writer_scope_from_document_path_across_sessions(
+    tmp_path,
+) -> None:
+    service, _, _, _event_bus = _build_environment_service(tmp_path)
+    primary = _acquire_document_session(service)
+    secondary = service.acquire_session_lease(
+        channel="desktop",
+        session_id="document-seat-2",
+        user_id="alice",
+        owner="worker-8",
+        ttl_seconds=60,
+        metadata={
+            "host_mode": "local-managed",
+            "lease_class": "exclusive-writer",
+            "access_mode": "document-bridge",
+            "session_scope": "desktop-user-session",
+        },
+    )
+    for lease in (primary, secondary):
+        service.register_document_bridge(
+            session_mount_id=lease.id,
+            bridge_ref="document-bridge:office",
+            status="ready",
+            supported_families=["documents"],
+        )
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    captured_scope: dict[str, str] = {}
+    call_count = 0
+    contract = {"path": str(tmp_path / "shared-report.docx"), "content": "draft"}
+
+    class _Executor:
+        async def __call__(self, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            active = service.list_shared_writer_leases(limit=5)
+            assert active
+            captured_scope["value"] = str(active[0].metadata.get("writer_lock_scope") or "")
+            if call_count == 1:
+                started.set()
+                await release.wait()
+            return {"success": True, "message": "document ok"}
+
+    service.register_document_bridge_executor("document-bridge:office", _Executor())
+
+    primary_task = asyncio.create_task(
+        service.execute_document_action(
+            session_mount_id=primary.id,
+            action="write_document",
+            document_family="documents",
+            contract=contract,
+        )
+    )
+    await started.wait()
+
+    with pytest.raises(RuntimeError, match="reserved"):
+        await service.execute_document_action(
+            session_mount_id=secondary.id,
+            action="write_document",
+            document_family="documents",
+            contract=contract,
+        )
+
+    release.set()
+    result = await primary_task
+
+    assert result["success"] is True
+    assert captured_scope["value"]
+    assert captured_scope["value"] != primary.id
+    assert captured_scope["value"] != secondary.id
+
+
+@pytest.mark.asyncio
 async def test_document_action_restores_clipboard_and_cleans_up_after_execution_failure(
     tmp_path,
 ) -> None:

@@ -138,6 +138,10 @@ def _desktop_pywin32_ready() -> bool:
     )
 
 
+def _desktop_semantic_control_ready() -> bool:
+    return _find_module("pywinauto")
+
+
 class ExecutionErrorDetail(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -2537,6 +2541,7 @@ def _desktop_doctor(
     enabled = installed_clients.get("desktop_windows")
     host_policy = _desktop_host_policy()
     pywin32_ready = _desktop_pywin32_ready()
+    semantic_ready = _desktop_semantic_control_ready()
     checks = [
         InstallTemplateDoctorCheck(
             key="platform",
@@ -2576,6 +2581,16 @@ def _desktop_doctor(
                 else "Desktop MCP server module is missing"
             ),
         ),
+        InstallTemplateDoctorCheck(
+            key="semantic_control",
+            label="Semantic control layer",
+            status="pass" if semantic_ready else "warn",
+            message=(
+                "pywinauto semantic desktop controls are available"
+                if semantic_ready
+                else "Semantic desktop controls are not ready; UIA actions may fail even if Win32 host smoke passes"
+            ),
+        ),
     ]
     statuses = [item.status for item in checks]
     if "fail" in statuses:
@@ -2599,6 +2614,7 @@ def _desktop_doctor(
             "installed": enabled is not None,
             "enabled": enabled,
             "pywin32_ready": pywin32_ready,
+            "semantic_control_ready": semantic_ready,
         },
         runtime={},
     )
@@ -2705,6 +2721,7 @@ async def _desktop_example_run(
 ) -> InstallTemplateExampleRunRecord:
     started_at = _utc_now()
     enabled = _list_installed_mcp_clients(capability_service).get("desktop_windows")
+    semantic_ready = _desktop_semantic_control_ready()
     if enabled is None:
         finished_at = _utc_now()
         return InstallTemplateExampleRunRecord(
@@ -2740,15 +2757,25 @@ async def _desktop_example_run(
     try:
         payload = WindowsDesktopHost().list_windows(limit=1)
         finished_at = _utc_now()
+        operations = ["list-windows", "semantic-import-check"]
+        summary = (
+            "Desktop host smoke succeeded"
+            if semantic_ready
+            else "Desktop host smoke succeeded, but semantic desktop controls are not ready"
+        )
         return InstallTemplateExampleRunRecord(
             template_id="desktop-windows",
             status="success",
             started_at=started_at.isoformat(),
             finished_at=finished_at.isoformat(),
-            summary="Desktop host smoke succeeded",
-            operations=["list-windows"],
+            summary=summary,
+            operations=operations,
             payload=payload if isinstance(payload, dict) else {},
-            support={"installed": True, "enabled": True},
+            support={
+                "installed": True,
+                "enabled": True,
+                "semantic_control_ready": semantic_ready,
+            },
         )
     except DesktopAutomationError as exc:
         finished_at = _utc_now()

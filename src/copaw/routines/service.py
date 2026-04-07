@@ -241,6 +241,8 @@ class RoutineService:
         state_store: SQLiteStateStore | None = None,
         memory_retain_service: object | None = None,
         learning_service: object | None = None,
+        capability_service: object | None = None,
+        agent_profile_service: object | None = None,
     ) -> None:
         self._routine_repository = routine_repository
         self._routine_run_repository = routine_run_repository
@@ -251,6 +253,8 @@ class RoutineService:
         self._state_store = state_store
         self._memory_retain_service = memory_retain_service
         self._learning_service = learning_service
+        self._capability_service = capability_service
+        self._agent_profile_service = agent_profile_service
 
     def list_routines(
         self,
@@ -1173,6 +1177,11 @@ class RoutineService:
                 "host-unsupported",
                 "Desktop routine replay is only available on Windows hosts",
             )
+        self._ensure_desktop_capability_available(
+            routine=routine,
+            run=run,
+            request=request,
+        )
         session_id = request.session_id or f"desktop-{routine.id[:12]}"
         session_lease = self._environment_service.acquire_session_lease(
             channel="desktop",
@@ -1316,6 +1325,96 @@ class RoutineService:
                 lease_token=session_lease.lease_token,
                 reason="routine desktop replay completed",
             )
+
+    def _ensure_desktop_capability_available(
+        self,
+        *,
+        routine: ExecutionRoutineRecord,
+        run: RoutineRunRecord,
+        request: RoutineReplayRequest,
+    ) -> None:
+        if self._agent_profile_service is None and self._capability_service is None:
+            return
+        required_capability_id = "mcp:desktop_windows"
+        owner_agent_id = _string(request.owner_agent_id) or _string(run.owner_agent_id) or _string(
+            routine.owner_agent_id,
+        )
+        capability_surface = self._get_agent_capability_surface(owner_agent_id)
+        if capability_surface is not None:
+            effective_capabilities = {
+                str(item).strip()
+                for item in list(capability_surface.get("effective_capabilities") or [])
+                if str(item).strip()
+            }
+            if required_capability_id in effective_capabilities:
+                return
+            raise _RoutineFailure(
+                "capability-unavailable",
+                (
+                    f"Desktop routine replay requires {required_capability_id}"
+                    + (
+                        f" for agent '{owner_agent_id}'."
+                        if owner_agent_id is not None
+                        else "."
+                    )
+                ),
+                metadata={
+                    "required_capability_id": required_capability_id,
+                    "owner_agent_id": owner_agent_id,
+                    "capability_surface_present": True,
+                },
+            )
+        if self._desktop_capability_mount_enabled(required_capability_id):
+            return
+        raise _RoutineFailure(
+            "capability-unavailable",
+            f"Desktop routine replay requires enabled capability {required_capability_id}.",
+            metadata={
+                "required_capability_id": required_capability_id,
+                "owner_agent_id": owner_agent_id,
+                "capability_surface_present": False,
+            },
+        )
+
+    def _get_agent_capability_surface(
+        self,
+        agent_id: str | None,
+    ) -> dict[str, Any] | None:
+        if agent_id is None:
+            return None
+        getter = getattr(self._agent_profile_service, "get_capability_surface", None)
+        if not callable(getter):
+            return None
+        try:
+            payload = getter(agent_id)
+        except Exception:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _desktop_capability_mount_enabled(self, capability_id: str) -> bool:
+        getter = getattr(self._capability_service, "get_capability", None)
+        if callable(getter):
+            try:
+                mount = getter(capability_id)
+            except Exception:
+                mount = None
+            if mount is not None and bool(getattr(mount, "enabled", False)):
+                return True
+        lister = getattr(self._capability_service, "list_mcp_client_infos", None)
+        if not callable(lister):
+            return False
+        try:
+            payload = lister()
+        except Exception:
+            return False
+        if not isinstance(payload, list):
+            return False
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            if _string(item.get("key")) == "desktop_windows" and bool(item.get("enabled")):
+                return True
+        return False
 
     def _build_browser_step_kwargs(
         self,

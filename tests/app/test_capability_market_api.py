@@ -1169,6 +1169,54 @@ def test_capability_market_install_template_doctor_and_example_run() -> None:
     assert payload["operations"] == ["start", "stop"]
 
 
+def test_capability_market_desktop_doctor_and_example_run_surface_semantic_readiness() -> None:
+    client = TestClient(build_app())
+
+    class _FakeWindowsDesktopHost:
+        def list_windows(self, *, limit: int = 1):
+            return {
+                "ok": True,
+                "windows": [{"title": "Orders.xlsx"}],
+                "limit": limit,
+            }
+
+    def _fake_find_module(name: str) -> bool:
+        if name == "pywinauto":
+            return False
+        return True
+
+    with (
+        patch(
+            "copaw.capabilities.install_templates._list_installed_mcp_clients",
+            return_value={"desktop_windows": True},
+        ),
+        patch("copaw.capabilities.install_templates.sys.platform", "win32"),
+        patch("copaw.capabilities.install_templates._desktop_pywin32_ready", return_value=True),
+        patch("copaw.capabilities.install_templates._find_module", side_effect=_fake_find_module),
+        patch(
+            "copaw.capabilities.install_templates.WindowsDesktopHost",
+            _FakeWindowsDesktopHost,
+        ),
+    ):
+        doctor = client.get("/capability-market/install-templates/desktop-windows/doctor")
+        example = client.post("/capability-market/install-templates/desktop-windows/example-run")
+
+    assert doctor.status_code == 200
+    doctor_payload = doctor.json()
+    semantic_check = next(
+        item for item in doctor_payload["checks"] if item["key"] == "semantic_control"
+    )
+    assert doctor_payload["status"] == "degraded"
+    assert semantic_check["status"] == "warn"
+    assert doctor_payload["support"]["semantic_control_ready"] is False
+
+    assert example.status_code == 200
+    example_payload = example.json()
+    assert example_payload["status"] == "success"
+    assert "semantic-import-check" in example_payload["operations"]
+    assert example_payload["support"]["semantic_control_ready"] is False
+
+
 def test_capability_market_hub_search_proxies_skill_hub() -> None:
     client = TestClient(build_app())
 

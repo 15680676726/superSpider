@@ -321,6 +321,8 @@ def build_runtime_domain_services(
         state_store=state_store,
         memory_retain_service=memory_retain_service,
         learning_service=learning_service,
+        capability_service=capability_service,
+        agent_profile_service=agent_profile_service,
     )
     fixed_sop_service.set_routine_service(routine_service)
     capability_service.set_routine_service(routine_service)

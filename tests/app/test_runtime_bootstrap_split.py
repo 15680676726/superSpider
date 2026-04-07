@@ -532,10 +532,14 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
         "FixedSopService",
         _FixedSopService,
     )
+    def _fake_routine_service(**kwargs):
+        captured["routine_service_kwargs"] = kwargs
+        return SimpleNamespace()
+
     monkeypatch.setattr(
         runtime_bootstrap_domains_module,
         "RoutineService",
-        lambda **kwargs: SimpleNamespace(),
+        _fake_routine_service,
     )
     monkeypatch.setattr(
         runtime_bootstrap_domains_module,
@@ -611,4 +615,6 @@ def test_domain_builder_wires_environment_service_into_fixed_sop_service(
     assert "report_replan_engine" in captured["industry_runtime_bindings_kwargs"]
     assert captured["industry_runtime_bindings_kwargs"]["report_replan_engine"] is not None
     assert captured["learning_bindings"].kernel_dispatcher is kernel_dispatcher
+    assert captured["routine_service_kwargs"]["agent_profile_service"] is not None
+    assert captured["routine_service_kwargs"]["capability_service"] is not None
     assert callable(captured["main_brain_orchestrator_kwargs"]["intake_contract_resolver"])

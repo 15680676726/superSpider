@@ -61,6 +61,20 @@ class FakeKnowledgeService:
         return kwargs
 
 
+class FakeAgentProfileService:
+    def __init__(self, surfaces: dict[str, dict[str, object] | None]) -> None:
+        self._surfaces = dict(surfaces)
+
+    def get_capability_surface(
+        self,
+        agent_id: str,
+        *,
+        decision_limit: int = 10,
+    ) -> dict[str, object] | None:
+        _ = decision_limit
+        return self._surfaces.get(agent_id)
+
+
 def build_routine_service(tmp_path, *, learning_service=None):
     store = SQLiteStateStore(tmp_path / "state.sqlite3")
     routine_repo = SqliteExecutionRoutineRepository(store)
@@ -606,3 +620,45 @@ async def test_routine_service_desktop_host_unsupported(tmp_path, monkeypatch) -
     assert response.run.status == "failed"
     assert response.run.failure_class == "host-unsupported"
     assert response.run.fallback_mode == "hard-fail"
+
+
+@pytest.mark.asyncio
+async def test_routine_service_desktop_replay_requires_desktop_capability_in_formal_runtime(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    harness = build_routine_service(tmp_path)
+    monkeypatch.setattr(routine_service_module.sys, "platform", "win32")
+
+    class _FailHost:
+        def __init__(self) -> None:
+            raise AssertionError("desktop host should not start without mcp:desktop_windows")
+
+    monkeypatch.setattr(routine_service_module, "WindowsDesktopHost", _FailHost)
+    harness.service._agent_profile_service = FakeAgentProfileService(
+        {
+            "agent-desktop": {
+                "agent_id": "agent-desktop",
+                "effective_capabilities": ["tool:browser_use"],
+            },
+        },
+    )
+    routine = harness.service.create_routine(
+        RoutineCreateRequest(
+            routine_key="desktop-capability-required",
+            name="Desktop Capability Required",
+            owner_agent_id="agent-desktop",
+            engine_kind="desktop",
+            environment_kind="desktop",
+            action_contract=[{"action": "list_windows"}],
+        ),
+    )
+
+    response = await harness.service.replay_routine(
+        routine.id,
+        RoutineReplayRequest(owner_agent_id="agent-desktop"),
+    )
+
+    assert response.run.status == "failed"
+    assert response.run.failure_class == "capability-unavailable"
+    assert "mcp:desktop_windows" in str(response.run.output_summary)
