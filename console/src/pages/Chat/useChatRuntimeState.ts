@@ -273,10 +273,12 @@ export function useChatRuntimeState({
         window.dispatchEvent(new CustomEvent("copaw:governance-status-dirty")),
       dispatchHumanAssistDirty: () =>
         window.dispatchEvent(new CustomEvent("copaw:human-assist-dirty")),
-      onRuntimeResponseTerminal: () =>
+      onRuntimeResponseTerminal: (status) => {
+        sessionApi.markThreadResponseTerminal(currentControlThreadId, status);
         setRuntimeCommitState((currentState) =>
           markRuntimeResponseTerminal(currentState),
-        ),
+        );
+      },
     });
 
     return {

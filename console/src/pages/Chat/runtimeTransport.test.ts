@@ -808,7 +808,7 @@ describe("runtimeTransport", () => {
     });
     expect(setRuntimeWaitState).toHaveBeenCalledWith(null);
     expect(dispatchGovernanceDirty).toHaveBeenCalledTimes(1);
-    expect(onRuntimeResponseTerminal).toHaveBeenCalledTimes(1);
+    expect(onRuntimeResponseTerminal).toHaveBeenCalledWith("completed");
     expect(setRuntimeHealthNotice).not.toHaveBeenCalled();
   });
 

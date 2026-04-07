@@ -427,4 +427,82 @@ describe("sessionApi.openBoundThread", () => {
 
     expect(firstCard?.data?.input?.[0]?.content?.[0]?.status).toBe("completed");
   });
+
+  it("settles local in-flight transcript after a terminal response even if refresh falls back to cached session", async () => {
+    const threadId = "industry-chat:industry-v1-acme:execution-core";
+    mockedGetRuntimeConversation.mockResolvedValueOnce(
+      buildConversation(threadId, [
+        {
+          id: "backend-user-1",
+          role: "user",
+          content: [{ type: "text", text: "开始" }],
+        },
+      ]) as Awaited<ReturnType<typeof api.getRuntimeConversation>>,
+    );
+
+    await sessionApi.openBoundThread({
+      name: "Acme Pets - Spider Mesh 主脑",
+      threadId,
+      userId: "copaw-agent-runner",
+      channel: "console",
+      meta: {
+        session_kind: "industry-control-thread",
+      },
+    });
+
+    await sessionApi.updateSession({
+      id: threadId,
+      messages: [
+        { id: "local-user-1", role: "user", cards: [] },
+        {
+          id: "local-assistant-1",
+          role: "assistant",
+          msgStatus: "generating",
+          cards: [
+            {
+              code: "AgentScopeRuntimeResponseCard",
+              data: {
+                status: "in_progress",
+                completed_at: null,
+                output: [
+                  {
+                    role: "assistant",
+                    status: "in_progress",
+                    content: [{ type: "text", text: "正在思考" }],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ] as never[],
+    });
+
+    (
+      sessionApi as unknown as {
+        markThreadResponseTerminal: (threadId: string, status: string) => void;
+      }
+    ).markThreadResponseTerminal(threadId, "completed");
+
+    mockedGetRuntimeConversation.mockRejectedValueOnce(
+      new Error("refresh failed"),
+    );
+    sessionApiInternals.threadCacheTimeout = 0;
+
+    const restored = await sessionApi.getSession(threadId);
+    const responseCard = restored.messages[1]?.cards?.[0] as
+      | {
+          data?: {
+            status?: string;
+            completed_at?: number | null;
+            output?: Array<{ status?: string }>;
+          };
+        }
+      | undefined;
+
+    expect(restored.messages[1]?.msgStatus).toBe("finished");
+    expect(responseCard?.data?.status).toBe("completed");
+    expect(responseCard?.data?.completed_at).not.toBeNull();
+    expect(responseCard?.data?.output?.[0]?.status).toBe("completed");
+  });
 });

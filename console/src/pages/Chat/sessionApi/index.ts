@@ -41,6 +41,13 @@ interface ExtendedSession extends IAgentScopeRuntimeWebUISession {
 }
 
 const IN_PROGRESS_MESSAGE_STATUSES = new Set(["created", "queued", "in_progress"]);
+const TERMINAL_RESPONSE_STATUSES = new Set([
+  "completed",
+  "failed",
+  "canceled",
+  "rejected",
+  "incomplete",
+]);
 
 export interface BoundThreadPayload {
   name: string;
@@ -218,6 +225,138 @@ function toBubbleStatus(status: string): RuntimeBubbleStatus {
     return "generating";
   }
   return "finished";
+}
+
+function normalizeTerminalResponseStatus(status: string | null | undefined): string | null {
+  if (typeof status !== "string" || !status.trim()) {
+    return null;
+  }
+  const normalized = status.trim().toLowerCase();
+  return TERMINAL_RESPONSE_STATUSES.has(normalized) ? normalized : null;
+}
+
+function settleTerminalResponseData(
+  value: unknown,
+  terminalStatus: string,
+  completedAt: number,
+): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const record = value as Record<string, unknown>;
+  let changed = false;
+  const next: Record<string, unknown> = { ...record };
+
+  if (
+    typeof next.status === "string" &&
+    IN_PROGRESS_MESSAGE_STATUSES.has(next.status.trim().toLowerCase())
+  ) {
+    next.status = terminalStatus;
+    changed = true;
+  }
+
+  if (Array.isArray(next.output)) {
+    let outputChanged = false;
+    const nextOutput = next.output.map((item) => {
+      if (!item || typeof item !== "object") {
+        return item;
+      }
+      const outputRecord = item as Record<string, unknown>;
+      if (
+        typeof outputRecord.status === "string" &&
+        IN_PROGRESS_MESSAGE_STATUSES.has(outputRecord.status.trim().toLowerCase())
+      ) {
+        outputChanged = true;
+        return {
+          ...outputRecord,
+          status: terminalStatus,
+        };
+      }
+      return item;
+    });
+    if (outputChanged) {
+      next.output = nextOutput;
+      changed = true;
+    }
+  }
+
+  const looksLikeResponseCard =
+    next.object === "response" ||
+    Array.isArray(next.output) ||
+    typeof next.status === "string";
+  if (looksLikeResponseCard && next.completed_at == null) {
+    next.completed_at = completedAt;
+    changed = true;
+  }
+
+  return changed ? next : value;
+}
+
+function settleMessageForTerminalResponse(
+  message: IAgentScopeRuntimeWebUIMessage,
+  terminalStatus: string,
+  completedAt: number,
+): IAgentScopeRuntimeWebUIMessage {
+  const nextBubbleStatus = toBubbleStatus(terminalStatus);
+  let changed = false;
+  const nextMessage: IAgentScopeRuntimeWebUIMessage = { ...message };
+
+  if (
+    typeof nextMessage.msgStatus === "string" &&
+    nextMessage.msgStatus.trim().toLowerCase() === "generating"
+  ) {
+    nextMessage.msgStatus = nextBubbleStatus;
+    changed = true;
+  }
+
+  if (Array.isArray(message.cards)) {
+    let cardsChanged = false;
+    const nextCards = message.cards.map((card) => {
+      if (!card || typeof card !== "object") {
+        return card;
+      }
+      const typedCard = card as typeof card & { data?: unknown };
+      const nextData = settleTerminalResponseData(
+        typedCard.data,
+        terminalStatus,
+        completedAt,
+      );
+      if (nextData !== typedCard.data) {
+        changed = true;
+        cardsChanged = true;
+        return {
+          ...(card as unknown as Record<string, unknown>),
+          data: nextData,
+        } as typeof card;
+      }
+      return card;
+    });
+    if (cardsChanged) {
+      nextMessage.cards = nextCards;
+    }
+  }
+
+  return changed ? nextMessage : message;
+}
+
+function settleMessagesForTerminalResponse(
+  messages: IAgentScopeRuntimeWebUIMessage[],
+  terminalStatus: string,
+  completedAt: number,
+): IAgentScopeRuntimeWebUIMessage[] {
+  let changed = false;
+  const nextMessages = messages.map((message) => {
+    const nextMessage = settleMessageForTerminalResponse(
+      message,
+      terminalStatus,
+      completedAt,
+    );
+    if (nextMessage !== message) {
+      changed = true;
+    }
+    return nextMessage;
+  });
+  return changed ? nextMessages : messages;
 }
 
 function resolveResponseError(outputMessages: OutputMessage[]): unknown {
@@ -680,6 +819,34 @@ class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     } finally {
       this.threadFetchPromises.delete(normalizedThreadId);
     }
+  }
+
+  markThreadResponseTerminal(threadId: string | null, status: string): void {
+    const normalizedThreadId = normalizeThreadId(threadId);
+    const normalizedStatus = normalizeTerminalResponseStatus(status);
+    if (!normalizedThreadId || !normalizedStatus) {
+      return;
+    }
+
+    const existing = this.findExistingSession(normalizedThreadId);
+    if (!existing) {
+      return;
+    }
+
+    const existingMessages = Array.isArray(existing.messages) ? existing.messages : [];
+    const nextMessages = settleMessagesForTerminalResponse(
+      existingMessages,
+      normalizedStatus,
+      Math.floor(Date.now() / 1000),
+    );
+    if (nextMessages === existingMessages) {
+      return;
+    }
+
+    this.cacheSession({
+      ...existing,
+      messages: nextMessages,
+    });
   }
 
   private async fetchSessionFromBackend(

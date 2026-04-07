@@ -70,7 +70,7 @@ interface CreateRuntimeTransportArgs {
   dispatchGovernanceDirty?: () => void;
   dispatchHumanAssistDirty?: () => void;
   onRuntimeSidecarEvent?: (event: RuntimeSidecarRecord) => void;
-  onRuntimeResponseTerminal?: () => void;
+  onRuntimeResponseTerminal?: (status: string) => void;
 }
 
 interface ParseRuntimeResponseChunkArgs {
@@ -82,7 +82,7 @@ interface ParseRuntimeResponseChunkArgs {
   dispatchGovernanceDirty?: () => void;
   dispatchHumanAssistDirty?: () => void;
   onRuntimeSidecarEvent?: (event: RuntimeSidecarRecord) => void;
-  onRuntimeResponseTerminal?: () => void;
+  onRuntimeResponseTerminal?: (status: string) => void;
 }
 
 interface LinkedAbortController {
@@ -741,7 +741,7 @@ export function parseRuntimeResponseChunk(
       parserArgs.setRuntimeWaitState(null);
       parserArgs.dispatchGovernanceDirty?.();
       parserArgs.dispatchHumanAssistDirty?.();
-      parserArgs.onRuntimeResponseTerminal?.();
+      parserArgs.onRuntimeResponseTerminal?.(status);
     }
   }
 
