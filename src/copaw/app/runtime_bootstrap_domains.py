@@ -84,6 +84,7 @@ class RuntimeDomainServices:
     query_execution_service: KernelQueryExecutionService
     main_brain_chat_service: MainBrainChatService
     main_brain_orchestrator: MainBrainOrchestrator
+    report_replan_engine: ReportReplanEngine
 
 
 def _build_goal_service(
@@ -441,4 +442,5 @@ def build_runtime_domain_services(
         query_execution_service=query_execution_service,
         main_brain_chat_service=main_brain_chat_service,
         main_brain_orchestrator=main_brain_orchestrator,
+        report_replan_engine=report_replan_engine,
     )

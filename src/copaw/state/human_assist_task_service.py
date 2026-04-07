@@ -500,6 +500,98 @@ class HumanAssistTaskService:
         )
         return self.issue_task(record)
 
+    def ensure_exception_absorption_task(
+        self,
+        *,
+        chat_thread_id: str,
+        title: str,
+        summary: str,
+        required_action: str,
+        industry_instance_id: str | None = None,
+        assignment_id: str | None = None,
+        task_id: str | None = None,
+        profile_id: str | None = None,
+        resume_checkpoint_ref: str | None = None,
+        verification_anchor: str | None = None,
+        block_evidence_refs: Sequence[str] | None = None,
+        continuation_context: Mapping[str, Any] | None = None,
+    ) -> HumanAssistTaskRecord:
+        normalized_thread_id = _string(chat_thread_id)
+        if normalized_thread_id is None:
+            raise ValueError("Exception absorption human assist task requires a chat thread id")
+        normalized_task_id = _string(task_id)
+        normalized_resume_ref = (
+            _string(resume_checkpoint_ref)
+            or _string(verification_anchor)
+            or "human-return"
+        )
+        merged_block_evidence_refs = _string_list(block_evidence_refs)
+        for existing in self._repository.list_tasks(chat_thread_id=normalized_thread_id, limit=50):
+            if existing.status in self._TERMINAL_STATUSES:
+                continue
+            if existing.task_type != "exception-absorption-human-step":
+                continue
+            if existing.reason_code != "main-brain-exception-absorption":
+                continue
+            if normalized_task_id is not None and existing.task_id not in {None, normalized_task_id}:
+                continue
+            if _string(existing.resume_checkpoint_ref) != normalized_resume_ref:
+                continue
+            updated = existing.model_copy(
+                update={
+                    "profile_id": _string(profile_id) or existing.profile_id,
+                    "industry_instance_id": _string(industry_instance_id) or existing.industry_instance_id,
+                    "assignment_id": _string(assignment_id) or existing.assignment_id,
+                    "summary": _string(summary) or existing.summary,
+                    "reason_summary": _string(summary) or existing.reason_summary,
+                    "required_action": _string(required_action) or existing.required_action,
+                    "submission_payload": _merge_submission_payload(
+                        existing.submission_payload,
+                        continuation_context,
+                    ),
+                    "block_evidence_refs": _string_list(
+                        [*list(existing.block_evidence_refs), *merged_block_evidence_refs],
+                    ),
+                    "updated_at": _utc_now(),
+                },
+            )
+            return self._repository.upsert_task(updated)
+
+        anchor = _string(verification_anchor) or normalized_resume_ref or "human-return"
+        anchor_hint = f"“{anchor}”" if anchor else "完成返回条件"
+        record = HumanAssistTaskRecord(
+            profile_id=_string(profile_id),
+            industry_instance_id=_string(industry_instance_id),
+            assignment_id=_string(assignment_id),
+            task_id=normalized_task_id,
+            chat_thread_id=normalized_thread_id,
+            title=_string(title) or "补一个必要人类动作",
+            summary=_string(summary) or "主脑已经完成内部恢复，当前需要一个明确的人类动作才能继续。",
+            task_type="exception-absorption-human-step",
+            reason_code="main-brain-exception-absorption",
+            reason_summary=(
+                _string(summary)
+                or "Main brain exception absorption reached a governed human boundary."
+            ),
+            required_action=(
+                _string(required_action)
+                or f"请在聊天里完成并确认 {anchor_hint} 对应的人类步骤。"
+            ),
+            submission_mode="chat-message",
+            acceptance_mode="anchor_verified",
+            acceptance_spec={
+                "version": "v1",
+                "hard_anchors": [anchor],
+                "failure_hint": (
+                    f"还需要一个可验证的人类动作。请在聊天里明确说明已完成，并包含 {anchor_hint}。"
+                ),
+            },
+            resume_checkpoint_ref=normalized_resume_ref,
+            block_evidence_refs=merged_block_evidence_refs,
+            submission_payload=_merge_submission_payload({}, continuation_context),
+        )
+        return self.issue_task(record)
+
     def submit_task(
         self,
         task_id: str,

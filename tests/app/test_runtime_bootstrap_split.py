@@ -85,6 +85,11 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     tmp_path,
 ) -> None:
     calls: dict[str, object] = {}
+    class _ActorSupervisor:
+        def configure_exception_absorption(self, **kwargs) -> None:
+            calls["exception_absorption_config"] = kwargs
+
+    actor_supervisor = _ActorSupervisor()
     repositories = SimpleNamespace(
         work_context_repository=object(),
         industry_instance_repository=SimpleNamespace(list_instances=lambda limit=None: []),
@@ -122,6 +127,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
         query_execution_service="query-execution-service",
         main_brain_chat_service="main-brain-chat-service",
         main_brain_orchestrator="main-brain-orchestrator",
+        report_replan_engine="report-replan-engine",
     )
 
     monkeypatch.setattr(runtime_service_graph_module, "WORKING_DIR", tmp_path)
@@ -176,7 +182,7 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
             "kernel-dispatcher",
             "actor-mailbox-service",
             "actor-worker",
-            "actor-supervisor",
+            actor_supervisor,
         ),
     )
 
@@ -241,6 +247,12 @@ def test_build_runtime_bootstrap_assembles_domain_services_via_domain_builder(
     assert (
         calls["turn_executor_kwargs"]["conversation_compaction_service"]
         == "conversation-compaction-service"
+    )
+    assert calls["exception_absorption_config"]["human_assist_task_service"] is not None
+    assert calls["exception_absorption_config"]["report_replan_engine"] == "report-replan-engine"
+    assert (
+        calls["exception_absorption_config"]["exception_absorption_service"].__class__.__name__
+        == "MainBrainExceptionAbsorptionService"
     )
     assert bootstrap.goal_service == "goal-service"
     assert bootstrap.memory_activation_service == "memory-activation-service"

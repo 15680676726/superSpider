@@ -21,6 +21,7 @@ from ..kernel import (
     GovernanceService,
     KernelDispatcher,
     MainBrainChatService,
+    MainBrainExceptionAbsorptionService,
     MainBrainOrchestrator,
     KernelQueryExecutionService,
     KernelTaskStore,
@@ -599,6 +600,8 @@ def build_runtime_bootstrap(
         runtime_provider=runtime_provider,
         external_runtime_service=external_runtime_service,
     )
+    exception_absorption_service = MainBrainExceptionAbsorptionService()
+    configure_exception_absorption = getattr(actor_supervisor, "configure_exception_absorption", None)
 
     domain_services = build_runtime_domain_services(
         session_backend=session_backend,
@@ -633,6 +636,12 @@ def build_runtime_bootstrap(
         actor_mailbox_service=actor_mailbox_service,
         actor_supervisor=actor_supervisor,
     )
+    if callable(configure_exception_absorption):
+        configure_exception_absorption(
+            exception_absorption_service=exception_absorption_service,
+            human_assist_task_service=human_assist_task_service,
+            report_replan_engine=getattr(domain_services, "report_replan_engine", None),
+        )
     goal_service = domain_services.goal_service
     agent_profile_service = domain_services.agent_profile_service
     reporting_service = domain_services.reporting_service

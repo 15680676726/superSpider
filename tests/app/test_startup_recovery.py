@@ -5,11 +5,13 @@ import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+from copaw.evidence import EvidenceLedger
 from copaw.app.runtime_events import RuntimeEventBus
 from copaw.app.runtime_session import SafeJSONSession
 from copaw.app.startup_recovery import _detect_requested_surfaces, run_startup_recovery
 from copaw.environments import EnvironmentRegistry, EnvironmentRepository, EnvironmentService, SessionMountRepository
 from copaw.kernel import (
+    AbsorptionAction,
     AbsorptionCase,
     AbsorptionSummary,
     ActorMailboxService,
@@ -37,6 +39,7 @@ from copaw.state import (
     TaskRecord,
     TaskRuntimeRecord,
 )
+from copaw.state.human_assist_task_service import HumanAssistTaskService
 from copaw.state.repositories import (
     SqliteAssignmentRepository,
     SqliteAgentCheckpointRepository,
@@ -49,6 +52,7 @@ from copaw.state.repositories import (
     SqliteDecisionRequestRepository,
     SqliteGoalRepository,
     SqliteGoalOverrideRepository,
+    SqliteHumanAssistTaskRepository,
     SqliteIndustryInstanceRepository,
     SqliteOperatingCycleRepository,
     SqliteRuntimeFrameRepository,
@@ -85,6 +89,33 @@ class _RecordingAbsorptionService:
             human_required_case_count=0,
             main_brain_summary="Main brain is absorbing internal execution pressure.",
         )
+
+
+class _AbsorbingRecoveryService(_RecordingAbsorptionService):
+    def __init__(self, action) -> None:
+        super().__init__()
+        self.action = action
+        self.absorb_calls: list[dict[str, object]] = []
+
+    def absorb(self, *, runtimes, mailbox_items, human_assist_tasks, now, **kwargs):
+        self.absorb_calls.append(
+            {
+                "runtime_count": len(list(runtimes)),
+                "mailbox_count": len(list(mailbox_items)),
+                "human_assist_count": len(list(human_assist_tasks)),
+                "now": now,
+                "kwargs": dict(kwargs),
+            }
+        )
+        return self.action
+
+
+def _build_human_assist_service(tmp_path) -> HumanAssistTaskService:
+    state_store = SQLiteStateStore(tmp_path / "human-assist-state.sqlite3")
+    return HumanAssistTaskService(
+        repository=SqliteHumanAssistTaskRepository(state_store),
+        evidence_ledger=EvidenceLedger(database_path=tmp_path / "human-assist-evidence.sqlite3"),
+    )
 
 
 def test_startup_recovery_surface_detection_prefers_capability_layers() -> None:
@@ -365,6 +396,126 @@ def test_startup_recovery_projects_absorption_summary_into_result(tmp_path) -> N
         "Main brain is absorbing internal execution pressure."
     )
     assert len(absorption_service.calls) == 1
+
+
+def test_startup_recovery_materializes_exception_absorption_human_assist_when_continuity_anchor_exists(
+    tmp_path,
+) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="ops-agent",
+            actor_key="industry:test:ops-agent",
+            actor_fingerprint="fp-ops-agent",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="running",
+            metadata={
+                "chat_thread_id": "thread-1",
+                "control_thread_id": "thread-1",
+                "industry_instance_id": "industry-1",
+                "assignment_id": "assignment-1",
+                "work_context_id": "work-1",
+                "environment_ref": "session:console:desktop-1",
+            },
+        )
+    )
+    mailbox_service = ActorMailboxService(
+        mailbox_repository=SqliteAgentMailboxRepository(state_store),
+        runtime_repository=runtime_repository,
+        checkpoint_repository=SqliteAgentCheckpointRepository(state_store),
+    )
+    human_assist_service = _build_human_assist_service(tmp_path)
+    absorption_service = _AbsorbingRecoveryService(
+        AbsorptionAction(
+            kind="human-assist",
+            case_kind="waiting-confirm-orphan",
+            recovery_rung="human-assist",
+            owner_agent_id="ops-agent",
+            scope_ref="checkpoint:confirm",
+            summary="Need one governed confirmation to resume.",
+            human_required=True,
+            human_action_summary="请补一个必要确认。",
+            human_action_contract={
+                "title": "补一个必要确认",
+                "summary": "Need one governed confirmation to resume.",
+                "required_action": "请在聊天里补一个必要确认，并包含“checkpoint:confirm”。",
+                "resume_checkpoint_ref": "checkpoint:confirm",
+                "acceptance_spec": {"version": "v1", "hard_anchors": ["checkpoint:confirm"]},
+            },
+        )
+    )
+
+    summary = run_startup_recovery(
+        environment_service=None,
+        actor_mailbox_service=mailbox_service,
+        decision_request_repository=None,
+        kernel_dispatcher=None,
+        kernel_task_store=None,
+        schedule_repository=None,
+        runtime_repository=runtime_repository,
+        exception_absorption_service=absorption_service,
+        human_assist_task_service=human_assist_service,
+        runtime_event_bus=None,
+        reason="startup",
+    )
+
+    tasks = human_assist_service.list_tasks(chat_thread_id="thread-1", limit=20)
+    assert len(tasks) == 1
+    assert summary.absorption_action_kind == "human-assist"
+    assert summary.absorption_action_materialized is True
+    assert summary.absorption_human_task_id == tasks[0].id
+
+
+def test_startup_recovery_records_exception_absorption_replan_action_into_summary(tmp_path) -> None:
+    state_store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    runtime_repository = SqliteAgentRuntimeRepository(state_store)
+    runtime_repository.upsert_runtime(
+        AgentRuntimeRecord(
+            agent_id="ops-agent",
+            actor_key="industry:test:ops-agent",
+            actor_fingerprint="fp-ops-agent",
+            actor_class="industry-dynamic",
+            desired_state="active",
+            runtime_status="running",
+            metadata={"assignment_id": "assignment-1", "work_context_id": "work-1"},
+        )
+    )
+    mailbox_service = ActorMailboxService(
+        mailbox_repository=SqliteAgentMailboxRepository(state_store),
+        runtime_repository=runtime_repository,
+        checkpoint_repository=SqliteAgentCheckpointRepository(state_store),
+    )
+    absorption_service = _AbsorbingRecoveryService(
+        AbsorptionAction(
+            kind="replan",
+            case_kind="repeated-blocker-same-scope",
+            recovery_rung="replan",
+            owner_agent_id="ops-agent",
+            scope_ref="assignment-1",
+            summary="Repeated blocker pressure is hitting the same execution scope.",
+            replan_decision_kind="cycle_rebalance",
+            replan_decision={"decision_kind": "cycle_rebalance"},
+        )
+    )
+
+    summary = run_startup_recovery(
+        environment_service=None,
+        actor_mailbox_service=mailbox_service,
+        decision_request_repository=None,
+        kernel_dispatcher=None,
+        kernel_task_store=None,
+        schedule_repository=None,
+        runtime_repository=runtime_repository,
+        exception_absorption_service=absorption_service,
+        human_assist_task_service=None,
+        reason="startup",
+    )
+
+    assert summary.absorption_action_kind == "replan"
+    assert summary.absorption_replan_decision_kind == "cycle_rebalance"
+    assert summary.absorption_action_materialized is False
 
 
 def test_startup_recovery_requeues_legacy_execution_core_chat_writeback_gap(

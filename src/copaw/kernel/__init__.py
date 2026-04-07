@@ -5,7 +5,9 @@ from __future__ import annotations
 from importlib import import_module
 
 __all__ = [
+    "AbsorptionAction",
     "AbsorptionCase",
+    "AbsorptionContinuityContext",
     "AbsorptionSummary",
     "ActorMailboxService",
     "ActorSupervisor",
@@ -39,6 +41,11 @@ __all__ = [
 
 _EXPORTS = {
     "AbsorptionCase": (".main_brain_exception_absorption", "AbsorptionCase"),
+    "AbsorptionAction": (".main_brain_exception_absorption", "AbsorptionAction"),
+    "AbsorptionContinuityContext": (
+        ".main_brain_exception_absorption",
+        "AbsorptionContinuityContext",
+    ),
     "AbsorptionSummary": (".main_brain_exception_absorption", "AbsorptionSummary"),
     "ActorMailboxService": (".actor_mailbox", "ActorMailboxService"),
     "ActorSupervisor": (".actor_supervisor", "ActorSupervisor"),

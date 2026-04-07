@@ -6,9 +6,11 @@ import time
 
 import pytest
 
-from copaw.kernel import AbsorptionCase, AbsorptionSummary, ActorSupervisor
+from copaw.evidence import EvidenceLedger
+from copaw.kernel import AbsorptionAction, AbsorptionCase, AbsorptionSummary, ActorSupervisor
 from copaw.state import AgentRuntimeRecord, SQLiteStateStore
-from copaw.state.repositories import SqliteAgentRuntimeRepository
+from copaw.state.human_assist_task_service import HumanAssistTaskService
+from copaw.state.repositories import SqliteAgentRuntimeRepository, SqliteHumanAssistTaskRepository
 
 
 class _RecordingWorker:
@@ -86,6 +88,25 @@ class _RecordingAbsorptionService:
         )
 
 
+class _AbsorbingService(_RecordingAbsorptionService):
+    def __init__(self, action: AbsorptionAction | None) -> None:
+        super().__init__()
+        self.action = action
+        self.absorb_calls: list[dict[str, object]] = []
+
+    def absorb(self, *, runtimes, mailbox_items, human_assist_tasks, now, **kwargs):
+        self.absorb_calls.append(
+            {
+                "runtime_count": len(list(runtimes)),
+                "mailbox_count": len(list(mailbox_items)),
+                "human_assist_count": len(list(human_assist_tasks)),
+                "now": now,
+                "kwargs": dict(kwargs),
+            }
+        )
+        return self.action
+
+
 def _build_runtime_repository(tmp_path) -> SqliteAgentRuntimeRepository:
     state_store = SQLiteStateStore(tmp_path / "actor-supervisor-state.db")
     repository = SqliteAgentRuntimeRepository(state_store)
@@ -102,6 +123,14 @@ def _build_runtime_repository(tmp_path) -> SqliteAgentRuntimeRepository:
             ),
         )
     return repository
+
+
+def _build_human_assist_service(tmp_path) -> HumanAssistTaskService:
+    store = SQLiteStateStore(tmp_path / "actor-supervisor-human-assist.db")
+    return HumanAssistTaskService(
+        repository=SqliteHumanAssistTaskRepository(store),
+        evidence_ledger=EvidenceLedger(database_path=tmp_path / "actor-supervisor-evidence.sqlite3"),
+    )
 
 
 def test_actor_supervisor_runs_different_agents_in_parallel(tmp_path) -> None:
@@ -340,3 +369,122 @@ def test_actor_supervisor_failure_path_refreshes_absorption_summary(tmp_path) ->
     asyncio.run(supervisor.run_agent_once("agent-1"))
 
     assert len(absorption_service.calls) == 1
+
+
+def test_actor_supervisor_materializes_exception_absorption_human_assist_with_continuity_anchor(
+    tmp_path,
+) -> None:
+    runtime_repository = _build_runtime_repository(tmp_path)
+    runtime = runtime_repository.get_runtime("agent-1")
+    assert runtime is not None
+    runtime_repository.upsert_runtime(
+        runtime.model_copy(
+            update={
+                "metadata": {
+                    **dict(runtime.metadata or {}),
+                    "chat_thread_id": "thread-1",
+                    "control_thread_id": "thread-1",
+                    "industry_instance_id": "industry-1",
+                    "assignment_id": "assignment-1",
+                    "work_context_id": "work-1",
+                    "environment_ref": "desktop:sheet-1",
+                }
+            }
+        )
+    )
+    human_assist_service = _build_human_assist_service(tmp_path)
+    event_bus = _RecordingEventBus()
+    absorption_service = _AbsorbingService(
+        AbsorptionAction(
+            kind="human-assist",
+            case_kind="waiting-confirm-orphan",
+            recovery_rung="human-assist",
+            owner_agent_id="agent-1",
+            scope_ref="checkpoint:confirm",
+            summary="Need one governed confirmation to resume.",
+            human_required=True,
+            human_action_summary="请补一个必要确认。",
+            human_action_contract={
+                "title": "补一个必要确认",
+                "summary": "Need one governed confirmation to resume.",
+                "required_action": "请在聊天里补一个必要确认，并包含“checkpoint:confirm”。",
+                "resume_checkpoint_ref": "checkpoint:confirm",
+                "acceptance_spec": {"version": "v1", "hard_anchors": ["checkpoint:confirm"]},
+            },
+        )
+    )
+    supervisor = ActorSupervisor(
+        runtime_repository=runtime_repository,
+        mailbox_service=None,  # type: ignore[arg-type]
+        worker=_RecordingWorker(),  # type: ignore[arg-type]
+        runtime_event_bus=event_bus,
+        exception_absorption_service=absorption_service,  # type: ignore[arg-type]
+        human_assist_task_service=human_assist_service,
+        poll_interval_seconds=0.01,
+    )
+
+    asyncio.run(supervisor.run_poll_cycle())
+
+    tasks = human_assist_service.list_tasks(chat_thread_id="thread-1", limit=20)
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert task.task_type == "exception-absorption-human-step"
+    assert task.reason_code == "main-brain-exception-absorption"
+    assert task.status == "issued"
+    assert task.resume_checkpoint_ref == "checkpoint:confirm"
+    assert any(
+        topic == "actor-supervisor"
+        and action == "exception-absorption"
+        and payload.get("action_kind") == "human-assist"
+        and payload.get("materialized") is True
+        and payload.get("human_task_id") == task.id
+        for topic, action, payload in event_bus.events
+    )
+
+
+def test_actor_supervisor_does_not_materialize_exception_absorption_human_assist_without_chat_thread(
+    tmp_path,
+) -> None:
+    runtime_repository = _build_runtime_repository(tmp_path)
+    human_assist_service = _build_human_assist_service(tmp_path)
+    event_bus = _RecordingEventBus()
+    absorption_service = _AbsorbingService(
+        AbsorptionAction(
+            kind="human-assist",
+            case_kind="waiting-confirm-orphan",
+            recovery_rung="human-assist",
+            owner_agent_id="agent-1",
+            scope_ref="checkpoint:confirm",
+            summary="Need one governed confirmation to resume.",
+            human_required=True,
+            human_action_summary="请补一个必要确认。",
+            human_action_contract={
+                "title": "补一个必要确认",
+                "summary": "Need one governed confirmation to resume.",
+                "required_action": "请在聊天里补一个必要确认，并包含“checkpoint:confirm”。",
+                "resume_checkpoint_ref": "checkpoint:confirm",
+                "acceptance_spec": {"version": "v1", "hard_anchors": ["checkpoint:confirm"]},
+            },
+        )
+    )
+    supervisor = ActorSupervisor(
+        runtime_repository=runtime_repository,
+        mailbox_service=None,  # type: ignore[arg-type]
+        worker=_RecordingWorker(),  # type: ignore[arg-type]
+        runtime_event_bus=event_bus,
+        exception_absorption_service=absorption_service,  # type: ignore[arg-type]
+        human_assist_task_service=human_assist_service,
+        poll_interval_seconds=0.01,
+    )
+
+    asyncio.run(supervisor.run_poll_cycle())
+
+    assert human_assist_service.list_tasks(limit=20) == []
+    assert any(
+        topic == "actor-supervisor"
+        and action == "exception-absorption"
+        and payload.get("action_kind") == "human-assist"
+        and payload.get("materialized") is False
+        and payload.get("materialization_reason") == "missing-chat-thread"
+        for topic, action, payload in event_bus.events
+    )

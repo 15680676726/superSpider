@@ -8,7 +8,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .actor_mailbox import ActorMailboxService
-from .main_brain_exception_absorption import AbsorptionSummary, MainBrainExceptionAbsorptionService
+from .main_brain_exception_absorption import (
+    AbsorptionAction,
+    AbsorptionSummary,
+    MainBrainExceptionAbsorptionService,
+    resolve_absorption_continuity_context,
+)
 from .actor_worker import ActorWorker
 from .runtime_outcome import normalize_runtime_summary, should_block_runtime_error
 from ..state import AgentRuntimeRecord
@@ -47,6 +52,8 @@ class ActorSupervisor:
         self._agent_locks: dict[str, asyncio.Lock] = {}
         self._agent_tasks: dict[str, asyncio.Task[bool]] = {}
         self._last_absorption_summary: AbsorptionSummary | None = None
+        self._last_absorption_action_fingerprint: str | None = None
+        self._report_replan_engine: object | None = None
 
     async def start(self) -> None:
         if self._loop_task is not None and not self._loop_task.done():
@@ -76,6 +83,23 @@ class ActorSupervisor:
 
     def mailbox_service(self) -> ActorMailboxService:
         return self._mailbox_service
+
+    def configure_exception_absorption(
+        self,
+        *,
+        exception_absorption_service: MainBrainExceptionAbsorptionService | None = None,
+        human_assist_task_service: object | None = None,
+        report_replan_engine: object | None = None,
+    ) -> None:
+        if exception_absorption_service is not None:
+            self._exception_absorption_service = exception_absorption_service
+        if human_assist_task_service is not None:
+            self._human_assist_task_service = human_assist_task_service
+        if report_replan_engine is not None:
+            self._report_replan_engine = report_replan_engine
+
+    def exception_absorption_service(self) -> MainBrainExceptionAbsorptionService | None:
+        return self._exception_absorption_service
 
     @staticmethod
     def _task_status(task: asyncio.Task[Any] | None) -> str:
@@ -199,12 +223,12 @@ class ActorSupervisor:
             )
         ]
         if not agent_ids:
-            self._refresh_exception_absorption_summary(now=_utc_now())
+            self._evaluate_exception_absorption(now=_utc_now())
             return False
         results = await asyncio.gather(
             *(self.run_agent_once(agent_id) for agent_id in agent_ids),
         )
-        self._refresh_exception_absorption_summary(now=_utc_now())
+        self._evaluate_exception_absorption(now=_utc_now())
         return any(results)
 
     async def _run_loop(self) -> None:
@@ -278,7 +302,61 @@ class ActorSupervisor:
                 "error_type": type(exc).__name__,
             },
         )
-        self._refresh_exception_absorption_summary(now=now)
+        self._evaluate_exception_absorption(now=now)
+
+    def _absorption_inputs(self) -> tuple[list[object], list[object], list[object]]:
+        list_items = getattr(self._mailbox_service, "list_items", None)
+        mailbox_items = list(list_items(limit=None) if callable(list_items) else [])
+        list_tasks = getattr(self._human_assist_task_service, "list_tasks", None)
+        human_assist_tasks = list(list_tasks(limit=None) if callable(list_tasks) else [])
+        runtimes = list(self._runtime_repository.list_runtimes(limit=None))
+        return runtimes, mailbox_items, human_assist_tasks
+
+    def _evaluate_exception_absorption(
+        self,
+        *,
+        now: datetime,
+    ) -> AbsorptionSummary | None:
+        if self._exception_absorption_service is None:
+            return None
+        runtimes, mailbox_items, human_assist_tasks = self._absorption_inputs()
+        summary = self._exception_absorption_service.scan(
+            runtimes=runtimes,
+            mailbox_items=mailbox_items,
+            human_assist_tasks=human_assist_tasks,
+            now=now,
+        )
+        self._last_absorption_summary = summary
+        absorb = getattr(self._exception_absorption_service, "absorb", None)
+        if not callable(absorb):
+            self._last_absorption_action_fingerprint = None
+            return summary
+        action = absorb(
+            runtimes=runtimes,
+            mailbox_items=mailbox_items,
+            human_assist_tasks=human_assist_tasks,
+            now=now,
+            report_replan_engine=self._report_replan_engine,
+            human_assist_contract_builder=getattr(
+                self._human_assist_task_service,
+                "build_exception_absorption_contract",
+                None,
+            ),
+        )
+        if action is None:
+            self._last_absorption_action_fingerprint = None
+            return summary
+        materialization = self._materialize_exception_absorption_action(
+            action=action,
+            runtimes=runtimes,
+            mailbox_items=mailbox_items,
+        )
+        self._publish_exception_absorption_action(
+            action=action,
+            summary=summary,
+            materialization=materialization,
+        )
+        return summary
 
     def _refresh_exception_absorption_summary(
         self,
@@ -287,18 +365,137 @@ class ActorSupervisor:
     ) -> AbsorptionSummary | None:
         if self._exception_absorption_service is None:
             return None
-        list_items = getattr(self._mailbox_service, "list_items", None)
-        mailbox_items = list_items(limit=None) if callable(list_items) else []
-        list_tasks = getattr(self._human_assist_task_service, "list_tasks", None)
-        human_assist_tasks = list_tasks(limit=None) if callable(list_tasks) else []
+        runtimes, mailbox_items, human_assist_tasks = self._absorption_inputs()
         summary = self._exception_absorption_service.scan(
-            runtimes=self._runtime_repository.list_runtimes(limit=None),
+            runtimes=runtimes,
             mailbox_items=mailbox_items,
             human_assist_tasks=human_assist_tasks,
             now=now,
         )
         self._last_absorption_summary = summary
         return summary
+
+    @staticmethod
+    def _action_fingerprint(
+        action: AbsorptionAction,
+        materialization: dict[str, object],
+    ) -> str:
+        return "|".join(
+            [
+                action.kind,
+                action.case_kind,
+                action.recovery_rung,
+                action.owner_agent_id or "",
+                action.scope_ref or "",
+                action.replan_decision_kind or "",
+                str(bool(materialization.get("materialized"))),
+                str(materialization.get("human_task_id") or materialization.get("materialization_reason") or ""),
+            ]
+        )
+
+    def _publish_exception_absorption_action(
+        self,
+        *,
+        action: AbsorptionAction,
+        summary: AbsorptionSummary,
+        materialization: dict[str, object],
+    ) -> None:
+        fingerprint = self._action_fingerprint(action, materialization)
+        if fingerprint == self._last_absorption_action_fingerprint:
+            return
+        self._last_absorption_action_fingerprint = fingerprint
+        payload = {
+            "action_kind": action.kind,
+            "case_kind": action.case_kind,
+            "recovery_rung": action.recovery_rung,
+            "owner_agent_id": action.owner_agent_id,
+            "scope_ref": action.scope_ref,
+            "summary": action.summary,
+            "human_required": action.human_required,
+            "replan_decision_kind": action.replan_decision_kind,
+            "replan_decision": dict(action.replan_decision),
+            "human_action_summary": action.human_action_summary,
+            "summary_text": summary.main_brain_summary,
+            **materialization,
+        }
+        self._publish_runtime_event(
+            topic="actor-supervisor",
+            action="exception-absorption",
+            payload=payload,
+        )
+
+    def _materialize_exception_absorption_action(
+        self,
+        *,
+        action: AbsorptionAction,
+        runtimes: list[object],
+        mailbox_items: list[object],
+    ) -> dict[str, object]:
+        if action.kind != "human-assist":
+            return {"materialized": False}
+        service = self._human_assist_task_service
+        ensure_task = getattr(service, "ensure_exception_absorption_task", None)
+        if not callable(ensure_task):
+            return {"materialized": False, "materialization_reason": "unsupported-service"}
+        context = resolve_absorption_continuity_context(
+            action,
+            runtimes=runtimes,
+            mailbox_items=mailbox_items,
+        )
+        if context.chat_thread_id is None:
+            return {"materialized": False, "materialization_reason": "missing-chat-thread"}
+        contract = dict(action.human_action_contract)
+        acceptance_spec = contract.get("acceptance_spec") or {}
+        hard_anchors = (
+            list(acceptance_spec.get("hard_anchors") or [])
+            if isinstance(acceptance_spec, dict)
+            else []
+        )
+        verification_anchor = (
+            contract.get("resume_checkpoint_ref")
+            or (hard_anchors[0] if hard_anchors else None)
+            or action.scope_ref
+        )
+        continuation_context = {
+            **context.to_payload(),
+            "owner_agent_id": action.owner_agent_id,
+            "case_kind": action.case_kind,
+            "recovery_rung": action.recovery_rung,
+            "main_brain_runtime": {
+                "control_thread_id": context.control_thread_id or context.chat_thread_id,
+                "session_id": context.session_id or context.chat_thread_id,
+                "work_context_id": context.work_context_id,
+                "environment_ref": context.environment_ref,
+                "recovery_mode": "exception-absorption",
+                "recovery_reason": action.summary,
+                "resume_checkpoint_id": verification_anchor,
+            },
+        }
+        task = ensure_task(
+            chat_thread_id=context.chat_thread_id,
+            profile_id=context.profile_id,
+            industry_instance_id=context.industry_instance_id,
+            assignment_id=context.assignment_id,
+            task_id=context.task_id,
+            title=str(contract.get("title") or "补一个必要人类动作"),
+            summary=str(contract.get("summary") or action.summary or ""),
+            required_action=str(
+                contract.get("required_action")
+                or action.human_action_summary
+                or action.summary
+                or ""
+            ),
+            resume_checkpoint_ref=str(verification_anchor or action.scope_ref or "human-return"),
+            verification_anchor=str(verification_anchor or action.scope_ref or "human-return"),
+            block_evidence_refs=[item for item in [action.scope_ref, context.environment_ref] if item],
+            continuation_context=continuation_context,
+        )
+        return {
+            "materialized": True,
+            "human_task_id": task.id,
+            "human_task_status": task.status,
+            "chat_thread_id": task.chat_thread_id,
+        }
 
     def _publish_runtime_event(
         self,

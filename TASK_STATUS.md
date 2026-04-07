@@ -1202,9 +1202,17 @@
 - 结构性升级已补齐正式 escalation 落点，而不是自由文本告警：
   - `ReportReplanEngine.compile_exception_absorption_replan(...)` 会把重复同 scope blocker 这类结构性压力提升成正式 `cycle_rebalance / lane_reweight / follow_up_backlog` replan shell。
   - `HumanAssistTaskService.build_exception_absorption_contract(...)` 会把确实需要人的最终一步编成正式 human-assist contract，而不是 ad hoc 文案。
-  - `MainBrainExceptionAbsorptionService.absorb(...)` 现在只负责在上述两个正式输出之间做 bounded 选择。
+  - `MainBrainExceptionAbsorptionService.absorb(...)` 继续只在上述两个正式输出之间做 bounded 选择，不新增第二套 incident truth。
+- 这轮把“typed output 还没接成运行时副作用”的残口正式收掉了：
+  - runtime bootstrap 现在会真实实例化并注入 `MainBrainExceptionAbsorptionService`，不再只停留在单测构造。
+  - `ActorSupervisor` 轮询与失败路径现在会在同一份 derived scan 之后调用 `absorb(...)`：
+    - `replan` 走正式 runtime event 投影
+    - `human-assist` 只会在解析到连续性锚点（尤其 `chat_thread_id/control_thread_id`）时，落成正式 `HumanAssistTask`
+    - 锚点缺失时不会伪造 closure，只记录 `materialized=false` 的吸收动作结果
+  - startup recovery 也复用同一套 absorb/materialize 纪律，并把结果回写到同一份 `StartupRecoverySummary`，不再只留一句摘要
 - 本轮 focused verification：
   - `python -m pytest tests/kernel/test_main_brain_exception_absorption.py tests/kernel/test_actor_supervisor.py tests/kernel/test_actor_mailbox.py tests/app/test_startup_recovery.py tests/app/runtime_center_api_parts/overview_governance.py tests/kernel/test_main_brain_chat_service.py tests/state/test_human_assist_task_service.py tests/compiler/test_report_replan_engine.py -q` -> `181 passed`
+  - `python -m pytest tests/kernel/test_main_brain_exception_absorption.py tests/kernel/test_actor_supervisor.py tests/kernel/test_main_brain_chat_service.py tests/app/test_startup_recovery.py tests/app/runtime_center_api_parts/overview_governance.py tests/state/test_human_assist_task_service.py tests/compiler/test_report_replan_engine.py tests/app/test_runtime_bootstrap_split.py tests/app/test_runtime_bootstrap_helpers.py tests/app/test_runtime_execution_provider_wiring.py -q` -> `225 passed`
 
 ### 3.3.4 `2026-04-07` Buddy carrier direction-truth fix
 

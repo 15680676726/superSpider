@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from ..industry.models import IndustrySeatCapabilityLayers
+from ..kernel.main_brain_exception_absorption import resolve_absorption_continuity_context
 from ..kernel.surface_routing import infer_requested_execution_surfaces
 
 
@@ -37,6 +38,11 @@ class StartupRecoverySummary(BaseModel):
     absorption_case_counts: dict[str, int] = Field(default_factory=dict)
     absorption_recovery_counts: dict[str, int] = Field(default_factory=dict)
     absorption_summary: str = ""
+    absorption_action_kind: str = ""
+    absorption_action_summary: str = ""
+    absorption_action_materialized: bool = False
+    absorption_replan_decision_kind: str = ""
+    absorption_human_task_id: str | None = None
     notes: list[str] = Field(default_factory=list)
 
 
@@ -66,6 +72,121 @@ def _unique_strings(*values: object) -> list[str]:
             continue
         _append(value)
     return resolved
+
+
+def _mapping(value: object | None) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        payload = model_dump(mode="json")
+        if isinstance(payload, dict):
+            return dict(payload)
+    return {}
+
+
+def _first_non_empty(*values: object | None) -> str | None:
+    for value in values:
+        if (text := _string(value)) is not None:
+            return text
+    return None
+
+
+def _record_absorption_action(
+    *,
+    summary: StartupRecoverySummary,
+    action: object,
+    materialization: dict[str, object],
+) -> None:
+    summary.absorption_action_kind = _string(getattr(action, "kind", None)) or ""
+    summary.absorption_action_summary = (
+        _string(getattr(action, "human_action_summary", None))
+        or _string(getattr(action, "summary", None))
+        or ""
+    )
+    summary.absorption_action_materialized = bool(materialization.get("materialized"))
+    summary.absorption_replan_decision_kind = (
+        _string(getattr(action, "replan_decision_kind", None)) or ""
+    )
+    summary.absorption_human_task_id = _string(materialization.get("human_task_id"))
+
+
+def _materialize_exception_absorption_action(
+    *,
+    action: object,
+    runtimes: list[object],
+    mailbox_items: list[object],
+    human_assist_task_service: object | None,
+) -> dict[str, object]:
+    if _string(getattr(action, "kind", None)) != "human-assist":
+        return {"materialized": False}
+    ensure_task = getattr(
+        human_assist_task_service,
+        "ensure_exception_absorption_task",
+        None,
+    )
+    if not callable(ensure_task):
+        return {"materialized": False, "materialization_reason": "unsupported-service"}
+    context = resolve_absorption_continuity_context(
+        action,
+        runtimes=runtimes,
+        mailbox_items=mailbox_items,
+    )
+    if context.chat_thread_id is None:
+        return {"materialized": False, "materialization_reason": "missing-chat-thread"}
+    contract = _mapping(getattr(action, "human_action_contract", None))
+    acceptance_spec = _mapping(contract.get("acceptance_spec"))
+    verification_anchor = _first_non_empty(
+        contract.get("resume_checkpoint_ref"),
+        (acceptance_spec.get("hard_anchors") or [None])[0]
+        if isinstance(acceptance_spec.get("hard_anchors"), list)
+        and acceptance_spec.get("hard_anchors")
+        else None,
+        getattr(action, "scope_ref", None),
+        "human-return",
+    ) or "human-return"
+    task = ensure_task(
+        chat_thread_id=context.chat_thread_id,
+        profile_id=context.profile_id,
+        industry_instance_id=context.industry_instance_id,
+        assignment_id=context.assignment_id,
+        task_id=context.task_id,
+        title=_string(contract.get("title")) or "补一个必要人类动作",
+        summary=(
+            _string(contract.get("summary"))
+            or _string(getattr(action, "summary", None))
+            or ""
+        ),
+        required_action=(
+            _string(contract.get("required_action"))
+            or _string(getattr(action, "human_action_summary", None))
+            or _string(getattr(action, "summary", None))
+            or ""
+        ),
+        resume_checkpoint_ref=verification_anchor,
+        verification_anchor=verification_anchor,
+        block_evidence_refs=[item for item in [getattr(action, "scope_ref", None), context.environment_ref] if item],
+        continuation_context={
+            **context.to_payload(),
+            "owner_agent_id": _string(getattr(action, "owner_agent_id", None)),
+            "case_kind": _string(getattr(action, "case_kind", None)),
+            "recovery_rung": _string(getattr(action, "recovery_rung", None)),
+            "main_brain_runtime": {
+                "control_thread_id": context.control_thread_id or context.chat_thread_id,
+                "session_id": context.session_id or context.chat_thread_id,
+                "work_context_id": context.work_context_id,
+                "environment_ref": context.environment_ref,
+                "recovery_mode": "exception-absorption",
+                "recovery_reason": _string(getattr(action, "summary", None)),
+                "resume_checkpoint_id": verification_anchor,
+            },
+        },
+    )
+    return {
+        "materialized": True,
+        "human_task_id": task.id,
+        "human_task_status": task.status,
+    }
 
 
 def _detect_requested_surfaces(
@@ -466,12 +587,15 @@ def run_startup_recovery(
         list_items = getattr(actor_mailbox_service, "list_items", None)
         list_human_assist = getattr(human_assist_task_service, "list_tasks", None)
         try:
+            runtimes = list(list_runtimes(limit=None) if callable(list_runtimes) else [])
+            mailbox_items = list(list_items(limit=None) if callable(list_items) else [])
+            human_assist_tasks = list(
+                list_human_assist(limit=None) if callable(list_human_assist) else []
+            )
             absorption_summary = exception_absorption_service.scan(
-                runtimes=list_runtimes(limit=None) if callable(list_runtimes) else [],
-                mailbox_items=list_items(limit=None) if callable(list_items) else [],
-                human_assist_tasks=(
-                    list_human_assist(limit=None) if callable(list_human_assist) else []
-                ),
+                runtimes=runtimes,
+                mailbox_items=mailbox_items,
+                human_assist_tasks=human_assist_tasks,
                 now=_utc_now(),
             )
             summary.absorption_case_count = absorption_summary.case_count
@@ -481,6 +605,31 @@ def run_startup_recovery(
             summary.absorption_case_counts = dict(absorption_summary.case_counts)
             summary.absorption_recovery_counts = dict(absorption_summary.recovery_counts)
             summary.absorption_summary = absorption_summary.main_brain_summary
+            absorb = getattr(exception_absorption_service, "absorb", None)
+            if callable(absorb):
+                absorption_action = absorb(
+                    runtimes=runtimes,
+                    mailbox_items=mailbox_items,
+                    human_assist_tasks=human_assist_tasks,
+                    now=_utc_now(),
+                    human_assist_contract_builder=getattr(
+                        human_assist_task_service,
+                        "build_exception_absorption_contract",
+                        None,
+                    ),
+                )
+                if absorption_action is not None:
+                    materialization = _materialize_exception_absorption_action(
+                        action=absorption_action,
+                        runtimes=runtimes,
+                        mailbox_items=mailbox_items,
+                        human_assist_task_service=human_assist_task_service,
+                    )
+                    _record_absorption_action(
+                        summary=summary,
+                        action=absorption_action,
+                        materialization=materialization,
+                    )
         except Exception as exc:  # pragma: no cover - guardrail
             summary.notes.append(f"exception absorption scan failed: {exc}")
 

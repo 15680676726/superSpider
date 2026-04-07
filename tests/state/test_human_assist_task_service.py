@@ -134,6 +134,40 @@ def test_human_assist_task_service_returns_current_active_task_for_thread(tmp_pa
     assert current.id == second.id
 
 
+def test_human_assist_task_service_ensures_exception_absorption_task_per_thread_anchor(
+    tmp_path,
+) -> None:
+    service = _build_service(tmp_path)
+
+    first = service.ensure_exception_absorption_task(
+        chat_thread_id="industry-chat:industry-1:execution-core",
+        industry_instance_id="industry-1",
+        assignment_id="assignment-1",
+        title="补一个必要确认",
+        summary="主脑已经完成内部恢复，当前还差一个必要确认。",
+        required_action="请在聊天里补一个必要确认，并包含“checkpoint:confirm”。",
+        resume_checkpoint_ref="checkpoint:confirm",
+        verification_anchor="checkpoint:confirm",
+        continuation_context={"control_thread_id": "industry-chat:industry-1:execution-core"},
+    )
+    second = service.ensure_exception_absorption_task(
+        chat_thread_id="industry-chat:industry-1:execution-core",
+        industry_instance_id="industry-1",
+        assignment_id="assignment-1",
+        title="补一个必要确认",
+        summary="主脑已经完成内部恢复，当前还差一个必要确认。",
+        required_action="请在聊天里补一个必要确认，并包含“checkpoint:confirm”。",
+        resume_checkpoint_ref="checkpoint:confirm",
+        verification_anchor="checkpoint:confirm",
+        continuation_context={"control_thread_id": "industry-chat:industry-1:execution-core"},
+    )
+
+    assert first.id == second.id
+    assert second.task_type == "exception-absorption-human-step"
+    assert second.reason_code == "main-brain-exception-absorption"
+    assert second.status == "issued"
+
+
 def test_human_assist_task_service_evidence_verified_requires_formal_evidence_refs(
     tmp_path,
 ) -> None:

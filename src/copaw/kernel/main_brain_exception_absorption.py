@@ -117,6 +117,180 @@ class AbsorptionAction:
     human_action_contract: dict[str, object] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class AbsorptionContinuityContext:
+    chat_thread_id: str | None = None
+    control_thread_id: str | None = None
+    session_id: str | None = None
+    industry_instance_id: str | None = None
+    assignment_id: str | None = None
+    task_id: str | None = None
+    work_context_id: str | None = None
+    environment_ref: str | None = None
+    profile_id: str | None = None
+    channel: str | None = None
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "chat_thread_id": self.chat_thread_id,
+            "control_thread_id": self.control_thread_id,
+            "session_id": self.session_id,
+            "industry_instance_id": self.industry_instance_id,
+            "assignment_id": self.assignment_id,
+            "task_id": self.task_id,
+            "work_context_id": self.work_context_id,
+            "environment_ref": self.environment_ref,
+            "profile_id": self.profile_id,
+            "channel": self.channel,
+        }
+
+
+def _first_non_empty(*values: object | None) -> str | None:
+    for value in values:
+        if (text := _string(value)) is not None:
+            return text
+    return None
+
+
+def _match_action_subject(action: AbsorptionAction, candidate: object) -> bool:
+    candidate_agent_id = _string(_field(candidate, "agent_id"))
+    if action.owner_agent_id is not None and candidate_agent_id == action.owner_agent_id:
+        return True
+    return _first_non_empty(
+        _field(candidate, "task_id"),
+        _field(candidate, "work_context_id"),
+        _field(candidate, "conversation_thread_id"),
+        _metadata(candidate).get("blocked_scope_ref"),
+        _metadata(candidate).get("assignment_id"),
+        _metadata(candidate).get("work_context_id"),
+        _metadata(candidate).get("environment_ref"),
+    ) == _string(action.scope_ref)
+
+
+def _apply_context(
+    context: dict[str, str | None],
+    *,
+    primary: dict[str, object],
+    metadata: dict[str, object],
+    nested_payload: dict[str, object],
+) -> None:
+    context["chat_thread_id"] = _first_non_empty(
+        context.get("chat_thread_id"),
+        primary.get("conversation_thread_id"),
+        primary.get("chat_thread_id"),
+        primary.get("control_thread_id"),
+        primary.get("session_id"),
+        metadata.get("conversation_thread_id"),
+        metadata.get("chat_thread_id"),
+        metadata.get("control_thread_id"),
+        metadata.get("session_id"),
+        nested_payload.get("conversation_thread_id"),
+        nested_payload.get("chat_thread_id"),
+        nested_payload.get("control_thread_id"),
+        nested_payload.get("session_id"),
+    )
+    context["control_thread_id"] = _first_non_empty(
+        context.get("control_thread_id"),
+        primary.get("control_thread_id"),
+        metadata.get("control_thread_id"),
+        nested_payload.get("control_thread_id"),
+        context.get("chat_thread_id"),
+    )
+    context["session_id"] = _first_non_empty(
+        context.get("session_id"),
+        primary.get("session_id"),
+        metadata.get("session_id"),
+        nested_payload.get("session_id"),
+        context.get("chat_thread_id"),
+    )
+    context["industry_instance_id"] = _first_non_empty(
+        context.get("industry_instance_id"),
+        primary.get("industry_instance_id"),
+        metadata.get("industry_instance_id"),
+        nested_payload.get("industry_instance_id"),
+    )
+    context["assignment_id"] = _first_non_empty(
+        context.get("assignment_id"),
+        primary.get("assignment_id"),
+        metadata.get("assignment_id"),
+        nested_payload.get("assignment_id"),
+    )
+    context["task_id"] = _first_non_empty(
+        context.get("task_id"),
+        primary.get("task_id"),
+        metadata.get("task_id"),
+        nested_payload.get("task_id"),
+    )
+    context["work_context_id"] = _first_non_empty(
+        context.get("work_context_id"),
+        primary.get("work_context_id"),
+        metadata.get("work_context_id"),
+        nested_payload.get("work_context_id"),
+    )
+    context["environment_ref"] = _first_non_empty(
+        context.get("environment_ref"),
+        primary.get("environment_ref"),
+        metadata.get("environment_ref"),
+        nested_payload.get("environment_ref"),
+    )
+    context["profile_id"] = _first_non_empty(
+        context.get("profile_id"),
+        primary.get("buddy_profile_id"),
+        primary.get("profile_id"),
+        metadata.get("buddy_profile_id"),
+        metadata.get("profile_id"),
+        nested_payload.get("buddy_profile_id"),
+        nested_payload.get("profile_id"),
+    )
+    context["channel"] = _first_non_empty(
+        context.get("channel"),
+        primary.get("channel"),
+        metadata.get("channel"),
+        nested_payload.get("channel"),
+    )
+
+
+def resolve_absorption_continuity_context(
+    action: AbsorptionAction,
+    *,
+    runtimes: list[object] | tuple[object, ...],
+    mailbox_items: list[object] | tuple[object, ...],
+) -> AbsorptionContinuityContext:
+    context: dict[str, str | None] = {
+        "chat_thread_id": None,
+        "control_thread_id": None,
+        "session_id": None,
+        "industry_instance_id": None,
+        "assignment_id": None,
+        "task_id": None,
+        "work_context_id": None,
+        "environment_ref": None,
+        "profile_id": None,
+        "channel": None,
+    }
+    for runtime in list(runtimes or []):
+        if not _match_action_subject(action, runtime):
+            continue
+        primary = _mapping(runtime)
+        _apply_context(
+            context,
+            primary=primary,
+            metadata=_metadata(runtime),
+            nested_payload=_mapping(primary.get("payload")),
+        )
+    for item in list(mailbox_items or []):
+        if not _match_action_subject(action, item):
+            continue
+        primary = _mapping(item)
+        _apply_context(
+            context,
+            primary=primary,
+            metadata=_metadata(item),
+            nested_payload=_mapping(primary.get("payload")),
+        )
+    return AbsorptionContinuityContext(**context)
+
+
 @dataclass(slots=True)
 class MainBrainExceptionAbsorptionService:
     retry_loop_threshold: int = 3
@@ -428,6 +602,8 @@ class MainBrainExceptionAbsorptionService:
 __all__ = [
     "AbsorptionAction",
     "AbsorptionCase",
+    "AbsorptionContinuityContext",
     "AbsorptionSummary",
     "MainBrainExceptionAbsorptionService",
+    "resolve_absorption_continuity_context",
 ]
