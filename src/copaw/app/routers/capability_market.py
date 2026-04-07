@@ -430,6 +430,9 @@ class BrowserSessionStartRequest(BaseModel):
     entry_url: str | None = Field(default=None)
     reuse_running_session: bool | None = Field(default=None)
     persist_login_state: bool | None = Field(default=None)
+    environment_id: str | None = Field(default=None)
+    session_mount_id: str | None = Field(default=None)
+    attach_required: bool = Field(default=False)
     allowed_hosts: list[str] = Field(default_factory=list)
     blocked_hosts: list[str] = Field(default_factory=list)
     action_timeout_seconds: float | None = Field(default=None)
@@ -538,12 +541,19 @@ def _get_browser_runtime_service(
             service,
             environment_service=environment_service,
         )
+        _bind_browser_attach_runtime(
+            service,
+            environment_service=environment_service,
+        )
         return service
     state_store = getattr(request.app.state, "state_store", None)
     if isinstance(state_store, SQLiteStateStore):
         service = BrowserRuntimeService(
             state_store,
             browser_companion_runtime=_browser_companion_runtime_adapter(
+                environment_service=environment_service,
+            ),
+            browser_attach_runtime=_browser_attach_runtime_adapter(
                 environment_service=environment_service,
             ),
         )
@@ -581,6 +591,20 @@ class _EnvironmentServiceBrowserCompanionAdapter:
         return self._environment_service.browser_companion_snapshot(**kwargs)
 
 
+class _EnvironmentServiceBrowserAttachAdapter:
+    def __init__(self, environment_service: object) -> None:
+        self._environment_service = environment_service
+
+    def register_transport(self, **kwargs) -> dict[str, Any]:
+        return self._environment_service.register_browser_attach_transport(**kwargs)
+
+    def clear_transport(self, **kwargs) -> dict[str, Any]:
+        return self._environment_service.clear_browser_attach_transport(**kwargs)
+
+    def snapshot(self, **kwargs) -> dict[str, Any]:
+        return self._environment_service.browser_attach_snapshot(**kwargs)
+
+
 def _browser_companion_runtime_adapter(
     *,
     environment_service: object | None,
@@ -595,6 +619,20 @@ def _browser_companion_runtime_adapter(
     return _EnvironmentServiceBrowserCompanionAdapter(environment_service)
 
 
+def _browser_attach_runtime_adapter(
+    *,
+    environment_service: object | None,
+) -> _EnvironmentServiceBrowserAttachAdapter | None:
+    if environment_service is None:
+        return None
+    register = getattr(environment_service, "register_browser_attach_transport", None)
+    clear = getattr(environment_service, "clear_browser_attach_transport", None)
+    snapshot = getattr(environment_service, "browser_attach_snapshot", None)
+    if not callable(register) or not callable(clear) or not callable(snapshot):
+        return None
+    return _EnvironmentServiceBrowserAttachAdapter(environment_service)
+
+
 def _bind_browser_companion_runtime(
     service: BrowserRuntimeService,
     *,
@@ -604,6 +642,18 @@ def _bind_browser_companion_runtime(
         environment_service=environment_service,
     )
     setattr(service, "_browser_companion_runtime", companion_runtime)
+    return service
+
+
+def _bind_browser_attach_runtime(
+    service: BrowserRuntimeService,
+    *,
+    environment_service: object | None,
+) -> BrowserRuntimeService:
+    attach_runtime = _browser_attach_runtime_adapter(
+        environment_service=environment_service,
+    )
+    setattr(service, "_browser_attach_runtime", attach_runtime)
     return service
 
 
@@ -3418,6 +3468,9 @@ async def start_browser_runtime_session(
             entry_url=request_payload.entry_url,
             reuse_running_session=request_payload.reuse_running_session,
             persist_login_state=request_payload.persist_login_state,
+            environment_id=request_payload.environment_id,
+            session_mount_id=request_payload.session_mount_id,
+            attach_required=request_payload.attach_required,
             navigation_guard={
                 "allowed_hosts": [item for item in request_payload.allowed_hosts if str(item).strip()],
                 "blocked_hosts": [item for item in request_payload.blocked_hosts if str(item).strip()],

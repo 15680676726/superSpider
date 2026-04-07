@@ -7,6 +7,7 @@ from typing import Any
 
 from ..state import AgentLeaseRecord
 from .artifact_service import EnvironmentArtifactService
+from .browser_channel_policy import resolve_browser_channel_policy
 from .cooperative import (
     BrowserAttachRuntime,
     BrowserCompanionRuntime,
@@ -920,6 +921,34 @@ class EnvironmentService:
     def browser_attach_snapshot(self, **kwargs) -> dict[str, Any]:
         runtime = self._require_browser_attach_runtime()
         return runtime.snapshot(**kwargs)
+
+    def resolve_browser_channel(
+        self,
+        *,
+        environment_id: str | None = None,
+        session_mount_id: str | None = None,
+        browser_mode: str | None = None,
+        attach_required: bool | None = None,
+    ) -> dict[str, Any]:
+        companion_snapshot: dict[str, Any] = {}
+        attach_snapshot: dict[str, Any] = {}
+        has_runtime_context = environment_id is not None or session_mount_id is not None
+        if self._browser_companion_runtime is not None and has_runtime_context:
+            companion_snapshot = self.browser_companion_snapshot(
+                environment_id=environment_id,
+                session_mount_id=session_mount_id,
+            )
+        if self._browser_attach_runtime is not None and has_runtime_context:
+            attach_snapshot = self.browser_attach_snapshot(
+                environment_id=environment_id,
+                session_mount_id=session_mount_id,
+            )
+        return resolve_browser_channel_policy(
+            companion_snapshot=companion_snapshot,
+            attach_snapshot=attach_snapshot,
+            browser_mode=browser_mode,
+            attach_required=attach_required,
+        )
 
     def clear_browser_companion(self, **kwargs) -> dict[str, Any]:
         runtime = self._require_browser_companion_runtime()

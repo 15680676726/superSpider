@@ -16,6 +16,7 @@ from ..agents.tools.browser_control import (
     get_browser_runtime_snapshot,
 )
 from ..constant import WORKING_DIR
+from ..environments.browser_channel_policy import resolve_browser_channel_policy
 from ..environments.cooperative.browser_attach_runtime import BrowserAttachRuntime
 from ..environments.cooperative.browser_companion import BrowserCompanionRuntime
 from ..state.store import SQLiteStateStore
@@ -200,6 +201,9 @@ class BrowserSessionStartOptions(BaseModel):
     entry_url: str | None = None
     reuse_running_session: bool | None = None
     persist_login_state: bool | None = None
+    environment_id: str | None = None
+    session_mount_id: str | None = None
+    attach_required: bool = False
     navigation_guard: dict[str, Any] | None = None
     action_timeout_seconds: float | None = None
 
@@ -556,6 +560,38 @@ class BrowserRuntimeService:
             "session_mount_id": snapshot.get("session_mount_id"),
         }
 
+    def resolve_channel(
+        self,
+        *,
+        environment_id: str | None = None,
+        session_mount_id: str | None = None,
+        browser_mode: str | None = None,
+        attach_required: bool | None = None,
+    ) -> dict[str, Any]:
+        has_runtime_context = environment_id is not None or session_mount_id is not None
+        companion_snapshot = (
+            self.companion_snapshot(
+                environment_id=environment_id,
+                session_mount_id=session_mount_id,
+            )
+            if has_runtime_context
+            else {}
+        )
+        attach_snapshot = (
+            self.attach_snapshot(
+                environment_id=environment_id,
+                session_mount_id=session_mount_id,
+            )
+            if has_runtime_context
+            else {}
+        )
+        return resolve_browser_channel_policy(
+            companion_snapshot=companion_snapshot,
+            attach_snapshot=attach_snapshot,
+            browser_mode=browser_mode,
+            attach_required=attach_required,
+        )
+
     async def start_session(
         self,
         options: BrowserSessionStartOptions,
@@ -606,6 +642,44 @@ class BrowserRuntimeService:
             )
         )
         session_id = str(options.session_id or "default").strip() or "default"
+        channel_resolution = self.resolve_channel(
+            environment_id=options.environment_id,
+            session_mount_id=options.session_mount_id,
+            browser_mode="attach-existing-session" if options.attach_required else None,
+            attach_required=options.attach_required,
+        )
+        if channel_resolution.get("selection_status") == "blocked":
+            return {
+                "status": "blocked",
+                "session_id": session_id,
+                "profile_id": profile.profile_id if profile is not None else None,
+                "runtime": self.runtime_snapshot(
+                    environment_id=options.environment_id,
+                    session_mount_id=options.session_mount_id,
+                ),
+                "result": {
+                    "ok": False,
+                    "error": channel_resolution.get("reason"),
+                    "code": "attach-required-browser-channel-unavailable",
+                },
+                "channel_resolution": channel_resolution,
+            }
+        if options.attach_required and channel_resolution.get("selected_channel") == "browser-mcp":
+            return {
+                "status": "channel-resolved",
+                "session_id": session_id,
+                "profile_id": profile.profile_id if profile is not None else None,
+                "runtime": self.runtime_snapshot(
+                    environment_id=options.environment_id,
+                    session_mount_id=options.session_mount_id,
+                ),
+                "result": {
+                    "ok": True,
+                    "message": "Attach-required request resolved to the attached browser channel.",
+                    "channel": "browser-mcp",
+                },
+                "channel_resolution": channel_resolution,
+            }
         runtime_before = get_browser_runtime_snapshot()
         active_session_ids = {
             str(item.get("session_id") or "")
@@ -621,6 +695,7 @@ class BrowserRuntimeService:
                 "profile_id": profile.profile_id if profile is not None else None,
                 "runtime": runtime_after_attach,
                 "result": attach_payload,
+                "channel_resolution": channel_resolution,
                 "continuity": _browser_continuity_contract(
                     session_id=session_id,
                     runtime=runtime_after_attach,
@@ -656,6 +731,7 @@ class BrowserRuntimeService:
             "profile_id": profile.profile_id if profile is not None else None,
             "runtime": runtime_after_start,
             "result": self._tool_response_json(text),
+            "channel_resolution": channel_resolution,
             "continuity": _browser_continuity_contract(
                 session_id=session_id,
                 runtime=runtime_after_start,

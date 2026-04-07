@@ -322,6 +322,15 @@ def test_runtime_center_environment_read_endpoints() -> None:
         "blocked_hosts": ["ads.jd.com"],
     }
     assert detail_response.json()["browser_site_contract"]["action_timeout_seconds"] == 12.5
+    assert detail_response.json()["browser_site_contract"]["browser_channel"] == "browser-mcp"
+    assert detail_response.json()["browser_site_contract"]["browser_channel_status"] == "ready"
+    assert detail_response.json()["browser_site_contract"]["browser_channel_health"] == "healthy"
+    assert (
+        detail_response.json()["browser_site_contract"]["browser_channel_resolution"][
+            "selected_channel"
+        ]
+        == "browser-mcp"
+    )
     assert (
         detail_response.json()["browser_site_contract"]["last_verified_dom_anchor"]
         == "#shop-header"

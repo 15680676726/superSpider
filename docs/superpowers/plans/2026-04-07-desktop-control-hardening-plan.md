@@ -4,7 +4,7 @@
 
 **Goal:** Tighten the desktop-control chain so formal runtime replay enforces capability mounting, health checks reflect semantic-control readiness, and document writes share stable writer locks across sessions.
 
-**Architecture:** Keep the Windows desktop control chain Windows-host-first and evidence-first, but fail closed at the formal runtime front door. Preserve low-level harness flexibility by only enforcing capability ownership when the formal runtime wiring provides agent/capability services. Make health/readiness and cooperative writer-lock semantics explicit instead of relying on weak defaults.
+**Architecture:** Keep the Windows desktop control chain evidence-first and `MCP-exposed, adapter/host-backed` at the actuation boundary, but fail closed at the formal runtime front door. Preserve low-level harness flexibility by only enforcing capability ownership when the formal runtime wiring provides agent/capability services, and treat runtime/kernel responsibility as governance and continuity rather than a thicker product-layer action brain. Make health/readiness and cooperative writer-lock semantics explicit instead of relying on weak defaults.
 
 **Tech Stack:** Python, FastAPI services, Pydantic, pytest
 
@@ -14,12 +14,13 @@
 
 **Files:**
 - Modify: `src/copaw/routines/service.py`
-- Modify: `src/copaw/app/runtime_bootstrap_domains.py`
+- Verify: `src/copaw/app/runtime_bootstrap_domains.py`
 - Test: `tests/routines/test_routine_service.py`
 
 - [ ] Add a failing test proving desktop replay fails closed in formal runtime mode when the owning agent lacks `mcp:desktop_windows`.
 - [ ] Run the targeted routine-service test to verify the failure is real.
-- [ ] Add the minimal `RoutineService` runtime capability guard and wire the optional services from runtime bootstrap.
+- [ ] Verify that runtime bootstrap already wires the optional capability/profile services into `RoutineService`; only patch bootstrap if the target branch has actually regressed that contract.
+- [ ] Add the minimal `RoutineService` runtime capability guard without expanding platform-owned desktop actuation logic.
 - [ ] Re-run the targeted routine-service tests until green.
 
 ### Task 2: Desktop Doctor And Example-Run Depth
@@ -30,7 +31,7 @@
 
 - [ ] Add a failing test proving the desktop doctor exposes semantic-control readiness separately from bare Win32 readiness.
 - [ ] Run the targeted capability-market test to verify the failure is real.
-- [ ] Implement the minimal doctor/example-run changes so the report no longer overclaims desktop readiness.
+- [ ] Implement the minimal doctor/example-run changes so the report no longer overclaims desktop readiness, and so host-ready / MCP-or-adapter-ready / semantic-ready remain distinct.
 - [ ] Re-run the targeted capability-market tests until green.
 
 ### Task 3: Stable Writer Scope For Desktop Document Actions
@@ -54,5 +55,5 @@
 - Verify: `tests/environments/test_cooperative_windows_apps.py`
 
 - [ ] Run the focused regression matrix that covers the hardened desktop replay, doctor/example-run surface, and cooperative desktop document execution.
-- [ ] Update status docs only if the external contract or audit wording materially changes.
+- [ ] Update status docs only if the external contract or audit wording materially changes, especially when boundary wording must be corrected toward `agent decides + adapter/host executes + MCP exposes + runtime governs`.
 - [ ] Commit and push the desktop-control hardening bundle.

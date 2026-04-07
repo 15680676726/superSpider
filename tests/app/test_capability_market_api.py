@@ -2824,6 +2824,8 @@ def test_capability_market_browser_local_install_persists_profile_and_sessions(
     started_payload = started.json()
     assert started_payload["status"] == "started"
     assert started_payload["profile_id"] == "sales-browser"
+    assert started_payload["channel_resolution"]["selected_channel"] == "built-in-browser"
+    assert started_payload["channel_resolution"]["selection_status"] == "ready"
     assert mocked_browser_use.call_args.kwargs["profile_id"] == "sales-browser"
     assert mocked_browser_use.call_args.kwargs["headed"] is True
     assert (
@@ -2921,6 +2923,104 @@ def test_capability_market_browser_local_install_persists_profile_and_sessions(
     sessions_payload = sessions.json()
     assert sessions_payload["session_count"] == 0
     assert sessions_payload["profiles"][0]["profile_id"] == "sales-browser"
+
+
+def test_capability_market_browser_local_session_start_fails_closed_when_attach_is_required_but_unavailable(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+    environment_service = app.state.environment_service
+
+    lease = environment_service.acquire_session_lease(
+        channel="browser",
+        session_id="browser-seat-attach-missing",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        metadata={
+            "host_mode": "attach-existing-session",
+            "lease_class": "exclusive-writer",
+            "access_mode": "writer",
+            "session_scope": "browser-user-session",
+            "browser_mode": "attach-existing-session",
+        },
+    )
+
+    with patch("copaw.capabilities.browser_runtime.browser_use") as mocked_browser_use:
+        response = client.post(
+            "/capability-market/install-templates/browser-local/sessions/start",
+            json={
+                "session_id": "attach-missing-browser-session",
+                "session_mount_id": lease.id,
+                "attach_required": True,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "blocked"
+    assert payload["result"]["ok"] is False
+    assert payload["channel_resolution"]["selection_status"] == "blocked"
+    assert payload["channel_resolution"]["fail_closed"] is True
+    mocked_browser_use.assert_not_called()
+
+
+def test_capability_market_browser_local_session_start_resolves_to_attached_browser_channel_when_available(
+    tmp_path,
+) -> None:
+    app = build_runtime_app(tmp_path)
+    client = TestClient(app)
+    environment_service = app.state.environment_service
+
+    lease = environment_service.acquire_session_lease(
+        channel="browser",
+        session_id="browser-seat-attach-ready",
+        user_id="alice",
+        owner="worker-1",
+        ttl_seconds=60,
+        metadata={
+            "host_mode": "attach-existing-session",
+            "lease_class": "exclusive-writer",
+            "access_mode": "writer",
+            "session_scope": "browser-user-session",
+            "browser_mode": "attach-existing-session",
+        },
+    )
+    environment_service.register_browser_companion(
+        session_mount_id=lease.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+        provider_session_ref="browser-session:web:main",
+    )
+    environment_service.register_browser_attach_transport(
+        session_mount_id=lease.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        browser_session_ref="browser-session:web:main",
+        browser_scope_ref="chrome-profile:alice",
+        reconnect_token="reconnect-token-1",
+    )
+
+    with patch("copaw.capabilities.browser_runtime.browser_use") as mocked_browser_use:
+        response = client.post(
+            "/capability-market/install-templates/browser-local/sessions/start",
+            json={
+                "session_id": "attach-ready-browser-session",
+                "session_mount_id": lease.id,
+                "attach_required": True,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "channel-resolved"
+    assert payload["result"]["ok"] is True
+    assert payload["channel_resolution"]["selected_channel"] == "browser-mcp"
+    assert payload["channel_resolution"]["selection_status"] == "ready"
+    assert payload["channel_resolution"]["fail_closed"] is False
+    mocked_browser_use.assert_not_called()
 
 
 def test_capability_market_browser_local_install_defaults_to_visible_profile(

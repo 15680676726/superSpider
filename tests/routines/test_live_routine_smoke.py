@@ -811,6 +811,170 @@ def _run_live_browser_case(
     return _run_live_python_script(tmp_path, script)
 
 
+def _run_live_attached_browser_case(
+    tmp_path,
+    *,
+    page_url: str,
+    screenshot_path: str,
+) -> dict[str, object]:
+    script = textwrap.dedent(
+        f"""
+        import asyncio
+        import json
+        from pathlib import Path
+        from types import SimpleNamespace
+
+        from copaw.agents.tools.browser_control import browser_use
+        from copaw.capabilities.browser_runtime import BrowserRuntimeService, BrowserSessionStartOptions
+        from copaw.environments import EnvironmentRegistry, EnvironmentRepository, EnvironmentService, SessionMountRepository
+        from copaw.state import SQLiteStateStore
+
+
+        def _tool_response_json(response):
+            content = getattr(response, "content", None) or []
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        text = item.get("text")
+                    else:
+                        text = getattr(item, "text", None)
+                    if text:
+                        return json.loads(text)
+            raise RuntimeError("Browser tool response did not contain JSON text.")
+
+
+        async def main() -> None:
+            root = Path({json.dumps(str(tmp_path))})
+            state_store = SQLiteStateStore(root / "attached-browser-state.sqlite3")
+            environment_repository = EnvironmentRepository(state_store)
+            session_repository = SessionMountRepository(state_store)
+            registry = EnvironmentRegistry(
+                repository=environment_repository,
+                session_repository=session_repository,
+            )
+            environment_service = EnvironmentService(registry=registry, lease_ttl_seconds=120)
+            environment_service.set_session_repository(session_repository)
+            browser_runtime = BrowserRuntimeService(state_store)
+            provider_session_ref = "live-attached-browser-session"
+            transport_ref = "transport:browser-companion:live"
+            started = await browser_runtime.start_session(
+                BrowserSessionStartOptions(
+                    session_id=provider_session_ref,
+                    headed=False,
+                    reuse_running_session=False,
+                ),
+            )
+            lease = environment_service.acquire_session_lease(
+                channel="browser",
+                session_id="attached-seat",
+                user_id="alice",
+                owner="live-smoke",
+                ttl_seconds=120,
+                metadata={{
+                    "host_mode": "attach-existing-session",
+                    "lease_class": "exclusive-writer",
+                    "access_mode": "browser",
+                    "session_scope": "browser-user-session",
+                    "browser_mode": "attach-existing-session",
+                }},
+            )
+            environment_service.register_browser_companion(
+                session_mount_id=lease.id,
+                transport_ref=transport_ref,
+                status="attached",
+                available=True,
+                provider_session_ref=provider_session_ref,
+            )
+            environment_service.register_browser_attach_transport(
+                session_mount_id=lease.id,
+                transport_ref=transport_ref,
+                status="attached",
+                browser_session_ref=provider_session_ref,
+                browser_scope_ref="site:attached-browser-smoke",
+                reconnect_token="reconnect-live-1",
+            )
+
+            class _Executor:
+                async def __call__(self, **kwargs):
+                    action = str(kwargs.get("action") or "").strip().lower()
+                    contract = dict(kwargs.get("contract") or {{}})
+                    browser_kwargs = {{
+                        "action": action,
+                        "session_id": provider_session_ref,
+                        "page_id": str(contract.get("page_id") or "page-1"),
+                    }}
+                    if action in {{"open", "navigate"}}:
+                        browser_kwargs["url"] = str(contract.get("url") or "")
+                    elif action == "type":
+                        browser_kwargs["selector"] = str(contract.get("selector") or "")
+                        browser_kwargs["text"] = str(contract.get("text") or "")
+                    elif action == "click":
+                        browser_kwargs["selector"] = str(contract.get("selector") or "")
+                        browser_kwargs["wait"] = int(contract.get("wait") or 0)
+                    elif action == "screenshot":
+                        browser_kwargs["path"] = str(contract.get("path") or "")
+                    else:
+                        raise RuntimeError(f"Unsupported attached-browser smoke action: {{action}}")
+                    return _tool_response_json(await browser_use(**browser_kwargs))
+
+            environment_service.register_browser_companion_executor(
+                transport_ref,
+                _Executor(),
+            )
+
+            resolution = environment_service.resolve_browser_channel(
+                session_mount_id=lease.id,
+                browser_mode="attach-existing-session",
+            )
+            open_result = await environment_service.execute_browser_action(
+                session_mount_id=lease.id,
+                action="open",
+                contract={{"url": {json.dumps(page_url)}, "page_id": "page-1"}},
+            )
+            type_result = await environment_service.execute_browser_action(
+                session_mount_id=lease.id,
+                action="type",
+                contract={{
+                    "page_id": "page-1",
+                    "selector": "#note",
+                    "text": "Attached channel draft",
+                }},
+            )
+            click_result = await environment_service.execute_browser_action(
+                session_mount_id=lease.id,
+                action="click",
+                contract={{
+                    "page_id": "page-1",
+                    "selector": "#save",
+                    "wait": 300,
+                }},
+            )
+            screenshot_result = await environment_service.execute_browser_action(
+                session_mount_id=lease.id,
+                action="screenshot",
+                contract={{
+                    "page_id": "page-1",
+                    "path": {json.dumps(screenshot_path)},
+                }},
+            )
+            await browser_runtime.stop_session(provider_session_ref)
+            print(
+                json.dumps(
+                    {{
+                        "start_status": started.get("status"),
+                        "resolution": resolution,
+                        "results": [open_result, type_result, click_result, screenshot_result],
+                        "screenshot_exists": Path({json.dumps(screenshot_path)}).exists(),
+                    }}
+                )
+            )
+
+        asyncio.run(main())
+        """,
+    )
+    return _run_live_python_script(tmp_path, script)
+
+
 @pytest.mark.skipif(
     not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
     reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
@@ -1418,6 +1582,66 @@ def test_live_browser_routine_authenticated_continuation_cross_tab_save_reopen_s
     assert len(anchors) == 9
     assert anchors[3].get("action") == "tabs"
     assert anchors[-1].get("artifact_path") == str(screenshot_path)
+
+
+@pytest.mark.skipif(
+    not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
+    reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
+)
+def test_live_attached_browser_channel_continuation_smoke(tmp_path) -> None:
+    screenshot_path = tmp_path / "attached-browser-channel-smoke.png"
+    html_path = tmp_path / "attached-browser-channel-smoke.html"
+    html_path.write_text(
+        textwrap.dedent(
+            """
+            <!doctype html>
+            <html lang="en">
+              <head>
+                <meta charset="utf-8" />
+                <title>Attached Browser Channel Smoke</title>
+                <script>
+                  function saveNote() {
+                    const value = document.getElementById("note").value;
+                    document.getElementById("status").textContent = "Saved: " + value;
+                  }
+                </script>
+              </head>
+              <body>
+                <h1>Attached Browser Channel Smoke</h1>
+                <label for="note">Note</label>
+                <input id="note" name="note" />
+                <button id="save" type="button" onclick="saveNote()">Save</button>
+                <p id="status">Idle</p>
+              </body>
+            </html>
+            """,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = _run_live_attached_browser_case(
+        tmp_path,
+        page_url=html_path.resolve().as_uri(),
+        screenshot_path=str(screenshot_path),
+    )
+
+    assert payload["start_status"] == "started"
+    resolution = dict(payload["resolution"] or {})
+    assert resolution.get("selected_channel") == "browser-mcp"
+    assert resolution.get("selection_status") == "ready"
+    results = list(payload["results"] or [])
+    assert len(results) == 4
+    assert all(
+        dict(item.get("execution_path") or {}).get("preferred_execution_path")
+        == "cooperative-native-first"
+        for item in results
+    )
+    assert all(
+        dict(item.get("execution_path") or {}).get("selected_path")
+        == "cooperative-native"
+        for item in results
+    )
+    assert payload["screenshot_exists"] is True
 
 
 @pytest.mark.skipif(

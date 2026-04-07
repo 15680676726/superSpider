@@ -738,20 +738,26 @@ class EnvironmentHealthService:
             runtime_descriptor.get("action_timeout_seconds"),
             live_descriptor.get("action_timeout_seconds"),
         )
+        browser_mode = self._canonical_browser_mode(
+            self._first_string(
+                session_metadata.get("browser_mode"),
+                mount_metadata.get("browser_mode"),
+                runtime_descriptor.get("browser_mode"),
+                live_descriptor.get("browser_mode"),
+                host_contract.get("host_mode"),
+            ),
+        )
+        browser_channel_resolution = self._service.resolve_browser_channel(
+            environment_id=getattr(mount, "id", None) if mount is not None else None,
+            session_mount_id=session.id if session is not None else None,
+            browser_mode=browser_mode,
+        )
         return {
             "projection_kind": "browser_site_contract_projection",
             "is_projection": True,
             "environment_id": getattr(mount, "id", None) if mount is not None else None,
             "session_mount_id": session.id if session is not None else None,
-            "browser_mode": self._canonical_browser_mode(
-                self._first_string(
-                    session_metadata.get("browser_mode"),
-                    mount_metadata.get("browser_mode"),
-                    runtime_descriptor.get("browser_mode"),
-                    live_descriptor.get("browser_mode"),
-                    host_contract.get("host_mode"),
-                ),
-            ),
+            "browser_mode": browser_mode,
             "tab_scope": tab_scope,
             "login_state": login_state,
             "profile_ref": self._first_string(
@@ -817,6 +823,19 @@ class EnvironmentHealthService:
                 runtime_descriptor.get("provider_session_ref"),
                 live_descriptor.get("provider_session_ref"),
             ),
+            "browser_channel": self._first_string(
+                browser_channel_resolution.get("selected_channel"),
+            ),
+            "browser_channel_status": self._first_string(
+                browser_channel_resolution.get("selection_status"),
+            ),
+            "browser_channel_health": self._first_string(
+                browser_channel_resolution.get("selected_channel_health"),
+            ),
+            "browser_channel_reason": self._first_string(
+                browser_channel_resolution.get("reason"),
+            ),
+            "browser_channel_resolution": dict(browser_channel_resolution),
             "navigation_guard": navigation_guard,
             "action_timeout_seconds": action_timeout_seconds,
             "download_policy": download_policy,

@@ -402,3 +402,78 @@ def test_release_browser_attach_transport_clears_session_and_environment_truth(
         "scope_ref": None,
         "reconnect_token": None,
     }
+
+
+def test_browser_channel_resolver_defaults_to_built_in_when_attach_path_is_unavailable(
+    tmp_path,
+) -> None:
+    service, _, _ = _build_environment_service(tmp_path)
+    lease = _acquire_browser_session(service)
+
+    resolution = service.resolve_browser_channel(session_mount_id=lease.id)
+
+    assert resolution["selected_channel"] == "built-in-browser"
+    assert resolution["selected_capability_id"] == "tool:browser_use"
+    assert resolution["selection_status"] == "ready"
+    assert resolution["selected_channel_health"] == "healthy"
+    assert resolution["attach_required"] is False
+    assert resolution["fail_closed"] is False
+    assert resolution["browser_mcp"]["healthy"] is False
+
+
+def test_browser_channel_resolver_prefers_browser_mcp_when_companion_and_attach_are_healthy(
+    tmp_path,
+) -> None:
+    service, _, _ = _build_environment_service(tmp_path)
+    lease = _acquire_browser_session(service)
+
+    service.register_browser_companion(
+        session_mount_id=lease.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+        provider_session_ref="browser-session:web:main",
+    )
+    service.register_browser_attach_transport(
+        session_mount_id=lease.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        browser_session_ref="browser-session:web:main",
+        browser_scope_ref="chrome-profile:alice",
+        reconnect_token="reconnect-token-1",
+    )
+
+    resolution = service.resolve_browser_channel(
+        session_mount_id=lease.id,
+        browser_mode="attach-existing-session",
+    )
+
+    assert resolution["selected_channel"] == "browser-mcp"
+    assert resolution["selected_capability_id"] == "system:browser_companion_runtime"
+    assert resolution["selection_status"] == "ready"
+    assert resolution["selected_channel_health"] == "healthy"
+    assert resolution["attach_required"] is True
+    assert resolution["fail_closed"] is False
+    assert resolution["browser_mcp"]["healthy"] is True
+    assert resolution["browser_mcp"]["attach_transport_ref"] == (
+        "transport:browser-companion:localhost"
+    )
+
+
+def test_browser_channel_resolver_fails_closed_when_attach_is_required_but_not_available(
+    tmp_path,
+) -> None:
+    service, _, _ = _build_environment_service(tmp_path)
+    lease = _acquire_browser_session(service)
+
+    resolution = service.resolve_browser_channel(
+        session_mount_id=lease.id,
+        browser_mode="attach-existing-session",
+    )
+
+    assert resolution["selected_channel"] is None
+    assert resolution["selection_status"] == "blocked"
+    assert resolution["selected_channel_health"] == "blocked"
+    assert resolution["attach_required"] is True
+    assert resolution["fail_closed"] is True
+    assert "attach" in str(resolution["reason"]).lower()

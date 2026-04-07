@@ -1922,6 +1922,18 @@ class FakeEnvironmentService:
             "attach_transport_ref": "transport:cdp:local",
             "provider_kind": "local-managed-browser",
             "provider_session_ref": "browser-session:web:main",
+            "browser_channel": "browser-mcp",
+            "browser_channel_status": "ready",
+            "browser_channel_health": "healthy",
+            "browser_channel_reason": "Browser MCP is healthy and selected for the attached browser seat.",
+            "browser_channel_resolution": {
+                "selected_channel": "browser-mcp",
+                "selected_capability_id": "system:browser_companion_runtime",
+                "selection_status": "ready",
+                "selected_channel_health": "healthy",
+                "attach_required": True,
+                "fail_closed": False,
+            },
             "navigation_guard": {
                 "allowed_hosts": ["seller.jd.com"],
                 "blocked_hosts": ["ads.jd.com"],

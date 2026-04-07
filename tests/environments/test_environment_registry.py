@@ -3476,6 +3476,13 @@ def test_environment_detail_projects_browser_attach_runtime_truth(tmp_path):
             "handoff_state": "agent-attached",
         },
     )
+    service.register_browser_companion(
+        session_mount_id=lease.id,
+        transport_ref="transport:browser-companion:localhost",
+        status="attached",
+        available=True,
+        provider_session_ref="browser-session:web:main",
+    )
     service.register_browser_attach_transport(
         session_mount_id=lease.id,
         transport_ref="transport:cdp:local",
@@ -3497,6 +3504,13 @@ def test_environment_detail_projects_browser_attach_runtime_truth(tmp_path):
         "blocked_hosts": ["ads.jd.com"],
     }
     assert detail["browser_site_contract"]["action_timeout_seconds"] == 12.5
+    assert detail["browser_site_contract"]["browser_channel"] == "browser-mcp"
+    assert detail["browser_site_contract"]["browser_channel_status"] == "ready"
+    assert detail["browser_site_contract"]["browser_channel_health"] == "healthy"
+    assert (
+        detail["browser_site_contract"]["browser_channel_resolution"]["selected_channel"]
+        == "browser-mcp"
+    )
 
 
 def test_shared_operator_abort_state_uses_same_session_environment_truth(tmp_path):
