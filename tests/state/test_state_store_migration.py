@@ -173,6 +173,10 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
             "domain_key",
             "domain_label",
             "status",
+            "industry_instance_id",
+            "control_thread_id",
+            "domain_scope_summary",
+            "domain_scope_tags_json",
             "capability_score",
             "evolution_stage",
         }.issubset(_column_names(conn, "buddy_domain_capabilities"))

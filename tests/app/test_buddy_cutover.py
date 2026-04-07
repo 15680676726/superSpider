@@ -161,10 +161,8 @@ def test_buddy_surface_and_runtime_center_surface_share_same_projection(tmp_path
     ).json()
     summary = runtime_surface["main_brain"]["buddy_summary"]
 
-    assert surface["execution_carrier"]["instance_id"] == f"buddy:{surface['profile']['profile_id']}"
-    assert surface["execution_carrier"]["thread_id"] == (
-        f"industry-chat:buddy:{surface['profile']['profile_id']}:execution-core"
-    )
+    assert surface["execution_carrier"]["instance_id"]
+    assert surface["execution_carrier"]["control_thread_id"] == surface["execution_carrier"]["thread_id"]
     assert surface["presentation"]["buddy_name"] == "Mochi"
     assert summary["buddy_name"] == "Mochi"
     assert summary["evolution_stage"] == surface["growth"]["evolution_stage"]
@@ -213,14 +211,10 @@ def test_buddy_confirm_direction_returns_execution_carrier_for_chat_binding(tmp_
 
     execution_carrier = confirmation.get("execution_carrier")
     assert execution_carrier is not None
-    assert execution_carrier["instance_id"] == f"buddy:{identity['profile']['profile_id']}"
+    assert execution_carrier["instance_id"] == confirmation["domain_capability"]["industry_instance_id"]
     assert execution_carrier["owner_scope"] == identity["profile"]["profile_id"]
-    assert execution_carrier["control_thread_id"] == (
-        f"industry-chat:buddy:{identity['profile']['profile_id']}:execution-core"
-    )
-    assert execution_carrier["thread_id"] == (
-        f"industry-chat:buddy:{identity['profile']['profile_id']}:execution-core"
-    )
+    assert execution_carrier["control_thread_id"] == confirmation["domain_capability"]["control_thread_id"]
+    assert execution_carrier["thread_id"] == confirmation["domain_capability"]["control_thread_id"]
     assert execution_carrier["chat_binding"]["thread_id"] == execution_carrier["thread_id"]
     assert execution_carrier["chat_binding"]["control_thread_id"] == execution_carrier["control_thread_id"]
     assert execution_carrier["chat_binding"]["channel"] == "console"
@@ -318,18 +312,18 @@ def test_http_buddy_surfaces_refresh_capability_growth_from_runtime_truth(tmp_pa
             "existing_question_count": 9,
         },
     ).json()
-    client.post(
+    confirmation = client.post(
         "/buddy/onboarding/confirm-direction",
         json={
             "session_id": identity["session_id"],
             "selected_direction": clarification["recommended_direction"],
             "capability_action": "start-new",
         },
-    )
+    ).json()
 
     assignment_repository = SqliteAssignmentRepository(store)
     report_repository = SqliteAgentReportRepository(store)
-    instance_id = f"buddy:{identity['profile']['profile_id']}"
+    instance_id = confirmation["domain_capability"]["industry_instance_id"]
     assignments = assignment_repository.list_assignments(industry_instance_id=instance_id)
     assert assignments
     first_assignment = assignments[0]

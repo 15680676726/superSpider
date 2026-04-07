@@ -107,6 +107,10 @@ class BuddyDomainCapabilityRecord(UpdatedRecord):
     domain_key: str = Field(..., min_length=1)
     domain_label: str = Field(..., min_length=1)
     status: BuddyDomainCapabilityStatus = "active"
+    industry_instance_id: str = ""
+    control_thread_id: str = ""
+    domain_scope_summary: str = ""
+    domain_scope_tags: list[str] = Field(default_factory=list)
     strategy_score: int = Field(default=0, ge=0, le=25)
     execution_score: int = Field(default=0, ge=0, le=35)
     evidence_score: int = Field(default=0, ge=0, le=20)
@@ -121,6 +125,11 @@ class BuddyDomainCapabilityRecord(UpdatedRecord):
     report_count: int = Field(default=0, ge=0)
     last_activated_at: str | None = None
     last_progress_at: str | None = None
+
+    @field_validator("domain_scope_tags", mode="before")
+    @classmethod
+    def _normalize_domain_scope_tags(cls, value: object) -> list[str]:
+        return _normalize_text_list(value)
 
 
 class BuddyPresentation(UpdatedRecord):

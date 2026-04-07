@@ -131,6 +131,14 @@ def test_confirm_primary_direction_and_name_buddy(tmp_path) -> None:
     assert confirm.status_code == 200
     assert confirm.json()["growth_target"]["primary_direction"] == recommended
     assert confirm.json()["domain_capability"]["status"] == "active"
+    assert (
+        confirm.json()["execution_carrier"]["instance_id"]
+        == confirm.json()["domain_capability"]["industry_instance_id"]
+    )
+    assert (
+        confirm.json()["execution_carrier"]["control_thread_id"]
+        == confirm.json()["domain_capability"]["control_thread_id"]
+    )
 
     naming = client.post(
         "/buddy/name",

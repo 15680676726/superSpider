@@ -39,6 +39,7 @@
 
 - Buddy 当前成长阶段的正式真相已从关系经验切到 active `BuddyDomainCapabilityRecord`
 - `CompanionRelationship.companion_experience` 继续保留，但只作为关系层信号，不再决定 stage
+- Buddy execution carrier 的正式真相已从 profile-global `buddy:{profile_id}` 收口为“每个 `BuddyDomainCapabilityRecord` 各自绑定自己的 carrier continuity”
 - 新增正式后端链路：
   - `POST /buddy/onboarding/direction-transition-preview`
   - `POST /buddy/onboarding/confirm-direction` with `capability_action`
@@ -46,6 +47,7 @@
 - 新增正式状态对象：
   - `BuddyDomainCapabilityRecord`
     - `domain_key / domain_label / capability_score / evolution_stage / strategy_score / execution_score / evidence_score / stability_score`
+    - `industry_instance_id / control_thread_id / domain_scope_summary / domain_scope_tags`
 - 前端已同步把 stage 文案收口为：
   - `幼年期 / 成长期 / 成熟期 / 完全体 / 究极体`
 - Buddy 领域能力分现在会从当前 execution carrier 的正式规划/执行事实自动刷新：
@@ -54,10 +56,17 @@
 - BuddyOnboarding 的换目标确认现在是显式人工确认 UI：
   - 先 preview，再由用户明确选择 `keep-active / restore-archived / start-new`
   - 前端不再自动接受系统推荐动作
+- Buddy carrier 切换规则现已正式化：
+  - `keep-active`：沿用当前 domain 绑定 carrier
+  - `restore-archived`：恢复历史 domain 绑定的旧 carrier / 旧 control thread continuity
+  - `start-new`：冻结旧 domain carrier，并为新 domain 创建 fresh carrier，不再继承旧 runtime 事实
+- Buddy 页面与聊天的职责边界已收口：
+  - 页面只负责主领域硬切换
+  - 聊天只负责当前领域扩展，不自动切换 domain carrier
 - 当前 fresh verification：
   - backend：
-    - `python -m pytest tests/kernel/test_buddy_domain_capability.py tests/kernel/test_buddy_onboarding_service.py tests/kernel/test_buddy_projection_service.py tests/kernel/test_buddy_projection_capability.py tests/app/test_buddy_routes.py tests/app/test_buddy_cutover.py -q`
-    - 结果：`37 passed`
+    - `PYTHONPATH=src python -m pytest tests/state/test_buddy_models.py tests/state/test_buddy_domain_capability_repository.py tests/state/test_state_store_migration.py tests/kernel/test_buddy_onboarding_service.py tests/kernel/test_buddy_projection_service.py tests/kernel/test_buddy_projection_capability.py tests/app/test_buddy_routes.py tests/app/test_buddy_cutover.py -q`
+    - 结果：`38 passed`
   - console：
     - `npm --prefix console test -- src/api/modules/buddy.test.ts src/pages/BuddyOnboarding/index.test.tsx src/pages/Chat/buddyEvolution.test.ts src/pages/Chat/buddyPresentation.test.ts src/pages/Chat/BuddyPanel.test.tsx src/pages/Chat/BuddyCompanion.test.tsx src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx src/runtime/buddyFlow.test.ts`
     - 结果：`35 passed`

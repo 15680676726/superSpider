@@ -33,6 +33,10 @@ def test_repository_round_trips_active_domain_capability(tmp_path) -> None:
         domain_key="writing",
         domain_label="写作",
         status="active",
+        industry_instance_id="buddy:profile-1:domain-writing",
+        control_thread_id="industry-chat:buddy:profile-1:domain-writing:execution-core",
+        domain_scope_summary="Writing plus adjacent creator products",
+        domain_scope_tags=["writing", "creator"],
         capability_score=48,
         evolution_stage="capable",
     )
@@ -44,6 +48,11 @@ def test_repository_round_trips_active_domain_capability(tmp_path) -> None:
     assert loaded.domain_id == "domain-writing"
     assert loaded.domain_label == "写作"
     assert loaded.capability_score == 48
+    assert loaded.industry_instance_id == "buddy:profile-1:domain-writing"
+    assert loaded.control_thread_id == (
+        "industry-chat:buddy:profile-1:domain-writing:execution-core"
+    )
+    assert loaded.domain_scope_tags == ["writing", "creator"]
 
 
 def test_repository_archives_previous_active_records_except_selected_one(tmp_path) -> None:
@@ -54,6 +63,8 @@ def test_repository_archives_previous_active_records_except_selected_one(tmp_pat
         domain_key="stocks",
         domain_label="股票",
         status="active",
+        industry_instance_id="buddy:profile-1:domain-stock",
+        control_thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
         capability_score=72,
         evolution_stage="seasoned",
     )
@@ -63,6 +74,8 @@ def test_repository_archives_previous_active_records_except_selected_one(tmp_pat
         domain_key="writing",
         domain_label="写作",
         status="active",
+        industry_instance_id="buddy:profile-1:domain-writing",
+        control_thread_id="industry-chat:buddy:profile-1:domain-writing:execution-core",
         capability_score=38,
         evolution_stage="bonded",
     )
@@ -79,6 +92,7 @@ def test_repository_archives_previous_active_records_except_selected_one(tmp_pat
     preserved = next(record for record in records if record.domain_id == "domain-writing")
     assert archived.status == "archived"
     assert archived.capability_score == 72
+    assert archived.industry_instance_id == "buddy:profile-1:domain-stock"
     assert preserved.status == "active"
 
 
@@ -91,6 +105,8 @@ def test_repository_finds_archived_domains_by_key_for_restore(tmp_path) -> None:
             domain_key="writing",
             domain_label="写作",
             status="archived",
+            industry_instance_id="buddy:profile-1:domain-writing",
+            control_thread_id="industry-chat:buddy:profile-1:domain-writing:execution-core",
             capability_score=52,
             evolution_stage="capable",
         )
@@ -102,6 +118,8 @@ def test_repository_finds_archived_domains_by_key_for_restore(tmp_path) -> None:
             domain_key="fitness",
             domain_label="健身",
             status="archived",
+            industry_instance_id="buddy:profile-1:domain-fitness",
+            control_thread_id="industry-chat:buddy:profile-1:domain-fitness:execution-core",
             capability_score=16,
             evolution_stage="seed",
         )
@@ -110,3 +128,6 @@ def test_repository_finds_archived_domains_by_key_for_restore(tmp_path) -> None:
     matches = repository.find_domain_capabilities_by_key("profile-1", "writing")
 
     assert [record.domain_id for record in matches] == ["domain-writing"]
+    assert matches[0].control_thread_id == (
+        "industry-chat:buddy:profile-1:domain-writing:execution-core"
+    )

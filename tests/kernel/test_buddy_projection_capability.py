@@ -104,7 +104,7 @@ def test_buddy_projection_refreshes_stage_from_runtime_capability_growth(tmp_pat
     )
     assignment_repository = SqliteAssignmentRepository(store)
     report_repository = SqliteAgentReportRepository(store)
-    instance_id = f"buddy:{identity.profile.profile_id}"
+    instance_id = result.domain_capability.industry_instance_id
     assignments = assignment_repository.list_assignments(industry_instance_id=instance_id)
     assert assignments
     first_assignment = assignments[0]

@@ -91,6 +91,7 @@ class BuddyProjectionService:
         execution_carrier = self._build_execution_carrier(
             profile=profile,
             growth_target=target,
+            active_domain=active_domain,
         )
         onboarding = self._build_onboarding_projection(
             session=session,
@@ -359,12 +360,16 @@ class BuddyProjectionService:
         *,
         profile: HumanProfile,
         growth_target: GrowthTarget | None,
+        active_domain: BuddyDomainCapabilityRecord | None,
     ) -> dict[str, object] | None:
         if growth_target is None:
             return None
+        instance_id = str(getattr(active_domain, "industry_instance_id", "") or "").strip()
+        control_thread_id = str(getattr(active_domain, "control_thread_id", "") or "").strip()
         return build_buddy_execution_carrier_handoff(
             profile=profile,
-            instance_id=f"buddy:{profile.profile_id}",
+            instance_id=instance_id or f"buddy:{profile.profile_id}",
+            control_thread_id=control_thread_id or None,
             label=profile.display_name,
             current_cycle_id=growth_target.current_cycle_label or "Cycle 1",
             team_generated=False,

@@ -81,7 +81,11 @@ def _relationship_from_row(row) -> CompanionRelationship | None:
 def _domain_capability_from_row(row) -> BuddyDomainCapabilityRecord | None:
     if row is None:
         return None
-    return BuddyDomainCapabilityRecord.model_validate(dict(row))
+    payload = dict(row)
+    payload["domain_scope_tags"] = _decode_json_list(
+        payload.pop("domain_scope_tags_json", None),
+    )
+    return BuddyDomainCapabilityRecord.model_validate(payload)
 
 
 def _session_from_row(row) -> BuddyOnboardingSessionRecord | None:
@@ -354,11 +358,14 @@ class SqliteBuddyDomainCapabilityRepository:
         record: BuddyDomainCapabilityRecord,
     ) -> BuddyDomainCapabilityRecord:
         payload = record.model_dump(mode="json")
+        payload["domain_scope_tags_json"] = _encode_json(record.domain_scope_tags)
         with self._store.connection() as conn:
             conn.execute(
                 """
                 INSERT INTO buddy_domain_capabilities (
                     domain_id, profile_id, domain_key, domain_label, status,
+                    industry_instance_id, control_thread_id, domain_scope_summary,
+                    domain_scope_tags_json,
                     strategy_score, execution_score, evidence_score, stability_score,
                     capability_score, evolution_stage, knowledge_value, skill_value,
                     completed_support_runs, completed_assisted_closures,
@@ -366,6 +373,8 @@ class SqliteBuddyDomainCapabilityRepository:
                     created_at, updated_at
                 ) VALUES (
                     :domain_id, :profile_id, :domain_key, :domain_label, :status,
+                    :industry_instance_id, :control_thread_id, :domain_scope_summary,
+                    :domain_scope_tags_json,
                     :strategy_score, :execution_score, :evidence_score, :stability_score,
                     :capability_score, :evolution_stage, :knowledge_value, :skill_value,
                     :completed_support_runs, :completed_assisted_closures,
@@ -377,6 +386,10 @@ class SqliteBuddyDomainCapabilityRepository:
                     domain_key = excluded.domain_key,
                     domain_label = excluded.domain_label,
                     status = excluded.status,
+                    industry_instance_id = excluded.industry_instance_id,
+                    control_thread_id = excluded.control_thread_id,
+                    domain_scope_summary = excluded.domain_scope_summary,
+                    domain_scope_tags_json = excluded.domain_scope_tags_json,
                     strategy_score = excluded.strategy_score,
                     execution_score = excluded.execution_score,
                     evidence_score = excluded.evidence_score,

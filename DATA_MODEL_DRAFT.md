@@ -29,6 +29,10 @@
   - Chat surface、Runtime Center buddy summary 与前端 stage 展示必须统一读取 active `BuddyDomainCapabilityRecord`
   - `CompanionRelationship` 继续只负责命名、陪伴风格、亲密度、契合度、沟通次数与关系记忆，不再主导 stage
   - 换目标写链允许 `keep-active / restore-archived / start-new` 三种领域能力切换，旧领域档案归档保留，后续切回可恢复
+  - `BuddyDomainCapabilityRecord` 现已正式绑定自己的 execution carrier continuity：`industry_instance_id / control_thread_id`；一个 active domain record 只能对应一个 active Buddy carrier
+  - 新领域不再继续复用 profile-global `buddy:{profile_id}` carrier；legacy shared carrier 只允许一次性 backfill 到已有 active domain record，之后新 domain 必须生成自己的 domain-owned carrier id
+  - Buddy 聊天只负责扩展当前 active domain 的范围与能力，不负责硬切换 carrier；页面确认流只负责主领域切换与 archived-domain 恢复
+  - archived `BuddyDomainCapabilityRecord` 与其绑定 carrier 必须一起归档保留；后续切回该 domain 时，应恢复原 carrier / control thread continuity，而不是新建平行 runtime truth
 
 本文件用于定义 `CoPaw` 理想载体升级中的**正式数据模型草案**。
 
