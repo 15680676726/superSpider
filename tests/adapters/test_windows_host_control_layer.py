@@ -10,6 +10,7 @@ from copaw.adapters.desktop.windows_uia import ControlSelector
 class _FakeWin32GUI:
     def __init__(self) -> None:
         self.foreground = 101
+        self.closed: list[int] = []
         self.windows = {
             101: {
                 "title": "Dialog Host",
@@ -55,6 +56,10 @@ class _FakeWin32GUI:
     def SetForegroundWindow(self, hwnd: int) -> None:
         self.foreground = hwnd
 
+    def PostMessage(self, hwnd: int, msg: int, wparam: int, lparam: int) -> None:
+        _ = (msg, wparam, lparam)
+        self.closed.append(hwnd)
+
 
 class _FakeWin32Process:
     def GetWindowThreadProcessId(self, hwnd: int):
@@ -99,7 +104,8 @@ class _FakeKernel32:
 
 
 class _FakeUIAAdapter:
-    def __init__(self) -> None:
+    def __init__(self, gui: _FakeWin32GUI | None = None) -> None:
+        self._gui = gui
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     def list_controls(self, **kwargs):
@@ -128,10 +134,17 @@ class _FakeUIAAdapter:
 
     def invoke_control(self, **kwargs):
         self.calls.append(("invoke_control", dict(kwargs)))
+        selector = kwargs["selector"]
+        window_handle = int(kwargs["window_handle"])
+        title = getattr(selector, "title", None)
+        if self._gui is not None and title == "关闭标签页":
+            self._gui.windows[window_handle]["title"] = "Other Document - Notepad"
+        if self._gui is not None and title == "关闭":
+            self._gui.windows.pop(window_handle, None)
         return {
             "control": {
                 "handle": 9001,
-                "title": "Save",
+                "title": title or "Save",
                 "automation_id": "1",
                 "control_type": "Button",
             },
@@ -153,7 +166,7 @@ class _FakeUIAAdapter:
 
 def _build_host_with_uia():
     gui = _FakeWin32GUI()
-    uia = _FakeUIAAdapter()
+    uia = _FakeUIAAdapter(gui)
     host = WindowsDesktopHost(
         platform_name="win32",
         win32gui_module=gui,
@@ -238,3 +251,42 @@ def test_windows_mcp_server_exposes_control_actions() -> None:
     assert edited["tool"] == "set_control_text"
     assert invoked["success"] is True
     assert invoked["tool"] == "invoke_dialog_action"
+
+
+def test_close_window_prefers_semantic_tab_close_when_selector_clears() -> None:
+    host, gui, uia = _build_host_with_uia()
+    gui.windows[101]["title"] = "Document A - Notepad"
+
+    result = host.close_window(selector=WindowSelector(title_contains="Document A"))
+
+    assert result["success"] is True
+    assert result["closed"] is True
+    assert result["close_path"] == "semantic:关闭标签页"
+    assert gui.closed == []
+    assert uia.calls[0][0] == "invoke_control"
+    assert gui.windows[101]["title"] == "Other Document - Notepad"
+
+
+def test_close_window_falls_back_to_wm_close_when_semantic_close_is_unavailable() -> None:
+    host, gui, uia = _build_host_with_uia()
+    gui.windows[101]["title"] = "Dialog Host"
+
+    def _invoke_control(**kwargs):
+        uia.calls.append(("invoke_control", dict(kwargs)))
+        raise RuntimeError("not available")
+
+    uia.invoke_control = _invoke_control  # type: ignore[method-assign]
+    original_post_message = gui.PostMessage
+
+    def _post_message(hwnd: int, msg: int, wparam: int, lparam: int) -> None:
+        original_post_message(hwnd, msg, wparam, lparam)
+        gui.windows.pop(hwnd, None)
+
+    gui.PostMessage = _post_message  # type: ignore[method-assign]
+
+    result = host.close_window(selector=WindowSelector(title="Dialog Host"), timeout_seconds=0.01)
+
+    assert result["success"] is True
+    assert result["closed"] is True
+    assert result["close_path"] == "wm_close"
+    assert gui.closed == [101]

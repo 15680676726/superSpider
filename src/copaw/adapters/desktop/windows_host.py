@@ -358,15 +358,82 @@ class WindowsDesktopHost:
             "window": self._window_info(handle),
         }
 
-    def close_window(self, *, selector: WindowSelector) -> dict[str, object]:
-        """Request a graceful close for a top-level window."""
+    def close_window(
+        self,
+        *,
+        selector: WindowSelector,
+        timeout_seconds: float = 2.0,
+    ) -> dict[str, object]:
+        """Request a graceful close for a top-level window and verify the selector clears."""
+        self._ensure_supported()
         window = self._resolve_window(selector)
         handle = int(window["handle"])
+        attempted_paths: list[str] = []
+        try:
+            self.focus_window(selector=selector)
+        except Exception:
+            pass
+        for close_path in self._semantic_close_selectors():
+            try:
+                self._uia.invoke_control(
+                    window_handle=handle,
+                    selector=close_path,
+                    action="invoke",
+                )
+            except Exception:
+                continue
+            attempted_paths.append(f"semantic:{close_path.title or close_path.title_contains or 'control'}")
+            if self._wait_for_selector_clear(selector, timeout_seconds=timeout_seconds):
+                return {
+                    "success": True,
+                    "window": window,
+                    "closed": True,
+                    "close_path": attempted_paths[-1],
+                }
+        try:
+            self._send_key_chord(["Ctrl", "W"])
+            attempted_paths.append("keys:Ctrl+W")
+            if self._wait_for_selector_clear(selector, timeout_seconds=timeout_seconds):
+                return {
+                    "success": True,
+                    "window": window,
+                    "closed": True,
+                    "close_path": attempted_paths[-1],
+                }
+        except Exception:
+            pass
+        for keys in (["Alt", "F4"],):
+            try:
+                self._send_key_chord(keys)
+            except Exception:
+                continue
+            attempted_paths.append(f"keys:{'+'.join(keys)}")
+            if self._wait_for_selector_clear(selector, timeout_seconds=timeout_seconds):
+                return {
+                    "success": True,
+                    "window": window,
+                    "closed": True,
+                    "close_path": attempted_paths[-1],
+                }
         self._win32gui.PostMessage(handle, self._win32con.WM_CLOSE, 0, 0)
-        return {
-            "success": True,
-            "window": window,
-        }
+        attempted_paths.append("wm_close")
+        if self._wait_for_selector_clear(selector, timeout_seconds=timeout_seconds):
+            return {
+                "success": True,
+                "window": window,
+                "closed": True,
+                "close_path": attempted_paths[-1],
+            }
+        raise DesktopAutomationError(
+            f"Failed to close window: {self._selector_description(selector)}",
+            code="window_close_failed",
+            details={
+                "selector": self._selector_payload(selector),
+                "window": window,
+                "attempted_paths": attempted_paths,
+                "remaining_windows": self._matching_windows(selector=selector, include_hidden=True),
+            },
+        )
 
     def verify_window_focus(self, *, selector: WindowSelector) -> dict[str, object]:
         """Verify whether the selected window currently owns the foreground."""
@@ -720,6 +787,29 @@ class WindowsDesktopHost:
         if bool(self._win32gui.IsIconic(handle)):
             self._win32gui.ShowWindow(handle, self._win32con.SW_RESTORE)
         self._win32gui.ShowWindow(handle, self._win32con.SW_SHOW)
+
+    def _wait_for_selector_clear(
+        self,
+        selector: WindowSelector,
+        *,
+        timeout_seconds: float,
+    ) -> bool:
+        deadline = self._time.monotonic() + max(timeout_seconds, 0.0)
+        while True:
+            matches = self._matching_windows(selector=selector, include_hidden=True)
+            if not matches:
+                return True
+            if self._time.monotonic() >= deadline:
+                return False
+            self._time.sleep(0.05)
+
+    def _semantic_close_selectors(self) -> tuple[ControlSelector, ...]:
+        return (
+            ControlSelector(title="\u5173\u95ed\u6807\u7b7e\u9875", control_type="Button", found_index=0),
+            ControlSelector(title="Close tab", control_type="Button", found_index=0),
+            ControlSelector(title="\u5173\u95ed", control_type="Button", found_index=0),
+            ControlSelector(title="Close", control_type="Button", found_index=0),
+        )
 
     def _activate_window(self, handle: int) -> None:
         self._try_focus_primitives(handle)
