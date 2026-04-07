@@ -2531,6 +2531,7 @@ class _IndustryLifecycleMixin:
         session_id: str | None = None,
         channel: str | None = None,
         execute_background: bool = False,
+        include_learning_acquisition_cycle: bool = False,
         trigger_source: str | None = None,
         trigger_reason_override: str | None = None,
     ) -> dict[str, Any] | None:
@@ -2545,6 +2546,8 @@ class _IndustryLifecycleMixin:
 
         async def _maybe_run_learning_acquisition_cycle() -> dict[str, Any] | None:
             if execute_background:
+                return None
+            if not include_learning_acquisition_cycle:
                 return None
             if not callable(acquisition_runner):
                 return None

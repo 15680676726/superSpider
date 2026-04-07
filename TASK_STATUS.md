@@ -1269,3 +1269,18 @@
 - 本轮 focused verification：
   - `PYTHONPATH=src python -m pytest tests/kernel/test_buddy_onboarding_service.py tests/app/test_buddy_cutover.py -q` -> `14 passed`
   - `cmd /c npm --prefix console run test -- src/pages/Industry/pageHelpers.test.ts` -> `6 passed`
+
+### 3.3.9 `2026-04-07` industry learning kickoff acquisition-closure
+
+- `IndustryService.kickoff_execution_from_chat(...)` 默认已不再同步阻塞 `run_industry_acquisition_cycle(...)`；learning acquisition 现在只有在显式传入 `include_learning_acquisition_cycle=True` 时才会加入本次 kickoff 返回。
+- 这意味着默认 kickoff 主链只负责 assignment/backlog/cycle 的正式执行起链，不再因为自动 acquisition 扫描把 operator / retirement / runtime-detail 相关测试和读面一起拖进慢链。
+- `LearningAcquisitionRuntimeService._discover_role_acquisition_candidates(...)` 现在已把 automatic industry acquisition discovery 默认收口到 `providers=["install-template"]`：
+  - install-template / builtin-runtime 仍保留在自动 acquisition 主链内；
+  - SOP template 搜索仍由 discovery service 的独立 `sop_templates` 分支提供；
+  - curated skill / MCP registry / remote provider 扫描不再作为 industry auto kickoff 的默认同步步骤。
+- 因此，`test_industry_learning_kickoff_materializes_acquisition_objects_and_exposes_them` 这条此前会长时间卡住的 industry learning 闭环现在已能在本地环境内 fresh 跑通。
+- 本次追加 focused verification：
+  - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py::test_kickoff_execution_from_chat_does_not_block_on_learning_acquisition_cycle_by_default -q` -> `1 passed`
+  - `python -m pytest tests/app/industry_api_parts/retirement_chain.py::test_industry_learning_kickoff_scopes_acquisition_discovery_to_install_templates -q` -> `1 passed`
+  - `python -m pytest tests/app/industry_api_parts/retirement_chain.py::test_industry_learning_kickoff_materializes_acquisition_objects_and_exposes_them -q` -> `1 passed in 88.75s`
+  - `python -m pytest tests/app/industry_api_parts/retirement_chain.py::test_industry_runtime_detail_and_goal_detail_use_formal_instance_store -q` -> `1 passed`

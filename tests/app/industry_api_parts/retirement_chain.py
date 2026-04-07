@@ -502,6 +502,7 @@ def test_industry_learning_kickoff_materializes_acquisition_objects_and_exposes_
             owner_agent_id="copaw-agent-runner",
             session_id=f"industry:{instance_id}",
             channel="console",
+            include_learning_acquisition_cycle=True,
         ),
     )
 
@@ -540,6 +541,96 @@ def test_industry_learning_kickoff_materializes_acquisition_objects_and_exposes_
     assert detail_payload["routes"]["acquisition_proposals"]
     assert detail_payload["routes"]["install_binding_plans"]
     assert detail_payload["routes"]["onboarding_runs"]
+
+
+def test_industry_learning_kickoff_scopes_acquisition_discovery_to_install_templates(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    async def _fake_example_run(*args, **kwargs):
+        return InstallTemplateExampleRunRecord(
+            template_id="browser-local",
+            status="success",
+            started_at="2026-03-22T00:00:00Z",
+            finished_at="2026-03-22T00:00:01Z",
+            summary="Browser runtime smoke completed",
+            operations=["start", "stop"],
+        )
+
+    monkeypatch.setattr(
+        "copaw.capabilities.install_templates.run_install_template_example",
+        _fake_example_run,
+    )
+    app = _build_industry_app(
+        tmp_path,
+        draft_generator=BrowserIndustryDraftGenerator(),
+    )
+    client = TestClient(app)
+
+    captured_payloads: list[dict[str, object]] = []
+    discovery_service = app.state.capability_service.get_discovery_service()
+
+    async def _fast_discover(payload: dict[str, object]) -> dict[str, object]:
+        captured_payloads.append(dict(payload))
+        role_payload = dict(payload.get("role") or {})
+        return {
+            "success": True,
+            "recommendations": [
+                {
+                    "recommendation_id": "browser-local:browser-local-default",
+                    "install_kind": "builtin-runtime",
+                    "template_id": "browser-local",
+                    "title": "Local browser runtime",
+                    "description": "Provision the governed browser runtime.",
+                    "default_client_key": "browser-local-default",
+                    "capability_ids": [],
+                    "target_agent_ids": [role_payload.get("agent_id")],
+                    "match_signals": ["browser workflow", "form submission"],
+                },
+            ],
+            "sop_templates": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(discovery_service, "discover", _fast_discover)
+
+    profile = IndustryProfile(
+        industry="Customer Operations",
+        company_name="Northwind Robotics",
+        product="Browser onboarding workflows",
+        target_customers=["Operators"],
+        channels=["Email"],
+        goals=["Launch the first governed browser workflow"],
+        constraints=["Keep onboarding actions inside the governed browser runtime."],
+    )
+    draft = BrowserIndustryDraftGenerator().build_draft(profile, "northwind-robotics")
+
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_activate": True,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    kickoff_result = asyncio.run(
+        app.state.industry_service.kickoff_execution_from_chat(
+            industry_instance_id=instance_id,
+            message_text="Start the first learning cycle now.",
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry:{instance_id}",
+            channel="console",
+            include_learning_acquisition_cycle=True,
+        ),
+    )
+
+    assert kickoff_result is not None
+    assert kickoff_result["acquisition_cycle"] is not None
+    assert captured_payloads
+    assert all(item.get("providers") == ["install-template"] for item in captured_payloads)
 
 
 def test_industry_rebootstrap_preserves_actor_identity_and_records_semantic_drift(
@@ -838,7 +929,7 @@ def test_industry_runtime_detail_and_goal_detail_use_formal_instance_store(
         task_id=task_id,
         agent_id="copaw-agent-runner",
     )
-    assert proposal.goal_id is None
+    assert proposal.goal_id == task.goal_id == assignment.goal_id
 
     detail = client.get(f"/industry/v1/instances/{instance_id}")
     assert detail.status_code == 200

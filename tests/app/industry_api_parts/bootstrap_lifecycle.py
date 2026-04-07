@@ -1831,6 +1831,60 @@ def test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_go
     assert all(task.assignment_id in started_assignment_ids for task in created_tasks)
 
 
+def test_kickoff_execution_from_chat_does_not_block_on_learning_acquisition_cycle_by_default(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(tmp_path)
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Industrial Equipment",
+            "company_name": "Northwind Robotics",
+            "product": "factory monitoring copilots",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+
+    bootstrap = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": preview_payload["profile"],
+            "draft": preview_payload["draft"],
+            "auto_activate": False,
+            "auto_dispatch": False,
+            "execute": False,
+        },
+    )
+    assert bootstrap.status_code == 200
+    instance_id = bootstrap.json()["team"]["team_id"]
+
+    async def _unexpected_acquisition_cycle(**kwargs):
+        raise AssertionError(f"acquisition cycle should not run by default: {kwargs}")
+
+    with patch.object(
+        app.state.learning_service,
+        "run_industry_acquisition_cycle",
+        side_effect=_unexpected_acquisition_cycle,
+    ):
+        kickoff = asyncio.run(
+            app.state.industry_service.kickoff_execution_from_chat(
+                industry_instance_id=instance_id,
+                message_text="Start the first execution cycle for today.",
+                owner_agent_id="copaw-agent-runner",
+                session_id=f"industry:{instance_id}",
+                channel="console",
+            ),
+        )
+
+    assert kickoff is not None
+    assert kickoff["kickoff_stage"] == "learning"
+    assert kickoff["started_assignment_ids"]
+    assert kickoff["acquisition_cycle"] is None
+
+
 def test_chat_writeback_schedule_creation_does_not_expand_instance_schedule_truth(
     tmp_path,
 ) -> None:
