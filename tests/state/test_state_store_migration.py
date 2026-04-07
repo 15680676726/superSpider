@@ -178,6 +178,13 @@ def test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_inde
             "domain_scope_summary",
             "domain_scope_tags_json",
             "capability_score",
+            "capability_points",
+            "settled_closure_count",
+            "independent_outcome_count",
+            "recent_completion_rate",
+            "recent_execution_error_rate",
+            "distinct_settled_cycle_count",
+            "demotion_cooldown_until",
             "evolution_stage",
         }.issubset(_column_names(conn, "buddy_domain_capabilities"))
         assert {
