@@ -5,6 +5,8 @@ from __future__ import annotations
 from importlib import import_module
 
 __all__ = [
+    "AbsorptionCase",
+    "AbsorptionSummary",
     "ActorMailboxService",
     "ActorSupervisor",
     "ActorWorker",
@@ -18,6 +20,7 @@ __all__ = [
     "GovernanceBatchResult",
     "GovernanceService",
     "GovernanceStatus",
+    "MainBrainExceptionAbsorptionService",
     "MainBrainChatService",
     "MainBrainOrchestrator",
     "KernelConfig",
@@ -35,6 +38,8 @@ __all__ = [
 ]
 
 _EXPORTS = {
+    "AbsorptionCase": (".main_brain_exception_absorption", "AbsorptionCase"),
+    "AbsorptionSummary": (".main_brain_exception_absorption", "AbsorptionSummary"),
     "ActorMailboxService": (".actor_mailbox", "ActorMailboxService"),
     "ActorSupervisor": (".actor_supervisor", "ActorSupervisor"),
     "ActorWorker": (".actor_worker", "ActorWorker"),
@@ -57,6 +62,10 @@ _EXPORTS = {
     "KernelToolBridge": (".tool_bridge", "KernelToolBridge"),
     "KernelTurnExecutor": (".turn_executor", "KernelTurnExecutor"),
     "MainBrainChatService": (".main_brain_chat_service", "MainBrainChatService"),
+    "MainBrainExceptionAbsorptionService": (
+        ".main_brain_exception_absorption",
+        "MainBrainExceptionAbsorptionService",
+    ),
     "MainBrainOrchestrator": (".main_brain_orchestrator", "MainBrainOrchestrator"),
     "RiskLevel": (".models", "RiskLevel"),
     "TaskDelegationService": (".delegation_service", "TaskDelegationService"),
