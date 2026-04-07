@@ -4,7 +4,7 @@ from __future__ import annotations
 from copaw.kernel.buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from copaw.kernel.buddy_onboarding_service import BuddyOnboardingService
 from copaw.kernel.buddy_projection_service import BuddyProjectionService
-from copaw.state import AgentReportRecord, SQLiteStateStore
+from copaw.state import AgentReportRecord, AssignmentRecord, SQLiteStateStore
 from copaw.state.main_brain_service import (
     AgentReportService,
     AssignmentService,
@@ -135,9 +135,11 @@ def test_buddy_projection_refreshes_stage_from_runtime_capability_growth(tmp_pat
     payload = projection.build_chat_surface(profile_id=identity.profile.profile_id)
 
     assert payload.growth.capability_score > result.domain_capability.capability_score
+    assert payload.growth.capability_points == 2
+    assert payload.growth.settled_closure_count == 1
     assert payload.growth.execution_score > 0
     assert payload.growth.evidence_score > 0
-    assert payload.growth.evolution_stage != "seed"
+    assert payload.growth.evolution_stage == "seed"
     assert payload.presentation.current_form == payload.growth.evolution_stage
     assert payload.growth.domain_label == "写作"
 
@@ -182,3 +184,47 @@ def test_relationship_experience_no_longer_upgrades_stage_without_domain_progres
 
     assert payload.growth.evolution_stage == baseline.growth.evolution_stage
     assert payload.growth.capability_score == baseline.growth.capability_score
+
+
+def test_invalid_closure_without_report_or_evidence_does_not_add_points(tmp_path) -> None:
+    onboarding, projection, store = _build_services(tmp_path)
+    identity = onboarding.submit_identity(
+        display_name="Alex",
+        profession="Designer",
+        current_stage="transition",
+        interests=["writing"],
+        strengths=["systems thinking"],
+        constraints=["time"],
+        goal_intention="Build a meaningful long-term creative career.",
+    )
+    clarification = onboarding.answer_clarification_turn(
+        session_id=identity.session_id,
+        answer="I want leverage, proof of work, and independence.",
+        existing_question_count=9,
+    )
+    result = onboarding.confirm_primary_direction(
+        session_id=identity.session_id,
+        selected_direction=clarification.recommended_direction,
+        capability_action="start-new",
+    )
+    assignment_repository = SqliteAssignmentRepository(store)
+    instance_id = result.domain_capability.industry_instance_id
+    assignments = assignment_repository.list_assignments(industry_instance_id=instance_id)
+    assert assignments
+    first_assignment = assignments[0]
+    assignment_repository.upsert_assignment(
+        AssignmentRecord.model_validate(
+            {
+                **first_assignment.model_dump(mode="json"),
+                "status": "completed",
+                "evidence_ids": [],
+                "last_report_id": None,
+            }
+        )
+    )
+
+    payload = projection.build_chat_surface(profile_id=identity.profile.profile_id)
+
+    assert payload.growth.capability_points == 0
+    assert payload.growth.settled_closure_count == 0
+    assert payload.growth.evolution_stage == "seed"
