@@ -38,8 +38,8 @@ def test_industry_delete_retired_instance_removes_persisted_runtime_state(tmp_pa
     assert first_response.status_code == 200
     first_payload = first_response.json()
     first_instance_id = first_payload["team"]["team_id"]
-    first_goal_ids = [item["goal"]["id"] for item in first_payload["goals"]]
-    first_schedule_ids = [item["schedule_id"] for item in first_payload["schedules"]]
+    first_goal_ids = bootstrap_goal_ids(first_payload)
+    first_schedule_ids = bootstrap_schedule_ids(first_payload)
 
     second_profile = normalize_industry_profile(
         IndustryPreviewRequest(
@@ -130,12 +130,10 @@ def test_industry_delete_active_instance_clears_current_team(tmp_path) -> None:
         for agent in payload["team"]["agents"]
         if agent["role_id"] == "solution-lead"
     )
-    goal_ids = [item["goal"]["id"] for item in payload["goals"]]
-    schedule_ids = [item["schedule_id"] for item in payload["schedules"]]
-    execution_core_goal = next(
-        item for item in payload["goals"] if item["owner_agent_id"] == "copaw-agent-runner"
-    )
-    execution_core_goal_id = execution_core_goal["goal"]["id"]
+    goal_ids = bootstrap_goal_ids(payload)
+    schedule_ids = bootstrap_schedule_ids(payload)
+    execution_core_goal = bootstrap_goal_by_owner(payload, "copaw-agent-runner")
+    execution_core_goal_id = execution_core_goal["goal_id"]
     goal_detail_response = client.get(f"/goals/{execution_core_goal_id}/detail")
     assert goal_detail_response.status_code == 200
     goal_tasks = goal_detail_response.json().get("tasks") or []
@@ -735,16 +733,13 @@ def test_industry_bootstrap_defaults_to_live_coordinating_contract(
 
         assert response.status_code == 200
         payload = response.json()
-        assert payload["goals"]
-        dispatch_by_kind = {
-            item["kind"]: bool(item.get("dispatch"))
-            for item in payload["goals"]
-        }
-        assert dispatch_by_kind["researcher"] is False
-        assert dispatch_by_kind["execution-core"] is False
-        assert dispatch_by_kind["solution"] is False
+        assert bootstrap_draft_goals(payload)
 
         instance_id = payload["team"]["team_id"]
+        assert app.state.task_repository.list_tasks(
+            industry_instance_id=instance_id,
+            limit=None,
+        ) == []
         runtime_payload = client.get(f"/runtime-center/industry/{instance_id}").json()
         assert runtime_payload["autonomy_status"] == "coordinating"
         assert runtime_payload["execution"]["status"] == "coordinating"
@@ -813,7 +808,7 @@ def test_industry_runtime_detail_and_goal_detail_use_formal_instance_store(
     assert summary["instance_id"] == instance_id
     assert "goal_count" not in summary["stats"]
     assert "active_goal_count" not in summary["stats"]
-    assert summary["stats"]["schedule_count"] == len(payload["schedules"])
+    assert summary["stats"]["schedule_count"] == len(bootstrap_schedule_summaries(payload))
 
     assignment_id = kickoff["started_assignment_ids"][0]
     assignment = app.state.assignment_repository.get_assignment(assignment_id)
@@ -854,7 +849,7 @@ def test_industry_runtime_detail_and_goal_detail_use_formal_instance_store(
     )
     assert "goal_count" not in detail_payload["stats"]
     assert "active_goal_count" not in detail_payload["stats"]
-    assert detail_payload["stats"]["schedule_count"] == len(payload["schedules"])
+    assert detail_payload["stats"]["schedule_count"] == len(bootstrap_schedule_summaries(payload))
     assert detail_payload["reports"]["daily"]["evidence_count"] >= 1
     assert detail_payload["reports"]["daily"]["proposal_count"] >= 1
     assert any(goal["agent_class"] == "business" for goal in detail_payload["goals"])
@@ -863,7 +858,7 @@ def test_industry_runtime_detail_and_goal_detail_use_formal_instance_store(
     assert runtime_detail.status_code == 200
     runtime_payload = runtime_detail.json()
     assert runtime_payload["instance_id"] == instance_id
-    assert runtime_payload["stats"]["schedule_count"] == len(payload["schedules"])
+    assert runtime_payload["stats"]["schedule_count"] == len(bootstrap_schedule_summaries(payload))
     assert runtime_payload["reports"]["daily"]["recent_evidence"][0]["task_id"] == task_id
     nodes_by_id = {
         node["node_id"]: node for node in runtime_payload["main_chain"]["nodes"]

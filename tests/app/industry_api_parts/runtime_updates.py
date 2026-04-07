@@ -192,9 +192,11 @@ def test_industry_bootstrap_goal_compile_regression_keeps_specialist_runtime_con
     assert response.status_code == 200
     bootstrap_payload = response.json()
     specialist_goal = next(
-        item for item in bootstrap_payload["goals"] if item["owner_agent_id"] != "copaw-agent-runner"
+        item
+        for item in bootstrap_draft_goals(bootstrap_payload)
+        if item["owner_agent_id"] != "copaw-agent-runner"
     )
-    specialist_goal_id = specialist_goal["goal"]["id"]
+    specialist_goal_id = specialist_goal["goal_id"]
     specialist_goal_record = app.state.goal_service.get_goal(specialist_goal_id)
     assert specialist_goal_record is not None
     assert specialist_goal_record.industry_instance_id == bootstrap_payload["team"]["team_id"]
@@ -288,7 +290,9 @@ def test_industry_bootstrap_specialist_runtime_metadata_only_persists_current_fo
     assert response.status_code == 200
     bootstrap_payload = response.json()
     specialist_goal = next(
-        item for item in bootstrap_payload["goals"] if item["owner_agent_id"] != "copaw-agent-runner"
+        item
+        for item in bootstrap_draft_goals(bootstrap_payload)
+        if item["owner_agent_id"] != "copaw-agent-runner"
     )
 
     runtime = app.state.agent_runtime_repository.get_runtime(specialist_goal["owner_agent_id"])
@@ -298,8 +302,8 @@ def test_industry_bootstrap_specialist_runtime_metadata_only_persists_current_fo
     assert "goal_id" not in metadata
     assert "goal_title" not in metadata
     assert metadata["current_focus_kind"] == "goal"
-    assert metadata["current_focus_id"] == specialist_goal["goal"]["id"]
-    assert metadata["current_focus"] == specialist_goal["goal"]["title"]
+    assert metadata["current_focus_id"] == specialist_goal["goal_id"]
+    assert metadata["current_focus"] == specialist_goal["title"]
 
 
 def test_industry_runtime_sync_preserves_assignment_focus_without_goal(tmp_path) -> None:
@@ -1593,11 +1597,7 @@ def test_bootstrap_researcher_schedule_report_keeps_main_brain_continuity(
     control_thread_id = f"industry-chat:{instance_id}:execution-core"
     environment_ref = f"session:console:industry:{instance_id}"
 
-    researcher_schedule_id = next(
-        item["schedule_id"]
-        for item in payload["schedules"]
-        if item["schedule"]["spec_payload"]["request"]["industry_role_id"] == "researcher"
-    )
+    researcher_schedule_id = bootstrap_schedule_by_role(payload, "researcher")["schedule_id"]
     schedule = app.state.schedule_repository.get_schedule(researcher_schedule_id)
     assert schedule is not None
     record = app.state.industry_instance_repository.get_instance(instance_id)
@@ -2510,11 +2510,7 @@ def test_researcher_followup_assignment_persists_execution_core_continuity_witho
     control_thread_id = f"industry-chat:{instance_id}:execution-core"
     environment_ref = f"session:console:industry:{instance_id}"
 
-    researcher_schedule_id = next(
-        item["schedule_id"]
-        for item in payload["schedules"]
-        if item["schedule"]["spec_payload"]["request"]["industry_role_id"] == "researcher"
-    )
+    researcher_schedule_id = bootstrap_schedule_by_role(payload, "researcher")["schedule_id"]
     schedule = app.state.schedule_repository.get_schedule(researcher_schedule_id)
     assert schedule is not None
 

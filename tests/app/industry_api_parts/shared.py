@@ -356,6 +356,47 @@ class HubSkillIndustryDraftGenerator(FakeIndustryDraftGenerator):
         return draft
 
 
+def bootstrap_draft_goals(payload: dict) -> list[dict]:
+    return list(payload.get("draft", {}).get("goals") or [])
+
+
+def bootstrap_goal_ids(payload: dict) -> list[str]:
+    return [
+        str(item["goal_id"])
+        for item in bootstrap_draft_goals(payload)
+        if item.get("goal_id") is not None
+    ]
+
+
+def bootstrap_goal_by_owner(payload: dict, owner_agent_id: str) -> dict:
+    return next(
+        item
+        for item in bootstrap_draft_goals(payload)
+        if item.get("owner_agent_id") == owner_agent_id
+    )
+
+
+def bootstrap_schedule_summaries(payload: dict) -> list[dict]:
+    return list(payload.get("schedule_summaries") or [])
+
+
+def bootstrap_schedule_ids(payload: dict) -> list[str]:
+    return [
+        str(item["schedule_id"])
+        for item in bootstrap_schedule_summaries(payload)
+        if item.get("schedule_id") is not None
+    ]
+
+
+def bootstrap_schedule_by_role(payload: dict, role_id: str) -> dict:
+    return next(
+        item
+        for item in bootstrap_schedule_summaries(payload)
+        if item.get("industry_role_id") == role_id
+        or item.get("spec_payload", {}).get("request", {}).get("industry_role_id") == role_id
+    )
+
+
 def _build_industry_app(
     tmp_path,
     *,

@@ -1230,7 +1230,6 @@
   - `PredictionService.create_cycle_case(...)` 不再把 `goal_statuses` 写进 cycle fingerprint 或 case metadata。
   - `WorkflowStepExecutionRecord` 已删除内部 `linked_goal_ids / linked_schedule_ids` 字段；step detail 改为读时推导，不再靠 step record 持有 legacy link。
 - 这轮完成后仍然真实存在的残留只剩：
-  - `industry` bootstrap 仍会 materialize bootstrap goal/schedule，再喂给 backlog/cycle。
   - workflow `step_execution_seed` 仍允许保留 `linked_goal_ids / linked_schedule_ids` 作为旧 run 兼容回填输入，但公开 step record/detail 已不再依赖它们。
   - `runtime_service_graph.py` + `runtime_bootstrap_models.py` 的 wiring graph 仍偏重。
 
@@ -1244,6 +1243,19 @@
 - 本次追加 focused verification：
   - `python -m pytest tests/state/test_state_store_migration.py::test_sqlite_state_store_initialize_upgrades_legacy_tables_before_schema_indexes tests/state/test_sqlite_repositories.py::test_sqlite_override_repositories_crud_round_trip tests/app/industry_api_parts/bootstrap_lifecycle.py::test_public_bootstrap_persists_draft_truth_and_uses_draft_goal_identity tests/app/industry_api_parts/retirement_chain.py::test_industry_delete_retired_instance_removes_persisted_runtime_state tests/app/industry_api_parts/runtime_updates.py::test_industry_chat_writeback_approved_staffing_proposal_unblocks_materialization -q` -> `5 passed`
   - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py::test_kickoff_execution_from_chat_dispatches_bootstrap_assignments_without_goal_dispatch -vv -s` -> `1 passed in 864.29s`
+
+### 3.3.8 `2026-04-07` bootstrap hard-cut 2A
+
+- `/industry/v1/bootstrap` 的正式公开 contract 已从 legacy `goals / schedules` 收口到 canonical `draft / backlog / cycle / assignments / schedule_summaries`；`routes` 里也不再暴露 legacy `goals` / `schedules` surface。
+- bootstrap write-path 现已进一步从 “先持久化 legacy schedule，再把 `ScheduleRecord[]` 喂给 backlog seed” 改成 “先用 canonical `goal_specs + schedule_specs` 起 `backlog/cycle/assignment`，再在下游物化 compatibility `GoalRecord / ScheduleRecord`”。
+- 这意味着此前“industry bootstrap 仍会 materialize bootstrap goal/schedule，再喂给 backlog/cycle”的残留判断已过时；当前 bootstrap 主链的正式起点已经收口到 canonical draft/spec truth。
+- compatibility 边界仍然存在，但角色已经变化：
+  - `GoalRecord / GoalOverrideRecord` 现在是 assignment-native seed 之后的 leaf/detail artifact。
+  - `ScheduleRecord` 现在是 canonical schedule spec 落库后的 runtime/cadence artifact，不再是 bootstrap seed 的前置真相。
+- 本次追加 focused verification：
+  - `python -m pytest tests/app/industry_api_parts/bootstrap_lifecycle.py -k "public_bootstrap_auto_activate_keeps_instance_active_without_legacy_goal_dispatch or public_bootstrap_auto_dispatch_materializes_assignment_tasks_without_goal_dispatch or public_bootstrap_persists_draft_truth_and_uses_draft_goal_identity or public_bootstrap_hard_cuts_legacy_goal_schedule_response_surface or public_bootstrap_seeds_backlog_from_canonical_schedule_specs" -q` -> `5 passed, 42 deselected`
+  - `python -m pytest tests/app/industry_api_parts/retirement_chain.py::test_industry_delete_retired_instance_removes_persisted_runtime_state tests/app/industry_api_parts/retirement_chain.py::test_industry_delete_active_instance_clears_current_team tests/app/industry_api_parts/retirement_chain.py::test_industry_bootstrap_defaults_to_live_coordinating_contract -q` -> `3 passed`
+  - `python -m pytest tests/app/industry_api_parts/runtime_updates.py::test_industry_bootstrap_goal_compile_regression_keeps_specialist_runtime_contract tests/app/industry_api_parts/runtime_updates.py::test_industry_bootstrap_specialist_runtime_metadata_only_persists_current_focus tests/app/industry_api_parts/runtime_updates.py::test_bootstrap_researcher_schedule_report_keeps_main_brain_continuity tests/app/industry_api_parts/runtime_updates.py::test_researcher_followup_assignment_persists_execution_core_continuity_without_backlog_anchor -q` -> `4 passed`
 
 ### 3.3.4 `2026-04-07` Buddy carrier direction-truth fix
 

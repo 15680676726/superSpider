@@ -1260,6 +1260,8 @@ Windows-first 约束：
 - `IndustryInstanceRecord.execution_core_identity_payload` 已成为“唯一物理 Spider Mesh 执行中枢如何绑定到当前行业实例”的正式真相字段；`goal detail`、`runtime detail` 与 `query execution` 只做只读投影，不再各自维护平行行业身份状态
 - `2026-04-07` 对象补充：`IndustryInstanceRecord.draft_payload` 已成为 bootstrap canonical draft 的正式持久化字段；industry strategy/runtime consumer 现在优先读取实例内 `draft_payload`，而不是再从 legacy `GoalRecord`/`ScheduleRecord` 反推出 bootstrap 草案
 - `2026-04-07` bootstrap hardening：canonical bootstrap goal identity 现已稳定到 `team_id + goal slug`，backlog/cycle/assignment seed 直接消费 goal specs；`GoalRecord` 改为 assignment-native seed 完成后按同一稳定 `goal_id` 物化，避免 bootstrap write path 再把 materialized goal 当唯一 draft truth
+- `2026-04-07` bootstrap hard-cut 2A：bootstrap 对外响应面已收口到 `draft / backlog / cycle / assignments / schedule_summaries`；legacy `goals / schedules` 不再属于正式 bootstrap response contract
+- `2026-04-07` bootstrap hard-cut 2A：bootstrap 内部现在先以 canonical `goal_specs + schedule_specs` 起 `backlog/cycle/assignment`，再下游持久化 compatibility `GoalRecord / ScheduleRecord`；`ScheduleRecord` 不再是 bootstrap seed 的前置真相
 - `V4` 规划补充：内部 canonical `execution-core` 与物理 runtime 继续保留，但其产品语义应逐步收敛为“团队总控核”；后续对象字段应能显式表达其 `operating_mode=control-core` 与 `direct_execution_policy=fallback-only`
 - `2026-03-14` 对象补充：`IndustryTeamBlueprint` 现应显式承载 `topology=solo|lead-plus-support|pod|full-team`；`researcher` 从固定常驻岗降为可选支援角色，由 draft/compiler 按 brief 的独立证据环路决定是否生成
 
@@ -1683,6 +1685,10 @@ formal product-contract objects rather than planning-only notes:
 - `IndustryBootstrapInstallResult`
   - returned by `POST /api/industry/v1/bootstrap`
   - records install status plus per-agent assignment outcome
+- `IndustryBootstrapResponse`
+  - returned by `POST /api/industry/v1/bootstrap`
+  - canonical surface is now `profile / team / draft / recommendation_pack / install_results / backlog / assignments / cycle / schedule_summaries / readiness_checks / media_analyses / routes`
+  - legacy `goals / schedules` no longer belong to the formal bootstrap response contract
 
 Current V4-A1 boundary:
 

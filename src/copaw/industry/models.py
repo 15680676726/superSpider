@@ -699,12 +699,15 @@ class IndustryReadinessCheck(BaseModel):
 class IndustryBootstrapResponse(BaseModel):
     profile: IndustryProfile
     team: IndustryTeamBlueprint
+    draft: IndustryDraftPlan
     recommendation_pack: IndustryCapabilityRecommendationPack = Field(
         default_factory=IndustryCapabilityRecommendationPack,
     )
     install_results: list[IndustryBootstrapInstallResult] = Field(default_factory=list)
-    goals: list[IndustryBootstrapGoalResult] = Field(default_factory=list)
-    schedules: list[IndustryBootstrapScheduleResult] = Field(default_factory=list)
+    backlog: list[dict[str, Any]] = Field(default_factory=list)
+    assignments: list[dict[str, Any]] = Field(default_factory=list)
+    cycle: dict[str, Any] | None = None
+    schedule_summaries: list[dict[str, Any]] = Field(default_factory=list)
     readiness_checks: list[IndustryReadinessCheck] = Field(default_factory=list)
     media_analyses: list[MediaAnalysisSummary] = Field(default_factory=list)
     routes: dict[str, Any] = Field(default_factory=dict)
