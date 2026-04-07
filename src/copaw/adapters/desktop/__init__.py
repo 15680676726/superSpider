@@ -7,8 +7,10 @@ from .templates import (
     list_desktop_mcp_templates,
 )
 from .windows_host import DesktopAutomationError, WindowSelector, WindowsDesktopHost
+from .windows_uia import ControlSelector
 
 __all__ = [
+    "ControlSelector",
     "DesktopAutomationError",
     "DesktopMCPTemplate",
     "WindowSelector",

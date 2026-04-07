@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from .windows_uia import ControlSelector, UIAControlError, WindowsUIAAdapter
+
 if sys.platform == "win32":
     import win32api
     import win32con
@@ -135,6 +137,7 @@ class WindowsDesktopHost:
         subprocess_module: Any | None = None,
         time_module: Any | None = None,
         operator_abort_producer: Callable[..., object] | None = None,
+        uia_adapter: WindowsUIAAdapter | None = None,
     ) -> None:
         self._platform_name = platform_name or sys.platform
         self._win32gui = win32gui_module or win32gui
@@ -150,6 +153,7 @@ class WindowsDesktopHost:
         self._subprocess = subprocess_module or subprocess
         self._time = time_module or time
         self._operator_abort_producer = operator_abort_producer
+        self._uia = uia_adapter or WindowsUIAAdapter(platform_name=self._platform_name)
 
     def list_windows(
         self,
@@ -377,6 +381,145 @@ class WindowsDesktopHost:
                 and int(foreground_window["handle"]) == int(window["handle"])
             ),
             "foreground_window": foreground_window,
+        }
+
+    def list_controls(
+        self,
+        *,
+        selector: WindowSelector,
+        control_selector: ControlSelector | None = None,
+        include_descendants: bool = True,
+        max_depth: int = 4,
+        limit: int = 100,
+    ) -> dict[str, object]:
+        """List UIA controls inside a resolved top-level window."""
+        self._ensure_supported()
+        window = self._resolve_window(selector)
+        try:
+            controls = self._uia.list_controls(
+                window_handle=int(window["handle"]),
+                selector=control_selector,
+                include_descendants=include_descendants,
+                max_depth=max_depth,
+                limit=limit,
+            )
+        except UIAControlError as exc:
+            raise DesktopAutomationError(
+                str(exc),
+                code=exc.code,
+                details=exc.details,
+            ) from exc
+        return {
+            "success": True,
+            "window": window,
+            "controls": controls,
+            "count": len(controls),
+        }
+
+    def set_control_text(
+        self,
+        *,
+        selector: WindowSelector,
+        control_selector: ControlSelector,
+        text: str,
+        append: bool = False,
+        focus_target: bool = True,
+    ) -> dict[str, object]:
+        """Update a control semantically through UIA instead of raw coordinates."""
+        self._ensure_supported()
+        if control_selector.is_empty():
+            raise DesktopAutomationError("A control selector is required", code="control_selector_required")
+        window = self._resolve_window(selector)
+        if focus_target:
+            window = self.focus_window(selector=selector)["window"]
+        try:
+            result = self._uia.set_control_text(
+                window_handle=int(window["handle"]),
+                selector=control_selector,
+                text=text,
+                append=append,
+            )
+        except UIAControlError as exc:
+            raise DesktopAutomationError(
+                str(exc),
+                code=exc.code,
+                details=exc.details,
+            ) from exc
+        if focus_target:
+            self._verify_action_foreground(
+                handle=int(window["handle"]),
+                selector=selector,
+                action_name="set_control_text",
+            )
+            window = self._window_info(int(window["handle"]))
+        return {
+            "success": True,
+            "window": window,
+            **result,
+        }
+
+    def invoke_control(
+        self,
+        *,
+        selector: WindowSelector,
+        control_selector: ControlSelector,
+        action: str = "invoke",
+        focus_target: bool = True,
+    ) -> dict[str, object]:
+        """Invoke a control by semantic selector."""
+        self._ensure_supported()
+        if control_selector.is_empty():
+            raise DesktopAutomationError("A control selector is required", code="control_selector_required")
+        window = self._resolve_window(selector)
+        if focus_target:
+            window = self.focus_window(selector=selector)["window"]
+        try:
+            result = self._uia.invoke_control(
+                window_handle=int(window["handle"]),
+                selector=control_selector,
+                action=action,
+            )
+        except UIAControlError as exc:
+            raise DesktopAutomationError(
+                str(exc),
+                code=exc.code,
+                details=exc.details,
+            ) from exc
+        return {
+            "success": True,
+            "window": window,
+            **result,
+        }
+
+    def invoke_dialog_action(
+        self,
+        *,
+        selector: WindowSelector,
+        action: str,
+        control_selector: ControlSelector | None = None,
+        focus_target: bool = True,
+    ) -> dict[str, object]:
+        """Invoke a semantic dialog action such as confirm/cancel/save/replace."""
+        self._ensure_supported()
+        window = self._resolve_window(selector)
+        if focus_target:
+            window = self.focus_window(selector=selector)["window"]
+        try:
+            result = self._uia.invoke_dialog_action(
+                window_handle=int(window["handle"]),
+                action=action,
+                selector=control_selector,
+            )
+        except UIAControlError as exc:
+            raise DesktopAutomationError(
+                str(exc),
+                code=exc.code,
+                details=exc.details,
+            ) from exc
+        return {
+            "success": True,
+            "window": window,
+            **result,
         }
 
     def click(

@@ -8,6 +8,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from .windows_host import DesktopAutomationError, WindowSelector, WindowsDesktopHost
+from .windows_uia import ControlSelector
 
 server = FastMCP(
     name="copaw-desktop-windows",
@@ -36,9 +37,32 @@ def _selector(
     )
 
 
-def _run_tool(tool_name: str, action, **kwargs) -> dict[str, Any]:
+def _control_selector(
+    *,
+    handle: int | None = None,
+    automation_id: str | None = None,
+    title: str | None = None,
+    title_contains: str | None = None,
+    title_regex: str | None = None,
+    control_type: str | None = None,
+    class_name: str | None = None,
+    found_index: int | None = None,
+) -> ControlSelector:
+    return ControlSelector(
+        handle=handle,
+        automation_id=automation_id,
+        title=title,
+        title_contains=title_contains,
+        title_regex=title_regex,
+        control_type=control_type,
+        class_name=class_name,
+        found_index=found_index,
+    )
+
+
+def _run_tool(tool_name: str, handler, **kwargs) -> dict[str, Any]:
     try:
-        result = action(**kwargs)
+        result = handler(**kwargs)
     except DesktopAutomationError as exc:
         payload = {
             "success": False,
@@ -191,6 +215,198 @@ def verify_window_focus(
             title_regex=title_regex,
             process_id=process_id,
         ),
+    )
+
+
+@server.tool(
+    name="list_controls",
+    description="List UIA controls inside a matching top-level window.",
+    structured_output=True,
+)
+def list_controls(
+    handle: int | None = None,
+    title: str | None = None,
+    title_contains: str | None = None,
+    title_regex: str | None = None,
+    process_id: int | None = None,
+    control_handle: int | None = None,
+    control_automation_id: str | None = None,
+    control_title: str | None = None,
+    control_title_contains: str | None = None,
+    control_title_regex: str | None = None,
+    control_type: str | None = None,
+    control_class_name: str | None = None,
+    control_found_index: int | None = None,
+    include_descendants: bool = True,
+    max_depth: int = 4,
+    limit: int = 100,
+) -> dict[str, Any]:
+    return _run_tool(
+        "list_controls",
+        _HOST.list_controls,
+        selector=_selector(
+            handle=handle,
+            title=title,
+            title_contains=title_contains,
+            title_regex=title_regex,
+            process_id=process_id,
+        ),
+        control_selector=_control_selector(
+            handle=control_handle,
+            automation_id=control_automation_id,
+            title=control_title,
+            title_contains=control_title_contains,
+            title_regex=control_title_regex,
+            control_type=control_type,
+            class_name=control_class_name,
+            found_index=control_found_index,
+        ),
+        include_descendants=include_descendants,
+        max_depth=max_depth,
+        limit=limit,
+    )
+
+
+@server.tool(
+    name="set_control_text",
+    description="Set text in a UIA control by semantic selector.",
+    structured_output=True,
+)
+def set_control_text(
+    text: str,
+    handle: int | None = None,
+    title: str | None = None,
+    title_contains: str | None = None,
+    title_regex: str | None = None,
+    process_id: int | None = None,
+    control_handle: int | None = None,
+    control_automation_id: str | None = None,
+    control_title: str | None = None,
+    control_title_contains: str | None = None,
+    control_title_regex: str | None = None,
+    control_type: str | None = None,
+    control_class_name: str | None = None,
+    control_found_index: int | None = None,
+    append: bool = False,
+    focus_target: bool = True,
+) -> dict[str, Any]:
+    return _run_tool(
+        "set_control_text",
+        _HOST.set_control_text,
+        selector=_selector(
+            handle=handle,
+            title=title,
+            title_contains=title_contains,
+            title_regex=title_regex,
+            process_id=process_id,
+        ),
+        control_selector=_control_selector(
+            handle=control_handle,
+            automation_id=control_automation_id,
+            title=control_title,
+            title_contains=control_title_contains,
+            title_regex=control_title_regex,
+            control_type=control_type,
+            class_name=control_class_name,
+            found_index=control_found_index,
+        ),
+        text=text,
+        append=append,
+        focus_target=focus_target,
+    )
+
+
+@server.tool(
+    name="invoke_control",
+    description="Invoke a UIA control by semantic selector.",
+    structured_output=True,
+)
+def invoke_control(
+    handle: int | None = None,
+    title: str | None = None,
+    title_contains: str | None = None,
+    title_regex: str | None = None,
+    process_id: int | None = None,
+    control_handle: int | None = None,
+    control_automation_id: str | None = None,
+    control_title: str | None = None,
+    control_title_contains: str | None = None,
+    control_title_regex: str | None = None,
+    control_type: str | None = None,
+    control_class_name: str | None = None,
+    control_found_index: int | None = None,
+    action: str = "invoke",
+    focus_target: bool = True,
+) -> dict[str, Any]:
+    return _run_tool(
+        "invoke_control",
+        _HOST.invoke_control,
+        selector=_selector(
+            handle=handle,
+            title=title,
+            title_contains=title_contains,
+            title_regex=title_regex,
+            process_id=process_id,
+        ),
+        control_selector=_control_selector(
+            handle=control_handle,
+            automation_id=control_automation_id,
+            title=control_title,
+            title_contains=control_title_contains,
+            title_regex=control_title_regex,
+            control_type=control_type,
+            class_name=control_class_name,
+            found_index=control_found_index,
+        ),
+        action=action,
+        focus_target=focus_target,
+    )
+
+
+@server.tool(
+    name="invoke_dialog_action",
+    description="Invoke a semantic dialog action such as confirm/cancel/save/replace.",
+    structured_output=True,
+)
+def invoke_dialog_action(
+    dialog_action: str,
+    handle: int | None = None,
+    title: str | None = None,
+    title_contains: str | None = None,
+    title_regex: str | None = None,
+    process_id: int | None = None,
+    control_handle: int | None = None,
+    control_automation_id: str | None = None,
+    control_title: str | None = None,
+    control_title_contains: str | None = None,
+    control_title_regex: str | None = None,
+    control_type: str | None = None,
+    control_class_name: str | None = None,
+    control_found_index: int | None = None,
+    focus_target: bool = True,
+) -> dict[str, Any]:
+    return _run_tool(
+        "invoke_dialog_action",
+        _HOST.invoke_dialog_action,
+        selector=_selector(
+            handle=handle,
+            title=title,
+            title_contains=title_contains,
+            title_regex=title_regex,
+            process_id=process_id,
+        ),
+        control_selector=_control_selector(
+            handle=control_handle,
+            automation_id=control_automation_id,
+            title=control_title,
+            title_contains=control_title_contains,
+            title_regex=control_title_regex,
+            control_type=control_type,
+            class_name=control_class_name,
+            found_index=control_found_index,
+        ),
+        action=dialog_action,
+        focus_target=focus_target,
     )
 
 

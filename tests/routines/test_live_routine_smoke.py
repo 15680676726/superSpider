@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -37,6 +38,39 @@ LIVE_ROUTINE_SMOKE_SKIP_REASON = (
     "Set COPAW_RUN_V6_LIVE_ROUTINE_SMOKE=1 to run V6 live routine smoke coverage "
     "(opt-in; not part of default regression coverage)."
 )
+
+
+def _resolve_verifiable_foreground_window() -> dict[str, object] | None:
+    host = routine_service_module.WindowsDesktopHost()
+    try:
+        foreground = host.get_foreground_window()
+    except Exception:
+        foreground = None
+    if isinstance(foreground, dict):
+        rect = dict(foreground.get("rect") or {})
+        if (
+            foreground.get("success")
+            and foreground.get("handle")
+            and bool(foreground.get("visible"))
+            and int(rect.get("width") or 0) > 0
+            and int(rect.get("height") or 0) > 0
+        ):
+            return foreground
+    candidates = list(host.list_windows(include_hidden=False, limit=20).get("windows") or [])
+    for candidate in candidates:
+        rect = dict(candidate.get("rect") or {})
+        if (
+            candidate.get("handle")
+            and bool(candidate.get("visible"))
+            and int(rect.get("width") or 0) > 0
+            and int(rect.get("height") or 0) > 0
+        ):
+            return {
+                "success": True,
+                **candidate,
+                "window": candidate,
+            }
+    return None
 
 
 def _build_live_routine_harness(tmp_path) -> SimpleNamespace:
@@ -1421,20 +1455,22 @@ async def test_live_desktop_routine_launch_edit_save_round_trip(tmp_path) -> Non
                         "include_hidden": True,
                     },
                     {
-                        "action": "click",
+                        "action": "list_controls",
                         "selector": selector,
-                        "relative_to_window": True,
-                        "x": 120,
-                        "y": 120,
+                        "control_selector": {
+                            "control_type": "Document",
+                            "class_name": "RichEditD2DPT",
+                            "found_index": 0,
+                        },
                     },
                     {
-                        "action": "press_keys",
+                        "action": "set_control_text",
                         "selector": selector,
-                        "keys": "Ctrl+A",
-                    },
-                    {
-                        "action": "type_text",
-                        "selector": selector,
+                        "control_selector": {
+                            "control_type": "Document",
+                            "class_name": "RichEditD2DPT",
+                            "found_index": 0,
+                        },
                         "text": "desktop runtime verified",
                     },
                     {
@@ -1464,14 +1500,13 @@ async def test_live_desktop_routine_launch_edit_save_round_trip(tmp_path) -> Non
         assert target_path.read_text(encoding="utf-8") == "desktop runtime verified"
         verification_summary = dict(response.run.metadata.get("verification_summary") or {})
         assert verification_summary.get("chain_status") == "verified"
-        assert verification_summary.get("verified_steps") == 7
+        assert verification_summary.get("verified_steps") == 6
         records = harness.ledger.list_by_task(f"routine-run:{response.run.id}")
         assert [record.metadata.get("action") for record in records] == [
             "launch_application",
             "wait_for_window",
-            "click",
-            "press_keys",
-            "type_text",
+            "list_controls",
+            "set_control_text",
             "press_keys",
             "close_window",
         ]
@@ -1489,10 +1524,26 @@ async def test_live_desktop_routine_replay_round_trip(tmp_path) -> None:
         pytest.skip("Desktop live routine smoke requires a Windows host.")
 
     harness = _build_live_routine_harness(tmp_path)
+    focus_target = tmp_path / "live-desktop-routine-focus.txt"
+    focus_target.write_text("focus", encoding="utf-8")
+    focus_selector = {"title_contains": focus_target.name}
+    host = routine_service_module.WindowsDesktopHost()
+    launched_focus_window = False
     try:
-        foreground = routine_service_module.WindowsDesktopHost().get_foreground_window()
-        if not foreground.get("success") or not foreground.get("handle"):
-            pytest.skip("Desktop live routine smoke requires a resolvable foreground window.")
+        try:
+            host.launch_application(executable="notepad.exe", args=[str(focus_target)])
+            launched_focus_window = True
+            host.wait_for_window(
+                selector=routine_service_module.WindowSelector(title_contains=focus_target.name),
+                timeout_seconds=10.0,
+                include_hidden=True,
+            )
+            host.focus_window(selector=routine_service_module.WindowSelector(title_contains=focus_target.name))
+        except Exception:
+            foreground = _resolve_verifiable_foreground_window()
+            if not foreground or not foreground.get("success") or not foreground.get("handle"):
+                pytest.skip("Desktop live routine smoke requires a resolvable foreground window.")
+            focus_selector = {"handle": foreground["handle"]}
         target_path = tmp_path / "live-desktop-routine-note.txt"
         routine = harness.service.create_routine(
             RoutineCreateRequest(
@@ -1515,7 +1566,7 @@ async def test_live_desktop_routine_replay_round_trip(tmp_path) -> None:
                     },
                     {
                         "action": "verify_window_focus",
-                        "selector": {"handle": foreground["handle"]},
+                        "selector": focus_selector,
                     },
                 ],
             ),
@@ -1541,5 +1592,129 @@ async def test_live_desktop_routine_replay_round_trip(tmp_path) -> None:
         assert dict(records[0].metadata.get("verification") or {}).get("verified") is True
         assert dict(records[1].metadata.get("verification") or {}).get("verified") is True
         assert dict(records[2].metadata.get("result") or {}).get("is_foreground") is True
+    finally:
+        if launched_focus_window:
+            try:
+                host.close_window(selector=routine_service_module.WindowSelector(title_contains=focus_target.name))
+            except Exception:
+                pass
+        harness.ledger.close()
+
+
+@pytest.mark.skipif(
+    not _env_flag("COPAW_RUN_V6_LIVE_ROUTINE_SMOKE"),
+    reason=LIVE_ROUTINE_SMOKE_SKIP_REASON,
+)
+@pytest.mark.asyncio
+async def test_live_desktop_routine_semantic_dialog_controls_round_trip(tmp_path) -> None:
+    if sys.platform != "win32":
+        pytest.skip("Desktop live routine smoke requires a Windows host.")
+
+    harness = _build_live_routine_harness(tmp_path)
+    script_path = tmp_path / "routine_semantic_dialog.ps1"
+    result_path = tmp_path / "routine_semantic_dialog_result.json"
+    script_path.write_text(
+        textwrap.dedent(
+            f"""
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type -AssemblyName System.Drawing
+
+            $utf8 = New-Object System.Text.UTF8Encoding($false)
+            $form = New-Object System.Windows.Forms.Form
+            $form.Text = 'CoPaw Routine Control Smoke'
+            $form.Width = 360
+            $form.Height = 180
+            $form.StartPosition = 'CenterScreen'
+
+            $textBox = New-Object System.Windows.Forms.TextBox
+            $textBox.Width = 220
+            $textBox.Left = 20
+            $textBox.Top = 20
+            $form.Controls.Add($textBox)
+
+            $writeResult = {{
+                param([string]$action)
+                $payload = @{{ action = $action; text = $textBox.Text }} | ConvertTo-Json -Compress
+                [System.IO.File]::WriteAllText({str(result_path)!r}, $payload, $utf8)
+                $form.Close()
+            }}
+
+            $ok = New-Object System.Windows.Forms.Button
+            $ok.Text = 'OK'
+            $ok.Left = 20
+            $ok.Top = 60
+            $ok.Add_Click({{ & $writeResult 'confirm' }})
+            $form.Controls.Add($ok)
+
+            $cancel = New-Object System.Windows.Forms.Button
+            $cancel.Text = 'Cancel'
+            $cancel.Left = 120
+            $cancel.Top = 60
+            $cancel.Add_Click({{ & $writeResult 'cancel' }})
+            $form.Controls.Add($cancel)
+
+            [System.Windows.Forms.Application]::Run($form)
+            """,
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        routine = harness.service.create_routine(
+            RoutineCreateRequest(
+                routine_key="live-desktop-routine-semantic-dialog-smoke",
+                name="Live Desktop Routine Semantic Dialog Smoke",
+                summary="Launch a desktop dialog, fill the entry semantically, and confirm it through the V6 desktop routine path.",
+                engine_kind="desktop",
+                environment_kind="desktop",
+                action_contract=[
+                    {
+                        "action": "launch_application",
+                        "executable": "powershell",
+                        "args": ["-ExecutionPolicy", "Bypass", "-File", str(script_path)],
+                    },
+                    {
+                        "action": "wait_for_window",
+                        "selector": {"title": "CoPaw Routine Control Smoke"},
+                        "timeout_seconds": 10.0,
+                        "include_hidden": True,
+                    },
+                    {
+                        "action": "set_control_text",
+                        "selector": {"title": "CoPaw Routine Control Smoke"},
+                        "control_selector": {"control_type": "Edit", "found_index": 0},
+                        "text": "routine semantic payload",
+                    },
+                    {
+                        "action": "invoke_dialog_action",
+                        "selector": {"title": "CoPaw Routine Control Smoke"},
+                        "dialog_action": "confirm",
+                    },
+                ],
+            ),
+        )
+
+        response = await harness.service.replay_routine(
+            routine.id,
+            RoutineReplayRequest(),
+        )
+
+        assert response.run.status == "completed"
+        assert response.run.deterministic_result == "desktop-replay-complete"
+        payload = json.loads(result_path.read_text(encoding="utf-8"))
+        assert payload == {
+            "action": "confirm",
+            "text": "routine semantic payload",
+        }
+        verification_summary = dict(response.run.metadata.get("verification_summary") or {})
+        assert verification_summary.get("chain_status") == "verified"
+        assert verification_summary.get("verified_steps") == 4
+        records = harness.ledger.list_by_task(f"routine-run:{response.run.id}")
+        assert [record.metadata.get("action") for record in records] == [
+            "launch_application",
+            "wait_for_window",
+            "set_control_text",
+            "invoke_dialog_action",
+        ]
     finally:
         harness.ledger.close()

@@ -17,6 +17,7 @@ from ..adapters.desktop.windows_host import (
     WindowSelector,
     WindowsDesktopHost,
 )
+from ..adapters.desktop.windows_uia import ControlSelector
 from ..agents.tools.browser_control import browser_use
 from ..agents.tools.evidence_runtime import bind_browser_evidence_sink
 from ..capabilities.browser_runtime import (
@@ -2065,6 +2066,8 @@ class RoutineService:
             )
         selector = contract.get("selector") or contract.get("window_selector")
         window_selector = self._window_selector_from_payload(selector)
+        control_payload = contract.get("control") or contract.get("control_selector")
+        control_selector = self._control_selector_from_payload(control_payload)
         if action == "list_windows":
             return host.list_windows(selector=window_selector if window_selector is not None else None)
         if action == "get_foreground_window":
@@ -2091,6 +2094,16 @@ class RoutineService:
             if window_selector is None:
                 raise _RoutineFailure("precondition-miss", "desktop verify_window_focus requires selector")
             return host.verify_window_focus(selector=window_selector)
+        if action == "list_controls":
+            if window_selector is None:
+                raise _RoutineFailure("precondition-miss", "desktop list_controls requires selector")
+            return host.list_controls(
+                selector=window_selector,
+                control_selector=control_selector,
+                include_descendants=bool(contract.get("include_descendants", True)),
+                max_depth=int(contract.get("max_depth") or 4),
+                limit=int(contract.get("limit") or 100),
+            )
         if action == "click":
             return host.click(
                 x=contract.get("x"),
@@ -2111,6 +2124,44 @@ class RoutineService:
             if keys in (None, "", []):
                 raise _RoutineFailure("precondition-miss", "desktop press_keys requires keys")
             return host.press_keys(keys=keys, selector=window_selector, focus_target=bool(contract.get("focus_target", True)))
+        if action == "set_control_text":
+            text = _string(contract.get("text"))
+            if window_selector is None:
+                raise _RoutineFailure("precondition-miss", "desktop set_control_text requires selector")
+            if control_selector is None:
+                raise _RoutineFailure("precondition-miss", "desktop set_control_text requires control_selector")
+            if text is None:
+                raise _RoutineFailure("precondition-miss", "desktop set_control_text requires text")
+            return host.set_control_text(
+                selector=window_selector,
+                control_selector=control_selector,
+                text=text,
+                append=bool(contract.get("append", False)),
+                focus_target=bool(contract.get("focus_target", True)),
+            )
+        if action == "invoke_control":
+            if window_selector is None:
+                raise _RoutineFailure("precondition-miss", "desktop invoke_control requires selector")
+            if control_selector is None:
+                raise _RoutineFailure("precondition-miss", "desktop invoke_control requires control_selector")
+            return host.invoke_control(
+                selector=window_selector,
+                control_selector=control_selector,
+                action=_string(contract.get("control_action")) or _string(contract.get("action_name")) or "invoke",
+                focus_target=bool(contract.get("focus_target", True)),
+            )
+        if action == "invoke_dialog_action":
+            dialog_action = _string(contract.get("dialog_action")) or _string(contract.get("semantic_action"))
+            if window_selector is None:
+                raise _RoutineFailure("precondition-miss", "desktop invoke_dialog_action requires selector")
+            if dialog_action is None:
+                raise _RoutineFailure("precondition-miss", "desktop invoke_dialog_action requires dialog_action")
+            return host.invoke_dialog_action(
+                selector=window_selector,
+                action=dialog_action,
+                control_selector=control_selector,
+                focus_target=bool(contract.get("focus_target", True)),
+            )
         if action == "close_window":
             if window_selector is None:
                 raise _RoutineFailure("precondition-miss", "desktop close_window requires selector")
@@ -2452,6 +2503,21 @@ class RoutineService:
             title_contains=_string(payload.get("title_contains")),
             title_regex=_string(payload.get("title_regex")),
             process_id=payload.get("process_id"),
+        )
+        return None if selector.is_empty() else selector
+
+    def _control_selector_from_payload(self, payload: Any) -> ControlSelector | None:
+        if not isinstance(payload, dict):
+            return None
+        selector = ControlSelector(
+            handle=payload.get("handle"),
+            automation_id=_string(payload.get("automation_id")),
+            title=_string(payload.get("title")),
+            title_contains=_string(payload.get("title_contains")),
+            title_regex=_string(payload.get("title_regex")),
+            control_type=_string(payload.get("control_type")),
+            class_name=_string(payload.get("class_name")),
+            found_index=payload.get("found_index"),
         )
         return None if selector.is_empty() else selector
 
