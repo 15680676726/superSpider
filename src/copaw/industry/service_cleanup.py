@@ -469,7 +469,7 @@ class _IndustryCleanupMixin:
     ) -> list[tuple[Any, GoalOverrideRecord | None]]:
         pending: list[tuple[Any, GoalOverrideRecord | None]] = []
         seen_goal_ids: set[str] = set()
-        for goal_id in self._resolve_instance_goal_ids(record):
+        for goal_id in self._resolve_instance_goal_ids(record, team=team):
             normalized_goal_id = _string(goal_id)
             if normalized_goal_id is None or normalized_goal_id in seen_goal_ids:
                 continue
@@ -496,7 +496,7 @@ class _IndustryCleanupMixin:
     ) -> dict[str, tuple[str, str]]:
         goal_links: dict[str, tuple[str, str]] = {}
         seen_goal_ids: set[str] = set()
-        for goal_id in self._resolve_instance_goal_ids(record):
+        for goal_id in self._resolve_instance_goal_ids(record, team=team):
             normalized_goal_id = _string(goal_id)
             if normalized_goal_id is None or normalized_goal_id in seen_goal_ids:
                 continue
@@ -613,7 +613,12 @@ class _IndustryCleanupMixin:
                 ),
             )
 
-    def _resolve_instance_goal_ids(self, record: IndustryInstanceRecord) -> list[str]:
+    def _resolve_instance_goal_ids(
+        self,
+        record: IndustryInstanceRecord,
+        *,
+        team: IndustryTeamBlueprint | None = None,
+    ) -> list[str]:
         goal_ids: set[str] = set()
         candidate_goals: dict[str, GoalRecord] = {}
         owner_scope = _string(record.owner_scope)
@@ -630,6 +635,7 @@ class _IndustryCleanupMixin:
                 goal,
                 record=record,
                 override=override,
+                team=team,
             ):
                 continue
             goal_ids.add(goal.id)

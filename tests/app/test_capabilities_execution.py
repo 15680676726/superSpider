@@ -2882,7 +2882,7 @@ def test_update_industry_team_add_role_response_drops_goal_count() -> None:
             return SimpleNamespace(
                 team=SimpleNamespace(agents=[{"agent_id": "agent-1"}]),
                 goals=[{"goal_id": "goal-1"}],
-                schedules=[{"schedule_id": "schedule-1"}],
+                schedule_summaries=[{"schedule_id": "schedule-1"}],
             )
 
     facade = SystemTeamCapabilityFacade(

@@ -2863,7 +2863,7 @@ class _IndustryRuntimeViewsMixin:
 
 
 
-        for goal_id in self._resolve_instance_goal_ids(record):
+        for goal_id in self._resolve_instance_goal_ids(record, team=team):
 
             goal = self._goal_service.get_goal(goal_id)
 
@@ -2880,6 +2880,8 @@ class _IndustryRuntimeViewsMixin:
                 record=record,
 
                 override=override,
+
+                team=team,
 
             ):
 
@@ -3174,7 +3176,7 @@ class _IndustryRuntimeViewsMixin:
 
         proposals = self._list_instance_proposals(
 
-            goal_ids=set(self._resolve_instance_goal_ids(record)),
+            goal_ids=set(self._resolve_instance_goal_ids(record, team=team)),
 
             task_ids=task_ids,
 

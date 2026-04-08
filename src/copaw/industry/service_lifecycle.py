@@ -1978,7 +1978,7 @@ class _IndustryLifecycleMixin:
         record: IndustryInstanceRecord,
     ) -> None:
         team = self._materialize_team_blueprint(record)
-        goal_links = self._list_active_goal_links_for_instance(record)
+        goal_links = self._list_active_goal_links_for_instance(record, team=team)
         current_cycle = self._current_operating_cycle_record(record.instance_id)
         assignments = self._list_assignment_records(
             record.instance_id,

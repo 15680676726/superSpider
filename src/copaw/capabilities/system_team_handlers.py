@@ -596,7 +596,7 @@ class SystemTeamCapabilityFacade:
             "agent_id": role.agent_id,
             "employment_mode": role.employment_mode,
             "team_size": len(response.team.agents),
-            "schedule_count": len(response.schedules),
+            "schedule_count": len(response.schedule_summaries),
             "routes": {
                 "industry": f"/api/runtime-center/industry/{instance_id}",
                 "agent": f"/api/runtime-center/agents/{role.agent_id}",
