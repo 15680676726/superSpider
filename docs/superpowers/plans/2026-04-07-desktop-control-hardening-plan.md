@@ -8,6 +8,18 @@
 
 **Tech Stack:** Python, FastAPI services, Pydantic, pytest
 
+**Implementation Status (2026-04-08):**
+- This hardening slice has been implemented on the current mainline code path.
+- Formal desktop replay now fails closed when the owning runtime capability is
+  absent.
+- Desktop doctor/example-run now distinguish host reachability from semantic
+  control readiness instead of overclaiming from shallow host checks.
+- Desktop document writes now derive stable writer scope from durable document
+  identity before falling back to session identity.
+- Fresh verification:
+  `python -m pytest tests/routines/test_routine_service.py tests/app/test_capability_market_api.py tests/environments/test_cooperative_document_bridge.py tests/routines/test_routine_execution_paths.py tests/environments/test_cooperative_windows_apps.py -q`
+  `106 passed`
+
 ---
 
 ### Task 1: Formal Desktop Replay Capability Enforcement
