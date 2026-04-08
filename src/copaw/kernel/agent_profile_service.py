@@ -454,9 +454,19 @@ class AgentProfileService:
             recommended_capabilities,
             effective_capabilities,
         )
+        capability_mounts_by_id = (
+            {
+                str(mount.id): mount
+                for mount in self._capability_service.list_capabilities()
+                if getattr(mount, "id", None) is not None
+            }
+            if self._capability_service is not None
+            else {}
+        )
         capability_items = [
             self._build_capability_surface_item(
                 capability_id,
+                mount=capability_mounts_by_id.get(capability_id),
                 baseline_capabilities=baseline_capabilities,
                 blueprint_capabilities=blueprint_capabilities,
                 explicit_capabilities=explicit_capabilities,
@@ -718,17 +728,13 @@ class AgentProfileService:
         self,
         capability_id: str,
         *,
+        mount: object | None,
         baseline_capabilities: list[str],
         blueprint_capabilities: list[str],
         explicit_capabilities: list[str],
         recommended_capabilities: list[str],
         effective_capabilities: list[str],
     ) -> dict[str, object]:
-        mount = (
-            self._capability_service.get_capability(capability_id)
-            if self._capability_service is not None
-            else None
-        )
         sources: list[str] = []
         if capability_id in baseline_capabilities:
             sources.append("baseline")
