@@ -30,7 +30,7 @@ class RuntimeEventBus:
     def __init__(self, *, max_events: int = 500) -> None:
         self._events: deque[RuntimeEvent] = deque(maxlen=max(50, max_events))
         self._next_event_id = 1
-        self._condition = asyncio.Condition()
+        self._waiters: set[asyncio.Future[None]] = set()
 
     def publish(
         self,
@@ -47,11 +47,7 @@ class RuntimeEventBus:
         )
         self._next_event_id += 1
         self._events.append(event)
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return event
-        loop.create_task(self._notify_waiters())
+        self._notify_all_waiters()
         return event
 
     def list_events(
@@ -75,19 +71,41 @@ class RuntimeEventBus:
         existing = self.list_events(after_id=after_id, limit=limit)
         if existing:
             return existing
-        async with self._condition:
+        loop = asyncio.get_running_loop()
+        waiter: asyncio.Future[None] = loop.create_future()
+        self._waiters.add(waiter)
+        try:
             existing = self.list_events(after_id=after_id, limit=limit)
             if existing:
                 return existing
             try:
-                await asyncio.wait_for(self._condition.wait(), timeout=max(1.0, timeout))
+                await asyncio.wait_for(waiter, timeout=max(1.0, timeout))
             except TimeoutError:
                 return []
+        finally:
+            self._waiters.discard(waiter)
         return self.list_events(after_id=after_id, limit=limit)
 
-    async def _notify_waiters(self) -> None:
-        async with self._condition:
-            self._condition.notify_all()
+    async def close(self) -> None:
+        self._notify_all_waiters()
+        self._waiters.clear()
+
+    def _notify_all_waiters(self) -> None:
+        stale_waiters: list[asyncio.Future[None]] = []
+        for waiter in list(self._waiters):
+            if waiter.done():
+                stale_waiters.append(waiter)
+                continue
+            loop = waiter.get_loop()
+            loop.call_soon_threadsafe(self._resolve_waiter, waiter)
+        for waiter in stale_waiters:
+            self._waiters.discard(waiter)
+
+    @staticmethod
+    def _resolve_waiter(waiter: asyncio.Future[None]) -> None:
+        if waiter.done():
+            return
+        waiter.set_result(None)
 
 
 __all__ = ["RuntimeEvent", "RuntimeEventBus"]

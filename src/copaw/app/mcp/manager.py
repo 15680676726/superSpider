@@ -30,6 +30,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _consume_current_task_cancellation() -> int:
+    current = asyncio.current_task()
+    if current is None:
+        return 0
+    uncancel = getattr(current, "uncancel", None)
+    if not callable(uncancel):
+        return 0
+    cleared = 0
+    while current.cancelling():
+        uncancel()
+        cleared += 1
+    return cleared
+
+
 @dataclass
 class _ScopedOverlayRegistry:
     mode: Literal["additive", "replace"] = "additive"
@@ -57,6 +71,7 @@ class MCPClientManager:
         self._runtime_records: Dict[tuple[str | None, str], MCPClientRuntimeRecord] = {}
         self._overlay_scopes: Dict[str, _ScopedOverlayRegistry] = {}
         self._lock = asyncio.Lock()
+        self._close_timeout_seconds = 5.0
 
     async def init_from_config(
         self,
@@ -226,14 +241,12 @@ class MCPClientManager:
         close_error: str | None = None
         if old_client is not None:
             logger.debug("Closing old MCP client: %s", key)
-            try:
-                await old_client.close()
-            except Exception as exc:  # pragma: no cover - exercised by tests
-                close_error = str(exc)
+            close_error = await self._close_client_with_timeout(old_client)
+            if close_error is not None:  # pragma: no branch - exercised by tests
                 logger.warning(
                     "Error closing old MCP client '%s': %s",
                     key,
-                    exc,
+                    close_error,
                 )
         else:
             logger.debug("Added new MCP client: %s", key)
@@ -457,10 +470,9 @@ class MCPClientManager:
 
         if old_client is not None:
             logger.debug("Removing MCP client: %s", key)
-            try:
-                await old_client.close()
-            except Exception as exc:
-                logger.warning("Error closing MCP client '%s': %s", key, exc)
+            close_error = await self._close_client_with_timeout(old_client)
+            if close_error is not None:
+                logger.warning("Error closing MCP client '%s': %s", key, close_error)
 
     async def close_all(self) -> None:
         """Close all base and overlay clients."""
@@ -505,10 +517,9 @@ class MCPClientManager:
         for key, client in base_clients_snapshot:
             if client is None:
                 continue
-            try:
-                await client.close()
-            except Exception as exc:
-                logger.warning("Error closing MCP client '%s': %s", key, exc)
+            close_error = await self._close_client_with_timeout(client)
+            if close_error is not None:
+                logger.warning("Error closing MCP client '%s': %s", key, close_error)
 
         for scope_ref, overlay in overlay_snapshot.items():
             await self._close_client_map(
@@ -785,14 +796,60 @@ class MCPClientManager:
             return None
         return normalized
 
-    @staticmethod
-    async def _close_client_quietly(client: Any | None) -> None:
+    async def _close_client_quietly(self, client: Any | None) -> None:
         if client is None:
             return
-        try:
-            await client.close()
-        except Exception:
-            return
+        await self._close_client_with_timeout(client)
+
+    @staticmethod
+    def _resolve_close_operations(client: Any) -> list[Any]:
+        operations: list[Any] = []
+        context = getattr(client, "client", None)
+        generator = getattr(context, "gen", None)
+        frame = getattr(generator, "ag_frame", None)
+        frame_locals = getattr(frame, "f_locals", None)
+        if isinstance(frame_locals, dict):
+            process = frame_locals.get("process")
+            process_aclose = getattr(process, "aclose", None)
+            if callable(process_aclose):
+                operations.append(process_aclose)
+        stack = getattr(client, "stack", None)
+        stack_aclose = getattr(stack, "aclose", None)
+        if callable(stack_aclose):
+            operations.append(stack_aclose)
+        close = getattr(client, "close", None)
+        if callable(close) and not operations:
+            operations.append(close)
+        return operations
+
+    async def _close_client_with_timeout(self, client: Any | None) -> str | None:
+        if client is None:
+            return None
+        close_operations = self._resolve_close_operations(client)
+        if not close_operations:
+            return "close operation unavailable"
+        close_timeout_seconds = max(0.01, float(self._close_timeout_seconds))
+        close_errors: list[str] = []
+        for close_operation in close_operations:
+            try:
+                async with asyncio.timeout(close_timeout_seconds):
+                    await close_operation()
+            except asyncio.TimeoutError:
+                _consume_current_task_cancellation()
+                close_errors.append(f"close timeout after {self._close_timeout_seconds}s")
+            except BaseException as exc:
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+                _consume_current_task_cancellation()
+                close_errors.append(str(exc) or "close cancelled")
+        if hasattr(client, "is_connected"):
+            try:
+                setattr(client, "is_connected", False)
+            except Exception:
+                pass
+        if not close_errors:
+            return None
+        return "; ".join(dict.fromkeys(close_errors))
 
     async def _close_client_map(
         self,
@@ -803,12 +860,11 @@ class MCPClientManager:
         for key, client in clients.items():
             if client is None:
                 continue
-            try:
-                await client.close()
-            except Exception as exc:
+            close_error = await self._close_client_with_timeout(client)
+            if close_error is not None:
                 logger.warning(
                     "Error closing MCP client '%s%s': %s",
                     label_prefix,
                     key,
-                    exc,
+                    close_error,
                 )

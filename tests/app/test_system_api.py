@@ -380,6 +380,38 @@ def test_system_self_check_prefers_persisted_automation_loop_snapshots_when_live
     assert payload["overall_status"] == "warn"
 
 
+def test_system_self_check_includes_environment_preflight_checks(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = build_app(tmp_path)
+    client = TestClient(app)
+    monkeypatch.setattr(
+        "copaw.app.routers.system.build_environment_preflight_report",
+        lambda **_kwargs: {
+            "overall_status": "warn",
+            "fatal": False,
+            "summary": "Subprocess probe is degraded.",
+            "checks": [
+                {
+                    "name": "subprocess_spawn",
+                    "status": "warn",
+                    "summary": "Subprocess spawn is unavailable.",
+                    "meta": {"command": "python -c pass"},
+                },
+            ],
+        },
+    )
+
+    response = client.get("/system/self-check")
+
+    assert response.status_code == 200
+    payload = response.json()
+    by_name = {item["name"]: item for item in payload["checks"]}
+    assert by_name["subprocess_spawn"]["status"] == "warn"
+    assert payload["environment_preflight"]["overall_status"] == "warn"
+
+
 def test_system_backup_download_streams_workspace_archive(
     tmp_path: Path,
     monkeypatch,

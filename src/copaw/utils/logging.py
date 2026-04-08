@@ -144,19 +144,27 @@ def add_copaw_file_handler(log_path: Path) -> None:
     Args:
         log_path: Path to the log file (e.g. WORKING_DIR / "copaw.log").
     """
-    log_path = Path(log_path).resolve()
-    log_path.parent.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger(LOG_NAMESPACE)
-    for handler in logger.handlers:
-        base = getattr(handler, "baseFilename", None)
-        if base is not None and Path(base).resolve() == log_path:
-            return
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_path,
-        encoding="utf-8",
-        maxBytes=_COPAW_LOG_MAX_BYTES,
-        backupCount=_COPAW_LOG_BACKUP_COUNT,
-    )
+    log_path = Path(log_path).resolve()
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        for handler in logger.handlers:
+            base = getattr(handler, "baseFilename", None)
+            if base is not None and Path(base).resolve() == log_path:
+                return
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_path,
+            encoding="utf-8",
+            maxBytes=_COPAW_LOG_MAX_BYTES,
+            backupCount=_COPAW_LOG_BACKUP_COUNT,
+        )
+    except OSError as exc:
+        logger.warning(
+            "Failed to attach copaw file handler at %s: %s",
+            log_path,
+            exc,
+        )
+        return
     file_handler.setFormatter(
         logging.Formatter("%(asctime)s | %(message)s", "%Y-%m-%d %H:%M:%S"),
     )

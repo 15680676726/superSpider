@@ -11,15 +11,16 @@ from fastapi import APIRouter, File, Request, UploadFile
 
 from ...constant import WORKING_DIR
 from ...utils.cache import TTLCache
+from ..startup_environment_preflight import (
+    build_environment_preflight_report,
+    resolve_environment_preflight_paths,
+)
 from ..runtime_center.models import RuntimeCenterAppStateView
 from ..runtime_recovery_report import resolve_current_recovery_report
 from ..runtime_health_service import RuntimeHealthService
 from .workspace import _dir_stats, download_workspace, upload_workspace
 
 router = APIRouter(prefix="/system", tags=["system"])
-
-_STATE_DB_PATH = WORKING_DIR / "state" / "phase1.sqlite3"
-_EVIDENCE_DB_PATH = WORKING_DIR / "evidence" / "phase1.sqlite3"
 _WORKSPACE_STATS_TTL_SECONDS = 5.0
 _workspace_stats_cache = TTLCache[str, tuple[int, int]](
     ttl_seconds=_WORKSPACE_STATS_TTL_SECONDS,
@@ -61,6 +62,42 @@ def _get_runtime_provider(app_state: Any) -> object:
     raise RuntimeError("runtime_provider is not attached to app.state")
 
 
+def _resolve_state_db_path(app_state: Any) -> Path:
+    state_store = getattr(app_state, "state_store", None)
+    raw_path = getattr(state_store, "_path", None)
+    if raw_path is not None:
+        return Path(raw_path).expanduser().resolve()
+    return resolve_environment_preflight_paths(working_dir=WORKING_DIR)[
+        "state_db_path"
+    ]
+
+
+def _resolve_evidence_db_path(app_state: Any) -> Path:
+    return resolve_environment_preflight_paths(
+        working_dir=_resolve_working_dir(app_state),
+    )["evidence_db_path"]
+
+
+def _resolve_working_dir(app_state: Any) -> Path:
+    state_store = getattr(app_state, "state_store", None)
+    raw_path = getattr(state_store, "_path", None)
+    if raw_path is not None:
+        return Path(raw_path).expanduser().resolve().parent
+    return WORKING_DIR
+
+
+def _build_environment_preflight(app_state: Any) -> dict[str, object]:
+    working_dir = _resolve_working_dir(app_state)
+    paths = resolve_environment_preflight_paths(working_dir=working_dir)
+    return build_environment_preflight_report(
+        working_dir=working_dir,
+        log_path=paths["log_path"],
+        state_db_path=_resolve_state_db_path(app_state),
+        evidence_db_path=_resolve_evidence_db_path(app_state),
+        include_subprocess=True,
+    )
+
+
 @router.get("/overview", response_model=dict[str, object])
 async def get_system_overview(request: Request) -> dict[str, object]:
     app_state = request.app.state
@@ -79,6 +116,8 @@ async def get_system_overview(request: Request) -> dict[str, object]:
         ]
 
     file_count, total_size = _workspace_stats(WORKING_DIR)
+    state_db_path = _resolve_state_db_path(app_state)
+    evidence_db_path = _resolve_evidence_db_path(app_state)
     return {
         "generated_at": _utc_now_iso(),
         "backup": {
@@ -92,8 +131,8 @@ async def get_system_overview(request: Request) -> dict[str, object]:
         },
         "self_check": {
             "route": "/api/system/self-check",
-            "state_db_path": str(_STATE_DB_PATH),
-            "evidence_db_path": str(_EVIDENCE_DB_PATH),
+            "state_db_path": str(state_db_path),
+            "evidence_db_path": str(evidence_db_path),
         },
         "providers": {
             "active_model": (
@@ -120,6 +159,9 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
     runtime_health_service = _get_runtime_health_service(app_state)
     runtime_summary = await runtime_health_service.build_runtime_summary()
     runtime_provider = _get_runtime_provider(app_state)
+    state_db_path = _resolve_state_db_path(app_state)
+    evidence_db_path = _resolve_evidence_db_path(app_state)
+    environment_preflight = _build_environment_preflight(app_state)
 
     checks: list[dict[str, object]] = []
 
@@ -139,18 +181,25 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
     )
     add_check(
         "state_store",
-        "pass" if _service_present(app_state, "state_store") and _STATE_DB_PATH.exists() else "warn",
+        "pass" if _service_present(app_state, "state_store") and state_db_path.exists() else "warn",
         "Unified state store is wired." if _service_present(app_state, "state_store") else "State store is not attached to app.state.",
-        path=str(_STATE_DB_PATH),
-        exists=_STATE_DB_PATH.exists(),
+        path=str(state_db_path),
+        exists=state_db_path.exists(),
     )
     add_check(
         "evidence_ledger",
-        "pass" if _service_present(app_state, "evidence_ledger") and _EVIDENCE_DB_PATH.exists() else "warn",
+        "pass" if _service_present(app_state, "evidence_ledger") and evidence_db_path.exists() else "warn",
         "Evidence ledger is wired." if _service_present(app_state, "evidence_ledger") else "Evidence ledger is not attached to app.state.",
-        path=str(_EVIDENCE_DB_PATH),
-        exists=_EVIDENCE_DB_PATH.exists(),
+        path=str(evidence_db_path),
+        exists=evidence_db_path.exists(),
     )
+    for item in environment_preflight.get("checks", []):
+        checks.append({
+            "name": str(item.get("name") or "environment_preflight"),
+            "status": str(item.get("status") or "warn"),
+            "summary": str(item.get("summary") or ""),
+            "meta": dict(item.get("meta") or {}),
+        })
     for runtime_health_check in runtime_health_service.build_checks():
         meta = runtime_health_check.get("meta")
         checks.append({
@@ -239,6 +288,7 @@ async def run_system_self_check(request: Request) -> dict[str, object]:
     return {
         "generated_at": _utc_now_iso(),
         "overall_status": overall_status,
+        "environment_preflight": environment_preflight,
         "runtime_summary": runtime_summary,
         "checks": checks,
     }

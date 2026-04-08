@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from copaw.app.runtime_center import (
     Phase1StateQueryService,
@@ -257,3 +260,17 @@ def test_runtime_center_activation_reads_do_not_write_decisions_evidence_or_even
     assert stored.status == "open"
     assert evidence_ledger.count_records() == before_evidence_count == 1
     assert event_bus.list_events(after_id=0, limit=10) == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_event_bus_close_drains_pending_notify_tasks() -> None:
+    event_bus = RuntimeEventBus()
+    waiter = asyncio.create_task(event_bus.wait_for_events(after_id=0, timeout=60.0))
+    await asyncio.sleep(0)
+
+    assert event_bus._waiters
+
+    await event_bus.close()
+
+    assert await asyncio.wait_for(waiter, timeout=0.2) == []
+    assert not event_bus._waiters

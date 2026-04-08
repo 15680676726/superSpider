@@ -2,6 +2,7 @@
 """Private conversation compaction service for runtime agents."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import platform
@@ -35,6 +36,20 @@ except ImportError as e:
         """Placeholder when reme is not available."""
 
 
+def _consume_current_task_cancellation() -> int:
+    current = asyncio.current_task()
+    if current is None:
+        return 0
+    uncancel = getattr(current, "uncancel", None)
+    if not callable(uncancel):
+        return 0
+    cleared = 0
+    while current.cancelling():
+        uncancel()
+        cleared += 1
+    return cleared
+
+
 class ConversationCompactionService(ReMeLight):
     """Private compaction/search state for one runtime actor/session."""
 
@@ -48,12 +63,17 @@ class ConversationCompactionService(ReMeLight):
             memory_backend = "local" if platform.system() == "Windows" else "chroma"
         else:
             memory_backend = memory_store_backend
+        file_watchers_enabled = (
+            os.environ.get("COPAW_COMPACTION_FILE_WATCHERS_ENABLED", "false").lower()
+            == "true"
+        )
 
         self._runtime_health_payload = {
             "private_compaction_enabled": True,
             "fts_enabled": fts_enabled,
             "memory_store_backend": memory_backend,
             "working_dir": working_dir,
+            "file_watchers_enabled": file_watchers_enabled,
         }
 
         super().__init__(
@@ -79,6 +99,14 @@ class ConversationCompactionService(ReMeLight):
                 "fts_enabled": fts_enabled,
             },
         )
+        if not file_watchers_enabled:
+            try:
+                self.service_config.file_watchers = {}
+            except Exception:
+                logger.debug(
+                    "Failed to disable conversation compaction file watchers",
+                    exc_info=True,
+                )
 
         self.summary_toolkit = Toolkit()
         self.summary_toolkit.register_tool_function(read_file)
@@ -89,6 +117,10 @@ class ConversationCompactionService(ReMeLight):
         self.formatter: FormatterBase | None = None
         self._runtime_model_fingerprint: str = ""
         self.token_counter = _get_token_counter()
+        self._close_timeout_seconds = self._safe_float(
+            "COPAW_COMPACTION_CLOSE_TIMEOUT_SECONDS",
+            1.0,
+        )
 
     @staticmethod
     def _safe_int(key: str, default: int) -> int:
@@ -100,6 +132,22 @@ class ConversationCompactionService(ReMeLight):
         except ValueError:
             logger.warning(
                 "Invalid int value '%s' for key '%s', using default %s",
+                value,
+                key,
+                default,
+            )
+            return default
+
+    @staticmethod
+    def _safe_float(key: str, default: float) -> float:
+        value = os.environ.get(key)
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except ValueError:
+            logger.warning(
+                "Invalid float value '%s' for key '%s', using default %s",
                 value,
                 key,
                 default,
@@ -205,10 +253,170 @@ class ConversationCompactionService(ReMeLight):
         if callable(starter):
             await starter()
 
-    async def close(self) -> None:
-        closer = getattr(super(), "close", None)
-        if callable(closer):
-            await closer()
+    async def close(self) -> bool:
+        self._cleanup_tool_results()
+        if not getattr(self, "_started", False):
+            logger.warning("Application is not started")
+            return True
+
+        await self._close_service_bucket(
+            "vector store",
+            getattr(self.service_context, "vector_stores", {}),
+        )
+        await self._close_service_bucket(
+            "file store",
+            getattr(self.service_context, "file_stores", {}),
+        )
+        await self._close_service_bucket(
+            "file watcher",
+            getattr(self.service_context, "file_watchers", {}),
+            force_stop_on_timeout=True,
+        )
+        await self._close_service_bucket(
+            "LLM",
+            getattr(self.service_context, "llms", {}),
+        )
+        await self._close_service_bucket(
+            "embedding model",
+            getattr(self.service_context, "embedding_models", {}),
+        )
+
+        self.shutdown_thread_pool()
+        self.shutdown_ray()
+        self._started = False
+        return False
+
+    async def _close_service_bucket(
+        self,
+        bucket_label: str,
+        components: dict[str, Any],
+        *,
+        force_stop_on_timeout: bool = False,
+    ) -> None:
+        for name, component in (components or {}).items():
+            logger.info("Closing %s: %s", bucket_label, name)
+            await self._close_service_component(
+                bucket_label,
+                name,
+                component,
+                force_stop_on_timeout=force_stop_on_timeout,
+            )
+
+    async def _close_service_component(
+        self,
+        bucket_label: str,
+        name: str,
+        component: Any,
+        *,
+        force_stop_on_timeout: bool = False,
+    ) -> None:
+        closer = getattr(component, "close", None)
+        if not callable(closer):
+            return
+        if force_stop_on_timeout:
+            await self._close_file_watcher_component(name, component, closer)
+            return
+        try:
+            async with asyncio.timeout(self._close_timeout_seconds):
+                await closer()
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Conversation compaction %s '%s' close timed out after %ss",
+                bucket_label,
+                name,
+                self._close_timeout_seconds,
+            )
+            if force_stop_on_timeout:
+                await self._force_stop_file_watcher(name, component)
+        except Exception as exc:
+            logger.warning(
+                "Conversation compaction %s '%s' close failed: %s",
+                bucket_label,
+                name,
+                exc,
+            )
+
+    async def _close_file_watcher_component(
+        self,
+        name: str,
+        component: Any,
+        closer: Any,
+    ) -> None:
+        close_task = asyncio.create_task(
+            closer(),
+            name=f"copaw-compaction-close-{name}",
+        )
+        force_stop = False
+        try:
+            await asyncio.wait_for(close_task, timeout=self._close_timeout_seconds)
+        except asyncio.TimeoutError:
+            _consume_current_task_cancellation()
+            logger.warning(
+                "Conversation compaction file watcher '%s' close timed out after %ss",
+                name,
+                self._close_timeout_seconds,
+            )
+            force_stop = True
+        except asyncio.CancelledError:
+            _consume_current_task_cancellation()
+            logger.warning(
+                "Conversation compaction file watcher '%s' close was cancelled; forcing stop",
+                name,
+            )
+            force_stop = True
+        except Exception as exc:
+            _consume_current_task_cancellation()
+            logger.warning(
+                "Conversation compaction file watcher '%s' close failed: %s",
+                name,
+                exc,
+            )
+            force_stop = True
+
+        if close_task.done():
+            if close_task.cancelled():
+                force_stop = True
+            else:
+                outcome = close_task.exception()
+                if outcome is not None:
+                    force_stop = True
+        else:
+            close_task.cancel()
+            await asyncio.gather(close_task, return_exceptions=True)
+            force_stop = True
+
+        if force_stop:
+            await self._force_stop_file_watcher(name, component)
+
+    async def _force_stop_file_watcher(
+        self,
+        name: str,
+        file_watcher: Any,
+    ) -> None:
+        stop_event = getattr(file_watcher, "_stop_event", None)
+        if callable(getattr(stop_event, "set", None)):
+            stop_event.set()
+
+        watch_task = getattr(file_watcher, "_watch_task", None)
+        if isinstance(watch_task, asyncio.Task) and not watch_task.done():
+            watch_task.cancel()
+            _consume_current_task_cancellation()
+            done, pending = await asyncio.wait(
+                {watch_task},
+                timeout=self._close_timeout_seconds,
+            )
+            _consume_current_task_cancellation()
+            if pending:
+                logger.warning(
+                    "Conversation compaction file watcher '%s' task did not stop after forced cancel",
+                    name,
+                )
+            elif done:
+                await asyncio.gather(*done, return_exceptions=True)
+                _consume_current_task_cancellation()
+
+        if hasattr(file_watcher, "_running"):
+            file_watcher._running = False
 
     async def check_context(
         self,

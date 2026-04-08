@@ -26,6 +26,20 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _consume_current_task_cancellation() -> int:
+    current = asyncio.current_task()
+    if current is None:
+        return 0
+    uncancel = getattr(current, "uncancel", None)
+    if not callable(uncancel):
+        return 0
+    cleared = 0
+    while current.cancelling():
+        uncancel()
+        cleared += 1
+    return cleared
+
+
 class ActorSupervisor:
     """One resident supervisor drives all actor workers from a shared loop."""
 
@@ -69,6 +83,7 @@ class ActorSupervisor:
             try:
                 await self._loop_task
             except asyncio.CancelledError:
+                _consume_current_task_cancellation()
                 pass
         running_tasks = [
             task
@@ -79,6 +94,7 @@ class ActorSupervisor:
             task.cancel()
         if running_tasks:
             await asyncio.gather(*running_tasks, return_exceptions=True)
+            _consume_current_task_cancellation()
         self._publish_runtime_event(topic="actor-supervisor", action="stopped", payload={})
 
     def mailbox_service(self) -> ActorMailboxService:

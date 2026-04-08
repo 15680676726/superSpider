@@ -23,10 +23,14 @@ class _FakeClient:
         *,
         fail_connect: bool = False,
         fail_close: bool = False,
+        hang_close: bool = False,
+        cancel_close: bool = False,
     ) -> None:
         self.name = name
         self.fail_connect = fail_connect
         self.fail_close = fail_close
+        self.hang_close = hang_close
+        self.cancel_close = cancel_close
         self.connect_calls = 0
         self.close_calls = 0
 
@@ -37,8 +41,21 @@ class _FakeClient:
 
     async def close(self) -> None:
         self.close_calls += 1
+        if self.hang_close:
+            await asyncio.Event().wait()
+        if self.cancel_close:
+            raise asyncio.CancelledError("close cancelled")
         if self.fail_close:
             raise RuntimeError("close failed")
+
+
+class _SelfCancellingClient(_FakeClient):
+    async def close(self) -> None:
+        self.close_calls += 1
+        current = asyncio.current_task()
+        if current is not None:
+            current.cancel()
+        await asyncio.sleep(0)
 
 
 class _RecordingMCPManager:
@@ -67,6 +84,42 @@ class _RecordingMCPManager:
 
     async def clear_scope_overlay(self, scope_ref: str) -> None:
         self.clear_calls.append(scope_ref)
+
+
+class _FakeAsyncExitStack:
+    def __init__(self) -> None:
+        self.aclose_calls = 0
+
+    async def aclose(self) -> None:
+        self.aclose_calls += 1
+
+
+class _FakeStackBackedClient(_FakeClient):
+    def __init__(self, name: str) -> None:
+        super().__init__(name, hang_close=True)
+        self.stack = _FakeAsyncExitStack()
+
+
+class _FakeProcessHandle:
+    def __init__(self) -> None:
+        self.aclose_calls = 0
+
+    async def aclose(self) -> None:
+        self.aclose_calls += 1
+
+
+class _FakeProcessBackedClient(_FakeClient):
+    def __init__(self, name: str) -> None:
+        super().__init__(name, hang_close=True)
+        self.stack = _FakeAsyncExitStack()
+        self.process = _FakeProcessHandle()
+        self.client = SimpleNamespace(
+            gen=SimpleNamespace(
+                ag_frame=SimpleNamespace(
+                    f_locals={"process": self.process},
+                ),
+            ),
+        )
 
 
 def test_build_mcp_trial_contract_projects_local_scope_and_rollback_boundary() -> None:
@@ -282,6 +335,78 @@ async def test_mcp_manager_replace_surfaces_old_client_close_failure(monkeypatch
     assert record.reload_state.last_outcome == "close_failed"
     assert record.reload_state.dirty is False
     assert record.reload_state.pending_reload is False
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_replace_times_out_hanging_old_client_close(monkeypatch) -> None:
+    manager = MCPClientManager()
+    manager._close_timeout_seconds = 0.01
+    build_count = 0
+
+    def _fake_build_client(cfg: MCPClientConfig) -> _FakeClient:
+        nonlocal build_count
+        build_count += 1
+        if build_count == 1:
+            return _FakeClient(cfg.name, hang_close=True)
+        return _FakeClient(cfg.name)
+
+    monkeypatch.setattr(MCPClientManager, "_build_client", staticmethod(_fake_build_client))
+
+    base_cfg = MCPClientConfig(
+        name="worker",
+        enabled=True,
+        transport="stdio",
+        command="python",
+        args=["-m", "worker"],
+    )
+    await manager.init_from_config(MCPConfig(clients={"worker": base_cfg}))
+
+    await asyncio.wait_for(manager.replace_client("worker", base_cfg, timeout=3.0), timeout=0.2)
+
+    record = await manager.get_runtime_record("worker")
+    assert record is not None
+    assert record.status == "ready"
+    assert record.connected is True
+    assert record.last_error == "close timeout after 0.01s"
+    assert record.reload_state.last_outcome == "close_failed"
+    assert record.reload_state.dirty is False
+    assert record.reload_state.pending_reload is False
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_close_all_clears_shutdown_cancellation_residue(
+    monkeypatch,
+) -> None:
+    manager = MCPClientManager()
+    manager._close_timeout_seconds = 0.01
+
+    monkeypatch.setattr(
+        MCPClientManager,
+        "_build_client",
+        staticmethod(lambda cfg: _FakeClient(cfg.name, hang_close=True)),
+    )
+
+    base_cfg = MCPClientConfig(
+        name="worker",
+        enabled=True,
+        transport="stdio",
+        command="python",
+        args=["-m", "worker"],
+    )
+    await manager.init_from_config(MCPConfig(clients={"worker": base_cfg}))
+
+    current = asyncio.current_task()
+    assert current is not None
+    assert current.cancelling() == 0
+
+    try:
+        await asyncio.wait_for(manager.close_all(), timeout=0.2)
+        assert current.cancelling() == 0
+    finally:
+        uncancel = getattr(current, "uncancel", None)
+        if callable(uncancel):
+            while current.cancelling():
+                uncancel()
 
 
 @pytest.mark.asyncio
@@ -778,3 +903,163 @@ async def test_windows_desktop_template_connects_and_calls_real_tool() -> None:
         assert payload["handle"]
     finally:
         await manager.close_all()
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_close_all_times_out_hanging_client_close(monkeypatch) -> None:
+    manager = MCPClientManager()
+    manager._close_timeout_seconds = 0.01
+
+    def _fake_build_client(cfg: MCPClientConfig) -> _FakeClient:
+        return _FakeClient(cfg.name, hang_close=True)
+
+    monkeypatch.setattr(MCPClientManager, "_build_client", staticmethod(_fake_build_client))
+
+    base_cfg = MCPClientConfig(
+        name="worker",
+        enabled=True,
+        transport="stdio",
+        command="python",
+        args=["-m", "worker"],
+    )
+    await manager.init_from_config(MCPConfig(clients={"worker": base_cfg}))
+
+    await asyncio.wait_for(manager.close_all(), timeout=0.2)
+
+    record = await manager.get_runtime_record("worker")
+    assert record is not None
+    assert record.status == "closing"
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_close_all_absorbs_cancelled_client_close(monkeypatch) -> None:
+    manager = MCPClientManager()
+
+    def _fake_build_client(cfg: MCPClientConfig) -> _FakeClient:
+        return _FakeClient(cfg.name, cancel_close=True)
+
+    monkeypatch.setattr(MCPClientManager, "_build_client", staticmethod(_fake_build_client))
+
+    base_cfg = MCPClientConfig(
+        name="worker",
+        enabled=True,
+        transport="stdio",
+        command="python",
+        args=["-m", "worker"],
+    )
+    await manager.init_from_config(MCPConfig(clients={"worker": base_cfg}))
+
+    current = asyncio.current_task()
+    assert current is not None
+    assert current.cancelling() == 0
+
+    try:
+        await manager.close_all()
+        assert current.cancelling() == 0
+    finally:
+        uncancel = getattr(current, "uncancel", None)
+        if callable(uncancel):
+            while current.cancelling():
+                uncancel()
+
+    record = await manager.get_runtime_record("worker")
+    assert record is not None
+    assert record.status == "closing"
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_close_all_clears_self_cancelled_close_residue(
+    monkeypatch,
+) -> None:
+    manager = MCPClientManager()
+
+    monkeypatch.setattr(
+        MCPClientManager,
+        "_build_client",
+        staticmethod(lambda cfg: _SelfCancellingClient(cfg.name)),
+    )
+
+    base_cfg = MCPClientConfig(
+        name="worker",
+        enabled=True,
+        transport="stdio",
+        command="python",
+        args=["-m", "worker"],
+    )
+    await manager.init_from_config(MCPConfig(clients={"worker": base_cfg}))
+
+    current = asyncio.current_task()
+    assert current is not None
+    assert current.cancelling() == 0
+
+    try:
+        await manager.close_all()
+        assert current.cancelling() == 0
+    finally:
+        uncancel = getattr(current, "uncancel", None)
+        if callable(uncancel):
+            while current.cancelling():
+                uncancel()
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_close_all_prefers_stack_aclose_for_stack_backed_clients(
+    monkeypatch,
+) -> None:
+    manager = MCPClientManager()
+    manager._close_timeout_seconds = 0.01
+    built_client: _FakeStackBackedClient | None = None
+
+    def _fake_build_client(cfg: MCPClientConfig) -> _FakeStackBackedClient:
+        nonlocal built_client
+        built_client = _FakeStackBackedClient(cfg.name)
+        return built_client
+
+    monkeypatch.setattr(MCPClientManager, "_build_client", staticmethod(_fake_build_client))
+
+    base_cfg = MCPClientConfig(
+        name="worker",
+        enabled=True,
+        transport="stdio",
+        command="python",
+        args=["-m", "worker"],
+    )
+    await manager.init_from_config(MCPConfig(clients={"worker": base_cfg}))
+
+    await manager.close_all()
+
+    assert built_client is not None
+    assert built_client.stack.aclose_calls == 1
+    assert built_client.close_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_close_all_runs_process_aclose_before_stack_for_stdio_clients(
+    monkeypatch,
+) -> None:
+    manager = MCPClientManager()
+    manager._close_timeout_seconds = 0.01
+    built_client: _FakeProcessBackedClient | None = None
+
+    def _fake_build_client(cfg: MCPClientConfig) -> _FakeProcessBackedClient:
+        nonlocal built_client
+        built_client = _FakeProcessBackedClient(cfg.name)
+        return built_client
+
+    monkeypatch.setattr(MCPClientManager, "_build_client", staticmethod(_fake_build_client))
+
+    base_cfg = MCPClientConfig(
+        name="worker",
+        enabled=True,
+        transport="stdio",
+        command="python",
+        args=["-m", "worker"],
+    )
+    await manager.init_from_config(MCPConfig(clients={"worker": base_cfg}))
+
+    await manager.close_all()
+
+    assert built_client is not None
+    assert built_client.process.aclose_calls == 1
+    assert built_client.stack.aclose_calls == 1
+    assert built_client.close_calls == 0

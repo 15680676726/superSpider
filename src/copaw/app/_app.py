@@ -33,6 +33,10 @@ from .runtime_bootstrap import (
     start_runtime_manager_stack,
     stop_runtime_manager_stack,
 )
+from .startup_environment_preflight import (
+    assert_startup_environment_ready,
+    resolve_environment_preflight_paths,
+)
 from .routers import router as api_router
 from .routers.voice import voice_router
 from ..envs import load_envs_into_environ
@@ -61,6 +65,10 @@ agent_runtime_app = create_agent_runtime_app()
 async def lifespan(
     app: FastAPI,
 ):  # pylint: disable=too-many-statements,too-many-branches
+    startup_environment_preflight = assert_startup_environment_ready(
+        **resolve_environment_preflight_paths(working_dir=WORKING_DIR),
+    )
+    app.state.startup_environment_preflight = startup_environment_preflight
     add_copaw_file_handler(WORKING_DIR / "copaw.log")
     await runtime_host.start()
     session_backend = runtime_host.session_backend
@@ -218,6 +226,13 @@ async def lifespan(
             except Exception:
                 pass
         await runtime_host.stop()
+        runtime_event_bus = getattr(app.state, "runtime_event_bus", None)
+        close_runtime_event_bus = getattr(runtime_event_bus, "close", None)
+        if callable(close_runtime_event_bus):
+            try:
+                await close_runtime_event_bus()
+            except Exception:
+                pass
 
 
 app = FastAPI(

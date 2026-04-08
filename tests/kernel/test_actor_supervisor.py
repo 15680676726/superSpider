@@ -51,6 +51,26 @@ class _SelectiveFailingWorker:
         return True
 
 
+class _SelfCancellingAwaitable:
+    def __init__(self) -> None:
+        self.cancel_calls = 0
+
+    def done(self) -> bool:
+        return False
+
+    def cancel(self) -> None:
+        self.cancel_calls += 1
+
+    def __await__(self):
+        async def _inner():
+            current = asyncio.current_task()
+            if current is not None:
+                current.cancel()
+            await asyncio.sleep(0)
+
+        return _inner().__await__()
+
+
 class _RecordingEventBus:
     def __init__(self) -> None:
         self.events: list[tuple[str, str, dict[str, object]]] = []
@@ -194,6 +214,89 @@ def test_actor_supervisor_stop_cancels_inflight_agent_runs(tmp_path) -> None:
     asyncio.run(_run())
 
     assert worker.cancelled == ["agent-1"]
+
+
+@pytest.mark.asyncio
+async def test_actor_supervisor_stop_clears_shutdown_cancellation_residue(tmp_path) -> None:
+    runtime_repository = _build_runtime_repository(tmp_path)
+    supervisor = ActorSupervisor(
+        runtime_repository=runtime_repository,
+        mailbox_service=None,  # type: ignore[arg-type]
+        worker=_RecordingWorker(),  # type: ignore[arg-type]
+        poll_interval_seconds=0.01,
+    )
+
+    await supervisor.start()
+
+    current = asyncio.current_task()
+    assert current is not None
+    assert current.cancelling() == 0
+
+    try:
+        await supervisor.stop()
+        assert current.cancelling() == 0
+    finally:
+        uncancel = getattr(current, "uncancel", None)
+        if callable(uncancel):
+            while current.cancelling():
+                uncancel()
+
+
+@pytest.mark.asyncio
+async def test_actor_supervisor_stop_clears_inflight_run_cancellation_residue(
+    tmp_path,
+) -> None:
+    runtime_repository = _build_runtime_repository(tmp_path)
+    worker = _InterruptibleWorker()
+    supervisor = ActorSupervisor(
+        runtime_repository=runtime_repository,
+        mailbox_service=None,  # type: ignore[arg-type]
+        worker=worker,  # type: ignore[arg-type]
+        poll_interval_seconds=0.01,
+    )
+
+    task = asyncio.create_task(supervisor.run_agent_once("agent-1"))
+    await worker.started.wait()
+
+    current = asyncio.current_task()
+    assert current is not None
+    assert current.cancelling() == 0
+
+    try:
+        await supervisor.stop()
+        assert current.cancelling() == 0
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        uncancel = getattr(current, "uncancel", None)
+        if callable(uncancel):
+            while current.cancelling():
+                uncancel()
+
+
+@pytest.mark.asyncio
+async def test_actor_supervisor_stop_clears_self_cancelled_loop_residue(tmp_path) -> None:
+    runtime_repository = _build_runtime_repository(tmp_path)
+    supervisor = ActorSupervisor(
+        runtime_repository=runtime_repository,
+        mailbox_service=None,  # type: ignore[arg-type]
+        worker=_RecordingWorker(),  # type: ignore[arg-type]
+        poll_interval_seconds=0.01,
+    )
+    supervisor._loop_task = _SelfCancellingAwaitable()  # type: ignore[assignment]
+
+    current = asyncio.current_task()
+    assert current is not None
+    assert current.cancelling() == 0
+
+    try:
+        await supervisor.stop()
+        assert current.cancelling() == 0
+    finally:
+        uncancel = getattr(current, "uncancel", None)
+        if callable(uncancel):
+            while current.cancelling():
+                uncancel()
 
 
 def test_actor_supervisor_isolates_agent_failure_without_aborting_parallel_poll(
