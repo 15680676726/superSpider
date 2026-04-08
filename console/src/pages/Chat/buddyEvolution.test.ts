@@ -7,15 +7,24 @@ import {
 } from "./buddyEvolution";
 
 describe("buddyEvolution", () => {
-  it("maps capability score bands into evolution stages", () => {
-    expect(resolveBuddyEvolutionStage({ capabilityScore: 0 })).toBe("seed");
-    expect(resolveBuddyEvolutionStage({ capabilityScore: 24 })).toBe("bonded");
-    expect(resolveBuddyEvolutionStage({ capabilityScore: 45 })).toBe("capable");
-    expect(resolveBuddyEvolutionStage({ capabilityScore: 63 })).toBe("seasoned");
-    expect(resolveBuddyEvolutionStage({ capabilityScore: 88 })).toBe("signature");
+  it("maps capability points bands into evolution stages", () => {
+    expect(resolveBuddyEvolutionStage({ capabilityPoints: 0 })).toBe("seed");
+    expect(resolveBuddyEvolutionStage({ capabilityPoints: 20 })).toBe("bonded");
+    expect(resolveBuddyEvolutionStage({ capabilityPoints: 40 })).toBe("capable");
+    expect(resolveBuddyEvolutionStage({ capabilityPoints: 100 })).toBe("seasoned");
+    expect(resolveBuddyEvolutionStage({ capabilityPoints: 200 })).toBe("signature");
   });
 
-  it("falls back to old experience thresholds only when capability score is missing", () => {
+  it("ignores capability score when points are available", () => {
+    expect(
+      resolveBuddyEvolutionStage({
+        capabilityPoints: 2,
+        capabilityScore: 88,
+      }),
+    ).toBe("seed");
+  });
+
+  it("falls back to old experience thresholds only when points are missing", () => {
     expect(resolveBuddyEvolutionStage({ companionExperience: 170 })).toBe("seasoned");
   });
 
@@ -25,6 +34,7 @@ describe("buddyEvolution", () => {
       resolveBuddyEvolutionView({
         evolutionStage: "",
         currentForm: "seasoned",
+        capabilityPoints: 40,
         capabilityScore: 20,
         rarity: "epic",
       }),

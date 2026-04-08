@@ -92,6 +92,13 @@ export type BuddyDisplaySnapshot = {
   companionStrategySummary: string | null;
   stage: string;
   stageLabel: string;
+  capabilityPoints: number;
+  settledClosureCount: number;
+  independentOutcomeCount: number;
+  distinctSettledCycleCount: number;
+  recentCompletionRate: number;
+  recentExecutionErrorRate: number;
+  progressToNextStage: number;
   presenceLabel: string;
   moodLabel: string;
   encouragementStyleLabel: string;
@@ -103,6 +110,7 @@ export function resolveBuddyDisplaySnapshot(
   const evolution = resolveBuddyEvolutionView({
     evolutionStage: surface.growth?.evolution_stage,
     currentForm: surface.presentation?.current_form,
+    capabilityPoints: surface.growth?.capability_points,
     capabilityScore: surface.growth?.capability_score,
     companionExperience: surface.growth?.companion_experience,
     rarity: surface.presentation?.rarity,
@@ -145,6 +153,22 @@ export function resolveBuddyDisplaySnapshot(
     companionStrategySummary: companionStrategySummary || null,
     stage: evolution.stage,
     stageLabel: presentBuddyStageLabel(evolution.stage),
+    capabilityPoints: Math.max(0, Number(surface.growth?.capability_points ?? 0)),
+    settledClosureCount: Math.max(0, Number(surface.growth?.settled_closure_count ?? 0)),
+    independentOutcomeCount: Math.max(
+      0,
+      Number(surface.growth?.independent_outcome_count ?? 0),
+    ),
+    distinctSettledCycleCount: Math.max(
+      0,
+      Number(surface.growth?.distinct_settled_cycle_count ?? 0),
+    ),
+    recentCompletionRate: Math.max(0, Number(surface.growth?.recent_completion_rate ?? 0)),
+    recentExecutionErrorRate: Math.max(
+      0,
+      Number(surface.growth?.recent_execution_error_rate ?? 0),
+    ),
+    progressToNextStage: Math.max(0, Number(surface.growth?.progress_to_next_stage ?? 0)),
     presenceLabel: presentBuddyPresenceLabel(surface.presentation?.presence_state),
     moodLabel: presentBuddyMoodLabel(surface.presentation?.mood_state),
     encouragementStyleLabel: presentBuddyEncouragementStyleLabel(

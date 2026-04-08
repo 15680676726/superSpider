@@ -23,6 +23,16 @@
   - single-loop main-brain chat keeps exactly one formal chat/control thread; `/runtime-center/chat/run` streams reply tokens first and same-thread commit sidecar events second, and must not reintroduce `task-chat:*` or a second chat object
   - `main_brain.phase2_commit` is canonical session snapshot state; conversation read surfaces may project it as `meta.main_brain_commit` for same-thread reload, but that projection is not a new top-level runtime object
   - truth-first main-brain scope snapshots are derived caches keyed by `work_context / industry / agent`; media adopt/retain/writeback must dirty-mark the relevant scope and refresh incrementally instead of rebuilding the entire prompt memory every turn
+- `2026-04-08` supplement:
+  - Buddy stage progression now uses `capability_points + promotion gates` as the canonical truth on active `BuddyDomainCapabilityRecord`; `capability_score` stays only as compatibility/read-model metadata.
+  - `1` valid closure = `2` points. A valid closure requires a settled `Assignment` with a completed linked `AgentReport` and non-empty evidence.
+  - Canonical promotion gates are:
+    - `bonded`: `capability_points >= 20`
+    - `capable`: `capability_points >= 40` and `settled_closure_count >= 1`
+    - `seasoned`: `capability_points >= 100` and `distinct_settled_cycle_count >= 3`
+    - `signature`: `capability_points >= 200`, `independent_outcome_count >= 10`, `recent_completion_rate >= 0.92`, `recent_execution_error_rate <= 0.03`
+  - Canonical stage demotion may drop at most one level per refresh; Buddy stage truth must not oscillate across multiple levels in a single growth pass.
+  - Active Buddy growth read models must now project `capability_points / settled_closure_count / independent_outcome_count / recent_completion_rate / recent_execution_error_rate / distinct_settled_cycle_count / demotion_cooldown_until` from the same active domain record.
 - `2026-04-07` supplement:
   - Buddy 的成长阶段正式拆成“关系层”和“领域能力层”两条链路，禁止再把 `CompanionRelationship.companion_experience` 直接投影成 stage
   - active `BuddyDomainCapabilityRecord` 是 Buddy 当前领域能力的唯一正式对象，承载 `domain_key / domain_label / capability_score / evolution_stage / strategy_score / execution_score / evidence_score / stability_score`

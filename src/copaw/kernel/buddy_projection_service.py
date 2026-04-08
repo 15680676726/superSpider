@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 from .buddy_domain_capability import (
     capability_stage_from_score,
     derive_buddy_domain_key,
-    progress_to_next_capability_stage,
+    progress_to_next_stage,
+    stage_from_points,
 )
 from .buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from .buddy_execution_carrier import build_buddy_execution_carrier_handoff
@@ -201,9 +202,11 @@ class BuddyProjectionService:
             "evolution_stage": surface.growth.evolution_stage,
             "growth_level": surface.growth.growth_level,
             "capability_score": surface.growth.capability_score,
+            "capability_points": surface.growth.capability_points,
             "domain_id": surface.growth.domain_id,
             "domain_key": surface.growth.domain_key,
             "domain_label": surface.growth.domain_label,
+            "settled_closure_count": surface.growth.settled_closure_count,
             "strategy_score": surface.growth.strategy_score,
             "execution_score": surface.growth.execution_score,
             "evidence_score": surface.growth.evidence_score,
@@ -260,10 +263,16 @@ class BuddyProjectionService:
                 selected_direction=target.primary_direction if target is not None else "",
             )
             capability_score = 0
+            capability_points = 0
             strategy_score = 0
             execution_score = 0
             evidence_score = 0
             stability_score = 0
+            settled_closure_count = 0
+            independent_outcome_count = 0
+            recent_completion_rate = 0.0
+            recent_execution_error_rate = 0.0
+            distinct_settled_cycle_count = 0
             knowledge_value = 0
             skill_value = 0
             completed_support_runs = 0
@@ -275,16 +284,26 @@ class BuddyProjectionService:
             domain_key = active_domain.domain_key
             domain_label = active_domain.domain_label
             capability_score = int(active_domain.capability_score)
+            capability_points = int(active_domain.capability_points)
             strategy_score = int(active_domain.strategy_score)
             execution_score = int(active_domain.execution_score)
             evidence_score = int(active_domain.evidence_score)
             stability_score = int(active_domain.stability_score)
+            settled_closure_count = int(active_domain.settled_closure_count)
+            independent_outcome_count = int(active_domain.independent_outcome_count)
+            recent_completion_rate = float(active_domain.recent_completion_rate)
+            recent_execution_error_rate = float(active_domain.recent_execution_error_rate)
+            distinct_settled_cycle_count = int(active_domain.distinct_settled_cycle_count)
             knowledge_value = int(active_domain.knowledge_value)
             skill_value = int(active_domain.skill_value)
             completed_support_runs = int(active_domain.completed_support_runs)
             completed_assisted_closures = int(active_domain.completed_assisted_closures)
-            evolution_stage = str(active_domain.evolution_stage or capability_stage_from_score(capability_score))
-        growth_level = max(1, 1 + capability_score // 20)
+            evolution_stage = str(
+                active_domain.evolution_stage
+                or stage_from_points(capability_points)
+                or capability_stage_from_score(capability_score)
+            )
+        growth_level = max(1, 1 + capability_points // 20)
         return BuddyGrowthProjection(
             profile_id=profile.profile_id,
             domain_id=domain_id,
@@ -295,10 +314,16 @@ class BuddyProjectionService:
             growth_level=growth_level,
             companion_experience=companion_experience,
             capability_score=capability_score,
+            capability_points=capability_points,
             strategy_score=strategy_score,
             execution_score=execution_score,
             evidence_score=evidence_score,
             stability_score=stability_score,
+            settled_closure_count=settled_closure_count,
+            independent_outcome_count=independent_outcome_count,
+            recent_completion_rate=recent_completion_rate,
+            recent_execution_error_rate=recent_execution_error_rate,
+            distinct_settled_cycle_count=distinct_settled_cycle_count,
             knowledge_value=knowledge_value,
             skill_value=skill_value,
             pleasant_interaction_score=pleasant_interaction_score,
@@ -306,7 +331,7 @@ class BuddyProjectionService:
             completed_support_runs=completed_support_runs,
             completed_assisted_closures=completed_assisted_closures,
             evolution_stage=evolution_stage,
-            progress_to_next_stage=progress_to_next_capability_stage(capability_score),
+            progress_to_next_stage=progress_to_next_stage(capability_points),
         )
 
     def _build_onboarding_projection(

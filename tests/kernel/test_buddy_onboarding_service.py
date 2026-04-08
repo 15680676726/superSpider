@@ -300,8 +300,9 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
 
     assignments = assignment_repository.list_assignments(industry_instance_id=instance.instance_id)
     assert any(assignment.industry_instance_id == instance.instance_id for assignment in assignments)
-    assert result.domain_capability.capability_score > 0
-    assert result.domain_capability.strategy_score > 0
+    assert result.domain_capability.capability_points == 0
+    assert result.domain_capability.capability_score == 0
+    assert result.domain_capability.strategy_score == 0
     assert result.domain_capability.evolution_stage == "seed"
 
 

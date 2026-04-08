@@ -357,10 +357,12 @@ def test_http_buddy_surfaces_refresh_capability_growth_from_runtime_truth(tmp_pa
     ).json()
     summary = runtime_surface["main_brain"]["buddy_summary"]
 
+    assert surface["growth"]["capability_points"] == 2
+    assert surface["growth"]["settled_closure_count"] == 1
     assert surface["growth"]["capability_score"] > 0
     assert surface["growth"]["execution_score"] > 0
     assert surface["growth"]["evidence_score"] > 0
-    assert surface["growth"]["evolution_stage"] != "seed"
+    assert surface["growth"]["evolution_stage"] == "seed"
     assert summary["capability_score"] == surface["growth"]["capability_score"]
     assert summary["execution_score"] == surface["growth"]["execution_score"]
     assert summary["evidence_score"] == surface["growth"]["evidence_score"]

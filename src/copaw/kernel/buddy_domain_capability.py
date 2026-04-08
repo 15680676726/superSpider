@@ -59,6 +59,20 @@ _CAPABILITY_STAGE_BANDS: tuple[tuple[int, BuddyEvolutionStage], ...] = (
     (20, "bonded"),
     (0, "seed"),
 )
+_POINT_STAGE_BANDS: tuple[tuple[int, BuddyEvolutionStage], ...] = (
+    (200, "signature"),
+    (100, "seasoned"),
+    (40, "capable"),
+    (20, "bonded"),
+    (0, "seed"),
+)
+_EVOLUTION_STAGE_ORDER: tuple[BuddyEvolutionStage, ...] = (
+    "seed",
+    "bonded",
+    "capable",
+    "seasoned",
+    "signature",
+)
 
 _DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
@@ -123,6 +137,94 @@ _DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 def _clamp_capability_score(score: int) -> int:
     return max(0, min(100, int(score)))
+
+
+def _normalize_points(points: int) -> int:
+    return max(0, int(points))
+
+
+def stage_from_points(points: int) -> BuddyEvolutionStage:
+    normalized = _normalize_points(points)
+    for minimum, stage in _POINT_STAGE_BANDS:
+        if normalized >= minimum:
+            return stage
+    return "seed"
+
+
+def can_promote_to_stage(
+    stage: BuddyEvolutionStage,
+    *,
+    points: int,
+    settled_closure_count: int,
+    independent_outcome_count: int,
+    recent_completion_rate: float,
+    recent_execution_error_rate: float,
+    distinct_settled_cycle_count: int,
+) -> bool:
+    normalized_points = _normalize_points(points)
+    if stage == "seed":
+        return normalized_points >= 0
+    if stage == "bonded":
+        return normalized_points >= 20
+    if stage == "capable":
+        return normalized_points >= 40 and int(settled_closure_count) >= 1
+    if stage == "seasoned":
+        return normalized_points >= 100 and int(distinct_settled_cycle_count) >= 3
+    return (
+        normalized_points >= 200
+        and int(independent_outcome_count) >= 10
+        and float(recent_completion_rate) >= 0.92
+        and float(recent_execution_error_rate) <= 0.03
+    )
+
+
+def resolve_stage_transition(
+    *,
+    previous_stage: BuddyEvolutionStage,
+    points: int,
+    settled_closure_count: int,
+    independent_outcome_count: int,
+    recent_completion_rate: float,
+    recent_execution_error_rate: float,
+    distinct_settled_cycle_count: int,
+) -> BuddyEvolutionStage:
+    target_stage = "seed"
+    highest_stage = stage_from_points(points)
+    highest_rank = _EVOLUTION_STAGE_ORDER.index(highest_stage)
+    for rank in range(highest_rank, -1, -1):
+        candidate = _EVOLUTION_STAGE_ORDER[rank]
+        if can_promote_to_stage(
+            candidate,
+            points=points,
+            settled_closure_count=settled_closure_count,
+            independent_outcome_count=independent_outcome_count,
+            recent_completion_rate=recent_completion_rate,
+            recent_execution_error_rate=recent_execution_error_rate,
+            distinct_settled_cycle_count=distinct_settled_cycle_count,
+        ):
+            target_stage = candidate
+            break
+    previous_rank = _EVOLUTION_STAGE_ORDER.index(previous_stage)
+    target_rank = _EVOLUTION_STAGE_ORDER.index(target_stage)
+    if target_rank < previous_rank - 1:
+        return _EVOLUTION_STAGE_ORDER[previous_rank - 1]
+    return target_stage
+
+
+def progress_to_next_stage(points: int) -> int:
+    normalized = _normalize_points(points)
+    if normalized >= 200:
+        return 100
+    thresholds = (0, 20, 40, 100, 200)
+    lower_bound = thresholds[0]
+    upper_bound = thresholds[1]
+    for current, next_threshold in zip(thresholds, thresholds[1:]):
+        if normalized < next_threshold:
+            lower_bound = current
+            upper_bound = next_threshold
+            break
+    span = max(1, upper_bound - lower_bound)
+    return min(100, max(0, ((normalized - lower_bound) * 100) // span))
 
 
 def capability_stage_from_score(score: int) -> BuddyEvolutionStage:
@@ -263,6 +365,7 @@ def _serialize_domain_record(record: object | None) -> dict[str, object] | None:
     domain_key = getattr(record, "domain_key", None)
     domain_label = getattr(record, "domain_label", None)
     status = getattr(record, "status", None)
+    capability_points = getattr(record, "capability_points", None)
     capability_score = getattr(record, "capability_score", None)
     evolution_stage = getattr(record, "evolution_stage", None)
     if not domain_id or not domain_key:
@@ -272,8 +375,13 @@ def _serialize_domain_record(record: object | None) -> dict[str, object] | None:
         "domain_key": str(domain_key),
         "domain_label": str(domain_label or domain_key),
         "status": str(status or ""),
+        "capability_points": int(capability_points or 0),
         "capability_score": int(capability_score or 0),
-        "evolution_stage": str(evolution_stage or capability_stage_from_score(int(capability_score or 0))),
+        "evolution_stage": str(
+            evolution_stage
+            or stage_from_points(int(capability_points or 0))
+            or capability_stage_from_score(int(capability_score or 0))
+        ),
     }
 
 
@@ -292,9 +400,13 @@ __all__ = [
     "BuddyDomainCapabilityMetrics",
     "BuddyDomainCapabilitySignals",
     "BuddyDomainTransitionPreview",
+    "can_promote_to_stage",
     "capability_stage_from_score",
     "derive_capability_metrics",
     "derive_buddy_domain_key",
     "preview_domain_transition",
     "progress_to_next_capability_stage",
+    "progress_to_next_stage",
+    "resolve_stage_transition",
+    "stage_from_points",
 ]

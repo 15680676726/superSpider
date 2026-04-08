@@ -68,6 +68,7 @@ def test_buddy_projection_derives_growth_from_formal_truth(tmp_path) -> None:
     onboarding.name_buddy(session_id=identity.session_id, buddy_name="Nova")
 
     projection_payload = projection.build_chat_surface(profile_id=identity.profile.profile_id)
+    summary = projection.build_cockpit_summary(profile_id=identity.profile.profile_id)
 
     assert projection_payload.execution_carrier is not None
     assert (
@@ -84,6 +85,8 @@ def test_buddy_projection_derives_growth_from_formal_truth(tmp_path) -> None:
     )
     assert projection_payload.growth.intimacy >= 0
     assert projection_payload.growth.communication_count >= 2
+    assert projection_payload.growth.capability_points == 0
+    assert summary["capability_points"] == projection_payload.growth.capability_points
     assert projection_payload.presentation.buddy_name == "Nova"
     assert projection_payload.presentation.current_task_summary == "Ship the first portfolio case study"
     assert projection_payload.presentation.why_now_summary.startswith("Because this is the first proof")

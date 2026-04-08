@@ -115,3 +115,39 @@ def test_sqlite_state_store_creates_buddy_tables(tmp_path) -> None:
     assert "growth_targets" in tables
     assert "companion_relationships" in tables
     assert "buddy_domain_capabilities" in tables
+
+
+def test_buddy_models_accept_points_and_gate_metrics() -> None:
+    from copaw.state import BuddyDomainCapabilityRecord, BuddyGrowthProjection
+
+    record = BuddyDomainCapabilityRecord(
+        profile_id="profile-1",
+        domain_key="writing",
+        domain_label="Writing",
+        capability_points=40,
+        settled_closure_count=20,
+        independent_outcome_count=2,
+        recent_completion_rate=0.95,
+        recent_execution_error_rate=0.02,
+        distinct_settled_cycle_count=3,
+        demotion_cooldown_until="2026-04-09T00:00:00Z",
+    )
+    growth = BuddyGrowthProjection(
+        profile_id="profile-1",
+        capability_points=40,
+        settled_closure_count=20,
+        independent_outcome_count=2,
+        recent_completion_rate=0.95,
+        recent_execution_error_rate=0.02,
+        distinct_settled_cycle_count=3,
+    )
+
+    assert record.capability_points == 40
+    assert record.settled_closure_count == 20
+    assert record.independent_outcome_count == 2
+    assert record.recent_completion_rate == 0.95
+    assert record.recent_execution_error_rate == 0.02
+    assert record.distinct_settled_cycle_count == 3
+    assert record.demotion_cooldown_until == "2026-04-09T00:00:00Z"
+    assert growth.capability_points == 40
+    assert growth.settled_closure_count == 20

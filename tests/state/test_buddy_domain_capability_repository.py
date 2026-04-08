@@ -131,3 +131,35 @@ def test_repository_finds_archived_domains_by_key_for_restore(tmp_path) -> None:
     assert matches[0].control_thread_id == (
         "industry-chat:buddy:profile-1:domain-writing:execution-core"
     )
+
+
+def test_repository_round_trips_points_fields(tmp_path) -> None:
+    repository = _repository(tmp_path)
+    record = BuddyDomainCapabilityRecord(
+        domain_id="domain-writing",
+        profile_id="profile-1",
+        domain_key="writing",
+        domain_label="Writing",
+        status="active",
+        industry_instance_id="buddy:profile-1:domain-writing",
+        control_thread_id="industry-chat:buddy:profile-1:domain-writing:execution-core",
+        capability_points=40,
+        settled_closure_count=20,
+        independent_outcome_count=2,
+        recent_completion_rate=0.95,
+        recent_execution_error_rate=0.02,
+        distinct_settled_cycle_count=3,
+        demotion_cooldown_until="2026-04-09T00:00:00Z",
+    )
+
+    repository.upsert_domain_capability(record)
+    loaded = repository.get_active_domain_capability("profile-1")
+
+    assert loaded is not None
+    assert loaded.capability_points == 40
+    assert loaded.settled_closure_count == 20
+    assert loaded.independent_outcome_count == 2
+    assert loaded.recent_completion_rate == 0.95
+    assert loaded.recent_execution_error_rate == 0.02
+    assert loaded.distinct_settled_cycle_count == 3
+    assert loaded.demotion_cooldown_until == "2026-04-09T00:00:00Z"

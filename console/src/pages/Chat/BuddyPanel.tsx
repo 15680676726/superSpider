@@ -37,6 +37,7 @@ export function BuddyPanel({
     ? resolveBuddyEvolutionView({
         evolutionStage: surface.growth.evolution_stage,
         currentForm: surface.presentation.current_form,
+        capabilityPoints: surface.growth.capability_points,
         capabilityScore: surface.growth.capability_score,
         companionExperience: surface.growth.companion_experience,
         rarity: surface.presentation.rarity,
@@ -126,16 +127,40 @@ export function BuddyPanel({
             <Card size="small" title="成长">
               <Row gutter={12}>
                 <Col span={12}>
-                  <Statistic title="等级" value={surface.growth.growth_level} />
+                  <Statistic title="成长积分" value={snapshot.capabilityPoints} />
                 </Col>
                 <Col span={12}>
-                  <Statistic title="能力分" value={surface.growth.capability_score ?? 0} />
+                  <Statistic title="有效闭环" value={snapshot.settledClosureCount} />
                 </Col>
               </Row>
               <Paragraph style={{ marginTop: 12, marginBottom: 0 }}>
                 当前领域：{surface.growth.domain_label || "未确认"}
               </Paragraph>
-              <Progress percent={surface.growth.progress_to_next_stage} style={{ marginTop: 12 }} />
+              <Progress percent={snapshot.progressToNextStage} style={{ marginTop: 12 }} />
+              <Row gutter={12} style={{ marginTop: 12 }}>
+                <Col span={12}>
+                  <Statistic title="独立成果" value={snapshot.independentOutcomeCount} />
+                </Col>
+                <Col span={12}>
+                  <Statistic title="跨周期数" value={snapshot.distinctSettledCycleCount} />
+                </Col>
+              </Row>
+              <Row gutter={12} style={{ marginTop: 12 }}>
+                <Col span={12}>
+                  <Statistic
+                    title="最近完成率"
+                    value={Math.round(snapshot.recentCompletionRate * 100)}
+                    suffix="%"
+                  />
+                </Col>
+                <Col span={12}>
+                  <Statistic
+                    title="最近出错率"
+                    value={Math.round(snapshot.recentExecutionErrorRate * 100)}
+                    suffix="%"
+                  />
+                </Col>
+              </Row>
             </Card>
           </Col>
           <Col span={24}>
@@ -185,7 +210,8 @@ export function BuddyPanel({
             <Tag color={evolution?.accentTone ?? "purple"}>
               {`领域 ${surface.growth.domain_label || "未确认"}`}
             </Tag>
-            <Tag color="green">{`能力分 ${surface.growth.capability_score ?? 0}`}</Tag>
+            <Tag color="green">{`积分 ${snapshot.capabilityPoints}`}</Tag>
+            <Tag>{`闭环 ${snapshot.settledClosureCount}`}</Tag>
             
           </Col>
         </Row>

@@ -29,6 +29,7 @@ export function BuddyCompanion({
   const evolution = resolveBuddyEvolutionView({
     evolutionStage: surface.growth.evolution_stage,
     currentForm: surface.presentation.current_form,
+    capabilityPoints: surface.growth.capability_points,
     capabilityScore: surface.growth.capability_score,
     companionExperience: surface.growth.companion_experience,
     rarity: surface.presentation.rarity,
@@ -86,6 +87,7 @@ export function BuddyCompanion({
           <Tag color="gold" data-testid="buddy-companion-rarity">
             {avatar.rarityStars}
           </Tag>
+          <Tag color="geekblue">{`积分 ${snapshot.capabilityPoints}`}</Tag>
           <Tag color="blue">{`亲密度 ${surface.growth.intimacy}`}</Tag>
         </div>
       </div>

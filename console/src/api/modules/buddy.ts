@@ -88,6 +88,12 @@ export interface BuddyConfirmDirectionResponse {
     domain_key: string;
     domain_label: string;
     status: string;
+    capability_points?: number;
+    settled_closure_count?: number;
+    independent_outcome_count?: number;
+    recent_completion_rate?: number;
+    recent_execution_error_rate?: number;
+    distinct_settled_cycle_count?: number;
     strategy_score: number;
     execution_score: number;
     evidence_score: number;
@@ -110,6 +116,7 @@ export interface BuddyDirectionTransitionPreviewResponse {
     domain_key: string;
     domain_label: string;
     status: string;
+    capability_points?: number;
     capability_score: number;
     evolution_stage: string;
   } | null;
@@ -118,6 +125,7 @@ export interface BuddyDirectionTransitionPreviewResponse {
     domain_key: string;
     domain_label: string;
     status: string;
+    capability_points?: number;
     capability_score: number;
     evolution_stage: string;
   }>;
@@ -172,7 +180,13 @@ export interface BuddySurfaceResponse {
     affinity: number;
     growth_level: number;
     companion_experience: number;
+    capability_points?: number;
     capability_score?: number;
+    settled_closure_count?: number;
+    independent_outcome_count?: number;
+    recent_completion_rate?: number;
+    recent_execution_error_rate?: number;
+    distinct_settled_cycle_count?: number;
     strategy_score?: number;
     execution_score?: number;
     evidence_score?: number;

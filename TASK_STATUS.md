@@ -74,6 +74,39 @@
     - `npm --prefix console run build`
     - 结果：通过
 
+## 1.1.2 `2026-04-08` Buddy stage points/gates cutover
+
+- Buddy 当前成长阶段的正式规则已从 `capability_score -> stage` 切到 `capability_points + promotion gates -> stage`
+- `capability_score / strategy_score / execution_score / evidence_score / stability_score` 继续保留，但只作为兼容读面和附属指标，不再决定正式 stage
+- Buddy 当前领域成长积分的正式口径已固定为：
+  - `1` 次真实闭环 = `2` 积分
+  - 真实闭环必须同时满足：正式 `Assignment` 已结算完成、存在对应 completed `AgentReport`、且有非空 evidence
+- Buddy 正式晋级门槛已固定为：
+  - `bonded`：`capability_points >= 20`
+  - `capable`：`capability_points >= 40` 且 `settled_closure_count >= 1`
+  - `seasoned`：`capability_points >= 100` 且 `distinct_settled_cycle_count >= 3`
+  - `signature`：`capability_points >= 200`，且 `independent_outcome_count >= 10`、`recent_completion_rate >= 0.92`、`recent_execution_error_rate <= 0.03`
+- Buddy 正式降级规则已固定为：
+  - 每次 growth refresh 最多只允许降 `1` 级
+  - 不允许一次刷新跨多级下跌
+- Chat / BuddyPanel / BuddyOnboarding preview / Runtime Center buddy summary 现已统一投影积分制字段：
+  - `capability_points`
+  - `settled_closure_count`
+  - `independent_outcome_count`
+  - `recent_completion_rate`
+  - `recent_execution_error_rate`
+  - `distinct_settled_cycle_count`
+- 当前 fresh verification：
+  - backend：
+    - `PYTHONPATH=src python -m pytest tests/state/test_buddy_models.py tests/state/test_buddy_domain_capability_repository.py tests/state/test_state_store_migration.py tests/kernel/test_buddy_onboarding_service.py tests/kernel/test_buddy_projection_service.py tests/kernel/test_buddy_domain_capability.py tests/kernel/test_buddy_projection_capability.py tests/app/test_buddy_routes.py tests/app/test_buddy_cutover.py -q`
+    - 结果：`52 passed`
+  - console：
+    - `npm --prefix console test -- src/api/modules/buddy.test.ts src/pages/BuddyOnboarding/index.test.tsx src/pages/Chat/buddyEvolution.test.ts src/pages/Chat/buddyPresentation.test.ts src/pages/Chat/BuddyPanel.test.tsx src/pages/Chat/BuddyCompanion.test.tsx src/pages/RuntimeCenter/MainBrainCockpitPanel.test.tsx src/runtime/buddyFlow.test.ts`
+    - 结果：`36 passed`
+  - console build：
+    - `npm --prefix console run build`
+    - 结果：通过
+
 ## 1.2 `2026-04-05` donor-first 开源项目能力落位补充
 
 - GitHub open-source donor 不再只以 `SKILL.md` bundle 形式落地。
