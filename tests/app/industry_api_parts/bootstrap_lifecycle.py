@@ -572,6 +572,76 @@ def test_industry_bootstrap_executes_browser_runtime_install_plan(
     assert default_profile.profile_id == "browser-local-default"
 
 
+def test_industry_bootstrap_browser_runtime_install_skips_unrelated_installed_catalog_scans(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(
+        tmp_path,
+        draft_generator=BrowserIndustryDraftGenerator(),
+    )
+    client = TestClient(app)
+
+    preview = client.post(
+        "/industry/v1/preview",
+        json={
+            "industry": "Customer Operations",
+            "company_name": "Northwind Robotics",
+            "product": "browser onboarding workflows",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    draft = preview_payload["draft"]
+    target_role = next(
+        agent
+        for agent in draft["team"]["agents"]
+        if agent["agent_class"] == "business" and agent["role_id"] != "execution-core"
+    )
+
+    with (
+        patch.object(
+            app.state.industry_service,
+            "_list_installed_mcp_client_keys",
+            side_effect=AssertionError("browser-local install should not scan MCP client keys"),
+        ),
+        patch.object(
+            app.state.industry_service,
+            "_list_installed_mcp_client_configs",
+            side_effect=AssertionError("browser-local install should not scan MCP client configs"),
+        ),
+        patch.object(
+            app.state.industry_service,
+            "_list_installed_skill_specs",
+            side_effect=AssertionError("browser-local install should not scan skill specs"),
+        ),
+    ):
+        response = client.post(
+            "/industry/v1/bootstrap",
+            json={
+                "profile": preview_payload["profile"],
+                "draft": draft,
+                "install_plan": [
+                    {
+                        "install_kind": "builtin-runtime",
+                        "template_id": "browser-local",
+                        "client_key": "browser-local-default",
+                        "source_kind": "install-template",
+                        "capability_assignment_mode": "merge",
+                        "target_agent_ids": [target_role["agent_id"]],
+                    }
+                ],
+                "auto_activate": True,
+                "auto_dispatch": False,
+                "execute": False,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["install_results"][0]["template_id"] == "browser-local"
+    assert payload["install_results"][0]["status"] == "installed"
+
+
 def test_industry_auto_gap_closure_reuses_installed_capability_and_assigns_target_agent(
     tmp_path,
 ) -> None:

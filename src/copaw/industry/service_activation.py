@@ -1234,9 +1234,21 @@ class _IndustryActivationMixin:
             for item in plan.recommendation_pack.items
             if item.recommendation_id
         }
-        installed_client_keys = self._list_installed_mcp_client_keys()
-        installed_client_configs = self._list_installed_mcp_client_configs()
-        installed_skills = self._list_installed_skill_specs()
+        installed_client_keys = (
+            self._list_installed_mcp_client_keys()
+            if requires_mcp_install
+            else set()
+        )
+        installed_client_configs = (
+            self._list_installed_mcp_client_configs()
+            if requires_mcp_install
+            else {}
+        )
+        installed_skills = (
+            self._list_installed_skill_specs()
+            if requires_hub_install
+            else []
+        )
         results: list[IndustryBootstrapInstallResult] = []
         environment_ref = f"industry:{plan.draft.team.team_id or plan.profile.slug}"
 
