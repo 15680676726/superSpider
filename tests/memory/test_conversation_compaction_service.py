@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from copaw.memory import conversation_compaction_service as service_module
 from copaw.memory.conversation_compaction_service import ConversationCompactionService
 
 
@@ -144,3 +145,28 @@ async def test_conversation_compaction_service_close_clears_self_cancelled_watch
         if callable(uncancel):
             while current.cancelling():
                 uncancel()
+
+
+def test_conversation_compaction_service_init_does_not_eagerly_create_token_counter(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    original_reme_init = service_module.ReMeLight.__init__
+
+    def fake_reme_init(self, *args, **kwargs) -> None:
+        self.service_context = SimpleNamespace(
+            service_config=SimpleNamespace(file_watchers={}),
+        )
+
+    def fail_token_counter():
+        raise AssertionError("token counter should stay lazy during service init")
+
+    monkeypatch.setattr(service_module.ReMeLight, "__init__", fake_reme_init)
+    monkeypatch.setattr(service_module, "_get_token_counter", fail_token_counter)
+
+    try:
+        service = service_module.ConversationCompactionService(working_dir=str(tmp_path))
+    finally:
+        monkeypatch.setattr(service_module.ReMeLight, "__init__", original_reme_init)
+
+    assert getattr(service, "_token_counter", None) is None

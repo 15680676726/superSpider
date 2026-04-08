@@ -116,11 +116,19 @@ class ConversationCompactionService(ReMeLight):
         self.chat_model: ChatModelBase | None = None
         self.formatter: FormatterBase | None = None
         self._runtime_model_fingerprint: str = ""
-        self.token_counter = _get_token_counter()
+        self._token_counter: Any | None = None
         self._close_timeout_seconds = self._safe_float(
             "COPAW_COMPACTION_CLOSE_TIMEOUT_SECONDS",
             1.0,
         )
+
+    @property
+    def token_counter(self) -> Any:
+        token_counter = getattr(self, "_token_counter", None)
+        if token_counter is None:
+            self._token_counter = _get_token_counter()
+            token_counter = self._token_counter
+        return token_counter
 
     @staticmethod
     def _safe_int(key: str, default: int) -> int:
