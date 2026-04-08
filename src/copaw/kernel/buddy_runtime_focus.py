@@ -58,6 +58,7 @@ def build_buddy_current_focus_resolver(
     *,
     agent_profile_service: object,
     growth_target_repository: object,
+    domain_capability_repository: object | None = None,
     industry_instance_repository: object,
     assignment_service: object,
     backlog_service: object,
@@ -69,7 +70,33 @@ def build_buddy_current_focus_resolver(
         target = get_active_target(profile_id) if callable(get_active_target) else None
         why_now = str(getattr(target, "why_it_matters", "") or "").strip() if target is not None else ""
         get_instance = getattr(industry_instance_repository, "get_instance", None)
-        instance = get_instance(f"buddy:{profile_id}") if callable(get_instance) else None
+        instance = None
+        get_active_domain = getattr(domain_capability_repository, "get_active_domain_capability", None)
+        active_domain = get_active_domain(profile_id) if callable(get_active_domain) else None
+        active_instance_id = str(getattr(active_domain, "industry_instance_id", "") or "").strip()
+        if active_instance_id and callable(get_instance):
+            instance = get_instance(active_instance_id)
+        if instance is None and callable(get_instance):
+            instance = get_instance(f"buddy:{profile_id}")
+        if instance is None:
+            list_instances = getattr(industry_instance_repository, "list_instances", None)
+            if callable(list_instances):
+                try:
+                    instances = list_instances(owner_scope=profile_id, status="active", limit=20)
+                except TypeError:
+                    instances = list_instances(owner_scope=profile_id, limit=20)
+                preferred_prefix = f"buddy:{profile_id}:"
+                for candidate in instances or []:
+                    candidate_id = str(getattr(candidate, "instance_id", "") or "").strip()
+                    if candidate_id.startswith(preferred_prefix):
+                        instance = candidate
+                        break
+                if instance is None:
+                    for candidate in instances or []:
+                        candidate_id = str(getattr(candidate, "instance_id", "") or "").strip()
+                        if candidate_id:
+                            instance = candidate
+                            break
         if instance is not None:
             list_assignments = getattr(assignment_service, "list_assignments", None)
             if callable(list_assignments):

@@ -495,6 +495,55 @@ async def test_kernel_turn_executor_auto_mode_routes_explicit_industry_agent_exe
 
 
 @pytest.mark.asyncio
+async def test_kernel_turn_executor_auto_mode_routes_buddy_runtime_messages_to_orchestrate(
+    monkeypatch,
+):
+    query_execution_service = FakeQueryExecutionService()
+    main_brain_chat_service = FakeMainBrainChatService()
+    main_brain_orchestrator = FakeMainBrainOrchestrator()
+    kernel_dispatcher = FakeKernelDispatcher()
+    executor = KernelTurnExecutor(
+        session_backend=object(),
+        kernel_dispatcher=kernel_dispatcher,
+        query_execution_service=query_execution_service,
+        main_brain_chat_service=main_brain_chat_service,
+        main_brain_orchestrator=main_brain_orchestrator,
+    )
+    request = AgentRequest(
+        id="req-auto-buddy-execution",
+        session_id="industry-chat:buddy:profile-1:execution-core",
+        user_id="buddy-user",
+        channel="console",
+        input=[],
+    )
+    request.interaction_mode = "auto"
+    request.session_kind = "industry-agent-chat"
+    request.buddy_profile_id = "profile-1"
+    msgs = [
+        Msg(
+            name="user",
+            role="user",
+            content="我想开始干活了，先把今天最该做的第一步推进下去。",
+        ),
+    ]
+
+    monkeypatch.setattr(
+        "copaw.kernel.turn_executor.resolve_request_main_brain_intake_contract",
+        _async_intake_resolver(None),
+    )
+
+    streamed = [item async for item in executor.handle_query(msgs=msgs, request=request)]
+
+    assert len(streamed) == 1
+    assert streamed[0][0].get_text_content() == "orchestrator done"
+    assert streamed[0][1] is True
+    assert len(main_brain_orchestrator.calls) == 1
+    assert main_brain_chat_service.calls == []
+    assert request._copaw_resolved_interaction_mode == "orchestrate"
+    assert kernel_dispatcher.submitted
+
+
+@pytest.mark.asyncio
 async def test_kernel_turn_executor_auto_mode_keeps_action_wording_in_chat_without_intake_result(
     monkeypatch,
 ):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import logging
 import unicodedata
 
 from pydantic import BaseModel, Field
@@ -13,6 +14,11 @@ from .buddy_execution_carrier import (
     build_buddy_domain_control_thread_id,
     build_buddy_domain_instance_id,
     build_buddy_execution_carrier_handoff,
+)
+from .buddy_onboarding_reasoner import (
+    BuddyOnboardingGrowthPlan,
+    BuddyOnboardingReasonedTurn,
+    BuddyOnboardingReasoner,
 )
 from .buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from .buddy_domain_capability import (
@@ -42,6 +48,8 @@ from ..state.repositories_buddy import (
     SqliteGrowthTargetRepository,
     SqliteHumanProfileRepository,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class BuddyIdentitySubmitResult(BaseModel):
@@ -83,6 +91,7 @@ class BuddyDirectionConfirmationResult:
 
 
 _DEFAULT_DIRECTION = "建立稳定、自主、长期向上的人生主方向"
+_STOCKS_DIRECTION = "建立稳定、可验证的股票交易与投资成长路径"
 _CREATOR_DIRECTION = "建立独立创作与内容事业的长期成长路径"
 _DESIGN_DIRECTION = "建立高杠杆的设计与系统领导力成长路径"
 _OPERATIONS_DIRECTION = "建立从执行型走向策略型的长期职业跃迁路径"
@@ -179,21 +188,100 @@ def _build_buddy_question(
     profile: HumanProfile,
     question_count: int,
     tightened: bool = False,
+    transcript: list[str] | None = None,
 ) -> str:
+    source = " ".join(
+        _normalize_text(item)
+        for item in [
+            profile.goal_intention,
+            profile.profession,
+            profile.current_stage,
+            *(profile.interests or []),
+            *(transcript or []),
+        ]
+        if str(item or "").strip()
+    )
     if tightened:
         return (
             f"{profile.display_name}，如果现在只能先改变一件事，"
             "你最想摆脱的是什么，为什么必须是现在？"
         )
-    prompts = [
-        "先告诉我，你最想真正改变的人生部分是什么？",
-        "如果接下来一年只允许有一个明显进步，你最希望是哪一块？",
-        "什么样的长期方向，会让你觉得自己是在为真正想要的人生前进？",
-        "你最不想继续重复的旧状态是什么？",
-        "如果我现在只能陪你先抓住一个方向，你最不想放弃的东西是什么？",
-    ]
-    index = min(max(question_count - 1, 0), len(prompts) - 1)
-    return prompts[index]
+    if not _contains_any(
+        source,
+        (
+            "stock",
+            "stocks",
+            "trading",
+            "trade",
+            "invest",
+            "investing",
+            "creator",
+            "content",
+            "writer",
+            "writing",
+            "design",
+            "designer",
+            "system",
+            "systems",
+            "operator",
+            "operations",
+            "fitness",
+            "health",
+            "股票",
+            "炒股",
+            "证券",
+            "基金",
+            "投资",
+            "交易",
+            "内容",
+            "创作",
+            "写作",
+            "设计",
+            "系统",
+            "运营",
+            "健康",
+            "健身",
+        ),
+    ):
+        return "先别泛化，直接告诉我：你最想在哪个具体领域做出结果？"
+    if not _contains_any(
+        source,
+        (
+            "自由",
+            "income",
+            "independent income",
+            "financial freedom",
+            "稳定收入",
+            "赚钱",
+            "结果",
+            "proof",
+            "作品",
+            "回报",
+            "收益",
+            "财富自由",
+        ),
+    ):
+        return "如果这条路走对了，你最想先看到的现实结果是什么？"
+    if not _contains_any(
+        source,
+        (
+            "stuck",
+            "lost",
+            "risk",
+            "discipline",
+            "拖延",
+            "卡住",
+            "没收入",
+            "失业",
+            "风险",
+            "自律",
+            "执行不下去",
+        ),
+    ):
+        return "现在最卡你的现实问题是什么？说具体一点。"
+    if question_count <= 2:
+        return "如果接下来三个月只能先抓一条主线，你最愿意每天持续推进什么？"
+    return "如果我现在就帮你收成一个长期方向，它应该叫什么？"
 
 
 def _derive_candidate_directions(
@@ -218,6 +306,29 @@ def _derive_candidate_directions(
         return [_DEFAULT_DIRECTION]
 
     direction_rules: list[tuple[str, tuple[str, ...], int]] = [
+        (
+            _STOCKS_DIRECTION,
+            (
+                "stock",
+                "stocks",
+                "trading",
+                "trade",
+                "invest",
+                "investing",
+                "quant",
+                "portfolio",
+                "股票",
+                "炒股",
+                "证券",
+                "基金",
+                "投资",
+                "交易",
+                "交易系统",
+                "风险控制",
+                "仓位",
+            ),
+            4,
+        ),
         (
             _CREATOR_DIRECTION,
             (
@@ -326,7 +437,30 @@ def _derive_candidate_directions(
         if score > 0:
             scores[direction] = score
 
-    if _contains_any(source, ("独立收入", "自主收入", "收入", "变现", "赚钱")):
+    if _contains_any(
+        source,
+        (
+            "stock",
+            "stocks",
+            "trading",
+            "trade",
+            "invest",
+            "investing",
+            "股票",
+            "炒股",
+            "证券",
+            "基金",
+            "投资",
+            "交易",
+            "财富自由",
+            "financial freedom",
+        ),
+    ):
+        scores[_STOCKS_DIRECTION] = scores.get(_STOCKS_DIRECTION, 0) + 3
+    if (
+        _contains_any(source, ("独立收入", "自主收入", "收入", "变现", "赚钱"))
+        and _contains_any(source, ("content", "creator", "writing", "内容", "创作", "写作", "作品"))
+    ):
         scores[_CREATOR_DIRECTION] = scores.get(_CREATOR_DIRECTION, 0) + 3
     if _contains_any(source, ("作品", "输出", "长期影响力", "内容运营", "内容创作")):
         scores[_CREATOR_DIRECTION] = scores.get(_CREATOR_DIRECTION, 0) + 2
@@ -345,6 +479,8 @@ def _derive_candidate_directions(
 
 
 def _derive_final_goal(*, profile: HumanProfile, direction: str) -> str:
+    if _STOCKS_DIRECTION in direction or derive_buddy_domain_key(direction) == "stocks":
+        return f"帮助{profile.display_name}建立稳定、可验证、可持续的股票交易与投资成长路径"
     if _CREATOR_DIRECTION in direction:
         return f"帮助{profile.display_name}建立可持续的创作事业与独立成长轨道"
     if _DESIGN_DIRECTION in direction:
@@ -405,6 +541,7 @@ class BuddyOnboardingService:
         operating_cycle_service: OperatingCycleService | None = None,
         assignment_service: AssignmentService | None = None,
         domain_capability_growth_service: BuddyDomainCapabilityGrowthService | None = None,
+        onboarding_reasoner: BuddyOnboardingReasoner | None = None,
     ) -> None:
         self._profile_repository = profile_repository
         self._growth_target_repository = growth_target_repository
@@ -417,6 +554,7 @@ class BuddyOnboardingService:
         self._operating_cycle_service = operating_cycle_service
         self._assignment_service = assignment_service
         self._domain_capability_growth_service = domain_capability_growth_service
+        self._onboarding_reasoner = onboarding_reasoner
 
     def submit_identity(
         self,
@@ -452,13 +590,35 @@ class BuddyOnboardingService:
         existing_session = self._onboarding_session_repository.get_latest_session_for_profile(
             profile.profile_id,
         )
+        reasoned_turn = self._resolve_reasoned_turn(
+            profile=profile,
+            transcript=[profile.goal_intention],
+            question_count=1,
+            tightened=False,
+        )
         session = BuddyOnboardingSessionRecord(
             profile_id=profile.profile_id,
             question_count=1,
             tightened=False,
             status="clarifying",
-            next_question=_build_buddy_question(profile=profile, question_count=1),
+            next_question=(
+                reasoned_turn.next_question.strip()
+                if reasoned_turn is not None and reasoned_turn.next_question.strip()
+                else _build_buddy_question(
+                    profile=profile,
+                    question_count=1,
+                    transcript=[profile.goal_intention],
+                )
+            ),
             transcript=[profile.goal_intention],
+            candidate_directions=(
+                list(reasoned_turn.candidate_directions)
+                if reasoned_turn is not None
+                else []
+            ),
+            recommended_direction=(
+                reasoned_turn.recommended_direction if reasoned_turn is not None else ""
+            ),
         )
         if existing_session is not None:
             session = session.model_copy(
@@ -497,16 +657,39 @@ class BuddyOnboardingService:
             transcript=merged_transcript,
         )
         recommended = candidate_directions[0] if candidate_directions else ""
-        finished = question_count >= self.MAX_QUESTIONS
-        next_question = (
-            ""
-            if finished
-            else _build_buddy_question(
-                profile=profile,
-                question_count=question_count,
-                tightened=tightened,
+        reasoned_turn = self._resolve_reasoned_turn(
+            profile=profile,
+            transcript=merged_transcript,
+            question_count=question_count,
+            tightened=tightened,
+        )
+        if reasoned_turn is not None:
+            candidate_directions = list(reasoned_turn.candidate_directions) or candidate_directions
+            recommended = reasoned_turn.recommended_direction or recommended
+        finished = (
+            question_count >= self.MAX_QUESTIONS
+            or (
+                reasoned_turn.finished
+                if reasoned_turn is not None
+                else self._should_finish_clarification(
+                    question_count=question_count,
+                    recommended_direction=recommended,
+                    transcript=merged_transcript,
+                )
             )
         )
+        next_question = ""
+        if not finished:
+            next_question = (
+                reasoned_turn.next_question.strip()
+                if reasoned_turn is not None and reasoned_turn.next_question.strip()
+                else _build_buddy_question(
+                    profile=profile,
+                    question_count=question_count,
+                    tightened=tightened,
+                    transcript=merged_transcript,
+                )
+            )
         updated = self._onboarding_session_repository.upsert_session(
             session.model_copy(
                 update={
@@ -601,6 +784,11 @@ class BuddyOnboardingService:
             session_id=session_id,
             selected_direction=normalized,
         )
+        growth_plan = self._resolve_growth_plan(
+            profile=profile,
+            transcript=session.transcript,
+            selected_direction=normalized,
+        )
         resolved_capability_action = str(
             capability_action or preview.recommended_action or "",
         ).strip()
@@ -614,8 +802,16 @@ class BuddyOnboardingService:
             GrowthTarget(
                 profile_id=profile.profile_id,
                 primary_direction=normalized,
-                final_goal=_derive_final_goal(profile=profile, direction=normalized),
-                why_it_matters=_derive_why_it_matters(profile=profile),
+                final_goal=(
+                    growth_plan.final_goal
+                    if growth_plan is not None and growth_plan.final_goal.strip()
+                    else _derive_final_goal(profile=profile, direction=normalized)
+                ),
+                why_it_matters=(
+                    growth_plan.why_it_matters
+                    if growth_plan is not None and growth_plan.why_it_matters.strip()
+                    else _derive_why_it_matters(profile=profile)
+                ),
                 current_cycle_label="Cycle 1",
             ),
         )
@@ -653,6 +849,7 @@ class BuddyOnboardingService:
             growth_target=growth_target,
             domain_capability=domain_capability,
             capability_action=resolved_capability_action,
+            growth_plan=growth_plan,
         )
         if self._domain_capability_growth_service is not None:
             refreshed = self._domain_capability_growth_service.refresh_active_domain_capability(
@@ -766,6 +963,46 @@ class BuddyOnboardingService:
             raise ValueError(f"Human profile '{profile_id}' not found")
         return profile
 
+    def _resolve_reasoned_turn(
+        self,
+        *,
+        profile: HumanProfile,
+        transcript: list[str],
+        question_count: int,
+        tightened: bool,
+    ) -> BuddyOnboardingReasonedTurn | None:
+        if self._onboarding_reasoner is None:
+            return None
+        try:
+            return self._onboarding_reasoner.plan_turn(
+                profile=profile,
+                transcript=transcript,
+                question_count=question_count,
+                tightened=tightened,
+            )
+        except Exception:
+            logger.debug("Buddy onboarding reasoned turn failed; falling back.", exc_info=True)
+            return None
+
+    def _resolve_growth_plan(
+        self,
+        *,
+        profile: HumanProfile,
+        transcript: list[str],
+        selected_direction: str,
+    ) -> BuddyOnboardingGrowthPlan | None:
+        if self._onboarding_reasoner is None:
+            return None
+        try:
+            return self._onboarding_reasoner.build_growth_plan(
+                profile=profile,
+                transcript=transcript,
+                selected_direction=selected_direction,
+            )
+        except Exception:
+            logger.debug("Buddy onboarding growth plan failed; falling back.", exc_info=True)
+            return None
+
     def _validate_selected_direction(
         self,
         *,
@@ -775,9 +1012,57 @@ class BuddyOnboardingService:
         normalized = selected_direction.strip()
         if not normalized:
             raise ValueError("selected_direction is required")
-        if session.candidate_directions and normalized not in session.candidate_directions:
-            raise ValueError("selected_direction must match one generated candidate")
         return normalized
+
+    def _should_finish_clarification(
+        self,
+        *,
+        question_count: int,
+        recommended_direction: str,
+        transcript: list[str],
+    ) -> bool:
+        if question_count < 2:
+            return False
+        normalized_direction = str(recommended_direction or "").strip()
+        if not normalized_direction or normalized_direction == _DEFAULT_DIRECTION:
+            return False
+        source = " ".join(
+            _normalize_text(item)
+            for item in transcript
+            if str(item or "").strip()
+        )
+        if _contains_any(
+            source,
+            (
+                "stock",
+                "stocks",
+                "trading",
+                "trade",
+                "invest",
+                "investing",
+                "creator",
+                "content",
+                "writing",
+                "design",
+                "operator",
+                "operations",
+                "fitness",
+                "health",
+                "股票",
+                "炒股",
+                "投资",
+                "交易",
+                "内容",
+                "创作",
+                "写作",
+                "设计",
+                "运营",
+                "健身",
+                "健康",
+            ),
+        ):
+            return True
+        return question_count > self.TIGHTEN_AFTER
 
     def _activate_domain_capability(
         self,
@@ -878,6 +1163,7 @@ class BuddyOnboardingService:
         growth_target: GrowthTarget,
         domain_capability: BuddyDomainCapabilityRecord,
         capability_action: str,
+        growth_plan: BuddyOnboardingGrowthPlan | None = None,
     ) -> tuple[GrowthTarget, BuddyDomainCapabilityRecord, dict[str, object] | None]:
         instance_id, control_thread_id = self._resolve_domain_carrier_binding(
             profile=profile,
@@ -922,7 +1208,7 @@ class BuddyOnboardingService:
             },
             agent_ids=list(existing_instance.agent_ids) if existing_instance is not None else [],
             lifecycle_status="running",
-            autonomy_status="guided",
+            autonomy_status="coordinating",
             current_cycle_id=existing_instance.current_cycle_id if existing_instance is not None else None,
             next_cycle_due_at=existing_instance.next_cycle_due_at if existing_instance is not None else None,
             last_cycle_started_at=existing_instance.last_cycle_started_at if existing_instance is not None else None,
@@ -949,6 +1235,7 @@ class BuddyOnboardingService:
                 profile=profile,
                 growth_target=growth_target,
                 lanes=lanes,
+                growth_plan=growth_plan,
             )
         ]
         focus_lane_ids = [lane.id for lane in lanes[:2]] or [lane.id for lane in lanes]
@@ -1086,7 +1373,7 @@ class BuddyOnboardingService:
                         update={
                             "status": "active",
                             "lifecycle_status": "running",
-                            "autonomy_status": "guided",
+                            "autonomy_status": "coordinating",
                             "updated_at": now,
                         },
                     ),
@@ -1151,10 +1438,31 @@ class BuddyOnboardingService:
         profile: HumanProfile,
         growth_target: GrowthTarget,
         lanes: list[object],
+        growth_plan: BuddyOnboardingGrowthPlan | None = None,
     ) -> list[tuple[str | None, str, str, int, str]]:
         lane_ids = [getattr(lane, "id", None) for lane in lanes]
         primary_lane_id = lane_ids[0] if lane_ids else None
         proof_lane_id = lane_ids[1] if len(lane_ids) > 1 else primary_lane_id
+        if growth_plan is not None and growth_plan.backlog_items:
+            generated_specs: list[tuple[str | None, str, str, int, str]] = []
+            for index, item in enumerate(growth_plan.backlog_items, start=1):
+                lane_id = proof_lane_id if item.lane_hint == "proof-of-work" else primary_lane_id
+                title = item.title.strip()
+                summary = item.summary.strip()
+                if not title or not summary:
+                    continue
+                source_key = item.source_key.strip() or f"model-seed-{index}"
+                generated_specs.append(
+                    (
+                        lane_id,
+                        title,
+                        summary,
+                        max(1, min(3, int(item.priority))),
+                        f"profile:{profile.profile_id}:{source_key}",
+                    ),
+                )
+            if generated_specs:
+                return generated_specs
         return [
             (
                 primary_lane_id,

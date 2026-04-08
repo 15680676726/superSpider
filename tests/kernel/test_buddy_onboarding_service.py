@@ -7,6 +7,7 @@ from copaw.kernel.buddy_onboarding_service import (
     BuddyOnboardingService,
     _CREATOR_DIRECTION,
     _HEALTH_DIRECTION,
+    _STOCKS_DIRECTION,
 )
 from copaw.state import SQLiteStateStore
 from copaw.state.main_brain_service import (
@@ -163,6 +164,30 @@ def test_buddy_onboarding_derives_video_creator_direction_from_chinese_profile(t
     assert result.recommended_direction == _CREATOR_DIRECTION
 
 
+def test_buddy_onboarding_finishes_early_for_clear_stock_trading_goal(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    identity = service.submit_identity(
+        display_name="Kai",
+        profession="Analyst",
+        current_stage="restart",
+        interests=["stocks", "trading"],
+        strengths=["discipline"],
+        constraints=["money"],
+        goal_intention="I want to build a real stock trading path and achieve financial freedom.",
+    )
+
+    result = service.answer_clarification_turn(
+        session_id=identity.session_id,
+        answer="I want a durable trading system, better risk control, and independent income.",
+    )
+
+    assert result.finished is True
+    assert result.question_count == 2
+    assert result.next_question == ""
+    assert _STOCKS_DIRECTION in result.candidate_directions
+    assert result.recommended_direction == _STOCKS_DIRECTION
+
+
 def test_buddy_onboarding_requires_exactly_one_primary_direction(tmp_path) -> None:
     service = _build_service(tmp_path)
     identity = service.submit_identity(
@@ -190,6 +215,35 @@ def test_buddy_onboarding_requires_exactly_one_primary_direction(tmp_path) -> No
     assert result.relationship.encouragement_style == "old-friend"
     assert result.domain_capability.domain_key == "writing"
     assert result.domain_capability.status == "active"
+
+
+def test_buddy_confirm_primary_direction_accepts_free_text_direction_override(tmp_path) -> None:
+    service = _build_service(tmp_path)
+    identity = service.submit_identity(
+        display_name="Mina",
+        profession="Operator",
+        current_stage="restart",
+        interests=["investing"],
+        strengths=["consistency"],
+        constraints=["money"],
+        goal_intention="I want a real stock trading direction.",
+    )
+    service.answer_clarification_turn(
+        session_id=identity.session_id,
+        answer="I want to stop drifting and build a disciplined trading path.",
+        existing_question_count=9,
+    )
+
+    result = service.confirm_primary_direction(
+        session_id=identity.session_id,
+        selected_direction="Build a disciplined stock trading path with real risk control.",
+        capability_action="start-new",
+    )
+
+    assert result.growth_target.primary_direction == (
+        "Build a disciplined stock trading path with real risk control."
+    )
+    assert result.domain_capability.domain_key == "stocks"
 
 
 def test_buddy_naming_updates_relationship(tmp_path) -> None:
@@ -288,6 +342,7 @@ def test_confirm_primary_direction_generates_formal_growth_scaffold(tmp_path) ->
     instance = industry_repository.get_instance(result.domain_capability.industry_instance_id)
     assert instance is not None
     assert instance.current_cycle_id
+    assert instance.autonomy_status == "coordinating"
 
     lanes = lane_repository.list_lanes(industry_instance_id=instance.instance_id)
     assert any(lane.industry_instance_id == instance.instance_id for lane in lanes)

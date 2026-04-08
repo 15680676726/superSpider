@@ -528,6 +528,9 @@ async def _resolve_auto_chat_mode(
             return "orchestrate"
         return "chat"
     has_cognitive_pressure = _request_has_unresolved_cognitive_pressure(request=request)
+    has_buddy_runtime = bool(_first_non_empty(getattr(request, "buddy_profile_id", None)))
+    if has_buddy_runtime and not _is_plain_acknowledgement(text) and not _is_short_chat_inspection(text):
+        return "orchestrate"
     if not has_cognitive_pressure and _is_plain_acknowledgement(text):
         return "chat"
     if not has_cognitive_pressure and _is_short_chat_inspection(text):

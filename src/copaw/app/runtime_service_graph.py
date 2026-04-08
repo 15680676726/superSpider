@@ -30,6 +30,7 @@ from ..kernel import (
     KernelTurnExecutor,
     TaskDelegationService,
 )
+from ..kernel.buddy_onboarding_reasoner import ModelDrivenBuddyOnboardingReasoner
 from ..kernel.buddy_runtime_focus import build_buddy_current_focus_resolver
 from ..learning import LearningService, PatchExecutor
 from ..media import MediaService
@@ -666,6 +667,7 @@ def build_runtime_bootstrap(
     buddy_current_focus_resolver = build_buddy_current_focus_resolver(
         agent_profile_service=agent_profile_service,
         growth_target_repository=buddy_growth_target_repository,
+        domain_capability_repository=buddy_domain_capability_repository,
         industry_instance_repository=repositories.industry_instance_repository,
         assignment_service=assignment_service,
         backlog_service=backlog_service,
@@ -691,6 +693,9 @@ def build_runtime_bootstrap(
         operating_cycle_service=operating_cycle_service,
         assignment_service=assignment_service,
         domain_capability_growth_service=buddy_domain_capability_growth_service,
+        onboarding_reasoner=ModelDrivenBuddyOnboardingReasoner(
+            provider_runtime=runtime_provider,
+        ),
     )
     buddy_projection_service = BuddyProjectionService(
         profile_repository=buddy_profile_repository,

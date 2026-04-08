@@ -1,0 +1,296 @@
+# -*- coding: utf-8 -*-
+"""Model-driven reasoning for Buddy onboarding."""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import threading
+from typing import Any, Callable, Protocol
+
+from pydantic import BaseModel, Field
+
+from ..providers.runtime_provider_facade import (
+    ProviderRuntimeSurface,
+    build_compat_runtime_provider_facade,
+)
+from ..state import HumanProfile
+
+logger = logging.getLogger(__name__)
+
+_BUDDY_ONBOARDING_REASONER_PROMPT = """
+你负责 CoPaw Buddy onboarding。
+
+目标不是陪聊，而是基于用户真实回答，快速收敛出：
+1. 下一句最值得问的问题
+2. 真实主方向
+3. 一个可执行的首批任务集
+
+硬规则：
+- 不能因为用户提到“赚钱/收入/财富自由”就强行改写成内容创作。
+- 如果用户明确说的是股票、交易、投资、仓位、回撤、策略、复盘，就保留在交易/投资方向。
+- 不要重复已经问过的问题；只问一个最关键的新问题。
+- 信息已经够时就结束追问，不要机械问满轮数。
+- final_goal 要具体，不要空泛人生鸡汤。
+- backlog_items 要具体、能开工、能产证据，不要泛泛的“保持努力”“建立节奏”。
+- lane_hint 只能是 growth-focus 或 proof-of-work。
+- priority 只能是 1 到 3，3 最高。
+""".strip()
+
+
+class BuddyOnboardingBacklogSeed(BaseModel):
+    lane_hint: str = "growth-focus"
+    title: str = ""
+    summary: str = ""
+    priority: int = Field(default=1, ge=1, le=3)
+    source_key: str = ""
+
+
+class BuddyOnboardingReasonedTurn(BaseModel):
+    finished: bool = False
+    next_question: str = ""
+    candidate_directions: list[str] = Field(default_factory=list)
+    recommended_direction: str = ""
+
+
+class BuddyOnboardingGrowthPlan(BaseModel):
+    primary_direction: str = ""
+    final_goal: str = ""
+    why_it_matters: str = ""
+    backlog_items: list[BuddyOnboardingBacklogSeed] = Field(default_factory=list)
+
+
+class BuddyOnboardingReasoner(Protocol):
+    def plan_turn(
+        self,
+        *,
+        profile: HumanProfile,
+        transcript: list[str],
+        question_count: int,
+        tightened: bool,
+    ) -> BuddyOnboardingReasonedTurn | None: ...
+
+    def build_growth_plan(
+        self,
+        *,
+        profile: HumanProfile,
+        transcript: list[str],
+        selected_direction: str,
+    ) -> BuddyOnboardingGrowthPlan | None: ...
+
+
+class _ReasonerResponse(BaseModel):
+    finished: bool = False
+    next_question: str = ""
+    candidate_directions: list[str] = Field(default_factory=list)
+    recommended_direction: str = ""
+    final_goal: str = ""
+    why_it_matters: str = ""
+    backlog_items: list[BuddyOnboardingBacklogSeed] = Field(default_factory=list)
+
+
+def _response_to_text(response: object) -> str:
+    content = getattr(response, "content", None)
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text")
+            else:
+                text = getattr(block, "text", None)
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+        return "\n".join(parts).strip()
+    return ""
+
+
+def _response_to_payload(response: object) -> dict[str, Any]:
+    metadata = getattr(response, "metadata", None)
+    if isinstance(metadata, BaseModel):
+        return metadata.model_dump(mode="json")
+    if isinstance(metadata, dict):
+        return dict(metadata)
+    text = _response_to_text(response)
+    if not text:
+        raise ValueError("Buddy onboarding reasoner returned an empty response.")
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise ValueError("Buddy onboarding reasoner returned a non-object payload.")
+    return payload
+
+
+async def _materialize_response(response: object) -> object:
+    if not hasattr(response, "__aiter__"):
+        return response
+    last_item: object | None = None
+    async for item in response:  # type: ignore[misc]
+        last_item = item
+    return last_item if last_item is not None else response
+
+
+def _run_async_blocking(awaitable: object) -> object:
+    async def _coerce() -> object:
+        return await awaitable  # type: ignore[misc]
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_coerce())
+
+    result: dict[str, object] = {}
+    error: dict[str, BaseException] = {}
+
+    def _runner() -> None:
+        try:
+            result["value"] = asyncio.run(_coerce())
+        except BaseException as exc:  # pragma: no cover - passthrough
+            error["value"] = exc
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    thread.join()
+    if "value" in error:
+        raise error["value"]
+    return result.get("value")
+
+
+def _unique(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        lowered = text.casefold()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        result.append(text)
+    return result
+
+
+class ModelDrivenBuddyOnboardingReasoner:
+    """Use the active runtime model to drive onboarding questions and first tasks."""
+
+    def __init__(
+        self,
+        *,
+        model_factory: Callable[[], object] | None = None,
+        provider_runtime: ProviderRuntimeSurface | None = None,
+    ) -> None:
+        resolved_runtime = (
+            provider_runtime
+            if provider_runtime is not None and hasattr(provider_runtime, "get_active_chat_model")
+            else None
+        )
+        self._provider_runtime = resolved_runtime or build_compat_runtime_provider_facade()
+        self._model_factory = model_factory or self._provider_runtime.get_active_chat_model
+
+    def plan_turn(
+        self,
+        *,
+        profile: HumanProfile,
+        transcript: list[str],
+        question_count: int,
+        tightened: bool,
+    ) -> BuddyOnboardingReasonedTurn | None:
+        payload = self._complete(
+            profile=profile,
+            transcript=transcript,
+            question_count=question_count,
+            tightened=tightened,
+            selected_direction=None,
+        )
+        if payload is None:
+            return None
+        directions = _unique(payload.candidate_directions)
+        recommended = str(payload.recommended_direction or "").strip()
+        if recommended and recommended not in directions:
+            directions = [recommended, *directions]
+        return BuddyOnboardingReasonedTurn(
+            finished=bool(payload.finished),
+            next_question="" if payload.finished else str(payload.next_question or "").strip(),
+            candidate_directions=directions[:3],
+            recommended_direction=recommended,
+        )
+
+    def build_growth_plan(
+        self,
+        *,
+        profile: HumanProfile,
+        transcript: list[str],
+        selected_direction: str,
+    ) -> BuddyOnboardingGrowthPlan | None:
+        payload = self._complete(
+            profile=profile,
+            transcript=transcript,
+            question_count=max(2, len(transcript)),
+            tightened=False,
+            selected_direction=selected_direction,
+        )
+        if payload is None:
+            return None
+        backlog_items = [
+            item
+            for item in payload.backlog_items
+            if item.title.strip() and item.summary.strip()
+        ][:3]
+        return BuddyOnboardingGrowthPlan(
+            primary_direction=selected_direction.strip(),
+            final_goal=str(payload.final_goal or "").strip(),
+            why_it_matters=str(payload.why_it_matters or "").strip(),
+            backlog_items=backlog_items,
+        )
+
+    def _complete(
+        self,
+        *,
+        profile: HumanProfile,
+        transcript: list[str],
+        question_count: int,
+        tightened: bool,
+        selected_direction: str | None,
+    ) -> _ReasonerResponse | None:
+        try:
+            model = self._model_factory()
+        except Exception:
+            logger.debug("Buddy onboarding reasoner could not resolve an active chat model.", exc_info=True)
+            return None
+        request_payload = {
+            "profile": profile.model_dump(mode="json"),
+            "transcript": list(transcript),
+            "question_count": question_count,
+            "tightened": tightened,
+            "selected_direction": str(selected_direction or "").strip(),
+        }
+        messages = [
+            {"role": "system", "content": _BUDDY_ONBOARDING_REASONER_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    "请根据下面的 Buddy onboarding 上下文，返回结构化 JSON。\n\n"
+                    f"{json.dumps(request_payload, ensure_ascii=False, indent=2)}"
+                ),
+            },
+        ]
+        try:
+            response = _run_async_blocking(
+                model(messages=messages, structured_model=_ReasonerResponse),
+            )
+            response = _run_async_blocking(_materialize_response(response))
+            payload = _ReasonerResponse.model_validate(_response_to_payload(response))
+        except Exception:
+            logger.debug("Buddy onboarding reasoner failed; falling back to heuristics.", exc_info=True)
+            return None
+        return payload
+
+
+__all__ = [
+    "BuddyOnboardingBacklogSeed",
+    "BuddyOnboardingGrowthPlan",
+    "BuddyOnboardingReasonedTurn",
+    "BuddyOnboardingReasoner",
+    "ModelDrivenBuddyOnboardingReasoner",
+]

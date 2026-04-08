@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from ...kernel.buddy_onboarding_service import BuddyOnboardingService
@@ -57,6 +57,32 @@ def _get_buddy_projection_service(request: Request) -> BuddyProjectionService:
     raise HTTPException(503, detail="Buddy projection service is not available")
 
 
+async def _maybe_activate_buddy_execution(
+    request: Request,
+    *,
+    execution_carrier: dict[str, object] | None,
+    domain_capability: object,
+) -> dict[str, object] | None:
+    industry_service = getattr(request.app.state, "industry_service", None)
+    kickoff = getattr(industry_service, "kickoff_execution_from_chat", None)
+    if not callable(kickoff):
+        return None
+    carrier = dict(execution_carrier or {})
+    instance_id = str(
+        carrier.get("instance_id")
+        or getattr(domain_capability, "industry_instance_id", "")
+        or "",
+    ).strip()
+    if not instance_id:
+        return None
+    return await kickoff(
+        industry_instance_id=instance_id,
+        message_text="Buddy onboarding confirmed. Start the first concrete task now.",
+        trigger_source="buddy-onboarding",
+        trigger_reason_override="Buddy onboarding confirmed. Start the first concrete task now.",
+    )
+
+
 @router.post("/onboarding/identity")
 async def submit_buddy_identity(
     request: Request,
@@ -106,12 +132,18 @@ async def confirm_buddy_direction(
         result = service.confirm_primary_direction(**payload.model_dump())
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
+    activation = await _maybe_activate_buddy_execution(
+        request,
+        execution_carrier=result.execution_carrier,
+        domain_capability=result.domain_capability,
+    )
     return {
         "session": result.session.model_dump(mode="json"),
         "growth_target": result.growth_target.model_dump(mode="json"),
         "relationship": result.relationship.model_dump(mode="json"),
         "domain_capability": result.domain_capability.model_dump(mode="json"),
         "execution_carrier": result.execution_carrier,
+        "activation": activation,
     }
 
 
@@ -144,16 +176,18 @@ async def name_buddy(
     return relationship.model_dump(mode="json")
 
 
-@router.get("/surface")
+@router.get("/surface", response_model=None)
 async def get_buddy_surface(
     request: Request,
     profile_id: str | None = None,
-) -> dict[str, object]:
+):
     service = _get_buddy_projection_service(request)
     try:
-        surface = service.build_chat_surface(profile_id=profile_id)
+        surface = service.build_optional_chat_surface(profile_id=profile_id)
     except ValueError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
+    if surface is None:
+        return Response(status_code=204)
     return surface.model_dump(mode="json")
 
 
