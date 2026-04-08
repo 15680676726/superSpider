@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from copaw.app.routers.runtime_center import router as runtime_center_router
+from copaw.app.runtime_session import SafeJSONSession
 from copaw.app.runtime_threads import (
     RuntimeThreadHistory,
     RuntimeThreadSpec,
@@ -445,6 +446,81 @@ def test_runtime_conversation_detail_resolves_industry_thread() -> None:
     assert history_reader.calls[0].user_id == "copaw-agent-runner"
 
 
+def test_runtime_conversation_detail_exposes_buddy_profile_id_for_buddy_control_thread() -> None:
+    repository = _FakeThreadBindingRepository()
+    repository._bindings["industry-chat:buddy:profile-1:domain-stock:execution-core"] = (
+        AgentThreadBindingRecord(
+            thread_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+            agent_id="copaw-agent-runner",
+            session_id="industry-chat:buddy:profile-1:domain-stock:execution-core",
+            channel="console",
+            binding_kind="industry-role-alias",
+            industry_instance_id="buddy:profile-1:domain-stock",
+            industry_role_id="execution-core",
+            work_context_id="ctx-buddy-stock",
+            owner_scope="profile-1",
+        )
+    )
+    app, _ = _build_app(thread_binding_repository=repository)
+    client = TestClient(app)
+
+    response = client.get(
+        "/runtime-center/conversations/industry-chat:buddy:profile-1:domain-stock:execution-core",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"]["buddy_profile_id"] == "profile-1"
+    assert payload["meta"]["session_kind"] == "industry-control-thread"
+
+
+def test_runtime_conversation_detail_resolves_buddy_control_thread_without_binding() -> None:
+    class _BuddyIndustryService(_FakeIndustryService):
+        def get_instance_detail(self, instance_id: str):
+            if instance_id == "buddy:profile-1:domain-stock":
+                return {
+                    "instance_id": instance_id,
+                    "label": "Buddy Stock",
+                    "owner_scope": "profile-1",
+                    "team": {
+                        "agents": [
+                            {
+                                "role_id": "execution-core",
+                                "agent_id": "copaw-agent-runner",
+                                "name": "Execution Core",
+                                "role_name": "Execution Core",
+                            },
+                        ],
+                    },
+                    "goals": [],
+                    "lanes": [],
+                    "backlog": [],
+                    "assignments": [],
+                    "staffing": {},
+                }
+            return super().get_instance_detail(instance_id)
+
+    app, history_reader = _build_app(
+        thread_binding_repository=_FakeThreadBindingRepositoryWithoutWorkContext(),
+        industry_service=_BuddyIndustryService(),
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/runtime-center/conversations/industry-chat:buddy:profile-1:domain-stock:execution-core",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "industry-chat:buddy:profile-1:domain-stock:execution-core"
+    assert payload["meta"]["industry_instance_id"] == "buddy:profile-1:domain-stock"
+    assert payload["meta"]["buddy_profile_id"] == "profile-1"
+    assert payload["meta"]["session_kind"] == "industry-control-thread"
+    assert history_reader.calls[0].session_id == (
+        "industry-chat:buddy:profile-1:domain-stock:execution-core"
+    )
+
+
 def test_runtime_conversation_detail_exposes_current_human_assist_task_meta() -> None:
     app, _history_reader = _build_app(
         human_assist_task_service=_FakeHumanAssistTaskService(),
@@ -731,6 +807,66 @@ def test_runtime_conversation_detail_surfaces_persisted_main_brain_commit_state_
     assert reloaded_payload["id"] == control_thread_id
     assert reloaded_payload["meta"]["main_brain_commit"]["status"] == "committed"
     assert reloaded_payload["meta"]["main_brain_commit"]["record_id"] == "strategy-memory-1"
+
+
+def test_runtime_conversation_detail_accepts_legacy_snapshot_messages_missing_name(
+    tmp_path,
+) -> None:
+    control_thread_id = "industry-chat:industry-v1-acme:execution-core"
+    session_backend = SafeJSONSession(database_path=tmp_path / "runtime-sessions.sqlite3")
+    session_backend.save_session_snapshot(
+        session_id=control_thread_id,
+        user_id="copaw-agent-runner",
+        payload={
+            "agent": {
+                "memory": [
+                    {
+                        "id": "legacy-report-1",
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "legacy report"}],
+                    },
+                ],
+            },
+        },
+        source_ref="test:/legacy-report",
+    )
+    session_backend.save_session_snapshot(
+        session_id=control_thread_id,
+        user_id="founder",
+        payload={
+            "agent": {
+                "memory": {
+                    "content": [
+                        [
+                            {
+                                "id": "founder-msg-1",
+                                "name": "user",
+                                "role": "user",
+                                "content": [{"type": "text", "text": "continue"}],
+                            },
+                            [],
+                        ],
+                    ],
+                },
+            },
+        },
+        source_ref="test:/founder-message",
+    )
+    app, _history_reader = _build_app(
+        history_reader=SessionRuntimeThreadHistoryReader(session_backend=session_backend),
+        session_backend=session_backend,
+    )
+    client = TestClient(app)
+
+    response = client.get(f"/runtime-center/conversations/{control_thread_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == control_thread_id
+    assert [message["role"] for message in payload["messages"][:2]] == [
+        "assistant",
+        "user",
+    ]
 
 
 def test_runtime_conversation_detail_rejects_legacy_chat_shell_ids() -> None:

@@ -54,6 +54,7 @@ class SessionRuntimeThreadHistoryReader:
             memories = {"content": memories}
         if not isinstance(memories, dict) or not memories:
             return RuntimeThreadHistory(messages=[])
+        memories = _normalize_memory_state(memories)
 
         memory = InMemoryMemory()
         memory.load_state_dict(memories)
@@ -69,6 +70,15 @@ class SessionRuntimeThreadHistoryReader:
         backend = self._session_backend
         if backend is None:
             return None
+
+        merged_loader = getattr(backend, "load_merged_session_snapshot", None)
+        if callable(merged_loader):
+            payload = merged_loader(
+                session_id=session_id,
+                primary_user_id=user_id,
+                allow_not_exist=True,
+            )
+            return payload if isinstance(payload, dict) else None
 
         snapshot_loader = getattr(backend, "load_session_snapshot", None)
         if callable(snapshot_loader):
@@ -88,3 +98,39 @@ class SessionRuntimeThreadHistoryReader:
             return payload if isinstance(payload, dict) else None
 
         return None
+
+
+def _normalize_memory_state(memory_state: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(memory_state)
+    content = normalized.get("content")
+    if not isinstance(content, list):
+        return normalized
+    normalized["content"] = [_normalize_memory_item(item) for item in content]
+    return normalized
+
+
+def _normalize_memory_item(item: Any) -> Any:
+    if isinstance(item, dict):
+        normalized = dict(item)
+        normalized_name = str(normalized.get("name") or "").strip()
+        if not normalized_name:
+            normalized["name"] = _default_message_name(normalized)
+        return normalized
+    if isinstance(item, list):
+        normalized_items = list(item)
+        if normalized_items:
+            normalized_items[0] = _normalize_memory_item(normalized_items[0])
+        return normalized_items
+    return item
+
+
+def _default_message_name(item: dict[str, Any]) -> str:
+    metadata = item.get("metadata")
+    if isinstance(metadata, dict):
+        original_name = str(metadata.get("original_name") or "").strip()
+        if original_name:
+            return original_name
+    role = str(item.get("role") or "").strip().lower()
+    if role:
+        return role
+    return "assistant"
