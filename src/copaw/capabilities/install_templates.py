@@ -921,6 +921,52 @@ def get_install_template(
     environment_service: object | None = None,
     include_runtime: bool = True,
 ) -> CapabilityInstallTemplateSpec | None:
+    installed_clients = _list_installed_mcp_clients(capability_service)
+    for desktop_template in list_desktop_mcp_templates():
+        if desktop_template.template_id != template_id:
+            continue
+        return _build_desktop_install_template(
+            desktop_template,
+            installed_clients=installed_clients,
+            decision_request_repository=decision_request_repository,
+            include_runtime=include_runtime,
+        )
+    if template_id == "browser-local":
+        return _build_browser_install_template(
+            capability_service=capability_service,
+            decision_request_repository=decision_request_repository,
+            browser_runtime_service=browser_runtime_service,
+            include_runtime=include_runtime,
+        )
+    if template_id == "browser-companion":
+        return _build_browser_companion_install_template(
+            capability_service=capability_service,
+            decision_request_repository=decision_request_repository,
+            browser_runtime_service=browser_runtime_service,
+            environment_service=environment_service,
+            include_runtime=include_runtime,
+        )
+    if template_id == "document-office-bridge":
+        return _build_document_bridge_install_template(
+            capability_service=capability_service,
+            decision_request_repository=decision_request_repository,
+            environment_service=environment_service,
+            include_runtime=include_runtime,
+        )
+    if template_id == "host-watchers":
+        return _build_host_watchers_install_template(
+            capability_service=capability_service,
+            decision_request_repository=decision_request_repository,
+            environment_service=environment_service,
+            include_runtime=include_runtime,
+        )
+    if template_id == "windows-app-adapters":
+        return _build_windows_app_adapters_install_template(
+            capability_service=capability_service,
+            decision_request_repository=decision_request_repository,
+            environment_service=environment_service,
+            include_runtime=include_runtime,
+        )
     for template in list_install_templates(
         capability_service=capability_service,
         decision_request_repository=decision_request_repository,
