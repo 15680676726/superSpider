@@ -95,8 +95,54 @@ class _FakeWindowSpec:
     def __init__(self, root: _FakeWrapper) -> None:
         self._root = root
 
-    def wrapper_object(self) -> _FakeWrapper:
+    def by(self, **criteria):
+        return _FakeControlQuery(self._root, criteria)
+
+    def find(self) -> _FakeWrapper:
         return self._root
+
+    def wrapper_object(self) -> _FakeWrapper:
+        raise AssertionError("wrapper_object should not be used")
+
+
+class _FakeControlQuery:
+    def __init__(self, root: _FakeWrapper, criteria: dict[str, object]) -> None:
+        self._root = root
+        self._criteria = criteria
+
+    def find(self) -> _FakeWrapper:
+        matches: list[_FakeWrapper] = []
+        queue = list(self._root.children())
+        while queue:
+            current = queue.pop(0)
+            if self._matches(current):
+                matches.append(current)
+            queue.extend(current.children())
+        if not matches:
+            raise RuntimeError("no elements found")
+        if len(matches) > 1:
+            raise RuntimeError("ambiguous match")
+        return matches[0]
+
+    def _matches(self, wrapper: _FakeWrapper) -> bool:
+        info = wrapper.element_info
+        for key, value in self._criteria.items():
+            if key == "handle" and info.handle != value:
+                return False
+            if key == "auto_id" and info.automation_id != value:
+                return False
+            if key == "name" and info.name != value:
+                return False
+            if key == "name_re":
+                import re
+
+                if not re.match(str(value), info.name or ""):
+                    return False
+            if key == "control_type" and info.control_type != value:
+                return False
+            if key == "class_name" and info.class_name != value:
+                return False
+        return True
 
 
 class _FakeDesktop:

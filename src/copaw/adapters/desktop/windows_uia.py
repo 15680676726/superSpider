@@ -364,7 +364,7 @@ class WindowsUIAAdapter:
             if descendants:
                 return [(wrapper, 1) for wrapper in descendants]
         try:
-            wrapper = spec.wrapper_object()
+            wrapper = spec.find()
         except Exception:
             return []
         return self._iter_controls(wrapper, include_descendants=include_descendants)
@@ -400,7 +400,7 @@ class WindowsUIAAdapter:
             )
         try:
             spec = self._desktop_factory(backend=backend).window(handle=int(window_handle))
-            return spec.child_window(**criteria).wrapper_object()
+            return spec.by(**criteria).find()
         except Exception as exc:
             message = str(exc).lower()
             code = "control_not_found"
