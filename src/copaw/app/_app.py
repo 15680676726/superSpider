@@ -260,23 +260,38 @@ if CORS_ORIGINS:
 _CONSOLE_STATIC_ENV = "COPAW_CONSOLE_STATIC_DIR"
 
 
+def _candidate_console_static_dirs() -> list[Path]:
+    candidates: list[Path] = []
+    seen: set[str] = set()
+
+    def _add(path: Path) -> None:
+        normalized = str(path.resolve())
+        if normalized in seen:
+            return
+        seen.add(normalized)
+        candidates.append(path)
+
+    pkg_dir = Path(__file__).resolve().parent.parent
+    _add(pkg_dir / "console")
+
+    app_file = Path(__file__).resolve()
+    for parent in app_file.parents:
+        _add(parent / "console" / "dist")
+        _add(parent / "console_dist")
+
+    cwd = Path(os.getcwd()).resolve()
+    _add(cwd / "console" / "dist")
+    _add(cwd / "console_dist")
+    return candidates
+
+
 def _resolve_console_static_dir() -> str:
     if os.environ.get(_CONSOLE_STATIC_ENV):
         return os.environ[_CONSOLE_STATIC_ENV]
-    # Shipped dist lives in copaw package as static data (not a Python pkg).
-    pkg_dir = Path(__file__).resolve().parent.parent
-    candidate = pkg_dir / "console"
-    if candidate.is_dir() and (candidate / "index.html").exists():
-        return str(candidate)
-    # the following code can be removed after next release,
-    # because the console will be output to copaw's
-    # `src/copaw/console/` directory directly by vite.
-    cwd = Path(os.getcwd())
-    for subdir in ("console/dist", "console_dist"):
-        candidate = cwd / subdir
+    for candidate in _candidate_console_static_dirs():
         if candidate.is_dir() and (candidate / "index.html").exists():
             return str(candidate)
-    return str(cwd / "console" / "dist")
+    return str(Path(os.getcwd()).resolve() / "console" / "dist")
 
 
 _CONSOLE_STATIC_DIR = _resolve_console_static_dir()
