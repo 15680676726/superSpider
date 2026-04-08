@@ -170,3 +170,65 @@ def test_conversation_compaction_service_init_does_not_eagerly_create_token_coun
         monkeypatch.setattr(service_module.ReMeLight, "__init__", original_reme_init)
 
     assert getattr(service, "_token_counter", None) is None
+
+
+def test_conversation_compaction_service_init_clears_embedding_runtime_config(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    original_reme_init = service_module.ReMeLight.__init__
+
+    def fake_reme_init(self, *args, **kwargs) -> None:
+        self.service_context = SimpleNamespace(
+            service_config=SimpleNamespace(
+                file_watchers={},
+                embedding_models={"default": SimpleNamespace(name="cfg-embedding")},
+            ),
+            embedding_models={"default": SimpleNamespace(name="runtime-embedding")},
+        )
+
+    monkeypatch.setattr(service_module.ReMeLight, "__init__", fake_reme_init)
+    monkeypatch.setattr(service_module, "_get_token_counter", lambda: object())
+
+    try:
+        service = service_module.ConversationCompactionService(working_dir=str(tmp_path))
+    finally:
+        monkeypatch.setattr(service_module.ReMeLight, "__init__", original_reme_init)
+
+    assert service.service_context.service_config.embedding_models == {}
+    assert service.service_context.embedding_models == {"default": None}
+
+
+@pytest.mark.asyncio
+async def test_conversation_compaction_service_memory_search_uses_lexical_file_scan(
+    tmp_path,
+) -> None:
+    memory_root = tmp_path / "memory"
+    memory_root.mkdir()
+    (tmp_path / "MEMORY.md").write_text(
+        "# Runtime Notes\nDesign direction uses calm editorial layout.\n",
+        encoding="utf-8",
+    )
+    (memory_root / "handoff.md").write_text(
+        "OpenSpace integration uses direct API capability, no page clicking.\n",
+        encoding="utf-8",
+    )
+
+    service = object.__new__(ConversationCompactionService)
+    service.working_path = tmp_path
+    service.memory_path = memory_root
+
+    response = await service.memory_search(
+        query="OpenSpace API capability",
+        max_results=3,
+        min_score=0.2,
+    )
+
+    assert response.content
+    rendered = "\n".join(
+        str(block.get("text", ""))
+        for block in response.content
+        if isinstance(block, dict)
+    )
+    assert "handoff.md" in rendered
+    assert "OpenSpace integration uses direct API capability" in rendered

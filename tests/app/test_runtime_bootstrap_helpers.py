@@ -1047,10 +1047,6 @@ def test_warm_runtime_memory_services_extracts_startup_side_effects(monkeypatch)
     )
     memory_recall_service = SimpleNamespace(
         list_backends=lambda: [SimpleNamespace(backend_id="hybrid-local", is_default=True)],
-        prepare_sidecar_backends=lambda prewarm_backend_ids: calls.setdefault(
-            "prewarm_backends",
-            list(prewarm_backend_ids),
-        ),
     )
     memory_reflection_service = SimpleNamespace(
         reflect=lambda **kwargs: calls.setdefault("reflect_calls", []).append(kwargs),
@@ -1059,12 +1055,10 @@ def test_warm_runtime_memory_services_extracts_startup_side_effects(monkeypatch)
     _warm_runtime_memory_services(
         repositories=repositories,
         derived_memory_index_service=derived_memory_index_service,
-        memory_recall_service=memory_recall_service,
         memory_reflection_service=memory_reflection_service,
     )
 
     assert calls["rebuild_all"] is True
-    assert calls["prewarm_backends"] == []
     assert calls["reflect_calls"] == [
         {
             "scope_type": "global",
@@ -1095,6 +1089,38 @@ def test_warm_runtime_memory_services_does_not_request_sidecar_prewarm(
     )
     memory_recall_service = SimpleNamespace(
         list_backends=lambda: [SimpleNamespace(backend_id="hybrid-local", is_default=True)],
+    )
+    memory_reflection_service = SimpleNamespace(
+        reflect=lambda **kwargs: calls.setdefault("reflect_calls", []).append(kwargs),
+    )
+
+    _warm_runtime_memory_services(
+        repositories=repositories,
+        derived_memory_index_service=derived_memory_index_service,
+        memory_reflection_service=memory_reflection_service,
+    )
+
+    assert calls["rebuild_all"] is True
+    assert calls["reflect_calls"] == [
+        {
+            "scope_type": "global",
+            "scope_id": "runtime",
+            "trigger_kind": "startup",
+            "create_learning_proposals": False,
+        },
+    ]
+
+
+def test_warm_runtime_memory_services_skips_legacy_sidecar_prewarm_call() -> None:
+    calls: dict[str, object] = {}
+    repositories = SimpleNamespace(
+        industry_instance_repository=SimpleNamespace(list_instances=lambda limit=None: []),
+    )
+    derived_memory_index_service = SimpleNamespace(
+        rebuild_all=lambda: calls.setdefault("rebuild_all", True),
+    )
+    memory_recall_service = SimpleNamespace(
+        list_backends=lambda: [SimpleNamespace(backend_id="truth-first", is_default=True)],
         prepare_sidecar_backends=lambda prewarm_backend_ids: calls.setdefault(
             "prewarm_backends",
             list(prewarm_backend_ids),
@@ -1107,12 +1133,11 @@ def test_warm_runtime_memory_services_does_not_request_sidecar_prewarm(
     _warm_runtime_memory_services(
         repositories=repositories,
         derived_memory_index_service=derived_memory_index_service,
-        memory_recall_service=memory_recall_service,
         memory_reflection_service=memory_reflection_service,
     )
 
     assert calls["rebuild_all"] is True
-    assert calls["prewarm_backends"] == []
+    assert "prewarm_backends" not in calls
     assert calls["reflect_calls"] == [
         {
             "scope_type": "global",

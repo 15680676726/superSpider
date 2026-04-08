@@ -427,16 +427,9 @@ def _warm_runtime_memory_services(
     *,
     repositories: RuntimeRepositories,
     derived_memory_index_service: DerivedMemoryIndexService,
-    memory_recall_service: MemoryRecallService,
     memory_reflection_service: MemoryReflectionService,
 ) -> None:
     derived_memory_index_service.rebuild_all()
-    try:
-        memory_recall_service.prepare_sidecar_backends(
-            prewarm_backend_ids=[],
-        )
-    except Exception:
-        pass
     try:
         memory_reflection_service.reflect(
             scope_type="global",
@@ -725,7 +718,6 @@ def build_runtime_bootstrap(
     _warm_runtime_memory_services(
         repositories=repositories,
         derived_memory_index_service=derived_memory_index_service,
-        memory_recall_service=memory_recall_service,
         memory_reflection_service=memory_reflection_service,
     )
     turn_executor = KernelTurnExecutor(

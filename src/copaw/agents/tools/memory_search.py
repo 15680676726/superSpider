@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Memory search tool for semantic search in memory files."""
+"""Memory search tool for lexical search in memory files."""
 from agentscope.tool import ToolResponse
 from agentscope.message import TextBlock
 
@@ -20,7 +20,7 @@ def create_memory_search_tool(memory_runtime):
         min_score: float = 0.1,
     ) -> ToolResponse:
         """
-        Search MEMORY.md and memory/*.md files semantically.
+        Search MEMORY.md and memory/*.md files lexically.
 
         Use this tool before answering questions about prior work, decisions,
         dates, people, preferences, or todos. Returns top relevant snippets
@@ -28,7 +28,7 @@ def create_memory_search_tool(memory_runtime):
 
         Args:
             query (`str`):
-                The semantic search query to find relevant memory snippets.
+                The query used to find relevant memory snippets.
             max_results (`int`, optional):
                 Maximum number of search results to return. Defaults to 5.
             min_score (`float`, optional):

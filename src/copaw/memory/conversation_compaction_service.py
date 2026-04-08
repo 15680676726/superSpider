@@ -6,12 +6,13 @@ import asyncio
 import logging
 import os
 import platform
+from pathlib import Path
 from typing import Any
 
 from agentscope.formatter import FormatterBase
-from agentscope.message import Msg
+from agentscope.message import Msg, TextBlock
 from agentscope.model import ChatModelBase
-from agentscope.tool import Toolkit
+from agentscope.tool import Toolkit, ToolResponse
 
 from copaw.agents.model_factory import (
     build_runtime_model_fingerprint,
@@ -21,6 +22,7 @@ from copaw.agents.tools import edit_file, read_file, write_file
 from copaw.agents.utils import _get_token_counter
 from copaw.config import load_config
 from copaw.constant import MEMORY_COMPACT_KEEP_RECENT
+from .derived_index_service import tokenize
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +101,7 @@ class ConversationCompactionService(ReMeLight):
                 "fts_enabled": fts_enabled,
             },
         )
+        self._disable_embedding_runtime()
         if not file_watchers_enabled:
             try:
                 self.service_config.file_watchers = {}
@@ -161,6 +164,28 @@ class ConversationCompactionService(ReMeLight):
                 default,
             )
             return default
+
+    def _disable_embedding_runtime(self) -> None:
+        service_context = getattr(self, "service_context", None)
+        if service_context is None:
+            return
+        service_config = getattr(service_context, "service_config", None)
+        if service_config is not None and hasattr(service_config, "embedding_models"):
+            try:
+                service_config.embedding_models = {}
+            except Exception:
+                logger.debug(
+                    "Failed to clear compaction embedding model config",
+                    exc_info=True,
+                )
+        if hasattr(service_context, "embedding_models"):
+            try:
+                service_context.embedding_models = {"default": None}
+            except Exception:
+                logger.debug(
+                    "Failed to clear compaction embedding model runtime bucket",
+                    exc_info=True,
+                )
 
     @staticmethod
     def _normalize_visibility_dict(
@@ -460,6 +485,135 @@ class ConversationCompactionService(ReMeLight):
         if not messages:
             return False
         return getattr(messages[0], "role", None) == "system"
+
+    @staticmethod
+    def _normalize_memory_search_int(value: object, default: int) -> int:
+        try:
+            return min(max(int(value), 1), 100)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _normalize_memory_search_score(value: object, default: float) -> float:
+        try:
+            return float(min(max(float(value), 0.001), 0.999))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _memory_search_line_score(
+        line: str,
+        query_tokens: set[str],
+    ) -> float:
+        if not query_tokens:
+            return 0.0
+        line_tokens = set(tokenize(line))
+        if not line_tokens:
+            return 0.0
+        return float(len(query_tokens.intersection(line_tokens))) / float(len(query_tokens))
+
+    @staticmethod
+    def _truncate_memory_search_snippet(text: str, max_length: int = 220) -> str:
+        normalized = " ".join(str(text or "").split())
+        if len(normalized) <= max_length:
+            return normalized
+        return normalized[: max_length - 3].rstrip() + "..."
+
+    def _iter_memory_search_paths(self) -> list[Path]:
+        paths: list[Path] = []
+        seen: set[Path] = set()
+        for candidate in (
+            self.working_path / "MEMORY.md",
+            self.working_path / "memory.md",
+        ):
+            if candidate.is_file():
+                resolved = candidate.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    paths.append(candidate)
+        memory_root = getattr(self, "memory_path", None)
+        if isinstance(memory_root, Path) and memory_root.exists():
+            for candidate in sorted(memory_root.rglob("*.md")):
+                resolved = candidate.resolve()
+                if resolved in seen or not candidate.is_file():
+                    continue
+                seen.add(resolved)
+                paths.append(candidate)
+        return paths
+
+    async def memory_search(
+        self,
+        query: str,
+        max_results: int = 5,
+        min_score: float = 0.1,
+    ) -> ToolResponse:
+        query_text = str(query or "").strip()
+        if not query_text:
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text="Error: No query provided.",
+                    ),
+                ],
+            )
+
+        normalized_max_results = self._normalize_memory_search_int(max_results, 5)
+        normalized_min_score = self._normalize_memory_search_score(min_score, 0.1)
+        query_tokens = set(tokenize(query_text))
+        if not query_tokens:
+            query_tokens = {query_text.lower()}
+
+        matches: list[tuple[float, Path, int, str]] = []
+        for path in self._iter_memory_search_paths():
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                logger.debug("Conversation compaction memory_search failed to read %s", path, exc_info=True)
+                continue
+            best_match: tuple[float, int, str] | None = None
+            for line_no, line in enumerate(lines, start=1):
+                score = self._memory_search_line_score(line, query_tokens)
+                if score <= 0.0:
+                    continue
+                candidate = (score, line_no, line)
+                if best_match is None or candidate[0] > best_match[0]:
+                    best_match = candidate
+            if best_match is None or best_match[0] < normalized_min_score:
+                continue
+            matches.append((best_match[0], path, best_match[1], best_match[2]))
+
+        if not matches:
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text="No memory matches found.",
+                    ),
+                ],
+            )
+
+        base_path = self.working_path if isinstance(self.working_path, Path) else Path(self.working_path)
+        rendered: list[str] = []
+        for score, path, line_no, line in sorted(matches, key=lambda item: item[0], reverse=True)[
+            :normalized_max_results
+        ]:
+            try:
+                display_path = path.relative_to(base_path)
+            except ValueError:
+                display_path = path
+            rendered.append(
+                f"[{display_path}:{line_no}] score={score:.2f}\n"
+                f"{self._truncate_memory_search_snippet(line)}"
+            )
+        return ToolResponse(
+            content=[
+                TextBlock(
+                    type="text",
+                    text="\n\n".join(rendered),
+                ),
+            ],
+        )
 
     def prepare_model_formatter(self) -> None:
         try:
