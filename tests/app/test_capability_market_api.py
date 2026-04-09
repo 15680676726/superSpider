@@ -1390,6 +1390,112 @@ def test_search_curated_skill_catalog_aggregates_skillhub_featured_sources() -> 
     clear_curated_skill_catalog_cache()
 
 
+def test_search_curated_skill_catalog_does_not_validate_bundles_during_browse() -> None:
+    clear_curated_skill_catalog_cache()
+
+    with (
+        patch(
+            "copaw.capabilities.remote_skill_catalog.search_skillhub_skills",
+            return_value=[
+                SimpleNamespace(
+                    slug="browser-use",
+                    name="Browser Use",
+                    description="Automate browser login and form actions.",
+                    version="1.0.0",
+                    source_url="https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/skills/browser-use.zip",
+                    source_label="SkillHub 商店",
+                    score=9.3,
+                ),
+            ],
+        ),
+        patch(
+            "copaw.capabilities.remote_skill_catalog.skillhub_bundle_is_installable",
+            side_effect=AssertionError("browse should not deep-validate bundle installability"),
+        ),
+    ):
+        payload = search_curated_skill_catalog("", limit=8)
+
+    assert payload.items
+    assert payload.items[0].candidate_id == "browser-use"
+    clear_curated_skill_catalog_cache()
+
+
+def test_search_curated_skill_catalog_loads_featured_sources_in_parallel() -> None:
+    clear_curated_skill_catalog_cache()
+    active_calls = 0
+    saw_parallel = False
+    lock = threading.Lock()
+
+    sources = [
+        CuratedSkillCatalogSource(
+            source_id="source-a",
+            label="A",
+            query="automation",
+            max_items=5,
+        ),
+        CuratedSkillCatalogSource(
+            source_id="source-b",
+            label="B",
+            query="browser automation",
+            max_items=5,
+        ),
+        CuratedSkillCatalogSource(
+            source_id="source-c",
+            label="C",
+            query="industry research",
+            max_items=5,
+        ),
+    ]
+
+    def _fake_load(source: CuratedSkillCatalogSource, *, skillhub_search_url: str | None = None):
+        nonlocal active_calls, saw_parallel
+        _ = skillhub_search_url
+        with lock:
+            active_calls += 1
+            if active_calls > 1:
+                saw_parallel = True
+        time.sleep(0.05)
+        with lock:
+            active_calls -= 1
+        return [
+            CuratedSkillCatalogEntry(
+                candidate_id=source.source_id,
+                source_id=source.source_id,
+                source_label=source.label,
+                source_kind="skillhub-curated",
+                source_repo_url="https://lightmake.site",
+                discovery_kind="skillhub-preset",
+                manifest_status="skillhub-curated",
+                title=source.label,
+                description=f"{source.label} result",
+                bundle_url=f"https://skillhub.example.com/{source.source_id}.zip",
+                version="1.0.0",
+                install_name=source.source_id,
+                capability_tags=["skill", "skillhub-curated"],
+                review_required=False,
+                review_summary="",
+                review_notes=[],
+                routes={},
+            )
+        ], []
+
+    with (
+        patch(
+            "copaw.capabilities.remote_skill_catalog.list_curated_skill_sources",
+            return_value=sources,
+        ),
+        patch(
+            "copaw.capabilities.remote_skill_catalog._load_source_entries",
+            side_effect=_fake_load,
+        ),
+    ):
+        payload = search_curated_skill_catalog("", limit=8)
+
+    assert payload.items
+    assert saw_parallel is True
+    clear_curated_skill_catalog_cache()
+
+
 def test_capability_market_curated_install_requires_review_ack(tmp_path) -> None:
     client = TestClient(build_runtime_app(tmp_path))
 

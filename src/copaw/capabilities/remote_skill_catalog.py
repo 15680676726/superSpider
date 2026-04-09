@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from urllib.parse import quote, unquote
@@ -265,11 +266,18 @@ def search_curated_skill_catalog(
     sources = list_curated_skill_sources()
     aggregated: list[CuratedSkillCatalogEntry] = []
     seen_keys: set[str] = set()
-    for source in sources:
-        source_items, source_warnings = _load_source_entries(
-            source,
-            skillhub_search_url=skillhub_search_url,
+    max_workers = max(1, len(sources))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        source_payloads = list(
+            executor.map(
+                lambda source: _load_source_entries(
+                    source,
+                    skillhub_search_url=skillhub_search_url,
+                ),
+                sources,
+            )
         )
+    for source_items, source_warnings in source_payloads:
         warnings.extend(source_warnings)
         for item in source_items:
             key = _entry_key(item)
@@ -346,21 +354,8 @@ def _load_source_entries(
         )
         return [], warnings
 
-    installable_results: list[SkillHubSearchResult] = []
-    suppressed_count = 0
-    for item in results:
-        bundle_url = str(item.source_url or "").strip()
-        if not bundle_url or not skillhub_bundle_is_installable(bundle_url):
-            suppressed_count += 1
-            continue
-        installable_results.append(item)
-
-    entries = _entries_from_skillhub_results(source, installable_results)
+    entries = _entries_from_skillhub_results(source, results)
     warnings: list[str] = []
-    if suppressed_count > 0:
-        warnings.append(
-            f"{source.label} 已抑制 {suppressed_count} 个不可安装的 SkillHub bundle 结果。",
-        )
     _CATALOG_CACHE[cache_key] = (
         now + _CACHE_TTL,
         list(entries),
