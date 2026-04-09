@@ -191,7 +191,8 @@ function trimRuntimeRequestBody(
   return trimmed;
 }
 
-function resolveRuntimeChatUrl(_baseUrl: string | undefined): string {
+function resolveRuntimeChatUrl(baseUrl: string | undefined): string {
+  void baseUrl;
   return getApiUrl("/runtime-center/chat/run");
 }
 

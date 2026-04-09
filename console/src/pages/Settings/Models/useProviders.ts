@@ -35,7 +35,8 @@ export function useProviders() {
   }, [load]);
 
   const fetchAll = useCallback(
-    async (_showLoading = true) => {
+    async (showLoading = true) => {
+      void showLoading;
       await load();
     },
     [load],

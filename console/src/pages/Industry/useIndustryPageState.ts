@@ -4,6 +4,7 @@ import type { FormInstance } from "antd";
 import type { NavigateFunction } from "react-router-dom";
 
 import api from "../../api";
+import type { AnalysisMode } from "../../api/modules/media";
 import {
   resolveCanonicalBuddyProfileId,
 } from "../../runtime/buddyProfileBinding";
@@ -186,10 +187,13 @@ export function useIndustryPageState({
   const draftTeamLabel = Form.useWatch(["team", "label"], draftForm);
   const draftTeamSummary = Form.useWatch(["team", "summary"], draftForm);
   const draftGenerationSummary = Form.useWatch("generation_summary", draftForm);
-  const draftAgents =
-    (Form.useWatch(["team", "agents"], draftForm) as IndustryRoleBlueprint[] | undefined) ||
-    preview?.draft.team.agents ||
-    [];
+  const watchedDraftAgents = Form.useWatch(["team", "agents"], draftForm) as
+    | IndustryRoleBlueprint[]
+    | undefined;
+  const draftAgents = useMemo(
+    () => watchedDraftAgents ?? preview?.draft.team.agents ?? [],
+    [preview?.draft.team.agents, watchedDraftAgents],
+  );
   const draftGoals =
     (Form.useWatch("goals", draftForm) as IndustryDraftGoal[] | undefined) ||
     preview?.draft.goals ||
@@ -390,7 +394,7 @@ export function useIndustryPageState({
     }
   }, [appendBriefMediaItem, briefMediaLink]);
 
-  const handleBriefUploadChange = useCallback(async (event: any) => {
+  const handleBriefUploadChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from((event?.target?.files || []) as File[]);
     if (!files.length) {
       return;
@@ -427,7 +431,7 @@ export function useIndustryPageState({
     }
   }, [appendBriefMediaItem]);
 
-  const handleBriefMediaModeChange = useCallback((itemId: string, analysisMode: string) => {
+  const handleBriefMediaModeChange = useCallback((itemId: string, analysisMode: AnalysisMode) => {
     setBriefMediaItems((current) =>
       current.map((item) =>
         item.id === itemId
@@ -435,7 +439,7 @@ export function useIndustryPageState({
               ...item,
               source: {
                 ...item.source,
-                analysis_mode: analysisMode as any,
+                analysis_mode: analysisMode,
               },
             }
           : item,

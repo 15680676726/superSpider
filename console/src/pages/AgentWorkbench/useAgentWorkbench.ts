@@ -779,7 +779,7 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
     } finally {
       setCapabilityCatalogLoading(false);
     }
-  }, [industryInstanceId]);
+  }, []);
 
   useEffect(() => {
     void fetchDashboard();
@@ -833,8 +833,7 @@ export function useAgentWorkbench(options: AgentWorkbenchOptions = {}) {
   }, [
     fetchAgentDetail,
     refreshIndustryDetail,
-    selectedAgent?.agent_id,
-    selectedAgent?.industry_instance_id,
+    selectedAgent,
   ]);
 
   const refreshActorSurface = useCallback(

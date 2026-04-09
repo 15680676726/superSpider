@@ -5,14 +5,15 @@ export type PreloadableRouteConfig = {
   preload?: (() => Promise<unknown>) | undefined;
 };
 
-type PreloadableComponent<T extends ComponentType<any>> = LazyExoticComponent<T> & {
+type PreloadableComponent<TProps extends object> =
+  LazyExoticComponent<ComponentType<TProps>> & {
   preload: () => Promise<unknown>;
 };
 
-export function lazyWithPreload<T extends ComponentType<any>>(
-  importer: () => Promise<{ default: T }>,
-): PreloadableComponent<T> {
-  const Component = lazy(importer) as PreloadableComponent<T>;
+export function lazyWithPreload<TProps extends object>(
+  importer: () => Promise<{ default: ComponentType<TProps> }>,
+): PreloadableComponent<TProps> {
+  const Component = lazy(importer) as PreloadableComponent<TProps>;
   Component.preload = importer;
   return Component;
 }

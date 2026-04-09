@@ -1,5 +1,14 @@
 import React from "react";
-import { Form, Input, ColorPicker, Flex, Divider, InputNumber } from "antd";
+import {
+  Form,
+  Input,
+  ColorPicker,
+  Flex,
+  Divider,
+  InputNumber,
+  type FormListFieldData,
+  type FormListOperation,
+} from "antd";
 import { createStyles } from "antd-style";
 import { Button, IconButton, Switch } from "@/ui";
 import { SparkDeleteLine, SparkPlusLine } from "@agentscope-ai/icons";
@@ -56,6 +65,18 @@ interface OptionsEditorProps {
   onChange?: (value: Record<string, unknown>) => void;
 }
 
+function normalizeColorValue(value: unknown): string {
+  if (
+    value
+    && typeof value === "object"
+    && "toHexString" in value
+    && typeof value.toHexString === "function"
+  ) {
+    return value.toHexString();
+  }
+  return typeof value === "string" ? value : "";
+}
+
 const OptionsEditor: React.FC<OptionsEditorProps> = ({ value, onChange }) => {
   const { styles } = useStyles();
   const [form] = Form.useForm();
@@ -88,7 +109,7 @@ const OptionsEditor: React.FC<OptionsEditorProps> = ({ value, onChange }) => {
         <FormItem
           name={["theme", "colorPrimary"]}
           label={TEXT.colorPrimary}
-          normalize={(value) => value.toHexString()}
+          normalize={normalizeColorValue}
         >
           <ColorPicker />
         </FormItem>
@@ -96,7 +117,7 @@ const OptionsEditor: React.FC<OptionsEditorProps> = ({ value, onChange }) => {
         <FormItem
           name={["theme", "colorBgBase"]}
           label={TEXT.colorBgBase}
-          normalize={(value) => value.toHexString()}
+          normalize={normalizeColorValue}
         >
           <ColorPicker />
         </FormItem>
@@ -104,7 +125,7 @@ const OptionsEditor: React.FC<OptionsEditorProps> = ({ value, onChange }) => {
         <FormItem
           name={["theme", "colorTextBase"]}
           label={TEXT.colorTextBase}
-          normalize={(value) => value.toHexString()}
+          normalize={normalizeColorValue}
         >
           <ColorPicker />
         </FormItem>
@@ -153,11 +174,11 @@ const OptionsEditor: React.FC<OptionsEditorProps> = ({ value, onChange }) => {
 
         <FormItem name={["welcome", "prompts"]} isList label={TEXT.prompts}>
           {(
-            fields: { key: string; name: string }[],
+            fields: FormListFieldData[],
             {
               add,
               remove,
-            }: { add: (item: any) => void; remove: (name: string) => void },
+            }: Pick<FormListOperation, "add" | "remove">,
           ) => (
             <div>
               {fields.map((field) => (

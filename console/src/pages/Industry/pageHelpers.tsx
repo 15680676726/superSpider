@@ -329,8 +329,9 @@ function recommendationPlanItemKey(recommendationId: string): string {
 function stripInstallPlanDraftItem(
   item: InstallPlanDraftItem,
 ): IndustryBootstrapInstallItem {
-  const { plan_item_key, ...payload } = item;
-  return payload;
+  return Object.fromEntries(
+    Object.entries(item).filter(([key]) => key !== "plan_item_key"),
+  ) as IndustryBootstrapInstallItem;
 }
 
 function createBlankInstallPlanItem(defaultTargetAgentId?: string): InstallPlanDraftItem {

@@ -174,6 +174,7 @@ export default function AgentWorkbenchPage() {
     }
     setSelectedAgent(nextAgent);
   }, [
+    agents.length,
     executionSeatAgents,
     requestedExecutionSeat,
     selectedAgent?.agent_id,
@@ -389,11 +390,6 @@ export default function AgentWorkbenchPage() {
                       ) || "由超级伙伴主脑统一分派任务。"}
                     </Text>
                   </div>
-                  {false ? (
-                    <div style={{ marginTop: 8 }}>
-                      <Tag color="green">当前聚焦</Tag>
-                    </div>
-                  ) : null}
                 </Card>
               ))}
             </div>

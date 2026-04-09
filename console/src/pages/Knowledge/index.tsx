@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Button,
@@ -345,7 +345,7 @@ export default function KnowledgePage() {
     agents[0] ||
     null;
 
-  async function loadPage() {
+  const loadPage = useCallback(async () => {
     setLoading(true);
     try {
       setError(null);
@@ -383,7 +383,7 @@ export default function KnowledgePage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [query]);
 
   async function loadDetail(agentId: string) {
     setDetailLoading(true);
@@ -401,7 +401,7 @@ export default function KnowledgePage() {
     }
   }
 
-  async function loadMemoryWorkspace(options?: { includeRecall?: boolean }) {
+  const loadMemoryWorkspace = useCallback(async (options?: { includeRecall?: boolean }) => {
     const { scopeId, search } = buildMemoryScopeSearch(
       memoryScopeType,
       memoryScopeId,
@@ -488,12 +488,12 @@ export default function KnowledgePage() {
     } finally {
       setMemoryLoading(false);
     }
-  }
+  }, [memoryBackend, memoryRole, memoryScopeId, memoryScopeType, recallQuery]);
 
   useEffect(() => {
     void loadPage();
     void loadMemoryWorkspace();
-  }, []);
+  }, [loadMemoryWorkspace, loadPage]);
 
   useEffect(() => {
     if (selectedAgent?.agent_id) {

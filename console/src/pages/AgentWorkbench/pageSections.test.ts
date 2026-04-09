@@ -5,6 +5,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { buildTaskGroups } from "./sections/taskPanels";
+import type { WorkTaskDetail } from "./useAgentWorkbench";
 import * as pageSections from "./pageSections";
 
 const { ProfileCard, TAB_KEYS } = pageSections;
@@ -62,7 +63,7 @@ describe("pageSections decomposition", () => {
         task: { id: "task-orphan", parent_task_id: "missing-parent" },
         runtime: null,
       },
-    ] as any);
+    ] as WorkTaskDetail[]);
 
     expect(grouped.groups).toHaveLength(1);
     expect(grouped.groups[0].parent.task.id).toBe("task-parent");

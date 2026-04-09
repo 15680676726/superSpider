@@ -51,7 +51,7 @@ describe("useCapabilityMarketState", () => {
 
     const { result } = renderHook(() => {
       const [templateForm] = Form.useForm<Record<string, unknown>>();
-      const [mcpForm] = Form.useForm<Record<string, any>>();
+      const [mcpForm] = Form.useForm<Record<string, unknown>>();
       const [searchParams, setSearchParams] = useState(new URLSearchParams());
       return useCapabilityMarketState({
         templateForm,
@@ -95,7 +95,7 @@ describe("useCapabilityMarketState", () => {
 
     const { result } = renderHook(() => {
       const [templateForm] = Form.useForm<Record<string, unknown>>();
-      const [mcpForm] = Form.useForm<Record<string, any>>();
+      const [mcpForm] = Form.useForm<Record<string, unknown>>();
       const [searchParams, setSearchParams] = useState(new URLSearchParams());
       return useCapabilityMarketState({
         templateForm,
@@ -127,7 +127,7 @@ describe("useCapabilityMarketState", () => {
 
     const { result } = renderHook(() => {
       const [templateForm] = Form.useForm<Record<string, unknown>>();
-      const [mcpForm] = Form.useForm<Record<string, any>>();
+      const [mcpForm] = Form.useForm<Record<string, unknown>>();
       const [searchParams, setSearchParams] = useState(
         new URLSearchParams("tab=curated"),
       );
@@ -158,7 +158,7 @@ describe("useCapabilityMarketState", () => {
 
     const { result } = renderHook(() => {
       const [templateForm] = Form.useForm<Record<string, unknown>>();
-      const [mcpForm] = Form.useForm<Record<string, any>>();
+      const [mcpForm] = Form.useForm<Record<string, unknown>>();
       const [searchParams, setSearchParams] = useState(new URLSearchParams());
       return useCapabilityMarketState({
         templateForm,

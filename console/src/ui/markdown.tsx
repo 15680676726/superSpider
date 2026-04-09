@@ -31,10 +31,10 @@ export function XMarkdown({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          a({ node: _node, ...anchorProps }) {
+          a(anchorProps) {
             return <a {...anchorProps} rel="noreferrer" target="_blank" />;
           },
-          code({ node: _node, className: codeClassName, children: codeChildren, ...codeProps }) {
+          code({ className: codeClassName, children: codeChildren, ...codeProps }) {
             return (
               <code
                 {...codeProps}
@@ -50,7 +50,7 @@ export function XMarkdown({
               </code>
             );
           },
-          pre({ node: _node, children: preChildren, ...preProps }) {
+          pre({ children: preChildren, ...preProps }) {
             return (
               <pre
                 {...(preProps as HTMLAttributes<HTMLPreElement>)}
@@ -68,7 +68,7 @@ export function XMarkdown({
               </pre>
             );
           },
-          table({ node: _node, ...tableProps }) {
+          table(tableProps) {
             return (
               <div style={{ overflowX: "auto" }}>
                 <table {...tableProps} />

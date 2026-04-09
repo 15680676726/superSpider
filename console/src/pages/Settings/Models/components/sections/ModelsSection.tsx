@@ -55,7 +55,7 @@ export function ModelsSection({
       setSelectedModel(currentSlot.model || undefined);
     }
     setDirty(false);
-  }, [currentSlot?.model, currentSlot?.provider_id]);
+  }, [currentSlot]);
 
   const chosenProvider = providers.find((provider) => provider.id === selectedProviderId);
   const modelOptions = [

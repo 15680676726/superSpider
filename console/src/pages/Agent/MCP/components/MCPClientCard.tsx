@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Card, Button, Modal, Tooltip, Tag } from "@/ui";
 import { DeleteOutlined } from "@ant-design/icons";
 import { Server } from "lucide-react";
+import type { MCPClientUpdateRequest } from "../../../../api/types";
 import { normalizeDisplayChinese } from "../../../../text";
 import { runtimeRiskColor, runtimeRiskLabel } from "../../../../runtime/tagSemantics";
 import type { MCPClientCapabilityView } from "../useMCP";
@@ -10,8 +11,8 @@ import styles from "../index.module.less";
 interface MCPClientCardProps {
   client: MCPClientCapabilityView;
   onToggle: (client: MCPClientCapabilityView, e: React.MouseEvent) => void;
-  onDelete: (client: MCPClientCapabilityView, e: React.MouseEvent) => void;
-  onUpdate: (key: string, updates: any) => Promise<boolean>;
+  onDelete: (client: MCPClientCapabilityView, e?: React.MouseEvent) => void;
+  onUpdate: (key: string, updates: MCPClientUpdateRequest) => Promise<boolean>;
   isHovered: boolean;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
@@ -175,7 +176,7 @@ export function MCPClientCard({
         open={deleteModalOpen}
         onOk={() => {
           setDeleteModalOpen(false);
-          onDelete(client, null as any);
+          onDelete(client);
         }}
         onCancel={() => setDeleteModalOpen(false)}
         okText={"确认"}

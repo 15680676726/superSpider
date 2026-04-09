@@ -8,7 +8,7 @@ import {
   Select,
 } from "@/ui";
 import { ApiOutlined } from "@ant-design/icons";
-import type { ProviderConfigRequest } from "../../../../../api/types";
+import type { ActiveModelsInfo, ProviderConfigRequest } from "../../../../../api/types";
 import api from "../../../../../api";
 import styles from "../../index.module.less";
 
@@ -23,7 +23,7 @@ interface ProviderConfigModalProps {
     freeze_url: boolean;
     chat_model: string;
   };
-  activeModels: any;
+  activeModels: ActiveModelsInfo | null;
   open: boolean;
   onClose: () => void;
   onSaved: () => void;

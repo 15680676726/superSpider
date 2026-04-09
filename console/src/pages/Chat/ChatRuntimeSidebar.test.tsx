@@ -6,6 +6,9 @@ import { describe, expect, it, vi } from "vitest";
 import { ChatRuntimeSidebar } from "./ChatRuntimeSidebar";
 import styles from "./index.module.less";
 
+type ChatRuntimeSidebarProps = Parameters<typeof ChatRuntimeSidebar>[0];
+type RuntimeLifecycleState = NonNullable<ChatRuntimeSidebarProps["runtimeLifecycleState"]>;
+
 describe("ChatRuntimeSidebar", () => {
   it("keeps chat chrome minimal while surfacing thread kind, focus, writeback, and shell mode", () => {
     render(
@@ -129,7 +132,7 @@ describe("ChatRuntimeSidebar", () => {
   });
 
   it("renders lifecycle failure state instead of collapsing back to ready", () => {
-    const baseProps = {
+    const baseProps: ChatRuntimeSidebarProps = {
       approvalButtonLabel: "\u5ba1\u6279",
       bindingLabel: "Acme / main-brain",
       onOpenGovernanceApprovals: vi.fn(),
@@ -141,19 +144,32 @@ describe("ChatRuntimeSidebar", () => {
       runtimeWaitSeconds: 0,
       runtimeWaitState: null,
     };
+    const acceptedState: RuntimeLifecycleState = {
+      phase: "accepted",
+      title: "\u5df2\u63a5\u6536",
+      description: "accepted boundary persisted",
+      tone: "busy",
+      updatedAt: 100,
+    };
+    const replyDoneState: RuntimeLifecycleState = {
+      phase: "reply_done",
+      title: "\u56de\u590d\u5b8c\u6210",
+      description: "reply complete",
+      tone: "busy",
+      updatedAt: 101,
+    };
+    const commitFailedState: RuntimeLifecycleState = {
+      phase: "commit_failed",
+      title: "\u63d0\u4ea4\u5931\u8d25",
+      description: "db commit blew up",
+      tone: "error",
+      updatedAt: 102,
+    };
 
     const { rerender } = render(
       <ChatRuntimeSidebar
-        {...({
-          ...baseProps,
-          runtimeLifecycleState: {
-            phase: "accepted",
-            title: "\u5df2\u63a5\u6536",
-            description: "accepted boundary persisted",
-            tone: "busy",
-            updatedAt: 100,
-          },
-        } as any)}
+        {...baseProps}
+        runtimeLifecycleState={acceptedState}
       />,
     );
 
@@ -162,16 +178,8 @@ describe("ChatRuntimeSidebar", () => {
 
     rerender(
       <ChatRuntimeSidebar
-        {...({
-          ...baseProps,
-          runtimeLifecycleState: {
-            phase: "reply_done",
-            title: "\u56de\u590d\u5b8c\u6210",
-            description: "reply complete",
-            tone: "busy",
-            updatedAt: 101,
-          },
-        } as any)}
+        {...baseProps}
+        runtimeLifecycleState={replyDoneState}
       />,
     );
 
@@ -180,16 +188,8 @@ describe("ChatRuntimeSidebar", () => {
 
     rerender(
       <ChatRuntimeSidebar
-        {...({
-          ...baseProps,
-          runtimeLifecycleState: {
-            phase: "commit_failed",
-            title: "\u63d0\u4ea4\u5931\u8d25",
-            description: "db commit blew up",
-            tone: "error",
-            updatedAt: 102,
-          },
-        } as any)}
+        {...baseProps}
+        runtimeLifecycleState={commitFailedState}
       />,
     );
 

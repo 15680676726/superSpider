@@ -1624,20 +1624,17 @@ export default function MainBrainCockpitPanel({
                       {
                         key: "unconsumed_reports",
                         label: "未消费汇报",
-                        children:
-                          String(unconsumedReportRecords.length) ?? RUNTIME_CENTER_TEXT.emptyValue,
+                        children: String(unconsumedReportRecords.length),
                       },
                       {
                         key: "needs_followup_reports",
                         label: "待跟进汇报",
-                        children:
-                          String(needsFollowupReportRecords.length) ?? RUNTIME_CENTER_TEXT.emptyValue,
+                        children: String(needsFollowupReportRecords.length),
                       },
                       {
                         key: "followup_backlog",
                         label: "跟进待办",
-                        children:
-                          String(followupBacklogRecords.length) ?? RUNTIME_CENTER_TEXT.emptyValue,
+                        children: String(followupBacklogRecords.length),
                       },
                     ]}
                   />

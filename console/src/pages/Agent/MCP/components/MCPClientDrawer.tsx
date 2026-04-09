@@ -1,6 +1,21 @@
 import { useState } from "react";
 import { Drawer, Form, Input, Switch, Button } from "@/ui";
+import type { FormInstance } from "antd";
 import type { MCPClientInfo } from "../../../../api/types";
+
+type MCPClientDrawerFormValues = {
+  key?: string;
+  name: string;
+  description?: string;
+  command: string;
+  enabled?: boolean;
+  transport?: "stdio" | "streamable_http" | "sse";
+  url?: string;
+  headers?: Record<string, string>;
+  args?: string;
+  env?: string;
+  cwd?: string;
+};
 
 interface MCPClientDrawerProps {
   open: boolean;
@@ -20,7 +35,7 @@ interface MCPClientDrawerProps {
       cwd?: string;
     },
   ) => Promise<boolean>;
-  form: any;
+  form: FormInstance<MCPClientDrawerFormValues>;
 }
 
 export function MCPClientDrawer({
@@ -46,7 +61,10 @@ export function MCPClientDrawer({
         env: values.env ? JSON.parse(values.env) : {},
       };
 
-      const key = isEditing ? client.key : values.key;
+      const key = isEditing ? client.key : values.key?.trim();
+      if (!key) {
+        return;
+      }
       const success = await onSubmit(key, clientData);
 
       if (success) {

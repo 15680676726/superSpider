@@ -3,7 +3,13 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { IndustryInstanceDetail } from "../../api/modules/industry";
+import type {
+  IndustryInstanceDetail,
+  IndustryRuntimeAgentReport,
+  IndustryRuntimeAssignment,
+  IndustryRuntimeBacklogItem,
+} from "../../api/modules/industry";
+import type { MediaAnalysisSummary } from "../../api/modules/media";
 import { renderRuntimeDetailDrawer } from "./runtimeDetailDrawer";
 
 Object.defineProperty(window, "matchMedia", {
@@ -193,7 +199,7 @@ describe("runtimeDetailDrawer", () => {
                 evidence_ids: [],
                 metadata: {},
                 route: "/api/runtime-center/industry/industry-1?assignment_id=assignment-1",
-              } as any,
+              } as IndustryRuntimeAssignment,
             ],
             backlog: [
               {
@@ -204,9 +210,10 @@ describe("runtimeDetailDrawer", () => {
                 source_kind: "chat-writeback",
                 priority: 1,
                 evidence_ids: [],
+                metadata: {},
                 selected: true,
                 route: "/api/runtime-center/industry/industry-1?backlog_item_id=backlog-1",
-              } as any,
+              } as IndustryRuntimeBacklogItem,
             ],
             agent_reports: [
               {
@@ -222,7 +229,7 @@ describe("runtimeDetailDrawer", () => {
                 decision_ids: [],
                 metadata: {},
                 route: "/api/runtime-center/industry/industry-1?report_id=report-1",
-              } as any,
+              } as IndustryRuntimeAgentReport,
             ],
             media_analyses: [
               {
@@ -249,7 +256,7 @@ describe("runtimeDetailDrawer", () => {
                 strategy_writeback_status: "written",
                 backlog_writeback_status: "written",
                 metadata: {},
-              } as any,
+              } as MediaAnalysisSummary,
             ],
             focus_selection: {
               selection_kind: "assignment",

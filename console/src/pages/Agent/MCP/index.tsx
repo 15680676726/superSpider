@@ -1,9 +1,12 @@
 import { useState } from "react";
 import { Button, Empty, Modal } from "@/ui";
+import type { MCPClientCreateRequest } from "../../../api/types";
 import { MCPClientCard } from "./components";
 import { useMCP, type MCPClientCapabilityView } from "./useMCP";
 
 type MCPTransport = "stdio" | "streamable_http" | "sse";
+type JsonRecord = Record<string, unknown>;
+type MCPClientInput = MCPClientCreateRequest["client"];
 
 const DEFAULT_CLIENT_JSON = `{
   "mcpServers": {
@@ -34,27 +37,66 @@ function normalizeTransport(raw?: unknown): MCPTransport | undefined {
   }
 }
 
-function normalizeClientData(key: string, rawData: any) {
-  const transport =
-    normalizeTransport(rawData.transport ?? rawData.type) ??
-    (rawData.url || rawData.baseUrl || !rawData.command
-      ? "streamable_http"
-      : "stdio");
+function toRecord(value: unknown): JsonRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : null;
+}
 
-  const command =
-    transport === "stdio" ? (rawData.command ?? "").toString() : "";
+function toStringValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value == null) {
+    return "";
+  }
+  return String(value);
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => toStringValue(item)).filter(Boolean);
+}
+
+function toStringRecord(value: unknown): Record<string, string> {
+  const record = toRecord(value);
+  if (!record) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(record)
+      .map(([key, entryValue]) => [key, toStringValue(entryValue)] as const)
+      .filter(([, entryValue]) => entryValue.length > 0),
+  );
+}
+
+function hasClientEndpoint(record: JsonRecord): boolean {
+  return Boolean(record.command || record.url || record.baseUrl);
+}
+
+function normalizeClientData(key: string, rawData: JsonRecord): MCPClientInput {
+  const commandCandidate = toStringValue(rawData.command);
+  const urlCandidate = toStringValue(rawData.url ?? rawData.baseUrl);
+  const enabledCandidate = rawData.enabled ?? rawData.isActive;
+  const transport =
+    normalizeTransport(rawData.transport ?? rawData.type)
+    ?? (urlCandidate || !commandCandidate ? "streamable_http" : "stdio");
+
+  const command = transport === "stdio" ? commandCandidate : "";
 
   return {
-    name: rawData.name || key,
-    description: rawData.description || "",
-    enabled: rawData.enabled ?? rawData.isActive ?? true,
+    name: toStringValue(rawData.name) || key,
+    description: toStringValue(rawData.description),
+    enabled: typeof enabledCandidate === "boolean" ? enabledCandidate : true,
     transport,
-    url: (rawData.url || rawData.baseUrl || "").toString(),
-    headers: rawData.headers || {},
+    url: urlCandidate,
+    headers: toStringRecord(rawData.headers),
     command,
-    args: Array.isArray(rawData.args) ? rawData.args : [],
-    env: rawData.env || {},
-    cwd: (rawData.cwd || "").toString(),
+    args: toStringArray(rawData.args),
+    env: toStringRecord(rawData.env),
+    cwd: toStringValue(rawData.cwd),
   };
 }
 
@@ -83,33 +125,44 @@ function MCPPage() {
 
   const handleCreateClient = async () => {
     try {
-      const parsed = JSON.parse(newClientJson);
-      const clientsToCreate: Array<{ key: string; data: any }> = [];
+      const parsed = JSON.parse(newClientJson) as unknown;
+      const parsedRecord = toRecord(parsed);
+      if (!parsedRecord) {
+        throw new Error("invalid-client-json");
+      }
+      const clientsToCreate: Array<{ key: string; data: MCPClientInput }> = [];
 
-      if (parsed.mcpServers) {
-        Object.entries(parsed.mcpServers).forEach(([key, data]: [string, any]) => {
+      const mcpServers = toRecord(parsedRecord.mcpServers);
+      if (mcpServers) {
+        Object.entries(mcpServers).forEach(([key, data]) => {
+          const clientRecord = toRecord(data);
+          if (!clientRecord) {
+            return;
+          }
           clientsToCreate.push({
             key,
-            data: normalizeClientData(key, data),
+            data: normalizeClientData(key, clientRecord),
           });
         });
-      } else if (parsed.key && (parsed.command || parsed.url || parsed.baseUrl)) {
-        const { key, ...clientData } = parsed;
+      } else if (
+        typeof parsedRecord.key === "string"
+        && hasClientEndpoint(parsedRecord)
+      ) {
+        const { key, ...clientData } = parsedRecord;
         clientsToCreate.push({
           key,
           data: normalizeClientData(key, clientData),
         });
       } else {
-        Object.entries(parsed).forEach(([key, data]: [string, any]) => {
-          if (
-            typeof data === "object" &&
-            (data.command || data.url || data.baseUrl)
-          ) {
-            clientsToCreate.push({
-              key,
-              data: normalizeClientData(key, data),
-            });
+        Object.entries(parsedRecord).forEach(([key, data]) => {
+          const clientRecord = toRecord(data);
+          if (!clientRecord || !hasClientEndpoint(clientRecord)) {
+            return;
           }
+          clientsToCreate.push({
+            key,
+            data: normalizeClientData(key, clientRecord),
+          });
         });
       }
 

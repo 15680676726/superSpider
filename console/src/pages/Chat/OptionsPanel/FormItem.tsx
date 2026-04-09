@@ -1,13 +1,37 @@
+import type { ReactNode } from "react";
 import { Form } from "antd";
 import { createStyles } from "antd-style";
+import type { FormListFieldData, FormListOperation } from "antd";
 
-interface FormItemProps {
+type FormItemNormalize = (
+  value: unknown,
+  prevValue: unknown,
+  prevValues: unknown,
+) => unknown;
+
+type FormListRenderer = (
+  fields: FormListFieldData[],
+  operations: FormListOperation,
+  meta: { errors: ReactNode[]; warnings: ReactNode[] },
+) => ReactNode;
+
+type BaseFormItemProps = {
   name: string | string[];
   label: string;
-  isList?: boolean;
-  children: any;
-  normalize?: (value: any) => any;
-}
+  normalize?: FormItemNormalize;
+};
+
+type ListFormItemProps = BaseFormItemProps & {
+  isList: true;
+  children: FormListRenderer;
+};
+
+type FieldFormItemProps = BaseFormItemProps & {
+  isList?: false;
+  children: ReactNode;
+};
+
+type FormItemProps = ListFormItemProps | FieldFormItemProps;
 
 const useStyles = createStyles(({ token }) => ({
   label: {

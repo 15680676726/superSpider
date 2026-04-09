@@ -37,7 +37,7 @@ export function useCapabilityMarketState({
   setSearchParams,
 }: {
   templateForm: FormInstance<Record<string, unknown>>;
-  mcpForm: FormInstance<Record<string, any>>;
+  mcpForm: FormInstance<Record<string, unknown>>;
   searchParams: URLSearchParams;
   setSearchParams: (next: URLSearchParams) => void;
 }) {

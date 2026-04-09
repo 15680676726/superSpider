@@ -261,20 +261,19 @@ function CapabilityGovernancePanel({
   const [mode, setMode] = React.useState<"replace" | "merge">("replace");
   const [selectedCapabilities, setSelectedCapabilities] = React.useState<string[]>([]);
   const [reason, setReason] = React.useState("");
+  const fallbackCapabilities = useMemo(() => {
+    const recommendedCapabilities = surface?.recommended_capabilities ?? [];
+    if (recommendedCapabilities.length > 0) {
+      return recommendedCapabilities;
+    }
+    return surface?.effective_capabilities ?? [];
+  }, [surface?.effective_capabilities, surface?.recommended_capabilities]);
 
   React.useEffect(() => {
-    const fallback =
-      surface?.recommended_capabilities?.length
-        ? surface.recommended_capabilities
-        : surface?.effective_capabilities ?? [];
-    setSelectedCapabilities(fallback);
+    setSelectedCapabilities(fallbackCapabilities);
     setMode("replace");
     setReason("");
-  }, [
-    agent.agent_id,
-    surface?.recommended_capabilities?.join("|"),
-    surface?.effective_capabilities?.join("|"),
-  ]);
+  }, [agent.agent_id, fallbackCapabilities]);
 
   const catalogOptions = useMemo(
     () =>

@@ -51,7 +51,7 @@ const { TextArea, Password } = Input;
 export default function CapabilityMarketPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [templateForm] = Form.useForm<Record<string, unknown>>();
-  const [mcpForm] = Form.useForm<Record<string, any>>();
+  const [mcpForm] = Form.useForm<Record<string, unknown>>();
   const {
     activeTab,
     categoryCounts,

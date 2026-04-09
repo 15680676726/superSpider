@@ -5,11 +5,23 @@ import {
   type CapabilityMutationResponse,
 } from "../../../api/modules/capability";
 import { capabilityMarketApi } from "../../../api/modules/capabilityMarket";
-import type { CapabilityMount, MCPClientInfo } from "../../../api/types";
+import type {
+  CapabilityMount,
+  MCPClientCreateRequest,
+  MCPClientInfo,
+  MCPClientUpdateRequest,
+} from "../../../api/types";
 
 export type MCPClientCapabilityView = MCPClientInfo & {
   capability?: CapabilityMount;
 };
+
+function presentErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return fallback;
+}
 
 function confirmationMessage(result: CapabilityMutationResponse): string {
   return result.decision_request_id
@@ -46,18 +58,7 @@ export function useMCP() {
   const createClient = useCallback(
     async (
       key: string,
-      clientData: {
-        name: string;
-        description?: string;
-        command: string;
-        enabled?: boolean;
-        transport?: "stdio" | "streamable_http" | "sse";
-        url?: string;
-        headers?: Record<string, string>;
-        args?: string[];
-        env?: Record<string, string>;
-        cwd?: string;
-      },
+      clientData: MCPClientCreateRequest["client"],
     ) => {
       try {
         await capabilityMarketApi.createCapabilityMarketMCPClient({
@@ -67,8 +68,8 @@ export function useMCP() {
         message.success("模型上下文协议客户端创建成功");
         await loadClients();
         return true;
-      } catch (error: any) {
-        message.error(error?.message || "创建模型上下文协议客户端失败");
+      } catch (error: unknown) {
+        message.error(presentErrorMessage(error, "创建模型上下文协议客户端失败"));
         return false;
       }
     },
@@ -78,26 +79,15 @@ export function useMCP() {
   const updateClient = useCallback(
     async (
       key: string,
-      updates: {
-        name?: string;
-        description?: string;
-        command?: string;
-        enabled?: boolean;
-        transport?: "stdio" | "streamable_http" | "sse";
-        url?: string;
-        headers?: Record<string, string>;
-        args?: string[];
-        env?: Record<string, string>;
-        cwd?: string;
-      },
+      updates: MCPClientUpdateRequest,
     ) => {
       try {
         await capabilityMarketApi.updateCapabilityMarketMCPClient(key, updates);
         message.success("模型上下文协议客户端已更新");
         await loadClients();
         return true;
-      } catch (error: any) {
-        message.error(error?.message || "更新模型上下文协议客户端失败");
+      } catch (error: unknown) {
+        message.error(presentErrorMessage(error, "更新模型上下文协议客户端失败"));
         return false;
       }
     },
@@ -131,7 +121,7 @@ export function useMCP() {
             result?.summary ||
             "切换模型上下文协议客户端状态失败",
         );
-      } catch (error) {
+      } catch {
         message.error("切换模型上下文协议客户端状态失败");
       }
     },
@@ -160,7 +150,7 @@ export function useMCP() {
             result?.summary ||
             "删除模型上下文协议客户端失败",
         );
-      } catch (error) {
+      } catch {
         message.error("删除模型上下文协议客户端失败");
       }
     },

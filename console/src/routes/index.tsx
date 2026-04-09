@@ -138,7 +138,8 @@ const PATHNAME_TO_KEY: Array<[string, string]> = [
   ["/runtime-center", "runtime-center"],
 ];
 
-export function resolveSelectedKey(pathname: string, _search: string = ""): string {
+export function resolveSelectedKey(pathname: string, search: string = ""): string {
+  void search;
   if (pathname.startsWith("/capability-market")) {
     return "capability-market";
   }

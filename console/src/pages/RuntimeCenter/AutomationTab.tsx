@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -18,6 +18,7 @@ import {
   TimePicker,
   Typography,
   message,
+  type FormInstance,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
@@ -67,6 +68,9 @@ type HeartbeatFormValues = Omit<RuntimeHeartbeatConfig, "every"> & {
   activeHoursStart?: string;
   activeHoursEnd?: string;
 };
+
+type ScheduleFormFieldValues =
+  Parameters<FormInstance<ScheduleFormValues>["setFieldsValue"]>[0];
 
 const TIMEZONE_OPTIONS = [
   { value: "UTC", label: "UTC" },
@@ -429,7 +433,7 @@ function buildSchedulePayload(values: ScheduleFormValues): RuntimeScheduleConfig
     if (typeof parsedInput === "string" && parsedInput.trim()) {
       try {
         parsedInput = JSON.parse(parsedInput);
-      } catch (e) {
+      } catch {
         // Fallback or ignore parse error if handled by form
       }
     }
@@ -476,7 +480,7 @@ export default function AutomationTab({
   const heartbeatAnchorRef = useRef<HTMLDivElement | null>(null);
   const didLoadRef = useRef(false);
 
-  const loadSchedules = async (mode: "initial" | "refresh" = "refresh") => {
+  const loadSchedules = useCallback(async (mode: "initial" | "refresh" = "refresh") => {
     if (mode === "initial") {
       setScheduleLoading(true);
     } else {
@@ -495,9 +499,9 @@ export default function AutomationTab({
       setScheduleLoading(false);
       setScheduleRefreshing(false);
     }
-  };
+  }, []);
 
-  const loadHeartbeat = async () => {
+  const loadHeartbeat = useCallback(async () => {
     setHeartbeatLoading(true);
     try {
       const detail = await api.getRuntimeHeartbeat();
@@ -523,11 +527,11 @@ export default function AutomationTab({
     } finally {
       setHeartbeatLoading(false);
     }
-  };
+  }, [heartbeatForm]);
 
   useEffect(() => {
     void Promise.all([loadSchedules("initial"), loadHeartbeat()]);
-  }, []);
+  }, [loadHeartbeat, loadSchedules]);
 
   useEffect(() => {
     if (!refreshSignal) {
@@ -538,7 +542,7 @@ export default function AutomationTab({
       return;
     }
     void Promise.all([loadSchedules(), loadHeartbeat()]);
-  }, [refreshSignal]);
+  }, [loadHeartbeat, loadSchedules, refreshSignal]);
 
   useEffect(() => {
     if (focusScope !== "heartbeat" || !heartbeatAnchorRef.current) {
@@ -547,23 +551,27 @@ export default function AutomationTab({
     heartbeatAnchorRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [focusScope]);
 
-  const refreshRuntimeSurface = async () => {
+  const refreshRuntimeSurface = useCallback(async () => {
     await Promise.resolve(onRuntimeChanged?.());
-  };
+  }, [onRuntimeChanged]);
 
   const openCreateDrawer = () => {
     setEditingScheduleId(null);
     scheduleForm.resetFields();
-    scheduleForm.setFieldsValue(DEFAULT_SCHEDULE_FORM_VALUES as any);
+    scheduleForm.setFieldsValue(
+      DEFAULT_SCHEDULE_FORM_VALUES as unknown as ScheduleFormFieldValues,
+    );
     setDrawerOpen(true);
   };
 
-  const openEditDrawer = async (scheduleId: string) => {
+  const openEditDrawer = useCallback(async (scheduleId: string) => {
     setDrawerLoading(true);
     try {
       const detail = await api.getRuntimeSchedule(scheduleId);
       scheduleForm.resetFields();
-      scheduleForm.setFieldsValue(buildScheduleFormValues(detail) as any);
+      scheduleForm.setFieldsValue(
+        buildScheduleFormValues(detail) as unknown as ScheduleFormFieldValues,
+      );
       setEditingScheduleId(scheduleId);
       setDrawerOpen(true);
     } catch (error) {
@@ -574,7 +582,7 @@ export default function AutomationTab({
     } finally {
       setDrawerLoading(false);
     }
-  };
+  }, [scheduleForm]);
 
   const closeDrawer = () => {
     setDrawerOpen(false);
@@ -604,7 +612,7 @@ export default function AutomationTab({
     }
   };
 
-  const handleDeleteSchedule = async (schedule: RuntimeScheduleSummary) => {
+  const handleDeleteSchedule = useCallback(async (schedule: RuntimeScheduleSummary) => {
     Modal.confirm({
       title: "确认删除",
       content: "确定要删除此定时任务吗？",
@@ -626,9 +634,9 @@ export default function AutomationTab({
         }
       },
     });
-  };
+  }, [loadSchedules, refreshRuntimeSurface]);
 
-  const invokeScheduleAction = async (
+  const invokeScheduleAction = useCallback(async (
     schedule: RuntimeScheduleSummary,
     action: "run" | "pause" | "resume",
   ) => {
@@ -651,7 +659,7 @@ export default function AutomationTab({
     } finally {
       setActingScheduleId(null);
     }
-  };
+  }, [loadSchedules, refreshRuntimeSurface]);
 
   const handleHeartbeatSubmit = async (values: HeartbeatFormValues) => {
     setHeartbeatSaving(true);
