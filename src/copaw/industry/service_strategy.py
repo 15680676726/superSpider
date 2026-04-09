@@ -348,6 +348,46 @@ class _IndustryStrategyMixin:
 
         }
 
+    def _build_draft_goal_focus_titles(
+
+        self,
+
+        *,
+
+        record: IndustryInstanceRecord,
+
+    ) -> list[str]:
+
+        draft_payload = dict(record.draft_payload or {})
+
+        draft_goals = draft_payload.get("goals")
+
+        if not isinstance(draft_goals, list):
+
+            return []
+
+        focus_titles: list[str] = []
+
+        for item in draft_goals:
+
+            if not isinstance(item, dict):
+
+                continue
+
+            focus_titles.extend(
+
+                _unique_strings(
+
+                    item.get("title"),
+
+                    item.get("summary"),
+
+                ),
+
+            )
+
+        return _unique_strings(focus_titles)
+
 
 
     def _message_has_research_intent(
@@ -2003,6 +2043,7 @@ class _IndustryStrategyMixin:
             )
             if title is not None
         ]
+        draft_focus_titles = self._build_draft_goal_focus_titles(record=record)
         live_focus_titles = _unique_strings(
             assignment_focus_titles,
             backlog_focus_titles,
@@ -2020,6 +2061,8 @@ class _IndustryStrategyMixin:
 
             list(resolved_profile.goals),
 
+            draft_focus_titles,
+
         )
 
         north_star = (
@@ -2027,6 +2070,8 @@ class _IndustryStrategyMixin:
             _string((list(existing.priority_order or [None])[0]) if existing is not None else None)
 
             or _string((resolved_profile.goals or [None])[0])
+
+            or _string((draft_focus_titles or [None])[0])
 
             or _string(record.summary)
 
@@ -2087,6 +2132,8 @@ class _IndustryStrategyMixin:
             ),
 
             [] if live_focus_titles else list(resolved_profile.goals),
+
+            [] if live_focus_titles else draft_focus_titles,
 
         )
 
