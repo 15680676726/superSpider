@@ -37,7 +37,17 @@ export default function RightPanel() {
   const [surface, setSurface] = useState<BuddySurfaceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
+  const [documentVisible, setDocumentVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState !== "hidden",
+  );
   const isBuddyOnboardingRoute = location.pathname.startsWith("/buddy-onboarding");
+  const isBuddyAnimationRoute =
+    isBuddyOnboardingRoute || location.pathname.startsWith("/chat");
+  const shouldAnimateAvatar =
+    !collapsed &&
+    documentVisible &&
+    isBuddyAnimationRoute &&
+    surface !== null;
 
   // 拉取伙伴数据
   useEffect(() => {
@@ -59,11 +69,27 @@ export default function RightPanel() {
     return () => { cancelled = true; };
   }, [isBuddyOnboardingRoute]);
 
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return undefined;
+    }
+    const syncVisibility = () => {
+      setDocumentVisible(document.visibilityState !== "hidden");
+    };
+    document.addEventListener("visibilitychange", syncVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", syncVisibility);
+    };
+  }, []);
+
   // 头像动画 tick
   useEffect(() => {
+    if (!shouldAnimateAvatar) {
+      return undefined;
+    }
     const timer = window.setInterval(() => setTick((t) => t + 1), BUDDY_ANIMATION_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [shouldAnimateAvatar]);
 
   const snapshot = surface ? resolveBuddyDisplaySnapshot(surface) : null;
   const evolution = surface

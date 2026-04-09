@@ -5,7 +5,7 @@ import {
   CircleDashed,
   LoaderCircle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useRuntimeExecutionPulse } from "../hooks/useRuntimeExecutionPulse";
 import RuntimeExecutionStrip from "./RuntimeExecutionStrip";
@@ -32,10 +32,28 @@ function iconForState(
 export default function RuntimeExecutionLauncher() {
   const location = useLocation();
   const [open, setOpen] = useState(false);
+  const [documentVisible, setDocumentVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState !== "hidden",
+  );
+  const launcherActive = open && documentVisible;
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return undefined;
+    }
+    const syncVisibility = () => {
+      setDocumentVisible(document.visibilityState !== "hidden");
+    };
+    document.addEventListener("visibilitychange", syncVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", syncVisibility);
+    };
+  }, []);
+
   const pulse = useRuntimeExecutionPulse({
     actor: "runtime-floating-launcher",
     maxItems: 6,
-    active: true,
+    active: launcherActive,
   });
 
   const metrics = useMemo(() => {

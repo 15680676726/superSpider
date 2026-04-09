@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -94,9 +100,17 @@ function makeSurface() {
 }
 
 describe("RightPanel", () => {
+  function setVisibilityState(value: DocumentVisibilityState) {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => value,
+    });
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     resetBuddyProfileBindingForTests();
+    setVisibilityState("visible");
     apiMock.getBuddySurface.mockResolvedValue(makeSurface());
   });
 
@@ -147,5 +161,76 @@ describe("RightPanel", () => {
     expect(sprite).not.toBeNull();
     expect(sprite?.style.fontSize).toBe("16px");
     expect(sprite ? getComputedStyle(sprite).alignItems : "").toBe("flex-start");
+  });
+
+  it("starts the buddy tick timer only on active chat routes", async () => {
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <RightPanel />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(
+        setIntervalSpy.mock.calls.some((call) => call[1] === 1000000),
+      ).toBe(true);
+    });
+  });
+
+  it("does not start the buddy tick timer on inactive routes", async () => {
+    const setIntervalSpy = vi
+      .spyOn(window, "setInterval")
+      .mockReturnValue(4242 as unknown as ReturnType<typeof setInterval>);
+
+    render(
+      <MemoryRouter initialEntries={["/settings/system"]}>
+        <RightPanel />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(apiMock.getBuddySurface).toHaveBeenCalled();
+    });
+    expect(setIntervalSpy).not.toHaveBeenCalledWith(expect.any(Function), 1000000);
+  });
+
+  it("does not start the buddy tick timer when the document is hidden", async () => {
+    const setIntervalSpy = vi
+      .spyOn(window, "setInterval")
+      .mockReturnValue(4242 as unknown as ReturnType<typeof setInterval>);
+    setVisibilityState("hidden");
+
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <RightPanel />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(apiMock.getBuddySurface).toHaveBeenCalled();
+    });
+    expect(setIntervalSpy).not.toHaveBeenCalledWith(expect.any(Function), 1000000);
+  });
+
+  it("clears the buddy tick timer when the panel collapses", async () => {
+    const buddyTimerId = 4242 as unknown as ReturnType<typeof setInterval>;
+    vi.spyOn(window, "setInterval").mockReturnValue(buddyTimerId);
+    const clearIntervalSpy = vi.spyOn(window, "clearInterval");
+
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <RightPanel />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(apiMock.getBuddySurface).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getAllByRole("button")[0]!);
+
+    expect(clearIntervalSpy).toHaveBeenCalledWith(buddyTimerId);
   });
 });
