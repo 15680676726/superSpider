@@ -6,6 +6,7 @@ import type {
   IndustryRuntimeAssignment,
   IndustryRuntimeBacklogItem,
 } from "../../api/modules/industry";
+import { normalizeDisplayChinese } from "../../text";
 import { normalizeSpiderMeshBrand } from "../../utils/brand";
 
 export function presentRecommendationSubsectionTitle(
@@ -198,7 +199,7 @@ export function buildIndustryRuntimeFocusSummary(options: {
     mainChainCurrentFocus,
   } = options;
 
-  return (
+  const summary =
     focusSelection?.summary ||
     focusSelection?.title ||
     (focusedAssignment
@@ -212,6 +213,7 @@ export function buildIndustryRuntimeFocusSummary(options: {
       : null) ||
     executionCurrentFocus ||
     mainChainCurrentFocus ||
-    "当前还没有聚焦子视图。"
-  );
+    "当前还没有聚焦子视图。";
+
+  return normalizeDisplayChinese(summary);
 }

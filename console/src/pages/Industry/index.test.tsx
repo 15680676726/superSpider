@@ -644,7 +644,7 @@ describe("IndustryPage", () => {
       .closest(".ant-card") as HTMLElement | null;
     expect(cockpitCard).toBeTruthy();
     expect(
-      within(cockpitCard as HTMLElement).getByText("Focused runtime assignment"),
+      within(cockpitCard as HTMLElement).getByText("已聚焦运行派工"),
     ).toBeTruthy();
     expect(
       within(cockpitCard as HTMLElement).queryByText("generic-focus"),
@@ -657,10 +657,11 @@ describe("IndustryPage", () => {
     expect(screen.getByText("待处理提案")).toBeTruthy();
     expect(screen.getByText("临时席位")).toBeTruthy();
     expect(screen.getByText("研究位")).toBeTruthy();
-    expect(screen.getByText("Approve closer staffing")).toBeTruthy();
+    expect(screen.getAllByText("等待明确批准").length).toBeGreaterThan(0);
     expect(screen.getByText("synthesize-before-reassign")).toBeTruthy();
     expect(screen.getAllByText("已选中").length).toBeGreaterThan(0);
     expect(screen.getAllByText("ctx-report-1").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Awaiting explicit approval")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "查看完整面板" }));
     expect(handleClearRuntimeFocus).toHaveBeenCalledTimes(1);

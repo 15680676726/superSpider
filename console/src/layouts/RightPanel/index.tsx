@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronRight, Sparkles } from "lucide-react";
 import { Col, Progress, Row, Spin, Statistic, Tag, Typography } from "antd";
+import { useLocation } from "react-router-dom";
 
 import type { BuddySurfaceResponse } from "../../api/modules/buddy";
 import { api } from "../../api";
@@ -11,6 +12,7 @@ import {
 } from "../../pages/Chat/buddyAvatar";
 import { resolveBuddyEvolutionView } from "../../pages/Chat/buddyEvolution";
 import { resolveBuddyDisplaySnapshot } from "../../pages/Chat/buddyPresentation";
+import { readBuddyProfileId } from "../../runtime/buddyProfileBinding";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
@@ -30,22 +32,32 @@ function EmptyState() {
 
 // ── 主面板 ──────────────────────────────────────────────────────────────
 export default function RightPanel() {
+  const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const [surface, setSurface] = useState<BuddySurfaceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
+  const isBuddyOnboardingRoute = location.pathname.startsWith("/buddy-onboarding");
 
   // 拉取伙伴数据
   useEffect(() => {
     let cancelled = false;
+    const boundProfileId = readBuddyProfileId();
+
+    if (isBuddyOnboardingRoute && !boundProfileId) {
+      setSurface(null);
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
+
     setLoading(true);
-    void api.getBuddySurface(undefined).then((s) => {
+    void api.getBuddySurface(isBuddyOnboardingRoute ? boundProfileId : undefined).then((s) => {
       if (!cancelled) { setSurface(s); setLoading(false); }
     }).catch(() => {
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [isBuddyOnboardingRoute]);
 
   // 头像动画 tick
   useEffect(() => {
@@ -108,8 +120,11 @@ export default function RightPanel() {
                     className={styles.spriteAscii}
                     aria-hidden="true"
                     style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
                       fontFamily: '"Consolas", "Courier New", Courier, monospace',
-                      fontSize: "12px",
+                      fontSize: "16px",
                       lineHeight: "1.1",
                       color: "#111827",
                       whiteSpace: "pre",

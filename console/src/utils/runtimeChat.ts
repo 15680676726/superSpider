@@ -42,7 +42,7 @@ type IndustryChatContext = Pick<
 >;
 
 const EXECUTION_CORE_ROLE_ID = "execution-core";
-const EXECUTION_CORE_LABEL = "Spider Mesh 主脑";
+const EXECUTION_CORE_LABEL = "超级伙伴主脑";
 
 function normalizeThreadId(threadId: string | null | undefined): string | null {
   if (!threadId) {
@@ -135,7 +135,7 @@ export function buildBuddyExecutionCarrierChatBinding(
 ): RuntimeChatBinding {
   const profileId = params.profileId.trim();
   if (!profileId) {
-    throw new Error("Buddy profile id is required to open runtime chat.");
+    throw new Error("打开主脑聊天前必须先有超级伙伴档案。");
   }
   const sessionId =
     typeof params.sessionId === "string" && params.sessionId.trim()
@@ -145,7 +145,7 @@ export function buildBuddyExecutionCarrierChatBinding(
     params.executionCarrier,
   );
   if (!threadId) {
-    throw new Error("Buddy execution carrier does not provide a runtime chat thread.");
+    throw new Error("当前超级伙伴载体还没有可用的正式聊天线程。");
   }
   const chatBinding =
     params.executionCarrier.chat_binding &&
@@ -161,8 +161,8 @@ export function buildBuddyExecutionCarrierChatBinding(
   return {
     name:
       normalizeSpiderMeshBrand(
-        params.executionCarrier.label || params.profileDisplayName || "Buddy",
-      ) || "Buddy",
+        params.executionCarrier.label || params.profileDisplayName || "超级伙伴",
+      ) || "超级伙伴",
     threadId,
     userId,
     channel,
@@ -282,7 +282,7 @@ export function buildIndustryRoleChatBinding(
   const industryLabel = normalizeSpiderMeshBrand(detail.label);
   const controlThreadId = resolveIndustryControlThreadId(detail.instance_id);
   if (!controlThreadId) {
-    throw new Error("Industry control thread is not available.");
+    throw new Error("当前行业主脑线程暂时不可用。");
   }
   return {
     name: `${industryLabel} - ${EXECUTION_CORE_LABEL}`,

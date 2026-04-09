@@ -196,7 +196,7 @@ export default function ReportsPage() {
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }} className="page-container">
       <PageHeader
-        eyebrow="Reports"
+        eyebrow="报告"
         title="报告中心"
         description="汇总日报、周报、月报窗口内的运行事实、关键亮点和指标变化。"
         stats={[

@@ -31,7 +31,7 @@ describe("resolveVerifiedRuntimeBindingState", () => {
           industry_role_name: "执行中枢",
           session_kind: "industry-control-thread",
           agent_id: "agent-1",
-          agent_name: "Spider Mesh 主脑",
+          agent_name: "超级伙伴主脑",
           current_focus: "Ship phase split",
         },
         activeAgentId: "agent-url",
@@ -43,7 +43,7 @@ describe("resolveVerifiedRuntimeBindingState", () => {
       expect.objectContaining({
         industryLabel: "Acme Mesh",
         roleLabel: "执行中枢",
-        agentLabel: "Spider Mesh 主脑",
+        agentLabel: "超级伙伴主脑",
         currentFocus: "Ship phase split",
         hasIndustryContext: true,
         hasAgentBinding: true,

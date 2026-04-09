@@ -601,7 +601,7 @@ export default function V7ExecutionSeatPanel({
           </Paragraph>
           <Paragraph>
             <Text strong>汇报给：</Text>{" "}
-            {resolveAgentLabel(agents, roleContract?.reports_to || agent.reports_to) || "Spider Mesh 主脑"}
+            {resolveAgentLabel(agents, roleContract?.reports_to || agent.reports_to) || "超级伙伴主脑"}
           </Paragraph>
           <Paragraph>
             <Text strong>岗位约束：</Text>{" "}

@@ -17,6 +17,7 @@ describe("tagSemantics", () => {
     expect(runtimeRiskLabel("auto")).toBe("自动");
     expect(runtimeRiskLabel("guarded")).toBe("守护");
     expect(runtimeRiskLabel("confirm")).toBe("确认");
+    expect(runtimeRiskLabel("unknown")).toBe("未知");
     expect(runtimeRiskLabel("custom-risk")).toBe("custom-risk");
   });
 

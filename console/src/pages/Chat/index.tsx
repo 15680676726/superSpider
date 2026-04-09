@@ -41,7 +41,6 @@ import {
   normalizeThreadId,
   normalizeThreadMeta,
   resolveChatThreadBootstrapState,
-  resolveChatRouteRecoveryTarget,
   shouldAutoRefreshRuntimeThread,
 } from "./chatPageHelpers";
 import {
@@ -530,7 +529,7 @@ export default function ChatPage() {
       setAutoBindingPending(threadBootstrapState.initialAutoBindingPending);
       return;
     }
-    if (!requestedThreadLooksBound) {
+    if (!requestedThreadLooksBound || !requestedThreadId) {
       sessionApi.setPreferredThreadId(null);
       sessionApi.clearBoundThreadContext(requestedThreadId);
       setThreadBootstrapPending(false);
@@ -540,18 +539,19 @@ export default function ChatPage() {
       navigate("/chat", { replace: true });
       return;
     }
+    const activeRequestedThreadId = requestedThreadId;
     setAutoBindingPending(false);
     let cancelled = false;
     setThreadBootstrapPending(true);
     setThreadBootstrapError(null);
-    sessionApi.setPreferredThreadId(requestedThreadId);
-    void sessionApi.getSession(requestedThreadId)
+    sessionApi.setPreferredThreadId(activeRequestedThreadId);
+    void sessionApi.getSession(activeRequestedThreadId)
       .then((thread) => {
         if (!cancelled) setThreadMeta(normalizeThreadMeta((thread as { meta?: Record<string, unknown> }).meta));
       })
       .catch((err) => {
         if (!cancelled) {
-          sessionApi.clearBoundThreadContext(requestedThreadId);
+          sessionApi.clearBoundThreadContext(activeRequestedThreadId);
           setThreadBootstrapError(err instanceof Error ? err.message : String(err));
           setThreadMeta({});
         }

@@ -87,7 +87,7 @@ export default function IndustryPlanningSurface({
             </Tag>
           ) : null}
           {detail.current_cycle?.focus_lane_ids.length ? (
-            <Tag>{`Focus lanes ${detail.current_cycle.focus_lane_ids.length}`}</Tag>
+            <Tag>{`焦点泳道 ${detail.current_cycle.focus_lane_ids.length}`}</Tag>
           ) : null}
           {runtimeSignals.map((signal) => (
             <Tag key={signal.label}>
@@ -209,10 +209,12 @@ export default function IndustryPlanningSurface({
                           {synthesisFollowups.slice(0, 3).map((finding) => (
                             <Text key={finding.report_id} type="secondary">
                               {[
-                                finding.headline || finding.summary || finding.report_id,
-                                nonEmpty(finding.followup_reason),
+                                presentText(
+                                  finding.headline || finding.summary || finding.report_id,
+                                ),
+                                presentText(nonEmpty(finding.followup_reason)),
                               ]
-                                .filter(Boolean)
+                                .filter((item) => item && item !== "-")
                                 .join(" | ")}
                             </Text>
                           ))}
@@ -227,7 +229,7 @@ export default function IndustryPlanningSurface({
                         <Space direction="vertical" size={4} style={{ width: "100%", marginTop: 4 }}>
                           {recommendedActions.slice(0, 3).map((action) => (
                             <Text key={action.action_id} type="secondary">
-                              {String(action.title || action.summary || action.action_id)}
+                              {presentText(action.title || action.summary || action.action_id)}
                             </Text>
                           ))}
                         </Space>
@@ -241,7 +243,7 @@ export default function IndustryPlanningSurface({
                         <Space direction="vertical" size={4} style={{ width: "100%", marginTop: 4 }}>
                           {controlCoreContract.map((item) => (
                             <Text key={item} type="secondary">
-                              {item}
+                              {presentText(item)}
                             </Text>
                           ))}
                         </Space>

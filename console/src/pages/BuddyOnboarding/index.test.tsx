@@ -371,7 +371,7 @@ describe("BuddyOnboardingPage", () => {
       expect(apiMock.getBuddySurface).toHaveBeenCalledWith("profile-incomplete");
     });
     expect(navigateMock).not.toHaveBeenCalled();
-    expect(screen.getByText("Buddy 初次建档")).toBeInTheDocument();
+    expect(screen.getByText("超级伙伴初次建档")).toBeInTheDocument();
     expect(
       screen.getByText("你最不想继续重复的旧状态是什么？"),
     ).toBeInTheDocument();

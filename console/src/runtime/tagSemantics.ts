@@ -8,6 +8,7 @@ const RUNTIME_RISK_LABEL_MAP: Record<string, string> = {
   auto: "自动",
   guarded: "守护",
   confirm: "确认",
+  unknown: "未知",
 };
 
 const RUNTIME_STATUS_COLOR_MAP: Record<string, string> = {

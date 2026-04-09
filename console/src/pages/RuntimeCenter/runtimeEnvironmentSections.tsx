@@ -266,10 +266,10 @@ export function renderHostTwinSection(
           <Alert
             showIcon
             type="warning"
-            message="Human return required"
+            message="需要人工回接"
             description={
               stringValue(legalRecovery.return_condition) ||
-              "The current host twin requires a human handoff before mutation can continue."
+              "当前宿主分身要求先完成人工交接，之后才能继续执行变更。"
             }
             style={{ marginBottom: 12 }}
           />
@@ -290,7 +290,7 @@ export function renderHostTwinSection(
 
         {contentionForecast ? (
           <div style={{ marginTop: 12 }}>
-            <div className={styles.detailSectionTitle}>Coordination</div>
+            <div className={styles.detailSectionTitle}>协调情况</div>
             <Text type="secondary">
               {[
                 stringValue(contentionForecast.severity),
@@ -304,7 +304,7 @@ export function renderHostTwinSection(
 
         {latestBlockingEvent ? (
           <div style={{ marginTop: 12 }}>
-            <div className={styles.detailSectionTitle}>Blocking Event</div>
+            <div className={styles.detailSectionTitle}>阻塞事件</div>
             <Text type="secondary">
               {[
                 stringValue(latestBlockingEvent.event_family),
@@ -319,11 +319,11 @@ export function renderHostTwinSection(
 
         {mutationReadyEntries.length > 0 ? (
           <div style={{ marginTop: 12 }}>
-            <div className={styles.detailSectionTitle}>Mutation Readiness</div>
+            <div className={styles.detailSectionTitle}>变更就绪度</div>
             <Space wrap size={[6, 6]}>
               {mutationReadyEntries.map(([surfaceKey, ready]) => (
                 <Tag key={`${sectionKey}:mutation:${surfaceKey}`} color={ready ? "success" : "error"}>
-                  {`${surfaceKey} ${ready ? "ready" : "blocked"}`}
+                  {`${surfaceKey} ${ready ? "就绪" : "阻塞"}`}
                 </Tag>
               ))}
             </Space>
@@ -332,7 +332,7 @@ export function renderHostTwinSection(
 
         {activeFamilies.length > 0 ? (
           <div style={{ marginTop: 12 }}>
-            <div className={styles.detailSectionTitle}>App Family Twins</div>
+            <div className={styles.detailSectionTitle}>应用族分身</div>
             <Space direction="vertical" size={8} style={{ width: "100%" }}>
               {activeFamilies.map(([familyKey, value]) => {
                 const family = recordValue(value) || {};
@@ -364,7 +364,7 @@ export function renderHostTwinSection(
 
         {surfaceMutabilityEntries.length > 0 ? (
           <div style={{ marginTop: 12 }}>
-            <div className={styles.detailSectionTitle}>Surface Mutability</div>
+            <div className={styles.detailSectionTitle}>界面可变性</div>
             <Space direction="vertical" size={4} style={{ width: "100%" }}>
               {surfaceMutabilityEntries.map(([surfaceKey, value]) => {
                 const surface = recordValue(value) || {};

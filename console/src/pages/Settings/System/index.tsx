@@ -342,7 +342,7 @@ export default function SystemSettingsPage() {
           <div>
             <h1 className="baize-page-header-title">系统维护</h1>
             <p className="baize-page-header-description">
-              管理备份恢复、自检健康和提供商回退。正式运行事实、治理和恢复闭环统一前往 Runtime Center。
+              管理备份恢复、自检健康和提供商回退。正式运行事实、治理和恢复闭环统一前往主脑驾驶舱。
             </p>
           </div>
           <div className="baize-page-header-actions">
@@ -376,12 +376,12 @@ export default function SystemSettingsPage() {
       <Alert
         type="info"
         showIcon
-        message="运行事实请前往 Runtime Center"
+        message="运行事实请前往主脑驾驶舱"
         description={
           <Space size={12} wrap>
-            <span>System 页只保留维护、自检和回退设置，不再承载正式运行事实摘要。</span>
+            <span>系统维护页只保留维护、自检和回退设置，不再承载正式运行事实摘要。</span>
             <Button type="link" href="/runtime-center" style={{ paddingInline: 0 }}>
-              前往 Runtime Center
+              前往主脑驾驶舱
             </Button>
           </Space>
         }
@@ -493,7 +493,7 @@ export default function SystemSettingsPage() {
                 健康自检与维护
               </Typography.Title>
               <Typography.Paragraph className={styles.sectionDescription}>
-                这里只保留系统维护需要的自检结果；正式恢复事实、治理状态和运行闭环请去 Runtime Center 查看。
+                这里只保留系统维护需要的自检结果；正式恢复事实、治理状态和运行闭环请去主脑驾驶舱查看。
               </Typography.Paragraph>
             </div>
             {selfCheck ? (

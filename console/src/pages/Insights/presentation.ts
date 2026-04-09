@@ -209,7 +209,7 @@ const EXACT_TEXT_MAP: Record<string, string> = {
   "Best case": "最佳情况",
   "Base case": "基准情况",
   "Worst case": "保守情况",
-  "Move leaf execution away from execution-core": "将叶子执行从 Spider Mesh 主脑迁出",
+  "Move leaf execution away from execution-core": "将叶子执行从超级伙伴主脑迁出",
   "Add a recurring automation schedule": "补充周期性自动化计划",
   "Review the prediction case manually": "人工复核该预测案例",
   "Scan recent runtime performance and propose governed optimizations.":

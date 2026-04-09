@@ -5,16 +5,16 @@ const defaultConfig = {
     prefix: "baize",
     leftHeader: {
       logo: "",
-      title: "Spider Mesh",
+      title: "超级伙伴",
     },
   },
   sender: {
     attachments: false,
     maxLength: 10000,
-    disclaimer: "Spider Mesh 主脑协作对话前台",
+    disclaimer: "超级伙伴主脑协作对话前台",
   },
   welcome: {
-    greeting: "这里是 Spider Mesh 主脑协作前台。",
+    greeting: "这里是超级伙伴主脑协作前台。",
     description:
       "你当前进入的是主脑协作入口。我会围绕当前绑定的伙伴主场、焦点事项、写回目标和治理状态来协作推进任务。",
     avatar: `${import.meta.env.BASE_URL}spider-mesh-symbol.svg`,

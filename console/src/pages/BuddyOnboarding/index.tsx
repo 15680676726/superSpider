@@ -303,7 +303,7 @@ export default function BuddyOnboardingPage() {
       <Card>
         <Space direction="vertical" size={8} style={{ width: "100%" }}>
           <Title level={2} style={{ margin: 0 }}>
-            Buddy 初次建档
+            超级伙伴初次建档
           </Title>
           <Paragraph style={{ margin: 0 }}>
             先让我认真了解你，再一起把长期方向收口成一个足够大的主方向。
@@ -452,7 +452,7 @@ export default function BuddyOnboardingPage() {
             ) : (
               <Card
                 size="small"
-                title="确认这次目标切换怎么处理 Buddy 的能力积累"
+                title="确认这次目标切换怎么处理超级伙伴的能力积累"
                 data-testid="buddy-transition-choice-panel"
               >
                 <Space direction="vertical" size={16} style={{ width: "100%" }}>

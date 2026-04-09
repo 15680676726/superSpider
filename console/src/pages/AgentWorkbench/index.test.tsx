@@ -132,7 +132,7 @@ function createAgent(agentId: string, name: string, agentClass: "system" | "busi
   };
 }
 
-const mainBrainAgent = createAgent("copaw-agent-runner", "Spider Mesh 主脑", "system");
+const mainBrainAgent = createAgent("copaw-agent-runner", "超级伙伴主脑", "system");
 const seatAgent = createAgent("agent-seat-1", "Research Operator", "business");
 const secondSeatAgent = createAgent("agent-seat-2", "Writer Operator", "business");
 
@@ -193,7 +193,7 @@ describe("AgentWorkbenchPage", () => {
     expect(tabLabels).not.toContain("成长");
     expect(screen.getByText("daily:agent-seat-1")).toBeTruthy();
     expect(screen.queryByText("daily:copaw-agent-runner")).toBeNull();
-    expect(screen.queryByText("profile:copaw-agent-runner:Spider Mesh 主脑")).toBeNull();
+    expect(screen.queryByText("profile:copaw-agent-runner:超级伙伴主脑")).toBeNull();
   });
 
   it("does not let selectedAgent keep the main brain in the execution-seat workbench", () => {
@@ -207,7 +207,7 @@ describe("AgentWorkbenchPage", () => {
 
     expect(screen.getByText("daily:agent-seat-1")).toBeTruthy();
     expect(screen.queryByText("daily:copaw-agent-runner")).toBeNull();
-    expect(screen.queryByText("profile:copaw-agent-runner:Spider Mesh 主脑")).toBeNull();
+    expect(screen.queryByText("profile:copaw-agent-runner:超级伙伴主脑")).toBeNull();
   });
 
   it("does not let agentDetail override the workbench back to the main brain", () => {
@@ -225,15 +225,15 @@ describe("AgentWorkbenchPage", () => {
 
     expect(screen.getByText("daily:agent-seat-1")).toBeTruthy();
     expect(screen.queryByText("daily:copaw-agent-runner")).toBeNull();
-    expect(screen.queryByText("profile:copaw-agent-runner:Spider Mesh 主脑")).toBeNull();
+    expect(screen.queryByText("profile:copaw-agent-runner:超级伙伴主脑")).toBeNull();
   });
 
-  it("routes the main-brain card back to Runtime Center instead of selecting it as a seat", () => {
+  it("routes the main-brain card back to the cockpit instead of selecting it as a seat", () => {
     useAgentWorkbenchMock.mockReturnValue(createWorkbenchState());
 
     render(<AgentWorkbenchPage />);
 
-    const mainBrainLabels = screen.getAllByText("Spider Mesh 主脑");
+    const mainBrainLabels = screen.getAllByText("超级伙伴主脑");
     fireEvent.click(mainBrainLabels[mainBrainLabels.length - 1]);
 
     expect(mockNavigate).toHaveBeenCalledWith("/runtime-center");

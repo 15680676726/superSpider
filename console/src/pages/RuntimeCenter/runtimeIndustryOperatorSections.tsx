@@ -18,6 +18,7 @@ import {
   formatPrimitiveValue,
   formatRuntimeSectionLabel as translateRuntimeSectionLabel,
   formatRuntimeStatus as translateRuntimeStatus,
+  localizeRuntimeText,
 } from "./text";
 import { isRecord } from "./runtimeDetailPrimitives";
 
@@ -217,7 +218,7 @@ export function renderOperatorAssignmentsSection(
               (typeof item.title === "string" && item.title) ||
               (typeof item.summary === "string" && item.summary) ||
               assignmentId ||
-              `Assignment ${index + 1}`;
+              `派工 ${index + 1}`;
             const summary = typeof item.summary === "string" ? item.summary : null;
             const status = typeof item.status === "string" && item.status ? item.status : "unknown";
             const route = typeof item.route === "string" && item.route ? item.route : null;
@@ -258,10 +259,10 @@ export function renderOperatorAssignmentsSection(
                 </Space>
                 {summary ? <Text type="secondary">{summary}</Text> : null}
                 <Space wrap size={[8, 6]} className={styles.selectionMeta}>
-                  {ownerAgentId ? <span>{`Owner ${ownerAgentId}`}</span> : null}
+                  {ownerAgentId ? <span>{`负责人 ${ownerAgentId}`}</span> : null}
                   {laneId ? <span>{`泳道 ${laneId}`}</span> : null}
                   {cycleId ? <span>{`周期 ${cycleId}`}</span> : null}
-                  {lastReportId ? <span>{`Last report ${lastReportId}`}</span> : null}
+                  {lastReportId ? <span>{`最新汇报 ${lastReportId}`}</span> : null}
                 </Space>
                 {route ? (
                   <div className={styles.routeActions}>
@@ -369,17 +370,17 @@ export function renderOperatorAgentReportsSection(
                   <Text strong>{headline}</Text>
                   <Tag color={runtimeStatusColor(status)}>{translateRuntimeStatus(status)}</Tag>
                   {focused ? <Tag color="blue">已聚焦</Tag> : null}
-                  {processed ? <Tag color="success">Consumed</Tag> : <Tag color="warning">Unconsumed</Tag>}
-                  {needsFollowup ? <Tag color="warning">Needs follow-up</Tag> : null}
+                  {processed ? <Tag color="success">已处理</Tag> : <Tag color="warning">未处理</Tag>}
+                  {needsFollowup ? <Tag color="warning">待跟进</Tag> : null}
                   {evidenceCount > 0 ? <Tag>{`证据 ${evidenceCount}`}</Tag> : null}
                   {riskLevel ? <Tag color={runtimeRiskColor(riskLevel)}>{riskLevel}</Tag> : null}
                   {reportKind ? <Tag>{reportKind}</Tag> : null}
                 </Space>
                 {summary ? <Text type="secondary">{summary}</Text> : null}
                 <Space wrap size={[8, 6]} className={styles.selectionMeta}>
-                  {ownerAgentId ? <span>{`Owner ${ownerAgentId}`}</span> : null}
+                  {ownerAgentId ? <span>{`负责人 ${ownerAgentId}`}</span> : null}
                   {laneId ? <span>{`泳道 ${laneId}`}</span> : null}
-                  {assignmentId ? <span>{`Assignment ${assignmentId}`}</span> : null}
+                  {assignmentId ? <span>{`派工 ${assignmentId}`}</span> : null}
                 </Space>
                 {route ? (
                   <div className={styles.routeActions}>
@@ -415,7 +416,7 @@ export function renderOperatorMediaAnalysesSection(
   return (
     <section key={sectionKey} className={styles.detailSection}>
       <div className={styles.detailSectionTitle}>
-        Media Analyses <Tag>{sectionValue.length}</Tag>
+        媒体分析 <Tag>{sectionValue.length}</Tag>
       </div>
 
       {sectionValue.length === 0 ? (
@@ -427,7 +428,7 @@ export function renderOperatorMediaAnalysesSection(
               typeof analysis.analysis_id === "string" && analysis.analysis_id
                 ? analysis.analysis_id
                 : `analysis-${index + 1}`;
-            const title = resolveMediaTitle(analysis);
+            const title = localizeRuntimeText(resolveMediaTitle(analysis));
             const summary =
               (typeof analysis.summary === "string" && analysis.summary) ||
               (Array.isArray(analysis.key_points)
@@ -470,9 +471,9 @@ export function renderOperatorMediaAnalysesSection(
                 </Space>
                 <Text type="secondary">{summary}</Text>
                 <Space wrap size={[8, 6]} className={styles.selectionMeta}>
-                  {workContextId ? <span>{`Work context ${workContextId}`}</span> : null}
+                  {workContextId ? <span>{`工作上下文 ${workContextId}`}</span> : null}
                   {typeof analysis.thread_id === "string" && analysis.thread_id ? (
-                    <span>{`Thread ${analysis.thread_id}`}</span>
+                    <span>{`线程 ${analysis.thread_id}`}</span>
                   ) : null}
                 </Space>
                 <div className={styles.routeActions}>
@@ -482,7 +483,7 @@ export function renderOperatorMediaAnalysesSection(
                       openRoute(route, title);
                     }}
                   >
-                    Open Analysis
+                    打开分析
                   </Button>
                 </div>
               </Card>

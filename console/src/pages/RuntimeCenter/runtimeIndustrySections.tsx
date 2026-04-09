@@ -77,7 +77,9 @@ function renderSynthesisFollowupList(
               {String(finding.headline || finding.summary || finding.report_id)}
             </Text>
             {nonEmpty(finding.followup_reason) ? (
-              <Text type="secondary">{nonEmpty(finding.followup_reason)}</Text>
+              <Text type="secondary">
+                {localizeRuntimeText(nonEmpty(finding.followup_reason) || "")}
+              </Text>
             ) : null}
           </Space>
         );
@@ -106,22 +108,22 @@ function renderMainBrainPlanningSection({
   synthesisFollowups: IndustrySynthesisFinding[];
 }) {
   return (
-    <Card size="small" title="Main-Brain Planning" style={{ marginTop: 16 }}>
+    <Card size="small" title="主脑规划" style={{ marginTop: 16 }}>
       <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
-        <Tag>{`Lanes ${lanes.length}`}</Tag>
+        <Tag>{`泳道 ${lanes.length}`}</Tag>
         <Tag>{`派工 ${payload.assignments.length}`}</Tag>
         <Tag>{`汇报 ${payload.agent_reports.length}`}</Tag>
         {followupReports.length > 0 ? (
           <Tag color="warning">{`跟进 ${followupReports.length}`}</Tag>
         ) : null}
         {payload.staffing?.pending_proposals.length ? (
-          <Tag>{`Staffing proposals ${payload.staffing.pending_proposals.length}`}</Tag>
+          <Tag>{`编制提案 ${payload.staffing.pending_proposals.length}`}</Tag>
         ) : null}
         {payload.staffing?.temporary_seats.length ? (
-          <Tag>{`Temporary seats ${payload.staffing.temporary_seats.length}`}</Tag>
+          <Tag>{`临时席位 ${payload.staffing.temporary_seats.length}`}</Tag>
         ) : null}
         {pendingSignalCount > 0 ? (
-          <Tag color="warning">{`Pending signals ${pendingSignalCount}`}</Tag>
+          <Tag color="warning">{`待处理信号 ${pendingSignalCount}`}</Tag>
         ) : null}
         {payload.current_cycle?.status ? (
           <Tag color={runtimeStatusColor(payload.current_cycle.status)}>
@@ -134,7 +136,7 @@ function renderMainBrainPlanningSection({
       </Text>
       {payload.current_cycle ? (
         <div style={{ marginTop: 10 }}>
-          <Text strong>{payload.current_cycle.title || "Current cycle"}</Text>
+          <Text strong>{payload.current_cycle.title || "当前周期"}</Text>
           {payload.current_cycle.summary ? (
             <div style={{ marginTop: 4 }}>
               <Text type="secondary">{payload.current_cycle.summary}</Text>
@@ -259,7 +261,9 @@ function renderMainBrainSynthesisSection({
           <Space direction="vertical" size={4} style={{ width: "100%" }}>
             {recommendedActions.slice(0, 3).map((action) => (
               <Text key={action.action_id} type="secondary">
-                {String(action.title || action.summary || action.action_id)}
+                {localizeRuntimeText(
+                  String(action.title || action.summary || action.action_id),
+                )}
               </Text>
             ))}
           </Space>
@@ -268,12 +272,12 @@ function renderMainBrainSynthesisSection({
       {controlCoreContract.length > 0 ? (
         <>
           <div className={styles.detailSectionTitle} style={{ marginTop: 10 }}>
-            Control Contract
+            控制合同
           </div>
           <Space direction="vertical" size={4} style={{ width: "100%" }}>
             {controlCoreContract.map((item) => (
               <Text key={item} type="secondary">
-                {item}
+                {localizeRuntimeText(item)}
               </Text>
             ))}
           </Space>
@@ -577,20 +581,26 @@ export function renderIndustryExecutionFocusSection(
         ? backlogNode.summary || backlogNode.label
         : null;
   const currentFocus =
-    liveFocusSummary ||
-    execution?.current_focus ||
-    mainChain?.current_focus ||
-    "暂无活动焦点";
+    localizeRuntimeText(
+      liveFocusSummary ||
+        execution?.current_focus ||
+        mainChain?.current_focus ||
+        "暂无活动焦点",
+    );
   const currentOwner =
-    execution?.current_owner ||
-    mainChain?.current_owner ||
-    payload.agents.find((agent) => agent.agent_id === currentOwnerAgentId)?.name ||
-    "Execution core";
+    localizeRuntimeText(
+      execution?.current_owner ||
+        mainChain?.current_owner ||
+        payload.agents.find((agent) => agent.agent_id === currentOwnerAgentId)?.name ||
+        "主脑执行核心",
+    );
   const currentRisk = execution?.current_risk || mainChain?.current_risk || "unknown";
   const latestEvidence =
-    execution?.latest_evidence_summary ||
-    mainChain?.latest_evidence_summary ||
-    "No evidence written yet";
+    localizeRuntimeText(
+      execution?.latest_evidence_summary ||
+        mainChain?.latest_evidence_summary ||
+        "还没有写入证据",
+    );
   const loopState = mainChain?.loop_state || execution?.status || payload.status;
   const evidenceCount = execution?.evidence_count ?? payload.evidence.length;
   const currentFocusRoute = assignmentNode?.route || backlogNode?.route || null;
@@ -628,6 +638,7 @@ export function renderIndustryExecutionFocusSection(
         `动作 ${recommendedActions.length}`,
       ].join(" / ")
     : "当前还没有周期综合结果。";
+  const localizedOwnerScope = localizeRuntimeText(payload.owner_scope || "未设置");
 
   const items = [
     {
@@ -677,7 +688,7 @@ export function renderIndustryExecutionFocusSection(
       key: "team-status",
       label: "当前团队状态",
       value: translateRuntimeStatus(payload.status),
-      note: `循环 ${translateRuntimeStatus(loopState)} · 范围 ${payload.owner_scope}`,
+      note: `循环 ${translateRuntimeStatus(loopState)} · 范围 ${localizedOwnerScope}`,
       status: payload.status,
       route: null,
       routeTitle: payload.label,
@@ -822,7 +833,7 @@ export function renderIndustryMainChainSection(
   const controlChain = presentControlChain(graph);
   return (
     <section key="industry-main-chain" className={styles.detailSection}>
-      <div className={styles.detailSectionTitle}>Spider Main Chain</div>
+      <div className={styles.detailSectionTitle}>主脑控制链</div>
       <div className={styles.mainChainHeader}>
         <Tag color={runtimeStatusColor(controlChain.loopState || "unknown")}>
           {controlChain.loopStateLabel}
@@ -834,7 +845,7 @@ export function renderIndustryMainChainSection(
         ) : null}
         {controlChain.currentOwner ? (
           <span className={styles.mainChainHeaderText}>
-            Owner: {controlChain.currentOwner}
+            {`负责人：${controlChain.currentOwner}`}
           </span>
         ) : null}
         {controlChain.currentRisk ? (
@@ -875,7 +886,7 @@ export function renderIndustryMainChainSection(
                         openRoute(node.route!, node.label);
                       }}
                     >
-                      Open
+                      打开
                     </Button>
                   ) : null}
                 </Space>

@@ -431,6 +431,11 @@ const EXACT_RUNTIME_TEXT_MAP: Record<string, string> = {
     "已通过内核托管的命令执行服务派发命令。",
   "Dispatched query through the kernel-owned query execution service.":
     "已通过内核托管的查询执行服务派发查询。",
+  "Execution core": "主脑执行核心",
+  "Execution Core": "主脑执行核心",
+  "No evidence written yet": "还没有写入证据",
+  operator: "操作员",
+  unknown: "未知",
 };
 
 const RUNTIME_REGEX_TEXT_MAP: Array<{

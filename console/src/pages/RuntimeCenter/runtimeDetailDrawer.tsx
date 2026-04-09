@@ -76,7 +76,7 @@ export function renderRecordCard(
     >
       {selected ? (
         <div style={{ marginBottom: 8 }}>
-          <Tag color="blue">Focused</Tag>
+          <Tag color="blue">已聚焦</Tag>
         </div>
       ) : null}
       {rows.length > 0 ? (

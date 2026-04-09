@@ -2,9 +2,9 @@ import { normalizeSpiderMeshBrand } from "../utils/brand";
 import { normalizeDisplayChinese } from "../text";
 
 const KNOWN_AGENT_NAMES: Record<string, string> = {
-  "copaw-agent-runner": "Spider Mesh 主脑",
-  "copaw-governance": "Spider Mesh 治理核心",
-  "copaw-scheduler": "Spider Mesh 调度核心",
+  "copaw-agent-runner": "超级伙伴主脑",
+  "copaw-governance": "超级伙伴治理核心",
+  "copaw-scheduler": "超级伙伴调度核心",
 };
 
 const RUNTIME_STATUS_LABELS: Record<string, string> = {

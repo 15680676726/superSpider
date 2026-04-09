@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { ReloadOutlined } from "@ant-design/icons";
 import {
   Alert,
   Button,
@@ -11,7 +11,8 @@ import {
   Typography,
   message,
 } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
+import { useCallback, useEffect, useState } from "react";
+
 import api from "../../api";
 import type { RuntimeScheduleSummary } from "../../api";
 
@@ -49,9 +50,15 @@ function formatTime(value?: string | null): string {
 }
 
 function statusColor(status: string): string {
-  if (["success", "running", "scheduled"].includes(status)) return "green";
-  if (["paused"].includes(status)) return "orange";
-  if (["error", "deleted"].includes(status)) return "red";
+  if (["success", "running", "scheduled"].includes(status)) {
+    return "green";
+  }
+  if (status === "paused") {
+    return "orange";
+  }
+  if (["error", "deleted"].includes(status)) {
+    return "red";
+  }
   return "default";
 }
 
@@ -100,7 +107,7 @@ export default function CalendarPage() {
       } else {
         await api.resumeRuntimeSchedule(scheduleId);
       }
-      message.success(`${ACTION_LABELS[action]}: ${scheduleId}`);
+      message.success(`${ACTION_LABELS[action]}：${scheduleId}`);
       await loadSchedules();
     } catch (mutationError) {
       message.error(
@@ -135,6 +142,7 @@ export default function CalendarPage() {
       </Card>
 
       {error ? <Alert type="error" showIcon message={error} /> : null}
+
       {loading ? (
         <Card>
           <Spin />

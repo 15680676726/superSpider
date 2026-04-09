@@ -285,17 +285,17 @@ describe("runtimeDetailDrawer", () => {
     );
 
     expect(screen.getByText("运行焦点")).toBeTruthy();
-    expect(screen.getByText("Main-Brain Planning")).toBeTruthy();
-    expect(screen.getByText("Spider Main Chain")).toBeTruthy();
+    expect(screen.getByText("主脑规划")).toBeTruthy();
+    expect(screen.getByText("主脑控制链")).toBeTruthy();
     expect(screen.getByText("已聚焦派工")).toBeTruthy();
     expect(screen.getAllByText("增长获客").length).toBeGreaterThan(0);
     expect(screen.getAllByText("本周增长与交付协调").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Unconsumed").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Needs follow-up").length).toBeGreaterThan(0);
-    expect(screen.getByText("Media Analyses")).toBeTruthy();
-    expect(screen.getByText("Seller brief")).toBeTruthy();
-    expect(screen.getByText("Open Analysis")).toBeTruthy();
-    expect(screen.getByText("Work context ctx-media-ops")).toBeTruthy();
+    expect(screen.getAllByText("未处理").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("待跟进").length).toBeGreaterThan(0);
+    expect(screen.getByText("媒体分析")).toBeTruthy();
+    expect(screen.getByText("销售简报")).toBeTruthy();
+    expect(screen.getByText("打开分析")).toBeTruthy();
+    expect(screen.getByText("工作上下文 ctx-media-ops")).toBeTruthy();
     expect(screen.queryByText("Execution")).toBeNull();
     expect(screen.queryByText("Main Chain")).toBeNull();
   });
@@ -392,8 +392,8 @@ describe("runtimeDetailDrawer", () => {
       ) as React.ReactElement,
     );
 
-    expect(screen.getAllByText("Coordination").length).toBeGreaterThan(0);
-    expect(screen.getByText("App Family Twins")).toBeTruthy();
+    expect(screen.getAllByText("协调情况").length).toBeGreaterThan(0);
+    expect(screen.getByText("应用族分身")).toBeTruthy();
     expect(screen.getByText("browser_backoffice")).toBeTruthy();
     expect(screen.getByText("office_document")).toBeTruthy();
     expect(screen.getByText("sticky-active-seat")).toBeTruthy();

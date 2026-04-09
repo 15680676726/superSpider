@@ -1,12 +1,12 @@
 const EXACT_TEXT_MAP: Record<string, string> = {
   "Acts as the team's visible main brain: decomposes goals, delegates concrete subtasks to specialist teammates, supervises execution, verifies evidence, and does not become the leaf worker.":
-    "作为团队可见的 Spider Mesh 主脑：负责拆解目标、分派具体子任务给专业协作角色、监督执行、核验证据，不再亲自承担叶子执行。",
+    "作为团队可见的超级伙伴主脑：负责拆解目标、分派具体子任务给专业协作角色、监督执行、核验证据，不再亲自承担叶子执行。",
   "Turn the current industry brief into delegated child tasks with explicit owners, collect evidence and status back, and surface staffing gaps instead of executing directly.":
     "将当前行业简报拆解为带明确负责人的子任务，回收证据与状态；若没有合适协作角色承接，就显式暴露补位或路由缺口。",
   "Collects domain, stakeholder, peer, and operating signals and turns them into usable evidence.":
     "负责收集行业、干系人、同业与经营信号，并整理为可直接使用的证据。",
   "Produce the highest-signal research the execution core can directly convert into action.":
-    "产出 Spider Mesh 主脑可以直接转化为行动的高信号研究结果。",
+    "产出超级伙伴主脑可以直接转化为行动的高信号研究结果。",
   "Turn the current brief into the next highest-leverage move inside this role envelope.":
     "在当前角色职责边界内，把现有简报转化为下一步最高杠杆动作。",
   "kernel-governed dispatch only": "仅允许通过内核治理后的分派链路执行",
@@ -146,7 +146,7 @@ const REGEX_TEXT_MAP: Array<{
   },
   {
     pattern: /^AI-generated industry team draft for (.+?) in (.+?)\.$/,
-    replace: (label, industry) => `${label} 在 ${industry} 场景下的 Spider Mesh 行业身份草案。`,
+    replace: (label, industry) => `${label} 在 ${industry} 场景下的超级伙伴行业身份草案。`,
   },
   {
     pattern: /^AI generated a (.+?) industry draft for (.+?) with (\d+) non-core role\(s\)\.$/,

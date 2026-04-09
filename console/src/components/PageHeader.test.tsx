@@ -8,9 +8,9 @@ import { PageHeader } from "./PageHeader";
 
 describe("PageHeader", () => {
   it("renders runtime eyebrow, stats and actions", () => {
-    render(
+    const { container } = render(
       <PageHeader
-          eyebrow="Runtime Center"
+          eyebrow="运行中心"
           title="主脑驾驶舱"
           description="让运行事实、风险与证据优先可见。"
           stats={[
@@ -21,13 +21,16 @@ describe("PageHeader", () => {
       />,
     );
 
-    expect(screen.getByText("Runtime Center")).toBeInTheDocument();
+    expect(screen.getByText("运行中心")).toBeInTheDocument();
     expect(screen.getByText("主脑驾驶舱")).toBeInTheDocument();
     expect(screen.getByText("让运行事实、风险与证据优先可见。")).toBeInTheDocument();
     expect(screen.getByText("运行中")).toBeInTheDocument();
     expect(screen.getByText("06")).toBeInTheDocument();
     expect(screen.getByText("待确认")).toBeInTheDocument();
     expect(screen.getByText("02")).toBeInTheDocument();
+    expect(
+      container.querySelector('[aria-label="主脑驾驶舱统计"]'),
+    ).not.toBeNull();
     expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
   });
 });

@@ -391,7 +391,11 @@ export default function IndustryRuntimeCockpitPanel({
               : "已聚焦待办"
           }
           description={[
-            focusSelection.summary || focusSelection.title || "运行详情当前已收束到选中的子视图。",
+            presentText(
+              focusSelection.summary ||
+                focusSelection.title ||
+                "运行详情当前已收束到选中的子视图。",
+            ),
             focusSelection.status
               ? `状态 ${presentIndustryRuntimeStatus(focusSelection.status)}`
               : null,
@@ -433,21 +437,25 @@ export default function IndustryRuntimeCockpitPanel({
                     <Space direction="vertical" size={6} style={{ width: "100%" }}>
                       <Space wrap>
                         <Text strong style={{ color: "var(--baize-text-main)" }}>
-                          {followupReports[0].headline || followupReports[0].report_id}
+                          {formatIndustryDisplayToken(
+                            followupReports[0].headline || followupReports[0].report_id,
+                          )}
                         </Text>
                         <Tag color="orange">待跟进</Tag>
                         {followupReports[0].followup_reason ? (
-                          <Tag>{followupReports[0].followup_reason}</Tag>
+                          <Tag>{presentText(followupReports[0].followup_reason)}</Tag>
                         ) : null}
                         {resolveReportWorkContextId(followupReports[0]) ? (
                           <Tag color="blue">{resolveReportWorkContextId(followupReports[0])}</Tag>
                         ) : null}
                       </Space>
                       <Text type="secondary">
-                        {followupReports[0].summary ||
-                          followupReports[0].recommendation ||
-                          followupReports[0].findings[0] ||
-                          "已记录跟进汇报。"}
+                        {presentText(
+                          followupReports[0].summary ||
+                            followupReports[0].recommendation ||
+                            followupReports[0].findings[0] ||
+                            "已记录跟进汇报。",
+                        )}
                       </Text>
                       <Space wrap>
                         {followupReports[0].assignment_id ? (
@@ -482,18 +490,22 @@ export default function IndustryRuntimeCockpitPanel({
                     <Space direction="vertical" size={6} style={{ width: "100%" }}>
                       <Space wrap>
                         <Text strong style={{ color: "var(--baize-text-main)" }}>
-                          {focusedBacklog.title || focusedBacklog.backlog_item_id}
+                          {formatIndustryDisplayToken(
+                            focusedBacklog.title || focusedBacklog.backlog_item_id,
+                          )}
                         </Text>
                         <Tag color={pageRuntimeStatusColor(focusedBacklog.status)}>
                           {presentIndustryRuntimeStatus(focusedBacklog.status)}
                         </Tag>
                         <Tag>{`P${focusedBacklog.priority}`}</Tag>
-                        <Tag>{focusedBacklog.source_kind}</Tag>
+                        <Tag>{formatIndustryDisplayToken(focusedBacklog.source_kind)}</Tag>
                       </Space>
                       <Text type="secondary">
-                        {focusedBacklog.summary ||
-                          focusedBacklog.source_ref ||
-                          "No backlog summary captured yet."}
+                        {presentText(
+                          focusedBacklog.summary ||
+                            focusedBacklog.source_ref ||
+                            "还没有记录待办摘要。",
+                        )}
                       </Text>
                       <Space wrap>
                         <Tag>{`证据 ${focusedBacklog.evidence_ids.length}`}</Tag>
@@ -525,17 +537,21 @@ export default function IndustryRuntimeCockpitPanel({
                     <Space direction="vertical" size={6} style={{ width: "100%" }}>
                       <Space wrap>
                         <Text strong style={{ color: "var(--baize-text-main)" }}>
-                          {focusedAssignment.title || focusedAssignment.assignment_id}
+                          {formatIndustryDisplayToken(
+                            focusedAssignment.title || focusedAssignment.assignment_id,
+                          )}
                         </Text>
                         <Tag color={pageRuntimeStatusColor(focusedAssignment.status)}>
                           {presentIndustryRuntimeStatus(focusedAssignment.status)}
                         </Tag>
                         {focusedAssignment.report_back_mode ? (
-                          <Tag>{focusedAssignment.report_back_mode}</Tag>
+                          <Tag>{formatIndustryDisplayToken(focusedAssignment.report_back_mode)}</Tag>
                         ) : null}
                       </Space>
                       <Text type="secondary">
-                        {focusedAssignment.summary || "No assignment summary captured yet."}
+                        {presentText(
+                          focusedAssignment.summary || "还没有记录派工摘要。",
+                        )}
                       </Text>
                       <Space wrap>
                         <Tag>{`证据 ${focusedAssignment.evidence_ids.length}`}</Tag>
@@ -558,7 +574,9 @@ export default function IndustryRuntimeCockpitPanel({
                 <Tag color={pageRuntimeStatusColor(detail.execution.status)}>
                   {presentIndustryRuntimeStatus(detail.execution.status)}
                 </Tag>
-                {detail.execution.current_owner ? <Tag>{detail.execution.current_owner}</Tag> : null}
+                {detail.execution.current_owner ? (
+                  <Tag>{formatIndustryDisplayToken(detail.execution.current_owner)}</Tag>
+                ) : null}
                 {detail.execution.current_stage ? <Tag>{formatIndustryDisplayToken(detail.execution.current_stage)}</Tag> : null}
                 {detail.execution.updated_at ? (
                   <Text type="secondary" style={{ fontSize: 12 }}>
@@ -570,8 +588,16 @@ export default function IndustryRuntimeCockpitPanel({
                 size="small"
                 column={2}
                 items={[
-                  { key: "focus", label: "当前焦点", children: detail.execution.current_focus || "-" },
-                  { key: "owner", label: "当前负责人", children: detail.execution.current_owner || "-" },
+                  {
+                    key: "focus",
+                    label: "当前焦点",
+                    children: presentText(detail.execution.current_focus),
+                  },
+                  {
+                    key: "owner",
+                    label: "当前负责人",
+                    children: presentText(detail.execution.current_owner),
+                  },
                   {
                     key: "risk",
                     label: "当前风险",
@@ -582,17 +608,24 @@ export default function IndustryRuntimeCockpitPanel({
                   {
                     key: "evidence",
                     label: "最新证据",
-                    children:
+                    children: presentText(
                       detail.execution.latest_evidence_summary ||
-                      (detail.execution.evidence_count > 0
-                        ? `共 ${detail.execution.evidence_count} 条证据`
-                        : "暂无证据"),
+                        (detail.execution.evidence_count > 0
+                          ? `共 ${detail.execution.evidence_count} 条证据`
+                          : "暂无证据"),
+                    ),
                   },
-                  { key: "next", label: "下一步", children: detail.execution.next_step || "-" },
+                  {
+                    key: "next",
+                    label: "下一步",
+                    children: presentText(detail.execution.next_step),
+                  },
                   {
                     key: "trigger",
                     label: "触发来源",
-                    children: detail.execution.trigger_reason || detail.execution.trigger_source || "-",
+                    children: presentText(
+                      detail.execution.trigger_reason || detail.execution.trigger_source,
+                    ),
                   },
                 ]}
               />
@@ -997,20 +1030,22 @@ export default function IndustryRuntimeCockpitPanel({
                     <Space direction="vertical" size={8} style={{ width: "100%" }}>
                       <Space wrap>
                         <Text strong style={{ color: "var(--baize-text-main)" }}>
-                          {report.headline || report.report_id}
+                          {formatIndustryDisplayToken(report.headline || report.report_id)}
                         </Text>
                         <Tag color={pageRuntimeStatusColor(report.status)}>
                           {presentIndustryRuntimeStatus(report.status)}
                         </Tag>
-                        <Tag>{report.report_kind}</Tag>
-                        {report.result ? <Tag>{report.result}</Tag> : null}
+                        <Tag>{formatIndustryDisplayToken(report.report_kind)}</Tag>
+                        {report.result ? <Tag>{formatIndustryDisplayToken(report.result)}</Tag> : null}
                         {report.processed ? <Tag color="green">已处理</Tag> : null}
                         {report.needs_followup ? <Tag color="orange">待跟进</Tag> : null}
                         {workContextId ? <Tag color="blue">{workContextId}</Tag> : null}
                       </Space>
-                      <Text type="secondary">{summary}</Text>
+                      <Text type="secondary">{presentText(summary)}</Text>
                       <Space wrap>
-                        {report.followup_reason ? <Tag>{report.followup_reason}</Tag> : null}
+                        {report.followup_reason ? (
+                          <Tag>{presentText(report.followup_reason)}</Tag>
+                        ) : null}
                         <Tag>{`发现 ${report.findings.length}`}</Tag>
                         <Tag>{`证据 ${report.evidence_ids.length}`}</Tag>
                         {report.updated_at ? (

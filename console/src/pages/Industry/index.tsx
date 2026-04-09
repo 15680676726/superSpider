@@ -170,7 +170,7 @@ export default function IndustryPage() {
         aside={
           selectedIsCurrentBuddyCarrier ? (
             <Tag color="processing" style={{ borderRadius: 999 }}>
-              当前 Buddy 载体
+              当前主方向载体
             </Tag>
           ) : null
         }

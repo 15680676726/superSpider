@@ -100,14 +100,14 @@ describe("SystemSettingsPage", () => {
     ]);
   });
 
-  it("keeps the page focused on maintenance and redirects runtime facts to Runtime Center", async () => {
+  it("keeps the page focused on maintenance and redirects runtime facts to the main-brain cockpit", async () => {
     render(<SystemSettingsPage />);
 
     await waitFor(() => {
       expect(screen.getByText("系统维护")).toBeInTheDocument();
     });
 
-    expect(screen.getAllByText(/Runtime Center/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/主脑驾驶舱/).length).toBeGreaterThan(0);
     expect(screen.getByText("备份与恢复")).toBeInTheDocument();
     expect(screen.getByText("健康自检与维护")).toBeInTheDocument();
     expect(screen.getAllByText("提供商回退").length).toBeGreaterThan(0);

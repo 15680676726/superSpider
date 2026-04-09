@@ -40,7 +40,7 @@ export function PageHeader({
             <p className="baize-page-header-description">{description}</p>
           )}
           {stats?.length ? (
-            <div className="baize-page-header-stats" aria-label={`${title} stats`}>
+            <div className="baize-page-header-stats" aria-label={`${title}统计`}>
               {stats.map((stat) => (
                 <div key={stat.label} className="baize-page-header-stat">
                   <span className="baize-page-header-stat-label">{stat.label}</span>

@@ -46,7 +46,6 @@ import {
   translateRuntimeEntryKind,
   translateRuntimeCardTitle,
   translateRuntimeCardSummary,
-  translateRuntimeSourceList,
   translateRuntimeEntryTitle,
   translateRuntimeEntrySummary,
   translateRuntimeFieldLabel,

@@ -140,6 +140,34 @@ describe("runtimeCenter viewHelpers", () => {
     expect(screen.queryByText("暂无活动目标")).toBeNull();
   });
 
+  it("localizes fallback owner, risk scope, and evidence copy for ordinary users", () => {
+    render(
+      renderIndustryExecutionFocusSection(
+        {
+          ...baseDetail,
+          owner_scope: "operator",
+          execution: {
+            status: "idle",
+            current_focus: "",
+            current_owner: "",
+            current_risk: "unknown",
+            evidence_count: 0,
+            latest_evidence_summary: "",
+          },
+          main_chain: null,
+        },
+        vi.fn(),
+      ) as React.ReactElement,
+    );
+
+    expect(screen.getByText("主脑执行核心")).toBeTruthy();
+    expect(screen.getAllByText("未知").length).toBeGreaterThan(0);
+    expect(screen.getByText("还没有写入证据")).toBeTruthy();
+    expect(screen.getByText("循环 待命 · 范围 操作员")).toBeTruthy();
+    expect(screen.queryByText("Execution core")).toBeNull();
+    expect(screen.queryByText("No evidence written yet")).toBeNull();
+  });
+
   it("renders shared risk labels instead of raw runtime risk tokens", () => {
     render(
       renderIndustryExecutionFocusSection(
@@ -263,7 +291,7 @@ describe("runtimeCenter viewHelpers", () => {
 
     expect(openRoute).toHaveBeenCalledWith(
       "/api/runtime-center/industry/industry-1?assignment_id=assignment-1",
-      "Live Assignment Title",
+      "Live 派工 Title",
     );
     expect(openRoute).not.toHaveBeenCalledWith(
       "/api/runtime-center/goals/goal-legacy",
@@ -369,14 +397,15 @@ describe("runtimeCenter viewHelpers", () => {
       ) as React.ReactElement,
     );
 
-    expect(screen.getAllByText("Main-Brain Planning").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("主脑规划").length).toBeGreaterThan(0);
     expect(screen.getByText("增长获客")).toBeTruthy();
     expect(screen.getByText("交付履约")).toBeTruthy();
     expect(screen.getByText("本周增长与交付协调")).toBeTruthy();
     expect(screen.getByText("派工 1")).toBeTruthy();
     expect(screen.getByText("汇报 1")).toBeTruthy();
-    expect(screen.getAllByText("Awaiting explicit approval").length).toBeGreaterThan(0);
-    expect(screen.getByText("Approve closer staffing")).toBeTruthy();
+    expect(screen.getAllByText("等待明确批准").length).toBeGreaterThan(0);
+    expect(screen.getByText("批准补充岗位编制")).toBeTruthy();
+    expect(screen.getByText("控制合同")).toBeTruthy();
     expect(screen.getByText("synthesize-before-reassign")).toBeTruthy();
   });
 

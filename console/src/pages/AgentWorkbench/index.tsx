@@ -299,7 +299,7 @@ export default function AgentWorkbenchPage() {
           <Space direction="vertical" size={12} style={{ width: "100%" }}>
             <Space wrap>
               <Text strong>主脑与执行位</Text>
-              <Tag color="blue">Spider Mesh 主脑</Tag>
+              <Tag color="blue">超级伙伴主脑</Tag>
               <Tag color={statusColor(executionCoreAgent.status)}>
                 {getIndustryRuntimeStatusLabel(executionCoreAgent.status)}
               </Tag>
@@ -308,7 +308,7 @@ export default function AgentWorkbenchPage() {
               ) : null}
             </Space>
             <Paragraph style={{ marginBottom: 0 }}>
-              Spider Mesh 主脑保留长期使命与派工权；下方面板只聚焦当前所选执行位的
+              超级伙伴主脑保留长期使命与派工权；下方面板只聚焦当前所选执行位的
               执行、回流、升级与待主脑裁决事项。
             </Paragraph>
             <div className={styles.agentSwitcherGrid}>
@@ -350,7 +350,7 @@ export default function AgentWorkbenchPage() {
                     executionCoreAgent.role_summary ||
                       executionCoreAgent.current_focus ||
                       executionCoreAgent.mission,
-                  ) || "负责拆解目标、分派执行位、回收证据并监督结果。点击返回 Runtime Center 查看主脑驾驶舱。"}
+                  ) || "负责拆解目标、分派执行位、回收证据并监督结果。点击返回主脑驾驶舱查看全局运行。"}
                 </Paragraph>
               </Card>
               {executionSeatAgents.map((agent) => (
@@ -386,7 +386,7 @@ export default function AgentWorkbenchPage() {
                         agent.current_focus ||
                           agent.role_summary ||
                           agent.environment_summary,
-                      ) || "由 Spider Mesh 主脑统一分派任务。"}
+                      ) || "由超级伙伴主脑统一分派任务。"}
                     </Text>
                   </div>
                   {false ? (

@@ -109,8 +109,8 @@ function ChannelsPage() {
   return (
     <div className={`${styles.channelsPage} page-container`}>
       <PageHeader
-        eyebrow="Channels"
-        title="频道"
+        eyebrow="渠道设置"
+        title="渠道中心"
         description="管理和配置消息频道，让主脑的输入输出链路保持稳定。"
         stats={[
           { label: "当前可见", value: String(cards.length).padStart(2, "0") },

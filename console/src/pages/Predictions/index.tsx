@@ -384,9 +384,9 @@ export default function PredictionsPage() {
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }} className="page-container">
       <PageHeader
-        eyebrow="Morning / Evening Review"
+        eyebrow="晨晚复盘"
         title="主脑晨会 / 晚会复盘中心"
-        description="这里只展示由 main-brain operating cycle 自动生成的正式复盘案例。这里不是独立预测开关，而是主脑晨会 / 晚会统一查看周期、回流、backlog 与决策机会的入口。"
+        description="这里只展示由主脑运行周期自动生成的正式复盘案例。这里不是独立预测开关，而是主脑晨会 / 晚会统一查看周期、回流、待办与决策机会的入口。"
         stats={[
           { label: "复盘案例", value: String(cases.length).padStart(2, "0") },
           { label: "待完成", value: String(openCaseCount).padStart(2, "0") },
@@ -414,10 +414,10 @@ export default function PredictionsPage() {
         description={
           <Space direction="vertical" size={2}>
             <Text>
-              案例由 operating cycle 自动生成，当前正式窗口只有 morning review 和 evening review。
+              案例由主脑运行周期自动生成，当前正式窗口只有晨会复盘和晚会复盘。
             </Text>
             <Text>
-              推荐动作执行后统一进入 kernel / decision 主链，再回流 backlog、assignment 与下一轮 cycle。
+              推荐动作执行后统一进入正式决策主链，再回流待办、派工与下一轮周期。
             </Text>
             <Text>
               如果这里暂时为空，说明当前还没有新的复盘事实，而不是前台开关没有打开。

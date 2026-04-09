@@ -639,12 +639,14 @@ function formatTimestamp(value?: string | null, locale?: string): string {
 }
 
 function presentText(value?: string | null): string {
-  return value && value.trim() ? value : "-";
+  return value && value.trim() ? normalizeDisplayChinese(value.trim()) : "-";
 }
 
 function presentList(values?: Array<string | null | undefined>): string {
   const items = (values || [])
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .map((item) =>
+      typeof item === "string" ? normalizeDisplayChinese(item.trim()) : "",
+    )
     .filter(Boolean);
   return items.length ? items.join(" / ") : "-";
 }

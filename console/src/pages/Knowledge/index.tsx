@@ -1280,7 +1280,7 @@ export default function KnowledgePage() {
                           </Title>
                           <Tag color={isExecutionCore(selectedAgent) ? "blue" : "default"}>
                             {isExecutionCore(selectedAgent)
-                              ? "Spider Mesh 核心主脑"
+                              ? "超级伙伴核心主脑"
                               : "全职执行位"}
                           </Tag>
                         </Space>
