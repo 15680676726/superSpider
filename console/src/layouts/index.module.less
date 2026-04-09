@@ -1,88 +1,217 @@
+/* ================================================================
+   MainLayout + Sidebar + RightPanel 布局样式
+   Cyber Holo UI — 三栏结构
+   ================================================================ */
+
+/* ---- 根容器 ---- */
 .mainLayout {
   height: 100vh;
-}
-
-.header {
-  height: 64px;
-  padding: 0 24px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: rgba(3, 7, 15, 0.65) !important;
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(201, 168, 76, 0.18);
+  overflow: hidden;
+  background: var(--ch-bg);
 }
 
-.headerTitle {
-  font-size: 18px;
-  font-weight: 600;
-  color: #EEF2FF;
-}
-
+/* ================================================================
+   左侧导航栏 — 深色哑光玻璃
+   ================================================================ */
 .sidebar {
-  background: rgba(3, 7, 15, 0.65) !important;
-  backdrop-filter: blur(20px) !important;
-  border-right: 1px solid rgba(201, 168, 76, 0.18);
-  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
-  overflow: auto;
+  /* 核心：透明玻璃感，能透出背景渐变色 */
+  background: rgba(255, 255, 255, 0.04) !important;
+  backdrop-filter: blur(24px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(160%) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+  overflow: hidden;
   height: 100vh;
-  z-index: 10;
+  z-index: 30;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  /* 无 backdrop-filter，保持哑光质感 */
 }
 
 .logoWrapper {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 20px 16px 16px;
+  padding: 18px 14px 14px;
+  border-bottom: 1px solid var(--ch-border);
+  flex-shrink: 0;
+}
+
+.brandBlock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .logo {
   width: 36px;
   height: 36px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #1B4FD8, #C9A84C);
-  box-shadow: 0 0 15px rgba(201, 168, 76, 0.35);
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--ch-neon) 0%, var(--ch-cyan) 100%);
+  box-shadow: 0 0 16px var(--ch-neon-glow);
   position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .logo::after {
-  content: "";
-  position: absolute;
-  top: 20%;
-  left: 20%;
-  width: 60%;
-  height: 60%;
-  background: rgba(255, 255, 255, 0.2);
-  filter: blur(4px);
-  border-radius: 50%;
+  content: "C";
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+}
+
+.brandCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.productName {
+  color: var(--ch-text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.productTagline {
+  color: var(--ch-text-3);
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .version {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #6B7E9F;
-  font-size: 11px;
-  font-weight: 500;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
+.statusBadge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(52, 211, 153, 0.15);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  color: var(--ch-green);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ---- 菜单 ---- */
 .menu {
-  padding: 8px 8px 0;
+  flex: 1;
+  padding: 10px 4px;
   background: transparent !important;
   border-inline-end: 0 !important;
+  overflow-y: auto;
 }
 
+/* ---- 折叠触发 ---- */
 .triggerWrapper {
   display: flex;
   justify-content: center;
-  padding: 16px 0 24px;
+  padding: 12px 0 16px;
+  border-top: 1px solid var(--ch-border);
+  flex-shrink: 0;
 }
 
 .triggerButton {
-  color: #C9A84C !important;
+  color: var(--ch-text-2) !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 8px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
+.triggerButton:hover {
+  background: var(--ch-overlay) !important;
+  color: var(--ch-text) !important;
+}
+
+/* ================================================================
+   顶部 Header
+   ================================================================ */
+.header {
+  height: 60px;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent !important;
+  border-bottom: 1px solid var(--ch-border);
+  flex-shrink: 0;
+  z-index: 20;
+  position: relative;
+}
+
+.headerMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.headerTitle {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ch-text);
+  white-space: nowrap;
+}
+
+.headerDescription {
+  color: var(--ch-text-3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* ================================================================
+   主内容区
+   ================================================================ */
+.pageContainer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.pageContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px 36px;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ================================================================
+   Modal update 内容
+   ================================================================ */
 .updateModalBody {
   max-height: 480px;
   overflow-y: auto;
@@ -97,10 +226,13 @@
   height: 120px;
 }
 
+/* ================================================================
+   代码块（Markdown）
+   ================================================================ */
 .codeBlock {
   position: relative;
-  background: rgba(15, 23, 42, 0.04);
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--ch-border);
   border-radius: 10px;
   padding: 12px 40px 12px 16px;
   overflow-x: auto;
@@ -108,16 +240,19 @@
 }
 
 .codeBlockInner {
-  font-family: Consolas, "Liberation Mono", Menlo, monospace;
+  font-family: 'JetBrains Mono', Consolas, 'Liberation Mono', Menlo, monospace;
   font-size: 13px;
+  color: var(--ch-text);
 }
 
 .codeInline {
-  background: rgba(15, 23, 42, 0.06);
+  background: rgba(92, 110, 245, 0.12);
+  border: 1px solid rgba(92, 110, 245, 0.2);
   border-radius: 4px;
-  padding: 1px 5px;
-  font-family: Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 13px;
+  padding: 1px 6px;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 12px;
+  color: var(--ch-neon-bright);
 }
 
 .copyBtn {
@@ -127,44 +262,27 @@
   transition: color 0.2s;
 }
 
-.copyBtnCopied {
-  color: #16a34a;
-}
+.copyBtnCopied { color: var(--ch-green); }
+.copyBtnDefault { color: var(--ch-text-3); }
 
-.copyBtnDefault {
-  color: #64748b;
-}
-.pageContainer {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  position: relative;
-  z-index: 1;
-  min-height: 0; /* Important for flex child scrolling */
-}
-
-.pageContent {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px 40px; /* Stronger gaps */
-  min-height: 0; /* Important for flex child scrolling */
-  position: relative;
-  
-  /* Standardizing gaps between children */
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
-}
-
-/* Ensure secondary text is not black */
+/* ================================================================
+   全局次要文字
+   ================================================================ */
 :global(.baize-typography-secondary) {
-  color: var(--baize-text-muted) !important;
+  color: var(--ch-text-2) !important;
 }
 
-/* Force dark backgrounds on potentially white components */
 :global(.baize-modal-content),
 :global(.baize-drawer-content) {
-  background-color: var(--baize-bg-color) !important;
-  color: var(--baize-text-main) !important;
+  background: var(--ch-surface) !important;
+  color: var(--ch-text) !important;
+}
+
+/* ================================================================
+   响应式
+   ================================================================ */
+@media (max-width: 768px) {
+  .header { padding: 0 16px; }
+  .headerDescription { display: none; }
+  .pageContent { padding: 16px 14px 28px; gap: 16px; }
 }

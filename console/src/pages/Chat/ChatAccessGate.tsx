@@ -131,7 +131,7 @@ export function ChatAccessGate({
 
       <Modal open={showModelPrompt} closable={false} footer={null} width={480} centered>
         <Result
-          icon={<ExclamationCircleOutlined style={{ color: "#C9A84C" }} />}
+          icon={<ExclamationCircleOutlined style={{ color: "#7170FF" }} />}
           title="需要配置对话模型"
           subTitle="聊天功能需要先配置对话模型才能运行。未配置模型时，对话消息无法发送到后端处理。"
           extra={[

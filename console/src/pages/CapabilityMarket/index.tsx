@@ -31,6 +31,7 @@ import {
   presentRemoteSkillSummary,
   presentRemoteVersion,
 } from "../../utils/remoteSkillPresentation";
+import { PageHeader } from "../../components/PageHeader";
 import styles from "./index.module.less";
 import {
   buildCuratedInstallKey,
@@ -205,10 +206,23 @@ export default function CapabilityMarketPage() {
   }, []);
 
   return (
-    <div className={styles.page}>
-      <Space style={{ marginBottom: 12 }}>
-        <Button icon={<ReloadOutlined />} onClick={() => void handleRefreshAll()}>刷新</Button>
-      </Space>
+    <div className={`${styles.page} page-container`}>
+      <PageHeader
+        eyebrow="Capability Market"
+        title="能力市场"
+        description="统一发现、评估、安装和启用 skill、MCP 与外扩项目能力，不再让能力入口散落在各处。"
+        stats={[
+          { label: "精选候选", value: String(filteredCuratedItems.length).padStart(2, "0") },
+          { label: "安装模板", value: String(templates.length).padStart(2, "0") },
+          { label: "已装能力", value: String(installedCapabilities.length).padStart(2, "0") },
+          { label: "Project 命中", value: String(projectResults.length).padStart(2, "0") },
+        ]}
+        actions={(
+          <Button icon={<ReloadOutlined />} onClick={() => void handleRefreshAll()} className="baize-btn">
+            刷新
+          </Button>
+        )}
+      />
       {curatedError ? <Alert type="error" showIcon message={curatedError} /> : null}
       <Tabs
         activeKey={activeTab}

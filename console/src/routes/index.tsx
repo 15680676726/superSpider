@@ -1,69 +1,121 @@
-import { lazy } from "react";
 import { Navigate } from "react-router-dom";
+import { lazyWithPreload } from "./preload";
 
-const Chat = lazy(() => import("../pages/Chat"));
-const BuddyOnboardingPage = lazy(() => import("../pages/BuddyOnboarding"));
-const AgentConfigPage = lazy(() => import("../pages/Agent/Config"));
-const RuntimeCenterPage = lazy(() => import("../pages/RuntimeCenter"));
-const IndustryPage = lazy(() => import("../pages/Industry"));
-const PredictionsPage = lazy(() => import("../pages/Predictions"));
-const KnowledgePage = lazy(() => import("../pages/Knowledge"));
-const ReportsPage = lazy(() => import("../pages/Reports"));
-const PerformancePage = lazy(() => import("../pages/Performance"));
-const CalendarPage = lazy(() => import("../pages/Calendar"));
-const ChannelsPage = lazy(() => import("../pages/Settings/Channels"));
-const ModelsPage = lazy(() => import("../pages/Settings/Models"));
-const EnvironmentsPage = lazy(() => import("../pages/Settings/Environments"));
-const CapabilityMarketPage = lazy(() => import("../pages/CapabilityMarket"));
-const SystemSettingsPage = lazy(() => import("../pages/Settings/System"));
+const Chat = lazyWithPreload(() => import("../pages/Chat"));
+const BuddyOnboardingPage = lazyWithPreload(() => import("../pages/BuddyOnboarding"));
+const AgentConfigPage = lazyWithPreload(() => import("../pages/Agent/Config"));
+const RuntimeCenterPage = lazyWithPreload(() => import("../pages/RuntimeCenter"));
+const IndustryPage = lazyWithPreload(() => import("../pages/Industry"));
+const PredictionsPage = lazyWithPreload(() => import("../pages/Predictions"));
+const KnowledgePage = lazyWithPreload(() => import("../pages/Knowledge"));
+const ReportsPage = lazyWithPreload(() => import("../pages/Reports"));
+const PerformancePage = lazyWithPreload(() => import("../pages/Performance"));
+const CalendarPage = lazyWithPreload(() => import("../pages/Calendar"));
+const ChannelsPage = lazyWithPreload(() => import("../pages/Settings/Channels"));
+const ModelsPage = lazyWithPreload(() => import("../pages/Settings/Models"));
+const EnvironmentsPage = lazyWithPreload(() => import("../pages/Settings/Environments"));
+const CapabilityMarketPage = lazyWithPreload(() => import("../pages/CapabilityMarket"));
+const SystemSettingsPage = lazyWithPreload(() => import("../pages/Settings/System"));
 
 export interface RouteConfig {
   path: string;
   element: React.ReactNode;
   menuKey?: string;
+  preload?: () => Promise<unknown>;
 }
 
 export const routes: RouteConfig[] = [
   { path: "/", element: <Navigate to="/buddy-onboarding" replace /> },
-  { path: "/buddy-onboarding", element: <BuddyOnboardingPage />, menuKey: "chat" },
-  { path: "/chat", element: <Chat />, menuKey: "chat" },
+  {
+    path: "/buddy-onboarding",
+    element: <BuddyOnboardingPage />,
+    menuKey: "chat",
+    preload: BuddyOnboardingPage.preload,
+  },
+  {
+    path: "/chat",
+    element: <Chat />,
+    menuKey: "chat",
+    preload: Chat.preload,
+  },
   {
     path: "/runtime-center",
     element: <RuntimeCenterPage />,
     menuKey: "runtime-center",
+    preload: RuntimeCenterPage.preload,
   },
-  { path: "/industry", element: <IndustryPage />, menuKey: "industry" },
-  { path: "/predictions", element: <PredictionsPage />, menuKey: "predictions" },
-  { path: "/knowledge", element: <KnowledgePage />, menuKey: "knowledge" },
-  { path: "/reports", element: <ReportsPage />, menuKey: "reports" },
-  { path: "/performance", element: <PerformancePage />, menuKey: "performance" },
-  { path: "/calendar", element: <CalendarPage />, menuKey: "calendar" },
+  {
+    path: "/industry",
+    element: <IndustryPage />,
+    menuKey: "industry",
+    preload: IndustryPage.preload,
+  },
+  {
+    path: "/predictions",
+    element: <PredictionsPage />,
+    menuKey: "predictions",
+    preload: PredictionsPage.preload,
+  },
+  {
+    path: "/knowledge",
+    element: <KnowledgePage />,
+    menuKey: "knowledge",
+    preload: KnowledgePage.preload,
+  },
+  {
+    path: "/reports",
+    element: <ReportsPage />,
+    menuKey: "reports",
+    preload: ReportsPage.preload,
+  },
+  {
+    path: "/performance",
+    element: <PerformancePage />,
+    menuKey: "performance",
+    preload: PerformancePage.preload,
+  },
+  {
+    path: "/calendar",
+    element: <CalendarPage />,
+    menuKey: "calendar",
+    preload: CalendarPage.preload,
+  },
   {
     path: "/capability-market",
     element: <CapabilityMarketPage />,
     menuKey: "capability-market",
+    preload: CapabilityMarketPage.preload,
   },
   { path: "/settings", element: <Navigate to="/settings/system" replace /> },
   {
     path: "/settings/system",
     element: <SystemSettingsPage />,
     menuKey: "system",
+    preload: SystemSettingsPage.preload,
   },
   {
     path: "/settings/channels",
     element: <ChannelsPage />,
     menuKey: "channels",
+    preload: ChannelsPage.preload,
   },
-  { path: "/settings/models", element: <ModelsPage />, menuKey: "models" },
+  {
+    path: "/settings/models",
+    element: <ModelsPage />,
+    menuKey: "models",
+    preload: ModelsPage.preload,
+  },
   {
     path: "/settings/environments",
     element: <EnvironmentsPage />,
     menuKey: "environments",
+    preload: EnvironmentsPage.preload,
   },
   {
     path: "/settings/agent-config",
     element: <AgentConfigPage />,
     menuKey: "agent-config",
+    preload: AgentConfigPage.preload,
   },
   { path: "*", element: <Navigate to="/runtime-center" replace /> },
 ];

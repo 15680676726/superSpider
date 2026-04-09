@@ -1,8 +1,18 @@
-﻿.page {
+.page {
   display: flex;
   flex-direction: column;
-  gap: 32px;
-  padding: 0 0 64px;
+  gap: 40px;
+  padding: 32px 64px 80px;
+  position: relative;
+}
+
+.page::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(92, 110, 245, 0.6), rgba(34, 211, 238, 0.4), transparent);
+  opacity: 0.8;
 }
 
 .hero {
@@ -14,7 +24,7 @@
   position: relative;
   overflow: hidden;
   background:
-    linear-gradient(135deg, rgba(27, 79, 216, 0.1) 0%, transparent 60%),
+    linear-gradient(135deg, rgba(113, 112, 255, 0.1) 0%, transparent 60%),
     rgba(5, 12, 35, 0.4) !important;
   border-bottom: 1px solid var(--baize-border-color);
 }
@@ -26,7 +36,7 @@
   right: -20%;
   width: 500px;
   height: 500px;
-  background: radial-gradient(circle, rgba(201, 168, 76, 0.15) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(113, 112, 255, 0.15) 0%, transparent 70%);
   filter: blur(80px);
   pointer-events: none;
 }
@@ -42,17 +52,17 @@
   margin-bottom: 12px;
   color: var(--baize-primary-glow);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 500;
   letter-spacing: 0.15em;
   text-transform: uppercase;
-  text-shadow: 0 0 10px rgba(27, 79, 216, 0.4);
+  text-shadow: 0 0 10px rgba(113, 112, 255, 0.4);
 }
 
 .title {
   margin: 0;
   color: var(--baize-text-main);
   font-size: 32px;
-  font-weight: 900;
+  font-weight: 500;
   line-height: 1.2;
   letter-spacing: -0.02em;
 }
@@ -86,17 +96,22 @@
 }
 
 .metricCard {
-  transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
-  background: rgba(10, 22, 60, 0.4) !important;
-  border: 1px solid var(--baize-border-color) !important;
-  border-radius: var(--baize-card-radius-sm) !important;
-  backdrop-filter: var(--baize-blur-sm) !important;
+  transition: all 0.3s ease;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-top: 2px solid rgba(92, 110, 245, 0.6) !important;
+  border-radius: 16px !important;
+  backdrop-filter: blur(16px) !important;
+  position: relative;
+  overflow: hidden;
 }
 
+.metricCard::after { display: none; }
+
 .metricCard:hover {
-  transform: translateY(-5px);
-  box-shadow: inset 0 0 20px rgba(27, 79, 216, 0.08), var(--baize-shadow-sm) !important;
-  border-color: var(--baize-border-strong) !important;
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3), 0 0 20px rgba(92, 110, 245, 0.2) !important;
+  border-color: rgba(92, 110, 245, 0.4) !important;
 }
 
 .metricIcon {
@@ -106,25 +121,25 @@
   align-items: center;
   justify-content: center;
   border-radius: 12px;
-  background: rgba(27, 79, 216, 0.08);
+  background: rgba(113, 112, 255, 0.08);
   margin-bottom: 16px;
-  border: 1px solid rgba(27, 79, 216, 0.15);
+  border: 1px solid rgba(113, 112, 255, 0.15);
   color: var(--baize-primary-glow);
 }
 
 .metricLabel {
   color: var(--baize-text-muted);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 400;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 4px;
 }
 
 .metricValue {
-  color: var(--baize-text-main) !important;
-  font-size: 28px !important;
-  font-weight: 900 !important;
+  color: var(--ch-neon-bright) !important;
+  font-size: 30px !important;
+  font-weight: 600 !important;
   letter-spacing: -0.02em;
 }
 
@@ -145,7 +160,7 @@
   margin: 0;
   color: var(--baize-text-main);
   font-size: 20px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .cardSummary {
@@ -162,22 +177,37 @@
 }
 
 .entry {
-  padding: 18px;
-  border: 1px solid var(--baize-border-color);
-  border-radius: var(--baize-card-radius-sm);
-  background: var(--baize-surface-subtle);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 16px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.entry::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0; width: 3px;
+  border-radius: 3px 0 0 3px;
+  background: transparent;
+  transition: background 0.2s;
 }
 
 .entry:hover {
-  background: var(--baize-hover-bg);
-  border-color: rgba(27, 79, 216, 0.2);
+  background: rgba(255, 255, 255, 0.06);
   transform: translateX(4px);
+  border-color: rgba(92, 110, 245, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.entry:hover::before {
+  background: var(--ch-neon);
 }
 
 .detailDrawer :global(.baize-drawer-content) {
-  background: rgba(2, 6, 23, 0.85) !important;
-  backdrop-filter: blur(50px) saturate(180%);
+  background: rgba(26, 27, 46, 0.92) !important;
+  backdrop-filter: blur(30px) saturate(150%);
 }
 
 /* ---- Status badges ---- */
@@ -188,7 +218,7 @@
   padding: 4px 12px;
   border-radius: 999px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .statusBadge.online {
@@ -218,7 +248,7 @@
 
 .entryTitle {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--baize-text-main);
 }
 
@@ -324,10 +354,10 @@
 }
 
 .agentStripCardPrimary {
-  border-color: rgba(27, 79, 216, 0.36) !important;
-  box-shadow:
-    inset 0 0 18px rgba(27, 79, 216, 0.08),
-    var(--baize-shadow-sm) !important;
+  border: 1px solid rgba(92, 110, 245, 0.3) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  box-shadow: 0 0 20px rgba(92, 110, 245, 0.1) !important;
+  border-radius: 16px !important;
 }
 
 .agentStripHeader {
@@ -379,10 +409,10 @@
 
 /* ---- Metric value small variant ---- */
 .metricValueSmall {
-  color: var(--baize-text-main);
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.4;
+  color: #D4AF37 !important;
+  font-size: 16px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.05em;
 }
 
 .briefGrid {
@@ -400,7 +430,7 @@
 
 .briefTitle {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 400;
   color: var(--baize-text-dim);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -417,6 +447,50 @@
   font-size: 13px;
   line-height: 1.5;
   color: var(--baize-text-secondary);
+}
+
+.summaryPanelGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.detailToggleBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--baize-border-color);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.detailToggleCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detailToggleTitle {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--baize-text-main);
+}
+
+.detailToggleHint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--baize-text-dim);
+}
+
+.diagnosticStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 /* ---- Entry internal layout ---- */
@@ -443,7 +517,7 @@
 .entryTitle {
   margin: 0;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--baize-text-main);
 }
 
@@ -451,7 +525,7 @@
   all: unset;
   cursor: pointer;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--baize-primary-glow);
   transition: color 0.2s;
 
@@ -652,7 +726,7 @@
 
 .checkTitle {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--baize-text-main);
   margin-bottom: 4px;
 }
@@ -683,7 +757,7 @@
 
 .detailSectionTitle {
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 400;
   color: var(--baize-text-main);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -718,7 +792,7 @@
   gap: 16px;
   margin-top: 8px;
   padding-left: 16px;
-  border-left: 2px solid rgba(27, 79, 216, 0.2);
+  border-left: 2px solid rgba(113, 112, 255, 0.2);
 }
 
 .detailNestedBlock {
@@ -744,10 +818,10 @@
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  border: 1px solid rgba(27, 79, 216, 0.16);
+  border: 1px solid rgba(113, 112, 255, 0.16);
   border-radius: 14px;
   background:
-    linear-gradient(145deg, rgba(27, 79, 216, 0.08), rgba(5, 12, 35, 0.55)),
+    linear-gradient(145deg, rgba(113, 112, 255, 0.08), rgba(5, 12, 35, 0.55)),
     rgba(5, 12, 35, 0.4);
 }
 
@@ -760,7 +834,7 @@
 
 .industryFocusLabel {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 400;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--baize-text-dim);
@@ -768,7 +842,7 @@
 
 .industryFocusValue {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 400;
   line-height: 1.6;
   color: var(--baize-text-main);
 }
@@ -794,8 +868,8 @@
 .mainChainSummary {
   padding: 12px 14px;
   border-radius: 12px;
-  background: rgba(27, 79, 216, 0.08);
-  border: 1px solid rgba(27, 79, 216, 0.16);
+  background: rgba(113, 112, 255, 0.08);
+  border: 1px solid rgba(113, 112, 255, 0.16);
   color: var(--baize-text-secondary);
   font-size: 13px;
   line-height: 1.6;
@@ -825,7 +899,7 @@
   height: 10px;
   border-radius: 999px;
   background: var(--baize-primary-glow);
-  box-shadow: 0 0 0 4px rgba(27, 79, 216, 0.12);
+  box-shadow: 0 0 0 4px rgba(113, 112, 255, 0.12);
 }
 
 .mainChainConnector {
@@ -834,8 +908,8 @@
   margin-top: 8px;
   background: linear-gradient(
     180deg,
-    rgba(27, 79, 216, 0.5),
-    rgba(27, 79, 216, 0.08)
+    rgba(113, 112, 255, 0.5),
+    rgba(113, 112, 255, 0.08)
   );
 }
 
@@ -859,7 +933,7 @@
 
 .mainChainNodeLabel {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 400;
   color: var(--baize-text-main);
 }
 
@@ -893,7 +967,7 @@
 
 .mainChainMetaLabel {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 400;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--baize-text-dim);
@@ -956,7 +1030,7 @@
 
 .reviewHeadline {
   font-size: 16px;
-  font-weight: 700;
+  font-weight: 400;
   color: var(--baize-text-main);
   line-height: 1.5;
 }
@@ -974,8 +1048,8 @@
 .reviewNextStep {
   padding: 10px 12px;
   border-radius: 10px;
-  background: rgba(27, 79, 216, 0.1);
-  border: 1px solid rgba(27, 79, 216, 0.18);
+  background: rgba(113, 112, 255, 0.1);
+  border: 1px solid rgba(113, 112, 255, 0.18);
   color: var(--baize-text-main);
   font-size: 13px;
   line-height: 1.6;
@@ -1025,7 +1099,7 @@
 
 .reviewListTitle {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 400;
   color: var(--baize-text-main);
   text-transform: uppercase;
   letter-spacing: 0.06em;

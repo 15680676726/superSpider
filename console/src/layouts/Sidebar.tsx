@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { LazyMarkdown } from "../components/LazyMarkdown";
 import { useAppStore } from "../stores";
+import { navigateToRuntimeChatEntry } from "../utils/runtimeChat";
 import styles from "./index.module.less";
 
 const { Sider } = Layout;
@@ -221,7 +222,7 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
 
   const handleMenuClick = (event: { key: string }) => {
     if (event.key === "chat") {
-      navigate("/chat");
+      navigateToRuntimeChatEntry(navigate);
       return;
     }
     const path = KEY_TO_PATH[event.key];
@@ -236,28 +237,39 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
       collapsible
       collapsed={collapsed}
       onCollapse={setCollapsed}
-      width={240}
-      collapsedWidth={52}
+      width={252}
+      collapsedWidth={64}
       className={`${styles.sidebar} baize-sider`}
       trigger={null}
     >
       <div className={styles.logoWrapper}>
-        <div className={styles.logo}></div>
-        <div className={styles.version}>
-          {version ? <span>{version}</span> : null}
-          {version && hasUpdate ? (
-            <Badge dot className={styles.updateBadge}>
-              <Button
-                type="text"
-                size="small"
-                onClick={handleOpenUpdateModal}
-                className={styles.updateButton}
-              >
-                更新
-              </Button>
-            </Badge>
+        <div className={styles.brandBlock}>
+          <div className={styles.logo}></div>
+          {!collapsed ? (
+            <div className={styles.brandCopy}>
+              <span className={styles.productName}>CoPaw Console</span>
+              <span className={styles.productTagline}>Buddy-first runtime command center</span>
+            </div>
           ) : null}
         </div>
+        {!collapsed ? (
+          <div className={styles.version}>
+            <span className={styles.statusBadge}>Live</span>
+            {version ? <span>{version}</span> : null}
+            {version && hasUpdate ? (
+              <Badge dot className={styles.updateBadge}>
+                <Button
+                  type="text"
+                  size="small"
+                  onClick={handleOpenUpdateModal}
+                  className={styles.updateButton}
+                >
+                  更新
+                </Button>
+              </Badge>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <Menu
         selectedKeys={[selectedKey]}

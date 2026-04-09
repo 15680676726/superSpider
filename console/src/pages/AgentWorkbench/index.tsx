@@ -40,6 +40,7 @@ import {
 } from "./useAgentWorkbench";
 import {
   buildAgentChatBinding,
+  navigateToRuntimeChatEntry,
   openRuntimeChat,
 } from "../../utils/runtimeChat";
 import { presentExecutionActorName } from "../../runtime/executionPresentation";
@@ -220,7 +221,7 @@ export default function AgentWorkbenchPage() {
     }
     try {
       if (!agent.industry_instance_id) {
-        navigate("/chat");
+        navigateToRuntimeChatEntry(navigate);
         message.info("当前前台只保留主脑聊天入口，已切换到主脑聊天。");
         return;
       }

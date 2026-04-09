@@ -40,6 +40,7 @@ import {
   presentInsightText,
 } from "../Insights/presentation";
 import { RecommendationOptimizationMeta } from "../Insights/RecommendationOptimizationMeta";
+import { PageHeader } from "../../components/PageHeader";
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -381,23 +382,30 @@ export default function PredictionsPage() {
   );
 
   return (
-    <Space direction="vertical" size={16} style={{ width: "100%" }}>
-      <Card className="baize-page-header">
-        <div className="baize-page-header-content">
-          <div>
-            <h1 className="baize-page-header-title">主脑晨会 / 晚会复盘中心</h1>
-            <p className="baize-page-header-description">
-              这里只展示由 main-brain operating cycle 自动生成的正式复盘案例。
-              这里不是独立预测开关，而是主脑晨会 / 晚会统一查看周期、回流、backlog 与决策机会的入口。
-            </p>
-          </div>
+    <Space direction="vertical" size={16} style={{ width: "100%" }} className="page-container">
+      <PageHeader
+        eyebrow="Morning / Evening Review"
+        title="主脑晨会 / 晚会复盘中心"
+        description="这里只展示由 main-brain operating cycle 自动生成的正式复盘案例。这里不是独立预测开关，而是主脑晨会 / 晚会统一查看周期、回流、backlog 与决策机会的入口。"
+        stats={[
+          { label: "复盘案例", value: String(cases.length).padStart(2, "0") },
+          { label: "待完成", value: String(openCaseCount).padStart(2, "0") },
+          { label: "待决策", value: String(pendingDecisionCount).padStart(2, "0") },
+          { label: "已归档", value: String(reviewedCaseCount).padStart(2, "0") },
+        ]}
+        aside={
+          latestUpdatedAt ? (
+            <Text type="secondary">{`最近更新 ${formatTime(latestUpdatedAt)}`}</Text>
+          ) : null
+        }
+        actions={(
           <Space>
             <Button icon={<ReloadOutlined />} onClick={() => void loadCases()}>
               刷新
             </Button>
           </Space>
-        </div>
-      </Card>
+        )}
+      />
 
       <Alert
         type="info"

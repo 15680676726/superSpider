@@ -55,6 +55,25 @@ function normalizeThreadId(threadId: string | null | undefined): string | null {
   return trimmed;
 }
 
+export function resolveRuntimeChatEntryPath(
+  threadId: string | null | undefined,
+): string {
+  const normalizedThreadId = normalizeThreadId(threadId);
+  if (
+    normalizedThreadId &&
+    normalizedThreadId.startsWith("industry-chat:")
+  ) {
+    return `/chat?threadId=${encodeURIComponent(normalizedThreadId)}`;
+  }
+  return "/chat";
+}
+
+export function navigateToRuntimeChatEntry(
+  navigate: NavigateFunction,
+): void {
+  navigate(resolveRuntimeChatEntryPath(sessionApi.getActiveThreadId()));
+}
+
 function pickPreferredThreadBinding(
   bindings: RuntimeThreadBinding[] | null | undefined,
 ): RuntimeThreadBinding | null {
@@ -93,19 +112,21 @@ function resolveBuddyCarrierThreadId(
     executionCarrier.chat_binding && typeof executionCarrier.chat_binding === "object"
       ? executionCarrier.chat_binding
       : null;
+  const canonicalControlThreadId =
+    resolveIndustryControlThreadId(executionCarrier.instance_id) || null;
   const controlThreadId =
+    canonicalControlThreadId ||
     normalizeThreadId(chatBinding?.control_thread_id) ||
     normalizeThreadId(executionCarrier.control_thread_id) ||
     null;
   const threadId =
+    controlThreadId ||
     normalizeThreadId(chatBinding?.thread_id) ||
     normalizeThreadId(executionCarrier.thread_id) ||
-    controlThreadId ||
-    resolveIndustryControlThreadId(executionCarrier.instance_id) ||
     null;
-  const contextKey =
-    (typeof chatBinding?.context_key === "string" && chatBinding.context_key.trim()) ||
-    (threadId ? `control-thread:${threadId}` : null);
+  const contextKey = controlThreadId
+    ? `control-thread:${controlThreadId}`
+    : (typeof chatBinding?.context_key === "string" && chatBinding.context_key.trim()) || null;
   return { threadId, controlThreadId: controlThreadId || threadId, contextKey };
 }
 

@@ -10,7 +10,10 @@ import type {
   RuntimeMainBrainBuddySummary,
   RuntimeMainBrainResponse,
 } from "../../api/modules/runtimeCenter";
-import { useRuntimeCenter } from "./useRuntimeCenter";
+import {
+  resetRuntimeCenterSurfaceCache,
+  useRuntimeCenter,
+} from "./useRuntimeCenter";
 
 const surface: RuntimeCenterSurfaceInfo = {
   version: "runtime-center-v1",
@@ -125,6 +128,7 @@ describe("useRuntimeCenter", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     runtimeEventHandler = null;
+    resetRuntimeCenterSurfaceCache();
     readBuddyProfileIdMock.mockReturnValue("profile-bound");
     requestRuntimeSurfaceMock.mockResolvedValue(mockSurface());
     requestRuntimeBusinessAgentsMock.mockResolvedValue([]);
@@ -443,5 +447,49 @@ describe("useRuntimeCenter", () => {
 
     expect(requestRuntimeSurfaceMock).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
+  });
+
+  it("reuses the last surface snapshot on remount while refreshing in the background", async () => {
+    const { result, unmount } = renderHook(() => useRuntimeCenter());
+
+    await waitFor(
+      () =>
+        !result.current.loading &&
+        !result.current.mainBrainLoading &&
+        !result.current.businessAgentsLoading,
+    );
+
+    unmount();
+
+    requestRuntimeSurfaceMock.mockResolvedValueOnce(
+      mockSurface({
+        generated_at: "2026-03-29T10:00:00Z",
+        cards: [
+          createAgentsCard({
+            id: "agent-ops-9",
+            title: "Closer Nine",
+            kind: "agent",
+            status: "active",
+            owner: "Closer",
+            summary: "Follow up retained deals",
+            actions: {},
+            meta: {},
+          }),
+        ],
+      }),
+    );
+
+    const remounted = renderHook(() => useRuntimeCenter());
+
+    expect(remounted.result.current.loading).toBe(false);
+    expect(remounted.result.current.refreshing).toBe(true);
+    expect(remounted.result.current.data?.generated_at).toBe(mockOverview.generated_at);
+
+    await waitFor(() => remounted.result.current.refreshing === false);
+
+    expect(remounted.result.current.data?.generated_at).toBe("2026-03-29T10:00:00Z");
+    expect(remounted.result.current.businessAgents.map((agent) => agent.agent_id)).toEqual([
+      "agent-ops-9",
+    ]);
   });
 });

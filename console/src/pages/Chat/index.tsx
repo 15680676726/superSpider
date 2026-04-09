@@ -1,4 +1,4 @@
-import {
+﻿import {
   useCallback,
   useEffect,
   useMemo,
@@ -40,6 +40,8 @@ import {
   countPendingChatApprovals,
   normalizeThreadId,
   normalizeThreadMeta,
+  resolveChatRouteRecoveryTarget,
+  shouldAutoRefreshRuntimeThread,
 } from "./chatPageHelpers";
 import {
   resolveChatComposerKey,
@@ -57,8 +59,6 @@ import {
 } from "./runtimeDiagnostics";
 import sessionApi from "./sessionApi";
 import { ChatComposerAdapter } from "./ChatComposerAdapter";
-import { BuddyCompanion } from "./BuddyCompanion";
-import { BuddyPanel } from "./BuddyPanel";
 import { ChatCommitConfirmationCard } from "./ChatCommitConfirmationCard";
 import { ChatHumanAssistPanel } from "./ChatHumanAssistPanel";
 import { ChatIntentShellCard } from "./ChatIntentShellCard";
@@ -217,7 +217,7 @@ function MediaPanel({
                   onClick={() => toggleMediaAnalysis(a.analysis_id)}
                 >
                   {on ? (
-                    <CheckCircleOutlined style={{ fontSize: 12, color: "#C9A84C" }} />
+                    <CheckCircleOutlined style={{ fontSize: 12, color: "#7170FF" }} />
                   ) : (
                     <FileTextOutlined style={{ fontSize: 12 }} />
                   )}
@@ -365,7 +365,6 @@ export default function ChatPage() {
   const [runtimeWaitClock, setRuntimeWaitClock] = useState(() => Date.now());
   const [governanceStatus, setGovernanceStatus] = useState<GovernanceStatus | null>(null);
   const [buddySurface, setBuddySurface] = useState<BuddySurfaceResponse | null>(null);
-  const [buddyPanelOpen, setBuddyPanelOpen] = useState(false);
   const [buddyLoading, setBuddyLoading] = useState(false);
   const [buddyError, setBuddyError] = useState<string | null>(null);
   const [buddyNameDraft, setBuddyNameDraft] = useState("");
@@ -506,6 +505,16 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!requestedThreadId) {
+      const recoveryTarget = resolveChatRouteRecoveryTarget({
+        requestedThreadId,
+        buddySessionId,
+        requestedBuddyProfileId,
+        activeThreadId: sessionApi.getActiveThreadId(),
+      });
+      if (recoveryTarget) {
+        navigate(recoveryTarget, { replace: true });
+        return;
+      }
       sessionApi.setPreferredThreadId(null);
       sessionApi.clearBoundThreadContext();
       setThreadBootstrapPending(false);
@@ -541,7 +550,13 @@ export default function ChatPage() {
       })
       .finally(() => { if (!cancelled) setThreadBootstrapPending(false); });
     return () => { cancelled = true; };
-  }, [navigate, requestedThreadId, requestedThreadLooksBound]);
+  }, [
+    buddySessionId,
+    navigate,
+    requestedBuddyProfileId,
+    requestedThreadId,
+    requestedThreadLooksBound,
+  ]);
 
   useEffect(() => {
     const sync = (e: Event) => {
@@ -551,6 +566,49 @@ export default function ChatPage() {
     window.addEventListener("copaw:thread-context", sync);
     return () => window.removeEventListener("copaw:thread-context", sync);
   }, []);
+
+  useEffect(() => {
+    if (
+      !requestedThreadId ||
+      threadBootstrapPending ||
+      autoBindingPending ||
+      !shouldAutoRefreshRuntimeThread({
+        threadId: requestedThreadId,
+        threadMeta: effectiveThreadMeta,
+        threadBootstrapError,
+      })
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      void sessionApi
+        .getSession(requestedThreadId)
+        .then((thread) => {
+          if (!cancelled) {
+            setThreadMeta(
+              normalizeThreadMeta((thread as { meta?: Record<string, unknown> }).meta),
+            );
+          }
+        })
+        .catch(() => {
+          /* keep current bound thread state on background refresh failure */
+        });
+    }, 6500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    autoBindingPending,
+    effectiveThreadMeta,
+    requestedThreadId,
+    threadBootstrapError,
+    threadBootstrapPending,
+  ]);
 
   useEffect(() => {
     if (activeIndustryId) { setSuggestedTeams([]); setIndustryTeamsError(null); return; }
@@ -794,14 +852,9 @@ export default function ChatPage() {
 
           {/* 聊天画布 */}
           <div className={styles.canvas}>
+            {/* 伙伴加载提示 */}
             {buddyLoading ? (
               <div className={styles.buddyLoading}>伙伴正在靠近你…</div>
-            ) : null}
-            {buddySurface ? (
-              <BuddyCompanion
-                surface={buddySurface}
-                onOpen={() => setBuddyPanelOpen(true)}
-              />
             ) : null}
             {shouldRenderChatComposer ? (
               <ChatComposerAdapter chatUiKey={chatComposerKey} options={options} />
@@ -826,11 +879,6 @@ export default function ChatPage() {
               />
             ) : null}
           </div>
-          <BuddyPanel
-            open={buddyPanelOpen}
-            surface={buddySurface}
-            onClose={() => setBuddyPanelOpen(false)}
-          />
           {buddyError ? (
             <Alert
               type="warning"

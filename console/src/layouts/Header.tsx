@@ -14,27 +14,10 @@ import {
   ShieldCheck,
   Waypoints,
 } from "lucide-react";
+import { getRoutePresentation } from "./routePresentation";
 import styles from "./index.module.less";
 
 const { Header: AntHeader } = Layout;
-
-const keyToDefaultLabel: Record<string, string> = {
-  chat: "聊天",
-  channels: "渠道设置",
-  "runtime-center": "运行中心",
-  industry: "行业中枢",
-  agents: "智能体",
-  predictions: "预测",
-  "capability-market": "能力市场",
-  system: "系统设置",
-  "agent-config": "智能体配置",
-  models: "模型设置",
-  environments: "环境设置",
-  knowledge: "知识库",
-  reports: "报告",
-  performance: "绩效",
-  calendar: "日历",
-};
 
 const keyToIcon: Record<string, ReactNode> = {
   chat: <MessageSquare size={14} />,
@@ -55,14 +38,17 @@ interface HeaderProps {
 }
 
 export default function Header({ selectedKey }: HeaderProps) {
-  const label = keyToDefaultLabel[selectedKey] || "运行中心";
+  const routePresentation = getRoutePresentation(selectedKey);
 
   return (
     <AntHeader className={`${styles.header} baize-header`}>
-      <Space align="center" size={10}>
-        {keyToIcon[selectedKey] ?? <Settings2 size={14} />}
-        <span className={styles.headerTitle}>{label}</span>
-      </Space>
+      <div className={styles.headerMeta}>
+        <Space align="center" size={10}>
+          {keyToIcon[selectedKey] ?? <Settings2 size={14} />}
+          <span className={styles.headerTitle}>{routePresentation.title}</span>
+        </Space>
+        <span className={styles.headerDescription}>{routePresentation.description}</span>
+      </div>
       <Space size="middle" />
     </AntHeader>
   );

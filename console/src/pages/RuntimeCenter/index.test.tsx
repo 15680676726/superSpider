@@ -82,6 +82,32 @@ function createRuntimeCenterState() {
           meta: {},
         },
         {
+          key: "tasks",
+          title: "执行事项",
+          source: "state_query_service",
+          status: "state-service",
+          count: 1,
+          summary: "当前执行事项",
+          entries: [
+            {
+              id: "task-1",
+              title: "整理交付证据",
+              kind: "task",
+              status: "active",
+              owner: "运营执行位",
+              summary: "把今天新增结果整理成可回看材料。",
+              updated_at: "2026-03-29T08:45:00Z",
+              route: "/api/runtime-center/tasks/task-1",
+              actions: {},
+              meta: {
+                queue_depth: 2,
+                runtime_status: "active",
+              },
+            },
+          ],
+          meta: {},
+        },
+        {
           key: "patches",
           title: "补丁",
           source: "learning_service",
@@ -315,8 +341,15 @@ describe("RuntimeCenterPage", () => {
     expect(screen.getByText("当前阻塞")).toBeTruthy();
     expect(screen.getByText("待确认")).toBeTruthy();
     expect(screen.getByText("下一步")).toBeTruthy();
+    expect(screen.getByText("执行中")).toBeTruthy();
+    expect(screen.getByText("需关注")).toBeTruthy();
+    expect(screen.getByText("今日新增")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^主脑/ })).toBeTruthy();
-    expect(screen.getByText("运营执行位")).toBeTruthy();
+    expect(screen.getAllByText("运营执行位").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("系统已接入").length).toBeGreaterThan(0);
+    expect(screen.getByText("查看详情")).toBeTruthy();
+    expect(screen.queryByText("/api/runtime-center/tasks/task-1")).toBeNull();
+    expect(screen.queryByText("状态查询服务")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /运营执行位/i }));
 
@@ -354,7 +387,7 @@ describe("RuntimeCenterPage", () => {
     render(<RuntimeCenterPage />);
 
     expect(screen.getAllByRole("button", { name: /^主脑/ })).toHaveLength(1);
-    expect(screen.getByText("运营执行位")).toBeTruthy();
+    expect(screen.getAllByText("运营执行位").length).toBeGreaterThan(0);
   });
 
   it("renders recovery self-check highlights when recovery tab is active", () => {

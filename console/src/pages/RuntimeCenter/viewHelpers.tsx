@@ -89,9 +89,13 @@ function renderEntry(
     actionPath: string,
   ) => void,
   openDetail: (route: string, title: string) => void,
+  options?: {
+    userFacing?: boolean;
+  },
 ) {
   const localizedTitle = translateRuntimeEntryTitle(card.key, entry.title);
   const localizedSummary = translateRuntimeEntrySummary(card.key, entry.summary);
+  const userFacing = options?.userFacing === true;
   const visibleMeta =
     card.key === "tasks"
       ? Object.fromEntries(
@@ -130,11 +134,11 @@ function renderEntry(
             <Tag color={runtimeStatusColor(entry.status)}>
               {translateRuntimeStatus(entry.status)}
             </Tag>
-            <Tag>{translateRuntimeEntryKind(entry.kind)}</Tag>
-            {childTaskCount && childTaskCount > 0 ? (
+            {!userFacing ? <Tag>{translateRuntimeEntryKind(entry.kind)}</Tag> : null}
+            {!userFacing && childTaskCount && childTaskCount > 0 ? (
               <Tag color="purple">{`委派主任务 ${childTaskCount}`}</Tag>
             ) : null}
-            {parentTaskId ? <Tag color="geekblue">委派子任务</Tag> : null}
+            {!userFacing && parentTaskId ? <Tag color="geekblue">委派子任务</Tag> : null}
           </div>
           <div className={styles.entryMetaLine}>
             {entry.owner ? <span>{localizeRuntimeText(entry.owner)}</span> : null}
@@ -145,7 +149,7 @@ function renderEntry(
 
       {localizedSummary ? <p className={styles.entrySummary}>{localizedSummary}</p> : null}
 
-      {metaRows(visibleMeta).length > 0 ? (
+      {!userFacing && metaRows(visibleMeta).length > 0 ? (
         <div className={styles.metaGrid}>
           {metaRows(visibleMeta).map(([label, value]) => (
             <div key={`${entry.id}:${label}`} className={styles.metaItem}>
@@ -165,7 +169,7 @@ function renderEntry(
               void openDetail(entry.route!, localizedTitle);
             }}
           >
-            <code className={styles.route}>{entry.route}</code>
+            {userFacing ? "查看详情" : <code className={styles.route}>{entry.route}</code>}
           </button>
         ) : (
           <span />

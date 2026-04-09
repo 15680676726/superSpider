@@ -37,6 +37,7 @@ import {
   openRuntimeChat,
 } from "../../utils/runtimeChat";
 import {
+  resetIndustryPageStateCache,
   resolveProtectedCarrierInstanceId,
   useIndustryPageState,
 } from "./useIndustryPageState";
@@ -53,6 +54,7 @@ const mockedOpenRuntimeChat = vi.mocked(openRuntimeChat);
 describe("useIndustryPageState", () => {
   afterEach(() => {
     window.localStorage.clear();
+    resetIndustryPageStateCache();
     mockedListIndustryInstances.mockReset();
     mockedGetRuntimeIndustryDetail.mockReset();
     mockedGetBuddySurface.mockReset();
@@ -218,6 +220,96 @@ describe("useIndustryPageState", () => {
     expect(resolveProtectedCarrierInstanceId("  profile-2  ")).toBe("buddy:profile-2");
     expect(resolveProtectedCarrierInstanceId("")).toBeNull();
     expect(resolveProtectedCarrierInstanceId(null)).toBeNull();
+  });
+
+  it("reuses the last industry list and detail snapshot on remount while refreshing in the background", async () => {
+    mockedListIndustryInstances.mockImplementation(async (options) => {
+      const status =
+        typeof options === "object" && options ? options.status : undefined;
+      if (status === "retired") {
+        return [] as never;
+      }
+      return [
+        {
+          instance_id: "industry-active",
+          label: "Active Team",
+          owner_scope: "industry-active",
+          team: { agents: [] },
+        },
+      ] as never;
+    });
+    mockedGetRuntimeIndustryDetail.mockResolvedValue({
+      instance_id: "industry-active",
+      label: "Active Team",
+      owner_scope: "industry-active",
+      profile: { industry: "Retail" },
+      team: { agents: [] },
+      media_analyses: [],
+    } as never);
+
+    const first = renderHook(() => {
+      const [briefForm] = Form.useForm();
+      const [draftForm] = Form.useForm();
+      return useIndustryPageState({
+        briefForm,
+        draftForm,
+        navigate: vi.fn() as never,
+      });
+    });
+
+    await waitFor(() => {
+      expect(first.result.current.instances).toHaveLength(1);
+      expect(first.result.current.detail?.instance_id).toBe("industry-active");
+    });
+
+    first.unmount();
+
+    mockedListIndustryInstances.mockImplementation(async (options) => {
+      const status =
+        typeof options === "object" && options ? options.status : undefined;
+      if (status === "retired") {
+        return [] as never;
+      }
+      return [
+        {
+          instance_id: "industry-next",
+          label: "Next Team",
+          owner_scope: "industry-next",
+          team: { agents: [] },
+        },
+      ] as never;
+    });
+    mockedGetRuntimeIndustryDetail.mockResolvedValue({
+      instance_id: "industry-next",
+      label: "Next Team",
+      owner_scope: "industry-next",
+      profile: { industry: "Retail" },
+      team: { agents: [] },
+      media_analyses: [],
+    } as never);
+
+    const remounted = renderHook(() => {
+      const [briefForm] = Form.useForm();
+      const [draftForm] = Form.useForm();
+      return useIndustryPageState({
+        briefForm,
+        draftForm,
+        navigate: vi.fn() as never,
+      });
+    });
+
+    expect(remounted.result.current.loadingInstances).toBe(false);
+    expect(remounted.result.current.instances.map((item) => item.instance_id)).toEqual([
+      "industry-active",
+    ]);
+    expect(remounted.result.current.detail?.instance_id).toBe("industry-active");
+
+    await waitFor(() => {
+      expect(remounted.result.current.instances.map((item) => item.instance_id)).toEqual([
+        "industry-next",
+      ]);
+      expect(remounted.result.current.detail?.instance_id).toBe("industry-next");
+    });
   });
 
   it("does not fall back to an unrelated team when the bound buddy carrier is missing", async () => {

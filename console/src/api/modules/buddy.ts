@@ -266,11 +266,14 @@ export const buddyApi = {
       body: JSON.stringify(payload),
     });
   },
-  getBuddySurface(profileId?: string | null) {
+  async getBuddySurface(profileId?: string | null): Promise<BuddySurfaceResponse | null> {
     const suffix = profileId
       ? `?profile_id=${encodeURIComponent(profileId)}`
       : "";
-    return request<BuddySurfaceResponse>(`/buddy/surface${suffix}`);
+    const response = await request<BuddySurfaceResponse | undefined>(
+      `/buddy/surface${suffix}`,
+    );
+    return response ?? null;
   },
 };
 

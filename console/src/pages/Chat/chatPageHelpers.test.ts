@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { countPendingChatApprovals } from "./chatPageHelpers";
+import {
+  countPendingChatApprovals,
+  resolveChatRouteRecoveryTarget,
+  shouldAutoRefreshRuntimeThread,
+} from "./chatPageHelpers";
 
 describe("countPendingChatApprovals", () => {
   it("counts only decisions and proposed patches as pending approvals", () => {
@@ -15,5 +19,59 @@ describe("countPendingChatApprovals", () => {
 
   it("returns zero when governance payload is absent", () => {
     expect(countPendingChatApprovals(null)).toBe(0);
+  });
+
+  it("recovers the active formal runtime thread for a bare chat entry", () => {
+    expect(
+      resolveChatRouteRecoveryTarget({
+        requestedThreadId: null,
+        buddySessionId: null,
+        requestedBuddyProfileId: null,
+        activeThreadId: "industry-chat:industry-1:execution-core",
+      }),
+    ).toBe("/chat?threadId=industry-chat%3Aindustry-1%3Aexecution-core");
+  });
+
+  it("does not override the buddy onboarding entry with a stale active thread", () => {
+    expect(
+      resolveChatRouteRecoveryTarget({
+        requestedThreadId: null,
+        buddySessionId: "session-1",
+        requestedBuddyProfileId: "profile-1",
+        activeThreadId: "industry-chat:industry-1:execution-core",
+      }),
+    ).toBeNull();
+  });
+
+  it("auto refreshes bound runtime control threads so background writeback can surface", () => {
+    expect(
+      shouldAutoRefreshRuntimeThread({
+        threadId: "industry-chat:buddy:profile-1:domain-stock:execution-core",
+        threadMeta: {
+          session_kind: "industry-control-thread",
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("does not auto refresh unbound or generic chat threads", () => {
+    expect(
+      shouldAutoRefreshRuntimeThread({
+        threadId: "chat:transient",
+        threadMeta: {},
+      }),
+    ).toBe(false);
+  });
+
+  it("does not auto refresh a bound thread after bootstrap has already failed", () => {
+    expect(
+      shouldAutoRefreshRuntimeThread({
+        threadId: "industry-chat:buddy:profile-1:domain-stock:execution-core",
+        threadMeta: {
+          session_kind: "industry-control-thread",
+        },
+        threadBootstrapError: "[404] thread missing",
+      }),
+    ).toBe(false);
   });
 });

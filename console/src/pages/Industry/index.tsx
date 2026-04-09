@@ -73,6 +73,7 @@ import {
   renderMediaAnalysisList,
 } from "./runtimePresentation";
 import { useIndustryPageState } from "./useIndustryPageState";
+import { PageHeader } from "../../components/PageHeader";
 
 const { Paragraph, Text } = Typography;
 const { TextArea } = Input;
@@ -156,17 +157,28 @@ export default function IndustryPage() {
 
   return (
     <div className="page-container" style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 24 }}>
-      <Card className="baize-page-header">
-        <div className="baize-page-header-content">
-          <div>
-            <h1 className="baize-page-header-title">{INDUSTRY_TEXT.pageTitle}</h1>
-            <p className="baize-page-header-description">{INDUSTRY_EXPERIENCE_TEXT.pageDescription}</p>
-          </div>
-          <div className="baize-page-header-actions">
-            <Button icon={<ReloadOutlined />} onClick={() => void loadInstances()} className="baize-btn">刷新</Button>
-          </div>
-        </div>
-      </Card>
+      <PageHeader
+        eyebrow="Industry Runtime"
+        title={INDUSTRY_TEXT.pageTitle}
+        description={INDUSTRY_EXPERIENCE_TEXT.pageDescription}
+        stats={[
+          { label: "执行载体", value: String(allTeams.length).padStart(2, "0") },
+          { label: "历史载体", value: String(retiredInstances.length).padStart(2, "0") },
+          { label: "能力建议", value: String(recommendationDisplayGroups.length).padStart(2, "0") },
+        ]}
+        aside={
+          selectedIsCurrentBuddyCarrier ? (
+            <Tag color="processing" style={{ borderRadius: 999 }}>
+              当前 Buddy 载体
+            </Tag>
+          ) : null
+        }
+        actions={(
+          <Button icon={<ReloadOutlined />} onClick={() => void loadInstances()} className="baize-btn">
+            刷新
+          </Button>
+        )}
+      />
 
       {error ? <Alert type="error" showIcon message={error} closable onClose={() => setError(null)} /> : null}
       <Alert

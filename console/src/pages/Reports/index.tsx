@@ -21,6 +21,7 @@ import {
   presentInsightMetricSource,
   presentInsightText,
 } from "../Insights/presentation";
+import { PageHeader } from "../../components/PageHeader";
 
 const { Paragraph, Text } = Typography;
 
@@ -186,24 +187,29 @@ export default function ReportsPage() {
   useEffect(() => {
     void loadReports();
   }, [loadReports]);
+  const activeReports = reports.filter((report) => hasWindowActivity(report)).length;
+  const totalEvidence = reports.reduce(
+    (sum, report) => sum + report.evidence_count,
+    0,
+  );
 
   return (
-    <Space direction="vertical" size={16} style={{ width: "100%" }}>
-      <Card className="baize-page-header">
-        <div className="baize-page-header-content">
-          <div>
-            <h1 className="baize-page-header-title">报告中心</h1>
-            <p className="baize-page-header-description">
-              汇总日报、周报、月报窗口内的运行事实、关键亮点和指标变化。
-            </p>
-          </div>
-          <div className="baize-page-header-actions">
-            <Button icon={<ReloadOutlined />} onClick={() => void loadReports()}>
-              刷新
-            </Button>
-          </div>
-        </div>
-      </Card>
+    <Space direction="vertical" size={16} style={{ width: "100%" }} className="page-container">
+      <PageHeader
+        eyebrow="Reports"
+        title="报告中心"
+        description="汇总日报、周报、月报窗口内的运行事实、关键亮点和指标变化。"
+        stats={[
+          { label: "报告窗口", value: String(reports.length).padStart(2, "0") },
+          { label: "活跃窗口", value: String(activeReports).padStart(2, "0") },
+          { label: "证据累计", value: String(totalEvidence).padStart(2, "0") },
+        ]}
+        actions={(
+          <Button icon={<ReloadOutlined />} onClick={() => void loadReports()}>
+            刷新
+          </Button>
+        )}
+      />
 
       <Alert type="info" showIcon message="报告数据来自运行中心汇总视图。" />
       {error ? <Alert type="error" showIcon message={error} /> : null}

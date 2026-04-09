@@ -82,6 +82,31 @@ type IndustryDetailLoadOptions = {
   backlogItemId?: string | null;
 };
 
+type IndustryPageStateCache = {
+  instances: IndustryInstanceSummary[];
+  retiredInstances: IndustryInstanceSummary[];
+  selectedInstanceId: string | null;
+  currentBuddyProfileId: string | null;
+  detailByInstanceId: Record<string, IndustryInstanceDetail>;
+};
+
+let industryPageStateCache: IndustryPageStateCache = {
+  instances: [],
+  retiredInstances: [],
+  selectedInstanceId: null,
+  currentBuddyProfileId: null,
+  detailByInstanceId: {},
+};
+
+function readCachedIndustryDetail(
+  instanceId: string | null,
+): IndustryInstanceDetail | null {
+  if (!instanceId) {
+    return null;
+  }
+  return industryPageStateCache.detailByInstanceId[instanceId] ?? null;
+}
+
 export function useIndustryPageState({
   briefForm,
   draftForm,
@@ -91,14 +116,26 @@ export function useIndustryPageState({
   draftForm: FormInstance<IndustryDraftPlan>;
   navigate: NavigateFunction;
 }) {
-  const [instances, setInstances] = useState<IndustryInstanceSummary[]>([]);
-  const [retiredInstances, setRetiredInstances] = useState<IndustryInstanceSummary[]>([]);
-  const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<IndustryInstanceDetail | null>(null);
+  const [instances, setInstances] = useState<IndustryInstanceSummary[]>(
+    () => industryPageStateCache.instances,
+  );
+  const [retiredInstances, setRetiredInstances] = useState<IndustryInstanceSummary[]>(
+    () => industryPageStateCache.retiredInstances,
+  );
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(
+    () => industryPageStateCache.selectedInstanceId,
+  );
+  const [detail, setDetail] = useState<IndustryInstanceDetail | null>(
+    () => readCachedIndustryDetail(industryPageStateCache.selectedInstanceId),
+  );
   const [preview, setPreview] = useState<IndustryPreviewResponse | null>(null);
   const [draftSourceInstanceId, setDraftSourceInstanceId] = useState<string | null>(null);
   const [installPlan, setInstallPlan] = useState<InstallPlanDraftItem[]>([]);
-  const [loadingInstances, setLoadingInstances] = useState(true);
+  const [loadingInstances, setLoadingInstances] = useState(
+    () =>
+      industryPageStateCache.instances.length === 0 &&
+      industryPageStateCache.retiredInstances.length === 0,
+  );
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [applyCarrierLoading, setApplyCarrierLoading] = useState(false);
@@ -110,7 +147,9 @@ export function useIndustryPageState({
   const [briefMediaItems, setBriefMediaItems] = useState<IndustryBriefMediaItem[]>([]);
   const [briefMediaLink, setBriefMediaLink] = useState("");
   const [briefMediaBusy, setBriefMediaBusy] = useState(false);
-  const [currentBuddyProfileId, setCurrentBuddyProfileId] = useState<string | null>(null);
+  const [currentBuddyProfileId, setCurrentBuddyProfileId] = useState<string | null>(
+    () => industryPageStateCache.currentBuddyProfileId,
+  );
   const protectedCarrierInstanceId = resolveProtectedCarrierInstanceId(
     currentBuddyProfileId,
   );
@@ -137,9 +176,27 @@ export function useIndustryPageState({
     selectedInstanceIdRef.current = selectedInstanceId;
   }, [selectedInstanceId]);
 
+  useEffect(() => {
+    if (!selectedInstanceId) {
+      setDetail(null);
+      return;
+    }
+    const cachedDetail = readCachedIndustryDetail(selectedInstanceId);
+    if (cachedDetail) {
+      setDetail(cachedDetail);
+      return;
+    }
+    setDetail(null);
+  }, [selectedInstanceId]);
+
   const loadInstances = useCallback(
     async (preferredInstanceId?: string | null) => {
-      setLoadingInstances(true);
+      const hasCachedInstances =
+        industryPageStateCache.instances.length > 0 ||
+        industryPageStateCache.retiredInstances.length > 0;
+      if (!hasCachedInstances) {
+        setLoadingInstances(true);
+      }
       try {
         setError(null);
         const buddySurfacePromise = Promise.resolve(api.getBuddySurface()).catch(
@@ -167,6 +224,13 @@ export function useIndustryPageState({
           buddyProfileId: resolvedBuddyProfileId,
         });
         setSelectedInstanceId(nextSelected);
+        industryPageStateCache = {
+          ...industryPageStateCache,
+          instances: nextInstances,
+          retiredInstances: nextRetiredInstances,
+          selectedInstanceId: nextSelected,
+          currentBuddyProfileId: resolvedBuddyProfileId || null,
+        };
       } catch (fetchError) {
         setError(
           fetchError instanceof Error ? fetchError.message : String(fetchError),
@@ -186,17 +250,32 @@ export function useIndustryPageState({
       setDetail(null);
       return null;
     }
-    setLoadingDetail(true);
+    const canUseCachedDetail = !options?.assignmentId && !options?.backlogItemId;
+    const cachedDetail = canUseCachedDetail ? readCachedIndustryDetail(instanceId) : null;
+    if (!cachedDetail) {
+      setLoadingDetail(true);
+    }
     try {
       setError(null);
       const payload = await api.getRuntimeIndustryDetail(instanceId, options);
       setDetail(payload);
+      if (canUseCachedDetail) {
+        industryPageStateCache = {
+          ...industryPageStateCache,
+          detailByInstanceId: {
+            ...industryPageStateCache.detailByInstanceId,
+            [instanceId]: payload,
+          },
+        };
+      }
       return payload;
     } catch (fetchError) {
       setError(
         fetchError instanceof Error ? fetchError.message : String(fetchError),
       );
-      setDetail(null);
+      if (!cachedDetail) {
+        setDetail(null);
+      }
       return null;
     } finally {
       setLoadingDetail(false);
@@ -445,6 +524,14 @@ export function useIndustryPageState({
         setDeletingInstanceId(null);
         if (draftSourceInstanceId === instanceId) {
           setDraftSourceInstanceId(null);
+        }
+        if (industryPageStateCache.detailByInstanceId[instanceId]) {
+          const nextDetailByInstanceId = { ...industryPageStateCache.detailByInstanceId };
+          delete nextDetailByInstanceId[instanceId];
+          industryPageStateCache = {
+            ...industryPageStateCache,
+            detailByInstanceId: nextDetailByInstanceId,
+          };
         }
       }
     },
@@ -812,5 +899,15 @@ export function useIndustryPageState({
     setPreview,
     setSelectedInstanceId,
     watchedExperienceMode,
+  };
+}
+
+export function resetIndustryPageStateCache(): void {
+  industryPageStateCache = {
+    instances: [],
+    retiredInstances: [],
+    selectedInstanceId: null,
+    currentBuddyProfileId: null,
+    detailByInstanceId: {},
   };
 }

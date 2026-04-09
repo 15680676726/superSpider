@@ -31,6 +31,7 @@ import CapabilityOptimizationPanel from "./CapabilityOptimizationPanel";
 import styles from "./index.module.less";
 import {
   type RuntimeCenterAgentSummary,
+  type RuntimeCardStatus,
   useRuntimeCenter,
 } from "./useRuntimeCenter";
 import { localizeRuntimeText, RUNTIME_CENTER_TEXT } from "./text";
@@ -60,6 +61,7 @@ import {
 import MainBrainCockpitPanel from "./MainBrainCockpitPanel";
 import { runtimeStatusColor } from "../../runtime/tagSemantics";
 import { presentExecutionActorName } from "../../runtime/executionPresentation";
+import { PageHeader } from "../../components/PageHeader";
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -174,6 +176,40 @@ function isProfessionalAgent(agent: RuntimeCenterAgentSummary | null | undefined
     MAIN_BRAIN_AGENT_CLASSES.has(agent.agent_class ?? "") ||
     MAIN_BRAIN_ROLE_IDS.has(agent.industry_role_id ?? "")
   );
+}
+
+function presentSurfaceState(status: RuntimeCardStatus | null | undefined): string {
+  switch (status) {
+    case "state-service":
+      return "系统已接入";
+    case "degraded":
+      return "部分受限";
+    default:
+      return "暂未接入";
+  }
+}
+
+function presentAgentState(status: string | null | undefined): string {
+  const normalized = typeof status === "string" ? status.trim().toLowerCase() : "";
+  switch (normalized) {
+    case "active":
+    case "running":
+      return "推进中";
+    case "queued":
+    case "pending":
+    case "waiting-resource":
+      return "待推进";
+    case "blocked":
+    case "error":
+    case "failed":
+    case "human-required":
+      return "需关注";
+    case "completed":
+    case "done":
+      return "已完成";
+    default:
+      return "待命";
+  }
 }
 
 export default function RuntimeCenterPage() {
@@ -327,53 +363,84 @@ export default function RuntimeCenterPage() {
         loading: mainBrainLoading,
         error: mainBrainError,
         unavailable: mainBrainUnavailable,
-      }),
+    }),
     [mainBrainData, mainBrainError, mainBrainLoading, mainBrainUnavailable],
+  );
+  const pendingAttentionCount =
+    (governanceStatus?.pending_decisions ?? mainBrainData?.governance?.pending_decisions ?? 0) +
+    (governanceStatus?.pending_patches ?? mainBrainData?.governance?.pending_patches ?? 0);
+  const headerStats = useMemo(
+    () => [
+      {
+        label: "执行中",
+        value: String(mainBrainData?.assignments.length ?? professionalAgents.length).padStart(
+          2,
+          "0",
+        ),
+      },
+      {
+        label: "需关注",
+        value: String(pendingAttentionCount).padStart(2, "0"),
+      },
+      {
+        label: "今日新增",
+        value: String(
+          (mainBrainData?.reports.length ?? 0) + (mainBrainData?.evidence?.count ?? 0),
+        ).padStart(2, "0"),
+      },
+    ],
+    [
+      mainBrainData?.assignments.length,
+      mainBrainData?.evidence?.count,
+      mainBrainData?.reports.length,
+      pendingAttentionCount,
+      professionalAgents.length,
+    ],
   );
 
   return (
     <div className={`${styles.page} page-container`}>
-      <Card className="baize-page-header">
-        <div className="baize-page-header-content">
-          <div>
-            <h1 className="baize-page-header-title">{RUNTIME_CENTER_TEXT.pageTitle}</h1>
-            <p className="baize-page-header-description">
-              {activeTab === "governance"
-                ? RUNTIME_CENTER_TEXT.tabGovernanceDescription
-                : activeTab === "recovery"
-                  ? RUNTIME_CENTER_TEXT.tabRecoveryDescription
-                  : activeTab === "automation"
-                    ? RUNTIME_CENTER_TEXT.automationPageDescription
-                    : RUNTIME_CENTER_TEXT.pageDescription}
-            </p>
-          </div>
-          <div className="baize-page-header-actions">
-            <Space size={12} wrap>
-              <Tag
-                color={surfaceTagColor(surface?.status ?? "unavailable")}
-                style={{ borderRadius: "8px", fontWeight: 700, padding: "4px 12px" }}
-              >
-                {translateRuntimeStatus(surface?.status ?? "unavailable")}
-              </Tag>
-              <Button
-                className="baize-btn baize-btn-primary"
-                icon={<RefreshCw size={16} />}
-                loading={refreshing || governanceLoading || recoveryLoading}
-                onClick={() => {
-                  void refreshActiveTabData();
-                }}
-              >
-                刷新
-              </Button>
-            </Space>
-          </div>
-        </div>
-        <div style={{ marginTop: 8, fontSize: "12px", color: "var(--baize-text-muted)" }}>
-          {data?.generated_at
-            ? RUNTIME_CENTER_TEXT.generatedAt(formatTimestamp(data.generated_at))
-            : RUNTIME_CENTER_TEXT.waitingForData}
-        </div>
-      </Card>
+      <PageHeader
+        eyebrow="运行中心"
+        title={RUNTIME_CENTER_TEXT.pageTitle}
+        description={
+          activeTab === "governance"
+            ? RUNTIME_CENTER_TEXT.tabGovernanceDescription
+            : activeTab === "recovery"
+              ? RUNTIME_CENTER_TEXT.tabRecoveryDescription
+              : activeTab === "automation"
+                ? RUNTIME_CENTER_TEXT.automationPageDescription
+                : RUNTIME_CENTER_TEXT.pageDescription
+        }
+        stats={headerStats}
+        aside={(
+          <span style={{ fontSize: 12, color: "var(--baize-text-muted)" }}>
+            {data?.generated_at
+              ? RUNTIME_CENTER_TEXT.generatedAt(formatTimestamp(data.generated_at))
+              : RUNTIME_CENTER_TEXT.waitingForData}
+          </span>
+        )}
+        actions={(
+          <Space size={12} wrap>
+            <Tag
+              color={surfaceTagColor(surface?.status ?? "unavailable")}
+              style={{ borderRadius: "999px", fontWeight: 600, padding: "4px 12px" }}
+            >
+              {presentSurfaceState(surface?.status ?? "unavailable")}
+            </Tag>
+            <Button
+              className="baize-btn baize-btn-primary"
+              icon={<RefreshCw size={16} />}
+              loading={refreshing || governanceLoading || recoveryLoading}
+              onClick={() => {
+                void refreshActiveTabData();
+              }}
+            >
+              刷新
+            </Button>
+          </Space>
+        )}
+      />
 
       <section className={styles.tabBar}>
         <Tabs
@@ -411,7 +478,10 @@ export default function RuntimeCenterPage() {
           <Card className="baize-card">
             <div className={styles.panelHeader}>
               <div>
-                <h2 className={styles.cardTitle}>主脑与职业智能体</h2>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                  <div style={{ width: 4, height: 22, background: "#D4AF37", borderRadius: 2, boxShadow: "0 0 10px rgba(212, 175, 55, 0.5)" }} />
+                  <h2 className={styles.cardTitle} style={{ borderLeft: "none", paddingLeft: 0 }}>主脑与职业智能体</h2>
+                </div>
                 <p className={styles.cardSummary}>
                   首页先看主脑今天要推进什么，再看职业执行位当前负责的具体工作。
                 </p>
@@ -419,9 +489,8 @@ export default function RuntimeCenterPage() {
               <Space size={8} wrap>
                 {agentStripLoading ? <Tag>加载中</Tag> : null}
                 {agentStripError ? <Tag color="warning">智能体摘要暂不可用</Tag> : null}
-                <Tag color="blue">主脑</Tag>
                 {professionalAgents.length > 0 ? (
-                  <Tag>{`职业智能体 ${professionalAgents.length}`}</Tag>
+                  <Tag>{`执行位 ${professionalAgents.length}`}</Tag>
                 ) : null}
               </Space>
             </div>
@@ -451,10 +520,12 @@ export default function RuntimeCenterPage() {
                 >
                   <div className={styles.agentStripHeader}>
                     <div className={styles.agentStripTitleRow}>
-                      <Text strong className={styles.agentStripName}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <div style={{ width: 6, height: 6, background: "#D4AF37", borderRadius: "50%", boxShadow: "0 0 8px #D4AF37" }}></div>
+                        <Text strong className={styles.agentStripName} style={{ color: "#FFF", fontSize: 16 }}>
                         主脑
                       </Text>
-                      <Tag color="blue">主脑</Tag>
+                      </div>
                       <Tag
                         color={
                           mainBrainError
@@ -467,12 +538,12 @@ export default function RuntimeCenterPage() {
                         }
                       >
                         {mainBrainError
-                          ? "异常"
+                          ? "需关注"
                           : mainBrainUnavailable
-                            ? "未接线"
+                            ? "未接入"
                             : mainBrainLoading
                               ? "加载中"
-                              : "在线"}
+                              : "推进中"}
                       </Tag>
                     </div>
                     <p className={styles.selectionSummary}>{mainBrainStripSummary}</p>
@@ -495,14 +566,17 @@ export default function RuntimeCenterPage() {
                   >
                     <div className={styles.agentStripHeader}>
                       <div className={styles.agentStripTitleRow}>
-                        <Text strong className={styles.agentStripName}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <div style={{ width: 6, height: 6, background: "rgba(255,255,255,0.4)", borderRadius: "50%" }}></div>
+                          <Text strong className={styles.agentStripName} style={{ color: "#E2E8F0", fontSize: 16 }}>
                           {presentExecutionActorName(agent.agent_id, agent.name)}
                         </Text>
+                        </div>
                         <Tag color="default">
                           {localizeRuntimeText(agent.role_name || "职业智能体")}
                         </Tag>
                         <Tag color={runtimeStatusColor(agent.status ?? "unknown")}>
-                          {translateRuntimeStatus(agent.status ?? "unknown")}
+                          {presentAgentState(agent.status ?? "unknown")}
                         </Tag>
                       </div>
                       <p className={styles.selectionSummary}>{agentHeadline(agent)}</p>
@@ -528,16 +602,23 @@ export default function RuntimeCenterPage() {
                   <div className={styles.cardHeader}>
                     <div>
                       <div className={styles.cardTitleRow}>
-                        <h2 className={styles.cardTitle}>{translateRuntimeCardTitle(card.key, card.title)}</h2>
-                        <Tag color={cardStatusColor(card.status)}>{translateRuntimeStatus(card.status)}</Tag>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ width: 3, height: 18, background: "#D4AF37", borderRadius: 2 }} />
+                          <h2 className={styles.cardTitle} style={{ borderLeft: "none", paddingLeft: 0 }}>{translateRuntimeCardTitle(card.key, card.title)}</h2>
+                        </div>
+                        <Tag color={cardStatusColor(card.status)}>{presentSurfaceState(card.status)}</Tag>
                       </div>
                       <p className={styles.cardSummary}>{translateRuntimeCardSummary(card.key, card.summary)}</p>
                     </div>
-                    <div className={styles.cardSide}><Tag>{card.count}</Tag><span className={styles.cardSource}>{translateRuntimeSourceList(card.source)}</span></div>
+                    <div className={styles.cardSide}><Tag>{`共 ${card.count} 项`}</Tag></div>
                   </div>
                   {card.entries.length > 0 ? (
                     <div className={styles.entryList}>
-                      {card.entries.map((entry) => renderEntry(card, entry, busyActionId, invokeAction, openDetail))}
+                      {card.entries.map((entry) =>
+                        renderEntry(card, entry, busyActionId, invokeAction, openDetail, {
+                          userFacing: true,
+                        }),
+                      )}
                     </div>
                   ) : (
                     <div className={styles.emptyWrap}><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={RUNTIME_CENTER_TEXT.cardEmpty(translateRuntimeCardTitle(card.key, card.title))} /></div>

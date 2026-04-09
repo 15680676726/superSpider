@@ -1,0 +1,420 @@
+/* ================================================================
+   RightPanel — 伙伴详情面板
+   磨砂玻璃 + 精灵正确渲染 + 字体统一
+   ================================================================ */
+
+/* 磨砂基础变量 */
+@panel-bg: rgba(12, 13, 26, 0.80);
+@panel-blur: blur(32px) saturate(170%);
+@border-subtle: rgba(255, 255, 255, 0.08);
+@card-bg: rgba(255, 255, 255, 0.05);
+@card-border: rgba(255, 255, 255, 0.08);
+@text-primary: #e2e8f0;
+@text-secondary: #94a3b8;
+@text-muted: #64748b;
+@accent: #818cf8;
+
+/* 字体基础 */
+@font-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+/* ── 主面板 ────────────────────────────────────────────── */
+.panel {
+  width: 300px;        /* 加宽：256 → 300 */
+  min-width: 300px;
+  height: 100vh;
+  background: @panel-bg;
+  backdrop-filter: @panel-blur;
+  -webkit-backdrop-filter: @panel-blur;
+  border-left: 1px solid @border-subtle;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+  z-index: 25;
+  font-family: @font-base;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.25s ease;
+}
+
+.panelHidden {
+  width: 0 !important;
+  min-width: 0 !important;
+  opacity: 0;
+  overflow: hidden;
+  border-left: none;
+  pointer-events: none;
+}
+
+/* ── 折叠竖条 ────────────────────────────────────────────── */
+.collapsedTab {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 8px;
+  background: @panel-bg;
+  backdrop-filter: @panel-blur;
+  border: 1px solid @border-subtle;
+  border-right: none;
+  border-radius: 12px 0 0 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.4);
+}
+
+.collapsedTab:hover {
+  background: rgba(92, 110, 245, 0.2);
+  border-color: rgba(92, 110, 245, 0.35);
+}
+
+.collapsedTab :global(svg) { color: rgba(255,255,255,0.4); transition: color 0.2s; }
+.collapsedTab:hover :global(svg) { color: @accent; }
+
+.collapsedLabel {
+  writing-mode: vertical-lr;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.3);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-family: @font-base;
+}
+
+/* ── Header ────────────────────────────────────────────── */
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid @border-subtle;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.panelTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: @text-primary;
+  letter-spacing: 0.04em;
+  font-family: @font-base;
+}
+
+.collapseBtn {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+  color: rgba(255,255,255,0.35);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.collapseBtn:hover {
+  background: rgba(92, 110, 245, 0.18);
+  border-color: rgba(92, 110, 245, 0.4);
+  color: @accent;
+}
+
+/* ── 滚动区 ────────────────────────────────────────────── */
+.scrollArea {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 0 32px;
+
+  &::-webkit-scrollbar { width: 3px; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(92, 110, 245, 0.2);
+    border-radius: 10px;
+  }
+}
+
+/* ── 空态 ────────────────────────────────────────────── */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 24px;
+  text-align: center;
+}
+
+.emptyIcon {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: rgba(92, 110, 245, 0.08);
+  border: 1px solid rgba(92, 110, 245, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: @accent;
+}
+
+.emptyTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: @text-primary;
+  font-family: @font-base;
+}
+
+.emptyDesc {
+  font-size: 12px;
+  color: @text-muted;
+  line-height: 1.6;
+  font-family: @font-base;
+}
+
+.loadingState {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 60px 0;
+}
+
+/* ================================================================
+   精灵区域 — 完全独立，不受 baize-card 等全局样式影响
+   对齐 Chat 原版 buddyPanelAvatarSprite
+   ================================================================ */
+.avatarSection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 22px 18px 18px;
+  border-bottom: 1px solid @border-subtle;
+  /* 阻止任何全局样式渗透 */
+  isolation: isolate;
+}
+
+/* 精灵外容器 — 渐变圆角方块（同原版 buddyPanelAvatarSprite) */
+.spriteBox {
+  width: 120px;
+  min-height: 108px;
+  padding: 12px 10px;
+  border-radius: 20px;
+  display: grid;
+  place-items: center;
+  /* 默认渐变：天触期 */
+  background: linear-gradient(180deg, rgba(255, 236, 179, 0.9) 0%, rgba(113, 112, 255, 0.78) 100%);
+  box-shadow: inset 0 0 0 3px rgba(15, 23, 42, 0.20), 0 8px 24px rgba(0,0,0,0.3);
+  margin-bottom: 14px;
+  flex-shrink: 0;
+  overflow: visible;
+  transition: background 0.35s ease, box-shadow 0.35s ease;
+  /* 关键：不继承面板的字体颜色 */
+  color: #111827;
+}
+
+/* 阶段颜色 */
+.spriteBox[data-stage="bonded"] {
+  background: linear-gradient(180deg, rgba(147, 197, 253, 0.94) 0%, rgba(59, 130, 246, 0.84) 100%);
+}
+.spriteBox[data-stage="capable"] {
+  background: linear-gradient(180deg, rgba(167, 243, 208, 0.95) 0%, rgba(16, 185, 129, 0.84) 100%);
+}
+.spriteBox[data-stage="seasoned"] {
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.96) 0%, rgba(217, 119, 6, 0.86) 100%);
+}
+.spriteBox[data-stage="signature"] {
+  background: linear-gradient(180deg, rgba(244, 114, 182, 0.95) 0%, rgba(168, 85, 247, 0.86) 100%);
+}
+
+/* 存在感效果 */
+.spriteBox[data-presence="focused"] {
+  transform: scale(1.03);
+  box-shadow:
+    inset 0 0 0 3px rgba(15, 23, 42, 0.22),
+    0 0 0 4px rgba(59, 130, 246, 0.18),
+    0 8px 24px rgba(0,0,0,0.3);
+}
+.spriteBox[data-presence="supporting"] { animation: buddyFloat 2.4s ease-in-out infinite; }
+.spriteBox[data-presence="celebrating"] { animation: buddyBounce 1.3s ease-in-out infinite; }
+.spriteBox[data-presence="pulling-back"] { animation: buddyShake 0.85s ease-in-out infinite; }
+.spriteBox[data-presence="resting"] { filter: saturate(0.7) brightness(0.9); }
+
+/* ASCII 字符区 — 关键：用 pre 字体保持对齐 */
+.spriteAscii {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  font-family: "Consolas", "Courier New", Courier, monospace !important;
+  font-size: 12px;
+  line-height: 1.1;
+  color: #111827;  /* 深色，在渐变背景上清晰 */
+  white-space: pre;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.2);
+  user-select: none;
+  /* 确保不被外层样式影响 */
+  letter-spacing: 0;
+  font-weight: 400;
+}
+
+/* 精灵动画 */
+@keyframes buddyFloat {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-5px); }
+}
+@keyframes buddyBounce {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%       { transform: translateY(-7px) scale(1.04); }
+}
+@keyframes buddyShake {
+  0%, 100% { transform: translateX(0); }
+  25%       { transform: translateX(-3px); }
+  75%       { transform: translateX(3px); }
+}
+
+/* ── 伙伴名 & 阶段 ────────────────────────────────────────── */
+.buddyName {
+  font-size: 16px;
+  font-weight: 700;
+  color: @text-primary;
+  margin-bottom: 4px;
+  letter-spacing: -0.01em;
+  font-family: @font-base;
+  text-align: center;
+}
+
+.buddyStage {
+  font-size: 12px;
+  color: @text-muted;
+  margin-bottom: 12px;
+  font-family: @font-base;
+  text-align: center;
+}
+
+.tagRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: center;
+}
+
+/* ── 状态信息行 ────────────────────────────────────────────── */
+.infoSection {
+  padding: 14px 18px;
+  border-bottom: 1px solid @border-subtle;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.infoRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  font-family: @font-base;
+}
+
+.infoLabel {
+  color: @text-muted;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.infoValue {
+  color: @text-secondary;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ── 分区卡片（关系/成长/领域/上下文） ────────────────────── */
+.sectionCard {
+  margin: 12px 12px 0;
+  padding: 14px 16px;
+  background: @card-bg;
+  border: 1px solid @card-border;
+  border-radius: 14px;
+  /* 防止 baize-card 全局样式覆盖 */
+  isolation: isolate;
+}
+
+.sectionLabel {
+  font-size: 10px;
+  font-weight: 700;
+  color: @text-muted;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  margin-bottom: 12px;
+  font-family: @font-base;
+}
+
+/* Ant Design Statistic 局部覆盖（作用范围限在 .sectionCard 内） */
+.sectionCard :global(.ant-statistic-title) {
+  color: @text-muted !important;
+  font-size: 11px !important;
+  font-family: @font-base !important;
+  line-height: 1.4 !important;
+}
+
+.sectionCard :global(.ant-statistic-content) {
+  color: #c7d2fe !important;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  font-family: @font-base !important;
+  line-height: 1.4 !important;
+}
+
+.sectionCard :global(.ant-statistic-content-suffix) {
+  font-size: 13px !important;
+}
+
+.progressWrap {
+  margin-top: 12px;
+}
+
+.progressLabel {
+  font-size: 11px;
+  color: @text-muted;
+  margin-bottom: 5px;
+  font-family: @font-base;
+}
+
+.strategyText {
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: @text-muted;
+  line-height: 1.5;
+  font-family: @font-base;
+}
+
+/* ── 关系上下文 ────────────────────────────────────────────── */
+.contextItem {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 12px;
+  font-family: @font-base;
+
+  &:last-child { margin-bottom: 0; }
+}
+
+.contextLabel {
+  font-size: 10px;
+  font-weight: 700;
+  color: @accent;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.contextValue {
+  font-size: 12.5px;
+  color: @text-secondary;
+  line-height: 1.55;
+}

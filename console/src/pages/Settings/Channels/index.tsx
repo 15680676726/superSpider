@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Card, Form, message } from "@/ui";
+import { Form, message } from "@/ui";
 
 import api from "../../../api";
 import {
@@ -9,6 +9,7 @@ import {
   getChannelLabel,
   type ChannelKey,
 } from "./components";
+import { PageHeader } from "../../../components/PageHeader";
 import styles from "./index.module.less";
 
 type FilterType = "all" | "builtin" | "custom";
@@ -102,32 +103,36 @@ function ChannelsPage() {
     { key: "builtin", label: "内置" },
     { key: "custom", label: "自定义" },
   ];
+  const enabledCount = cards.filter(({ config }) => Boolean(config.enabled)).length;
+  const customCount = cards.filter(({ key }) => !isBuiltin(key)).length;
 
   return (
-    <div className={styles.channelsPage}>
-      <Card className="baize-page-header">
-        <div className="baize-page-header-content">
-          <div>
-            <h1 className="baize-page-header-title">频道</h1>
-            <p className="baize-page-header-description">管理和配置消息频道</p>
+    <div className={`${styles.channelsPage} page-container`}>
+      <PageHeader
+        eyebrow="Channels"
+        title="频道"
+        description="管理和配置消息频道，让主脑的输入输出链路保持稳定。"
+        stats={[
+          { label: "当前可见", value: String(cards.length).padStart(2, "0") },
+          { label: "已启用", value: String(enabledCount).padStart(2, "0") },
+          { label: "自定义", value: String(customCount).padStart(2, "0") },
+        ]}
+        actions={(
+          <div className={styles.filterTabs}>
+            {FILTER_TABS.map(({ key, label }) => (
+              <button
+                key={key}
+                className={`${styles.filterTab} ${
+                  filter === key ? styles.filterTabActive : ""
+                }`}
+                onClick={() => setFilter(key)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <div className="baize-page-header-actions">
-            <div className={styles.filterTabs}>
-              {FILTER_TABS.map(({ key, label }) => (
-                <button
-                  key={key}
-                  className={`${styles.filterTab} ${
-                    filter === key ? styles.filterTabActive : ""
-                  }`}
-                  onClick={() => setFilter(key)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </Card>
+        )}
+      />
 
       {loading ? (
         <div className={styles.loading}>

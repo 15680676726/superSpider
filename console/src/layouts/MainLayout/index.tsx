@@ -1,11 +1,13 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { Layout, Spin } from "antd";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { routes, resolveSelectedKey } from "../../routes";
+import { scheduleRoutePreload } from "../../routes/preload";
 import styles from "../index.module.less";
 
 const Sidebar = lazy(() => import("../Sidebar"));
 const Header = lazy(() => import("../Header"));
+const RightPanel = lazy(() => import("../RightPanel"));
 const ConsoleCronBubble = lazy(() => import("../../components/ConsoleCronBubble"));
 const RuntimeExecutionLauncher = lazy(
   () => import("../../components/RuntimeExecutionLauncher"),
@@ -45,13 +47,27 @@ export default function MainLayout() {
   const location = useLocation();
   const selectedKey = resolveSelectedKey(location.pathname, location.search);
 
+  useEffect(() => {
+    return scheduleRoutePreload(routes, location.pathname);
+  }, [location.pathname]);
+
   return (
-    <Layout className={`baize-layout ${styles.mainLayout}`}>
-      <Suspense fallback={<ShellFallback width={240} />}>
+    /* 最外层用 flex row 实现三栏 */
+    <div
+      className={`baize-layout ${styles.mainLayout}`}
+      style={{ display: "flex", flexDirection: "row", height: "100vh", overflow: "hidden" }}
+    >
+      {/* ---- 左侧导航 ---- */}
+      <Suspense fallback={<ShellFallback width={252} />}>
         <Sidebar selectedKey={selectedKey} />
       </Suspense>
-      <Layout className="baize-layout-content" style={{ background: "transparent" }}>
-        <Suspense fallback={<ShellFallback minHeight={64} />}>
+
+      {/* ---- 中间主内容 ---- */}
+      <Layout
+        className="baize-layout-content"
+        style={{ background: "transparent", flex: 1, minWidth: 0 }}
+      >
+        <Suspense fallback={<ShellFallback minHeight={60} />}>
           <Header selectedKey={selectedKey} />
         </Suspense>
         <Content className={styles.pageContainer}>
@@ -75,6 +91,11 @@ export default function MainLayout() {
           </div>
         </Content>
       </Layout>
-    </Layout>
+
+      {/* ---- 右侧智体面板 ---- */}
+      <Suspense fallback={<ShellFallback width={260} />}>
+        <RightPanel />
+      </Suspense>
+    </div>
   );
 }

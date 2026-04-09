@@ -5,7 +5,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const navigateMock = vi.fn();
+const { getActiveThreadIdMock, navigateMock } = vi.hoisted(() => ({
+  getActiveThreadIdMock: vi.fn<() => string | null>(() => null),
+  navigateMock: vi.fn(),
+}));
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>(
@@ -25,7 +28,7 @@ vi.mock("../api", () => ({
 
 vi.mock("../pages/Chat/sessionApi", () => ({
   default: {
-    getActiveThreadId: vi.fn(() => null),
+    getActiveThreadId: getActiveThreadIdMock,
   },
 }));
 
@@ -35,6 +38,8 @@ describe("Sidebar", () => {
   afterEach(() => {
     vi.clearAllMocks();
     navigateMock.mockReset();
+    getActiveThreadIdMock.mockReset();
+    getActiveThreadIdMock.mockReturnValue(null);
   });
 
   it("renders runtime-center-first navigation labels", async () => {
@@ -84,5 +89,23 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByText("聊天前台"));
 
     expect(navigateMock).toHaveBeenCalledWith("/chat");
+  });
+
+  it("restores the active runtime thread when re-entering chat from the sidebar", () => {
+    getActiveThreadIdMock.mockReturnValue(
+      "industry-chat:industry-1:execution-core",
+    );
+
+    render(
+      <MemoryRouter>
+        <Sidebar selectedKey="chat" />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByText("聊天前台"));
+
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/chat?threadId=industry-chat%3Aindustry-1%3Aexecution-core",
+    );
   });
 });

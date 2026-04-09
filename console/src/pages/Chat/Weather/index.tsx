@@ -34,7 +34,7 @@ const useStyles = createStyles(({ css }) => ({
   location: css`
     color: white !important;
     font-size: 24px;
-    font-weight: 600;
+    font-weight: 400;
     margin-bottom: 4px;
   `,
   date: css`
@@ -56,7 +56,7 @@ const useStyles = createStyles(({ css }) => ({
   temperature: css`
     color: white !important;
     font-size: 64px;
-    font-weight: 700;
+    font-weight: 400;
   `,
   degree: css`
     color: white !important;

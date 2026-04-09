@@ -1,3 +1,5 @@
+import { resolveRuntimeChatEntryPath } from "../../utils/runtimeChat";
+
 const CHAT_RUNTIME_TEXT = {
   modelNotConfigured: "未配置大模型",
   unknownAgent: "未知智能体",
@@ -63,6 +65,44 @@ function parseIndustryThreadId(
   return { instanceId, roleId };
 }
 
+function resolveChatRouteRecoveryTarget({
+  requestedThreadId,
+  buddySessionId,
+  requestedBuddyProfileId,
+  activeThreadId,
+}: {
+  requestedThreadId: string | null;
+  buddySessionId: string | null;
+  requestedBuddyProfileId: string | null;
+  activeThreadId: string | null | undefined;
+}): string | null {
+  if (requestedThreadId || buddySessionId || requestedBuddyProfileId) {
+    return null;
+  }
+  const recoveryTarget = resolveRuntimeChatEntryPath(activeThreadId);
+  return recoveryTarget === "/chat" ? null : recoveryTarget;
+}
+
+function shouldAutoRefreshRuntimeThread({
+  threadId,
+  threadMeta,
+  threadBootstrapError,
+}: {
+  threadId: string | null;
+  threadMeta: Record<string, unknown>;
+  threadBootstrapError?: string | null;
+}): boolean {
+  if (typeof threadBootstrapError === "string" && threadBootstrapError.trim()) {
+    return false;
+  }
+  if (!isFormalRuntimeThreadId(threadId)) {
+    return false;
+  }
+  const sessionKind =
+    typeof threadMeta.session_kind === "string" ? threadMeta.session_kind.trim() : "";
+  return !sessionKind || sessionKind === "industry-control-thread";
+}
+
 export {
   CHAT_RUNTIME_TEXT,
   countPendingChatApprovals,
@@ -70,4 +110,6 @@ export {
   normalizeThreadMeta,
   isFormalRuntimeThreadId,
   parseIndustryThreadId,
+  resolveChatRouteRecoveryTarget,
+  shouldAutoRefreshRuntimeThread,
 };

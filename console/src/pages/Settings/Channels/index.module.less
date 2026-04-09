@@ -12,7 +12,7 @@
 .title {
   margin-bottom: 4px;
   font-size: 24px;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .description {
@@ -71,7 +71,7 @@
 .channelCard {
   border-radius: 16px;
   cursor: pointer;
-  transition: all 0.2s ease-in-out;
+  transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1)-in-out;
 
   &.hover {
     border: 1px solid rgba(52, 211, 153, 0.22);
@@ -113,7 +113,7 @@
 .builtinTag {
   font-size: 10px;
   color: var(--baize-primary-glow);
-  background: rgba(27, 79, 216, 0.12);
+  background: rgba(113, 112, 255, 0.12);
   border-radius: 4px;
   padding: 1px 6px;
   white-space: nowrap;
@@ -162,13 +162,13 @@
   color: var(--baize-accent-2);
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(201, 168, 76, 0.1);
+  background: rgba(113, 112, 255, 0.1);
 }
 
 .cardTitle {
   max-width: 150px;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 400;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -204,4 +204,3 @@
   gap: 8px;
   margin-top: 16px;
 }
-

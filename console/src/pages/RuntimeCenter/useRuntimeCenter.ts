@@ -25,6 +25,9 @@ import {
   RUNTIME_CENTER_TEXT,
 } from "./text";
 
+let runtimeCenterSurfaceCache: RuntimeCenterSurfaceResponse | null = null;
+let runtimeCenterBuddySummaryCache: RuntimeMainBrainBuddySummary | null = null;
+
 export type RuntimeCardStatus = "state-service" | "degraded" | "unavailable";
 
 export interface RuntimeOverviewEntry {
@@ -219,10 +222,10 @@ function isMainBrainAgent(agent: RuntimeCenterAgentSummary | null | undefined): 
 
 export function useRuntimeCenter() {
   const [surfaceData, setSurfaceData] =
-    useState<RuntimeCenterSurfaceResponse | null>(null);
+    useState<RuntimeCenterSurfaceResponse | null>(() => runtimeCenterSurfaceCache);
   const [buddySummary, setBuddySummary] =
-    useState<RuntimeMainBrainBuddySummary | null>(null);
-  const [loading, setLoading] = useState(true);
+    useState<RuntimeMainBrainBuddySummary | null>(() => runtimeCenterBuddySummaryCache);
+  const [loading, setLoading] = useState(() => runtimeCenterSurfaceCache == null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
@@ -261,7 +264,8 @@ export function useRuntimeCenter() {
       mode: "initial" | "refresh" = "refresh",
       options?: { sections?: RuntimeSurfaceSection[] },
     ) => {
-      if (mode === "initial") {
+      const hasCachedSurface = runtimeCenterSurfaceCache !== null;
+      if (mode === "initial" && !hasCachedSurface) {
         setLoading(true);
       } else {
         setRefreshing(true);
@@ -288,8 +292,20 @@ export function useRuntimeCenter() {
             ? payload.main_brain
             : previous?.main_brain ?? null,
         }));
+        runtimeCenterSurfaceCache = {
+          generated_at: payload.generated_at,
+          surface: payload.surface,
+          cards: requestedSections.has("cards")
+            ? payload.cards
+            : runtimeCenterSurfaceCache?.cards ?? [],
+          main_brain: requestedSections.has("main_brain")
+            ? payload.main_brain
+            : runtimeCenterSurfaceCache?.main_brain ?? null,
+        };
         if (requestedSections.has("main_brain")) {
-          setBuddySummary(payload.main_brain?.buddy_summary ?? null);
+          const nextBuddySummary = payload.main_brain?.buddy_summary ?? null;
+          setBuddySummary(nextBuddySummary);
+          runtimeCenterBuddySummaryCache = nextBuddySummary;
         }
         setError(null);
       } catch (err) {
@@ -479,4 +495,9 @@ export function useRuntimeCenter() {
     openDetail,
     closeDetail,
   };
+}
+
+export function resetRuntimeCenterSurfaceCache(): void {
+  runtimeCenterSurfaceCache = null;
+  runtimeCenterBuddySummaryCache = null;
 }

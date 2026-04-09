@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -460,6 +460,8 @@ describe("MainBrainCockpitPanel", () => {
   it("renders dedicated payload signals when available", () => {
     renderPanel(dedicatedPayload);
 
+    fireEvent.click(screen.getByRole("button", { name: "查看运行细节" }));
+
     expect(screen.getAllByText("Dedicated carrier value").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Dedicated strategy").length).toBeGreaterThan(0);
   });
@@ -543,13 +545,15 @@ describe("MainBrainCockpitPanel", () => {
   it("renders unified operator sections from the dedicated cockpit payload", () => {
     renderPanel(unifiedPayload);
 
-    expect(screen.getAllByText("Resolve handoff return evidence gap").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Northwind field operations strategy").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("异常吸收").length).toBeGreaterThan(0);
+    expect(screen.getByText("团队在推进")).toBeInTheDocument();
+    expect(screen.getByText("当前卡点")).toBeInTheDocument();
+    expect(screen.getByText("需要你决定")).toBeInTheDocument();
+    expect(screen.getByText("查看运行细节")).toBeInTheDocument();
+    expect(screen.queryByText("异常吸收")).toBeNull();
     expect(
-      screen.getAllByText("Main brain is absorbing one human-required runtime case.").length,
-    ).toBeGreaterThan(0);
-    expect(screen.getAllByText("browser_backoffice, office_document").length).toBeGreaterThan(0);
+      screen.queryByText("Main brain is absorbing one human-required runtime case."),
+    ).toBeNull();
+    expect(screen.queryByText("browser_backoffice, office_document")).toBeNull();
   });
 
   it("renders recovery absorption action details when the dedicated cockpit payload includes them", () => {
@@ -563,6 +567,8 @@ describe("MainBrainCockpitPanel", () => {
         absorption_human_task_id: "human-assist-1",
       },
     });
+
+    fireEvent.click(screen.getByRole("button", { name: "查看运行细节" }));
 
     expect(screen.getByText("吸收动作")).toBeInTheDocument();
     expect(screen.getByText("人协动作")).toBeInTheDocument();
@@ -578,6 +584,8 @@ describe("MainBrainCockpitPanel", () => {
 
   it("renders report cognition and explicit replan visibility from the dedicated cockpit payload", () => {
     renderPanel(unifiedPayload);
+
+    fireEvent.click(screen.getByRole("button", { name: "查看运行细节" }));
 
     expect(screen.getAllByText("Resolve handoff return evidence gap").length).toBeGreaterThan(0);
     expect(
@@ -595,6 +603,8 @@ describe("MainBrainCockpitPanel", () => {
 
   it("renders structured formal planning shell visibility in the main-brain cockpit", () => {
     renderPanel(unifiedPayload);
+
+    fireEvent.click(screen.getByRole("button", { name: "查看运行细节" }));
 
     expect(screen.getByText("Cycle shell for Runtime Center.")).toBeInTheDocument();
     expect(
@@ -655,6 +665,8 @@ describe("MainBrainCockpitPanel", () => {
     } satisfies RuntimeMainBrainResponse;
 
     renderPanel(entropyPayload);
+
+    fireEvent.click(screen.getByRole("button", { name: "查看运行细节" }));
 
     const entropyHeadings = screen.getAllByRole("heading", {
       level: 3,
@@ -733,9 +745,9 @@ describe("MainBrainCockpitPanel", () => {
 
     renderPanel(scopedPayload);
 
-    expect(screen.getAllByText("Today report").length).toBeGreaterThan(0);
+    expect(screen.getByText("今天已经收到新的执行回流，主脑正在消化结果。")).toBeInTheDocument();
     expect(screen.queryByText("Old report")).toBeNull();
-    expect(screen.getAllByText("Today evidence").length).toBeGreaterThan(0);
+    expect(screen.getByText("今天新增 1 条可追溯证据。")).toBeInTheDocument();
     expect(screen.queryByText("Old evidence")).toBeNull();
   });
 
@@ -805,7 +817,7 @@ describe("MainBrainCockpitPanel", () => {
   it("renders compact buddy summary when runtime center receives buddy projection", () => {
     renderPanel(unifiedPayload, { buddySummary });
 
-    expect(screen.getByText("伙伴摘要")).toBeInTheDocument();
+    expect(screen.getByText("主脑对你的引导")).toBeInTheDocument();
     expect(screen.getByText("Nova")).toBeInTheDocument();
     expect(
       screen.getByText("建立独立创作与内容事业的长期成长路径"),
@@ -815,6 +827,7 @@ describe("MainBrainCockpitPanel", () => {
       screen.getByText("这是让长期方向不再停留在想象里的最小推进。"),
     ).toBeInTheDocument();
     expect(screen.getByText("现在先打开文档，写下标题和三条核心观点。")).toBeInTheDocument();
-    expect(screen.getByText("先接住情绪，再把任务缩成一个最小动作。")).toBeInTheDocument();
+    expect(screen.queryByText("等级 4 / 亲密度 24 / 契合度 19")).toBeNull();
+    expect(screen.queryByText("先接住情绪，再把任务缩成一个最小动作。")).toBeNull();
   });
 });

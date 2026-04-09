@@ -8,7 +8,7 @@ import {
   ShieldCheck,
   Waypoints,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   presentBuddyMoodLabel,
   presentBuddyStageLabel,
@@ -22,9 +22,7 @@ import {
   formatCnTimestamp,
   formatMainBrainSignalLabel,
   formatRuntimeFieldLabel,
-  formatRuntimeSourceList,
   formatRuntimeStatus,
-  formatRuntimeSurfaceNote,
   localizeRuntimeText,
 } from "./text";
 import type { RuntimeCenterOverviewPayload } from "./useRuntimeCenter";
@@ -63,20 +61,20 @@ type MainBrainCockpitPanelProps = {
 };
 
 const SIGNAL_ICONS: Record<string, ReactNode> = {
-  carrier: <Activity size={18} color="#1B4FD8" />,
-  strategy: <Waypoints size={18} color="#C9A84C" />,
-  lanes: <Waypoints size={18} color="#1B4FD8" />,
-  backlog: <Waypoints size={18} color="#1B4FD8" />,
-  current_cycle: <RotateCcw size={18} color="#C9A84C" />,
+  carrier: <Activity size={18} color="#5E6AD2" />,
+  strategy: <Waypoints size={18} color="#7170FF" />,
+  lanes: <Waypoints size={18} color="#5E6AD2" />,
+  backlog: <Waypoints size={18} color="#5E6AD2" />,
+  current_cycle: <RotateCcw size={18} color="#7170FF" />,
   assignments: <Bot size={18} color="#10b981" />,
   exception_absorption: <ShieldAlert size={18} color="#f97316" />,
   agent_reports: <Bot size={18} color="#10b981" />,
   report_cognition: <ShieldAlert size={18} color="#f97316" />,
   environment: <ShieldCheck size={18} color="#10b981" />,
   governance: <ShieldAlert size={18} color="#f43f5e" />,
-  automation: <RotateCcw size={18} color="#1B4FD8" />,
-  recovery: <RefreshCw size={18} color="#C9A84C" />,
-  evidence: <Activity size={18} color="#1B4FD8" />,
+  automation: <RotateCcw size={18} color="#5E6AD2" />,
+  recovery: <RefreshCw size={18} color="#7170FF" />,
+  evidence: <Activity size={18} color="#5E6AD2" />,
   decisions: <ShieldAlert size={18} color="#f43f5e" />,
   patches: <RotateCcw size={18} color="#f97316" />,
 };
@@ -238,7 +236,7 @@ function signalToneColor(signal: RuntimeCockpitSignal): string {
 }
 
 function signalIcon(signal: RuntimeCockpitSignal): ReactNode {
-  return SIGNAL_ICONS[signal.key] ?? <Activity size={18} color="#1B4FD8" />;
+  return SIGNAL_ICONS[signal.key] ?? <Activity size={18} color="#5E6AD2" />;
 }
 
 function renderSignalCard(
@@ -296,6 +294,43 @@ function firstString(...values: unknown[]): string | null {
     }
   }
   return null;
+}
+
+function hasCjk(value: string | null | undefined): boolean {
+  return Boolean(value && /[\u3400-\u9fff]/u.test(value));
+}
+
+function pickUserFacingText(
+  candidates: unknown[],
+  fallback: string,
+): string {
+  for (const candidate of candidates) {
+    const raw = firstString(candidate);
+    if (!raw) {
+      continue;
+    }
+    const localized = localizeRuntimeText(raw);
+    if (hasCjk(localized)) {
+      return localized;
+    }
+  }
+  return fallback;
+}
+
+function readableRecordText(
+  records: Record<string, unknown>[],
+  fallback: string,
+): string {
+  for (const record of records) {
+    const localized = pickUserFacingText(
+      [record.title, record.headline, record.label, record.summary, record.description],
+      "",
+    );
+    if (localized) {
+      return localized;
+    }
+  }
+  return fallback;
 }
 
 function presentRecoveryAbsorptionActionKind(value: unknown): string | null {
@@ -583,6 +618,7 @@ export default function MainBrainCockpitPanel({
   onRefresh,
   onOpenRoute,
 }: MainBrainCockpitPanelProps) {
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const dedicatedSignals = buildDedicatedSignals(mainBrainData);
   const signalCards =
     dedicatedSignals.length > 0
@@ -763,10 +799,6 @@ export default function MainBrainCockpitPanel({
     typeof environmentPayload?.human_assist?.blocked_count === "number"
       ? environmentPayload.human_assist.blocked_count
       : 0;
-  const todayGoalItems = [
-    firstString(cycleSignal?.title, mainBrainData?.strategy?.title, strategySignal?.value),
-    firstString(cycleSignal?.summary, mainBrainData?.strategy?.summary, strategySignal?.detail),
-  ].filter((item): item is string => Boolean(item));
   const completedItems = [
     ...scopedReportRecords
       .slice(0, 2)
@@ -822,36 +854,171 @@ export default function MainBrainCockpitPanel({
     {
       key: "today-goal",
       label: "今日目标",
-      items: todayGoalItems.length > 0 ? todayGoalItems : ["收口当前周期与主脑派工回流"],
+      items: [
+        pickUserFacingText(
+          [cycleSignal?.title, mainBrainData?.strategy?.title, strategySignal?.value],
+          "主脑正在收口当前周期的核心目标。",
+        ),
+        pickUserFacingText(
+          [cycleSignal?.summary, mainBrainData?.strategy?.summary, strategySignal?.detail],
+          "今天会继续把关键事项收束到同一条推进线上。",
+        ),
+      ],
     },
     {
       key: "completed",
       label: "已完成",
-      items: completedItems.length > 0 ? completedItems : [todayCompletedEmptyCopy],
+      items:
+        completedItems.length > 0
+          ? [
+              readableRecordText(
+                scopedReportRecords,
+                "今天已经收到新的执行回流，主脑正在消化结果。",
+              ),
+              scopedEvidenceSection && typeof scopedEvidenceSection.count === "number"
+                ? `今天新增 ${scopedEvidenceSection.count} 条可追溯证据。`
+                : "今天的新增结果会继续沉淀为证据。",
+            ]
+          : [todayCompletedEmptyCopy],
     },
     {
       key: "in-progress",
       label: "进行中",
-      items: inProgressItems.length > 0 ? inProgressItems : ["今天暂无进行中的任务。"],
+      items:
+        inProgressItems.length > 0
+          ? [
+              `主脑已派出 ${assignmentRecords.length} 项执行工作，仍有 ${backlogRecords.length} 项待推进事项。`,
+              readableRecordText(
+                assignmentRecords,
+                "当前推进重点已经进入执行闭环，团队正在持续跟进。",
+              ),
+            ]
+          : ["今天暂无进行中的任务。"],
     },
     {
       key: "blocked",
       label: "当前阻塞",
-      items: blockedItems.length > 0 ? blockedItems : ["今天暂无明显阻塞。"],
+      items:
+        blockedItems.length > 0
+          ? [
+              conflictRecords.length > 0
+                ? `当前有 ${conflictRecords.length} 个冲突等待主脑收口。`
+                : "当前存在需要主脑继续吸收的阻塞点。",
+              humanAssistBlockedCount > 0
+                ? `其中 ${humanAssistBlockedCount} 项卡在外部协作或人工条件上。`
+                : pickUserFacingText(
+                    [governancePayload?.summary],
+                    "主脑正在处理当前阻塞，不需要你先读内部诊断字段。",
+                  ),
+            ]
+          : ["今天暂无明显阻塞。"],
     },
     {
       key: "confirm",
       label: "待确认",
-      items: confirmItems.length > 0 ? confirmItems : ["今天暂无待确认事项。"],
+      items:
+        confirmItems.length > 0
+          ? [
+              `当前有 ${scopedDecisionRecords.length + scopedPatchRecords.length + staffingPendingCount} 项事项可能需要你确认。`,
+              pickUserFacingText(
+                [
+                  scopedDecisionRecords[0]?.title,
+                  scopedPatchRecords[0]?.title,
+                  cognitionNextAction?.title,
+                ],
+                "主脑会在真正需要你决策时，再把事项明确地推到你面前。",
+              ),
+            ]
+          : ["今天暂无待确认事项。"],
     },
     {
       key: "next-step",
       label: "下一步",
-      items: [`${nextStepMode} · ${localizeRuntimeText(nextStepTitle)}`, nextStepSummary]
-        .filter((item): item is string => Boolean(item)),
+      items: [
+        `${nextStepMode} · ${pickUserFacingText(
+          [nextStepTitle],
+          "继续推进当前周期中的下一步关键动作。",
+        )}`,
+        pickUserFacingText(
+          [nextStepSummary],
+          "主脑会继续把当前周期里的关键事项往前推进。",
+        ),
+      ],
     },
   ];
   const industryRoute = firstString(mainBrainData?.carrier?.route);
+  const operatorSummarySections = [
+    {
+      key: "team",
+      title: "团队在推进",
+      summary: "只看当前主脑正在推哪几类事，不直接暴露后台链路字段。",
+      items: [
+        `当前已派出 ${assignmentRecords.length} 项执行工作。`,
+        backlogRecords.length > 0
+          ? `还有 ${backlogRecords.length} 项待推进事项正在排队。`
+          : "当前没有新的待办积压。",
+        reportRecords.length > 0
+          ? `已收到 ${reportRecords.length} 份执行回流，主脑正在消化。`
+          : "目前还没有新的执行回流。",
+      ],
+    },
+    {
+      key: "blockers",
+      title: "当前卡点",
+      summary: "这里集中展示真正影响推进的阻塞，而不是系统内部字段名。",
+      items:
+        blockedItems.length > 0
+          ? [
+              conflictRecords.length > 0
+                ? `存在 ${conflictRecords.length} 个需要主脑统一判断的冲突。`
+                : "当前存在需要主脑继续处理的阻塞点。",
+              humanAssistBlockedCount > 0
+                ? `其中 ${humanAssistBlockedCount} 项卡在外部协作条件上。`
+                : "当前阻塞还没有扩散到人工协作面。",
+              pickUserFacingText(
+                [governancePayload?.summary],
+                "主脑正在压缩阻塞范围，避免影响后续推进。",
+              ),
+            ]
+          : ["当前没有明显卡点，系统可继续自动推进。"],
+    },
+    {
+      key: "confirm",
+      title: "需要你决定",
+      summary: "只有真正碰到责任边界或关键取舍时，主脑才会把事项抛给你。",
+      items:
+        confirmItems.length > 0
+          ? [
+              scopedDecisionRecords.length > 0
+                ? `当前有 ${scopedDecisionRecords.length} 项待确认决策。`
+                : "当前没有新的待确认决策。",
+              scopedPatchRecords.length > 0
+                ? `另有 ${scopedPatchRecords.length} 项主脑变更建议待处理。`
+                : "当前没有新的变更建议需要你把关。",
+              staffingPendingCount > 0
+                ? `还有 ${staffingPendingCount} 项补位/接手确认在等待。`
+                : "当前没有额外的人力接手确认。",
+            ]
+          : ["当前不需要你介入，主脑会继续自动推进。"],
+    },
+    {
+      key: "outcomes",
+      title: "今天的结果",
+      summary: "只保留普通人真正关心的产出结果，不把证据链明细直接摊开。",
+      items: [
+        scopedEvidenceSection && typeof scopedEvidenceSection.count === "number"
+          ? `今天新增 ${scopedEvidenceSection.count} 条证据沉淀。`
+          : "今天暂时没有新的证据沉淀。",
+        scopedDecisionRecords.length > 0
+          ? `今天出现了 ${scopedDecisionRecords.length} 项决策结果。`
+          : "今天还没有新的决策结果。",
+        scopedPatchRecords.length > 0
+          ? `今天出现了 ${scopedPatchRecords.length} 项补丁/调整结果。`
+          : "今天还没有新的调整落地。",
+      ],
+    },
+  ];
+  const detailToggleLabel = showDiagnostics ? "收起运行细节" : "查看运行细节";
 
   const isInitialLoading =
     (loading && !data) ||
@@ -895,7 +1062,7 @@ export default function MainBrainCockpitPanel({
           type={errorMessage ? "error" : "info"}
           showIcon
           message={errorMessage ?? "主脑驾驶舱暂未接入正式读面。"}
-          description="Runtime Center 当前只认 dedicated main-brain cockpit contract，不再从 overview 卡片回填主脑运行事实。"
+          description="运行中心现在只接受主脑正式读面；如果这里为空，说明主脑驾驶舱还没有接上正式数据，不再从旧概览卡片拼接运行事实。"
         />
       </Card>
     );
@@ -937,13 +1104,11 @@ export default function MainBrainCockpitPanel({
         />
       ) : null}
 
-      <Space wrap size={[8, 8]} style={{ marginBottom: 16 }}>
-        {surface?.source ? <Tag>{formatRuntimeSourceList(surface.source)}</Tag> : null}
-        {surface?.note ? <Tag>{formatRuntimeSurfaceNote(surface.note)}</Tag> : null}
-        {generatedAt ? (
+      {generatedAt ? (
+        <Space wrap size={[8, 8]} style={{ marginBottom: 16 }}>
           <Tag>{RUNTIME_CENTER_TEXT.generatedAt(formatCnTimestamp(generatedAt))}</Tag>
-        ) : null}
-      </Space>
+        </Space>
+      ) : null}
 
       <Card size="small" title="主脑今日运行简报" style={{ marginBottom: 16 }}>
         <div className={styles.briefGrid}>
@@ -966,7 +1131,7 @@ export default function MainBrainCockpitPanel({
         ? (() => {
             const summary = buddySummary;
             return (
-              <Card size="small" title="伙伴摘要" style={{ marginBottom: 16 }}>
+              <Card size="small" title="主脑对你的引导" style={{ marginBottom: 16 }}>
                 <div className={styles.briefGrid}>
                   <div className={styles.briefCard}>
                     <div className={styles.briefTitle}>{summary.buddy_name}</div>
@@ -974,13 +1139,8 @@ export default function MainBrainCockpitPanel({
                       <div className={styles.briefItem}>
                         {localizeRuntimeText(
                           `${presentBuddyStageLabel(summary.evolution_stage)} / ${
-                            summary.domain_label ? `领域 ${summary.domain_label} / ` : ""
-                          }能力分 ${summary.capability_score ?? 0} / 心情 ${presentBuddyMoodLabel(summary.mood_state)}`,
-                        )}
-                      </div>
-                      <div className={styles.briefItem}>
-                        {localizeRuntimeText(
-                          `等级 ${summary.growth_level} / 亲密度 ${summary.intimacy} / 契合度 ${summary.affinity}`,
+                            summary.domain_label ? `当前领域 ${summary.domain_label} / ` : ""
+                          }心情 ${presentBuddyMoodLabel(summary.mood_state)}`,
                         )}
                       </div>
                     </div>
@@ -1019,22 +1179,50 @@ export default function MainBrainCockpitPanel({
                       </div>
                     </div>
                   </div>
-                  <div className={styles.briefCard}>
-                    <div className={styles.briefTitle}>陪伴策略</div>
-                    <div className={styles.briefList}>
-                      <div className={styles.briefItem}>
-                        {localizeRuntimeText(
-                          summary.companion_strategy_summary || "先接住情绪，再把任务缩成一个最小动作。",
-                        )}
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </Card>
             );
           })()
         : null}
 
+      <section className={styles.summaryPanelGrid}>
+        {operatorSummarySections.map((section) => (
+          <div key={section.key} className={styles.controlCard}>
+            <div className={styles.panelHeader} style={{ marginBottom: 12 }}>
+              <div>
+                <h3 className={styles.entryTitle}>{section.title}</h3>
+                <p className={styles.selectionSummary}>{section.summary}</p>
+              </div>
+            </div>
+            <div className={styles.briefList}>
+              {section.items.map((item, index) => (
+                <div key={`${section.key}:${index}`} className={styles.briefItem}>
+                  {localizeRuntimeText(item)}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <div className={styles.detailToggleBar}>
+        <div className={styles.detailToggleCopy}>
+          <div className={styles.detailToggleTitle}>运行细节</div>
+          <div className={styles.detailToggleHint}>
+            默认只给普通用户看结果摘要，系统诊断字段按需展开。
+          </div>
+        </div>
+        <Button
+          onClick={() => {
+            setShowDiagnostics((current) => !current);
+          }}
+        >
+          {detailToggleLabel}
+        </Button>
+      </div>
+
+      {showDiagnostics ? (
+        <div className={styles.diagnosticStack}>
       <Descriptions
         size="small"
         bordered
@@ -1105,8 +1293,7 @@ export default function MainBrainCockpitPanel({
         </Card>
       ) : null}
 
-      {mainBrainData ? (
-        <section className={styles.panelGrid}>
+      <section className={styles.panelGrid}>
           <Card size="small" title="规划面" style={{ marginBottom: 16 }}>
             <div className={styles.metaGrid}>
               <div className={styles.controlCard}>
@@ -1705,12 +1892,13 @@ export default function MainBrainCockpitPanel({
               })}
             </div>
           </Card>
-        </section>
-      ) : null}
 
-      <section className={styles.metrics}>
-        {signalCards.map((signal) => renderSignalCard(signal, onOpenRoute))}
-      </section>
+          <section className={styles.metrics}>
+            {signalCards.map((signal) => renderSignalCard(signal, onOpenRoute))}
+          </section>
+        </section>
+        </div>
+      ) : null}
     </Card>
   );
 }

@@ -28,7 +28,7 @@
   height: 200%;
   background: radial-gradient(
     circle,
-    rgba(27, 79, 216, 0.15) 0%,
+    rgba(113, 112, 255, 0.15) 0%,
     transparent 70%
   );
   transform: rotate(-15deg);
@@ -46,17 +46,17 @@
   margin-bottom: 16px;
   color: var(--baize-primary-glow);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 500;
   letter-spacing: 0.15em;
   text-transform: uppercase;
-  text-shadow: 0 0 10px rgba(27, 79, 216, 0.5);
+  text-shadow: 0 0 10px rgba(113, 112, 255, 0.5);
 }
 
 .title {
   margin: 0;
   color: var(--baize-text-main);
   font-size: 48px;
-  font-weight: 900;
+  font-weight: 500;
   line-height: 1.1;
   letter-spacing: -0.02em;
 }
@@ -80,12 +80,12 @@
   border: 1px solid rgba(255, 255, 255, 0.05) !important;
   background: rgba(255, 255, 255, 0.02) !important;
   border-radius: 20px !important;
-  transition: all 0.3s ease;
+  transition: all 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .metricCard:hover {
   background: rgba(255, 255, 255, 0.04) !important;
-  border-color: rgba(27, 79, 216, 0.2) !important;
+  border-color: rgba(113, 112, 255, 0.2) !important;
   transform: translateY(-4px);
 }
 
@@ -105,17 +105,17 @@
 
 .hubCard:hover {
   background: rgba(10, 22, 60, 0.5) !important;
-  border-color: rgba(27, 79, 216, 0.3) !important;
+  border-color: rgba(113, 112, 255, 0.3) !important;
   box-shadow:
     0 20px 40px rgba(0, 0, 0, 0.4),
-    0 0 20px rgba(27, 79, 216, 0.1) !important;
+    0 0 20px rgba(113, 112, 255, 0.1) !important;
   transform: translateY(-4px) scale(1.01);
 }
 
 .cardTitle {
   color: var(--baize-text-main) !important;
   font-size: 17px !important;
-  font-weight: 700 !important;
+  font-weight: 400 !important;
 }
 
 .cardDescription {
@@ -132,14 +132,14 @@
     var(--baize-accent-2)
   ) !important;
   border: none !important;
-  font-weight: 700 !important;
-  box-shadow: 0 10px 20px rgba(27, 79, 216, 0.3) !important;
-  transition: all 0.3s ease !important;
+  font-weight: 400 !important;
+  box-shadow: 0 10px 20px rgba(113, 112, 255, 0.3) !important;
+  transition: all 0.5s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
 }
 
 .glassButtonPrimary:hover {
   transform: scale(1.05);
-  box-shadow: 0 15px 30px rgba(27, 79, 216, 0.5) !important;
+  box-shadow: 0 15px 30px rgba(113, 112, 255, 0.5) !important;
 }
 
 .hubStack {
@@ -168,7 +168,7 @@
   height: 44px;
   border-radius: 14px;
   margin-bottom: 12px;
-  background: rgba(27, 79, 216, 0.15);
+  background: rgba(113, 112, 255, 0.15);
   color: var(--baize-primary-glow);
 }
 
@@ -218,8 +218,8 @@
 }
 
 .templateCardActive {
-  border: 1px solid rgba(27, 79, 216, 0.35);
-  background: rgba(27, 79, 216, 0.12);
+  border: 1px solid rgba(113, 112, 255, 0.35);
+  background: rgba(113, 112, 255, 0.12);
 }
 
 @media (max-width: 768px) {

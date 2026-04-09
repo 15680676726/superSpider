@@ -1,9 +1,5 @@
 import { theme } from "antd";
 
-// ---------------------------------------------------------------------------
-// Responsive breakpoints (matches layout.css media queries)
-// ---------------------------------------------------------------------------
-
 export const BREAKPOINTS = {
   xs: 480,
   sm: 576,
@@ -15,132 +11,256 @@ export const BREAKPOINTS = {
 
 export type Breakpoint = keyof typeof BREAKPOINTS;
 
-// ---------------------------------------------------------------------------
-// Noble Blue & Gold Theme  —  皇家蓝 × 香槟金
-// ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────
+// Cyber Holo Design System — Ant Design Token Overrides
+//
+// 背景哲学：
+//   深空哑光底 (#171821)  +  大圆角玻璃卡片  +  霓虹紫蓝点缀
+//   参考 Daccord 风格：强层次、大圆角、精致间距、微弱光感
+// ─────────────────────────────────────────────────────────
+
+const NEON       = "#5c6ef5";   // 主霓虹紫蓝
+const NEON_LIGHT = "#818cf8";   // 高亮紫蓝
+const CYAN       = "#22d3ee";   // 强调青
+const BG         = "#171821";   // 全局底色
+const SURFACE    = "#242740";   // 卡片表面
+const ELEVATED   = "#1e2035";   // 侧边栏/导航
+const BORDER     = "rgba(255,255,255,0.06)";
+const TEXT       = "#e2e8f0";
+const TEXT_2     = "#94a3b8";
 
 export const baizeTheme = {
-  wave: {
-    disabled: true,
-  },
+  wave: { disabled: false },
   theme: {
     algorithm: theme.darkAlgorithm,
     cssVar: true,
     hashed: false,
     token: {
-      // Brand colors — 皇家蓝主色 / 香槟金强调
-      colorPrimary: "#1B4FD8",
-      colorInfo: "#2563EB",
-      colorLink: "#C9A84C",
-      colorSuccess: "#22c55e",
-      colorWarning: "#E8C870",
-      colorError: "#ef4444",
+      // ── 品牌色 ──
+      colorPrimary:   NEON,
+      colorInfo:      CYAN,
+      colorLink:      NEON_LIGHT,
+      colorSuccess:   "#34d399",
+      colorWarning:   "#fbbf24",
+      colorError:     "#f87171",
 
-      // Surfaces — 午夜深蓝
-      colorBgBase: "#03070F",
-      colorBgLayout: "#03070F",
-      colorBgContainer: "rgba(5, 12, 35, 0.50)",
-      colorBgElevated: "rgba(10, 22, 60, 0.80)",
+      // ── 背景 ──
+      colorBgBase:        BG,
+      colorBgLayout:      "transparent",
+      colorBgContainer:   "rgba(15, 16, 30, 0.65)",  /* 磨砂玻璃卡片底 */
+      colorBgElevated:    "rgba(20, 21, 38, 0.82)",  /* 弹出层 比卡片更不透明 */
+      colorBgSpotlight:   "rgba(20, 21, 38, 0.82)",
 
-      // Text
-      colorTextBase: "#EEF2FF",
-      colorTextSecondary: "#A8B8D8",
-      colorTextTertiary: "#6B7E9F",
+      // ── 文字 ──
+      colorTextBase:      TEXT,
+      colorText:          TEXT,
+      colorTextSecondary: TEXT_2,
+      colorTextTertiary:  "#64748b",
+      colorTextDisabled:  "#475569",
 
-      // Borders & Radius
-      borderRadius: 12,
+      // ── 边框 ──
+      colorBorder:          BORDER,
+      colorBorderSecondary: "rgba(255,255,255,0.03)",
+      colorSplit:           BORDER,
+
+      // ── 填充 ──
+      colorFill:        "rgba(255,255,255,0.04)",
+      colorFillSecondary: "rgba(255,255,255,0.06)",
+      colorFillTertiary: "rgba(255,255,255,0.02)",
+
+      // ── 几何 ──
+      borderRadius:   12,
       borderRadiusLG: 16,
       borderRadiusSM: 8,
-      colorBorder: "rgba(201, 168, 76, 0.20)",
-      colorBorderSecondary: "rgba(201, 168, 76, 0.10)",
+      borderRadiusXS: 6,
 
-      // Shadows
-      boxShadow: "0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(201, 168, 76, 0.08)",
-      boxShadowSecondary: "0 4px 16px rgba(0, 0, 0, 0.4)",
+      // ── 字体 ──
+      fontFamily:    "'Inter', -apple-system, sans-serif",
+      fontSize:      14,
+      fontSizeSM:    12,
+      fontSizeLG:    16,
 
-      // Typography
-      fontFamily:
-        "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-      fontSize: 14,
-      fontSizeHeading1: 30,
-      fontSizeHeading2: 24,
-      fontSizeHeading3: 20,
+      // ── 阴影 ──
+      boxShadow:          "0 4px 16px rgba(0,0,0,0.4)",
+      boxShadowSecondary: "0 2px 8px rgba(0,0,0,0.3)",
 
-      // Motion
-      motionDurationSlow: "0.4s",
-      motionDurationMid: "0.25s",
-      motionDurationFast: "0.15s",
-      motionEaseInOut: "cubic-bezier(0.19, 1, 0.22, 1)",
+      // ── Motion ──
+      motionDurationMid:   "0.2s",
+      motionDurationSlow:  "0.3s",
+      motionEaseInOut:     "cubic-bezier(0.4,0,0.2,1)",
+
+      // ── 控件高度 ──
+      controlHeight:   36,
+      controlHeightLG: 42,
+      controlHeightSM: 28,
+
+      // ── 间距 ──
+      padding:   16,
+      paddingLG: 24,
+      paddingSM: 12,
+      paddingXS: 8,
+      margin:    16,
+      marginLG:  24,
+      marginSM:  12,
     },
     components: {
       Layout: {
-        bodyBg: "transparent",
-        headerBg: "transparent",
-        siderBg: "transparent",
-        headerHeight: 80,
+        bodyBg:     "transparent",
+        headerBg:   "transparent",
+        siderBg:    "rgba(15, 16, 30, 0.72)",  /* 磨砂玻璃侧边栏 */
+        triggerBg:  "rgba(15, 16, 30, 0.72)",
+        triggerColor: "#94a3b8",
+      },
+      Sider: {
+        colorBgCollapsedButton: ELEVATED,
       },
       Card: {
-        colorBgContainer: "rgba(5, 12, 35, 0.45)",
-        colorBorderSecondary: "rgba(201, 168, 76, 0.12)",
-        borderRadiusLG: 24,
+        colorBgContainer: SURFACE,
+        colorBorderSecondary: BORDER,
+        borderRadiusLG: 16,
+        paddingLG: 18,
+        fontWeightStrong: 600,
       },
       Menu: {
-        itemBg: "transparent",
-        itemSelectedBg: "rgba(27, 79, 216, 0.20)",
-        itemActiveBg: "rgba(201, 168, 76, 0.06)",
-        itemPaddingInline: 16,
-        itemBorderRadius: 12,
+        itemBg:           "transparent",
+        subMenuItemBg:    "transparent",
+        itemSelectedBg:   "rgba(92,110,245,0.18)",
+        itemActiveBg:     "rgba(255,255,255,0.06)",
+        itemHoverBg:      "rgba(255,255,255,0.06)",
+        itemColor:        TEXT_2,
+        itemHoverColor:   TEXT,
+        itemSelectedColor: TEXT,
+        itemPaddingInline: 12,
+        itemBorderRadius:  10,
+        itemMarginInline:  8,
+        itemMarginBlock:   2,
+        groupTitleColor:   "#64748b",
+        groupTitleFontSize: 11,
+        iconSize: 15,
+        collapsedIconSize: 18,
+        activeBarBorderWidth: 0,
       },
       Button: {
-        fontWeight: 700,
-        borderRadius: 12,
-        controlHeight: 40,
-        controlHeightLG: 48,
-        controlHeightSM: 32,
+        fontWeight:        600,
+        borderRadius:      10,
+        colorPrimary:      NEON,
+        colorPrimaryHover: NEON_LIGHT,
+        primaryShadow:     `0 4px 12px rgba(92,110,245,0.35)`,
+        defaultBg:         "rgba(255,255,255,0.04)",
+        defaultBorderColor: BORDER,
+        defaultColor:      TEXT,
+        defaultShadow:     "none",
+        controlHeight:     36,
       },
       Input: {
-        colorBgContainer: "rgba(5, 12, 35, 0.75)",
-        activeBorderColor: "#C9A84C",
-        hoverBorderColor: "rgba(201, 168, 76, 0.50)",
+        colorBgContainer:  "rgba(0,0,0,0.25)",
+        colorBorder:       BORDER,
+        activeBorderColor: NEON,
+        hoverBorderColor:  "rgba(255,255,255,0.12)",
+        activeShadow:      `0 0 0 2px rgba(92,110,245,0.2)`,
+        borderRadius:      10,
+        paddingInline:     12,
+        colorText:         TEXT,
+        colorTextPlaceholder: "#64748b",
       },
       Select: {
-        colorBgContainer: "rgba(5, 12, 35, 0.75)",
-        optionSelectedBg: "rgba(27, 79, 216, 0.25)",
+        colorBgContainer:   "rgba(0,0,0,0.25)",
+        colorBorder:        BORDER,
+        optionSelectedBg:   "rgba(92,110,245,0.15)",
+        optionActiveBg:     "rgba(255,255,255,0.04)",
+        colorBgElevated:    SURFACE,
+        borderRadius:       10,
+        selectorBg:         "rgba(0,0,0,0.25)",
       },
       Modal: {
-        contentBg: "rgba(5, 12, 35, 0.96)",
-        headerBg: "transparent",
+        contentBg:    SURFACE,
+        headerBg:     "transparent",
+        borderRadiusLG: 18,
+        titleFontSize: 16,
+        titleColor:    TEXT,
       },
       Drawer: {
-        colorBgElevated: "rgba(5, 12, 35, 0.96)",
+        colorBgElevated: SURFACE,
+        borderRadiusLG:  18,
       },
       Table: {
-        headerBg: "rgba(5, 12, 35, 0.70)",
-        rowHoverBg: "rgba(201, 168, 76, 0.04)",
-        borderColor: "rgba(201, 168, 76, 0.10)",
+        headerBg:           "rgba(255,255,255,0.03)",
+        headerColor:        TEXT_2,
+        headerSortHoverBg:  "rgba(255,255,255,0.04)",
+        rowHoverBg:         "rgba(255,255,255,0.04)",
+        borderColor:        BORDER,
+        colorBgContainer:   "transparent",
+        cellPaddingBlock:   12,
+        cellPaddingInline:  14,
+        headerSplitColor:   BORDER,
+        fixedHeaderSortActiveBg: "rgba(255,255,255,0.04)",
+        bodySortBg:         "transparent",
       },
       Tabs: {
-        itemSelectedColor: "#C9A84C",
-        inkBarColor: "#C9A84C",
-        titleFontSize: 15,
-        fontWeightStrong: 700,
+        itemColor:         TEXT_2,
+        itemHoverColor:    TEXT,
+        itemSelectedColor: TEXT,
+        inkBarColor:       NEON,
+        cardBg:            "transparent",
+        colorBorderSecondary: BORDER,
+        titleFontSize:     14,
+        horizontalItemPadding: "12px 0",
+        horizontalItemGutter: 24,
       },
       Tag: {
-        borderRadiusSM: 8,
-        defaultBg: "rgba(27, 79, 216, 0.18)",
+        colorBorder:     "rgba(92,110,245,0.25)",
+        colorBgContainer: "rgba(92,110,245,0.12)",
+        colorText:        NEON_LIGHT,
+        borderRadiusSM:   999,
+        fontSizeSM:       11,
       },
-      Alert: {
-        colorInfoBg: "rgba(27, 79, 216, 0.12)",
-        colorWarningBg: "rgba(201, 168, 76, 0.12)",
-        colorErrorBg: "rgba(239, 68, 68, 0.10)",
-        colorSuccessBg: "rgba(34, 197, 94, 0.10)",
+      Badge: {
+        colorBgContainer: ELEVATED,
+      },
+      Switch: {
+        colorPrimary:        NEON,
+        colorPrimaryHover:   NEON_LIGHT,
+        colorTextQuaternary: "rgba(255,255,255,0.2)",
+      },
+      Radio: {
+        colorPrimary:   NEON,
+        buttonBg:       "rgba(255,255,255,0.04)",
+        buttonCheckedBg: NEON,
+        radioSize:      15,
+      },
+      Checkbox: {
+        colorPrimary: NEON,
+        colorBorder:  BORDER,
+      },
+      Form: {
+        labelColor:       TEXT_2,
+        labelFontSize:    13,
+        verticalLabelPadding: "0 0 6px",
+      },
+      Spin: {
+        colorPrimary: NEON,
+        dotSize: 24,
       },
       Tooltip: {
-        colorBgSpotlight: "rgba(5, 12, 35, 0.96)",
+        colorBgSpotlight: ELEVATED,
+        colorTextLightSolid: TEXT,
+        borderRadius: 8,
       },
-      Result: {
-        colorTextHeading: "#EEF2FF",
-        colorTextDescription: "#A8B8D8",
+      Dropdown: {
+        colorBgElevated: SURFACE,
+        controlItemBgHover: "rgba(255,255,255,0.06)",
+        controlItemBgActive: "rgba(92,110,245,0.15)",
+        borderRadiusLG: 12,
+      },
+      Empty: {
+        colorText:     TEXT_2,
+        colorTextDisabled: "#64748b",
+      },
+      Statistic: {
+        contentFontSize: 28,
+        titleFontSize:   12,
+        colorText:       TEXT,
+        colorTextDescription: TEXT_2,
       },
     },
   },
