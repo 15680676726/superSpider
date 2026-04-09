@@ -1783,6 +1783,41 @@ async def test_main_brain_chat_service_never_schedules_background_intake_for_con
     assert service._background_tasks == set()  # pylint: disable=protected-access
 
 
+def test_main_brain_chat_service_stable_prompt_prefix_includes_live_time_grounding(
+    monkeypatch,
+) -> None:
+    backend = _FakeSessionBackend()
+    service = MainBrainChatService(
+        session_backend=backend,
+        industry_service=_FakeIndustryService(),
+        model_factory=lambda: _StaticResponseModel("ok"),
+    )
+    monkeypatch.setattr(
+        main_brain_chat_service_module,
+        "_current_prompt_time_snapshot",
+        lambda: "北京时间 2026-04-09 周四 10:00",
+        raising=False,
+    )
+    request = SimpleNamespace(
+        session_id="sess-time-grounding",
+        user_id="user-time-grounding",
+        industry_instance_id="industry-v1-demo",
+        work_context_id=None,
+        agent_id=None,
+    )
+
+    prompt_messages = service._build_prompt_messages(  # pylint: disable=protected-access
+        request=request,
+        query="今天是周几，接下来等到哪天？",
+        prior_messages=[],
+        current_messages=[],
+    )
+
+    context_prompt = prompt_messages[1]["content"]
+    assert "## 当前时间" in context_prompt
+    assert "北京时间 2026-04-09 周四 10:00" in context_prompt
+
+
 @pytest.mark.asyncio
 async def test_main_brain_chat_service_reuses_scope_snapshot_for_same_work_context():
     backend = _FakeSessionBackend()

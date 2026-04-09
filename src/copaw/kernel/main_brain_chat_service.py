@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import json
 import logging
 import re
@@ -11,6 +12,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo
 
 from agentscope.message import Msg, TextBlock, ThinkingBlock
 from reme.memory.file_based.reme_in_memory_memory import ReMeInMemoryMemory
@@ -42,6 +44,17 @@ if TYPE_CHECKING:
     from .agent_profile_service import AgentProfileService
 else:
     from ..memory.surface_service import MemorySurfaceService
+    from .agent_profile_service import AgentProfileService
+
+
+_PROMPT_TIME_ZONE = ZoneInfo("Asia/Shanghai")
+_PROMPT_WEEKDAY_LABELS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+
+
+def _current_prompt_time_snapshot() -> str:
+    now = datetime.now(_PROMPT_TIME_ZONE)
+    weekday = _PROMPT_WEEKDAY_LABELS[now.weekday()]
+    return f"北京时间 {now:%Y-%m-%d} {weekday} {now:%H:%M}"
 
 logger = logging.getLogger(__name__)
 
@@ -1819,6 +1832,9 @@ class MainBrainChatService:
         )
         context_sections = [
             f"## 主脑身份\n- 当前身份：Spider Mesh 主脑\n- 当前会话：{_clip_text(getattr(request, 'session_id', ''), limit=80) or '未命名会话'}",
+            "## 当前时间\n"
+            f"- {_current_prompt_time_snapshot()}\n"
+            "- 凡是涉及今天、明天、周几、截止日期或等待到某天的回答，都必须先以这里的当前时间为准，不要自行猜测。",
             f"## 当前运行摘要\n{_format_runtime_snapshot(detail)}",
             *(
                 [f"## 主脑异常吸收\n{_format_exception_absorption_snapshot(exception_absorption)}"]

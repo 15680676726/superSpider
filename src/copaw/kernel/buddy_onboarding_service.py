@@ -27,6 +27,8 @@ from .buddy_onboarding_reasoner import (
 )
 from .buddy_domain_capability_growth import BuddyDomainCapabilityGrowthService
 from .buddy_domain_capability import (
+    buddy_specialist_allowed_capabilities,
+    buddy_specialist_preferred_capability_families,
     derive_buddy_domain_key,
     preview_domain_transition,
 )
@@ -1005,6 +1007,7 @@ class BuddyOnboardingService:
             profile=profile,
             instance_id=instance_id,
             existing_instance=instance,
+            direction_text=growth_target.final_goal,
         )
         specs = self._ensure_durable_review_schedules(
             profile=profile,
@@ -1342,6 +1345,7 @@ class BuddyOnboardingService:
             profile=profile,
             instance_id=instance_id,
             existing_instance=existing_instance,
+            direction_text=growth_target.final_goal,
         )
         instance = IndustryInstanceRecord(
             instance_id=instance_id,
@@ -1772,6 +1776,7 @@ class BuddyOnboardingService:
         profile: HumanProfile,
         instance_id: str,
         existing_instance: IndustryInstanceRecord | None,
+        direction_text: str | None,
     ) -> list[IndustryRoleBlueprint]:
         existing_agents = (
             list((existing_instance.team_payload or {}).get("agents") or [])
@@ -1787,6 +1792,31 @@ class BuddyOnboardingService:
         if restored_roles:
             return restored_roles
         label = profile.display_name.strip() or "Buddy"
+        domain_key = derive_buddy_domain_key(direction_text or "")
+        growth_allowed = buddy_specialist_allowed_capabilities(
+            domain_key=domain_key,
+            role_id="growth-focus",
+        )
+        proof_allowed = buddy_specialist_allowed_capabilities(
+            domain_key=domain_key,
+            role_id="proof-of-work",
+        )
+        growth_families = buddy_specialist_preferred_capability_families(
+            domain_key=domain_key,
+            role_id="growth-focus",
+        )
+        proof_families = buddy_specialist_preferred_capability_families(
+            domain_key=domain_key,
+            role_id="proof-of-work",
+        )
+        growth_summary = f"持续确保{label}没有偏离已经确认的长期主方向。"
+        proof_summary = f"把{label}当前的主方向尽快变成看得见的证据、作品与推进势能。"
+        if domain_key == "writing":
+            growth_summary = f"持续确保{label}的写作主线、题材方向和更新节奏没有跑偏。"
+            proof_summary = f"把{label}的写作主线尽快变成章节草稿、平台发布证据和作品积累。"
+        elif domain_key == "stocks":
+            growth_summary = f"持续确保{label}的交易主线、策略边界和复盘节奏没有跑偏。"
+            proof_summary = f"把{label}的交易主线尽快变成可验证的观察、记录、复盘与结果证据。"
         return [
             IndustryRoleBlueprint(
                 role_id="growth-focus",
@@ -1794,8 +1824,8 @@ class BuddyOnboardingService:
                 actor_key=f"{instance_id}:growth-focus",
                 name=f"{label} Growth Focus",
                 role_name="成长主线",
-                role_summary=f"持续确保{label}没有偏离已经确认的长期主方向。",
-                mission=f"持续确保{label}没有偏离已经确认的长期主方向。",
+                role_summary=growth_summary,
+                mission=growth_summary,
                 goal_kind="growth-focus",
                 agent_class="business",
                 employment_mode="career",
@@ -1803,8 +1833,8 @@ class BuddyOnboardingService:
                 suspendable=False,
                 reports_to=EXECUTION_CORE_ROLE_ID,
                 risk_level="guarded",
-                allowed_capabilities=["system:dispatch_query"],
-                preferred_capability_families=["planning", "coordination"],
+                allowed_capabilities=growth_allowed,
+                preferred_capability_families=growth_families,
                 evidence_expectations=["growth-focus completion note"],
             ),
             IndustryRoleBlueprint(
@@ -1813,8 +1843,8 @@ class BuddyOnboardingService:
                 actor_key=f"{instance_id}:proof-of-work",
                 name=f"{label} Proof Of Work",
                 role_name="成果证明",
-                role_summary=f"把{label}当前的主方向尽快变成看得见的证据、作品与推进势能。",
-                mission=f"把{label}当前的主方向尽快变成看得见的证据、作品与推进势能。",
+                role_summary=proof_summary,
+                mission=proof_summary,
                 goal_kind="proof-of-work",
                 agent_class="business",
                 employment_mode="career",
@@ -1822,8 +1852,8 @@ class BuddyOnboardingService:
                 suspendable=False,
                 reports_to=EXECUTION_CORE_ROLE_ID,
                 risk_level="guarded",
-                allowed_capabilities=["system:dispatch_query"],
-                preferred_capability_families=["execution", "evidence"],
+                allowed_capabilities=proof_allowed,
+                preferred_capability_families=proof_families,
                 evidence_expectations=["proof-of-work artifact"],
             ),
         ]

@@ -134,6 +134,29 @@ _DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
 )
 
+_BUDDY_SPECIALIST_BASE_ALLOWED_CAPABILITIES: tuple[str, ...] = (
+    "system:dispatch_query",
+    "tool:get_current_time",
+    "tool:read_file",
+    "tool:write_file",
+    "tool:edit_file",
+)
+
+_BUDDY_SPECIALIST_DOMAIN_FAMILIES: dict[str, dict[str, tuple[str, ...]]] = {
+    "growth-focus": {
+        "stocks": ("planning", "coordination", "research", "data"),
+        "writing": ("planning", "coordination", "content", "research"),
+        "fitness": ("planning", "coordination", "workflow", "data"),
+        "general": ("planning", "coordination"),
+    },
+    "proof-of-work": {
+        "stocks": ("execution", "evidence", "research", "data", "browser"),
+        "writing": ("execution", "evidence", "content", "browser", "workflow"),
+        "fitness": ("execution", "evidence", "workflow", "data"),
+        "general": ("execution", "evidence", "browser"),
+    },
+}
+
 
 def _clamp_capability_score(score: int) -> int:
     return max(0, min(100, int(score)))
@@ -312,6 +335,27 @@ def derive_buddy_domain_key(direction: str) -> str:
     collapsed = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "-", normalized)
     collapsed = collapsed.strip("-")
     return collapsed or "general"
+
+
+def buddy_specialist_allowed_capabilities(*, domain_key: str, role_id: str) -> list[str]:
+    capabilities = list(_BUDDY_SPECIALIST_BASE_ALLOWED_CAPABILITIES)
+    normalized_role_id = role_id.strip().lower()
+    normalized_domain_key = domain_key.strip().lower() or "general"
+    if normalized_role_id == "proof-of-work" or normalized_domain_key in {"stocks", "writing"}:
+        capabilities.append("tool:browser_use")
+    return list(dict.fromkeys(capabilities))
+
+
+def buddy_specialist_preferred_capability_families(
+    *,
+    domain_key: str,
+    role_id: str,
+) -> list[str]:
+    normalized_role_id = role_id.strip().lower()
+    normalized_domain_key = domain_key.strip().lower() or "general"
+    family_map = _BUDDY_SPECIALIST_DOMAIN_FAMILIES.get(normalized_role_id, {})
+    families = family_map.get(normalized_domain_key) or family_map.get("general") or ()
+    return list(dict.fromkeys(families))
 
 
 def preview_domain_transition(

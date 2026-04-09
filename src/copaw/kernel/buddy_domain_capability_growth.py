@@ -5,7 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from .buddy_domain_capability import resolve_stage_transition
+from .buddy_domain_capability import (
+    buddy_specialist_allowed_capabilities,
+    buddy_specialist_preferred_capability_families,
+    derive_buddy_domain_key,
+    resolve_stage_transition,
+)
 from .buddy_execution_carrier import (
     EXECUTION_CORE_ROLE_ID,
     build_buddy_domain_control_thread_id,
@@ -398,6 +403,9 @@ class BuddyDomainCapabilityGrowthService:
             return restored
         instance_id = str(getattr(record, "instance_id", "") or "").strip()
         label = str(getattr(record, "label", "") or "").strip() or "Buddy"
+        domain_key = derive_buddy_domain_key(
+            _string(getattr(record, "summary", None)) or label,
+        )
         return [
             IndustryRoleBlueprint(
                 role_id="growth-focus",
@@ -414,8 +422,14 @@ class BuddyDomainCapabilityGrowthService:
                 suspendable=False,
                 reports_to=EXECUTION_CORE_ROLE_ID,
                 risk_level="guarded",
-                allowed_capabilities=["system:dispatch_query"],
-                preferred_capability_families=["planning", "coordination"],
+                allowed_capabilities=buddy_specialist_allowed_capabilities(
+                    domain_key=domain_key,
+                    role_id="growth-focus",
+                ),
+                preferred_capability_families=buddy_specialist_preferred_capability_families(
+                    domain_key=domain_key,
+                    role_id="growth-focus",
+                ),
                 evidence_expectations=["growth-focus completion note"],
             ),
             IndustryRoleBlueprint(
@@ -433,8 +447,14 @@ class BuddyDomainCapabilityGrowthService:
                 suspendable=False,
                 reports_to=EXECUTION_CORE_ROLE_ID,
                 risk_level="guarded",
-                allowed_capabilities=["system:dispatch_query"],
-                preferred_capability_families=["execution", "evidence"],
+                allowed_capabilities=buddy_specialist_allowed_capabilities(
+                    domain_key=domain_key,
+                    role_id="proof-of-work",
+                ),
+                preferred_capability_families=buddy_specialist_preferred_capability_families(
+                    domain_key=domain_key,
+                    role_id="proof-of-work",
+                ),
                 evidence_expectations=["proof-of-work artifact"],
             ),
         ]

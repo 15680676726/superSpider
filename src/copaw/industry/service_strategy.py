@@ -436,10 +436,10 @@ class _IndustryStrategyMixin:
             matched_surface_count += 1
             score += 6 if surface_signal.endswith("capability match") else 4
             signals.append(surface_signal)
-        if normalized_requested_surfaces and matched_surface_count == 0:
-            return 0, []
         if missing_surface_count:
             score -= missing_surface_count * 3
+            if matched_surface_count == 0:
+                signals.append("surface gap on matched specialist")
         if normalized_requested_surfaces and matched_surface_count:
             is_researcher = normalize_industry_role_id(role.role_id) == "researcher"
             if is_researcher and not research_intent:
@@ -505,6 +505,8 @@ class _IndustryStrategyMixin:
                 if surface_signal is not None:
                     score += 4 if surface_signal.endswith("capability match") else 2
                     signals.append(surface_signal)
+        if normalized_requested_surfaces and matched_surface_count == 0 and score < 6:
+            return 0, []
         return score, _unique_strings(signals)
 
     def _build_chat_writeback_role_values(

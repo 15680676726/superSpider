@@ -82,3 +82,14 @@ def test_resolve_execution_surface_support_prefers_capability_mounts() -> None:
         )
         == "desktop environment match"
     )
+
+
+def test_infer_requested_execution_surfaces_recognizes_platform_draft_and_upload_browser_flow() -> None:
+    assert infer_requested_execution_surfaces(
+        texts=[
+            "请在浏览器里打开番茄创作平台草稿箱，继续写今天的小说章节，并从 Windows 桌面目录选择封面图片上传",
+        ],
+        capability_ids=["tool:browser_use", "mcp:desktop_windows", "tool:write_file"],
+        capability_mounts=[],
+        environment_texts=["browser", "desktop", "workspace"],
+    ) == ["file", "browser", "desktop"]

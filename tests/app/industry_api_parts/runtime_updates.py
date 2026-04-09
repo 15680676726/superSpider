@@ -1060,7 +1060,8 @@ def test_industry_chat_writeback_auto_closes_temporary_seat_desktop_gap_via_gove
         )
 
     assert result is not None
-    assert "temporary-seat-auto" in result["classification"]
+    assert "existing-role" in result["classification"]
+    assert "capability-gap-closed" in result["classification"]
     assert app.state.capability_service.get_mcp_client_info("desktop_windows") is not None
     install_tasks = app.state.task_repository.list_tasks(
         task_type="system:create_mcp_client",
@@ -1450,19 +1451,87 @@ def test_industry_chat_writeback_surfaces_browser_seat_proposal_in_runtime_detai
     assert result is not None
     assert result["delegated"] is False
     assert result["dispatch_deferred"] is True
-    assert "temporary-seat-proposal" in result["classification"]
-    assert result["decision_request_id"]
+    assert "existing-role" in result["classification"]
+    assert "capability-gap-closed" in result["classification"]
+    assert result["decision_request_id"] is None
 
     detail = app.state.industry_service.get_instance_detail(instance_id)
     assert detail is not None
-    assert detail.staffing["active_gap"]["kind"] == "temporary-seat-proposal"
-    assert detail.staffing["active_gap"]["requires_confirmation"] is True
-    assert "browser" in detail.staffing["active_gap"]["requested_surfaces"]
-    assert detail.staffing["pending_proposals"]
-    pending = detail.staffing["pending_proposals"][0]
-    assert pending["kind"] == "temporary-seat-proposal"
-    assert pending["requires_confirmation"] is True
-    assert "browser" in pending["requested_surfaces"]
+    assert detail.staffing["active_gap"] is None
+    assert detail.staffing["pending_proposals"] == []
+
+
+def test_industry_chat_writeback_auto_closes_existing_browser_specialist_gap_before_temp_seat(
+    tmp_path,
+) -> None:
+    app = _build_industry_app(
+        tmp_path,
+        draft_generator=BrowserIndustryDraftGenerator(),
+    )
+    client = TestClient(app)
+
+    profile = normalize_industry_profile(
+        IndustryPreviewRequest(
+            industry="Writing Operations",
+            company_name="Northwind Stories",
+            product="serialized fiction publishing",
+            goals=["build a stable writing and publishing loop"],
+        ),
+    )
+    draft = BrowserIndustryDraftGenerator().build_draft(
+        profile,
+        "industry-v1-northwind-stories",
+    )
+    response = client.post(
+        "/industry/v1/bootstrap",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "draft": draft.model_dump(mode="json"),
+            "auto_dispatch": True,
+            "execute": False,
+        },
+    )
+    assert response.status_code == 200
+    instance_id = response.json()["team"]["team_id"]
+
+    message_text = "请在浏览器里打开番茄创作平台草稿箱，继续写今天的小说章节，并从 Windows 桌面目录选择封面图片上传"
+    result = asyncio.run(
+        app.state.industry_service.apply_execution_chat_writeback(
+            industry_instance_id=instance_id,
+            message_text=message_text,
+            owner_agent_id="copaw-agent-runner",
+            session_id=f"industry-chat:{instance_id}:execution-core",
+            channel="console",
+            writeback_plan=build_chat_writeback_plan(
+                message_text,
+                approved_classifications=["backlog"],
+                goal_title="番茄章节草稿推进",
+                goal_summary=message_text,
+                goal_plan_steps=[
+                    "打开番茄创作平台并进入当前作品草稿。",
+                    "完成今天章节的草稿更新，并从 Windows 桌面目录选择封面图片上传。",
+                    "把草稿推进结果和下一步写回。",
+                ],
+            ),
+        ),
+    )
+
+    assert result is not None
+    assert result["delegated"] is False
+    assert result["dispatch_deferred"] is True
+    assert result["target_industry_role_id"] == "solution-lead"
+    assert result["target_owner_agent_id"] != "copaw-agent-runner"
+    assert "temporary-seat-proposal" not in result["classification"]
+    assert "temporary-seat-auto" not in result["classification"]
+    assert "capability-gap-closed" in result["classification"]
+
+    detail = app.state.industry_service.get_instance_detail(instance_id)
+    assert detail is not None
+    assert not any(agent.employment_mode == "temporary" for agent in detail.team.agents)
+    runtime = app.state.agent_runtime_repository.get_runtime(result["target_owner_agent_id"])
+    assert runtime is not None
+    capability_layers = runtime.metadata["capability_layers"]
+    assert "tool:browser_use" in capability_layers["role_prototype_capability_ids"]
 
 
 def test_industry_chat_writeback_approved_staffing_proposal_unblocks_materialization(

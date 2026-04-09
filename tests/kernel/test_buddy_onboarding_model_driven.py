@@ -100,6 +100,55 @@ class _FakeBuddyReasoner:
         )
 
 
+class _FakeWritingBuddyReasoner:
+    def plan_turn(
+        self,
+        *,
+        profile,
+        transcript,
+        question_count: int,
+        tightened: bool,
+    ) -> BuddyOnboardingReasonedTurn:
+        _ = (profile, transcript, tightened)
+        finished = question_count >= 2
+        return BuddyOnboardingReasonedTurn(
+            finished=finished,
+            next_question="" if finished else "你更想先写长篇连载，还是先做短篇练习？",
+            candidate_directions=["建立稳定、可持续的写作与内容发布成长路径"],
+            recommended_direction="建立稳定、可持续的写作与内容发布成长路径",
+        )
+
+    def build_growth_plan(
+        self,
+        *,
+        profile,
+        transcript,
+        selected_direction: str,
+    ) -> BuddyOnboardingGrowthPlan:
+        _ = (profile, transcript)
+        return BuddyOnboardingGrowthPlan(
+            primary_direction=selected_direction,
+            final_goal="先建立稳定的番茄写作与发布节奏，并产出第一轮作品证据。",
+            why_it_matters="把写作从口头计划收成能持续发布、能形成作品资产的长期主线。",
+            backlog_items=[
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="growth-focus",
+                    title="明确连载方向与更新节奏",
+                    summary="先确定题材、更新频率和最小可持续字数目标。",
+                    priority=3,
+                    source_key="writing-direction",
+                ),
+                BuddyOnboardingBacklogSeed(
+                    lane_hint="proof-of-work",
+                    title="完成第一章并进入平台草稿",
+                    summary="完成第一章初稿，准备进入番茄平台草稿箱。",
+                    priority=2,
+                    source_key="writing-first-chapter",
+                ),
+            ],
+        )
+
+
 def _build_service(tmp_path, *, reasoner=None) -> BuddyOnboardingService:
     store = SQLiteStateStore(tmp_path / "buddy-onboarding-model.sqlite3")
     return BuddyOnboardingService(
@@ -227,3 +276,48 @@ def test_confirm_primary_direction_uses_model_generated_growth_plan(tmp_path) ->
     )
     assert [item.title for item in backlog] == ["确定交易边界", "产出第一份交易复盘"]
     assert reasoner.plan_calls[-1]["selected_direction"] == _STOCKS_DIRECTION
+
+
+def test_confirm_primary_direction_shapes_domain_specific_specialist_capabilities(tmp_path) -> None:
+    service, store = _build_service_with_planning(
+        tmp_path,
+        reasoner=_FakeWritingBuddyReasoner(),
+    )
+    identity = service.submit_identity(
+        display_name="小满",
+        profession="写作者",
+        current_stage="重启",
+        interests=["写作", "番茄"],
+        strengths=["连续创作"],
+        constraints=["需要先形成稳定节奏"],
+        goal_intention="我想长期写小说，并真的在番茄持续发布。",
+    )
+    clarification = service.answer_clarification_turn(
+        session_id=identity.session_id,
+        answer="我想先把长篇连载写起来，再逐步稳定更新。",
+    )
+
+    result = service.confirm_primary_direction(
+        session_id=identity.session_id,
+        selected_direction=clarification.recommended_direction,
+        capability_action="start-new",
+    )
+
+    industry_repository = SqliteIndustryInstanceRepository(store)
+    stored_instance = industry_repository.get_instance(result.domain_capability.industry_instance_id)
+    assert stored_instance is not None
+    agents = list((stored_instance.team_payload or {}).get("agents") or [])
+    by_role = {
+        str(item.get("role_id") or "").strip(): item
+        for item in agents
+        if str(item.get("role_id") or "").strip()
+    }
+
+    proof = by_role["proof-of-work"]
+    growth = by_role["growth-focus"]
+
+    assert "tool:browser_use" in list(proof.get("allowed_capabilities") or [])
+    assert "content" in list(proof.get("preferred_capability_families") or [])
+    assert "browser" in list(proof.get("preferred_capability_families") or [])
+    assert "workflow" in list(proof.get("preferred_capability_families") or [])
+    assert "content" in list(growth.get("preferred_capability_families") or [])

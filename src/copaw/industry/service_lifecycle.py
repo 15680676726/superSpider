@@ -1595,13 +1595,14 @@ class _IndustryLifecycleMixin:
             "output": output,
         }
 
-    async def _auto_close_temporary_seat_capability_gap(
+    async def _auto_close_role_capability_gap(
         self,
         *,
         record: IndustryInstanceRecord,
         profile: IndustryProfile,
         role: IndustryRoleBlueprint,
         plan: ChatWritebackPlan,
+        approval_note: str,
     ) -> list[IndustryBootstrapInstallResult]:
         goal_context_by_agent = self._build_instance_goal_context_by_agent(
             record=record,
@@ -1628,9 +1629,7 @@ class _IndustryLifecycleMixin:
                     "review_summary": "",
                     "review_notes": _unique_strings(
                         list(recommendation.review_notes or []),
-                        [
-                            "Auto-approved because seat-gap policy already classified this request as low-risk local work.",
-                        ],
+                        [approval_note],
                     ),
                 },
             )
@@ -1643,6 +1642,42 @@ class _IndustryLifecycleMixin:
                 ),
             )
         return results
+
+    async def _auto_close_temporary_seat_capability_gap(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        profile: IndustryProfile,
+        role: IndustryRoleBlueprint,
+        plan: ChatWritebackPlan,
+    ) -> list[IndustryBootstrapInstallResult]:
+        return await self._auto_close_role_capability_gap(
+            record=record,
+            profile=profile,
+            role=role,
+            plan=plan,
+            approval_note=(
+                "Auto-approved because seat-gap policy already classified this request as low-risk local work."
+            ),
+        )
+
+    async def _auto_close_existing_role_capability_gap(
+        self,
+        *,
+        record: IndustryInstanceRecord,
+        profile: IndustryProfile,
+        role: IndustryRoleBlueprint,
+        plan: ChatWritebackPlan,
+    ) -> list[IndustryBootstrapInstallResult]:
+        return await self._auto_close_role_capability_gap(
+            record=record,
+            profile=profile,
+            role=role,
+            plan=plan,
+            approval_note=(
+                "Auto-approved because an existing specialist already matched this request and only needed its runtime surface closed."
+            ),
+        )
     async def _search_hub_skills_cached(
         self,
         *,
@@ -3015,6 +3050,75 @@ class _IndustryLifecycleMixin:
         capability_gap_closure_results: list[IndustryBootstrapInstallResult] = []
         target_role = matched_role
         dispatch_role = matched_role
+        matched_role_surface_gap = _mapping(
+            _mapping(seat_resolution.metadata).get("matched_role_surface_gap"),
+        )
+        if (
+            matched_role is not None
+            and matched_role_surface_gap
+            and seat_resolution_kind != "existing-role"
+        ):
+            capability_gap_closure_results = (
+                await self._auto_close_existing_role_capability_gap(
+                    record=record,
+                    profile=profile,
+                    role=matched_role,
+                    plan=plan,
+                )
+            )
+            successful_closure = any(
+                item.status in {"installed", "satisfied"}
+                for item in capability_gap_closure_results
+            )
+            failed_capability_result = next(
+                (
+                    item
+                    for item in capability_gap_closure_results
+                    if item.status == "failed"
+                ),
+                None,
+            )
+            if successful_closure and failed_capability_result is None:
+                refreshed_record = self._industry_instance_repository.get_instance(
+                    record.instance_id,
+                )
+                if refreshed_record is not None:
+                    record = refreshed_record
+                team = self._materialize_team_blueprint(record)
+                execution_core_identity = self._materialize_execution_core_identity(
+                    record,
+                    profile=profile,
+                    team=team,
+                )
+                target_role = self._match_instance_team_role(
+                    team,
+                    role_id=matched_role.role_id,
+                    agent_id=matched_role.agent_id,
+                ) or matched_role
+                dispatch_role = target_role
+                seat_resolution_kind = "existing-role"
+                seat_resolution_reason = (
+                    "Matched specialist runtime gap was auto-closed before dispatch."
+                )
+                plan.classifications = _unique_strings(
+                    list(plan.classifications),
+                    ["existing-role", "capability-gap-closed"],
+                )
+                target_match_signals = _unique_strings(
+                    list(target_match_signals),
+                    [
+                        "matched specialist runtime gap was auto-closed before dispatch",
+                        _string(matched_role_surface_gap.get("role_id")),
+                        _string(
+                            matched_role_surface_gap.get("missing_surfaces"),
+                        ),
+                    ],
+                    [
+                        _string(item.detail)
+                        for item in capability_gap_closure_results
+                        if _string(item.detail)
+                    ],
+                )
         if seat_resolution_kind != "existing-role":
             plan.classifications = _unique_strings(
                 list(plan.classifications),

@@ -9,8 +9,11 @@ SURFACE_ORDER: tuple[str, ...] = ("file", "browser", "desktop")
 FILE_DIRECT_TEXT_HINTS: tuple[tuple[str, str], ...] = (
     ("文件", "文件"),
     ("文件夹", "文件夹"),
+    ("目录", "目录"),
     ("文档", "文档"),
     ("资料", "资料"),
+    ("图片", "图片"),
+    ("封面", "封面"),
     ("text", "text"),
     ("txt", "txt"),
     ("text file", "text file"),
@@ -32,6 +35,8 @@ BROWSER_DIRECT_TEXT_HINTS: tuple[tuple[str, str], ...] = (
     ("浏览器", "浏览器"),
     ("网页", "网页"),
     ("网站", "网站"),
+    ("平台", "平台"),
+    ("草稿箱", "草稿箱"),
     ("表单", "表单"),
     ("登录", "登录"),
     ("browser", "browser"),
@@ -53,8 +58,12 @@ _FILE_SURFACE_TOKENS: tuple[str, ...] = (
     " 文件",
     "文件",
     "文件夹",
+    "目录",
     "文档",
     "资料",
+    "图片",
+    "封面",
+    "上传",
     "txt",
 )
 _DESKTOP_SURFACE_TOKENS: tuple[str, ...] = (
@@ -78,6 +87,8 @@ _BROWSER_SURFACE_TOKENS: tuple[str, ...] = (
     "网页",
     "网站",
     "浏览器",
+    "平台",
+    "草稿箱",
 )
 
 _FILE_ACTION_HINTS: tuple[tuple[str, str], ...] = (
@@ -86,11 +97,15 @@ _FILE_ACTION_HINTS: tuple[tuple[str, str], ...] = (
     ("分类", "分类"),
     ("移动", "移动"),
     ("保存", "保存"),
+    ("上传", "上传"),
+    ("选择", "选择"),
     ("archive", "archive"),
     ("organize", "organize"),
     ("sort", "sort"),
     ("move", "move"),
     ("save", "save"),
+    ("upload", "upload"),
+    ("select", "select"),
 )
 _DESKTOP_ACTION_HINTS: tuple[tuple[str, str], ...] = (
     ("打开", "打开"),
@@ -111,6 +126,8 @@ _DESKTOP_ACTION_HINTS: tuple[tuple[str, str], ...] = (
 _BROWSER_ACTION_HINTS: tuple[tuple[str, str], ...] = (
     ("登录", "登录"),
     ("后台", "后台"),
+    ("平台", "平台"),
+    ("草稿", "草稿"),
     ("页面", "页面"),
     ("网页", "网页"),
     ("站点", "站点"),
